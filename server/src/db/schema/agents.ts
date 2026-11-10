@@ -84,9 +84,9 @@ export const agentGrants = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("agent_grants_bot_subject_unique")
-      .on(table.botUserId, table.subjectUserId)
-      .where(sql`${table.subjectUserId} is not null`),
+    // A full unique index also supports the predecessor's unqualified upsert.
+    // NULL user subjects remain distinct for space and group grants.
+    uniqueIndex("agent_grants_bot_subject_unique").on(table.botUserId, table.subjectUserId),
     uniqueIndex("agent_grants_bot_space_unique")
       .on(table.botUserId, table.subjectSpaceId)
       .where(sql`${table.subjectSpaceId} is not null`),

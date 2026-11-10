@@ -923,6 +923,7 @@ async fn acp_advertised_commands_use_the_threads_folder_and_preserve_inline_cont
                 Operation::StartWork,
                 Grants::OWNER,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1025,6 +1026,7 @@ async fn slash_command_runs_an_installed_skill_but_never_shadows_inline() {
             &decision,
             Operation::StartWork,
             Grants::OWNER,
+            None,
             None,
         )
         .await
@@ -1910,4 +1912,71 @@ async fn a_waiting_lead_takes_a_finished_task_in_its_turn() {
     if let Some(work) = runtime.works.remove(&9) {
         work.task.abort();
     }
+}
+
+#[tokio::test]
+async fn a_widget_call_is_a_turn_from_its_viewer_replying_to_the_widget() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    runtime.agent.names.remember(1, "Owner".into()).await;
+    runtime.agent.sent.lock().unwrap().insert(40);
+    let text = widget_call_text("picker", "choose", br#"{"plan":"pro"}"#, 40);
+    let toast = tokio::time::timeout(
+        Duration::from_secs(2),
+        runtime.on_widget_call(77, 9, 40, 1, &text),
+    )
+    .await
+    .expect("widget call");
+    assert_eq!(toast, None);
+    let id = input_id(2, 9, 40, "widget-77");
+    assert!(state(&runtime, &id).is_some());
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+    until(|| !harness.session.received.lock().unwrap().is_empty()).await;
+    let received = harness.session.received.lock().unwrap()[0].clone();
+    assert!(
+        received.content.text.contains(
+            r#"[Widget call] choose {"plan":"pro"} (from the widget "picker" on message 40)"#
+        ),
+        "{}",
+        received.content.text
+    );
+    assert_eq!(received.id.as_str(), id);
+}
+
+#[tokio::test]
+async fn a_widget_call_from_someone_without_access_is_refused_with_a_toast() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    runtime.agent.names.remember(5, "Guest".into()).await;
+    runtime.agent.sent.lock().unwrap().insert(40);
+    let text = widget_call_text("picker", "choose", b"", 40);
+    let toast = tokio::time::timeout(
+        Duration::from_secs(2),
+        runtime.on_widget_call(78, 9, 40, 5, &text),
+    )
+    .await
+    .expect("widget call");
+    assert_eq!(
+        toast.as_deref(),
+        Some("You don't have access to ask this agent.")
+    );
+    assert!(runtime.works.is_empty());
+    assert!(state(&runtime, &input_id(2, 9, 40, "widget-78")).is_none());
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn widget_call_text_is_bounded_and_single_line() {
+    assert_eq!(
+        widget_call_text("w", "go", b"", 3),
+        "[Widget call] go (from the widget \"w\" on message 3)"
+    );
+    let long = format!("\"{}\"", "é".repeat(4_000));
+    let text = widget_call_text("w", "go\nnow", long.as_bytes(), 3);
+    assert!(text.starts_with("[Widget call] go now \""));
+    assert!(text.contains("…"));
+    assert!(text.len() < 4 * 1024 + 100);
+    assert!(!text.contains('\n'));
+    assert_eq!(
+        widget_call_refusal(None),
+        "This widget isn't connected to the agent here."
+    );
 }

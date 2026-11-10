@@ -310,8 +310,8 @@ export class SessionsModel {
    * left this device without reaching the server) would push with a key or account the device no
    * longer has, which the notification extension can only show as a generic placeholder.
    *
-   * Tokens are stored encrypted with random IVs, so matches are found among the owner's sessions
-   * and sessions sharing the owner's device ID, not by a token lookup.
+   * Tokens are stored encrypted with random IVs, so candidates are the owner's sessions and
+   * sessions sharing the owner's device ID, compared by decrypted token, not by a token lookup.
    */
   private static async releasePushTokenFromOtherSessions(
     tx: Transaction,
@@ -341,13 +341,10 @@ export class SessionsModel {
     // No row locks: a lost race only leaves a stale token until the next registration, while
     // locking a user's sessions from concurrent device registrations could deadlock.
     const stale = candidates
-      .filter((candidate) => {
-        const token = this.decryptApplePushToken(candidate)
-        if (!token) return false
-        if (token === owner.applePushToken) return true
-        // Same install on the same device: its previous token is already dead.
-        return owner.deviceId !== null && candidate.deviceId === owner.deviceId && candidate.clientType === owner.clientType
-      })
+      // Only an identical token proves the same app install. A device ID is shared by every Inline
+      // bundle on the device (release, debug and devbuild share the vendor ID), so a different
+      // token under the same device ID may still be another app's live registration.
+      .filter((candidate) => this.decryptApplePushToken(candidate) === owner.applePushToken)
       .map((candidate) => candidate.id)
     if (stale.length === 0) return
 

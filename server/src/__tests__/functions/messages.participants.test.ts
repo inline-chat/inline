@@ -51,7 +51,7 @@ describe("home thread participant management", () => {
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
 
-  test("only creator can add participants to home thread", async () => {
+  test("participants can add people to a home thread, outsiders cannot", async () => {
     const creator = await testUtils.createUser("home-add-creator@example.com")
     const target = await testUtils.createUser("home-add-target@example.com")
     const outsider = await testUtils.createUser("home-add-outsider@example.com")
@@ -78,8 +78,14 @@ describe("home thread participant management", () => {
     expect(participant).toBeDefined()
 
     await expect(
-      addChatParticipant({ chatId: chat.id, userId: outsider.id }, makeFunctionContext(target.id)),
+      addChatParticipant({ chatId: chat.id, userId: creator.id }, makeFunctionContext(outsider.id)),
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.PEER_ID_INVALID })
+
+    const addedByParticipant = await addChatParticipant(
+      { chatId: chat.id, userId: outsider.id },
+      makeFunctionContext(target.id),
+    )
+    expect(Number(addedByParticipant.participant?.userId)).toBe(outsider.id)
   })
 
   test("rejects adding deleted users to a home thread", async () => {
@@ -128,7 +134,7 @@ describe("home thread participant management", () => {
 describe("space thread participant management", () => {
   setupTestLifecycle()
 
-  test("requires creator or space admin to add participants", async () => {
+  test("lets thread participants and space admins add people, but not other members", async () => {
     const space = await testUtils.createSpace("participant-auth-space")
     const creator = await testUtils.createUser("space-participant-creator@example.com")
     const admin = await testUtils.createUser("space-participant-admin@example.com")
@@ -153,6 +159,33 @@ describe("space thread participant management", () => {
 
     const added = await addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(admin.id))
     expect(Number(added.participant?.userId)).toBe(target.id)
+
+    // A non-admin participant can bring others in but still can't remove them.
+    const addedByParticipant = await addChatParticipant(
+      { chatId: chat.id, userId: member.id },
+      makeFunctionContext(target.id),
+    )
+    expect(Number(addedByParticipant.participant?.userId)).toBe(member.id)
+    await expect(
+      removeChatParticipant({ chatId: chat.id, userId: member.id }, makeFunctionContext(target.id)),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.SPACE_ADMIN_REQUIRED })
+  })
+
+  test("keeps creator/admin rule for adding people to public threads", async () => {
+    const space = await testUtils.createSpace("participant-public-space")
+    const creator = await testUtils.createUser("space-public-creator@example.com")
+    const member = await testUtils.createUser("space-public-member@example.com")
+    const target = await testUtils.createUser("space-public-target@example.com")
+    if (!space || !creator || !member || !target) throw new Error("Failed to create test data")
+
+    await addSpaceMembers(space.id, [{ userId: creator.id }, { userId: member.id }, { userId: target.id }])
+
+    const chat = await testUtils.createChat(space.id, "Public Space Thread", "thread", true, creator.id)
+    if (!chat) throw new Error("Chat not created")
+
+    await expect(
+      addChatParticipant({ chatId: chat.id, userId: target.id }, makeFunctionContext(member.id)),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.SPACE_ADMIN_REQUIRED })
   })
 
   test("uses exact catch-up hints for direct additions without synthesizing inbox-opening actions", async () => {

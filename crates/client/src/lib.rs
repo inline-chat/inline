@@ -633,6 +633,24 @@ pub enum ClientEvent {
         /// Opaque bot-defined payload.
         data: Vec<u8>,
     },
+    /// A viewer's `inline.action(name, payload)` call from a widget in a bot
+    /// message; answered like an action. Every field is viewer-supplied.
+    MessageWidgetCalled {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Chat containing the widget.
+        chat_id: InlineId,
+        /// Message containing the widget.
+        message_id: InlineId,
+        /// User who used the widget.
+        actor_user_id: InlineId,
+        /// The widget's ID within its message.
+        widget_id: String,
+        /// The call's name.
+        name: String,
+        /// UTF-8 JSON, at most 4 KiB; empty for none.
+        payload: Vec<u8>,
+    },
     /// A bot message form was submitted; answered like an action.
     MessageFormSubmitted {
         /// Server interaction ID.
@@ -787,6 +805,7 @@ impl ClientEvent {
             | Self::SpaceMemberChanged { .. }
             | Self::UserSettingsChanged { .. }
             | Self::MessageActionInvoked { .. }
+            | Self::MessageWidgetCalled { .. }
             | Self::MessageFormSubmitted { .. }
             | Self::AgentSessionControlRequested { .. }
             | Self::AgentAccessChanged { .. }

@@ -187,6 +187,8 @@ struct ChatView: View {
     .toolbarRole(.editor)
     .toolbar {
       if !preview {
+        // Actions need a readable chat; one you can't open keeps only its title.
+        if !isUnavailable {
         if translationPlacement == .toolbar {
           ToolbarItem(placement: .primaryAction) {
             TranslationButton(peer: peerId, activeColor: themeManager.accentColor)
@@ -238,9 +240,13 @@ struct ChatView: View {
             .accessibilityLabel("Agent Settings")
           }
         }
+        }
 
         if #available(iOS 26.0, *) {
           ToolbarItem(placement: .principal) {
+            if isUnavailable {
+              ChatUnavailableToolbarTitle(peer: peerId)
+            } else {
             ChatToolbarLeadingView(
               peerId: peerId,
               contextSpaceId: contextSpaceId,
@@ -253,10 +259,14 @@ struct ChatView: View {
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
+            }
           }
           .sharedBackgroundVisibility(.hidden)
         } else {
           ToolbarItem(placement: .topBarLeading) {
+            if isUnavailable {
+              ChatUnavailableToolbarTitle(peer: peerId)
+            } else {
             ChatToolbarLeadingView(
               peerId: peerId,
               contextSpaceId: contextSpaceId,
@@ -269,6 +279,7 @@ struct ChatView: View {
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
             .matchedTransitionSource(id: TransitionID.chatInfo, in: chatInfoTransition)
+            }
           }
         }
       }
@@ -693,6 +704,11 @@ struct ChatView: View {
     }
   }
 
+  private var isUnavailable: Bool {
+    if case .error = renderState { return true }
+    return false
+  }
+
   private var renderState: RenderState {
     if fullChatViewModel.chat != nil {
       return .content
@@ -716,32 +732,28 @@ struct ChatView: View {
     }
   }
 
+  /// A calm empty state rather than an error: the usual reason is a private
+  /// thread someone linked before adding you.
   private func errorOverlay(error _: Error) -> some View {
-    ZStack {
-      Color.black.opacity(0.1)
-        .ignoresSafeArea()
-
-      VStack(spacing: 16) {
-        Image(systemName: "exclamationmark.triangle")
-          .font(.system(size: 48))
-          .foregroundColor(.secondary)
-
-        Text("Chat unavailable")
-          .font(.headline)
-
-        Text("You may not have access to this chat, or it may no longer exist.")
-          .font(.subheadline)
-          .foregroundColor(.secondary)
-          .multilineTextAlignment(.center)
-          .padding(.horizontal)
-
-        Button("Try Again") {
-          Task { await fetchChatIfNeeded() }
-        }
-        .buttonStyle(.borderedProminent)
+    ContentUnavailableView {
+      Label(
+        peerId.isThread ? "Private Thread" : "Chat Unavailable",
+        systemImage: peerId.isThread ? "lock" : "bubble.left"
+      )
+    } description: {
+      Text(peerId.isThread
+        ? "You don't have access to this thread. Ask someone in it to add you."
+        : "This conversation isn't available to you.")
+    } actions: {
+      Button("Check Again") {
+        Task { await fetchChatIfNeeded() }
       }
-      .padding()
+      .buttonStyle(.bordered)
+      .buttonBorderShape(.capsule)
+      .controlSize(.small)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground).ignoresSafeArea())
   }
 
   private func scheduleUntitledThreadCleanupIfNeeded() {

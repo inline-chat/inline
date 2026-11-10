@@ -5,6 +5,7 @@ import type { Transaction } from "../types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { appendReactionEvent } from "./mcpReactionEvents"
+import { recordReactionActivity, removeStaleReactionActivity } from "@in/server/modules/activityItems"
 import { contentLookup } from "../../modules/encryption/contentEncryption"
 
 export const reactionEmojiHash = (reaction: Pick<DbNewReaction, "chatId" | "messageId" | "userId" | "emoji">) =>
@@ -21,12 +22,13 @@ async function lockReactionChat(tx: Transaction, chatId: number, userId: number)
   const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
   if (!chat) throw RealtimeRpcError.PeerIdInvalid()
   await AccessGuards.ensureChatAccess(chat, userId, tx)
+  return chat
 }
 
 async function insertReaction(reaction: DbNewReaction) {
   const emojiHash = reactionEmojiHash(reaction)
   return db.transaction(async (tx) => {
-    await lockReactionChat(tx, reaction.chatId, reaction.userId)
+    const chat = await lockReactionChat(tx, reaction.chatId, reaction.userId)
     // Index a matching old row before insertion, including during mixed-format backfill.
     // Its row lock plus the new unique constraint preserve concurrent duplicate handling.
     await tx.update(reactions).set({ emojiHash }).where(and(
@@ -35,7 +37,10 @@ async function insertReaction(reaction: DbNewReaction) {
       sql`${reactions.emoji} = ${reaction.emoji}`,
     ))
     const [inserted] = await tx.insert(reactions).values({ ...reaction, emojiHash }).onConflictDoNothing().returning()
-    if (inserted) await appendReactionEvent(tx, inserted, true)
+    if (inserted) {
+      await appendReactionEvent(tx, inserted, true)
+      await recordReactionActivity(tx, { chat, messageId: inserted.messageId, reactorUserId: inserted.userId, date: inserted.date })
+    }
     return inserted
   })
 }
@@ -49,7 +54,7 @@ async function getReactions(messageId: bigint, chatId: bigint) {
 
 async function deleteReaction(messageId: bigint, chatId: number, emoji: string, currentUserId: number) {
   return db.transaction(async (tx) => {
-    await lockReactionChat(tx, chatId, currentUserId)
+    const chat = await lockReactionChat(tx, chatId, currentUserId)
     const result = await tx
       .delete(reactions)
       .where(
@@ -65,7 +70,10 @@ async function deleteReaction(messageId: bigint, chatId: number, emoji: string, 
       )
       .returning()
 
-    if (result[0]) await appendReactionEvent(tx, result[0], false)
+    if (result[0]) {
+      await appendReactionEvent(tx, result[0], false)
+      await removeStaleReactionActivity(tx, { chat, messageId: Number(messageId) })
+    }
     return result
   })
 }

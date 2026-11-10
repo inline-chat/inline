@@ -61,11 +61,11 @@ final class ForwardMessageSelectionBar: NSView {
 
     container.translatesAutoresizingMaskIntoConstraints = false
     addSubview(container)
-    for view in [cancelButton, capsule, deleteButton] {
+    for view in [cancelButton, capsule, forwardButton, deleteButton] {
       view.translatesAutoresizingMaskIntoConstraints = false
       controls.addSubview(view)
     }
-    for view in [countLabel, forwardButton, progress] {
+    for view in [countLabel, progress] {
       view.translatesAutoresizingMaskIntoConstraints = false
       pillContent.addSubview(view)
     }
@@ -77,13 +77,14 @@ final class ForwardMessageSelectionBar: NSView {
     deleteButton.contentTintColor = .systemRed
     deleteButton.hasDestructiveAction = true
     configure(forwardButton, symbol: "arrowshape.turn.up.right", label: "Forward selected messages", help: "Choose recipients (Return)",
-              pointSize: Self.mode.sendIconPointSize, action: #selector(forward))
-    forwardButton.bezelColor = Theme.accentColor
-    forwardButton.contentTintColor = .white
+              pointSize: Self.mode.sideIconPointSize, action: #selector(forward))
 
     countLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
     countLabel.textColor = .labelColor
     countLabel.lineBreakMode = .byTruncatingTail
+    countLabel.alignment = .center
+    countLabel.wantsLayer = true
+    countLabel.layer?.masksToBounds = true
     countLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     progress.style = .spinning
     progress.controlSize = .small
@@ -102,24 +103,23 @@ final class ForwardMessageSelectionBar: NSView {
       capsule.leadingAnchor.constraint(equalTo: cancelButton.trailingAnchor, constant: Self.mode.glassSpacing),
       capsule.topAnchor.constraint(equalTo: controls.topAnchor),
       capsule.bottomAnchor.constraint(equalTo: controls.bottomAnchor),
-      deleteButton.leadingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: Self.mode.glassSpacing),
+      forwardButton.leadingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: Self.mode.glassSpacing),
+      forwardButton.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+      forwardButton.widthAnchor.constraint(equalToConstant: Self.mode.sideButtonSize),
+      forwardButton.heightAnchor.constraint(equalToConstant: Self.mode.sideButtonSize),
+      deleteButton.leadingAnchor.constraint(equalTo: forwardButton.trailingAnchor, constant: Self.mode.glassSpacing),
       deleteButton.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
       deleteButton.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
       deleteButton.widthAnchor.constraint(equalToConstant: Self.mode.sideButtonSize),
       deleteButton.heightAnchor.constraint(equalToConstant: Self.mode.sideButtonSize),
-      countLabel.leadingAnchor.constraint(
-        equalTo: pillContent.leadingAnchor, constant: 8 + Theme.composeTextViewHorizontalPadding
-      ),
+      countLabel.centerXAnchor.constraint(equalTo: pillContent.centerXAnchor),
+      countLabel.leadingAnchor.constraint(greaterThanOrEqualTo: pillContent.leadingAnchor, constant: 12),
       countLabel.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
       countLabel.trailingAnchor.constraint(lessThanOrEqualTo: progress.leadingAnchor, constant: -8),
-      progress.trailingAnchor.constraint(equalTo: forwardButton.leadingAnchor, constant: -Self.mode.pillContentInset),
+      progress.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -Self.mode.pillContentInset - 4),
       progress.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
       progress.widthAnchor.constraint(equalToConstant: 16),
       progress.heightAnchor.constraint(equalToConstant: 16),
-      forwardButton.trailingAnchor.constraint(equalTo: pillContent.trailingAnchor, constant: -Self.mode.sendButtonEdgeInset),
-      forwardButton.centerYAnchor.constraint(equalTo: pillContent.centerYAnchor),
-      forwardButton.widthAnchor.constraint(equalToConstant: Self.mode.sendButtonSize),
-      forwardButton.heightAnchor.constraint(equalToConstant: Self.mode.sendButtonSize),
     ])
     update(count: 0, isDeleting: false)
   }
@@ -155,8 +155,23 @@ final class ForwardMessageSelectionBar: NSView {
     }
   }
 
+  private var displayedCount = 0
+
   func update(count: Int, isDeleting: Bool) {
-    countLabel.stringValue = "\(count) selected"
+    if count != displayedCount, displayedCount > 0, count > 0, let layer = countLabel.layer {
+      // Roll the number like Telegram: up when adding, down when removing.
+      let roll = CATransition()
+      roll.type = .push
+      roll.subtype = count > displayedCount ? .fromTop : .fromBottom
+      roll.duration = 0.18
+      roll.timingFunction = SelectionMotion.timing
+      layer.add(roll, forKey: "countRoll")
+    }
+    displayedCount = count
+    // Keep the last count while the bar fades out after the selection ends.
+    if count > 0 {
+      countLabel.stringValue = count == 1 ? "1 message selected" : "\(count) messages selected"
+    }
     countLabel.setAccessibilityLabel(count == 1 ? "1 message selected" : "\(count) messages selected")
     cancelButton.isEnabled = !isDeleting
     forwardButton.isEnabled = count > 0 && !isDeleting

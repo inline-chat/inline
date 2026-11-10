@@ -746,3 +746,38 @@ struct ChatSubtitlePreview: View {
   .padding()
   .background(Color(uiColor: .systemBackground))
 }
+
+/// Navigation title while the chat can't be opened: the regular title's shape
+/// with a lock in place of the avatar.
+struct ChatUnavailableToolbarTitle: View {
+  let peer: Peer
+
+  private let iconSize: CGFloat = 32
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Circle()
+        .fill(Color(.secondarySystemFill))
+        .overlay {
+          Image(systemName: peer.isThread ? "lock.fill" : "bubble.left")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.secondary)
+        }
+        .frame(width: iconSize, height: iconSize)
+        .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 0) {
+        Text(peer.isThread ? "Private Thread" : "Chat Unavailable")
+          .font(.body)
+          .fontWeight(.medium)
+          .lineLimit(1)
+        Text("No access")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
+  }
+}

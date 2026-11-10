@@ -87,9 +87,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case sidebarAgentRowNewThread
   case richContentRenderer
   case inlineMathAttachments
+  case messageWidgets
   case richMessageMultiBlockSelection
   case richCopyMarkdownEditing
-  case selectMultipleMessages
   case quickForward
   case fileBrowser
   case nativeFileDownloads
@@ -141,7 +141,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward,
+         .messageWidgets, .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .quickForward,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -190,7 +190,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .dockBadge: "Dock Badge"
     case .notificationSounds: "Notification Sounds"
     case .appearInGlobalSearch: "Appear in Global Search"
-    case .shareTimeZone: "Share Time Zone"
+    case .shareTimeZone: "Who Can See My Local Time"
     case .autoDownloadMedia: "Media"
     case .autoDownloadFiles: "Files"
     case .autoDownloadVoiceMessages: "Voice Messages"
@@ -211,9 +211,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .sidebarAgentRowNewThread: "Agent Row New Thread Button"
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
+    case .messageWidgets: "Message Widgets"
     case .richMessageMultiBlockSelection: "Rich Message Multi-Block Selection"
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
-    case .selectMultipleMessages: "Select Multiple Messages"
     case .quickForward: "Quick Forward"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
@@ -270,9 +270,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .automaticUpdates, .updateChannel: "Automatic Updates"
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .richMessageMultiBlockSelection:
+         .messageWidgets, .richMessageMultiBlockSelection:
       "Agents"
-    case .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward: "Messages"
+    case .richCopyMarkdownEditing, .quickForward: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -322,7 +322,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .dockBadge: ["unread", "count", "icon"]
     case .notificationSounds: ["alert", "mute"]
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
-    case .shareTimeZone: ["local time", "timezone"]
+    case .shareTimeZone: ["local time", "timezone", "share", "privacy", "exceptions"]
     case .autoDownloadMedia: ["photos", "images", "videos", "download"]
     case .autoDownloadFiles: ["documents", "attachments", "download"]
     case .autoDownloadVoiceMessages: ["audio", "download"]
@@ -343,9 +343,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .sidebarAgentRowNewThread: ["agent", "thread", "sidebar", "plus"]
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
+    case .messageWidgets: ["html", "widget", "visualization", "chart"]
     case .richMessageMultiBlockSelection: ["select", "copy"]
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
-    case .selectMultipleMessages: ["select", "forward", "delete"]
     case .quickForward: ["forward"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]

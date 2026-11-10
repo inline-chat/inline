@@ -118,6 +118,7 @@ const cloneUrlPreviewById = async (previewId: bigint): Promise<number | null> =>
 const cloneForwardedBlockContent = async (
   blockContent: BlockContent | null | undefined,
   currentUserId: number,
+  options: { keepWidgets: boolean },
 ): Promise<BlockContent | undefined> => {
   if (!blockContent) return undefined
   const clonedPhotos = new Map<bigint, Photo>()
@@ -129,10 +130,15 @@ const cloneForwardedBlockContent = async (
   }
   return snapshotForwardedBlockContent(
     projectReadyBlockPhotos(blockContent, clonedPhotos),
+    options,
   )
 }
 
-export const snapshotForwardedBlockContent = (content: BlockContent): BlockContent => {
+/** Widgets are bot content: a copy that names no bot sender keeps only the title. */
+export const snapshotForwardedBlockContent = (
+  content: BlockContent,
+  options: { keepWidgets: boolean } = { keepWidgets: true },
+): BlockContent => {
   const snapshot = BlockContent.fromBinary(BlockContent.toBinary(content))
   const image = (value: BlockImage): void => {
     if (value.state.oneofKind !== "pending") return
@@ -142,13 +148,19 @@ export const snapshotForwardedBlockContent = (content: BlockContent): BlockConte
     }
   }
   const blocks = (values: Block[]): void => {
-    for (const block of values) {
+    for (const [index, block] of values.entries()) {
       switch (block.kind.oneofKind) {
+        case "widget":
+          if (!options.keepWidgets && block.kind.widget.title) {
+            values[index] = { kind: { oneofKind: "paragraph", paragraph: block.kind.widget.title } }
+          }
+          break
         case "image": image(block.kind.image); break
         case "album": block.kind.album.images.forEach(image); break
         case "disclosure": blocks(block.kind.disclosure.children); break
         case "quote": blocks(block.kind.quote.children); break
         case "list": block.kind.list.items.forEach((item) => blocks(item.children)); break
+        case "callout": blocks(block.kind.callout.children); break
       }
     }
   }
@@ -278,6 +290,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
     const blockContent = await cloneForwardedBlockContent(
       sourceMessage.blockContent,
       currentUserId,
+      { keepWidgets: forwardHeader !== undefined || (context.isBot === true && sourceMessage.fromId === currentUserId) },
     )
 
     const result = await sendMessage(

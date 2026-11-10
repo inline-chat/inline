@@ -26,6 +26,7 @@ final class MentionedParticipantsAutoAddManager {
     let groupParticipantIds: Set<Int64>
     let users: [UserInfo]
     let groups: [InlineKit.UserGroup]
+    let canRemoveParticipants: Bool
   }
 
   private let dependencies: AppDependencies
@@ -77,6 +78,7 @@ final class MentionedParticipantsAutoAddManager {
           database: database,
           peer: request.peer,
           chat: request.chat,
+          currentUserId: request.currentUserId,
           userIds: request.reservedUserIds,
           groupIds: request.reservedGroupIds
         )
@@ -90,7 +92,8 @@ final class MentionedParticipantsAutoAddManager {
           currentUserId: request.currentUserId,
           messageCount: snapshot.messageCount,
           participantIds: snapshot.participantIds,
-          pendingUserIds: request.pendingUserIds
+          pendingUserIds: request.pendingUserIds,
+          canRemoveParticipants: snapshot.canRemoveParticipants
         )
 
         let action = MentionedParticipantAddPolicy.action(
@@ -148,6 +151,34 @@ final class MentionedParticipantsAutoAddManager {
   private func release(userIds: Set<Int64> = [], groupIds: Set<Int64> = []) {
     pendingUserIds.subtract(userIds)
     pendingGroupIds.subtract(groupIds)
+  }
+
+  /// After a send, offers to add recipients who can't open a private thread the
+  /// message links to. Runs off the main thread and never delays the send.
+  func promptForLinkedThreadAccess(text: String?, entities: MessageEntities?, peer: InlineKit.Peer) {
+    guard toolbarState != nil else { return }
+    let database = dependencies.database
+    let currentUserId = dependencies.auth.currentUserId
+
+    Task.detached(priority: .utility) { [weak self] in
+      let gaps = await LinkedThreadAccess.findGaps(
+        text: text,
+        entities: entities,
+        destination: peer,
+        currentUserId: currentUserId,
+        database: database,
+        refreshRoster: { chatId in
+          _ = try? await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        }
+      )
+      guard let gap = gaps.first else { return }
+      await self?.presentLinkAccessPrompt(gap)
+    }
+  }
+
+  @MainActor
+  private func presentLinkAccessPrompt(_ gap: LinkedThreadAccessGap) {
+    toolbarState?.presentLinkAccessPrompt(gap)
   }
 
   @MainActor
@@ -240,6 +271,7 @@ final class MentionedParticipantsAutoAddManager {
     database: AppDatabase,
     peer: InlineKit.Peer,
     chat: InlineKit.Chat?,
+    currentUserId: Int64?,
     userIds: Set<Int64>,
     groupIds: Set<Int64>
   ) async throws -> Snapshot {
@@ -261,6 +293,19 @@ final class MentionedParticipantsAutoAddManager {
 
       let access = try ChatParticipantsWithMembersViewModel.effectiveParticipantAccess(db, for: chat)
 
+      let membership = try chat.spaceId.flatMap { spaceId -> InlineKit.Member? in
+        guard let currentUserId else { return nil }
+        return try InlineKit.Member
+          .filter(Column("spaceId") == spaceId)
+          .filter(Column("userId") == currentUserId)
+          .fetchOne(db)
+      }
+      let canRemoveParticipants = ChatParticipantPolicy.canRemove(
+        chat: chat,
+        currentUserId: currentUserId,
+        membership: membership
+      )
+
       let users = try User
         .filter(ids: Array(userIds))
         .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
@@ -277,7 +322,8 @@ final class MentionedParticipantsAutoAddManager {
         participantIds: access.userIds,
         groupParticipantIds: access.groupIds,
         users: users,
-        groups: groups
+        groups: groups,
+        canRemoveParticipants: canRemoveParticipants
       )
     }
   }
@@ -334,7 +380,9 @@ final class MentionedParticipantsAutoAddManager {
     guard !context.isPublic else { return .none }
     guard context.currentUserId != nil else { return .none }
 
-    if context.isReplyThread || context.messageCount < autoAddMessageLimit {
+    if context.canRemoveParticipants,
+       context.isReplyThread || context.messageCount < autoAddMessageLimit
+    {
       return .autoAdd(items)
     }
 

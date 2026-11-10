@@ -84,6 +84,7 @@ import {
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
+import { recordMessageActivity } from "@in/server/modules/activityItems"
 import {
   DIALOG_FOLLOWING,
   getFollowingDialogUserIds,
@@ -290,6 +291,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
         text: inputText,
         entities: replyQuote?.entities ?? input.entities,
         parseMarkdown: input.parseMarkdown,
+        allowWidgets: context.isBot === true,
       })
     : undefined
   let text = outgoingText?.text
@@ -709,6 +711,18 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     sourceChatId: input.sourceChatId,
   })
 
+  // After the new-message push so recipients see the message before its activity badge.
+  const activityWork = recordSentMessageActivity({
+    chat,
+    message: newMessage,
+    mentionedUserIds,
+    replyToMessageId: replyToMsgIdNumber ?? undefined,
+    recipientUserIds: updateGroup.userIds,
+  }).catch((error) => {
+    log.error("Failed to record message activity", { error, chatId, messageId: newMessage.messageId })
+  })
+  applicationBackgroundWork.track(activityWork)
+
   // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
   if (previewRoutes.length > 0) {
     const previewWork = processUrlPreviews({
@@ -940,6 +954,32 @@ async function scheduleThreadTitleGenerationWithMessageAttachments(input: {
     entities: input.entities,
     attachments,
     currentUserId: input.currentUserId,
+  })
+}
+
+async function recordSentMessageActivity(input: {
+  chat: DbChat
+  message: { messageId: number; fromId: number; countsAsUnread: boolean; systemMessage?: unknown }
+  mentionedUserIds: ReadonlySet<number>
+  replyToMessageId: number | undefined
+  recipientUserIds: number[]
+}): Promise<void> {
+  if (input.chat.type === "private") return
+  const repliedToUserId =
+    input.replyToMessageId === undefined
+      ? undefined
+      : await MessageModel.getSenderIdForMessage({ chatId: input.chat.id, messageId: input.replyToMessageId })
+  await recordMessageActivity({
+    chat: input.chat,
+    message: {
+      messageId: input.message.messageId,
+      fromId: input.message.fromId,
+      countsAsUnread: input.message.countsAsUnread,
+      isSystemMessage: input.message.systemMessage != null,
+    },
+    mentionedUserIds: input.mentionedUserIds,
+    repliedToUserId,
+    recipientUserIds: input.recipientUserIds,
   })
 }
 

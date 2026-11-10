@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
-import { BotChat, BotChatParticipant, BotMessageAction, BotUpdate } from "./types.effect"
+import { BotChat, BotChatParticipant, BotMessageAction, BotRichMessage, BotUpdate } from "./types.effect"
 
 const chat = {
   chat_id: 10,
@@ -158,4 +158,33 @@ describe("BotChatParticipant", () => {
     expect(decoded.parent_message).not.toHaveProperty("reply_to_message")
     expect(serialized.length).toBeLessThan(1_000)
   })
+})
+
+describe("BotRichMessage", () => {
+  // Every block the server's encoder emits must survive the response schema unchanged.
+  const blocks = [
+    { type: "meter", label: "Context", value: 0.4, max: 1, tone: "warning" },
+    { type: "details", summary: "Run", blocks: [], kind: "progress", status: "running", meta: "48s", started_at: 1_700_000_000 },
+    {
+      type: "form",
+      form_id: "q",
+      fields: [
+        { field_id: "a", label: "A", type: "select", options: [{ option_id: "x", label: "X" }] },
+        { field_id: "k", label: "Key", type: "text", kind: "secret" },
+      ],
+      required_grant: "access",
+    },
+    { type: "diff", path: "a.ts", diff: "@@ -1 +1 @@", change: "modified", additions: 1, deletions: 1 },
+    { type: "fields", fields: [{ label: "Command", value: "ls", is_monospace: true }] },
+    { type: "steps", steps: [{ text: "Build", status: "done", detail: "12s" }] },
+    { type: "callout", kind: "info", title: "Note", blocks: [{ type: "paragraph", text: "Body" }] },
+    { type: "widget", widget_id: "chart", title: "Revenue", html: "<b>x</b>", height: 320 },
+  ] as const
+
+  for (const block of blocks) {
+    it(`round-trips ${block.type} blocks`, () => {
+      const encoded = Schema.encodeUnknownSync(BotRichMessage)({ blocks: [block] })
+      expect(encoded).toEqual({ blocks: [block] })
+    })
+  }
 })

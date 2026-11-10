@@ -9,6 +9,8 @@ function hasImages(blocks: readonly Block[]): boolean {
       case "image":
       case "album":
         return true
+      case "widget":
+        return block.kind.widget.images.length > 0
       case "disclosure":
         return hasImages(block.kind.disclosure.children)
       case "quote":

@@ -25,6 +25,7 @@ export const searchMessages = async (
       limit: input.limit,
       offsetId: input.offsetId,
       filter: input.filter,
+      countOnly: input.countOnly,
     },
     {
       currentSessionId: handlerContext.sessionId,
@@ -32,5 +33,5 @@ export const searchMessages = async (
     },
   )
 
-  return { seq: result.seq, messages: result.messages }
+  return { seq: result.seq, messages: result.messages, totalCount: result.totalCount }
 }

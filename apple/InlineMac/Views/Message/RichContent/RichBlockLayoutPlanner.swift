@@ -21,6 +21,7 @@ final class RichBlockLayoutPlanner {
     let baseFontSize: CGFloat
     let inlineMathAttachmentsEnabled: Bool
     let disclosureOverrides: [BlockContentPath: Bool]
+    let widgetLayout: RichBlockWidgetLayout?
 
     init(
       plan: RichBlockLayoutPlan,
@@ -31,7 +32,8 @@ final class RichBlockLayoutPlanner {
       contentHorizontalInset: CGFloat,
       baseFontSize: CGFloat,
       inlineMathAttachmentsEnabled: Bool,
-      disclosureOverrides: [BlockContentPath: Bool]
+      disclosureOverrides: [BlockContentPath: Bool],
+      widgetLayout: RichBlockWidgetLayout?
     ) {
       var geometry = plan
       geometry.mathSnapshot = nil
@@ -44,6 +46,7 @@ final class RichBlockLayoutPlanner {
       self.baseFontSize = baseFontSize
       self.inlineMathAttachmentsEnabled = inlineMathAttachmentsEnabled
       self.disclosureOverrides = disclosureOverrides
+      self.widgetLayout = widgetLayout
     }
 
     func matches(
@@ -54,7 +57,8 @@ final class RichBlockLayoutPlanner {
       contentHorizontalInset: CGFloat,
       baseFontSize: CGFloat,
       inlineMathAttachmentsEnabled: Bool,
-      disclosureOverrides: [BlockContentPath: Bool]
+      disclosureOverrides: [BlockContentPath: Bool],
+      widgetLayout: RichBlockWidgetLayout?
     ) -> Bool {
       self.contentCacheSignature == contentCacheSignature
         && self.content == content
@@ -65,6 +69,7 @@ final class RichBlockLayoutPlanner {
         && self.baseFontSize == baseFontSize
         && self.inlineMathAttachmentsEnabled == inlineMathAttachmentsEnabled
         && self.disclosureOverrides == disclosureOverrides
+        && self.widgetLayout == widgetLayout
     }
   }
 
@@ -86,7 +91,8 @@ final class RichBlockLayoutPlanner {
     primaryColor: NSColor = .labelColor,
     secondaryColor: NSColor = .secondaryLabelColor,
     inlineMathAttachmentsEnabled: Bool,
-    disclosureOverrides: [BlockContentPath: Bool] = [:]
+    disclosureOverrides: [BlockContentPath: Bool] = [:],
+    widgetLayout: RichBlockWidgetLayout? = nil
   ) -> RichBlockLayoutPlan? {
     guard availableWidth.isFinite, availableWidth >= 1,
           !content.blocks.isEmpty,
@@ -120,6 +126,7 @@ final class RichBlockLayoutPlanner {
       baseFontSize: baseFontSize,
       inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
       disclosureOverrides: disclosureOverrides,
+      widgetLayout: widgetLayout,
       mathSignature: math.signature
     )
     if let cached = cache.object(forKey: key),
@@ -131,7 +138,8 @@ final class RichBlockLayoutPlanner {
          contentHorizontalInset: resolvedContentInset,
          baseFontSize: baseFontSize,
          inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
-         disclosureOverrides: disclosureOverrides
+         disclosureOverrides: disclosureOverrides,
+         widgetLayout: widgetLayout
        )
     {
       var prepared = cached.plan
@@ -144,7 +152,8 @@ final class RichBlockLayoutPlanner {
       math: math,
       baseFontSize: baseFontSize,
       contentHorizontalInset: resolvedContentInset,
-      disclosureOverrides: disclosureOverrides
+      disclosureOverrides: disclosureOverrides,
+      widgetLayout: widgetLayout
     )
     guard builder.layout(
       blocks: content.blocks,
@@ -178,7 +187,8 @@ final class RichBlockLayoutPlanner {
       contentHorizontalInset: resolvedContentInset,
       baseFontSize: baseFontSize,
       inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
-      disclosureOverrides: disclosureOverrides
+      disclosureOverrides: disclosureOverrides,
+      widgetLayout: widgetLayout
     )
     let estimatedCost = contentByteCount + attributedText.length * 8 + plan.nodes.count * 128
     cache.setObject(box, forKey: key, cost: estimatedCost)
@@ -246,6 +256,7 @@ final class RichBlockLayoutPlanner {
     baseFontSize: CGFloat,
     inlineMathAttachmentsEnabled: Bool,
     disclosureOverrides: [BlockContentPath: Bool],
+    widgetLayout: RichBlockWidgetLayout?,
     mathSignature: Int
   ) -> NSString {
     let overrides = disclosureOverrides
@@ -253,7 +264,7 @@ final class RichBlockLayoutPlanner {
       .sorted()
       .joined(separator: ",")
     return NSString(
-      string: "\(contentCacheSignature)_\(Data(attributedText.string.utf8).hashValue)_\(attributedText.hash)_\(Int(availableWidth.rounded()))_\(contentHorizontalInset)_\(baseFontSize)_\(inlineMathAttachmentsEnabled)_\(overrides)_\(mathSignature)"
+      string: "\(contentCacheSignature)_\(Data(attributedText.string.utf8).hashValue)_\(attributedText.hash)_\(Int(availableWidth.rounded()))_\(contentHorizontalInset)_\(baseFontSize)_\(inlineMathAttachmentsEnabled)_\(overrides)_\(widgetLayout?.cacheKey ?? "off")_\(mathSignature)"
     )
   }
 
@@ -395,6 +406,7 @@ final class RichBlockLayoutPlanner {
     let baseFontSize: CGFloat
     let contentHorizontalInset: CGFloat
     let disclosureOverrides: [BlockContentPath: Bool]
+    let widgetLayout: RichBlockWidgetLayout?
     var nodes: [RichBlockLayoutPlan.Node] = []
     var height: CGFloat = 0
     var trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
@@ -631,6 +643,10 @@ final class RichBlockLayoutPlanner {
         return appendDiff(diff, path: path, x: x, width: width)
       case let .form(form):
         return appendForm(form, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .widget(widget):
+        // With widgets off, the message falls back to its flat text, like an unknown kind.
+        guard let widgetLayout else { return false }
+        return appendWidget(widget, layout: widgetLayout, path: path, x: x, width: width)
       }
     }
 

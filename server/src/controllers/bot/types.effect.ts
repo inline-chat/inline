@@ -352,6 +352,49 @@ export const BotRichText: Schema.Codec<NeutralBotRichText> = Schema.suspend(
   description: "Recursive rich text following Telegram's text-tree model.",
 })
 
+const BotFormFieldBase = {
+  field_id: Schema.String,
+  label: BotRichText,
+  description: Schema.optionalKey(BotRichText),
+  is_required: Schema.optionalKey(Schema.Literal(true)),
+} as const
+const BotFormFieldSchema = Schema.Union([
+  Schema.Struct({
+    ...BotFormFieldBase,
+    type: Schema.Literal("select"),
+    options: Schema.mutable(Schema.Array(Schema.Struct({
+      option_id: Schema.String,
+      label: BotRichText,
+      description: Schema.optionalKey(BotRichText),
+    }))),
+    is_multiple: Schema.optionalKey(Schema.Literal(true)),
+    default_option_ids: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+    allow_other: Schema.optionalKey(Schema.Literal(true)),
+  }),
+  Schema.Struct({
+    ...BotFormFieldBase,
+    type: Schema.Literal("text"),
+    kind: Schema.optionalKey(Schema.Literals(["single_line", "multiline", "secret"])),
+    placeholder: OptionalString,
+    default_value: OptionalString,
+    max_length: Schema.optionalKey(WireNonNegativeInteger),
+  }),
+  Schema.Struct({ ...BotFormFieldBase, type: Schema.Literal("toggle"), default_value: Schema.optionalKey(Schema.Boolean) }),
+  Schema.Struct({
+    ...BotFormFieldBase,
+    type: Schema.Literal("number"),
+    default_value: Schema.optionalKey(Schema.Number),
+    min: Schema.optionalKey(Schema.Number),
+    max: Schema.optionalKey(Schema.Number),
+    step: Schema.optionalKey(Schema.Number),
+    is_integer: Schema.optionalKey(Schema.Literal(true)),
+  }),
+], { mode: "oneOf" })
+
+const BotBlockStatusSchema = Schema.Literals(["pending", "running", "waiting", "done", "failed", "cancelled"])
+const BotGrantRequirementSchema = Schema.Literals(["access", "invoke", "steer", "approve", "configure", "owner"])
+const OptionalTrue = Schema.optionalKey(Schema.Literal(true))
+
 export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
   (): Schema.Codec<NeutralBotRichBlock> => Schema.Union([
     Schema.Struct({ type: Schema.Literal("math"), latex: Schema.String }),
@@ -396,7 +439,64 @@ export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
       blocks: Schema.mutable(Schema.Array(BotRichBlock)),
       is_open: Schema.optionalKey(Schema.Literal(true)),
       kind: Schema.optionalKey(Schema.Literal("progress")),
+      status: Schema.optionalKey(BotBlockStatusSchema),
+      meta: Schema.optionalKey(BotRichText),
+      started_at: Schema.optionalKey(WireNonNegativeInteger),
       is_rtl: Schema.optionalKey(Schema.Literal(true)),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("diff"),
+      path: BotRichText,
+      diff: Schema.optionalKey(BotRichText),
+      change: Schema.optionalKey(Schema.Literals(["added", "modified", "deleted", "renamed"])),
+      previous_path: Schema.optionalKey(BotRichText),
+      additions: Schema.optionalKey(WireNonNegativeInteger),
+      deletions: Schema.optionalKey(WireNonNegativeInteger),
+      language: OptionalString,
+      is_truncated: OptionalTrue,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("fields"),
+      fields: Schema.mutable(Schema.Array(Schema.Struct({
+        label: BotRichText,
+        value: BotRichText,
+        is_monospace: OptionalTrue,
+      }))),
+      is_rtl: OptionalTrue,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("steps"),
+      steps: Schema.mutable(Schema.Array(Schema.Struct({
+        text: BotRichText,
+        status: Schema.optionalKey(BotBlockStatusSchema),
+        detail: Schema.optionalKey(BotRichText),
+      }))),
+      is_rtl: OptionalTrue,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("callout"),
+      kind: Schema.optionalKey(Schema.Literals(["info", "success", "warning", "error"])),
+      title: Schema.optionalKey(BotRichText),
+      blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+      is_rtl: OptionalTrue,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("meter"),
+      label: BotRichText,
+      value: Schema.Number,
+      max: Schema.Number,
+      meta: Schema.optionalKey(BotRichText),
+      tone: Schema.optionalKey(Schema.Literals(["warning", "critical"])),
+    }),
+    Schema.Struct({
+      type: Schema.Literal("form"),
+      form_id: Schema.String,
+      title: Schema.optionalKey(BotRichText),
+      fields: Schema.mutable(Schema.Array(BotFormFieldSchema)),
+      submit_label: OptionalString,
+      required_grant: Schema.optionalKey(BotGrantRequirementSchema),
+      is_closed: OptionalTrue,
+      is_rtl: OptionalTrue,
     }),
     Schema.Struct({
       type: Schema.Literal("table"),
@@ -415,6 +515,19 @@ export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
       width: Schema.optionalKey(WireNonNegativeInteger),
       height: Schema.optionalKey(WireNonNegativeInteger),
     }),
+    Schema.Struct({
+      type: Schema.Literal("widget"),
+      widget_id: Schema.optionalKey(Schema.String),
+      title: BotRichText,
+      html: Schema.String,
+      height: Schema.optionalKey(WireNonNegativeInteger),
+      images: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.Struct({
+        file: Schema.optionalKey(Schema.suspend(() => BotFile)),
+        width: Schema.optionalKey(WireNonNegativeInteger),
+        height: Schema.optionalKey(WireNonNegativeInteger),
+      })))),
+      required_grant: Schema.optionalKey(BotGrantRequirementSchema),
+    }).annotate({ description: "Sandboxed HTML a bot shows inside the message, with no network access." }),
   ], { mode: "oneOf" }),
 ).annotate({
   identifier: "BotRichBlock",
@@ -840,6 +953,22 @@ export const BotUpdate = Schema.Union([
       actor: BotUser,
       date: WireNonNegativeInteger,
       action: BotActionInvocation,
+      form: Schema.optionalKey(Schema.Struct({
+        values: Schema.mutable(Schema.Array(Schema.Union([
+          Schema.Struct({ field_id: Schema.String, text: Schema.String }),
+          Schema.Struct({ field_id: Schema.String, option_ids: Schema.mutable(Schema.Array(Schema.String)), other_text: OptionalString }),
+          Schema.Struct({ field_id: Schema.String, toggle: Schema.Boolean }),
+          Schema.Struct({ field_id: Schema.String, number: Schema.Number }),
+          Schema.Struct({ field_id: Schema.String, redacted: Schema.Literal(true) }),
+          Schema.Struct({ field_id: Schema.String }),
+        ]))),
+      }).annotate({ description: "Present when a form block was submitted; action.action_id is its form ID." })),
+      widget_call: Schema.optionalKey(Schema.Struct({
+        name: Schema.String,
+        payload: Schema.optionalKey(Schema.Unknown),
+      }).annotate({
+        description: "A widget's inline.action(name, payload); action.action_id is its widget ID. The viewer's client supplies both fields.",
+      })),
     }),
   }),
   Schema.Struct({

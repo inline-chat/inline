@@ -849,11 +849,11 @@ private struct ExperimentalChatListView: View {
 
   private func contextMenuReadUnreadButton(for item: ChatListItemSnapshot) -> some View {
     Button {
-      performReadUnreadUpdate(peer: item.peer, isUnread: item.isUnread)
+      performReadUnreadUpdate(peer: item.peer, isUnread: item.needsAttention)
     } label: {
       Label(
-        item.isUnread ? "Mark as Read" : "Mark as Unread",
-        systemImage: item.isUnread ? "checkmark.message" : "envelope.badge"
+        item.needsAttention ? "Mark as Read" : "Mark as Unread",
+        systemImage: item.needsAttention ? "checkmark.message" : "envelope.badge"
       )
     }
   }
@@ -1114,11 +1114,11 @@ private struct ExperimentalChatListView: View {
 
   private func readUnreadButton(for item: ChatListItemSnapshot) -> some View {
     Button {
-      performReadUnreadUpdate(peer: item.peer, isUnread: item.isUnread)
+      performReadUnreadUpdate(peer: item.peer, isUnread: item.needsAttention)
     } label: {
       Label(
-        item.isUnread ? "Read" : "Unread",
-        systemImage: item.isUnread ? "checkmark.message.fill" : "envelope.badge.fill"
+        item.needsAttention ? "Read" : "Unread",
+        systemImage: item.needsAttention ? "checkmark.message.fill" : "envelope.badge.fill"
       )
     }
     .tint(.blue)
@@ -1167,7 +1167,8 @@ private struct ExperimentalChatListView: View {
       do {
         _ = try await homeActions.perform(peer: peer) {
           if isUnread {
-            _ = try await realtimeV2.send(.readMessages(peerId: peer))
+            // Explicit "Mark as Read" also clears unseen mentions, replies and reactions.
+            _ = try await realtimeV2.send(.readMessages(peerId: peer, readActivity: true))
           } else {
             _ = try await realtimeV2.send(.markAsUnread(peerId: peer))
           }

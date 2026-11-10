@@ -97,6 +97,11 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       if layoutMode == .compact {
         ComposeActionCompactAccessory(peer: item.peer)
 
+        if let activityBadge = item.activityBadge {
+          activityBadgeView(activityBadge)
+            .transition(unreadTransition)
+        }
+
         if showsNumberedUnread {
           unreadBadge
             .transition(unreadTransition)
@@ -121,12 +126,36 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       previewContent
         .frame(maxWidth: .infinity, alignment: .leading)
 
-      if showsNumberedUnread {
-        unreadBadge
-          .transition(unreadTransition)
+      HStack(spacing: 5) {
+        if let activityBadge = item.activityBadge {
+          activityBadgeView(activityBadge)
+            .transition(unreadTransition)
+        }
+
+        if showsNumberedUnread {
+          unreadBadge
+            .transition(unreadTransition)
+        }
       }
     }
     .animation(unreadAnimation, value: showsNumberedUnread)
+    .animation(unreadAnimation, value: item.activityBadge)
+  }
+
+  private func activityBadgeColor(_ badge: ChatListActivityBadge) -> Color {
+    guard badge == .reaction else { return .accentColor }
+    return item.isProminent ? .pink : Color(.systemGray2)
+  }
+
+  /// "@" for mentions and replies, a heart for reactions. "@" always uses the accent color;
+  /// reactions follow the row's prominence like its unread count.
+  private func activityBadgeView(_ badge: ChatListActivityBadge) -> some View {
+    Image(systemName: badge.symbolName)
+      .font(.system(size: badge == .mention ? 10.5 : 9, weight: .bold))
+      .foregroundStyle(Color.white)
+      .frame(width: unreadBadgeHeight, height: unreadBadgeHeight)
+      .background(activityBadgeColor(badge), in: Circle())
+      .accessibilityLabel(badge.accessibilityLabel)
   }
 
   @ViewBuilder
@@ -284,6 +313,9 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     }
     if let timestampText = displayedTimestampText {
       parts.append(timestampText)
+    }
+    if let activityBadge = item.activityBadge {
+      parts.append(activityBadge.accessibilityLabel.lowercased())
     }
     if item.isUnread {
       parts.append(item.unreadCount > 0 ? "\(item.unreadCount) unread" : "unread")
@@ -478,4 +510,13 @@ private struct Metrics {
   let horizontalSpacing: CGFloat
   let textSpacing: CGFloat
   let previewLines: Int
+}
+
+private extension ChatListActivityBadge {
+  var symbolName: String {
+    switch self {
+      case .mention: "at"
+      case .reaction: "heart.fill"
+    }
+  }
 }

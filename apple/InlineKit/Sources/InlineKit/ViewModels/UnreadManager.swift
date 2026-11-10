@@ -584,6 +584,22 @@ public final class UnreadManager: Sendable {
     }
   }
 
+  /// Explicit "Mark as Read" from a chat list or menu: moves the read cursor and also reads
+  /// every unseen mention and reaction. Opening a chat uses `readAll`, which keeps them.
+  public func markChatRead(_ peerId: Peer, chatId: Int64) {
+    readAll(peerId, chatId: chatId)
+    Task(priority: .userInitiated) {
+      do {
+        let maxId = try await db.reader.read { db in try ChatActivityItem.markAllBound(db, chatId: chatId) }
+        _ = try await Api.realtime.send(
+          .readAllActivity(peerId: peerId, chatId: chatId, kinds: ChatActivityItem.Kind.allCases, maxId: maxId)
+        )
+      } catch {
+        log.error("Failed to clear activity for chat", error: error)
+      }
+    }
+  }
+
   // Useful in context menu to mark all messages as read
   public func readAll(_ peerId: Peer, chatId: Int64) {
     log.trace("readAll")

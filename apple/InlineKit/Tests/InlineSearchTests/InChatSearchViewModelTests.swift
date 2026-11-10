@@ -42,19 +42,24 @@ struct InChatSearchViewModelTests {
     #expect(model.currentMessageId == 80)
   }
 
-  @Test("keeps paging in the background until the total is exact")
-  func countsEveryMatch() async throws {
-    let source = ScriptedSource(local: [50, 30], remote: [50, 45, 40, 35, 30, 25, 20])
+  @Test("pages load on demand and the total comes from the server count")
+  func pagesOnDemandWithServerTotal() async throws {
+    let source = ScriptedSource(local: [], remote: [50, 45, 40, 35, 30, 25, 20])
     let model = makeModel(source, pageLimit: 2)
 
     model.setQuery("deploy")
-    try await waitUntil { !model.hasMore && !model.isSearching }
+    try await waitUntil { !model.isSearching && model.totalCount != nil }
 
-    #expect(model.matches.map(\.messageId) == [50, 45, 40, 35, 30, 25, 20])
-    #expect(model.isCounting == false)
-    #expect(model.currentMessageId == 50)
+    // Only the first page is loaded, but the counter already shows the exact total.
+    #expect(model.matches.map(\.messageId) == [50, 45])
     #expect(model.counterText == "1 of 7")
     #expect(model.resultsText == "7 messages")
+
+    // A list showing one of its last rows loads the next page.
+    model.loadMoreIfNeeded(after: model.matches[1])
+    try await waitUntil { model.matches.count == 4 }
+    #expect(model.matches.map(\.messageId) == [50, 45, 40, 35])
+    #expect(model.counterText == "1 of 7")
   }
 
   @Test("no matches says so")
@@ -168,7 +173,7 @@ struct InChatSearchViewModelTests {
   // MARK: Helpers
 
   private func makeModel(_ source: ScriptedSource, pageLimit: Int = 50) -> InChatSearchViewModel {
-    InChatSearchViewModel(source: source, timing: .immediate, pageLimit: pageLimit, countPageLimit: pageLimit)
+    InChatSearchViewModel(source: source, timing: .immediate, pageLimit: pageLimit)
   }
 
   private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
@@ -199,6 +204,11 @@ private struct ScriptedSource: InChatSearchSource {
   func remote(query _: String, beforeMessageId: Int64?, limit: Int) async throws -> InChatSearchPage {
     guard let remoteIds else { throw Failure() }
     return page(remoteIds, before: beforeMessageId, limit: limit)
+  }
+
+  func remoteCount(query _: String) async throws -> Int {
+    guard let remoteIds else { throw Failure() }
+    return remoteIds.count
   }
 
   private func page(_ ids: [Int64], before: Int64?, limit: Int) -> InChatSearchPage {

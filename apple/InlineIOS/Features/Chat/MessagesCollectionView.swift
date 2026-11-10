@@ -124,6 +124,12 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
+  /// Incoming message IDs on screen while the chat is being looked at, or nil when it is not.
+  var onVisibleMessagesChanged: (([Int64]?) -> Void)? {
+    get { coordinator.onVisibleMessagesChanged }
+    set { coordinator.onVisibleMessagesChanged = newValue }
+  }
+
   init(
     peerId: Peer,
     chatId: Int64,
@@ -1379,6 +1385,7 @@ private extension MessagesCollectionView {
     private let spaceId: Int64?
     private let isPreview: Bool
     private var theme: IOSThemeSnapshot
+    var onVisibleMessagesChanged: (([Int64]?) -> Void)?
     /// `.next` draws supported message kinds with the next message view.
     private let messageViewImplementation: MessageViewImplementation
     /// `.custom` opens `MessageContextMenuController` from a hold instead of UIKit's menu.
@@ -4131,11 +4138,29 @@ private extension MessagesCollectionView {
             window.windowScene?.activationState == .foregroundActive,
             UIApplication.shared.applicationState == .active
       else {
+        onVisibleMessagesChanged?(nil)
         return
       }
       // Temporary read-on-open workaround: do not wait for history coverage or
       // an advancing incoming marker. readAll clears locally before sending.
       UnreadManager.shared.readAll(peerId, chatId: chatId)
+      onVisibleMessagesChanged?(visibleMessageIDs(in: collectionView))
+    }
+
+    /// All on-screen messages: mentions arrive on others' messages, reactions on yours.
+    private func visibleMessageIDs(in collectionView: UICollectionView) -> [Int64] {
+      let visibleRect = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+      guard !visibleRect.isEmpty, !visibleRect.isNull else { return [] }
+      return collectionView.indexPathsForVisibleItems.compactMap { indexPath -> Int64? in
+        guard let cell = collectionView.cellForItem(at: indexPath),
+              !cell.isHidden,
+              cell.frame.intersects(visibleRect),
+              case .message? = item(at: indexPath),
+              let message = message(at: indexPath),
+              message.message.messageId > 0
+        else { return nil }
+        return message.message.messageId
+      }
     }
 
     private func highestVisibleIncomingMessageID(in collectionView: UICollectionView) -> Int64? {

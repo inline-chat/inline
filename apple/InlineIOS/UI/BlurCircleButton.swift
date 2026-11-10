@@ -21,27 +21,27 @@ final class BlurCircleButton: UIView {
     let button = ScrollGlassButton(type: .custom)
     button.translatesAutoresizingMaskIntoConstraints = false
 
-    let image = UIImage(systemName: "chevron.down")?.withConfiguration(
+    let image = UIImage(systemName: symbolName)?.withConfiguration(
       UIImage.SymbolConfiguration(pointSize: Metrics.iconPointSize, weight: .semibold)
     )
 
     if #available(iOS 26.0, *) {
       var configuration = UIButton.Configuration.glass()
       configuration.image = image
-      configuration.baseForegroundColor = .label
+      configuration.baseForegroundColor = symbolTint
       configuration.contentInsets = .zero
       configuration.cornerStyle = .capsule
       button.configuration = configuration
     } else {
       var configuration = UIButton.Configuration.plain()
       configuration.image = image
-      configuration.baseForegroundColor = .label
+      configuration.baseForegroundColor = symbolTint
       configuration.contentInsets = .zero
       button.configuration = configuration
     }
 
     button.addTarget(self, action: #selector(buttonTapped), for: .touchUpInside)
-    button.accessibilityLabel = "Scroll to Bottom"
+    button.accessibilityLabel = accessibilityTitle
     button.isPointerInteractionEnabled = true
     return button
   }()
@@ -58,6 +58,10 @@ final class BlurCircleButton: UIView {
   }()
 
   private let unreadBadgeView = UIView()
+  private let countLabel = UILabel()
+  private let symbolName: String
+  private let symbolTint: UIColor
+  private let accessibilityTitle: String
   private var desiredVisibility = false
   private var visibilityAnimationGeneration = 0
   private var visibilityAnimator: UIViewPropertyAnimator?
@@ -69,14 +73,21 @@ final class BlurCircleButton: UIView {
     y: Metrics.hiddenTranslationY
   ).scaledBy(x: Metrics.hiddenScale, y: Metrics.hiddenScale)
 
-  override init(frame: CGRect) {
-    super.init(frame: frame)
+  init(
+    symbolName: String = "chevron.down",
+    tint: UIColor = .label,
+    accessibilityTitle: String = "Scroll to Bottom"
+  ) {
+    self.symbolName = symbolName
+    symbolTint = tint
+    self.accessibilityTitle = accessibilityTitle
+    super.init(frame: .zero)
     setup()
   }
 
+  @available(*, unavailable)
   required init?(coder: NSCoder) {
-    super.init(coder: coder)
-    setup()
+    fatalError("init(coder:) has not been implemented")
   }
 
   override func didMoveToWindow() {
@@ -154,6 +165,25 @@ final class BlurCircleButton: UIView {
       unreadBadgeView.heightAnchor.constraint(equalToConstant: 6),
       unreadBadgeView.topAnchor.constraint(equalTo: button.topAnchor),
       unreadBadgeView.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+    ])
+
+    countLabel.translatesAutoresizingMaskIntoConstraints = false
+    countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    countLabel.textColor = .white
+    countLabel.textAlignment = .center
+    // The count matches a colored symbol (heart); the default chevron button uses the accent.
+    countLabel.backgroundColor = symbolTint == .label ? ThemeManager.shared.selected.accent : symbolTint
+    countLabel.layer.cornerRadius = 9
+    countLabel.layer.cornerCurve = .continuous
+    countLabel.clipsToBounds = true
+    countLabel.isUserInteractionEnabled = false
+    countLabel.isHidden = true
+    addSubview(countLabel)
+    NSLayoutConstraint.activate([
+      countLabel.heightAnchor.constraint(equalToConstant: 18),
+      countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
+      countLabel.centerYAnchor.constraint(equalTo: button.topAnchor, constant: 2),
+      countLabel.centerXAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
     ])
 
     isHidden = false
@@ -258,5 +288,20 @@ final class BlurCircleButton: UIView {
 
   func setHasUnread(_ hasUnread: Bool) {
     unreadBadgeView.isHidden = !hasUnread
+  }
+
+  /// Count capsule on the top trailing edge; zero hides it.
+  func setCount(_ count: Int) {
+    countLabel.isHidden = count <= 0
+    let text = count > 99 ? "99+" : "\(count)"
+    // Padding for multi-digit counts without a stack view.
+    countLabel.text = text.count > 1 ? " \(text) " : text
+    button.accessibilityValue = count > 0 ? "\(count)" : nil
+  }
+
+  /// Shown on long-press; the tap still runs `onTap`.
+  func setMenu(_ menu: UIMenu?) {
+    button.menu = menu
+    button.showsMenuAsPrimaryAction = false
   }
 }

@@ -990,12 +990,10 @@ class MessageSizeCalculator {
     {
       let richContentInset = hasBubbleColor ? bubbleContentHorizontalInset : 0
       let richViewportWidth = max(1, availableWidth + richContentInset * 2)
-      // A quote reply shows its quote in the reply header, so the body skips it.
-      let replyQuote = message.leadingReplyQuote
       richBlockPlan = RichBlockLayoutPlanner.shared.plan(
-        content: replyQuote?.body ?? blockContentPayload.content,
-        contentCacheSignature: replyQuote?.bodyCacheSignature ?? blockContentPayload.cacheSignature,
-        contentByteCount: replyQuote?.bodyByteCount ?? blockContentPayload.byteCount,
+        content: blockContentPayload.content,
+        contentCacheSignature: blockContentPayload.cacheSignature,
+        contentByteCount: blockContentPayload.byteCount,
         attributedText: attributedString,
         availableWidth: richViewportWidth,
         contentHorizontalInset: richContentInset,
@@ -1003,7 +1001,8 @@ class MessageSizeCalculator {
         primaryColor: primaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
         secondaryColor: secondaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
         inlineMathAttachmentsEnabled: AppSettings.shared.richTextInlineMathEnabled,
-        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
+        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message),
+        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message)
       )
       if let richBlockPlan {
         textSize = richBlockPlan.size
@@ -1811,18 +1810,18 @@ class MessageSizeCalculator {
        text.utf8.elementsEqual((message.message.text ?? "").utf8),
        let blockContentPayload = message.message.blockContentPayload
     {
-      let replyQuote = message.leadingReplyQuote
       richBlockPlan = RichBlockLayoutPlanner.shared.plan(
-        content: replyQuote?.body ?? blockContentPayload.content,
-        contentCacheSignature: replyQuote?.bodyCacheSignature ?? blockContentPayload.cacheSignature,
-        contentByteCount: replyQuote?.bodyByteCount ?? blockContentPayload.byteCount,
+        content: blockContentPayload.content,
+        contentCacheSignature: blockContentPayload.cacheSignature,
+        contentByteCount: blockContentPayload.byteCount,
         attributedText: attributedString,
         availableWidth: textAvailableWidth,
         baseFontSize: fontSize,
         primaryColor: primaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
         secondaryColor: secondaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
         inlineMathAttachmentsEnabled: AppSettings.shared.richTextInlineMathEnabled,
-        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
+        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message),
+        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message)
       )
       if let richBlockPlan {
         textSize = richBlockPlan.size

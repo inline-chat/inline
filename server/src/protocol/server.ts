@@ -12,6 +12,7 @@ import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { MessageActionResponseUi } from "@inline-chat/protocol/core";
+import { MessageWidgetCall } from "@inline-chat/protocol/core";
 import { MessageFormSubmission } from "@inline-chat/protocol/core";
 import { Chat } from "@inline-chat/protocol/core";
 import { MessageServiceGridTranscript } from "@inline-chat/protocol/core";
@@ -37,6 +38,7 @@ import { Reaction } from "@inline-chat/protocol/core";
 import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { UpdateUnreadActivity } from "@inline-chat/protocol/core";
 import { UpdateAgentSettings } from "@inline-chat/protocol/core";
 import { UpdateAgentSessionControl } from "@inline-chat/protocol/core";
 import { UpdateAgentRuntime } from "@inline-chat/protocol/core";
@@ -423,6 +425,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: UpdateAgentSettings user_agent_settings = 55;
          */
         userAgentSettings: UpdateAgentSettings;
+    } | {
+        oneofKind: "userUnreadActivity";
+        /**
+         * @generated from protobuf field: UpdateUnreadActivity user_unread_activity = 56;
+         */
+        userUnreadActivity: UpdateUnreadActivity;
     } | {
         oneofKind: undefined;
     };
@@ -1339,6 +1347,12 @@ export interface ServerUserUpdateMessageActionInvoked {
      * @generated from protobuf field: optional MessageFormSubmission form = 6;
      */
     form?: MessageFormSubmission;
+    /**
+     * A call from inside a widget; action_id is its widget_id.
+     *
+     * @generated from protobuf field: optional MessageWidgetCall widget_call = 7;
+     */
+    widgetCall?: MessageWidgetCall;
 }
 /**
  * Update for a user when bot answers a previously invoked action.
@@ -1529,7 +1543,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 52, name: "user_agent_grant", kind: "message", oneof: "update", T: () => UpdateAgentGrant },
             { no: 53, name: "user_agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
             { no: 54, name: "user_agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl },
-            { no: 55, name: "user_agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings }
+            { no: 55, name: "user_agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings },
+            { no: 56, name: "user_unread_activity", kind: "message", oneof: "update", T: () => UpdateUnreadActivity }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1864,6 +1879,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userAgentSettings: UpdateAgentSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentSettings)
                     };
                     break;
+                case /* UpdateUnreadActivity user_unread_activity */ 56:
+                    message.update = {
+                        oneofKind: "userUnreadActivity",
+                        userUnreadActivity: UpdateUnreadActivity.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userUnreadActivity)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2038,6 +2059,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* UpdateAgentSettings user_agent_settings = 55; */
         if (message.update.oneofKind === "userAgentSettings")
             UpdateAgentSettings.internalBinaryWrite(message.update.userAgentSettings, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUnreadActivity user_unread_activity = 56; */
+        if (message.update.oneofKind === "userUnreadActivity")
+            UpdateUnreadActivity.internalBinaryWrite(message.update.userUnreadActivity, writer.tag(56, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4922,7 +4946,8 @@ class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUp
             { no: 3, name: "actor_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "action_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
-            { no: 6, name: "form", kind: "message", T: () => MessageFormSubmission }
+            { no: 6, name: "form", kind: "message", T: () => MessageFormSubmission },
+            { no: 7, name: "widget_call", kind: "message", T: () => MessageWidgetCall }
         ]);
     }
     create(value?: PartialMessage<ServerUserUpdateMessageActionInvoked>): ServerUserUpdateMessageActionInvoked {
@@ -4959,6 +4984,9 @@ class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUp
                 case /* optional MessageFormSubmission form */ 6:
                     message.form = MessageFormSubmission.internalBinaryRead(reader, reader.uint32(), options, message.form);
                     break;
+                case /* optional MessageWidgetCall widget_call */ 7:
+                    message.widgetCall = MessageWidgetCall.internalBinaryRead(reader, reader.uint32(), options, message.widgetCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4989,6 +5017,9 @@ class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUp
         /* optional MessageFormSubmission form = 6; */
         if (message.form)
             MessageFormSubmission.internalBinaryWrite(message.form, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageWidgetCall widget_call = 7; */
+        if (message.widgetCall)
+            MessageWidgetCall.internalBinaryWrite(message.widgetCall, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -880,7 +880,8 @@ impl Renderer {
                 Some(ItemBody::Message { text, .. }) => text.clone(),
                 _ => row.delta.clone(),
             };
-            builder.paragraph(&text);
+            // A widget streams as its title; its HTML belongs to the answer.
+            builder.paragraph(&inline_agent_bridge::widget::preview(&text));
             return;
         }
         let Some(body) = row.body.clone() else {
@@ -2672,6 +2673,52 @@ mod tests {
             "{ops:?}"
         );
         assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Hello"));
+    }
+
+    #[test]
+    fn a_streaming_widget_shows_in_progress_only_by_its_title() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let delta = |text: &str| {
+            Event::Item(
+                Item::new(
+                    ItemId::new("m1").expect("id"),
+                    None,
+                    ItemUpdate::Delta {
+                        delta: ItemDelta {
+                            stream: DeltaStream::Text,
+                            index: None,
+                            text: text.to_owned(),
+                        },
+                    },
+                    Value::Null,
+                )
+                .with_kind(ItemKind::Message),
+            )
+        };
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (10, delta("Chart:\n\n<iframe title=\"Q3\">\n<div>")),
+                (5_000, delta("</div>\n</iframe>\n\nAfter.")),
+            ],
+        );
+        let progress: Vec<&str> = ops
+            .iter()
+            .filter_map(|op| match op {
+                RenderOp::Progress { doc, .. } => Some(doc.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(!progress.is_empty(), "{ops:?}");
+        assert!(
+            progress.iter().all(|text| !text.contains('<')),
+            "{progress:?}"
+        );
+        assert!(
+            progress.last().expect("last").contains("[Widget: Q3]"),
+            "{progress:?}"
+        );
     }
 
     #[test]

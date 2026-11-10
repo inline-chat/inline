@@ -28,6 +28,7 @@ final class SidebarViewModel {
     let unreadCount: Int
     let unreadMark: Bool
     let prominentUnreadDot: Bool
+    let activityBadge: ChatListActivityBadge?
     let pinned: Bool
     let archived: Bool
     let open: Bool
@@ -39,6 +40,9 @@ final class SidebarViewModel {
     let chatType: ChatType?
     let chatCreatedBy: Int64?
     let chatIsPublic: Bool?
+
+    /// Unread messages, or an unseen mention, reply or reaction. Drives "Mark Read".
+    var needsAttention: Bool { unread || activityBadge != nil }
 
     init(snapshot: ChatListItemSnapshot, kind: ChatListItem.Kind = .thread) {
       id = ChatListItem.Identifier(kind: kind, rawValue: snapshot.dialogID)
@@ -61,6 +65,7 @@ final class SidebarViewModel {
       unreadMark = snapshot.unreadMark
       unread = snapshot.isUnread
       prominentUnreadDot = snapshot.isProminent
+      activityBadge = snapshot.activityBadge
       pinned = snapshot.isPinned
       archived = snapshot.isArchived
       open = snapshot.isOpen

@@ -95,7 +95,8 @@ public struct ParticipantsPopoverView: View {
   }
 
   private var canAddParticipants: Bool {
-    canManageParticipants
+    guard !isShowingInheritedParticipants else { return false }
+    return ChatParticipantPolicy.canAdd(chat: chat)
   }
 
   private var canToggleVisibility: Bool {

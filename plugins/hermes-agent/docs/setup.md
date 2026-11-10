@@ -4,7 +4,7 @@ Install the official Inline platform adapter for Hermes Agent.
 
 ## Requirements
 
-- Hermes Agent `>=0.21.3` (validated against `0.21.3` and `0.22.7`; `0.22.6` and later need adapter `1.0.0`; several profiles in one gateway need Hermes `0.22.0` or later)
+- Hermes Agent `>=0.21.3` (validated against `0.21.3` and `0.23.0`; `0.22.6` and later need adapter `1.0.0`; several profiles in one gateway need Hermes `0.22.0` or later)
 - Node.js `20` or newer
 - The Inline CLI for guided bot creation, or an existing Inline bot/user token
 
@@ -135,6 +135,7 @@ Supported:
 - Token setup through `INLINE_TOKEN`, `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`, including simple `${ENV_NAME}` config references.
 - Realtime inbound messages, catch-up, replies, action callbacks, opt-in edit-message streaming, edits, deletes, typing, presence, and long outbound replies.
 - Inline-native clarify, approval, slash confirmation, and model picker buttons.
+- Sandboxed HTML message widgets through the `inline` tool's `send_widget` action or an `<iframe>` block in a reply, split so no widget is cut; viewer widget calls arrive as turns.
 - Native Inline `/` command-menu sync for Hermes slash commands, including `/threads` and `/update`.
 - Native Hermes `inline` tool for bounded current-chat/thread history and search, exact message lookup, sending, editing, deleting bot-owned messages, reactions, pin/unpin/list pins, typing/presence, reply-thread creation, and private or explicitly public top-level thread/chat creation outside the current conversation.
 - Per-turn Inline sender/chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with prompt guidance for sender mentions and current chat/thread Markdown links.

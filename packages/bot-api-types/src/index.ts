@@ -272,6 +272,27 @@ export type BotRichBlock =
       width?: number
       height?: number
     }
+  | ({ type: "widget" } & BotWidget)
+
+/**
+ * Sandboxed HTML rendered inside the message, with no network access. Bots only;
+ * at most one per message. Bots send one as `<iframe title="…" id="…" height="…">`
+ * in Markdown text; received messages carry it as this block.
+ */
+export type BotWidget = {
+  /** Stable across edits; per-viewer state is kept by it. Defaults to "widget". */
+  widget_id?: string
+  /** Header, notification and fallback text. */
+  title: BotRichText
+  /** An HTML fragment or full document, at most 256 KiB. */
+  html: string
+  /** Measured content height in CSS px at 640 px wide; reserves first-frame space. */
+  height?: number
+  /** Referenced from the HTML as "media/0", "media/1", ... in this order. */
+  images?: Array<{ file?: BotFile; width?: number; height?: number }>
+  /** Who may trigger `inline.action()`. Defaults to anyone who can see the message. */
+  required_grant?: BotGrantRequirement
+}
 
 export type BotBlockStatus = "pending" | "running" | "waiting" | "done" | "failed" | "cancelled"
 
@@ -569,6 +590,11 @@ export type BotUpdate = BotUpdateBase &
             )
           /** Present when a form block was submitted; `action.action_id` is its form ID. */
           form?: BotFormSubmission
+          /**
+           * Present for `inline.action(name, payload)` from a widget; `action.action_id` is its
+           * widget ID. The viewer's client supplies both fields: treat them as untrusted input.
+           */
+          widget_call?: { name: string; payload?: unknown }
         }
       }
     | { bot_participation: BotParticipationChange }
@@ -662,6 +688,10 @@ export type DeleteWebhookResult = true
 export type GetWebhookInfoResult = WebhookInfo
 
 export type SendMessageParams = BotTargetInput & {
+  /**
+   * Inline Markdown when `parse_markdown` is on. Bots can embed one widget as an Agent
+   * Flavored Markdown preview: `<iframe title="…">HTML</iframe>` on its own lines.
+   */
   text?: string
   reply_to_message_id?: BotInputId
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
@@ -682,6 +712,7 @@ export type SendMessageParams = BotTargetInput & {
 
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
+  /** Replaces the text and blocks. Keep a widget's `id` to keep viewers' widget state. */
   text: string
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean

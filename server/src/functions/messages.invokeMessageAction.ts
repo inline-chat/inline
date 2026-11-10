@@ -1,4 +1,4 @@
-import type { InputPeer, MessageFormSubmission, Update } from "@inline-chat/protocol/core"
+import type { InputPeer, MessageFormSubmission, MessageWidgetCall, Update } from "@inline-chat/protocol/core"
 import { AgentGrantRequirement } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -8,6 +8,7 @@ import { resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/module
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { findCallbackAction } from "@in/server/modules/message/messageActions"
 import { findForm, validateFormSubmission } from "@in/server/modules/message/messageForms"
+import { findWidget, MessageWidgetError, validateWidgetCall } from "@in/server/modules/message/messageWidgets"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -19,6 +20,7 @@ type Input = {
   messageId: bigint
   actionId: string
   form?: MessageFormSubmission
+  widgetCall?: MessageWidgetCall
 }
 
 type Output = {
@@ -47,20 +49,30 @@ export const invokeMessageAction = async (input: Input, context: FunctionContext
   }
 
   const actionId = input.actionId.trim()
-  const callback = input.form ? null : findCallbackAction({ actions: message.actions, actionId })
+  // The input names what is invoked, so a widget or form ID never reaches a same-named button.
+  if (input.form && input.widgetCall) throw RealtimeRpcError.BadRequest()
+  const callback = input.form || input.widgetCall ? null : findCallbackAction({ actions: message.actions, actionId })
   const form = input.form ? findForm(message.blockContent, actionId) : undefined
-  if (!callback && !form) {
+  const widget = input.widgetCall ? findWidget(message.blockContent, actionId) : undefined
+  if (!callback && !form && !widget) {
     throw RealtimeRpcError.BadRequest()
   }
 
   // Checked before the bot sees anything.
-  const requiredGrant = callback?.requiredGrant ?? form?.requiredGrant ?? AgentGrantRequirement.NONE
+  const requiredGrant = callback?.requiredGrant ?? form?.requiredGrant ?? widget?.requiredGrant ?? AgentGrantRequirement.NONE
   if (requiredGrant !== AgentGrantRequirement.NONE) {
     const access = await resolveAgentAccess(sender, context.currentUserId)
     if (!satisfiesGrantRequirement(access, requiredGrant)) throw RealtimeRpcError.AgentGrantRequired()
   }
 
   const submission = form && input.form ? validateFormSubmission(form, input.form) : undefined
+  let widgetCall: ReturnType<typeof validateWidgetCall> | undefined
+  try {
+    widgetCall = widget && input.widgetCall ? validateWidgetCall(input.widgetCall) : undefined
+  } catch (error) {
+    if (error instanceof MessageWidgetError) throw RealtimeRpcError.BadRequest()
+    throw error
+  }
   const data = callback?.callback.data ?? new Uint8Array()
 
   // The durable copy never holds secret values; only the live delivery does.
@@ -75,6 +87,7 @@ export const invokeMessageAction = async (input: Input, context: FunctionContext
         actionId,
         data,
         form: submission?.stored,
+        widgetCall: widgetCall?.call,
       },
     },
   })
@@ -92,6 +105,7 @@ export const invokeMessageAction = async (input: Input, context: FunctionContext
         actionId,
         data,
         form: submission?.live,
+        widgetCall: widgetCall?.call,
       },
     },
   }
@@ -101,6 +115,7 @@ export const invokeMessageAction = async (input: Input, context: FunctionContext
   BotUpdateProjector.actionInvoked({
     botUserId: sender.id, chat, messageId, actorUserId: context.currentUserId,
     actionId, interactionId: BigInt(userUpdate.seq), data, form: submission?.stored,
+    widgetCall: widgetCall ? { name: widgetCall.call.name, payload: widgetCall.payload } : undefined,
   })
 
   return {

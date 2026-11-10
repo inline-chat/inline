@@ -65,9 +65,14 @@ enum HistoryPageReducer {
   static func save(
     _ messages: [InlineProtocol.Message], db: Database
   ) throws -> [Message] {
-    try messages.map {
+    let saved = try messages.map {
       try Message.save(db, protocolMessage: $0, materializeMissingReferences: true, authoritativeSnapshot: true)
     }
+    let byChat = Dictionary(grouping: zip(saved, messages), by: { $0.0.chatId })
+    for (chatId, pairs) in byChat {
+      try ChatActivityItem.insertFromHistory(db, chatId: chatId, messages: pairs.map(\.1))
+    }
+    return saved
   }
 
   static func admitCoverage(

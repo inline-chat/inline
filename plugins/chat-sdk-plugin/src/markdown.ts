@@ -11,6 +11,8 @@ const destination = (url: string) =>
     .replace(/\(/g, "%28")
     .replace(/\)/g, "%29")
     .replace(/[\r\n]/g, "")
+const attribute = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/[\r\n]+/g, " ")
 function plain(text: BotRichText): string {
   return typeof text === "string" ? text : Array.isArray(text) ? text.map(plain).join("") : plain(text.text)
 }
@@ -116,6 +118,45 @@ export function richBlocksToMarkdown(blocks: BotRichBlock[]): string {
           return block.file?.download_url
             ? `![${richTextToMarkdown(block.alt ?? "")}](${destination(block.file.download_url)})`
             : richTextToMarkdown(block.alt ?? "[Image]")
+        case "widget": {
+          // Rebuilt as the AFM preview a bot sends, so the Markdown round-trips to a widget.
+          const attributes = [
+            `title="${attribute(plain(block.title))}"`,
+            block.widget_id ? `id="${attribute(block.widget_id)}"` : "",
+            block.height ? `height="${block.height}"` : "",
+          ].filter(Boolean).join(" ")
+          return `<iframe ${attributes}>\n${block.html}\n</iframe>`
+        }
+        case "fields":
+          return block.fields
+            .map((field) => `**${richTextToMarkdown(field.label)}**: ${
+              field.is_monospace ? code(plain(field.value)) : richTextToMarkdown(field.value)
+            }`)
+            .join("\n")
+        case "steps":
+          return block.steps
+            .map((step) => `- [${step.status === "done" ? "x" : " "}] ${richTextToMarkdown(step.text)}${
+              step.detail ? ` (${richTextToMarkdown(step.detail)})` : ""
+            }`)
+            .join("\n")
+        case "callout":
+          return [block.title ? `**${richTextToMarkdown(block.title)}**` : "", richBlocksToMarkdown(block.blocks)]
+            .filter(Boolean)
+            .join("\n\n")
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n")
+        case "meter":
+          return `${richTextToMarkdown(block.label)}: ${block.value}/${block.max}${
+            block.meta ? ` (${richTextToMarkdown(block.meta)})` : ""
+          }`
+        case "diff":
+          return `${code(plain(block.path))}${block.diff ? `\n\n${code(plain(block.diff), true, "diff")}` : ""}`
+        case "form":
+          return [
+            block.title ? `**${richTextToMarkdown(block.title)}**` : "",
+            ...block.fields.map((field) => `- ${richTextToMarkdown(field.label)}`),
+          ].filter(Boolean).join("\n")
       }
     })
     .join("\n\n")

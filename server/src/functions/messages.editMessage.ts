@@ -112,6 +112,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
         text: input.text,
         entities: input.entities,
         parseMarkdown: input.parseMarkdown,
+        allowWidgets: context.isBot === true,
       })
   let entities = outgoingText.entities
   if (input.text !== undefined) {

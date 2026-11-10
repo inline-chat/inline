@@ -740,7 +740,7 @@ class MinimalMessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
-      view.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.leadingReplyQuote?.text)
+      view.update(with: embeddedMessage, kind: .replyInMessage)
     }
     return view
   }()
@@ -3079,7 +3079,7 @@ class MinimalMessageViewAppKit: NSView {
     let text = translationText ?? fullMessage.message.text ?? ""
     let entities = translationEntities ?? fullMessage.message.entities
     let richBlockPlan = props.layout.richBlockContent
-    let blockContent = richBlockPlan == nil ? nil : fullMessage.leadingReplyQuote?.body ?? fullMessage.message.blockContent
+    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
 
     let renderCacheStyleKey = "\(richTextStyleKey)|links-v1"
     let attributedString: NSAttributedString
@@ -4177,7 +4177,7 @@ class MinimalMessageViewAppKit: NSView {
     if props.layout.hasReply {
       replyView.setRelatedMessage(fullMessage.message)
       if let embeddedMessage = fullMessage.repliedToMessage {
-        replyView.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.leadingReplyQuote?.text)
+        replyView.update(with: embeddedMessage, kind: .replyInMessage)
       }
     }
     updateReplyThreadSummaryView(for: props)
@@ -4894,6 +4894,23 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
   }
 }
 
+// MARK: - Selection menu
+
+extension MinimalMessageViewAppKit: MessageSelectionMenuProviding {
+  func messageSelectionMenuItems() -> [MessageSelectionMenu.Item] {
+    let regularMessage = message.status != .sending && message.status != .failed
+    guard regularMessage, !isAnchorMessage, let quoted = selectedTextForQuote() else { return [] }
+    return [
+      .init(title: "Quote") { [weak self] in
+        guard let self, !self.isAnchorMessage else { return }
+        ChatsManager
+          .get(for: self.fullMessage.peerId, chatId: self.fullMessage.chatId)
+          .quote(MessageMarkdown.quoteLines(quoted), replyingTo: self.fullMessage.message.messageId)
+      },
+    ]
+  }
+}
+
 // MARK: - NSTextViewDelegate
 
 extension MinimalMessageViewAppKit: NSTextViewDelegate, RichBlockTextMenuProviding {
@@ -4988,11 +5005,11 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
           forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
         }
         menu.addItem(forwardItem)
-        if ExperimentalFeatureFlags.macMessageSelectionEnabled, message.messageId > 0,
+        if message.messageId > 0,
            message.status == nil || message.status == .sent
         {
           let selectItem = NSMenuItem(
-            title: "Select Messages", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
+            title: "Select", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
           )
           selectItem.target = self
           selectItem.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)

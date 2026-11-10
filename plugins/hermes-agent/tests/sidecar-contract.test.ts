@@ -4,6 +4,7 @@ import {
   inboundEventNeedsSenderResolution,
   normalizeInboundEvent,
   normalizeError,
+  normalizeWidgetCall,
   normalizeUploadKind,
   parseInlineId,
   parseUnsigned64Id,
@@ -130,6 +131,13 @@ describe("sidecar contract helpers", () => {
     expect(normalizeError(flood(429))).toEqual({ status: 429, errorKind: "rate_limited", message: "Too many requests" })
     expect(normalizeError(flood(2, 7)).errorKind).toBe("unknown")
     expect(normalizeError(new Error("Too many requests: rate limited, retry after 9 s")).errorKind).toBe("rate_limited")
+    // A refused request keeps the server's reason, even when it reads like "missing".
+    const badRequest = (rpcCode: number, message: string) =>
+      Object.assign(new Error(message), { code: "rpc-error", rpcCode })
+    expect(normalizeError(badRequest(400, "Widget is missing its closing </iframe>"))).toEqual({
+      status: 400, errorKind: "bad_format", message: "Widget is missing its closing </iframe>",
+    })
+    expect(normalizeError(badRequest(1, "A message can have one widget")).errorKind).toBe("bad_format")
     // Never sent: the SDK's plain timeout and a missing connection stay retry-safe.
     expect(normalizeError(Object.assign(new Error("timeout"), { code: "timeout" })).errorKind).toBe("transient")
     expect(normalizeError(new Error("network closed")).outcomeUnknown).toBeUndefined()
@@ -260,6 +268,26 @@ describe("sidecar contract helpers", () => {
       meId: "1600",
       meUsername: "inlinebot",
     })
+  })
+
+  it("forwards a widget call's name and JSON payload as text", () => {
+    const payload = new TextEncoder().encode('{"slot":"10:00"}')
+    const event = normalizeInboundEvent({
+      kind: "message.action.invoke",
+      interactionId: 1n,
+      chatId: 2n,
+      messageId: 3n,
+      actorUserId: 4n,
+      actionId: "revenue",
+      data: new Uint8Array(),
+      widgetCall: { name: "pick", payload },
+      seq: 8,
+      date: 9n,
+    }, "1600") as Record<string, unknown>
+    expect(event.widgetCall).toEqual({ name: "pick", payloadJson: '{"slot":"10:00"}' })
+    expect(event.dataBase64).toBe("")
+    expect(normalizeWidgetCall({ name: "ping", payload: new Uint8Array() })).toEqual({ name: "ping", payloadJson: null })
+    expect(normalizeWidgetCall(undefined)).toBeNull()
   })
 
   it("reads primitive request fields conservatively", () => {

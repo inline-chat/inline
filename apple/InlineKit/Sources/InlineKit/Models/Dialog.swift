@@ -57,6 +57,13 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var translationLegacyImportPending: Bool? = nil
   /// Personal history-collapse boundary; messages at or below this ID stay hidden.
   public var collapsedMaxId: Int64? = nil
+  /// Unseen mentions and replies addressed to the viewer: the server's count minus this
+  /// device's unconfirmed reads. nil means unknown. It can briefly go below zero when this device
+  /// reads a row the server had already read (a stale history flag) until the server's echo
+  /// lands, so a failed request can restore it exactly; display it clamped at zero.
+  public var unreadMentionsCount: Int? = nil
+  /// The viewer's messages with unseen reactions, kept the same way as `unreadMentionsCount`.
+  public var unreadReactionsCount: Int? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id
@@ -82,6 +89,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case translationEnabled
     case followMode
     case collapsedMaxId
+    case unreadMentionsCount
+    case unreadReactionsCount
   }
 
   public enum Columns {
@@ -107,6 +116,8 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let translationEnabled = Column(CodingKeys.translationEnabled)
     public static let followMode = Column(CodingKeys.followMode)
     public static let collapsedMaxId = Column(CodingKeys.collapsedMaxId)
+    public static let unreadMentionsCount = Column(CodingKeys.unreadMentionsCount)
+    public static let unreadReactionsCount = Column(CodingKeys.unreadReactionsCount)
   }
 
   public static let space = belongsTo(Space.self)
@@ -276,6 +287,9 @@ public extension Dialog {
     followMode = from.hasFollowMode ? from.followMode : nil
     translationEnabled = from.hasTranslationEnabled ? from.translationEnabled : nil
     collapsedMaxId = from.hasCollapsedMaxID ? from.collapsedMaxID : nil
+    if let counts = from.activityCounts {
+      setActivityCounts(counts)
+    }
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -402,6 +416,7 @@ public extension ApiDialog {
       dialog.followMode = existing.followMode
       dialog.translationEnabled = existing.translationEnabled
       dialog.translationLegacyImportPending = existing.translationLegacyImportPending
+      dialog.copyActivityCounts(from: existing)
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -457,11 +472,17 @@ public extension InlineProtocol.Dialog {
       if !hasFollowMode {
         newDialog.followMode = existing.followMode
       }
+      if activityCounts == nil || preservingExistingReadState {
+        newDialog.copyActivityCounts(from: existing)
+      }
       if preservingExistingReadState {
         newDialog.unreadCount = existing.unreadCount
         newDialog.readInboxMaxId = existing.readInboxMaxId
         newDialog.readOutboxMaxId = existing.readOutboxMaxId
         newDialog.unreadMark = existing.unreadMark
+      }
+      if let activityCounts, !preservingExistingReadState {
+        try newDialog.applySnapshotActivityCounts(db, activityCounts, existing: existing)
       }
       try newDialog.save(db, onConflict: .replace)
       Dialog.logUnreadDropFromServer(before: existing, after: newDialog)
@@ -469,6 +490,9 @@ public extension InlineProtocol.Dialog {
     } else {
       var newDialog = Dialog(from: self)
       try newDialog.clearMissingOptionalReferences(db)
+      if let activityCounts {
+        try newDialog.applyServerActivityCounts(db, activityCounts)
+      }
       try newDialog.save(db, onConflict: .replace)
       return newDialog
     }
@@ -719,5 +743,57 @@ public extension Dialog {
       // Delete the dialog itself
       try Dialog.filter(Column("id") == self.id).deleteAll(db)
     }
+  }
+}
+
+// MARK: - Activity counts
+
+public extension InlineProtocol.Dialog {
+  /// Unread mention and reaction counts, or nil when the server did not compute them.
+  var activityCounts: ActivityCounts? {
+    guard hasUnreadMentionsCount || hasUnreadReactionsCount else { return nil }
+    return ActivityCounts(mentions: Int(max(0, unreadMentionsCount)), reactions: Int(max(0, unreadReactionsCount)))
+  }
+}
+
+public extension Dialog {
+  func activityCount(_ kind: ChatActivityItem.Kind) -> Int? {
+    kind == .mention ? unreadMentionsCount : unreadReactionsCount
+  }
+
+  mutating func setActivityCount(_ kind: ChatActivityItem.Kind, _ value: Int) {
+    if kind == .mention { unreadMentionsCount = value } else { unreadReactionsCount = value }
+  }
+
+  mutating func setActivityCounts(_ counts: ActivityCounts) {
+    unreadMentionsCount = counts.mentions
+    unreadReactionsCount = counts.reactions
+  }
+
+  /// Stores server counts minus rows this device already read but the server has not
+  /// confirmed yet, and drops local rows of kinds the server reports as empty.
+  mutating func applyServerActivityCounts(_ db: Database, _ counts: ActivityCounts) throws {
+    guard let chatId else {
+      setActivityCounts(counts)
+      return
+    }
+    setActivityCounts(try ChatActivityItem.displayedCounts(db, chatId: chatId, server: counts))
+  }
+
+  /// Counts from a dialog snapshot (getChats, getChat, sync sidecars) are not ordered with the
+  /// activity stream. While this device has reads in flight they could already exclude a row
+  /// that is still pending here, so keep the stream's counts until those reads are confirmed.
+  /// Telegram skips its counter re-sync for a peer with running consume operations the same way.
+  mutating func applySnapshotActivityCounts(_ db: Database, _ counts: ActivityCounts, existing: Dialog) throws {
+    if let chatId, try !ChatActivityItem.pendingCounts(db, chatId: chatId).isEmpty {
+      copyActivityCounts(from: existing)
+      return
+    }
+    try applyServerActivityCounts(db, counts)
+  }
+
+  mutating func copyActivityCounts(from other: Dialog) {
+    unreadMentionsCount = other.unreadMentionsCount
+    unreadReactionsCount = other.unreadReactionsCount
   }
 }

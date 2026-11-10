@@ -602,7 +602,6 @@ class LegacyComposeAppKit: NSView {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
-        removeStaleReplyQuote(replyingTo: replyingToMsgId)
         updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
         updateVoiceAvailability()
         focus()
@@ -611,6 +610,11 @@ class LegacyComposeAppKit: NSView {
     state.quotePublisher
       .sink { [weak self] markdown in
         self?.insertQuote(markdown)
+      }.store(in: &cancellables)
+
+    state.promptPublisher
+      .sink { [weak self] text in
+        self?.insertPrompt(text)
       }.store(in: &cancellables)
 
     state.editingMsgIdPublisher
@@ -1894,6 +1898,7 @@ class LegacyComposeAppKit: NSView {
     else if attachmentItemsSnapshot.isEmpty {
       keepCurrentChatInSidebar()
 
+      mentionedParticipants.promptForLinkedThreadAccess(text: text, entities: entities, peer: destinationPeerId)
       mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
         Task.detached(priority: .userInitiated) { // @MainActor in
           try await Api.realtime.send(
@@ -1928,6 +1933,7 @@ class LegacyComposeAppKit: NSView {
     // With image/file/video
     else {
       keepCurrentChatInSidebar()
+      mentionedParticipants.promptForLinkedThreadAccess(text: text, entities: entities, peer: destinationPeerId)
       mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
         enqueueAttachments(replyToMessageId: replyToMsgId)
       }
@@ -2156,37 +2162,26 @@ class LegacyComposeAppKit: NSView {
     }
   }
 
-  /// The quote lines Quote put at the top and the message they quote, so quoting again or
-  /// dropping the reply can take them back out.
-  private var insertedReplyQuote: (markdown: String, messageId: Int64)?
-
-  /// Puts quote lines first, replacing the last quote, through the normal input path, and
-  /// leaves the cursor at the end so the reply is typed below the quote. One quote per reply,
-  /// like Telegram, so the reply shows it in its header.
+  /// Adds quote lines after anything already typed, each quote its own block, through the
+  /// normal input path, and leaves the cursor at the end so the reply is typed below the quote.
   private func insertQuote(_ markdown: String) {
     let textView = textEditor.textView
-    let insertion = MessageMarkdown.replyQuoteInsertion(
-      markdown,
-      into: textView.string,
-      replacing: insertedReplyQuote?.markdown
-    )
+    let insertion = MessageMarkdown.quoteInsertion(markdown, into: textView.string)
     textView.updateTypingAttributesIfNeeded()
     textView.insertText(insertion.text, replacementRange: insertion.range)
-    insertedReplyQuote = state.replyingToMsgId.map { (markdown, $0) }
     textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     focus()
   }
 
-  /// A reply that moved to another message, or was dropped, takes its inserted quote with it
-  /// while the lines are still untouched at the top.
-  private func removeStaleReplyQuote(replyingTo replyingToMsgId: Int64?) {
-    guard let inserted = insertedReplyQuote, replyingToMsgId != inserted.messageId else { return }
-    insertedReplyQuote = nil
+  /// Adds a widget's prompt after what is already typed and focuses the composer; the user sends it.
+  private func insertPrompt(_ text: String) {
     let textView = textEditor.textView
-    guard let range = MessageMarkdown.replyQuoteRemoval(inserted.markdown, from: textView.string) else { return }
-    let selection = textView.selectedRange()
-    textView.insertText("", replacementRange: range)
-    textView.setSelectedRange(NSRange(location: max(0, selection.location - range.length), length: 0))
+    let current = textView.string as NSString
+    let separator = current.length == 0 || textView.string.last?.isNewline == true ? "" : "\n"
+    textView.updateTypingAttributesIfNeeded()
+    textView.insertText(separator + text, replacementRange: NSRange(location: current.length, length: 0))
+    textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+    focus()
   }
 
   // TODO: Abstract setAttributedString out of this

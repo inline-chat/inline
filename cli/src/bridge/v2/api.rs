@@ -32,6 +32,16 @@ pub(crate) enum Failure {
 }
 
 impl ApiError {
+    /// The server's own reason for an error, unless it is only the generic
+    /// label for its code ("Bad request").
+    pub(crate) fn server_reason(&self) -> Option<&str> {
+        let Self::Request(ClientRequestError::Backend(error)) = self else {
+            return None;
+        };
+        let reason = error.server_message.as_deref()?.trim();
+        (!reason.is_empty() && !reason.eq_ignore_ascii_case("Bad request")).then_some(reason)
+    }
+
     pub(crate) fn failure(&self) -> Failure {
         use inline_client::ClientErrorCategory as Category;
         let Self::Request(ClientRequestError::Backend(error)) = self else {
@@ -342,6 +352,7 @@ pub(crate) async fn search_messages(
             limit: Some(limit),
             offset_id,
             filter: None,
+            count_only: None,
         }
     )?
     .messages)

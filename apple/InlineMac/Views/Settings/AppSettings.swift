@@ -154,6 +154,7 @@ final class AppSettings: ObservableObject {
   static let showGridInSidebarKey = "showGridInSidebar"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
+  static let messageWidgetsEnabledKey = "experimental.messageWidgetsEnabled"
   static let richTextMultiSurfaceSelectionEnabledKey = "experimental.richTextMultiSurfaceSelectionEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
@@ -437,6 +438,13 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  /// Live HTML widgets that bots send in messages. Off until the host is ready.
+  @Published var messageWidgetsEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(messageWidgetsEnabled, forKey: Self.messageWidgetsEnabledKey)
+    }
+  }
+
   @Published var richTextInlineMathEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
@@ -538,6 +546,7 @@ final class AppSettings: ObservableObject {
     richContentRendererEnabled = UserDefaults.standard.object(
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? true
+    messageWidgetsEnabled = UserDefaults.standard.object(forKey: Self.messageWidgetsEnabledKey) as? Bool ?? false
     richTextInlineMathEnabled = UserDefaults.standard.object(
       forKey: Self.richTextInlineMathEnabledKey
     ) as? Bool ?? false

@@ -689,5 +689,143 @@ async def exercise_cron_mentions():
             config_path.write_text(previous_config)
 
 
+async def exercise_exec_approval():
+    # Published adapters before 1.1.0 drew their own card and never reported buttons.
+    if "_send_exec_approval_prompt" not in vars(type(adapter)):
+        return
+    import inspect
+    from gateway.platforms.base import BasePlatformAdapter
+    from tools import approval as approval_mod
+
+    # Hermes' runner sends the card only when the adapter reports native buttons.
+    assert type(adapter).supports_exec_approval_buttons() is True
+    sent = []
+
+    def transport(request):
+        if request.url.path == "/send":
+            sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": str(len(sent))}})
+
+    approver = platform_registry.create_adapter("inline", PlatformConfig(
+        enabled=True, token="offline-test-token", extra={"sync_commands": False, "context_backfill": "off"},
+    ))
+    approver._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    outcomes = []
+
+    async def finish(event, toast, text):
+        outcomes.append(toast)
+
+    async def answer(interaction_id, toast):
+        outcomes.append(f"answer:{toast}")
+
+    approver._finish_action = finish
+    approver._answer_action = answer
+
+    def card_choices(card):
+        return [action["id"].rsplit(":", 1)[1] for row in card["actions"]["rows"] for action in row["actions"]]
+
+    async def tap(card, choice):
+        action_id = next(
+            action["id"] for row in card["actions"]["rows"] for action in row["actions"]
+            if action["id"].endswith(f":{choice}")
+        )
+        native = action_id.split(":", 1)[1] if action_id.startswith("system:") else action_id
+        assert await approver._handle_approval_action({
+            "actionId": native, "chatId": "99", "messageId": "1", "interactionId": "tap", "actorUserId": "42",
+        })
+
+    def queue(command):
+        from tools.approval_gateway_wait import _ApprovalEntry
+        entry = _ApprovalEntry({"command": command, "description": "host check", "pattern_key": "host-check"})
+        # Hermes main creates requests Deny-only; its own send_exec_approval lifts the mark.
+        if "card_deny_only" in getattr(_ApprovalEntry, "__slots__", ()):
+            entry.card_deny_only = True
+        with approval_mod._lock:
+            approval_mod._gateway_queues.setdefault("approval-session", []).append(entry)
+        return entry
+
+    try:
+        if "request_id" not in inspect.signature(BasePlatformAdapter.send_exec_approval).parameters:
+            # Hosts before request-scoped cards: the card renders and a tap reaches Hermes' resolver.
+            await approver.send_exec_approval("99", "echo legacy-host", "approval-session")
+            card = sent[-1]
+            assert "echo legacy-host" in card["text"] and {"once", "deny"} <= set(card_choices(card)), card
+            await tap(card, "once")
+            assert outcomes[-1] == "Approval expired", outcomes
+            return
+
+        entry = queue("echo inline-approval")
+        await approver.send_exec_approval(
+            "99", "echo inline-approval", "approval-session", description="host check",
+            request_id=entry.data["request_id"],
+        )
+        card = sent[-1]
+        assert "echo inline-approval" in card["text"] and {"once", "deny"} <= set(card_choices(card)), card
+        await tap(card, "once")
+        assert entry.result == "once" and outcomes[-1] == "Approved once", (entry.result, outcomes)
+
+        # A card whose request already settled resolves nothing, never the next one queued.
+        queued = queue("echo queued-after")
+        approver._approval_sessions["stale-card"] = "approval-session"
+        approver._approval_request_ids["stale-card"] = entry.data["request_id"]
+        assert await approver._handle_approval_action({
+            "actionId": "appr:stale-card:once", "chatId": "99", "messageId": "1", "interactionId": "stale",
+            "actorUserId": "42",
+        })
+        assert queued.result is None and outcomes[-1] == "Approval expired", (queued.result, outcomes)
+        approval_mod.resolve_gateway_approval("approval-session", "deny", request_id=queued.data["request_id"])
+
+        # Hosts that gate truncated cards send a longer command whole first, and its card can still approve.
+        from gateway.platforms import base_exec_approval
+        if not hasattr(base_exec_approval, "card_shows_whole_command"):
+            return
+        long_command = "echo " + "x" * 2600
+        entry = queue(long_command)
+        sent.clear()
+        await approver.send_exec_approval(
+            "99", long_command, "approval-session", description="host check", request_id=entry.data["request_id"],
+        )
+        card = sent[-1]
+        assert "once" in card_choices(card), card
+        assert any(long_command in body["text"] for body in sent), [len(body["text"]) for body in sent]
+        await tap(card, "once")
+        assert entry.result == "once", (entry.result, outcomes)
+    finally:
+        await approver._http_client.aclose()
+        with approval_mod._lock:
+            approval_mod._gateway_queues.pop("approval-session", None)
+
+
+asyncio.run(exercise_exec_approval())
+
+
+async def exercise_partial_send():
+    # Published adapters before 1.1.0 returned the bare chunk failure.
+    if not hasattr(type(adapter), "_partial_send_failure"):
+        return
+    sent = []
+
+    def transport(request):
+        if request.url.path == "/send":
+            sent.append(json.loads(request.content)["text"])
+            if len(sent) == 2:
+                return httpx.Response(400, json={"ok": False, "error": "widget rejected", "errorKind": "bad_format"})
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": str(len(sent))}})
+
+    sender = platform_registry.create_adapter("inline", PlatformConfig(
+        enabled=True, token="offline-test-token", extra={"sync_commands": False, "context_backfill": "off"},
+    ))
+    sender._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    try:
+        # Hermes' own retry and plain-text fallback: a reply whose second message is refused must
+        # not be sent again, or its delivered first message would appear twice.
+        content = "a" * 3900 + "\n\n" + "b" * 3900
+        result = await sender._send_with_retry("99", content)
+        assert not result.success and len(sent) == 2, (result, [len(text) for text in sent])
+    finally:
+        await sender._http_client.aclose()
+
+
+asyncio.run(exercise_partial_send())
 asyncio.run(exercise_cron_mentions())
-print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply and cron delivery, deduplication and media safety passed (offline transport).")
+print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply, cron delivery and exec approvals, deduplication and media safety passed (offline transport).")

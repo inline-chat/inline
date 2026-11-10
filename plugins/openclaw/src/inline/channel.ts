@@ -86,6 +86,7 @@ import {
   normalizeInlineAllowEntry,
 } from "./shared.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
+import { chunkInlineMarkdownWithWidgets } from "./widgets.js"
 import { inlineSetupAdapter } from "./setup-core.js"
 import { inlineSetupWizard } from "./setup-surface.js"
 import { inlineSecrets } from "./secret-contract.js"
@@ -1282,7 +1283,10 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
     const destination = resolveInlineSessionTarget({ id: targetThreadId ?? targetKey })
     return Boolean(origin && destination === origin)
   },
-  chunker: (text, limit) => getInlineRuntime().channel.text.chunkMarkdownText(text, limit),
+  // Widget blocks stay whole, one per message; Markdown around them chunks as usual.
+  chunker: (text, limit) =>
+    chunkInlineMarkdownWithWidgets(text, limit, (segment, segmentLimit) =>
+      getInlineRuntime().channel.text.chunkMarkdownText(segment, segmentLimit)),
   chunkerMode: "markdown",
   extractMarkdownImages: true,
   textChunkLimit: 4000,
@@ -1847,6 +1851,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline targeting: omit `target` to reply in the current chat.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
       "- Inline discovery: use `channel-list` to discover available chats and users. Use `scope: groups|peers|all` when helpful, and reuse returned `target` values.",
+      "- Inline widgets: `show_widget` posts one Inline widget message in the current chat, so it uses Inline's widget theme (`--foreground`, `--muted-foreground` for secondary text, `--primary` for accents; `--muted` and `--accent` are subtle fills). To keep prose and a widget in one message, put the `<iframe>` widget block in a normal reply. A viewer's `inline.action(name, payload)` arrives as an Inline widget call turn; answer it with a new message.",
       "- Inline markdown links: in visible replies, link returned users as `[@name](inline://user?id=<userId>)` and returned chats/threads as `[title](inline://chat?id=<chatId>)` or `[title](inline://thread?id=<chatId>)`. Use `target` values only for tool calls.",
       ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
         ? [

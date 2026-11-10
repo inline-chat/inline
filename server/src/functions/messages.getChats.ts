@@ -1,3 +1,4 @@
+import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { Chat, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -27,6 +28,7 @@ import {
   type DbFile,
 } from "@in/server/db/schema"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { getActivityCountsForChats } from "@in/server/modules/activityItems"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { getDialogFolders } from "@in/server/modules/dialogFolders"
@@ -657,10 +659,16 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
       tx,
     })
 
+    const activityCounts = await getActivityCountsForChats({
+      userId: currentUserId,
+      chatIds: dialogsList.map((d) => d.chatId),
+      tx,
+    })
+
     // // 8. Encode everything to protocol buffer types
     const encodedDialogs = dialogsList.map((dialog) => {
       const unreadCount = unreadCounts.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
-      return Encoders.dialog(dialog, { unreadCount })
+      return Encoders.dialog(dialog, { unreadCount, unreadActivity: activityCounts.get(dialog.chatId) })
     })
 
     const usersById = new Map<number, DbUser & { photoFile?: DbFile | null }>()
@@ -679,12 +687,17 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
         .filter((dialog) => privateChatIds.has(dialog.chatId))
         .flatMap((dialog) => (dialog.peerUserId === null ? [] : [dialog.peerUserId])),
     )
+    const timeZoneVisible = await resolveTimeZoneVisibility(
+      currentUserId,
+      Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id)),
+    )
     const encodedUsers = Array.from(usersById.values()).map((user) =>
       Encoders.user({
         user,
         photoFile: user.photoFile ?? undefined,
         min: true,
         includeTimeZone: dmPeerUserIds.has(user.id),
+        timeZoneVisible: timeZoneVisible.has(user.id),
         includeBotStatus: dmPeerUserIds.has(user.id),
         viewerUserId: currentUserId,
       }),

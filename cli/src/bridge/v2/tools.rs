@@ -29,19 +29,27 @@ use tokio::sync::oneshot;
 
 use super::api;
 use super::lead::{LeadRequest, SendMode, SpawnTask};
+use super::limits;
 use super::work::Command;
 use crate::bridge::helpers::interaction_random_id;
 use crate::bridge::inline_tools::{
-    HOST_TOOL_EXECUTION_TIMEOUT, MAX_HOST_TOOL_ARGUMENT_BYTES, RETURN_ATTACHMENT_TIMEOUT,
-    ReturnFile, bool_arg, bounded_limit, bounded_tool_result, json_value_result, positive_i64,
-    project_proto_messages, return_local_file, string_arg, valid_tool_call_id,
-    validate_tool_arguments,
+    HOST_TOOL_EXECUTION_TIMEOUT, RETURN_ATTACHMENT_TIMEOUT, ReturnFile, bool_arg, bounded_limit,
+    bounded_tool_result, json_value_result, positive_i64, project_proto_messages,
+    return_local_file, string_arg, valid_tool_call_id, validate_tool_arguments,
 };
 
 /// How long a tool that acts through the work (subthread, status) waits for
 /// the work to answer.
 const WORK_ANSWER_TIMEOUT: Duration = Duration::from_secs(12);
+/// Text for another agent: a task brief or direction to a task.
 const MAX_TEXT_CHARS: usize = 8_000;
+/// Text Inline posts as a message, which may carry a widget's HTML: the
+/// server's own limit, so nothing is cut here.
+const MAX_MESSAGE_UTF16: usize = limits::MAX_TEXT_UTF16;
+/// Room `notify_owner` keeps for the line naming the thread it came from.
+const NOTIFY_HEADER_UTF16: usize = 1_000;
+/// All of one call's arguments: a message at Inline's limit, JSON-escaped.
+const MAX_ARGUMENT_BYTES: usize = 1024 * 1024;
 /// Threads `search_messages` with `all_threads` searches.
 const SEARCH_THREADS: usize = 15;
 /// Starting a task creates its subthread, posts and opens its work. Under
@@ -222,10 +230,14 @@ impl Tools {
         let Some(spec) = specs().into_iter().find(|spec| spec.name == call.tool_name) else {
             return HostToolResult::failure("Unknown Inline tool.");
         };
-        if serde_json::to_vec(&call.arguments).map_or(true, |arguments| {
-            arguments.len() > MAX_HOST_TOOL_ARGUMENT_BYTES
-        }) {
+        if serde_json::to_vec(&call.arguments)
+            .map_or(true, |arguments| arguments.len() > MAX_ARGUMENT_BYTES)
+        {
             return HostToolResult::failure("Inline tool arguments are invalid or too large.");
+        }
+        // Before the schema, so a long text hears its size rather than a mismatch.
+        if let Some(error) = text_over_limit(&call.tool_name, &call.arguments) {
+            return HostToolResult::failure(error);
         }
         if validate_tool_arguments(&call.arguments, &spec.input_schema).is_err() {
             return HostToolResult::failure("Inline tool arguments do not match the tool schema.");
@@ -434,7 +446,7 @@ impl Tools {
             "edit_own_message" => {
                 let (Some(message_id), Some(text)) = (
                     positive_i64(arguments, "message_id"),
-                    string_arg(arguments, "text", MAX_TEXT_CHARS),
+                    string_arg(arguments, "text", MAX_MESSAGE_UTF16),
                 ) else {
                     return HostToolResult::failure("message_id and text are required.");
                 };
@@ -444,7 +456,7 @@ impl Tools {
                     .edit_message(EditMessageRequest {
                         chat_id: InlineId::new(chat),
                         message_id: InlineId::new(message_id),
-                        text,
+                        text: text.clone(),
                         external_id: ExternalId::try_new(
                             "agent-tool",
                             format!("{}-edit", call.call_id),
@@ -455,9 +467,14 @@ impl Tools {
                     .await
                 {
                     Ok(()) => HostToolResult::success("Message edited."),
-                    Err(_) => HostToolResult::failure(
-                        "Inline rejected the edit; only this agent's messages can be changed.",
-                    ),
+                    Err(error) => HostToolResult::failure(match refusal(
+                        &text,
+                        &api::ApiError::from(error),
+                    ) {
+                        Some(hint) => hint,
+                        None => "Inline rejected the edit; only this agent's messages can be changed."
+                            .to_owned(),
+                    }),
                 }
             }
             "create_chat" => self.create_chat(arguments, call).await,
@@ -500,7 +517,7 @@ impl Tools {
             }
             "get_related_threads" => self.related_threads(chat).await,
             "notify_owner" => {
-                let Some(text) = string_arg(arguments, "text", MAX_TEXT_CHARS) else {
+                let Some(text) = string_arg(arguments, "text", MAX_MESSAGE_UTF16) else {
                     return HostToolResult::failure("text is required.");
                 };
                 self.through_lead(|reply| LeadRequest::NotifyOwner {
@@ -758,14 +775,17 @@ impl Tools {
                     json!({"chat_id": chat, "message_id": message_id}).to_string(),
                 )
             }
-            Err(_) => HostToolResult::failure("Inline could not send the message."),
+            Err(error) => HostToolResult::failure(
+                refusal(text, &error)
+                    .unwrap_or_else(|| "Inline could not send the message.".to_owned()),
+            ),
         }
     }
 
     async fn create_chat(&self, arguments: &Value, call: &HostToolCall) -> HostToolResult {
         let (Some(title), Some(initial_message)) = (
             string_arg(arguments, "title", 200),
-            string_arg(arguments, "initial_message", MAX_TEXT_CHARS),
+            string_arg(arguments, "initial_message", MAX_MESSAGE_UTF16),
         ) else {
             return HostToolResult::failure("title and initial_message are required.");
         };
@@ -820,7 +840,7 @@ impl Tools {
         chat: i64,
         call: &HostToolCall,
     ) -> HostToolResult {
-        let Some(text) = string_arg(arguments, "text", MAX_TEXT_CHARS) else {
+        let Some(text) = string_arg(arguments, "text", MAX_MESSAGE_UTF16) else {
             return HostToolResult::failure("text is required.");
         };
         let anchor = match arguments.get("reply_thread") {
@@ -884,7 +904,12 @@ impl Tools {
         .await
         {
             Ok(sent) => sent,
-            Err(_) => return HostToolResult::failure("Inline could not send the message."),
+            Err(error) => {
+                return HostToolResult::failure(
+                    refusal(&text, &error)
+                        .unwrap_or_else(|| "Inline could not send the message.".to_owned()),
+                );
+            }
         };
         self.sent.lock().expect("sent").insert(sent.message_id);
         let mentioned: Vec<i64> = mentioned_user_ids(&text)
@@ -1400,6 +1425,62 @@ fn project_history(page: &HistoryPage) -> Value {
     json!({"messages": messages, "has_more": page.has_more})
 }
 
+/// A tool's long text field and its limit: UTF-16 units for a message Inline
+/// posts, characters for text to another agent (as the schema counts).
+fn text_limit(tool: &str) -> Option<(&'static str, usize, bool)> {
+    match tool {
+        "send_message" | "edit_own_message" => Some(("text", MAX_MESSAGE_UTF16, true)),
+        "create_chat" => Some(("initial_message", MAX_MESSAGE_UTF16, true)),
+        "notify_owner" => Some(("text", MAX_MESSAGE_UTF16 - NOTIFY_HEADER_UTF16, true)),
+        "send_to_thread" => Some(("text", MAX_TEXT_CHARS, false)),
+        "spawn_thread" => Some(("task", MAX_TEXT_CHARS, false)),
+        _ => None,
+    }
+}
+
+/// An explicit error for a text over its tool's limit, never a silent cut.
+fn text_over_limit(tool: &str, arguments: &Value) -> Option<String> {
+    let (key, maximum, utf16) = text_limit(tool)?;
+    let text = arguments.get(key)?.as_str()?;
+    // Within the units, a message is within Inline's byte limit too.
+    let (length, unit) = if utf16 {
+        (text.encode_utf16().count(), "UTF-16 units")
+    } else {
+        (text.chars().count(), "characters")
+    };
+    (length > maximum).then(|| {
+        format!(
+            "{key} is {length} {unit}; the limit is {maximum}. Shorten it or split it across messages."
+        )
+    })
+}
+
+/// Why Inline refused a message: the server's own reason when it gave one
+/// (which widget rule, say), else the widget rules for a message with a
+/// widget. `None` for any other failure.
+fn refusal(text: &str, error: &api::ApiError) -> Option<String> {
+    if error.failure() != api::Failure::Refused {
+        return None;
+    }
+    if let Some(reason) = error.server_reason() {
+        return Some(format!("Inline refused the message: {reason}"));
+    }
+    let widgets = inline_agent_bridge::widget::spans(text);
+    if widgets.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Inline refused the message{}. A widget needs `<iframe title=\"…\" id=\"…\" height=\"…\">` starting its own line \
+and `</iframe>` ending its own line; one per message; id of letters, digits and _.:- (64 at most); height 80-2000; \
+HTML up to 256 KiB with no `vh` units, nested iframe/frame/object/embed or password inputs.",
+        if widgets.len() > 1 {
+            ": it has more than one widget"
+        } else {
+            ""
+        }
+    ))
+}
+
 /// The v2 catalog (spec §4.8). Names served by v1 keep their names.
 pub(crate) fn specs() -> Vec<HostToolSpec> {
     let read = [
@@ -1451,7 +1532,7 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
     let writes = [
         (
             "send_message",
-            "Send a message (default: this work's thread). Markdown; mention with [@Name](inline://user?id=ID), link a thread with [Title](inline://chat?id=ID). To ask a person or agent, start the message with their mention, usually with reply_thread to post in the reply thread on a message (\"current\": the message that started this turn). Mentioned people and agents not in the thread are added when you may. The result reports each mention: added, already_in or cant_add, and wont_respond (no_access, offline) for agents that won't answer. Mentioning an agent wakes it: never start reciprocal agent loops.",
+            "Send a message (default: this work's thread). Markdown; mention with [@Name](inline://user?id=ID), link a thread with [Title](inline://chat?id=ID). To ask a person or agent, start the message with their mention, usually with reply_thread to post in the reply thread on a message (\"current\": the message that started this turn). Mentioned people and agents not in the thread are added when you may. The result reports each mention: added, already_in or cant_add, and wont_respond (no_access, offline) for agents that won't answer. Mentioning an agent wakes it: never start reciprocal agent loops. May hold one widget (see Formatting).",
         ),
         ("add_reaction", "Add a reaction to a message."),
         ("remove_reaction", "Remove your reaction from a message."),
@@ -1522,6 +1603,7 @@ fn input_schema(name: &str) -> Value {
     let limit = json!({"type": "integer", "minimum": 1, "maximum": 100});
     let intent = json!({"type": "boolean", "const": true});
     let text = json!({"type": "string", "minLength": 1, "maxLength": MAX_TEXT_CHARS});
+    let message = |maximum: usize| json!({"type": "string", "minLength": 1, "maxLength": maximum});
     let (properties, required): (Value, &[&str]) = match name {
         "get_current_context" => (json!({}), &[]),
         "get_chat" | "list_pins" => (json!({"chat_id": chat_id}), &[]),
@@ -1560,7 +1642,7 @@ fn input_schema(name: &str) -> Value {
         "send_message" => (
             json!({
                 "chat_id": chat_id,
-                "text": text,
+                "text": message(MAX_MESSAGE_UTF16),
                 "reply_to_message_id": message_id,
                 "reply_thread": {
                     "anyOf": [
@@ -1595,7 +1677,7 @@ fn input_schema(name: &str) -> Value {
             json!({
                 "chat_id": chat_id,
                 "message_id": message_id,
-                "text": text,
+                "text": message(MAX_MESSAGE_UTF16),
                 "confirmed_intent": intent,
             }),
             &["message_id", "text", "confirmed_intent"],
@@ -1603,7 +1685,7 @@ fn input_schema(name: &str) -> Value {
         "create_chat" => (
             json!({
                 "title": {"type": "string", "minLength": 1, "maxLength": 200},
-                "initial_message": text,
+                "initial_message": message(MAX_MESSAGE_UTF16),
                 "space_id": {"type": "integer", "minimum": 1},
                 "description": {"type": "string", "maxLength": 500},
                 "emoji": {"type": "string", "maxLength": 32},
@@ -1645,7 +1727,10 @@ fn input_schema(name: &str) -> Value {
             &[],
         ),
         "get_related_threads" => (json!({"chat_id": chat_id}), &[]),
-        "notify_owner" => (json!({"text": text}), &["text"]),
+        "notify_owner" => (
+            json!({"text": message(MAX_MESSAGE_UTF16 - NOTIFY_HEADER_UTF16)}),
+            &["text"],
+        ),
         "spawn_thread" => (
             json!({
                 "title": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -1708,6 +1793,75 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    #[test]
+    fn a_long_multi_line_widget_message_is_taken_whole() {
+        let html = "<div class=\"card\">row</div>\n".repeat(2_000);
+        let text =
+            format!("Intro\n\n<iframe title=\"Rows\" height=\"400\">\n{html}</iframe>\n\nDone.");
+        assert!(text.encode_utf16().count() > MAX_TEXT_CHARS);
+        let arguments = json!({"text": text, "reply_thread": "current"});
+        assert!(text_over_limit("send_message", &arguments).is_none());
+        assert!(validate_tool_arguments(&arguments, &input_schema("send_message")).is_ok());
+        assert_eq!(
+            string_arg(&arguments, "text", MAX_MESSAGE_UTF16).as_deref(),
+            Some(text.as_str())
+        );
+        let create = json!({"title": "T", "initial_message": text, "confirmed_intent": true});
+        assert!(validate_tool_arguments(&create, &input_schema("create_chat")).is_ok());
+    }
+
+    #[test]
+    fn text_over_its_limit_is_an_explicit_error() {
+        let long = "é".repeat(MAX_MESSAGE_UTF16 + 1);
+        let error = text_over_limit("send_message", &json!({"text": long})).expect("too long");
+        assert!(error.starts_with("text is 100001 UTF-16 units; the limit is 100000."));
+        let notify = "x".repeat(MAX_MESSAGE_UTF16 - NOTIFY_HEADER_UTF16 + 1);
+        assert!(text_over_limit("notify_owner", &json!({"text": notify})).is_some());
+        let brief = "🦀".repeat(MAX_TEXT_CHARS);
+        assert!(text_over_limit("spawn_thread", &json!({"task": brief})).is_none());
+        let brief = "x".repeat(MAX_TEXT_CHARS + 1);
+        assert!(text_over_limit("spawn_thread", &json!({"task": brief})).is_some());
+        assert!(text_over_limit("add_reaction", &json!({"reaction": "x"})).is_none());
+    }
+
+    #[test]
+    fn a_refused_message_hears_the_servers_reason_or_the_widget_rules() {
+        use inline_client::{BackendError, ClientErrorCategory, ClientRequestError};
+        let error = |category, reason: &str| {
+            api::ApiError::Request(ClientRequestError::Backend(
+                BackendError::new(category, "Inline RPC error BAD_REQUEST (status 400)")
+                    .with_server_message(reason),
+            ))
+        };
+        let widget = "<iframe title=\"A\">\nx\n</iframe>";
+        let reason =
+            "Widget HTML has `vh` units; use px or let the content set the height (line 2)";
+        assert_eq!(
+            refusal(widget, &error(ClientErrorCategory::InvalidInput, reason)).as_deref(),
+            Some(format!("Inline refused the message: {reason}").as_str())
+        );
+        // A generic refusal falls back to the rules, for widgets only.
+        let generic = error(ClientErrorCategory::InvalidInput, "Bad request");
+        let hint = refusal(widget, &generic).expect("hint");
+        assert!(hint.contains("one per message") && !hint.contains("more than one"));
+        let two = format!("{widget}\n\n{widget}");
+        assert!(
+            refusal(&two, &generic)
+                .expect("hint")
+                .contains("more than one widget")
+        );
+        assert!(refusal("no widget", &generic).is_none());
+        assert_eq!(
+            refusal(
+                "no widget",
+                &error(ClientErrorCategory::InvalidInput, "Text is too long")
+            )
+            .as_deref(),
+            Some("Inline refused the message: Text is too long")
+        );
+        assert!(refusal(widget, &error(ClientErrorCategory::Network, reason)).is_none());
     }
 
     #[test]

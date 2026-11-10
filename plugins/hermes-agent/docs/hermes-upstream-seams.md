@@ -22,6 +22,7 @@ The cron metadata gap below was rechecked against main `9ffa7dff` on 2026-11-07.
 | `hermes_cli.__version__` | `importlib.metadata.version("hermes-agent")` |
 | `hermes_cli.gateway` env/config helpers | `hermes_cli.config` (`get_env_value`, `save_env_value`, `read_raw_config`, `write_platform_config_field`) |
 | `hermes_cli.setup.print_*` | `hermes_cli.cli_output` |
+| own `send_exec_approval` (bypassed the button probe and newer hosts' Deny-only gate) | `_send_exec_approval_prompt` hook; taps resolve through `resolve_gateway_approval_card` and, where present, `gateway.approval_actor.approval_refusal` |
 
 ## Legacy-host fallbacks (no upstream ask)
 
@@ -78,11 +79,13 @@ Each draft is ready to file on NousResearch/hermes-agent.
 ### 4. Session model and reasoning settings
 
 - Uses: `GatewayRunner._session_key_for_source`, `_session_model_overrides`,
-  `_resolve_session_reasoning_config`, `_handle_model_command`, `_apply_reasoning_selection`;
+  `_resolve_session_reasoning_config`, `_handle_model_command`, `_apply_reasoning_selection`,
+  `_resident_agent_for` (its `context_compressor` token counts, as `/usage` reads them);
   `hermes_cli.model_switch_providers.list_picker_providers`.
 - Why: Inline's agent settings sheet shows and changes the session/default model and
   reasoning effort, like `/model` and `/reasoning`.
-- Without it: the sheet hides the model and reasoning rows; switching reports unavailable.
+- Without it: the sheet hides the model and reasoning rows and the context window;
+  switching reports unavailable.
 
 > **Session settings API for platform adapters.** Native settings UIs need to read and set
 > the current model and reasoning effort for a `SessionSource`: e.g.

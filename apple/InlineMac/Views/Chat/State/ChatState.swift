@@ -15,6 +15,8 @@ enum ScrollToMessageReason: String, Sendable, Codable {
   case media
   case link
   case search
+  /// Jumping to an unseen mention or reply from the @ button.
+  case mention
   case unknown
 }
 
@@ -100,6 +102,8 @@ class ChatState {
   public let sendSilentlyPublisher = PassthroughSubject<Bool, Never>()
   /// Quote lines for the composer to place before what is already typed.
   public let quotePublisher = PassthroughSubject<String, Never>()
+  /// Text for the composer to add after what is already typed, such as a widget's prompt.
+  public let promptPublisher = PassthroughSubject<String, Never>()
 
   struct ForwardContext: Codable {
     var fromPeerId: Peer
@@ -152,6 +156,12 @@ class ChatState {
   public func quote(_ markdown: String, replyingTo id: Int64) {
     setReplyingToMsgId(id)
     quotePublisher.send(markdown)
+  }
+
+  /// Replies to a message with `text` in the composer for the user to review and send.
+  public func prefillPrompt(_ text: String, replyingTo id: Int64) {
+    setReplyingToMsgId(id)
+    promptPublisher.send(text)
   }
 
   public func clearReplyingToMsgId() {

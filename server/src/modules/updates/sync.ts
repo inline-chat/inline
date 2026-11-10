@@ -16,6 +16,7 @@ import { SyncSkippedSequence_Reason } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { getActivityCountsForChats } from "@in/server/modules/activityItems"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
@@ -843,6 +844,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userAgentRuntime":
       case "userAgentSessionControl":
       case "userAgentSettings":
+      case "userUnreadActivity":
       case "reaction":
       case "reactionDeleted":
         inflatedUpdates.push(chatSkipPts(update, chatId))
@@ -1044,9 +1046,16 @@ async function buildChatSidecarsForUpdates(input: ChatSidecarsForUpdatesInput): 
       chatIds: dialogRows.map((dialog) => dialog.chatId),
     })
     const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
+    const activityCounts = await getActivityCountsForChats({
+      userId: input.userId,
+      chatIds: dialogRows.map((dialog) => dialog.chatId),
+    })
 
     for (const dialog of dialogRows) {
-      const encoded = Encoders.dialog(dialog, { unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0 })
+      const encoded = Encoders.dialog(dialog, {
+        unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0,
+        unreadActivity: activityCounts.get(dialog.chatId),
+      })
       dialogMap.set(String(encoded.chatId), encoded)
     }
   }
@@ -1152,6 +1161,10 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
         collectPeerSidecarRefs(update.update.markAsUnread.peerId, peerRefs)
         break
 
+      case "unreadActivity":
+        collectPeerSidecarRefs(update.update.unreadActivity.peerId, peerRefs)
+        break
+
       case "dialogNotificationSettings":
         collectPeerSidecarRefs(update.update.dialogNotificationSettings.peerId, peerRefs)
         break
@@ -1241,9 +1254,16 @@ async function buildUserSidecarsForUpdates(input: UserSidecarsForUpdatesInput): 
       chatIds: dialogRows.map((dialog) => dialog.chatId),
     })
     const unreadCountByChatId = new Map(unreadCounts.map((row) => [row.chatId, row.unreadCount]))
+    const activityCounts = await getActivityCountsForChats({
+      userId: input.userId,
+      chatIds: dialogRows.map((dialog) => dialog.chatId),
+    })
 
     for (const dialog of dialogRows) {
-      const encoded = Encoders.dialog(dialog, { unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0 })
+      const encoded = Encoders.dialog(dialog, {
+        unreadCount: unreadCountByChatId.get(dialog.chatId) ?? 0,
+        unreadActivity: activityCounts.get(dialog.chatId),
+      })
       dialogMap.set(String(encoded.chatId), encoded)
     }
   }
@@ -1850,6 +1870,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userAgentRuntime":
     case "userAgentSessionControl":
     case "userAgentSettings":
+    case "userUnreadActivity":
       return null
     case undefined:
       log.warn("Skipping unknown durable space update", { spaceId: update.entityId, seq: update.seq })
@@ -2161,6 +2182,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
             actionId: payload.userMessageActionInvoked.actionId,
             data: payload.userMessageActionInvoked.data,
             form: payload.userMessageActionInvoked.form,
+            widgetCall: payload.userMessageActionInvoked.widgetCall,
           },
         },
       }
@@ -2211,6 +2233,9 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
       return { seq, date, update: { oneofKind: "agentRuntime", agentRuntime: payload.userAgentRuntime } }
     case "userAgentSettings":
       return { seq, date, update: { oneofKind: "agentSettings", agentSettings: payload.userAgentSettings } }
+
+    case "userUnreadActivity":
+      return { seq, date, update: { oneofKind: "unreadActivity", unreadActivity: payload.userUnreadActivity } }
     case "userAgentSessionControl":
       return {
         seq,

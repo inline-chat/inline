@@ -525,7 +525,7 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
         for surface in nodeSurfaces {
           guard appendSurface(surface, separatorAfter: "\n") else { return nil }
         }
-      case .separator, .image, .album, .quote, .diff:
+      case .separator, .image, .album, .quote, .diff, .widget:
         guard nodeSurfaces.isEmpty else { return nil }
       }
     }

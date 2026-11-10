@@ -15,6 +15,7 @@ import { createInlineFollowCommands } from "./inline/follow-command.js"
 import { createInlineMaintenanceCommands } from "./inline/maintenance-command.js"
 import { createInlineThreadReplyCommand } from "./inline/threadreply-command.js"
 import { createInlineUpdateCommand } from "./inline/update-command.js"
+import { registerInlineWidgetPresenter } from "./inline/widget-presenter.js"
 
 export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   api.registerTool((ctx) => createInlineMembersTool(ctx) as AnyAgentTool, {
@@ -44,6 +45,8 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   api.registerTool((ctx) => createInlineReplyThreadsTool(ctx, api.runtime.config) as AnyAgentTool, {
     names: ["inline_reply_threads"],
   })
+  // OpenClaw's show_widget posts an Inline widget message in the current chat.
+  registerInlineWidgetPresenter(api)
   const registerCommand = (api as { registerCommand?: OpenClawPluginApi["registerCommand"] })
     .registerCommand
   if (typeof registerCommand === "function") {

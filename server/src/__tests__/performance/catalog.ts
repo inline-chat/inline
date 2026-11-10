@@ -9,21 +9,26 @@ export type ScenarioSpec = {
 // These are reviewed upper bounds for complete operations, including tracked
 // detached work and transaction control. They describe current costs, not targets.
 // Fixture or semantic changes require a version bump before comparing timings.
-export const scenarioVersion = 2
+export const scenarioVersion = 3
 
 // Coherent reads submit BEGIN, SET TRANSACTION and COMMIT. Catalog discovery
 // additionally prepares missing dialogs and checks candidate access. History
 // reads its explicit chat once inside the snapshot. Fixed costs do not scale with rows.
 const snapshotCommands = 3
 const catalogAdmissionCommands = 2
+// One indexed lookup for per-dialog counts or per-page unread activity flags.
+const unreadActivityCommands = 1
+// DM writes check whether the sender is a bot before retry recovery, enforcing
+// the same bot contact policy on retries as on first sends.
+const dmSenderIdentityCommands = 1
 export const scenarios: readonly ScenarioSpec[] = [
   { id: "send.dm.open", kind: "sendDm", size: 1, maxCommands: 25 },
   { id: "send.dm.closed", kind: "sendDm", size: 1, variant: "closed", maxCommands: 42 },
-  { id: "send.dm.retry", kind: "sendDm", size: 1, variant: "retry", maxCommands: 7 },
+  { id: "send.dm.retry", kind: "sendDm", size: 1, variant: "retry", maxCommands: 7 + dmSenderIdentityCommands },
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.public.${size}`, kind: "sendThread", size, maxCommands: 32 })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.reply.${size}`, kind: "sendThread", size, variant: "reply", maxCommands: 66 + 7 * size })),
-  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `getChats.${size}`, kind: "getChats", size, maxCommands: 11 + snapshotCommands + catalogAdmissionCommands })),
-  { id: "history.50", kind: "history", size: 50, maxCommands: 7 + snapshotCommands },
+  ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `getChats.${size}`, kind: "getChats", size, maxCommands: 11 + snapshotCommands + catalogAdmissionCommands + unreadActivityCommands })),
+  { id: "history.50", kind: "history", size: 50, maxCommands: 7 + snapshotCommands + unreadActivityCommands },
   { id: "updates.replay.empty", kind: "replay", size: 0, variant: "empty", maxCommands: 7 },
   { id: "updates.replay.message", kind: "replay", size: 1, maxCommands: 23 },
   // New IDs preserve the existing fixture version and prior scenario meanings.

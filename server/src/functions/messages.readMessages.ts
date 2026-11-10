@@ -20,10 +20,13 @@ import {
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { readActivity } from "@in/server/modules/activityItems"
 
 type Input = {
   peer: InputPeer
   maxId?: number
+  // Explicit "Mark as Read" also clears unread mentions, replies and reactions.
+  readActivity?: boolean
 }
 
 type Output = {
@@ -209,6 +212,13 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
       unreadCount,
     }
   })
+
+  // Independent of the read cursor: a chat can be fully read and still hold unseen mentions.
+  // Activity changes reach every session through the ordered user stream, not this result.
+  if (input.readActivity) {
+    // Bounded like the read cursor, so activity arriving after the request stays unread.
+    await readActivity({ userId: context.currentUserId, chat, allMentions: true, allReactions: true, maxId })
+  }
 
   if (!mutation.updated) {
     return { updates: [] }

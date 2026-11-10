@@ -15,8 +15,6 @@ struct ExperimentalSettingsDetailView: View {
 
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
-  @AppStorage(ExperimentalFeatureFlags.macMessageSelectionKey)
-  private var messageSelectionEnabled = false
   @AppStorage(ExperimentalFeatureFlags.quickForwardKey)
   private var quickForwardEnabled = false
   @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
@@ -64,6 +62,13 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.inlineMathAttachments)
+      Toggle(isOn: $settings.messageWidgetsEnabled) {
+        SettingsRowLabel(
+          .messageWidgets,
+          description: "Show charts, mockups and other HTML that agents send as live widgets in messages, sandboxed with no network access."
+        )
+      }
+      .settingsSearchAnchor(.messageWidgets)
       Toggle(isOn: $settings.richTextMultiSurfaceSelectionEnabled) {
         SettingsRowLabel(
           .richMessageMultiBlockSelection,
@@ -85,13 +90,6 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.richCopyMarkdownEditing)
-      Toggle(isOn: $messageSelectionEnabled) {
-        SettingsRowLabel(
-          .selectMultipleMessages,
-          description: "Select messages to forward or delete together. Right-click a message and choose Select Messages."
-        )
-      }
-      .settingsSearchAnchor(.selectMultipleMessages)
       Toggle(isOn: $quickForwardEnabled) {
         SettingsRowLabel(
           .quickForward,

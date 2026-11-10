@@ -24,6 +24,8 @@ struct ChatListDatabaseRow {
     case parentPeerPhoneNumber
     case unreadCount
     case unreadMark
+    case unreadMentionsCount
+    case unreadReactionsCount
     case isArchived
     case isPinned
     case isOpen

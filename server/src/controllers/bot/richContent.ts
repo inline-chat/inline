@@ -526,6 +526,23 @@ const encodeBlocks = (input: {
           is_rtl: trueOrUndefined(table.isRtl),
         }]
       }
+      case "widget": {
+        const widget = block.kind.widget
+        return [{
+          type: "widget",
+          widget_id: widget.widgetId,
+          title: richText(widget.title),
+          html: widget.html,
+          height: widget.height,
+          images: widget.images.length > 0
+            ? widget.images.map((value) => ({
+                file: value.state.oneofKind === "ready" ? photoFile(value.state.ready) : undefined,
+                ...imageDimensions(value),
+              }))
+            : undefined,
+          required_grant: botGrantRequirement(widget.requiredGrant),
+        }]
+      }
       case undefined:
         return []
     }

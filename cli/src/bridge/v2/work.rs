@@ -3151,8 +3151,11 @@ impl Actor {
                         .as_ref()
                         .or(self.rendering_turn.as_ref())
                         .map(|turn| format!("{turn}:{}", text_digest(&doc.text)));
-                    // An answer over Inline's limit goes out in parts.
-                    let parts = if limits::Size::of(&doc).fits() {
+                    // An answer over Inline's limit, or with more than one
+                    // widget, goes out in parts.
+                    let parts = if limits::Size::of(&doc).fits()
+                        && inline_agent_bridge::widget::spans(&doc.text).len() <= 1
+                    {
                         vec![doc]
                     } else {
                         split_markdown(&doc.text, limits::MAX_TEXT_UTF16 * 4 / 5)
@@ -3733,22 +3736,52 @@ fn limit_notice(agent_name: &str, resets_at: Option<i64>, now: i64) -> String {
 }
 
 /// Markdown cut into parts of at most `max_utf16` units at line ends, closing
-/// and reopening a code fence a cut falls inside.
+/// and reopening a code fence a cut falls inside. A widget is never cut and
+/// each part holds at most one, since Inline refuses a message with two.
 fn split_markdown(text: &str, max_utf16: usize) -> Vec<String> {
+    use inline_agent_bridge::widget::{self, Fence};
+    let units = |text: &str| text.encode_utf16().count();
+    let mut widgets = widget::spans(text).into_iter().peekable();
     let mut parts = Vec::new();
     let mut part = String::new();
-    let mut fence: Option<String> = None;
-    for line in text.split_inclusive('\n') {
-        let units = |text: &str| text.encode_utf16().count();
-        if !part.is_empty() && units(&part) + units(line) + 4 > max_utf16 {
-            if fence.is_some() {
-                part.push_str("\n```");
+    let mut part_has_widget = false;
+    // The open fence and its opening line, to reopen it in the next part.
+    let mut fence: Option<(Fence, String)> = None;
+    let mut offset = 0;
+    while offset < text.len() {
+        // A widget outside fences, whole, or else one line.
+        let is_widget = widgets.peek().is_some_and(|span| span.start == offset);
+        let end = match widgets.peek() {
+            Some(span) if is_widget => span.end,
+            _ => text[offset..]
+                .find('\n')
+                .map_or(text.len(), |index| offset + index + 1),
+        };
+        if is_widget {
+            widgets.next();
+        }
+        let line = &text[offset..end];
+        offset = end;
+        if !part.is_empty()
+            && (units(&part) + units(line) + 4 > max_utf16 || is_widget && part_has_widget)
+        {
+            if let Some((open, _)) = &fence {
+                part.push('\n');
+                part.push_str(&open.closer());
             }
             parts.push(std::mem::take(&mut part));
-            if let Some(open) = &fence {
-                part.push_str(open);
+            part_has_widget = false;
+            if let Some((_, opening)) = &fence {
+                part.push_str(opening);
                 part.push('\n');
             }
+        }
+        if is_widget {
+            // Over a part's size it still goes whole: Inline may take it, or
+            // its plain fallback shows the title.
+            part.push_str(line);
+            part_has_widget = true;
+            continue;
         }
         // A line longer than a whole part is cut by characters.
         let mut rest = line;
@@ -3764,13 +3797,12 @@ fn split_markdown(text: &str, max_utf16: usize) -> Vec<String> {
             parts.push(rest[..cut].to_owned());
             rest = &rest[cut..];
         }
-        let trimmed = rest.trim_start();
-        if trimmed.starts_with("```") {
-            fence = match fence {
-                Some(_) => None,
-                None => Some(trimmed.trim_end().to_owned()),
-            };
-        }
+        let content = rest.trim_end_matches(['\n', '\r']);
+        fence = match fence {
+            Some((open, _)) if open.closed_by(content) => None,
+            Some(open) => Some(open),
+            None => Fence::opening(content).map(|open| (open, content.to_owned())),
+        };
         part.push_str(rest);
     }
     if !part.trim().is_empty() {
@@ -3779,18 +3811,19 @@ fn split_markdown(text: &str, max_utf16: usize) -> Vec<String> {
     parts
 }
 
-/// The plain text of a message Inline refused, within its limits.
+/// The plain text of a message Inline refused, within its limits. A widget
+/// shows only its title, never its HTML.
 fn plain_fallback(doc: &Doc) -> Doc {
     let max = limits::MAX_TEXT_UTF16 * 4 / 5;
-    let mut text: String = doc
-        .text
+    let source = inline_agent_bridge::widget::replace_with_titles(&doc.text);
+    let mut text: String = source
         .chars()
         .scan(0, |count, character| {
             *count += character.len_utf16();
             (*count <= max).then_some(character)
         })
         .collect();
-    if text.len() < doc.text.len() {
+    if text.len() < source.len() {
         text.push_str("\n\n(Cut: the rest was longer than Inline allows.)");
     }
     Doc {
@@ -4076,6 +4109,64 @@ mod tests {
             parts[1].starts_with("```rust\n"),
             "the next part reopens the fence"
         );
+    }
+
+    #[test]
+    fn a_split_never_cuts_a_widget_and_gives_each_part_one() {
+        let widget = |title: &str| {
+            format!(
+                "<iframe title=\"{title}\" height=\"300\">\n{}</iframe>\n",
+                "<div>row</div>\n".repeat(300)
+            )
+        };
+        let text = format!(
+            "{}\n{}\nBetween.\n\n{}\n```\n<iframe title=\"code\">\n```\nDone.",
+            "Intro line.\n".repeat(200),
+            widget("One"),
+            widget("Two")
+        );
+        // Small parts, so a cut would land inside the first widget.
+        let parts = split_markdown(&text, 4_000);
+        assert_eq!(parts.concat(), text);
+        for part in &parts {
+            let spans = inline_agent_bridge::widget::spans(part);
+            assert!(spans.len() <= 1, "{part}");
+            assert!(spans.iter().all(|span| span.closed));
+        }
+        let with_widget = |title: &str| {
+            parts
+                .iter()
+                .filter(|part| part.contains(&format!("title=\"{title}\"")))
+                .count()
+        };
+        assert_eq!((with_widget("One"), with_widget("Two")), (1, 1));
+        // Two widgets in a short answer still go out as two messages.
+        let short = format!("A\n\n{}\nB\n\n{}\nC", widget("One"), widget("Two"));
+        let parts = split_markdown(&short, 80_000);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[1].starts_with("<iframe title=\"Two\""));
+    }
+
+    #[test]
+    fn a_tilde_fence_cut_reopens_and_closes_with_its_own_marker() {
+        let mut text = String::from("~~~~text\n");
+        for line in 0..500 {
+            text.push_str(&format!("line {line}\n"));
+        }
+        text.push_str("~~~~\n");
+        let parts = split_markdown(&text, 2_000);
+        assert!(parts.len() > 1);
+        assert!(parts[0].trim_end().ends_with("~~~~"));
+        assert!(parts[1].starts_with("~~~~text\n"));
+    }
+
+    #[test]
+    fn the_plain_fallback_shows_a_widget_by_its_title() {
+        let doc = Doc::markdown(
+            "Summary\n\n<iframe title=\"Q3 revenue\" height=\"420\">\n<div>chart</div>\n</iframe>\n\nAfter.",
+        );
+        let plain = plain_fallback(&doc);
+        assert_eq!(plain.text, "Summary\n\n[Widget: Q3 revenue]\n\nAfter.");
     }
 
     #[test]

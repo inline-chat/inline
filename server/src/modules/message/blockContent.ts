@@ -27,6 +27,7 @@ import { parseMarkdownWithSourceMap, type ParsedMarkdownWithSourceMap } from "./
 import { linkLabelEnd } from "../translation2/entities/linkSyntax"
 import type { MarkdownReference } from "./markdownDocument"
 import { messageFormLimits, validateFormDefinition } from "./messageForms"
+import { messageWidgetLimits, validateWidgetDefinition } from "./messageWidgets"
 
 const disclosureActivityKinds: Record<string, BlockDisclosure_ActivityKind> = {
   reasoning: BlockDisclosure_ActivityKind.REASONING,
@@ -775,6 +776,8 @@ export function validateBlockContent(
   let imageCount = 0
   let tableCellCount = 0
   let formCount = 0
+  let widgetCount = 0
+  // Forms and widgets are both invoked by ID, so they share one namespace.
   const formIds = new Set<string>()
 
   const validateText = (range: BlockText | undefined): void => {
@@ -957,6 +960,13 @@ export function validateBlockContent(
           if (formIds.has(block.kind.form.formId)) throw new Error("Duplicate form id")
           formIds.add(block.kind.form.formId)
           validateFormDefinition(block.kind.form, validateText)
+          break
+        case "widget":
+          widgetCount += 1
+          if (widgetCount > messageWidgetLimits.maxPerMessage) throw new Error("Too many widgets")
+          if (formIds.has(block.kind.widget.widgetId)) throw new Error("Duplicate widget id")
+          formIds.add(block.kind.widget.widgetId)
+          validateWidgetDefinition(block.kind.widget, validateText, validateImage)
           break
         case "quote":
           if (block.kind.quote.children.length === 0) throw new Error("Empty block quote")

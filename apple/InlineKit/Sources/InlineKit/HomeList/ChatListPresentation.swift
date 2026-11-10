@@ -98,7 +98,7 @@ public struct ChatListPresentation: Equatable, Sendable {
       .filter(\.isInboxMember)
       .sorted { inboxOrdered($0, before: $1, sort: inboxSort) }
     let timeline = visible
-      .filter { allChatsFilter == .all || $0.isUnread }
+      .filter { allChatsFilter == .all || $0.matchesUnreadFilter }
       .sorted { timelineOrdered($0, before: $1, sort: .lastUpdated) }
     let allChatsPinned = timeline
       .filter(\.isPinned)

@@ -117,7 +117,10 @@ struct DownloadTelemetryTests {
     ] {
       #expect(PerformanceTrace.isAllowedEnumValue(kind, for: "fallback_kind"))
     }
-    #expect(PerformanceTrace.isAllowedEnumValue("expired", for: "delivery_end"))
+    for end in ["expired", "superseded", "published", "redacted"] {
+      #expect(PerformanceTrace.isAllowedEnumValue(end, for: "delivery_end"))
+    }
+    #expect(PerformanceTrace.isAllowedEnumValue("received", for: "delivery_stage"))
   }
 
   @Test("extension outbox counts distinct outcomes and drains once")

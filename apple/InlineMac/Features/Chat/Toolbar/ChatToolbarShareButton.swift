@@ -363,6 +363,6 @@ private struct ChatToolbarShareState: Equatable {
     )
 
     canToggleVisibility = chat.spaceId != nil && canManage
-    canAddParticipants = !isPublic && canManage
+    canAddParticipants = ChatParticipantPolicy.canAdd(chat: chat)
   }
 }

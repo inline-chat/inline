@@ -1065,7 +1065,9 @@ fn bounded_visible_output(value: &str) -> String {
     }
     let content_limit = MAX_VISIBLE_OUTPUT_BYTES.saturating_sub(OMITTED_OUTPUT_MARKER.len());
     let boundary = previous_char_boundary(value, content_limit);
-    format!("{}{}", &value[..boundary], OMITTED_OUTPUT_MARKER)
+    // A widget cut before its `</iframe>` would make Inline refuse the answer.
+    let kept = crate::widget::hold_back(&value[..boundary]);
+    format!("{}{}", kept.trim_end(), OMITTED_OUTPUT_MARKER)
 }
 
 fn previous_char_boundary(value: &str, maximum: usize) -> usize {
@@ -1540,6 +1542,20 @@ mod tests {
                 .is_char_boundary(presenter.content().len())
         );
         assert!(presenter.content().ends_with(OMITTED_OUTPUT_MARKER));
+    }
+
+    #[test]
+    fn a_widget_cut_by_the_bound_is_dropped_whole() {
+        let mut presenter = StreamingPresenter::new(0, 0);
+        let html = "<p>row</p>\n".repeat(MAX_VISIBLE_OUTPUT_BYTES / 10);
+        presenter.replace_snapshot(
+            1,
+            format!("Summary.\n\n<iframe title=\"Chart\">\n{html}</iframe>\n\nAfter."),
+        );
+        assert_eq!(
+            presenter.content(),
+            format!("Summary.{OMITTED_OUTPUT_MARKER}")
+        );
     }
 
     #[test]

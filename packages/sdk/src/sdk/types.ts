@@ -9,6 +9,7 @@ import type {
   MessageActionResponseUi,
   MessageActions,
   MessageEntities,
+  MessageFormSubmission,
   Peer,
   Reaction,
   RpcCall,
@@ -358,6 +359,13 @@ export type InlineInboundEvent =
       actorUserId: InlineId
       actionId: string
       data: Uint8Array
+      /** A submitted form block; `actionId` is its form ID. */
+      form?: MessageFormSubmission
+      /**
+       * A call from a widget's `inline.action(name, payload)`; `actionId` is its widget ID.
+       * `payload` is UTF-8 JSON (empty for none) supplied by the viewer's client: treat it as untrusted.
+       */
+      widgetCall?: { name: string; payload: Uint8Array }
       seq: number
       date: InlineUnixSeconds
     }

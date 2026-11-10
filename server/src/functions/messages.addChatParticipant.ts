@@ -29,7 +29,7 @@ import {
   type PreparedChatPermissionUpdate,
 } from "@in/server/modules/authorization/chatPermissionUpdates"
 import {
-  ensureCanManageChatParticipants,
+  ensureCanAddChatParticipants,
   ensureUserCanParticipateInChat,
 } from "@in/server/modules/authorization/spaceThreadGuards"
 import {
@@ -98,7 +98,7 @@ export async function addChatParticipant(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
       }
 
-      await ensureCanManageChatParticipants(chat, context.currentUserId)
+      await ensureCanAddChatParticipants(chat, context.currentUserId, tx)
       await ensureUserCanParticipateInChat(chat, userId)
       await ensureActorCanReach(context.currentUserId, userId, "add_participant")
 
@@ -280,7 +280,7 @@ async function addChatParticipantGroup(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
       }
 
-      await ensureCanManageChatParticipants(chat, context.currentUserId)
+      await ensureCanAddChatParticipants(chat, context.currentUserId, tx)
       await ensureGroupCanParticipateInChat(chat, input.groupId)
 
       const [existing] = await tx

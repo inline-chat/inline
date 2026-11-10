@@ -5,11 +5,15 @@ import { decodeDialogNotificationSettings } from "@in/server/modules/notificatio
 import { encodedDialogOpen } from "@in/server/modules/dialogOpen"
 import { encodeDialogFollowMode } from "@in/server/modules/dialogFollow"
 import { Log } from "@in/server/utils/log"
+import type { ActivityCounts } from "@in/server/modules/activityItems"
 
 const log = new Log("encodeDialog")
 
 // New encoders for Member and MinUser
-export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: number }): Dialog {
+export function encodeDialog(
+  dialog: DbDialog,
+  { unreadCount, unreadActivity }: { unreadCount: number; unreadActivity?: ActivityCounts },
+): Dialog {
   let peer: Peer
 
   if (dialog.peerUserId) {
@@ -44,6 +48,8 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
     unreadCount: unreadCount,
     readMaxId: dialog.readInboxMaxId ? BigInt(dialog.readInboxMaxId) : undefined,
     unreadMark: dialog.unreadMark ?? undefined,
+    unreadMentionsCount: unreadActivity?.mentions,
+    unreadReactionsCount: unreadActivity?.reactions,
     notificationSettings: decodeDialogNotificationSettings(dialog.notificationSettings),
     open: encodedDialogOpen(dialog),
     openedDate: encodeDate(dialog.openedDate ?? undefined),

@@ -55,6 +55,7 @@
 		CD0240C42EA439D400976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C32EA439D400976FDE /* Invite */; };
 		CD0240C62EA439DA00976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C52EA439DA00976FDE /* Invite */; };
 		CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */; };
+		AB1E0B0A2FB0000100000002 /* InlineWebWidget in Frameworks */ = {isa = PBXBuildFile; productRef = AB1E0B0A2FB0000100000001 /* InlineWebWidget */; };
 		CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4E2EDC6F4A00E867E5 /* MacTheme */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
@@ -141,6 +142,7 @@
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
 		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD092C4B2EDC6D8200E867E5 /* InlineMacUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacUI; sourceTree = "<group>"; };
+		AB1E0B0A2FB0000100000003 /* InlineWebWidget */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineWebWidget; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline Debug.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Inline Debug.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineNotificationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
@@ -331,6 +333,7 @@
 				A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */,
 				F17C11012F9A000100000001 /* InlineCLIInstaller in Frameworks */,
 				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
+				AB1E0B0A2FB0000100000002 /* InlineWebWidget in Frameworks */,
 				E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */,
 				CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */,
 				CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */,
@@ -388,6 +391,7 @@
 				A55C00052FA0003000000001 /* InlineMacScripting */,
 				A55C00042FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef */,
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
+				AB1E0B0A2FB0000100000003 /* InlineWebWidget */,
 				E5A100012FA0000100000001 /* InlineSyntaxHighlighting */,
 				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
 				F1A0B1C42F10432100A1B2C3 /* InlineMessageLayout */,
@@ -576,6 +580,7 @@
 				A55C00022FA0003000000001 /* InlineMacScripting */,
 				F17C11002F9A000100000000 /* InlineCLIInstaller */,
 				CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */,
+				AB1E0B0A2FB0000100000001 /* InlineWebWidget */,
 				7BABF642C785B35DB0C34BF2 /* InlineMacWindow */,
 				D4ACD0022F1B000000000001 /* MacDevtools */,
 				CD092C4E2EDC6F4A00E867E5 /* MacTheme */,
@@ -2250,6 +2255,10 @@
 		CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMacUI;
+		};
+		AB1E0B0A2FB0000100000001 /* InlineWebWidget */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineWebWidget;
 		};
 		CD092C4E2EDC6F4A00E867E5 /* MacTheme */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -202,7 +202,9 @@ public enum PerformanceTrace {
     ],
     "placeholder_reason": ["no_device_key", "encryption_failed", "too_large", "unknown"],
     "withheld_reason": ["missingRecipient", "missingFence", "fenceUnavailable", "signedOut", "otherAccount"],
-    "delivery_end": ["expired"],
+    // `superseded`, `expired` and `published`/`redacted` can all follow one received request.
+    "delivery_stage": ["received"],
+    "delivery_end": ["expired", "superseded", "published", "redacted"],
     "registration_outcome": ["key_unavailable"],
   ]
   private static let connectionReasonValues: Set<String> = [

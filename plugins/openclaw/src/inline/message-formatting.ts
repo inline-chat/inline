@@ -1,6 +1,12 @@
+import { mapInlineTextOutsideWidgets } from "./widgets.js"
+
 const INLINE_FORMATTING_RULES = [
   "Use Inline's supported Markdown: emphasis, inline or fenced code, links, headings, lists or checklists, quotes, tables, separators, and HTTP(S) images.",
-  "Do not rely on strikethrough, footnotes, or arbitrary HTML; unrecognized or ambiguous incomplete syntax remains visible text.",
+  "Do not rely on strikethrough, footnotes, or arbitrary HTML (the one exception is a widget block); unrecognized or ambiguous incomplete syntax remains visible text.",
+  'Widgets (sandboxed HTML in a message): only when Markdown or tables cannot show it, such as charts, diagrams, mockups, comparison grids, or small pickers; keep prose outside. Use the show_widget tool when available; otherwise write one block per message, with blank lines around it: a line <iframe title="Title" id="short-id" height="420">, the HTML, then a line </iframe>. Never put </iframe> inside the HTML.',
+  "Widget sandbox: no network (no fetch, XHR, WebSocket, or remote images); inline scripts plus cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, esm.sh; images as data: URIs. Avoid vh, position: fixed, and nested frames; stay responsive at 320-640px; set height to the content height at about 640px.",
+  "Widget theme: --background --foreground --muted (fill) --muted-foreground --card --border --primary --primary-foreground --accent (tint) --success --warning --destructive --radius --font-sans --font-mono; classes .card .grid .row .badge .btn .btn-primary .btn-ghost .table .muted .small.",
+  "Widget bridge, on the viewer's click: inline.copy(text); inline.sendPrompt(text) prefills the viewer's reply (sends directly in a 1:1 DM with you); inline.action(name, payload) reaches you as a widget call; inline.openLink(url); inline.setState(obj) and inline.state.",
   "Use ordinary Markdown tables for genuinely tabular data; never put a table in a fenced code block.",
   'For collapsible work, use <details open> followed by <summary>Title</summary>, body Markdown, and </details>; add kind="progress" to summary only while work is in progress.',
   "Use <footer>Attribution or brief metadata</footer> for a short message footer.",
@@ -107,7 +113,9 @@ export function buildInlineThreadTitleMarkdownLink(params: {
 }
 
 export function sanitizeInlineOutgoingText(text: string): string {
-  return adaptInlineVisibleCopy(text).replace(/`([^`\n]+)`/g, (full, content: string) => {
-    return isBareHttpUrl(content) ? content : full
-  })
+  // Widget HTML is literal: a JS template literal holding a URL must keep its backticks.
+  return mapInlineTextOutsideWidgets(text, (segment) =>
+    adaptInlineVisibleCopy(segment).replace(/`([^`\n]+)`/g, (full, content: string) => {
+      return isBareHttpUrl(content) ? content : full
+    }))
 }

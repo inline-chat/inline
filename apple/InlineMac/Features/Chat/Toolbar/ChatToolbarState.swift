@@ -33,6 +33,7 @@ final class ChatToolbarState {
     case participantsPopover(Anchor)
     case addParticipants(Anchor)
     case mentionParticipantPrompt(Anchor, [MentionCompletionItem])
+    case linkAccessPrompt(Anchor)
     case botSettings(Anchor)
 
     var anchor: Anchor {
@@ -44,6 +45,7 @@ final class ChatToolbarState {
            let .participantsPopover(anchor),
            let .addParticipants(anchor),
            let .mentionParticipantPrompt(anchor, _),
+           let .linkAccessPrompt(anchor),
            let .botSettings(anchor):
         anchor
       }
@@ -56,6 +58,7 @@ final class ChatToolbarState {
            .translationPrompt,
            .participantsPopover,
            .mentionParticipantPrompt,
+           .linkAccessPrompt,
            .botSettings:
         true
       case .translationOptions,
@@ -67,6 +70,11 @@ final class ChatToolbarState {
 
   private(set) var visibleButtons: Set<ToolbarButton> = []
   var presentation: Presentation?
+  /// The thread whose access the link prompt offers to extend.
+  private(set) var linkAccessGap: LinkedThreadAccessGap?
+  /// Set by the chat view while its content can't be shown, so the toolbar can
+  /// drop actions that need a readable chat.
+  var isContentUnavailable = false
 
   func handleAppear(_ button: ToolbarButton) {
     visibleButtons.insert(button)
@@ -121,6 +129,19 @@ final class ChatToolbarState {
   func presentMentionParticipantPrompt(items: [MentionCompletionItem], from anchor: Anchor? = nil) {
     guard !items.isEmpty else { return }
     presentation = .mentionParticipantPrompt(anchor ?? self.anchor(for: .participants), items)
+  }
+
+  /// Offers to add people who can't open a thread linked in a just-sent message.
+  /// Anchored on the title, which in a DM is the person the link went to.
+  func presentLinkAccessPrompt(_ gap: LinkedThreadAccessGap) {
+    guard !isContentUnavailable else { return }
+    linkAccessGap = gap
+    presentation = .linkAccessPrompt(.title)
+  }
+
+  func linkAccessPromptGap(for anchor: Anchor) -> LinkedThreadAccessGap? {
+    guard presentation == .linkAccessPrompt(anchor) else { return nil }
+    return linkAccessGap
   }
 
   func mentionParticipantPromptItems(for anchor: Anchor) -> [MentionCompletionItem]? {

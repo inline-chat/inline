@@ -288,6 +288,13 @@ message Dialog {
   optional int64 folder_id = 18;
   // Personal translation preference, shared by all sessions of this account.
   optional bool translation_enabled = 19;
+  // Unseen messages addressed to the viewer: mentions of them (directly or
+  // through a group) and replies to their messages. Absent when the server did
+  // not compute it; clients keep their previous value.
+  optional int32 unread_mentions_count = 20;
+  // The viewer's messages with reactions they haven't seen. Absent when the
+  // server did not compute it; clients keep their previous value.
+  optional int32 unread_reactions_count = 21;
 }
 
 message DialogFolder {
@@ -598,6 +605,8 @@ message Block {
     BlockCallout callout = 16;
     BlockMeter meter = 17;
     BlockForm form = 18;
+    // Bot only. Sandboxed HTML; at most one per message.
+    BlockWidget widget = 19;
   }
 }
 
@@ -915,6 +924,37 @@ message MessageFormSelection {
   optional string other_text = 2;
 }
 
+// A bot's HTML widget, rendered in a sandbox with no network access. The title
+// range is the fallback older clients, notifications and search use. Clients
+// that can't render widgets show the flat text.
+message BlockWidget {
+  // Bot-chosen identity, unique among the message's action and form IDs, and
+  // stable across edits: per-viewer widget state is keyed by it. Same
+  // character set as MessageAction.action_id.
+  string widget_id = 1;
+  BlockText title = 2;
+  // An HTML fragment or a full document. UTF-8, at most 256 KiB.
+  string html = 3;
+  // The content height the sender measured, in CSS px at 640 px wide, so the
+  // first frame reserves the right space. Clamped to 80...2000.
+  optional uint32 height = 4;
+  // Images the HTML references by position as "media/0", "media/1", ...
+  // They use the block image pipeline, so they can be pending. No alt text.
+  repeated BlockImage images = 5;
+  // Checked by the server before the bot sees an inline.action() call.
+  AgentGrantRequirement required_grant = 6;
+}
+
+// A widget's inline.action(name, payload) call. Unlike a callback button's
+// data, which the bot wrote, the viewer's client supplies every field: bots
+// must treat both as untrusted input.
+message MessageWidgetCall {
+  // Same character set as MessageAction.action_id, at most 64 characters.
+  string name = 1;
+  // UTF-8 JSON, at most 4 KiB. Empty means no payload.
+  bytes payload = 2;
+}
+
 message Message {
   int64 id = 1;
 
@@ -1001,6 +1041,14 @@ message Message {
   // Text quoted from the replied message, shown in the reply header. `message`
   // holds only the caption. Older clients show a plain reply.
   optional string reply_quote = 27;
+
+  // Addressed to the viewer (mention or reply) and not seen yet. Set on
+  // history results only; absent elsewhere.
+  optional bool unread_mention = 28;
+
+  // The viewer's message, with reactions they haven't seen. Set on history
+  // results only; absent elsewhere.
+  optional bool unread_reactions = 29;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -2401,6 +2449,8 @@ enum Method {
   GET_AGENT_SETTINGS = 164;
   GET_CONTACTS = 165;
   GET_AGENT_ACCESS = 166;
+  GET_UNREAD_ACTIVITY = 167;
+  READ_ACTIVITY = 168;
 }
 
 message RpcCall {
@@ -2572,6 +2622,8 @@ message RpcCall {
     GetAgentSettingsInput getAgentSettings = 165;
     GetContactsInput getContacts = 166;
     GetAgentAccessInput getAgentAccess = 167;
+    GetUnreadActivityInput getUnreadActivity = 168;
+    ReadActivityInput readActivity = 169;
   }
 }
 
@@ -2745,6 +2797,8 @@ message RpcResult {
     GetAgentSettingsResult getAgentSettings = 165;
     GetContactsResult getContacts = 166;
     GetAgentAccessResult getAgentAccess = 167;
+    GetUnreadActivityResult getUnreadActivity = 168;
+    ReadActivityResult readActivity = 169;
   }
 }
 
@@ -3369,9 +3423,51 @@ message ReadMessagesInput {
 
   // If unset, server resolves to the latest message id for the peer.
   optional int64 max_id = 2;
+
+  // Explicit "Mark as Read" from a chat list: also reads every unread
+  // mention and reaction in the dialog.
+  optional bool read_activity = 3;
 }
 
 message ReadMessagesResult { repeated Update updates = 1; }
+
+// IDs of unread mentions or of the viewer's messages with unread reactions,
+// oldest first.
+message GetUnreadActivityInput {
+  InputPeer peer_id = 1;
+  // False lists mentions and replies, true lists reactions.
+  bool reactions = 2;
+  // Return messages with an ID greater than this.
+  optional int64 offset_id = 3;
+  // Defaults to and is capped at 500.
+  optional int32 limit = 4;
+}
+
+message GetUnreadActivityResult {
+  repeated int64 message_ids = 1;
+  int32 unread_mentions_count = 2;
+  int32 unread_reactions_count = 3;
+  // True when nothing unread follows the last returned ID.
+  bool final = 4;
+}
+
+// Reads mentions and reactions. A message ID is enough: for one viewer a
+// message is either addressed to them or theirs, never both.
+message ReadActivityInput {
+  InputPeer peer_id = 1;
+  // Messages seen on screen.
+  repeated int64 message_ids = 2;
+  // Read every unread mention and reply, up to max_id when set.
+  bool all_mentions = 3;
+  // Read every unread reaction, up to max_id when set.
+  bool all_reactions = 4;
+  optional int64 max_id = 5;
+}
+
+// Empty on purpose: the change reaches every session, the caller included,
+// through the ordered user stream. Counts delivered here could arrive out of
+// order with that stream and double-count reads still in flight.
+message ReadActivityResult {}
 
 message CreateBotInput {
   // Name of the bot
@@ -3722,6 +3818,36 @@ message PrivacySettings {
 
   // If true, the user may appear in global user search results.
   optional bool appear_in_global_search = 2;
+
+  // Who can see the user's time zone. When present, it is authoritative and
+  // share_time_zone mirrors it (true only for AUDIENCE_EVERYONE). Absent means
+  // the client should derive it from share_time_zone and send no rule back.
+  optional PrivacyRule time_zone = 3;
+}
+
+// Who can see one piece of the user's information. The user always sees their own.
+message PrivacyRule {
+  enum Audience {
+    AUDIENCE_UNSPECIFIED = 0;
+    AUDIENCE_EVERYONE = 1;
+    AUDIENCE_NOBODY = 2;
+  }
+
+  Audience audience = 1;
+
+  // Exceptions that can see it when audience is NOBODY.
+  repeated PrivacyTarget always_share = 2;
+
+  // Exceptions that cannot see it when audience is EVERYONE.
+  repeated PrivacyTarget never_share = 3;
+}
+
+// One entry in a privacy exception list. New kinds (spaces, groups) are added
+// as new oneof cases; servers drop kinds they do not understand.
+message PrivacyTarget {
+  oneof target {
+    int64 user_id = 1;
+  }
 }
 
 message NotificationSettings {
@@ -4161,10 +4287,13 @@ message SendMessageResult {
 message InvokeMessageActionInput {
   InputPeer peer_id = 1;
   int64 message_id = 2;
-  // A callback action's ID, or a form's form_id when submitting it.
+  // A callback action's ID, a form's form_id when submitting it, or a
+  // widget's widget_id for a call from inside it.
   string action_id = 3;
   // Required when action_id names a BlockForm, absent otherwise.
   optional MessageFormSubmission form = 4;
+  // Required when action_id names a BlockWidget, absent otherwise.
+  optional MessageWidgetCall widget_call = 5;
 }
 
 message InvokeMessageActionResult {
@@ -4378,11 +4507,20 @@ message SearchMessagesInput {
 
   // Optional filter for media/doc messages
   optional SearchMessagesFilter filter = 5;
+
+  // Count every matching message instead of returning a page: the result has
+  // total_count set and no messages. Scans the whole chat, so clients send it
+  // alongside the first page request rather than waiting on it. Requires
+  // queries; limit and offset_id are ignored.
+  optional bool count_only = 6;
 }
 
 message SearchMessagesResult {
   repeated Message messages = 1;
   optional int64 seq = 2;
+
+  // Number of matching messages in the chat; set for count_only requests.
+  optional int32 total_count = 3;
 }
 
 enum ExternalResourceProvider {
@@ -4741,6 +4879,7 @@ message Update {
     UpdateAgentRuntime agent_runtime = 56;
     UpdateAgentSessionControl agent_session_control = 57;
     UpdateAgentSettings agent_settings = 58;
+    UpdateUnreadActivity unread_activity = 59;
   }
 }
 
@@ -4898,6 +5037,21 @@ message UpdateReadMaxId {
   int32 unread_count = 4;
 }
 
+// Unread mentions or reactions in a dialog changed. Stored in the user bucket.
+message UpdateUnreadActivity {
+  Peer peer_id = 1;
+  // Counts after this change.
+  int32 unread_mentions_count = 2;
+  int32 unread_reactions_count = 3;
+  // Messages that became unread mentions or replies.
+  repeated int64 unread_mention_ids = 4;
+  // The viewer's messages that got unseen reactions.
+  repeated int64 unread_reaction_ids = 5;
+  // Messages that are no longer unread: read, deleted, or the reaction was
+  // withdrawn. Also echoes reads that changed nothing.
+  repeated int64 cleared_message_ids = 6;
+}
+
 // Update when a dialog is marked as unread
 message UpdateMarkAsUnread {
   // Peer ID of the dialog that was marked as unread
@@ -4969,6 +5123,8 @@ message UpdateMessageActionInvoked {
   // A form submission. Secret values are present only in the live delivery;
   // catch-up copies mark them redacted.
   optional MessageFormSubmission form = 7;
+  // A call from inside a widget; action_id is its widget_id and data is empty.
+  optional MessageWidgetCall widget_call = 8;
 }
 
 // A chat member's view of an agent session's run state changed.

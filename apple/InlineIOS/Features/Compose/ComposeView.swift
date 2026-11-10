@@ -1394,6 +1394,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     } else {
       let replyToMessageId = state.replyingMessageId
       mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
+      mentionedParticipantsAccess.promptForLinkedThreadAccess(text: text, entities: entities, peer: peerId)
       if attachmentItemsToSend.isEmpty {
         let transaction = makeTextSendTransaction(replyToMessageId: replyToMessageId)
         shouldCoordinateSendAnimationReset = shouldCoordinateTextSendAnimationReset(
@@ -1718,46 +1719,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   @objc private func handleReplyStateChange() {
-    removeStaleReplyQuote()
     updateEmbedState(animated: true)
     updateAgentReplyTarget()
   }
 
-  /// The quote lines Quote put at the top and the message they quote, so quoting again or
-  /// dropping the reply can take them back out.
-  private var insertedReplyQuote: (markdown: String, messageId: Int64)?
-
-  /// Puts quote lines first, replacing the last quote, through the normal input path, and
-  /// leaves the cursor at the end so the reply is typed below the quote. One quote per reply,
-  /// like Telegram, so the reply shows it in its header.
+  /// Adds quote lines after anything already typed, each quote its own block, through the
+  /// normal input path, and leaves the cursor at the end so the reply is typed below the quote.
   @objc private func handleQuote(_ notification: Notification) {
     guard let peerId, (notification.userInfo?["peer"] as? InlineKit.Peer) == peerId,
           let markdown = notification.userInfo?["markdown"] as? String else { return }
-    let insertion = MessageMarkdown.replyQuoteInsertion(
-      markdown,
-      into: textView.text ?? "",
-      replacing: insertedReplyQuote?.markdown
-    )
+    let insertion = MessageMarkdown.quoteInsertion(markdown, into: textView.text ?? "")
     textView.resetTypingAttributesToDefault()
     textView.selectedRange = insertion.range
     textView.insertText(insertion.text)
-    insertedReplyQuote = ChatState.shared.getState(peer: peerId).replyingMessageId.map { (markdown, $0) }
     textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
     textView.becomeFirstResponder()
-  }
-
-  /// A reply that moved to another message, or was dropped, takes its inserted quote with it
-  /// while the lines are still untouched at the top.
-  private func removeStaleReplyQuote() {
-    guard let inserted = insertedReplyQuote, let peerId,
-          ChatState.shared.getState(peer: peerId).replyingMessageId != inserted.messageId
-    else { return }
-    insertedReplyQuote = nil
-    guard let range = MessageMarkdown.replyQuoteRemoval(inserted.markdown, from: textView.text ?? "") else { return }
-    let selection = textView.selectedRange
-    textView.selectedRange = range
-    textView.insertText("")
-    textView.selectedRange = NSRange(location: max(0, selection.location - range.length), length: 0)
   }
 
   @objc private func handleForwardStateChange() {

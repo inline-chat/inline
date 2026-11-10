@@ -139,6 +139,35 @@ public final class WidgetCoordinator: NSObject {
     webView.load(URLRequest(url: WidgetURL.documentURL(for: content.key, mode: configuration.originMode)))
   }
 
+  /// Moves a live widget's web view into a new host without reloading it, as when
+  /// a row is rebuilt after a height change. Returns false when the key isn't live.
+  @discardableResult
+  public func rehost(_ host: WidgetHostView) -> Bool {
+    guard let content = host.content, var entry = live[content.key] else { return false }
+    if entry.host === host { return true }
+    if let previous = entry.host, previous.content?.key == content.key { previous.detach(showing: nil) }
+    entry.host = host
+    live[content.key] = entry
+    touch(content.key)
+    host.attach(entry.webView)
+    if entry.rendered { host.showLive() }
+    return true
+  }
+
+  /// Whether this host currently shows the live web view for its widget.
+  public func isHosting(_ host: WidgetHostView) -> Bool {
+    guard let key = host.content?.key else { return false }
+    return live[key]?.host === host
+  }
+
+  /// Starts one pooled web view, so the first widget skips WebContent process launch.
+  public func prewarm() {
+    guard idle.isEmpty, live.isEmpty else { return }
+    let webView = makeWebView()
+    webView.loadHTMLString("", baseURL: nil)
+    idle.append(webView)
+  }
+
   /// Snapshots (when rendered) and returns the web view to the pool.
   public func unmount(key: String, snapshot: Bool = true, completion: (@MainActor () -> Void)? = nil) {
     guard let entry = live.removeValue(forKey: key) else {
