@@ -30,6 +30,12 @@ pub(super) struct OwnerControl {
 }
 
 impl OwnerControl {
+    /// The owner's own Inline client. Bridges use it to show messages the
+    /// owner wrote on another network as sent by the owner.
+    pub(super) fn client(&self) -> &InlineClient {
+        &self.client
+    }
+
     #[cfg(test)]
     pub(super) fn for_test(client: InlineClient, store: SqliteStore) -> Self {
         Self {

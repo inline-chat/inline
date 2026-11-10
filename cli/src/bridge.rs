@@ -2160,7 +2160,6 @@ async fn run_provider_installation(
     if installation.provider_id == dots::DOTS_PROVIDER_ID {
         // A Dot has no coding turns: the relay owns the DM instead of a
         // driver, sharing this service's bot, owner control, and health.
-        let _owner_control = owner_control;
         drop(startup_activity);
         return dots::run_dots_relay(dots::DotsLaunch {
             installation: &installation,
@@ -2172,6 +2171,7 @@ async fn run_provider_installation(
             readiness: shared_provider_readiness.as_ref(),
             external_shutdown,
             standalone_runtime,
+            owner_control: owner_control.clone(),
             profile: Some(dots::ProfileSync {
                 config: config.clone(),
                 owner_auth: owner_credential(&secrets)?,

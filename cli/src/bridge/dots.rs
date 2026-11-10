@@ -42,6 +42,9 @@ pub(crate) struct BotDm {
     chat_id: InlineId,
     http: reqwest::Client,
     profile: Option<ProfileSync>,
+    /// The owner's session: posts, edits, and reactions the owner made in
+    /// ChatGPT appear in Inline as the owner's own.
+    owner: Option<Arc<super::owner_control::OwnerControl>>,
 }
 
 /// Mirrors the Dot's name and photo onto the bot through a short-lived owner
@@ -157,6 +160,7 @@ impl BotDm {
         bot: InlineClient,
         chat_id: InlineId,
         profile: Option<ProfileSync>,
+        owner: Option<Arc<super::owner_control::OwnerControl>>,
     ) -> io::Result<Self> {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -168,6 +172,7 @@ impl BotDm {
             chat_id,
             http,
             profile,
+            owner,
         })
     }
 
@@ -206,10 +211,75 @@ fn inline_error(error: impl std::fmt::Display) -> InlineError {
 }
 
 fn media_kind(mime: &str) -> MediaKind {
-    match mime {
+    match mime.split(';').next().unwrap_or("").trim() {
         "image/jpeg" | "image/png" | "image/gif" | "image/webp" => MediaKind::Photo,
         _ => MediaKind::Document,
     }
+}
+
+/// Writes Inline's formatting entities back as Markdown, so a link or code
+/// the owner sends from Inline reaches the agent intact. Offsets are UTF-16.
+pub(crate) fn entities_to_markdown(
+    text: &str,
+    entities: &[inline_client::MessageEntityRecord],
+) -> String {
+    if entities.is_empty() {
+        return text.to_owned();
+    }
+    // UTF-16 offset of every char boundary, so entity ranges map to bytes.
+    let mut boundaries = Vec::with_capacity(text.len() + 1);
+    let mut units = 0i64;
+    for (byte, character) in text.char_indices() {
+        boundaries.push((units, byte));
+        units += character.len_utf16() as i64;
+    }
+    boundaries.push((units, text.len()));
+    let byte_at = |offset: i64| {
+        boundaries
+            .iter()
+            .find(|(unit, _)| *unit >= offset)
+            .map(|(_, byte)| *byte)
+            .unwrap_or(text.len())
+    };
+    // (byte, is_close, nesting key, marker)
+    let mut marks: Vec<(usize, bool, i64, String)> = Vec::new();
+    for entity in entities {
+        let (open, close) = match entity.kind.as_str() {
+            "TYPE_BOLD" => ("**".to_owned(), "**".to_owned()),
+            "TYPE_ITALIC" => ("_".to_owned(), "_".to_owned()),
+            "TYPE_STRIKETHROUGH" => ("~~".to_owned(), "~~".to_owned()),
+            "TYPE_CODE" => ("`".to_owned(), "`".to_owned()),
+            "TYPE_PRE" => ("```\n".to_owned(), "\n```".to_owned()),
+            "TYPE_TEXT_URL" => match entity.value.as_deref().filter(|url| !url.is_empty()) {
+                Some(url) => ("[".to_owned(), format!("]({url})")),
+                None => continue,
+            },
+            // Mentions, plain URLs, and emails are already in the text.
+            _ => continue,
+        };
+        if entity.length <= 0 {
+            continue;
+        }
+        let start = byte_at(entity.offset);
+        let end = byte_at(entity.offset + entity.length);
+        if start >= end {
+            continue;
+        }
+        marks.push((start, false, -entity.length, open));
+        marks.push((end, true, entity.length, close));
+    }
+    // Closes before opens at the same spot; outer entities open first and
+    // close last.
+    marks.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    let mut out = String::with_capacity(text.len() + marks.len() * 4);
+    let mut cursor = 0;
+    for (byte, _, _, marker) in marks {
+        out.push_str(&text[cursor..byte]);
+        out.push_str(&marker);
+        cursor = byte;
+    }
+    out.push_str(&text[cursor..]);
+    out
 }
 
 impl InlineSide for BotDm {
@@ -217,6 +287,19 @@ impl InlineSide for BotDm {
         Box::pin(async move {
             let external_id = Self::external(&post.key)?;
             let random_id = interaction_random_id("dots", &post.key);
+            let owner = post
+                .as_owner
+                .then(|| self.owner.as_ref().map(|owner| owner.client()))
+                .flatten();
+            let client = owner.unwrap_or(&self.bot);
+            // Without an owner session, fall back to a labeled bot post.
+            let fallback_text;
+            let text = if post.as_owner && owner.is_none() && !post.text.is_empty() {
+                fallback_text = inline_relay::render::owner_mirror("ChatGPT", &post.text);
+                fallback_text.as_str()
+            } else {
+                post.text.as_str()
+            };
             let notification_mode = if post.silent {
                 SendNotificationMode::Silent
             } else {
@@ -233,7 +316,7 @@ impl InlineSide for BotDm {
                     file_name: Some(file.name.clone()),
                     mime_type: Some(file.mime.clone()),
                     size_bytes: Some(file.bytes.len() as u64),
-                    caption: (!post.text.trim().is_empty()).then(|| post.text.clone()),
+                    caption: (!text.trim().is_empty()).then(|| text.to_owned()),
                     width: None,
                     height: None,
                     duration_ms: None,
@@ -241,19 +324,19 @@ impl InlineSide for BotDm {
                     random_id: Some(random_id),
                     reply_to_message_id,
                 };
-                self.bot
+                client
                     .send_media(request, file.bytes.clone())
                     .await
                     .map_err(inline_error)?
             } else {
-                let mut message = SendTextRequest::new(peer, &post.text);
+                let mut message = SendTextRequest::new(peer, text);
                 message.reply_to_message_id = reply_to_message_id;
                 message.external_id = Some(external_id);
                 message.random_id = Some(random_id);
                 message.parse_markdown = true;
                 message.notification_mode = notification_mode;
                 if post.buttons.is_empty() {
-                    self.bot.send_text(message).await.map_err(inline_error)?
+                    client.send_text(message).await.map_err(inline_error)?
                 } else {
                     self.bot
                         .send_interactive_text(SendInteractiveTextRequest {
@@ -268,6 +351,54 @@ impl InlineSide for BotDm {
                 .message_id
                 .map(InlineId::get)
                 .ok_or_else(|| InlineError("Inline accepted the message without an id".into()))
+        })
+    }
+
+    fn edit_as_owner<'a>(
+        &'a self,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            let Some(owner) = &self.owner else {
+                return self.edit(message_id, text, None).await;
+            };
+            owner
+                .client()
+                .edit_message(EditMessageRequest {
+                    chat_id: self.chat_id,
+                    message_id: InlineId::new(message_id),
+                    text: text.to_owned(),
+                    external_id: None,
+                    parse_markdown: true,
+                })
+                .await
+                .map_err(inline_error)
+        })
+    }
+
+    fn react_as_owner<'a>(
+        &'a self,
+        message_id: i64,
+        emoji: &'a str,
+        remove: bool,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            // A bot reaction would misattribute it; skip without a session.
+            let Some(owner) = &self.owner else {
+                return Ok(());
+            };
+            owner
+                .client()
+                .react(ReactRequest {
+                    chat_id: self.chat_id,
+                    message_id: InlineId::new(message_id),
+                    reaction: emoji.to_owned(),
+                    remove,
+                    external_id: None,
+                })
+                .await
+                .map_err(inline_error)
         })
     }
 
@@ -448,7 +579,9 @@ pub(crate) fn relay_event(event: &ClientEvent, dm_chat_id: InlineId) -> Option<I
             // once, so an edit of a delivered message is not resent, while a
             // message edited before the bridge saw it goes out as edited.
             let (text, media) = match &message.content {
-                MessageContent::Text { text } => (text.clone(), None),
+                MessageContent::Text { text } => {
+                    (entities_to_markdown(text, &message.metadata.entities), None)
+                }
                 MessageContent::Media {
                     url,
                     mime_type,
@@ -457,7 +590,10 @@ pub(crate) fn relay_event(event: &ClientEvent, dm_chat_id: InlineId) -> Option<I
                     size_bytes,
                     ..
                 } => (
-                    caption.clone().unwrap_or_default(),
+                    entities_to_markdown(
+                        caption.as_deref().unwrap_or_default(),
+                        &message.metadata.entities,
+                    ),
                     Some(InlineMedia {
                         url: url.clone(),
                         name: file_name.clone(),
@@ -552,6 +688,7 @@ pub(crate) struct DotsLaunch<'a> {
     pub(crate) external_shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     pub(crate) standalone_runtime: bool,
     pub(crate) profile: Option<ProfileSync>,
+    pub(crate) owner_control: Option<Arc<super::owner_control::OwnerControl>>,
 }
 
 /// Serves the Dots relay until shutdown.
@@ -569,6 +706,7 @@ pub(crate) async fn run_dots_relay(
         mut external_shutdown,
         standalone_runtime,
         profile,
+        owner_control,
     } = launch;
     // Typing is best-effort and only on the broadcast stream.
     let mut best_effort = bot.subscribe();
@@ -577,7 +715,7 @@ pub(crate) async fn run_dots_relay(
     let store = Arc::new(RelayStore::open(
         &installation.state_dir.join("dots-relay.sqlite"),
     )?);
-    let side = Arc::new(BotDm::new(bot.clone(), dm_chat_id, profile)?);
+    let side = Arc::new(BotDm::new(bot.clone(), dm_chat_id, profile, owner_control)?);
     let relay = Arc::new(Relay::new(
         connector,
         side,
@@ -837,8 +975,56 @@ mod tests {
         );
     }
 
+    fn entity(
+        kind: &str,
+        offset: i64,
+        length: i64,
+        value: Option<&str>,
+    ) -> inline_client::MessageEntityRecord {
+        inline_client::MessageEntityRecord {
+            kind: kind.into(),
+            offset,
+            length,
+            user_id: None,
+            agent_id: None,
+            group_id: None,
+            chat_id: None,
+            value: value.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn inline_formatting_reaches_the_agent_as_markdown() {
+        let text = "see docs and run ls now";
+        let entities = [
+            entity("TYPE_TEXT_URL", 4, 4, Some("https://example.com/docs")),
+            entity("TYPE_CODE", 17, 2, None),
+            entity("TYPE_BOLD", 0, 3, None),
+        ];
+        assert_eq!(
+            entities_to_markdown(text, &entities),
+            "**see** [docs](https://example.com/docs) and run `ls` now"
+        );
+        // UTF-16 offsets past an emoji, and a nested bold link.
+        let text = "👋 hi there";
+        let entities = [
+            entity("TYPE_BOLD", 3, 8, None),
+            entity("TYPE_TEXT_URL", 6, 5, Some("https://x.y")),
+        ];
+        assert_eq!(
+            entities_to_markdown(text, &entities),
+            "👋 **hi [there](https://x.y)**"
+        );
+        assert_eq!(entities_to_markdown("plain", &[]), "plain");
+        assert_eq!(
+            entities_to_markdown("@sam hi", &[entity("TYPE_MENTION", 0, 4, None)]),
+            "@sam hi"
+        );
+    }
+
     #[test]
     fn images_upload_as_photos() {
+        assert_eq!(media_kind("image/png; charset=binary"), MediaKind::Photo);
         assert_eq!(media_kind("image/png"), MediaKind::Photo);
         assert_eq!(media_kind("application/pdf"), MediaKind::Document);
     }
