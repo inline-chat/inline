@@ -22,6 +22,8 @@ protocol ComposeAttachmentOwner: AnyObject {
   func removeImage(_ id: String)
   func removeVideo(_ id: String)
   func removeFile(_ id: String)
+  /// Called when the attachment strip goes from empty to non-empty or back.
+  func composeAttachmentsDidChangeStaged(_ hasAttachments: Bool)
 }
 
 final class ComposeAppKit: NSView {
