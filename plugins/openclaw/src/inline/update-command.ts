@@ -180,6 +180,16 @@ export async function handleInlineUpdateCommand(
       options.runner ? { runner: options.runner } : {},
     )
     if (result.exitCode === 0) {
+      const output = `${result.stdout}\n${result.stderr}`.replace(ANSI_ESCAPE_PATTERN, "")
+      if (/^inline (?:is up to date \(|already at )/m.test(output)) {
+        return { text: "Inline is up to date for the installed package selection." }
+      }
+      if (/^inline is pinned to /m.test(output)) {
+        return { text: "Inline is pinned. To change versions, update the package selection on the OpenClaw host." }
+      }
+      if (!/^(?:Updated|Downgraded) inline:/m.test(output)) {
+        return { text: "OpenClaw did not confirm a version change. Check the tracked install with openclaw plugins inspect inline --json on the host." }
+      }
       api.logger.info?.("[inline-update] OpenClaw plugin updater completed successfully")
       return {
         text: "Inline plugin update completed. Run /restart to load the installed version.",
@@ -190,6 +200,9 @@ export async function handleInlineUpdateCommand(
     api.logger.error?.(
       `[inline-update] OpenClaw plugin updater failed${result.errorCode ? ` (${result.errorCode})` : ""}\n${diagnostic}`,
     )
+    if (diagnostic.includes("requires exclusive offline state ownership")) {
+      return { text: "OpenClaw requires an offline update. On the host, stop this gateway, run openclaw plugins update inline --accept-capabilities for the same profile, then start the gateway." }
+    }
     if (result.errorCode === "ENOENT") {
       return { text: "Inline plugin update is unavailable because the OpenClaw CLI was not found." }
     }

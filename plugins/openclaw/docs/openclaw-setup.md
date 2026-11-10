@@ -29,15 +29,23 @@ openclaw plugins install npm:@inline-openclaw/inline@1.0.0 --force --accept-capa
 If already installed on a supported host, update in place:
 
 ```sh
+openclaw gateway stop
 openclaw plugins update inline --accept-capabilities
-openclaw gateway restart
+openclaw gateway start
 openclaw plugins list
 openclaw plugins inspect inline --json
 openclaw channels status --channel inline --probe --json
 ```
 
-After the first install, an OpenClaw owner can run `/inline_update` in Inline
-and then `/restart`; routine plugin updates do not require host shell access.
+On OpenClaw 2026.11.1 and newer, an exact install keeps its version pin.
+Use `openclaw plugins update inline --dry-run` to inspect the selection. To
+switch to stable updates, use `openclaw plugins update @inline-openclaw/inline@latest --accept-capabilities`
+for the update step. Keep older hosts on their compatible pin. Run each command
+with the same `--profile <name>` if using a named profile. For a foreground
+gateway, stop and relaunch that process.
+
+An OpenClaw owner can also try `/inline_update` in Inline. When the host
+requires exclusive access, finish active turns and use the offline steps above.
 
 ## 2) Configure Inline Channel
 

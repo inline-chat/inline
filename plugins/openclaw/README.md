@@ -124,19 +124,24 @@ openclaw plugins install npm:@inline-openclaw/inline@1.0.0 --force --accept-capa
 If the plugin is already installed, update in place:
 
 ```sh
+openclaw gateway stop
 openclaw plugins update inline --accept-capabilities
-openclaw gateway restart
+openclaw gateway start
 openclaw plugins list
 openclaw plugins inspect inline --json
 openclaw channels status --channel inline --probe --json
 openclaw message send --channel inline --target chat:123 --message "Inline smoke test" --dry-run
 ```
 
-After initial installation, an OpenClaw owner can run `/inline_update` from
-Inline. The command delegates to OpenClaw's tracked-plugin updater with explicit
-capability consent, strips credential variables from the updater process, and
-asks for `/restart` after OpenClaw reports a successful update. Other authorized
-chat members cannot update host plugins.
+On OpenClaw 2026.11.1 and newer, an exact install keeps its version pin.
+Use `openclaw plugins update inline --dry-run` to inspect the selection. To
+switch to stable updates, use `openclaw plugins update @inline-openclaw/inline@latest --accept-capabilities`
+for the update step. Keep older hosts on their compatible pin. Run each command
+with the same `--profile <name>` if using a named profile. For a foreground
+gateway, stop and relaunch that process.
+
+An OpenClaw owner can also try `/inline_update` in Inline. When the host
+requires exclusive access, finish active turns and use the offline steps above.
 
 Installed skills are published to Inline for Skilled Agent selection on gateway
 start and whenever OpenClaw emits `skill_changed`. Any authorized bot user can
