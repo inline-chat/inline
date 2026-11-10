@@ -309,6 +309,11 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
           "RTL heading, paragraph, list, and disclosure beside LTR content"
         ),
         .init(
+          .richMixedRTL,
+          "Persian with Latin names",
+          "Unflagged Persian prose that opens with product names; direction is derived per block"
+        ),
+        .init(
           .richQuote,
           "Block quote",
           "A nested quote with inline emphasis and multiple paragraphs"
@@ -412,6 +417,7 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case richAlbum
   case richAgentAnswer
   case richRTLBlocks
+  case richMixedRTL
   case richQuote
   case richTable
   case richMath
@@ -508,6 +514,8 @@ private enum DeveloperMessageCatalogFactory {
       return richFixture(id: id, content: richAgentAnswer(), outgoing: true, reactions: true)
     case .richRTLBlocks:
       return richFixture(id: id, content: richRTLBlocks())
+    case .richMixedRTL:
+      return richFixture(id: id, content: richMixedRTL())
     case .richQuote:
       return richFixture(id: id, content: richQuote())
     case .richTable:
@@ -1146,6 +1154,34 @@ private enum DeveloperMessageCatalogFactory {
     ])
   }
 
+  /// A real agent reply: no stored direction flags, so the client decides each block.
+  private static func richMixedRTL() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let intro = builder.segment(
+      "Fable 5.2 به فهرست مدل\u{200C}های Inline اضافه شد، ولی فقط در جلسه\u{200C}های تازه دیده می\u{200C}شود. این جلسه فهرستش را قبل از این تغییر گرفته است."
+    )
+    builder.addEntity(.bold, matching: "جلسه\u{200C}های تازه", in: intro)
+    let label = builder.segment("چه کار کردم:")
+    builder.addEntity(.bold, matching: "چه کار کردم:", in: label)
+    let first = builder.segment(
+      "Claude Code روی این مک (نسخهٔ 2.1.322) مدل Fable 5.2 را می\u{200C}شناسد، ولی هنوز آن را در فهرستی که به Inline می\u{200C}دهد نمی\u{200C}گذارد."
+    )
+    let second = builder.segment("یک درخواست آزمایشی با claude-fable-5-2 فرستادم و جواب گرفتم.")
+    builder.addEntity(.code, matching: "claude-fable-5-2", in: second)
+    let third = builder.segment("Opus 5.5 قیمتش ۲ برابر است: $8 ورودی و $40 خروجی برای هر میلیون توکن.")
+    let question = builder.segment("کدام را انجام دهم؟")
+    let sources = builder.segment("Sources:")
+    let source = builder.segment("Models overview – Claude Platform Docs")
+    return builder.finish(blocks: [
+      paragraphBlock(intro),
+      paragraphBlock(label),
+      listBlock(kind: .unordered, items: [[paragraphBlock(first)], [paragraphBlock(second)], [paragraphBlock(third)]]),
+      paragraphBlock(question),
+      paragraphBlock(sources),
+      listBlock(kind: .unordered, items: [[paragraphBlock(source)]]),
+    ])
+  }
+
   private static func richQuote() -> RichCatalogFixture {
     var builder = RichCatalogTextBuilder()
     let introduction = builder.segment("A quote stays structural instead of appearing as a literal greater-than character.")
@@ -1633,7 +1669,7 @@ private enum DeveloperMessageCatalogFactory {
       .richStreaming, .richNestedLists, .richChecklist,
       .richDisclosures, .richProgressDisclosure, .richPendingImage, .richUnknownImage, .richReadyImage,
       .richUnavailableImage, .richAlbum, .richAgentAnswer,
-      .richRTLBlocks, .richQuote, .richTable,
+      .richRTLBlocks, .richMixedRTL, .richQuote, .richTable,
       .groupStart, .groupMiddle, .groupEnd, .reply, .forwarded, .reactions, .sending, .failed,
       .compactUrlPreview, .largeUrlPreview, .multipleUrlPreviews,
       .photo, .photoCaption, .video, .pdf, .archive, .voice,

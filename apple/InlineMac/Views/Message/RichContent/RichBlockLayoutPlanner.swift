@@ -155,8 +155,10 @@ final class RichBlockLayoutPlanner {
       disclosureOverrides: disclosureOverrides,
       widgetLayout: widgetLayout
     )
+    // Direction is decided per block from its own text, replacing the stored flags.
+    let directed = BlockContentDirection.resolved(content, text: attributedText.string)
     guard builder.layout(
-      blocks: content.blocks,
+      blocks: directed.blocks,
       parent: .init(),
       x: resolvedContentInset,
       width: max(1, availableWidth - resolvedContentInset * 2),
@@ -411,6 +413,8 @@ final class RichBlockLayoutPlanner {
     var height: CGFloat = 0
     var trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
     private var measuredMaxX: CGFloat = 0
+    /// Node index to the leading edge of its container, for text anchored to the trailing edge.
+    private var trailingAnchoredMinX: [Int: CGFloat] = [:]
     private var claimsMaximumWidth = false
 
     func resolvedPlanWidth(maximumWidth: CGFloat) -> CGFloat {
@@ -421,6 +425,10 @@ final class RichBlockLayoutPlanner {
 
     mutating func normalizeFlexibleFrames(from maximumWidth: CGFloat, to resolvedWidth: CGFloat) {
       guard resolvedWidth < maximumWidth else { return }
+      let shrink = maximumWidth - resolvedWidth
+      for (index, minX) in trailingAnchoredMinX {
+        nodes[index].frame.origin.x = max(minX, nodes[index].frame.minX - shrink)
+      }
       for index in nodes.indices {
         switch nodes[index].kind {
         case .separator, .quote:
@@ -669,18 +677,20 @@ final class RichBlockLayoutPlanner {
         lastOrdinal: lastOrdinal,
         baseFontSize: baseFontSize
       )
-      let isRTL = list.hasIsRtl ? list.isRtl : (inheritedDirection ?? false)
+      let listIsRTL = list.hasIsRtl ? list.isRtl : (inheritedDirection ?? false)
       let isNested = path.components.contains { component in
         if case .listItem = component { return true }
         return false
       }
       let logicalInset = RichBlockListMetrics.leadingInset
         + (isNested ? RichBlockListMetrics.nestedIndent : 0)
-      let listX = isRTL ? x : x + logicalInset
       let listWidth = max(1, width - logicalInset)
       let childWidth = max(1, listWidth - markerWidth)
       for (itemIndex, item) in list.items.enumerated() {
         if itemIndex > 0 { height += RichBlockListMetrics.itemSpacing }
+        // Each item reads in its own direction, so its marker sits on its own leading side.
+        let isRTL = BlockContentDirection.direction(of: item) ?? listIsRTL
+        let listX = isRTL ? x : x + logicalInset
         let itemPath = BlockContentPath(path.components + [.listItem(itemIndex)])
         let marker = if item.hasChecked {
           item.checked ? "☑" : "☐"
@@ -1089,12 +1099,20 @@ final class RichBlockLayoutPlanner {
         width,
         max(1, measurement.maxLineUsedWidth + inset * 2 + accessoryWidth)
       )
-      let frame = CGRect(
+      let leadingFrame = CGRect(
         x: x,
         y: height,
         width: compactWidth,
         height: max(measuredHeight + inset * 2, baseFontSize + inset * 2)
       )
+      // Right-to-left prose hugs the trailing edge. It measures as if leading, so a short
+      // line doesn't widen the bubble; `normalizeFlexibleFrames` moves it with the edge.
+      let trailingAnchored = isRTL && !singleLine
+      var frame = leadingFrame
+      if trailingAnchored {
+        frame.origin.x = x + width - compactWidth
+        trailingAnchoredMinX[nodes.count] = x
+      }
       nodes.append(.init(
         path: path,
         frame: frame,
@@ -1106,7 +1124,7 @@ final class RichBlockLayoutPlanner {
           isRTL: isRTL
         ))
       ))
-      recordMeasuredFrame(frame)
+      recordMeasuredFrame(leadingFrame)
       height = frame.maxY
       if capturesTrailingLine {
         trailingTextLine = .init(
