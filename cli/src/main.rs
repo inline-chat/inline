@@ -24,6 +24,7 @@ mod message_export;
 mod message_output;
 mod message_page;
 mod message_selectors;
+mod message_wait;
 mod native_download;
 mod notifications;
 mod output;
@@ -72,7 +73,7 @@ use crate::downloads::{
 };
 use crate::errors::{
     CliError, JsonCliError, JsonErrorEnvelope, human_cli_error, human_cli_error_from_error,
-    is_reported_cli_failure, json_cli_error_from_error,
+    ReportedExit, is_reported_cli_failure, json_cli_error_from_error, reported_exit_code,
 };
 use crate::identity::connect_realtime;
 use crate::message_export::{
@@ -1639,6 +1640,11 @@ cap, threadsSkipped. --thread lists one parent message's thread.
     #[command(about = "Send a Markdown message to a chat or user", after_help = MESSAGE_SEND_HELP)]
     Send(MessagesSendArgs),
     #[command(
+        about = "Block until new messages arrive in a chat, then print them",
+        after_help = MESSAGE_WAIT_HELP
+    )]
+    Wait(MessagesWaitArgs),
+    #[command(
         about = "Forward messages between chats or DMs",
         after_help = "Examples:\n  inline messages forward --from-user-id 42 --to-chat-id 123 --message-id 91,92,100 --json --receipt\n  inline messages forward --from-chat-id 123 --to-user-id 42 --message-id 91-100\n\nPreserves selector order and duplicates. Failures may leave delivered messages; inspect the destination before retrying. --receipt omits raw updates from successful JSON output."
     )]
@@ -1915,6 +1921,89 @@ impl MessagesSearchArgs {
             count_only: None,
         })
     }
+}
+
+const MESSAGE_WAIT_HELP: &str = r#"Examples:
+  inline messages wait --user-id 42 --after 9001 --timeout 2h --json
+  inline messages wait --chat-id 123 --after 9001 --sender-id 42 --settle 30s --json
+  inline messages wait --chat-id 123 --thread 456 --after 789 --json
+
+Pass the id of the message you just sent as --after: replies that landed
+before the wait started are returned immediately. Without --after the wait
+starts at the chat's latest message.
+
+By default only messages from other people count; --sender-id narrows that to
+one author and --include-own counts yours too. The command exits on the first
+match, or with --settle keeps collecting until the chat is quiet for that long.
+
+Output: matching messages oldest first, plus "cursor" (the highest message id
+examined) and "timedOut". Pass the cursor as --after to wait again without
+gaps or repeats. Exit status is 0 with messages and 124 on timeout. Dropped
+connections are retried until the timeout.
+"#;
+
+#[derive(Args)]
+struct MessagesWaitArgs {
+    #[arg(long, short = 'c', help = "Chat id", conflicts_with = "user_id")]
+    chat_id: Option<i64>,
+
+    #[arg(
+        long,
+        short = 'u',
+        help = "DM counterpart user id (may initialize a missing DM)",
+        conflicts_with = "chat_id"
+    )]
+    user_id: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "MESSAGE_ID",
+        help = "Wait in the reply thread of this parent message (never creates one)"
+    )]
+    thread: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "MESSAGE_ID",
+        help = "Return messages newer than this id, including ones already sent (default: the chat's latest message)"
+    )]
+    after: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "USER_ID",
+        conflicts_with = "include_own",
+        help = "Only count messages from this author"
+    )]
+    sender_id: Option<i64>,
+
+    #[arg(long, help = "Also count messages sent by your account")]
+    include_own: bool,
+
+    #[arg(
+        long,
+        value_name = "DURATION",
+        default_value = "10m",
+        help = "Give up after this long, e.g. 90s, 30m, 2h (max 24h)"
+    )]
+    timeout: String,
+
+    #[arg(
+        long,
+        value_name = "DURATION",
+        default_value = "0s",
+        help = "After the first match, keep collecting until no new message arrives for this long"
+    )]
+    settle: String,
+
+    #[arg(
+        long,
+        value_name = "DURATION",
+        default_value = "3s",
+        hide = true,
+        help = "Delay between history reads (min 1s)"
+    )]
+    poll_interval: String,
 }
 
 #[derive(Args)]
@@ -2947,6 +3036,10 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
         _ => None,
     };
     if let Err(error) = run_until_terminated(cli, started_at).await {
+        if let Some(code) = reported_exit_code(error.as_ref()) {
+            drop(telemetry);
+            std::process::exit(code);
+        }
         if is_reported_cli_failure(error.as_ref()) {
             drop(telemetry);
             std::process::exit(1);
@@ -4276,6 +4369,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         }
                     }
                 }
+                MessagesCommand::Wait(args) => {
+                    handle_messages_wait(args, &config, &auth_store, &local_db, cli.json, json_format).await?;
+                }
                 MessagesCommand::Search(args) => {
                     handle_messages_search(args, &config, &auth_store, &local_db, cli.json, json_format).await?;
                 }
@@ -5111,6 +5207,172 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
         update::finish_update_check(update_handle).await;
     }
     result
+}
+
+/// Reads newer history over one authenticated connection, reconnecting after
+/// transport failures.
+struct RealtimeHistorySource<'a> {
+    config: &'a Config,
+    auth_store: &'a AuthStore,
+    realtime: Option<AuthenticatedRealtime>,
+    peer: proto::InputPeer,
+}
+
+impl message_wait::HistorySource for RealtimeHistorySource<'_> {
+    async fn fetch_newer(
+        &mut self,
+        after_id: i64,
+        limit: i32,
+    ) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
+        let realtime = match self.realtime.as_mut() {
+            Some(realtime) => realtime,
+            None => self
+                .realtime
+                .insert(connect_authenticated_realtime(self.config, self.auth_store).await?),
+        };
+        let input = proto::GetChatHistoryInput {
+            peer_id: Some(self.peer.clone()),
+            mode: Some(proto::GetChatHistoryMode::HistoryModeNewer as i32),
+            after_id: Some(after_id),
+            limit: Some(limit),
+            ..Default::default()
+        };
+        match realtime.call(input).await {
+            Ok(payload) => Ok(payload.messages),
+            Err(error) => {
+                if native_download::retryable_transport_failure(error.as_ref()) {
+                    self.realtime = None;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn is_transient(&self, error: &(dyn std::error::Error + 'static)) -> bool {
+        native_download::retryable_transport_failure(error)
+            || native_download::server_range_retryable(error)
+    }
+}
+
+fn wait_duration_arg(flag: &str, raw: &str) -> Result<Duration, CliError> {
+    message_wait::parse_wait_duration(flag, raw).map_err(CliError::invalid_args)
+}
+
+async fn handle_messages_wait(
+    args: MessagesWaitArgs,
+    config: &Config,
+    auth_store: &AuthStore,
+    local_db: &LocalDb,
+    json: bool,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validate_optional_positive_id_arg("--sender-id", args.sender_id)?;
+    let after = validate_optional_message_id_arg("--after", args.after)?;
+    let thread_parent = validate_optional_message_id_arg("--thread", args.thread)?;
+    let timeout = wait_duration_arg("--timeout", &args.timeout)?;
+    if timeout.is_zero() || timeout > message_wait::MAX_WAIT_TIMEOUT {
+        return Err(CliError::invalid_args("--timeout must be between 1s and 24h").into());
+    }
+    let settle = wait_duration_arg("--settle", &args.settle)?;
+    let poll_interval = wait_duration_arg("--poll-interval", &args.poll_interval)?;
+    if poll_interval < Duration::from_secs(1) {
+        return Err(CliError::invalid_args("--poll-interval must be at least 1s").into());
+    }
+    let filter = match (args.sender_id, args.include_own) {
+        (Some(sender_id), _) => message_wait::SenderFilter::Sender(sender_id),
+        (None, true) => message_wait::SenderFilter::Anyone,
+        (None, false) => message_wait::SenderFilter::Others,
+    };
+
+    let parent_peer = input_peer_from_args(args.chat_id, args.user_id)?;
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let peer = match thread_parent {
+        Some(parent_id) => chat_input_peer(
+            resolve_existing_reply_thread(&mut realtime, &parent_peer, parent_id).await?,
+        ),
+        None => parent_peer,
+    };
+    let after_id = match after {
+        Some(after_id) => after_id,
+        None => realtime
+            .call(proto::GetChatHistoryInput {
+                peer_id: Some(peer.clone()),
+                mode: Some(proto::GetChatHistoryMode::HistoryModeLatest as i32),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await?
+            .messages
+            .iter()
+            .map(|message| message.id)
+            .max()
+            .unwrap_or(0),
+    };
+
+    let plan = message_wait::WaitPlan {
+        after_id,
+        filter,
+        timeout,
+        settle,
+        poll_interval,
+    };
+    let mut source = RealtimeHistorySource {
+        config,
+        auth_store,
+        realtime: Some(realtime),
+        peer: peer.clone(),
+    };
+    let result = message_wait::wait_for_messages(&mut source, &plan).await?;
+    let timed_out = result.timed_out;
+
+    if json {
+        output::print_json(&result, json_format)?;
+    } else if timed_out {
+        println!(
+            "{}",
+            output::style_dim(&format!(
+                "No new messages within {}. Wait again with --after {}.",
+                args.timeout, result.cursor
+            ))
+        );
+    } else {
+        let realtime = match source.realtime.as_mut() {
+            Some(realtime) => realtime,
+            None => source
+                .realtime
+                .insert(connect_authenticated_realtime(config, auth_store).await?),
+        };
+        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
+        let users_by_id = chats_payload
+            .users
+            .into_iter()
+            .map(|user| (user.id, user))
+            .collect();
+        let chats_by_id = chats_payload
+            .chats
+            .into_iter()
+            .map(|chat| (chat.id, chat))
+            .collect();
+        let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+        let output = build_message_list_from_messages(
+            &result.messages,
+            &users_by_id,
+            current_user_id,
+            peer_summary_from_input(&peer),
+            peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+            None,
+        );
+        output::print_messages(&output, false, json_format)?;
+        println!(
+            "{}",
+            output::style_dim(&format!("Wait again with --after {}.", result.cursor))
+        );
+    }
+
+    if timed_out {
+        return Err(ReportedExit(message_wait::WAIT_TIMEOUT_EXIT_CODE).into());
+    }
+    Ok(())
 }
 
 async fn handle_messages_search(
