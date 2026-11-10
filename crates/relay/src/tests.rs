@@ -1808,3 +1808,31 @@ async fn task_only_message_becomes_the_card_in_place() {
         Some("m1")
     );
 }
+
+#[tokio::test]
+async fn unavailable_network_keeps_the_message_queued_past_the_retry_limit() {
+    let h = harness();
+    let unavailable = || {
+        Err(ConnectorError::new(
+            FailureKind::Unavailable,
+            "not offered in this region",
+        ))
+    };
+    h.connector.send_results.lock().unwrap().push_back(unavailable());
+    h.relay.handle_inline(owner_text(9, "hi")).await.unwrap();
+    let request = correlation_id("bot-1", 9);
+    // Far past MAX_SEND_ATTEMPTS: still queued, one notice, no failure.
+    h.connector.send_results.lock().unwrap().push_back(unavailable());
+    h.store.defer_send(&request, 20, 0).unwrap();
+    h.relay.retry_pending().await.unwrap();
+    assert_eq!(h.store.pending_sends().unwrap().len(), 1);
+    let texts = h.inline.texts();
+    assert_eq!(texts.len(), 1, "{texts:?}");
+    assert!(texts[0].starts_with("Not delivered yet (not offered in this region)"));
+
+    // Back in a supported location: it goes out.
+    h.store.defer_send(&request, 21, 0).unwrap();
+    h.relay.retry_pending().await.unwrap();
+    assert!(h.store.pending_sends().unwrap().is_empty());
+    assert_eq!(h.connector.sends.lock().unwrap().len(), 3);
+}

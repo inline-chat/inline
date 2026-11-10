@@ -226,6 +226,10 @@ pub enum FailureKind {
     Transient,
     /// Not delivered; the owner must sign in again.
     NeedsLogin,
+    /// Not delivered; the network is not serving this conversation from
+    /// where the bridge runs (for example a region or VPN location without
+    /// the product). Keep waiting without a give-up limit.
+    Unavailable,
 }
 
 /// Connector failure. Messages must be safe to show the owner and to log.
