@@ -76,10 +76,13 @@ Everything that can sync goes both ways by default.
 | Task progress | — | One card, updated in place, with each prompt and final answer under it |
 | Confirmations | Approve or Decline buttons | Yes |
 | Edits and deletions | Not possible in ChatGPT; the bot tells you | Shown as edits |
-| Messages you type in ChatGPT | — | Shown as quotes (`/mirror off` to stop) |
+| Messages and files you send in ChatGPT | — | Mirrored with your attribution (`/mirror off` to stop) |
 | Dot name and avatar | — | The bot follows them, unless you renamed it or set its photo yourself |
 
 - Messages from before setup are not imported.
+- Editing a message still waiting to deliver updates its queued text. If an
+  earlier attempt already reached ChatGPT, the bridge tells you to send the
+  correction as a new message.
 - Notices from ChatGPT itself and messages the bridge can't render appear as
   short placeholders, never silently dropped.
 - Confirmations that need more than a yes or no say so and point you to
