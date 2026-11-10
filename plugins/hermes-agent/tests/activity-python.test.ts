@@ -187,6 +187,9 @@ async def detailed_turn():
     folded = await adapter.send("10", "Looking at the failing test", metadata={"_interim_send": True})
     assert folded.success is False and folded.raw_response == {"inlineActivity": "commentary"}
     assert adapter._send_retry_is_final(folded) is True
+    # Hermes' 3-minute heartbeat is dropped: the progress message's timer already says it.
+    beat = await adapter.send("10", "⏳ Working — 3 min — terminal", metadata={"_interim_send": True})
+    assert beat.success is False and beat.raw_response == {"inlineActivity": "heartbeat"}
     # Hermes' own status sends and approval texts are untouched.
     await adapter.send("10", "Status", metadata={"_interim_send": True, "non_conversational": True})
     await adapter.send("10", "Approve?", metadata={"_interim_send": True, "is_approval_prompt": True})
@@ -318,9 +321,11 @@ async def friendly_turn():
     hooks["pre_tool_call"](tool_name="terminal", args={"command": "ls"}, session_id="s1", tool_call_id="f1")
     update = await adapter.send("10", "Checking the logs first.", metadata={"_interim_send": True})
     assert update.success is True
+    beat = await adapter.send("10", "⏳ Working — 3 min", metadata={"_interim_send": True})
+    assert beat.success is True
     await adapter.send("10", "All good.")
     sends = [entry[1]["text"] for entry in log if entry[0] == "chat-send"]
-    assert sends == ["Checking the logs first.", "All good."]
+    assert sends == ["Checking the logs first.", "⏳ Working — 3 min", "All good."]
     # Friendly keeps no progress: only the turn's start reached the sidecar.
     assert [e["type"] for e in events_of(log)] == ["turn.start"]
     adapter._activity_stop()

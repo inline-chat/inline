@@ -1013,6 +1013,11 @@ _ACTIVITY_LOGGED_FAILURES: set[str] = set()
 _ACTIVITY_SESSION_ENV: Optional[Callable[..., Any]] = None
 
 
+def _is_hermes_heartbeat(content: Any) -> bool:
+    """Hermes' long-running "⏳ Working — N min" notice; every locale starts it with ⏳."""
+    return isinstance(content, str) and content.lstrip().startswith("⏳")
+
+
 def _activity_local_sends(fn: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -5624,6 +5629,14 @@ class InlineAdapter(BasePlatformAdapter):
         if turn is not None:
             if (metadata or {}).get("_interim_send"):
                 if self._activity_foldable(content, metadata, actions) and await self._activity_is_detailed(turn):
+                    if _is_hermes_heartbeat(content):
+                        # The progress message's live timer already says this.
+                        return _send_result(
+                            success=False,
+                            error="the Inline progress message shows the elapsed time",
+                            raw_response={"inlineActivity": "heartbeat"},
+                            retryable=False,
+                        )
                     turn.pump.put("commentary", turn, str(content))
                     # Not a chat message: reported undelivered so Hermes never counts it as the
                     # answer (its final-reply dedup matches delivered interim text) and the answer

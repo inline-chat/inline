@@ -307,12 +307,14 @@ the setting. An unset setting means Detailed.
   shows each step as a row: commands with their output tail and exit code, files
   read and searched, edits with their diff, web searches, plans, sub-agents with
   their own steps nested inside, and approvals waiting on someone. Hermes'
-  commentary between tool calls appears inside it too. When the answer is ready
+  commentary between tool calls appears inside it too, and its "still working"
+  notice is left out since the timer already shows it. When the answer is ready
   the message collapses to "Worked for 1m 4s" and the answer follows as its own
   message. A message someone sends mid-turn ends the progress message there;
   later work starts a new one.
 - **Friendly**: no progress message. Hermes' commentary between tool calls posts
-  as short updates, then the answer.
+  as short updates, Hermes' "⏳ Working — 3 min" notice keeps a long turn
+  visibly alive (removed once the turn succeeds), then the answer.
 
 Approvals, questions and errors look the same in both modes. Output tails are
 capped at 2,000 characters and diffs at 8,000, and values that look like secrets
