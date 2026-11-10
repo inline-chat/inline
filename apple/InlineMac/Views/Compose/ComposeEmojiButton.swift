@@ -1,4 +1,5 @@
 import AppKit
+import TextProcessing
 
 protocol ComposeEmojiButtonDelegate: AnyObject {
   func composeEmojiButton(_ button: ComposeEmojiButton, didReceiveText text: String)
@@ -193,6 +194,7 @@ final class ComposeEmojiButton: NSView {
   private func makeEmojiPopover() -> NSPopover {
     let popover = EmojiPickerPopover2.makePopover { [weak self] emoji in
       guard let self else { return }
+      EmojiPickerData.recordUse(emoji)
       delegate?.composeEmojiButton(self, didReceiveText: emoji)
     }
     popover.delegate = self

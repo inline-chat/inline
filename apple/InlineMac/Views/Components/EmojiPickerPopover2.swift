@@ -28,10 +28,14 @@ struct EmojiPickerPopover2: View {
     popover.behavior = .transient
     popover.animates = true
     popover.contentSize = preferredContentSize
-    popover.contentViewController = makeViewController { [weak popover] emoji in
+    let controller = EmojiPicker2ViewController { [weak popover] emoji in
       onSelect(emoji)
       popover?.performClose(nil)
     }
+    controller.onRequestClose = { [weak popover] in
+      popover?.performClose(nil)
+    }
+    popover.contentViewController = controller
     return popover
   }
 }
@@ -166,11 +170,17 @@ private struct EmojiPicker2AppKitView: NSViewRepresentable {
     func emojiPicker2RootView(_: EmojiPicker2RootView, didSelect emoji: String) {
       onSelect(emoji)
     }
+
+    func emojiPicker2RootViewDidRequestClose(_ view: EmojiPicker2RootView) {
+      // Hosted in SwiftUI: let the enclosing popover or sheet handle Escape.
+      _ = view.window?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: nil)
+    }
   }
 }
 
 private final class EmojiPicker2ViewController: NSViewController, EmojiPicker2RootViewDelegate {
   private var onSelect: (String) -> Void
+  var onRequestClose: (() -> Void)?
 
   init(onSelect: @escaping (String) -> Void) {
     self.onSelect = onSelect
@@ -192,16 +202,33 @@ private final class EmojiPicker2ViewController: NSViewController, EmojiPicker2Ro
   func emojiPicker2RootView(_: EmojiPicker2RootView, didSelect emoji: String) {
     onSelect(emoji)
   }
+
+  func emojiPicker2RootViewDidRequestClose(_: EmojiPicker2RootView) {
+    onRequestClose?()
+  }
 }
 
 @MainActor
 private protocol EmojiPicker2RootViewDelegate: AnyObject {
   func emojiPicker2RootView(_ view: EmojiPicker2RootView, didSelect emoji: String)
+  func emojiPicker2RootViewDidRequestClose(_ view: EmojiPicker2RootView)
 }
 
 @MainActor
 private final class EmojiPicker2RootView: NSView {
   weak var delegate: EmojiPicker2RootViewDelegate?
+
+  private enum HighlightSource {
+    case mouse
+    case keyboard
+  }
+
+  private enum Move {
+    case left
+    case right
+    case up
+    case down
+  }
 
   private let backgroundView = NSVisualEffectView()
   private let searchBar = EmojiPicker2BarView(separatorEdge: .bottom)
@@ -209,27 +236,42 @@ private final class EmojiPicker2RootView: NSView {
   private let scrollView = EmojiPicker2ScrollView()
   private let collectionView = EmojiPicker2CollectionView()
   private let collectionLayout = NSCollectionViewFlowLayout()
-  private let emptyLabel = NSTextField(labelWithString: "No emoji found")
+  private let emptyLabel = NSTextField(labelWithString: "No Results")
   private let categoryBar = EmojiPicker2BarView(separatorEdge: .top)
 
-  private var sections = EmojiPickerData.defaultSections
+  /// Captured when the picker opens so Frequently Used doesn't reshuffle under the pointer.
+  private let browseSections: [EmojiPickerSection]
+  private let tabs: [EmojiPicker2CategoryTab]
+  private var sections: [EmojiPickerSection] = []
   private var query = ""
   private var didFocusSearch = false
-  private var hoveredIndexPath: IndexPath?
+  private var highlightedIndexPath: IndexPath?
+  private var highlightSource: HighlightSource = .mouse
+  private var activeTabIndex: Int?
   private var categoryButtons: [EmojiPicker2CategoryButton] = []
   private var lastLayoutWidth: CGFloat = 0
   private var preloadedImageScaleKeys = Set<Int>()
 
-  private let tabs = EmojiPicker2CategoryTab.makeTabs(from: EmojiPickerData.defaultSections)
   private let imageCache = EmojiPicker2ImageCache.shared
 
+  private var isSearching: Bool {
+    !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
   override init(frame frameRect: NSRect) {
+    var browseSections = EmojiPickerData.defaultSections
+    if let frequent = EmojiPickerData.frequentlyUsedSection(limit: EmojiPicker2Layout.frequentlyUsedLimit) {
+      browseSections.insert(frequent, at: 0)
+    }
+    self.browseSections = browseSections
+    tabs = EmojiPicker2CategoryTab.makeTabs(from: browseSections)
+
     super.init(frame: frameRect)
     setupView()
     setupSearchField()
     setupCollectionView()
     setupCategories()
-    applySections(EmojiPickerData.defaultSections, resetScroll: true)
+    applySections(browseSections, resetScroll: true)
   }
 
   @available(*, unavailable)
@@ -245,7 +287,7 @@ private final class EmojiPicker2RootView: NSView {
     super.viewDidMoveToWindow()
 
     guard window != nil else {
-      updateHoveredIndexPath(nil)
+      setHighlight(nil, source: .mouse)
       return
     }
 
@@ -284,6 +326,7 @@ private final class EmojiPicker2RootView: NSView {
     updateCollectionLayoutMetrics()
     syncDocumentFrame()
     preloadImagesForCurrentScale()
+    updateActiveTab()
   }
 
   private func setupView() {
@@ -302,7 +345,7 @@ private final class EmojiPicker2RootView: NSView {
 
     addSubview(scrollView)
 
-    emptyLabel.font = .systemFont(ofSize: 12)
+    emptyLabel.font = .systemFont(ofSize: 13)
     emptyLabel.textColor = .secondaryLabelColor
     emptyLabel.alignment = .center
     emptyLabel.isHidden = true
@@ -313,7 +356,7 @@ private final class EmojiPicker2RootView: NSView {
   }
 
   private func setupSearchField() {
-    searchField.placeholderString = "Search emoji"
+    searchField.placeholderString = "Search Emoji"
     searchField.controlSize = .regular
     searchField.font = .systemFont(ofSize: NSFont.systemFontSize(for: searchField.controlSize))
     searchField.focusRingType = .default
@@ -367,8 +410,12 @@ private final class EmojiPicker2RootView: NSView {
     scrollView.autohidesScrollers = true
     scrollView.verticalScrollElasticity = .allowed
     scrollView.scrollerStyle = .overlay
+    scrollView.didScrollWheel = { [weak self] in
+      guard let self, highlightSource == .mouse else { return }
+      setHighlight(nil, source: .mouse)
+    }
     scrollView.didScroll = { [weak self] in
-      self?.updateHoveredIndexPath(nil)
+      self?.updateActiveTab()
     }
     scrollView.documentView = collectionView
   }
@@ -377,6 +424,7 @@ private final class EmojiPicker2RootView: NSView {
     for (index, tab) in tabs.enumerated() {
       let button = EmojiPicker2CategoryButton(categoryIndex: index)
       button.toolTip = tab.title
+      button.setAccessibilityLabel(tab.title)
       button.configure(symbol: EmojiPicker2SymbolCache.image(named: tab.symbolName), fallback: tab.fallback)
       button.target = self
       button.action = #selector(categoryButtonPressed(_:))
@@ -396,22 +444,19 @@ private final class EmojiPicker2RootView: NSView {
     )
   }
 
+  /// Spreads the tabs evenly across the bar so a Frequently Used tab never overflows it.
   private func layoutCategoryButtons() {
     let count = categoryButtons.count
     guard count > 0 else { return }
 
     let buttonSize = EmojiPicker2Layout.categoryButtonSize
-    let spacing = EmojiPicker2Layout.categoryButtonSpacing
-    let totalWidth = CGFloat(count) * buttonSize + CGFloat(max(0, count - 1)) * spacing
-    let startX = max(
-      EmojiPicker2Layout.categoryHorizontalPadding,
-      floor((categoryBar.contentView.bounds.width - totalWidth) / 2)
-    )
+    let padding = EmojiPicker2Layout.categoryHorizontalPadding
+    let slotWidth = max(buttonSize, (categoryBar.contentView.bounds.width - padding * 2) / CGFloat(count))
     let y = floor((categoryBar.contentView.bounds.height - buttonSize) / 2)
 
     for (index, button) in categoryButtons.enumerated() {
       button.frame = NSRect(
-        x: startX + CGFloat(index) * (buttonSize + spacing),
+        x: floor(padding + CGFloat(index) * slotWidth + (slotWidth - buttonSize) / 2),
         y: y,
         width: buttonSize,
         height: buttonSize
@@ -455,6 +500,7 @@ private final class EmojiPicker2RootView: NSView {
       if resetScroll {
         scrollToTop()
       }
+      updateActiveTab()
     }
   }
 
@@ -468,7 +514,7 @@ private final class EmojiPicker2RootView: NSView {
       )
     }
     emptyLabel.isHidden = sections.contains { !$0.items.isEmpty }
-    updateHoveredIndexPath(nil)
+    highlightedIndexPath = nil
     collectionLayout.invalidateLayout()
     collectionView.reloadData()
     scheduleDocumentFrameSync(resetScroll: resetScroll)
@@ -499,36 +545,39 @@ private final class EmojiPicker2RootView: NSView {
     scrollView.reflectScrolledClipView(scrollView.contentView)
   }
 
-  private func selectFirstResult() {
-    guard let item = sections.first?.items.first else { return }
-    delegate?.emojiPicker2RootView(self, didSelect: item.emoji)
-  }
-
   private func setQuery(_ value: String) {
     guard query != value else { return }
 
     query = value
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {
-      applySections(EmojiPickerData.defaultSections, resetScroll: true)
+      applySections(browseSections, resetScroll: true)
       return
     }
 
-    let results = EmojiPickerData.suggestions(matching: trimmed, limit: 160)
+    let results = EmojiPickerData.suggestions(matching: trimmed, limit: EmojiPicker2Layout.searchResultLimit)
     applySections(
-      results.isEmpty ? [] : [EmojiPickerSection(id: "search", title: "Results", items: results)],
+      results.isEmpty ? [] : [EmojiPickerSection(id: "search", title: "", items: results)],
       resetScroll: true
     )
+    // Return picks the best match, so show which one it is.
+    if !results.isEmpty {
+      setHighlight(IndexPath(item: 0, section: 0), source: .keyboard)
+    }
+  }
+
+  private func clearQuery() {
+    guard !query.isEmpty || !searchField.stringValue.isEmpty else { return }
+    searchField.stringValue = ""
+    setQuery("")
   }
 
   private func selectCategory(_ index: Int) {
     guard tabs.indices.contains(index) else { return }
 
-    if !query.isEmpty {
-      query = ""
-      searchField.stringValue = ""
-      applySections(EmojiPickerData.defaultSections, resetScroll: false)
-    }
+    clearQuery()
+    setActiveTab(index)
+    setHighlight(nil, source: .mouse)
 
     DispatchQueue.main.async { [weak self] in
       self?.scrollToSection(index)
@@ -538,11 +587,24 @@ private final class EmojiPicker2RootView: NSView {
   private func scrollToSection(_ index: Int) {
     guard sections.indices.contains(index), !sections[index].items.isEmpty else { return }
 
-    updateHoveredIndexPath(nil)
-    collectionView.scrollToItems(
-      at: [IndexPath(item: 0, section: index)],
-      scrollPosition: .top
-    )
+    if index == 0 {
+      scrollToTop()
+      return
+    }
+
+    // Scroll to the header rather than the first item so the title stays visible.
+    let headerPath = IndexPath(item: 0, section: index)
+    guard let header = collectionLayout.layoutAttributesForSupplementaryView(
+      ofKind: NSCollectionView.elementKindSectionHeader,
+      at: headerPath
+    ) else {
+      collectionView.scrollToItems(at: [headerPath], scrollPosition: .top)
+      return
+    }
+
+    let maxY = max(0, collectionView.frame.height - scrollView.contentView.bounds.height)
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(maxY, header.frame.minY)))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
   }
 
   private func emojiItem(at indexPath: IndexPath) -> EmojiPickerItem? {
@@ -555,21 +617,158 @@ private final class EmojiPicker2RootView: NSView {
     return sections[indexPath.section].items[indexPath.item]
   }
 
-  private func updateHoveredIndexPath(_ indexPath: IndexPath?) {
-    let validIndexPath = indexPath.flatMap { emojiItem(at: $0) == nil ? nil : $0 }
-    guard hoveredIndexPath != validIndexPath else { return }
+  private func select(_ indexPath: IndexPath) {
+    guard let item = emojiItem(at: indexPath) else { return }
+    delegate?.emojiPicker2RootView(self, didSelect: item.emoji)
+  }
 
-    let previous = hoveredIndexPath
-    hoveredIndexPath = validIndexPath
+  // MARK: Highlight
+
+  private func setHighlight(_ indexPath: IndexPath?, source: HighlightSource) {
+    let validIndexPath = indexPath.flatMap { emojiItem(at: $0) == nil ? nil : $0 }
+    highlightSource = source
+    guard highlightedIndexPath != validIndexPath else { return }
+
+    let previous = highlightedIndexPath
+    highlightedIndexPath = validIndexPath
 
     if let previous,
        let item = collectionView.item(at: previous) as? EmojiPicker2CollectionItem {
-      item.setHovered(false)
+      item.setHighlighted(false)
     }
 
     if let validIndexPath,
        let item = collectionView.item(at: validIndexPath) as? EmojiPicker2CollectionItem {
-      item.setHovered(true)
+      item.setHighlighted(true)
+    }
+  }
+
+  private func moveHighlight(_ move: Move) {
+    guard let current = highlightedIndexPath else {
+      // Arrowing into the grid starts at the first emoji.
+      if move == .down, emojiItem(at: IndexPath(item: 0, section: 0)) != nil {
+        setHighlight(IndexPath(item: 0, section: 0), source: .keyboard)
+        scrollToHighlight()
+      }
+      return
+    }
+
+    let columns = EmojiPicker2Layout.columnCount(for: max(1, scrollView.contentView.bounds.width))
+    guard let next = Self.indexPath(after: current, moving: move, columns: columns, counts: sections.map(\.items.count))
+    else { return }
+
+    setHighlight(next, source: .keyboard)
+    scrollToHighlight()
+  }
+
+  private func scrollToHighlight() {
+    guard let highlightedIndexPath,
+          let attributes = collectionLayout.layoutAttributesForItem(at: highlightedIndexPath)
+    else { return }
+
+    let visible = scrollView.contentView.bounds
+    let padding = EmojiPicker2Layout.itemSpacing + 4
+    var targetY = visible.minY
+    if attributes.frame.minY - padding < visible.minY {
+      // Reveal the section title when moving onto a section's first row.
+      let headerHeight = highlightedIndexPath.item < EmojiPicker2Layout.preferredColumnCount && !isSearching
+        ? EmojiPicker2Layout.sectionHeaderHeight
+        : 0
+      targetY = attributes.frame.minY - padding - headerHeight
+    } else if attributes.frame.maxY + padding > visible.maxY {
+      targetY = attributes.frame.maxY + padding - visible.height
+    } else {
+      return
+    }
+
+    let maxY = max(0, collectionView.frame.height - visible.height)
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(maxY, max(0, targetY))))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+  }
+
+  /// Grid navigation that flows across section boundaries, keeping the column where it can.
+  private static func indexPath(after current: IndexPath, moving move: Move, columns: Int, counts: [Int]) -> IndexPath? {
+    let section = current.section
+    let item = current.item
+    guard counts.indices.contains(section), columns > 0 else { return nil }
+    let count = counts[section]
+
+    func previousSection() -> Int? {
+      var index = section - 1
+      while index >= 0 {
+        if counts[index] > 0 { return index }
+        index -= 1
+      }
+      return nil
+    }
+
+    func nextSection() -> Int? {
+      var index = section + 1
+      while index < counts.count {
+        if counts[index] > 0 { return index }
+        index += 1
+      }
+      return nil
+    }
+
+    switch move {
+    case .right:
+      if item + 1 < count { return IndexPath(item: item + 1, section: section) }
+      return nextSection().map { IndexPath(item: 0, section: $0) }
+    case .left:
+      if item > 0 { return IndexPath(item: item - 1, section: section) }
+      return previousSection().map { IndexPath(item: counts[$0] - 1, section: $0) }
+    case .down:
+      if item + columns < count { return IndexPath(item: item + columns, section: section) }
+      let lastRowStart = ((count - 1) / columns) * columns
+      if item < lastRowStart { return IndexPath(item: count - 1, section: section) }
+      return nextSection().map { IndexPath(item: min(item % columns, counts[$0] - 1), section: $0) }
+    case .up:
+      if item - columns >= 0 { return IndexPath(item: item - columns, section: section) }
+      return previousSection().map { previous in
+        let previousCount = counts[previous]
+        let lastRowStart = ((previousCount - 1) / columns) * columns
+        return IndexPath(item: min(lastRowStart + item % columns, previousCount - 1), section: previous)
+      }
+    }
+  }
+
+  // MARK: Category tabs
+
+  private func updateActiveTab() {
+    guard !isSearching else {
+      setActiveTab(nil)
+      return
+    }
+
+    let visible = scrollView.contentView.bounds
+    let reachedBottom = visible.maxY >= collectionView.frame.height - 1 && visible.minY > 0
+    var active = 0
+
+    if reachedBottom {
+      active = sections.count - 1
+    } else {
+      for index in sections.indices {
+        guard let header = collectionLayout.layoutAttributesForSupplementaryView(
+          ofKind: NSCollectionView.elementKindSectionHeader,
+          at: IndexPath(item: 0, section: index)
+        ) else { continue }
+        if header.frame.minY <= visible.minY + EmojiPicker2Layout.sectionHeaderHeight {
+          active = index
+        } else {
+          break
+        }
+      }
+    }
+
+    setActiveTab(tabs.indices.contains(active) ? active : nil)
+  }
+
+  private func setActiveTab(_ index: Int?) {
+    guard activeTabIndex != index else { return }
+    activeTabIndex = index
+    for button in categoryButtons {
+      button.isActive = button.categoryIndex == index
     }
   }
 
@@ -588,12 +787,35 @@ extension EmojiPicker2RootView: NSSearchFieldDelegate {
     textView: NSTextView,
     doCommandBy commandSelector: Selector
   ) -> Bool {
-    guard commandSelector == #selector(NSResponder.insertNewline(_:)) else {
+    switch commandSelector {
+    case #selector(NSResponder.insertNewline(_:)):
+      if let highlightedIndexPath {
+        select(highlightedIndexPath)
+      }
+      return true
+    case #selector(NSResponder.moveDown(_:)):
+      moveHighlight(.down)
+      return true
+    case #selector(NSResponder.moveUp(_:)):
+      moveHighlight(.up)
+      return true
+    // Left and right edit the search text until the grid has a highlight.
+    case #selector(NSResponder.moveLeft(_:)) where highlightedIndexPath != nil:
+      moveHighlight(.left)
+      return true
+    case #selector(NSResponder.moveRight(_:)) where highlightedIndexPath != nil:
+      moveHighlight(.right)
+      return true
+    case #selector(NSResponder.cancelOperation(_:)):
+      if searchField.stringValue.isEmpty {
+        delegate?.emojiPicker2RootViewDidRequestClose(self)
+      } else {
+        clearQuery()
+      }
+      return true
+    default:
       return false
     }
-
-    selectFirstResult()
-    return true
   }
 }
 
@@ -624,7 +846,7 @@ extension EmojiPicker2RootView: NSCollectionViewDataSource {
     item.configure(
       with: emoji,
       image: imageCache.image(for: emoji.emoji, scale: scale),
-      isHovered: indexPath == hoveredIndexPath,
+      isHighlighted: indexPath == highlightedIndexPath,
       displayScale: scale
     )
     return item
@@ -653,10 +875,10 @@ extension EmojiPicker2RootView: NSCollectionViewDataSource {
 
 extension EmojiPicker2RootView: NSCollectionViewDelegate {
   func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-    guard let indexPath = indexPaths.first, let item = emojiItem(at: indexPath) else { return }
+    guard let indexPath = indexPaths.first else { return }
 
     collectionView.deselectItems(at: indexPaths)
-    delegate?.emojiPicker2RootView(self, didSelect: item.emoji)
+    select(indexPath)
   }
 }
 
@@ -674,7 +896,11 @@ extension EmojiPicker2RootView: NSCollectionViewDelegateFlowLayout {
     layout _: NSCollectionViewLayout,
     insetForSectionAt _: Int
   ) -> NSEdgeInsets {
-    EmojiPicker2Layout.collectionSectionInset(for: max(1, scrollView.contentView.bounds.width))
+    var inset = EmojiPicker2Layout.collectionSectionInset(for: max(1, scrollView.contentView.bounds.width))
+    if isSearching {
+      inset.top = EmojiPicker2Layout.searchResultsTopInset
+    }
+    return inset
   }
 
   func collectionView(
@@ -698,33 +924,39 @@ extension EmojiPicker2RootView: NSCollectionViewDelegateFlowLayout {
     layout _: NSCollectionViewLayout,
     referenceSizeForHeaderInSection _: Int
   ) -> NSSize {
-    NSSize(width: max(1, scrollView.contentView.bounds.width), height: EmojiPicker2Layout.sectionHeaderHeight)
+    // Search results are one ranked list; a "Results" title adds nothing.
+    NSSize(
+      width: max(1, scrollView.contentView.bounds.width),
+      height: isSearching ? 0 : EmojiPicker2Layout.sectionHeaderHeight
+    )
   }
 }
 
 extension EmojiPicker2RootView: EmojiPicker2CollectionViewHoverDelegate {
   func emojiPicker2CollectionView(_ collectionView: EmojiPicker2CollectionView, didHoverAt point: NSPoint?) {
-    guard collectionView === self.collectionView, let point else {
-      updateHoveredIndexPath(nil)
+    guard collectionView === self.collectionView else { return }
+    guard let point else {
+      if highlightSource == .mouse { setHighlight(nil, source: .mouse) }
       return
     }
 
-    updateHoveredIndexPath(collectionView.indexPathForItem(at: point))
+    // Exiting the grid keeps a keyboard highlight; moving over an emoji takes over.
+    if let indexPath = collectionView.indexPathForItem(at: point) {
+      setHighlight(indexPath, source: .mouse)
+    } else if highlightSource == .mouse {
+      setHighlight(nil, source: .mouse)
+    }
   }
 }
 
-private final class EmojiPicker2SearchField: NSSearchField {
-  override func cancelOperation(_ sender: Any?) {
-    stringValue = ""
-    sendAction(action, to: target)
-  }
-}
+private final class EmojiPicker2SearchField: NSSearchField {}
 
 private final class EmojiPicker2ScrollView: NSScrollView {
   var didScroll: (() -> Void)?
+  var didScrollWheel: (() -> Void)?
 
   override func scrollWheel(with event: NSEvent) {
-    didScroll?()
+    didScrollWheel?()
     super.scrollWheel(with: event)
   }
 
@@ -811,7 +1043,7 @@ private final class EmojiPicker2CollectionItem: NSCollectionViewItem {
       image: nil,
       accessibilityLabel: nil,
       toolTip: nil,
-      isHovered: false,
+      isHighlighted: false,
       displayScale: EmojiPicker2Layout.defaultImageScale
     )
   }
@@ -819,7 +1051,7 @@ private final class EmojiPicker2CollectionItem: NSCollectionViewItem {
   func configure(
     with item: EmojiPickerItem,
     image: CGImage?,
-    isHovered: Bool,
+    isHighlighted: Bool,
     displayScale: CGFloat
   ) {
     let hint = ":\(item.shortcode):"
@@ -828,13 +1060,13 @@ private final class EmojiPicker2CollectionItem: NSCollectionViewItem {
       image: image,
       accessibilityLabel: "\(item.label), \(hint)",
       toolTip: hint,
-      isHovered: isHovered,
+      isHighlighted: isHighlighted,
       displayScale: displayScale
     )
   }
 
-  func setHovered(_ isHovered: Bool) {
-    cellView?.setHovered(isHovered)
+  func setHighlighted(_ isHighlighted: Bool) {
+    cellView?.setHighlighted(isHighlighted)
   }
 }
 
@@ -842,7 +1074,7 @@ private final class EmojiPicker2CellView: NSView {
   private let imageLayer = CALayer()
   private var emoji = ""
   private var hasImage = false
-  private var isHovering = false
+  private var isHighlighted = false
 
   override var isFlipped: Bool {
     true
@@ -862,7 +1094,7 @@ private final class EmojiPicker2CellView: NSView {
     super.viewDidMoveToWindow()
 
     if window == nil {
-      setHovered(false)
+      setHighlighted(false)
     }
   }
 
@@ -898,7 +1130,7 @@ private final class EmojiPicker2CellView: NSView {
     image: CGImage?,
     accessibilityLabel: String?,
     toolTip: String?,
-    isHovered: Bool,
+    isHighlighted: Bool,
     displayScale: CGFloat
   ) {
     if self.emoji != emoji {
@@ -908,7 +1140,7 @@ private final class EmojiPicker2CellView: NSView {
     updateImage(image, displayScale: displayScale)
     setAccessibilityLabel(accessibilityLabel)
     self.toolTip = toolTip
-    setHovered(isHovered)
+    setHighlighted(isHighlighted)
   }
 
   func updateImage(_ image: CGImage?, displayScale: CGFloat) {
@@ -925,16 +1157,17 @@ private final class EmojiPicker2CellView: NSView {
     }
   }
 
-  func setHovered(_ isHovered: Bool) {
-    guard isHovering != isHovered else { return }
+  func setHighlighted(_ isHighlighted: Bool) {
+    guard self.isHighlighted != isHighlighted else { return }
 
-    isHovering = isHovered
+    self.isHighlighted = isHighlighted
     updateBackground()
   }
 
   private func setupView() {
     wantsLayer = true
     layer?.cornerRadius = EmojiPicker2Layout.itemCornerRadius
+    layer?.cornerCurve = .continuous
     setAccessibilityRole(.button)
 
     imageLayer.contentsGravity = .resizeAspect
@@ -966,8 +1199,9 @@ private final class EmojiPicker2CellView: NSView {
   }
 
   private func updateBackground() {
-    let color = isHovering
-      ? NSColor.labelColor.resolvedColor(with: effectiveAppearance).withAlphaComponent(0.08)
+    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let color = isHighlighted
+      ? NSColor.labelColor.resolvedColor(with: effectiveAppearance).withAlphaComponent(isDark ? 0.14 : 0.09)
       : NSColor.clear
     layer?.backgroundColor = color.cgColor
   }
@@ -999,11 +1233,14 @@ private final class EmojiPicker2HeaderView: NSView {
 
   override func layout() {
     super.layout()
+    let inset = EmojiPicker2Layout.collectionSectionInset(for: bounds.width).left
+      + EmojiPicker2Layout.sectionHeaderTextInset
+    let height = ceil(label.intrinsicContentSize.height)
     label.frame = NSRect(
-      x: EmojiPicker2Layout.sectionHeaderHorizontalInset,
-      y: 5,
-      width: max(0, bounds.width - EmojiPicker2Layout.sectionHeaderHorizontalInset * 2),
-      height: max(0, bounds.height - 8)
+      x: inset,
+      y: EmojiPicker2Layout.sectionHeaderBottomPadding,
+      width: max(0, bounds.width - inset * 2),
+      height: height
     )
   }
 
@@ -1015,7 +1252,7 @@ private final class EmojiPicker2HeaderView: NSView {
     wantsLayer = true
     layer?.backgroundColor = NSColor.clear.cgColor
 
-    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.font = .systemFont(ofSize: 11, weight: .semibold)
     label.textColor = .secondaryLabelColor
     label.lineBreakMode = .byTruncatingTail
     addSubview(label)
@@ -1088,6 +1325,16 @@ private final class EmojiPicker2BarView: NSView {
 private final class EmojiPicker2CategoryButton: NSButton {
   let categoryIndex: Int
 
+  var isActive = false {
+    didSet {
+      guard isActive != oldValue else { return }
+      updateAppearance()
+    }
+  }
+
+  private var isHovering = false
+  private var hoverTrackingArea: NSTrackingArea?
+
   init(categoryIndex: Int) {
     self.categoryIndex = categoryIndex
     super.init(frame: .zero)
@@ -1106,16 +1353,59 @@ private final class EmojiPicker2CategoryButton: NSButton {
     imagePosition = symbol == nil ? .noImage : .imageOnly
   }
 
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
+    }
+    let area = NSTrackingArea(
+      rect: .zero,
+      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+      owner: self,
+      userInfo: nil
+    )
+    hoverTrackingArea = area
+    addTrackingArea(area)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    isHovering = true
+    updateAppearance()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    isHovering = false
+    updateAppearance()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
+  }
+
   private func setupView() {
     bezelStyle = .rounded
     setButtonType(.momentaryPushIn)
     imagePosition = .imageOnly
     imageScaling = .scaleProportionallyDown
     isBordered = false
-    showsBorderOnlyWhileMouseInside = true
     focusRingType = .none
+    wantsLayer = true
+    layer?.cornerRadius = 7
+    layer?.cornerCurve = .continuous
     setAccessibilityRole(.button)
-    contentTintColor = .secondaryLabelColor
+    updateAppearance()
+  }
+
+  private func updateAppearance() {
+    contentTintColor = isActive ? .labelColor : .secondaryLabelColor
+    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let alpha: CGFloat = isActive ? (isDark ? 0.14 : 0.09) : (isHovering ? (isDark ? 0.08 : 0.05) : 0)
+    layer?.backgroundColor = NSColor.labelColor
+      .resolvedColor(with: effectiveAppearance)
+      .withAlphaComponent(alpha)
+      .cgColor
+    setAccessibilityValue(isActive ? "selected" : nil)
   }
 }
 
@@ -1138,6 +1428,7 @@ private struct EmojiPicker2CategoryTab: Hashable {
 
   private static func symbolName(for id: String) -> String {
     switch id {
+    case "frequent": return "clock"
     case "smileys": return "face.smiling"
     case "people": return "hand.raised"
     case "animals": return "leaf"
@@ -1153,6 +1444,7 @@ private struct EmojiPicker2CategoryTab: Hashable {
 
   private static func fallback(for id: String) -> String {
     switch id {
+    case "frequent": return "recent"
     case "smileys": return ":)"
     case "people": return "hand"
     case "animals": return "leaf"
@@ -1309,27 +1601,30 @@ private final class EmojiPicker2ImageCache: @unchecked Sendable {
 
 private enum EmojiPicker2Layout {
   static let width: CGFloat = 320
-  static let height: CGFloat = 380
+  static let height: CGFloat = 372
   static let searchHeight: CGFloat = 24
-  static let searchBarHeight: CGFloat = 42
-  static let searchHorizontalPadding: CGFloat = 14
-  static let categoryBarHeight: CGFloat = 38
-  static let categoryHorizontalPadding: CGFloat = 10
+  static let searchBarHeight: CGFloat = 44
+  static let searchHorizontalPadding: CGFloat = 12
+  static let categoryBarHeight: CGFloat = 36
+  static let categoryHorizontalPadding: CGFloat = 8
   static let categoryButtonSize: CGFloat = 26
-  static let categoryButtonSpacing: CGFloat = 6
   static let itemSize: CGFloat = 34
-  static let itemSpacing: CGFloat = 7
-  static let itemCornerRadius: CGFloat = 7
+  static let itemSpacing: CGFloat = 2
+  static let itemCornerRadius: CGFloat = 8
   static let emojiImageSize: CGFloat = 30
   static let defaultImageScale: CGFloat = 2
   static let emojiFontSize: CGFloat = 25
-  static let sectionHeaderHeight: CGFloat = 31
-  static let sectionHeaderHorizontalInset: CGFloat = 18
-  static let preferredColumnCount = 7
-  static let minCollectionHorizontalInset: CGFloat = 17
-  static let collectionTopInset: CGFloat = 7
-  static let collectionBottomInset: CGFloat = 16
+  static let sectionHeaderHeight: CGFloat = 28
+  static let sectionHeaderTextInset: CGFloat = 4
+  static let sectionHeaderBottomPadding: CGFloat = 4
+  static let preferredColumnCount = 8
+  static let minCollectionHorizontalInset: CGFloat = 12
+  static let collectionTopInset: CGFloat = 0
+  static let collectionBottomInset: CGFloat = 8
+  static let searchResultsTopInset: CGFloat = 8
   static let emojiBaselineAdjustment: CGFloat = -1
+  static let frequentlyUsedLimit = 16
+  static let searchResultLimit = 160
   static var emojiFont: NSFont {
     NSFont(name: "AppleColorEmoji", size: emojiFontSize) ?? .systemFont(ofSize: emojiFontSize)
   }

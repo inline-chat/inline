@@ -3078,6 +3078,7 @@ extension LegacyComposeAppKit: ComposeAutocompleteMenuDelegate {
 
       case let .emoji(value, _):
         let preferredValue = AppSettings.shared.preferredEmojiSkinTone.applying(to: value)
+        ComposeEmojiAutocompleteProvider.recordSelection(preferredValue)
         let result = emojiAutocompleteDetector.replaceEmojiAutocomplete(
           in: textEditor.attributedString,
           range: match.range,

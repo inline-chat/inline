@@ -15,6 +15,8 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
   private let paletteScrollView = ComposeAutocompleteScrollView()
   private let paletteLayout = NSCollectionViewFlowLayout()
   private let collectionView = ComposeAutocompleteCollectionView()
+  /// Names the selected emoji, so Return's target is readable at a glance.
+  private let paletteHintLabel = NSTextField(labelWithString: "")
   private let surfaceView: ComposeCompletionSurfaceView
 
   private var items: [ComposeAutocompleteItem] = []
@@ -41,8 +43,11 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
     static let paletteItemSize: CGFloat = 34
     static let paletteHeight: CGFloat = 42
     static let paletteSpacing: CGFloat = 0
-    static let paletteHorizontalInset: CGFloat = 6
+    static let paletteHorizontalInset: CGFloat = 4
     static let paletteVerticalInset: CGFloat = 4
+    static let paletteHintTrailingInset: CGFloat = 16
+    static let paletteHintSpacing: CGFloat = 8
+    static let paletteHintMaxWidthFraction: CGFloat = 0.4
   }
 
   init(surfaceStyle: ComposeCompletionSurfaceStyle) {
@@ -215,6 +220,17 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
     paletteScrollView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(paletteScrollView)
 
+    paletteHintLabel.font = .systemFont(ofSize: 12, weight: .medium)
+    paletteHintLabel.textColor = .secondaryLabelColor
+    paletteHintLabel.alignment = .right
+    paletteHintLabel.lineBreakMode = .byTruncatingMiddle
+    paletteHintLabel.maximumNumberOfLines = 1
+    paletteHintLabel.setContentHuggingPriority(.required, for: .horizontal)
+    paletteHintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    paletteHintLabel.setAccessibilityElement(false)
+    paletteHintLabel.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(paletteHintLabel)
+
     // The host's horizontal anchors own width. A preferred menu width feeds
     // back into the chat's SwiftUI/AppKit fitting size, even while hidden.
     heightConstraint = heightAnchor.constraint(equalToConstant: 0)
@@ -229,9 +245,18 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
       scrollView.topAnchor.constraint(equalTo: topAnchor),
       scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
       paletteScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      paletteScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      paletteScrollView.trailingAnchor.constraint(
+        equalTo: paletteHintLabel.leadingAnchor,
+        constant: -Layout.paletteHintSpacing
+      ),
       paletteScrollView.topAnchor.constraint(equalTo: topAnchor),
       paletteScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      paletteHintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Layout.paletteHintTrailingInset),
+      paletteHintLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+      paletteHintLabel.widthAnchor.constraint(
+        lessThanOrEqualTo: widthAnchor,
+        multiplier: Layout.paletteHintMaxWidthFraction
+      ),
     ]
 
     NSLayoutConstraint.activate(constraints)
@@ -259,9 +284,11 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
     case .list:
       scrollView.isHidden = false
       paletteScrollView.isHidden = true
+      paletteHintLabel.isHidden = true
     case .emojiPalette:
       scrollView.isHidden = true
       paletteScrollView.isHidden = false
+      paletteHintLabel.isHidden = false
     }
     updateLayerGeometry()
     updateBackdropAppearance()
@@ -295,8 +322,9 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
       }
     case .emojiPalette:
       let indexPath = IndexPath(item: selectedIndex, section: 0)
-      collectionView.scrollToItems(at: [indexPath], scrollPosition: .centeredHorizontally)
+      scrollPaletteItemToVisible(indexPath)
       paletteScrollView.hideScrollers()
+      paletteHintLabel.stringValue = items[selectedIndex].title
 
       for visibleIndexPath in collectionView.indexPathsForVisibleItems() {
         if let item = collectionView.item(at: visibleIndexPath) as? ComposeEmojiAutocompletePaletteItem {
@@ -304,6 +332,30 @@ final class ComposeAutocompleteMenu: ComposeCompletionMenuView {
         }
       }
     }
+  }
+
+  /// Scrolls only when the selection leaves the visible strip, so arrowing doesn't shift every emoji.
+  private func scrollPaletteItemToVisible(_ indexPath: IndexPath) {
+    guard let frame = paletteLayout.layoutAttributesForItem(at: indexPath)?.frame else {
+      collectionView.scrollToItems(at: [indexPath], scrollPosition: .centeredHorizontally)
+      return
+    }
+
+    let clipView = paletteScrollView.contentView
+    let visible = clipView.bounds
+    let padding = Layout.paletteHorizontalInset
+    var x = visible.minX
+    if frame.minX - padding < visible.minX {
+      x = frame.minX - padding
+    } else if frame.maxX + padding > visible.maxX {
+      x = frame.maxX + padding - visible.width
+    } else {
+      return
+    }
+
+    let maxX = max(0, collectionView.frame.width - visible.width)
+    clipView.scroll(to: NSPoint(x: min(maxX, max(0, x)), y: visible.minY))
+    paletteScrollView.reflectScrolledClipView(clipView)
   }
 
   private func updateBackdropAppearance() {
