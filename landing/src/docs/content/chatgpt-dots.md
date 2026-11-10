@@ -119,8 +119,15 @@ bot. Check on it with `docker compose run --rm dots status` or `logs`.
 - **"Codex is not signed in"** or **"sign-in needed"** in `/status`: run
   `codex login` as the same user the bridge runs as, then
   `inline bridge restart`.
-- **"this ChatGPT account has no Dot yet"**: create the Dot in ChatGPT, or
-  sign Codex in to the account that has it.
+- **"ChatGPT has no Dot for this account here"**: create the Dot in ChatGPT,
+  or sign Codex in to the account that has it. If you already have one, see
+  the next item.
+- **"ChatGPT isn't returning your Dot from this location"**: Dots isn't
+  offered everywhere, and ChatGPT judges by where the bridge's connection
+  exits, including a VPN. The bridge keeps your messages queued and sends
+  them once Dots answers again; switch the VPN or the machine's network to a
+  supported location. On a remote machine, run the bridge somewhere Dots is
+  offered.
 - **"ChatGPT served a browser challenge"**: ChatGPT blocked the request. The
   bridge does not work around this; try again later.
 - `inline bridge status`, `inline bridge doctor`, and `inline bridge logs`
