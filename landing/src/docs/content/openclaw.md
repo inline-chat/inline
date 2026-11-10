@@ -12,7 +12,8 @@ inline agents setup --target openclaw
 The command checks the installed OpenClaw version before creating a bot, installs
 the matching trusted plugin, restarts the gateway, and only reports ready after a
 live Inline probe. If it stops, the error includes the failed phase and retry
-command; no failed or partial run is reported as ready.
+command. If Inline is already installed, start the gateway for that profile
+before retrying setup. The live probe identifies the existing bot.
 
 ## Install
 
@@ -95,17 +96,23 @@ Open a DM with the bot, complete pairing, and verify it works.
 
 ## Update
 
-Ask OpenClaw to update the tracked Inline plugin:
+On OpenClaw `2026.11.1` and newer, check the tracked selection with
+`openclaw plugins update inline --dry-run`. An exact install keeps its version
+pin. To switch that install to the latest stable release, use
+`openclaw plugins update @inline-openclaw/inline@latest --accept-capabilities`
+as the update command below. Keep the compatible pin on older hosts.
+
+After active turns finish, update the same gateway profile from the host:
 
 ```bash
+openclaw gateway stop
 openclaw plugins update inline --accept-capabilities
+openclaw gateway start
+openclaw channels status --channel inline --probe --json
 ```
 
-Restart after active work finishes:
-
-```bash
-openclaw gateway restart
-```
+For a foreground gateway, stop and relaunch the foreground process. For a named
+profile, pass `--profile <name>` before each subcommand.
 
 ## Checks
 
