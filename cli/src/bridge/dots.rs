@@ -593,7 +593,7 @@ pub(crate) async fn run_dots_relay(
     relay.recover().await?;
 
     let (stop, stopped) = tokio::sync::watch::channel(false);
-    let remote = {
+    let mut remote = {
         let relay = relay.clone();
         tokio::spawn(async move { relay.run_remote(stopped).await })
     };
@@ -605,9 +605,11 @@ pub(crate) async fn run_dots_relay(
             Some(inline_relay::ConnectorHealth::NeedsLogin(detail)) => {
                 readiness.mark_needs_setup(&installation_id, &format!("ChatGPT: {detail}"))
             }
-            // Degraded still relays (polling, or a paused Dot); `/status`
-            // in the DM shows the detail.
-            _ => readiness.mark_ready(&installation_id),
+            Some(inline_relay::ConnectorHealth::Degraded(detail)) => {
+                readiness.mark_restarting_with_detail(&installation_id, detail)
+            }
+            Some(inline_relay::ConnectorHealth::Ready) => readiness.mark_ready(&installation_id),
+            None => readiness.mark_restarting(&installation_id),
         }
     };
     report(&health.borrow());
@@ -616,12 +618,36 @@ pub(crate) async fn run_dots_relay(
         installation.bot_username
     );
 
+    let mut remote_delay = Duration::from_secs(3);
     let result: Result<(), Box<dyn std::error::Error>> = loop {
         tokio::select! {
             _ = super::wait_for_standalone_termination(standalone_runtime) => break Ok(()),
             _ = super::setup::wait_for_control_shutdown(&mut external_shutdown) => break Ok(()),
+            outcome = &mut remote => {
+                match outcome {
+                    Ok(Ok(())) => log::warn!(target: "inline::bridge::dots", "remote worker ended unexpectedly"),
+                    Ok(Err(error)) => log::warn!(target: "inline::bridge::dots", "remote worker failed: {error}"),
+                    Err(error) => log::warn!(target: "inline::bridge::dots", "remote worker task failed: {error}"),
+                }
+                relay.set_connector_health(inline_relay::ConnectorHealth::Degraded("remote worker stopped; reconnecting".into()));
+                report(&health.borrow());
+                let relay = relay.clone();
+                let mut stopped = stop.subscribe();
+                let delay = remote_delay;
+                remote = tokio::spawn(async move {
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {}
+                        _ = stopped.changed() => return Ok(()),
+                    }
+                    relay.run_remote(stopped).await
+                });
+                remote_delay = (remote_delay * 2).min(Duration::from_secs(60));
+            }
             changed = health.changed() => {
                 if changed.is_ok() {
+                    if matches!(health.borrow().connector, Some(inline_relay::ConnectorHealth::Ready)) {
+                        remote_delay = Duration::from_secs(3);
+                    }
                     report(&health.borrow());
                 }
             }
@@ -647,14 +673,18 @@ pub(crate) async fn run_dots_relay(
                     tokio::time::sleep(Duration::from_secs(2)).await;
                     continue;
                 }
-                delivery.ack().await?;
+                if let Err(error) = delivery.ack().await { break Err(error.into()); }
             }
         }
     };
     let _ = stop.send(true);
-    match tokio::time::timeout(Duration::from_secs(10), remote).await {
+    match tokio::time::timeout(Duration::from_secs(10), &mut remote).await {
         Ok(Ok(Err(error))) => log::warn!(target: "inline::bridge::dots", "relay stopped: {error}"),
         Ok(Err(error)) => log::warn!(target: "inline::bridge::dots", "relay task failed: {error}"),
+        Err(_) => {
+            remote.abort();
+            let _ = remote.await;
+        }
         _ => {}
     }
     bot.shutdown().await?;
@@ -811,5 +841,92 @@ mod tests {
     fn images_upload_as_photos() {
         assert_eq!(media_kind("image/png"), MediaKind::Photo);
         assert_eq!(media_kind("application/pdf"), MediaKind::Document);
+    }
+}
+
+#[cfg(test)]
+mod packaging_tests {
+    // Evaluate the globs used by these context filters, including directory
+    // exclusions and ordered negation. No Docker daemon is needed.
+    fn included(path: &str, rules: &str) -> bool {
+        let mut included = true;
+        for line in rules
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        {
+            let (allow, pattern) = line.strip_prefix('!').map_or((false, line), |p| (true, p));
+            let pattern = pattern.trim_matches('/');
+            let mut regex = String::from("^");
+            if !pattern.contains('/') && pattern != "**" {
+                regex.push_str("(?:.*/)?");
+            }
+            let mut chars = pattern.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '*' if chars.peek() == Some(&'*') => {
+                        chars.next();
+                        if chars.peek() == Some(&'/') {
+                            chars.next();
+                            regex.push_str("(?:.*/)?");
+                        } else {
+                            regex.push_str(".*");
+                        }
+                    }
+                    '*' => regex.push_str("[^/]*"),
+                    '?' => regex.push_str("[^/]"),
+                    c => regex.push_str(&regex::escape(&c.to_string())),
+                }
+            }
+            regex.push_str("(?:/.*)?$");
+            if regex::Regex::new(&regex).unwrap().is_match(path) {
+                included = allow;
+            }
+        }
+        included
+    }
+
+    #[test]
+    fn dots_docker_context_keeps_rust_inputs_and_excludes_local_artifacts() {
+        let rules = include_str!("../../packaging/dots/Dockerfile.dockerignore");
+        let root_rules = include_str!("../../../.dockerignore");
+        assert!(
+            !included("cli/Cargo.toml", root_rules),
+            "the root filter excludes the CLI"
+        );
+        for path in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            "cli/Cargo.toml",
+            "cli/build.rs",
+            "cli/src/main.rs",
+            "cli/assets/provider-avatars/dots.png",
+            "cli/packaging/dots/entrypoint.sh",
+            "cli/src/bridge/adapter_locks/amp/dist/index.js",
+            "crates/dots/src/client.rs",
+            "crates/relay/src/store.rs",
+            "vendor/agent-client-protocol/Cargo.toml",
+            "proto/core.proto",
+            "skills/inline/SKILL.md",
+            "skills/inline/agents/openai.yaml",
+            "skills/inline/references/inline-cli.md",
+        ] {
+            assert!(
+                included(path, rules),
+                "required build input excluded: {path}"
+            );
+        }
+        for path in [
+            "target/debug/inline",
+            "cli/target/debug/inline",
+            "cli/node_modules/package/index.js",
+            ".git/config",
+            "cli/.env",
+            "crates/relay/state.sqlite",
+            "cli/debug.log",
+        ] {
+            assert!(!included(path, rules), "local artifact included: {path}");
+        }
     }
 }

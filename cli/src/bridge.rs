@@ -285,24 +285,13 @@ pub async fn setup_provider(
         if result.background_service == "restart_required" {
             println!(
                 "No service was installed. Start the bridge with: inline bridge run --config {}",
-                shell_quote(&outcome.config_path.display().to_string())
+                crate::intro::quote_argument(&outcome.config_path.display().to_string())
             );
         } else if let Some(hint) = service::setup_lifecycle_hint() {
             println!("{hint}");
         }
     }
     Ok(())
-}
-
-fn shell_quote(value: &str) -> String {
-    if value
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "/._-~".contains(c))
-    {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
-    }
 }
 
 pub(crate) async fn setup_provider_core(
