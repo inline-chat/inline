@@ -15938,6 +15938,26 @@ describe("inline/monitor durable inbound recovery", () => {
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   })
 
+  it.each([true, false])("applies dropPendingOnColdBoot=%s to replayed widget actions", async (dropPendingOnColdBoot) => {
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    const action = { kind: "message.action.invoke" as const, chatId: 7n, messageId: 991n, actorUserId: 42n,
+      actionId: "chart", data: new Uint8Array(), widgetCall: { name: "select", payload: new Uint8Array() } }
+    const harness = await setupMonitorHarness({
+      events: [{ ...action, interactionId: 21n, date: now - 120n }, { ...action, interactionId: 22n, date: now }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      historyByChat: { "7": [{ id: 991n, date: now - 180n, fromId: 777n, message: "Chart" }] },
+      dispatchReplyPayload: { text: "Selected." },
+    })
+    const handle = await start(harness, { dropPendingOnColdBoot })
+    try {
+      await handle.done
+      expect(harness.calls.answerMessageAction.mock.calls.map(([input]) => input.interactionId)).toEqual(
+        dropPendingOnColdBoot ? [22n] : [21n, 22n],
+      )
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(dropPendingOnColdBoot ? 1 : 2)
+    } finally { await handle.stop() }
+  })
+
   it("recovers accepted pending input even when cold boot drops old unaccepted server events", async () => {
     const harness = await setupMonitorHarness({ events: [], chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } } })
     const inbox = await InlineInboundInbox.open(harness.stateDir, identity)

@@ -270,6 +270,7 @@ const INLINE_PROCESS_STARTED_AT_SECONDS = Date.now() / 1000
 const INLINE_COLD_BOOT_CLOCK_SKEW_SECONDS = 60
 const INLINE_COLD_BOOT_DROP_LOG_INTERVAL_MS = 60_000
 const INLINE_COLD_BOOT_GATED_EVENTS = new Set([
+  "message.action.invoke",
   "message.new",
   "message.edit",
   "reaction.add",
