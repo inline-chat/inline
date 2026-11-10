@@ -1087,6 +1087,9 @@ extension AppDelegate {
           log.warning("Failed to resolve notification conversation")
           return
         }
+        // A notification opens where the news is, as Telegram: at the unread line or the latest
+        // messages, never back at a saved reading place.
+        ChatReadingPlaceStore.shared.clear(for: peerId)
         self.openChat(peer: peerId, targetMessageId: target.focusMessageID)
         guard !Task.isCancelled, MessageNotificationAccount.isCurrent(account) else { return }
         await self.unarchiveIfNeeded(peer: peerId)
