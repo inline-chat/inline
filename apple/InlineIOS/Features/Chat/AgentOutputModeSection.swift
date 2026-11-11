@@ -1,13 +1,21 @@
 import InlineKit
 import SwiftUI
 
-/// Output in a chat's Agent Settings: one row for this thread, its menu
-/// holding the agent's default as a submenu, like on Mac. Shown for agents
-/// that report a runtime or declare the Output capability. The sheet loads
-/// the values (`loadOutputModes`).
+/// Output in a chat's Agent Settings and in a bot's chat info: one row for
+/// this thread, its menu holding the agent's default as a submenu, like on
+/// Mac. Shown for agents that report a runtime or declare the Output
+/// capability. The caller loads the values (`loadOutputModes`).
 struct AgentOutputModeSection: View {
+  enum Style {
+    /// A form section with the summary as its footer.
+    case formSection
+    /// Rows inside a chat info card, like Notifications.
+    case card
+  }
+
   let peer: Peer
   let botUserID: Int64
+  var style: Style = .formSection
 
   @ObservedObject private var store = AgentWorkStateStore.shared
   @ObservedObject private var grants = AgentGrantStore.shared
@@ -19,47 +27,73 @@ struct AgentOutputModeSection: View {
   }
 
   var body: some View {
-    let defaultMode = store.defaultOutputMode(botUserID: botUserID)
-    let threadMode = store.outputModeOverride(peer: peer, botUserID: botUserID)
-    let defaultTitle = String(localized: "Default (\(defaultMode.title))")
-    Section {
-      Menu {
-        option(defaultTitle, isSelected: threadMode == nil) { setThreadMode(nil) }
-        Divider()
-        ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
-          option(mode.title, description: mode.summary, isSelected: threadMode == mode) { setThreadMode(mode) }
+    Group {
+      switch style {
+      case .formSection:
+        Section {
+          menu
+        } footer: {
+          footer
         }
-        Divider()
-        Menu("Agent Default") {
-          ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
-            option(mode.title, description: mode.summary, isSelected: defaultMode == mode) { setDefaultMode(mode) }
-          }
-        }
-      } label: {
-        LabeledContent("Output") {
-          HStack(spacing: 6) {
-            if isUpdating { ProgressView() }
-            Text(threadMode?.title ?? defaultTitle)
-            if canConfigure {
-              Image(systemName: "chevron.up.chevron.down")
-                .font(.caption2.weight(.semibold))
-            }
-          }
-        }
-        .foregroundStyle(.primary)
-      }
-      .disabled(!canConfigure || isUpdating)
-      .accessibilityLabel("Output")
-      .accessibilityValue(threadMode?.title ?? defaultTitle)
-    } footer: {
-      if canConfigure {
-        Text((threadMode ?? defaultMode).summary)
-      } else {
-        Label("Only the agent’s owner can change how it replies.", systemImage: "lock")
+      case .card:
+        menu
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+        footer
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 16)
+          .padding(.bottom, 12)
       }
     }
     .task(id: botUserID) {
       grants.ensureLoaded(botUserID: botUserID)
+    }
+  }
+
+  private var menu: some View {
+    let defaultMode = store.defaultOutputMode(botUserID: botUserID)
+    let threadMode = store.outputModeOverride(peer: peer, botUserID: botUserID)
+    let defaultTitle = String(localized: "Default (\(defaultMode.title))")
+    return Menu {
+      option(defaultTitle, isSelected: threadMode == nil) { setThreadMode(nil) }
+      Divider()
+      ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
+        option(mode.title, description: mode.summary, isSelected: threadMode == mode) { setThreadMode(mode) }
+      }
+      Divider()
+      Menu("Agent Default") {
+        ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
+          option(mode.title, description: mode.summary, isSelected: defaultMode == mode) { setDefaultMode(mode) }
+        }
+      }
+    } label: {
+      LabeledContent("Output") {
+        HStack(spacing: 6) {
+          if isUpdating { ProgressView() }
+          Text(threadMode?.title ?? defaultTitle)
+            .foregroundStyle(style == .card ? .secondary : .primary)
+          if canConfigure {
+            Image(systemName: "chevron.up.chevron.down")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(style == .card ? .tertiary : .primary)
+          }
+        }
+      }
+      .foregroundStyle(.primary)
+    }
+    .disabled(!canConfigure || isUpdating)
+    .accessibilityLabel("Output")
+    .accessibilityValue(threadMode?.title ?? defaultTitle)
+  }
+
+  @ViewBuilder
+  private var footer: some View {
+    if canConfigure {
+      Text(store.outputMode(peer: peer, botUserID: botUserID).summary)
+    } else {
+      Label("Only the agent’s owner can change how it replies.", systemImage: "lock")
     }
   }
 
