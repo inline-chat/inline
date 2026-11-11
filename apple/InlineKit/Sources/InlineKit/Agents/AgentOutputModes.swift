@@ -31,11 +31,33 @@ public extension AgentWorkStateStore {
   }
 
   /// The bot's settings, plus whether a bot without a runtime declares the
-  /// Output setting, for its profile in Settings. Bots declare capabilities
-  /// per chat, so this reads them in the owner's chat with the bot.
+  /// Output setting, for its profile in Settings.
   func loadBotSettings(botUserID: Int64) async {
     guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
     await loadAgentSettings(botUserID: botUserID, owner: owner)
+    await loadOutputModeDeclaration(botUserID: botUserID, owner: owner)
+  }
+
+  /// The bot's default and this chat's override, for a chat's Agent Settings.
+  func loadOutputModes(peer: Peer, botUserID: Int64) async {
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+    await loadParticipations(peer: peer, owner: owner)
+  }
+
+  /// Everything the Output row in a direct chat's info needs: the bot's
+  /// default, whether a bot without a runtime declares the setting, and this
+  /// chat's override.
+  func loadDirectChatOutputModes(botUserID: Int64) async {
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+    await loadOutputModeDeclaration(botUserID: botUserID, owner: owner)
+    await loadParticipations(peer: .user(id: botUserID), owner: owner)
+  }
+
+  /// Capabilities are per chat, so this reads them in the viewer's direct
+  /// chat with the bot.
+  private func loadOutputModeDeclaration(botUserID: Int64, owner: OutputModeRequestOwner) async {
     guard !runtimeBotUserIDs.contains(botUserID),
           case let .getPeerBots(result)? = try? await callOutputModeRPC(
             method: .getPeerBots,
@@ -49,10 +71,7 @@ public extension AgentWorkStateStore {
     setDeclaresOutputMode(declares, botUserID: botUserID)
   }
 
-  /// The bot's default and this chat's override, for a chat's Agent Settings.
-  func loadOutputModes(peer: Peer, botUserID: Int64) async {
-    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
-    await loadAgentSettings(botUserID: botUserID, owner: owner)
+  private func loadParticipations(peer: Peer, owner: OutputModeRequestOwner) async {
     if case let .getAgentParticipations(result)? = try? await callOutputModeRPC(
       method: .getAgentParticipations,
       input: .getAgentParticipations(.with { $0.peerID = peer.toInputPeer() }),
