@@ -4,8 +4,10 @@ import GRDB
 import InlineProtocol
 import Logger
 
-/// Drives the in-chat @ and ♥ buttons: how many mentions (replies included) and reactions are
+/// Drives the in-chat floating buttons: how many mentions (replies included) and reactions are
 /// unseen, which one to jump to next, and marking each read once it has stayed on screen briefly.
+/// It also carries the dialog's unread count and read marker for the scroll-to-bottom count
+/// (see `ChatUnreadBadgeCount`).
 ///
 /// The message list reports what is visible through `noteVisible(messageIds:)`, only while the
 /// chat is actually being looked at (app active, window key or scene foreground).
@@ -15,8 +17,17 @@ public final class ChatActivityNavigator {
     /// Unseen mentions and replies, as shown on the @ button.
     public var mentionsCount: Int
     public var reactionsCount: Int
+    /// Unread messages, as the server counts them after `readInboxMaxId`.
+    public var unreadCount: Int = 0
+    public var readInboxMaxId: Int64 = 0
+    public var unreadMark = false
 
     public static let empty = State(mentionsCount: 0, reactionsCount: 0)
+
+    /// Whether the @ and ♥ buttons, which take stack slots, changed.
+    public func hasSameActivity(as other: State) -> Bool {
+      mentionsCount == other.mentionsCount && reactionsCount == other.reactionsCount
+    }
   }
 
   public let peerId: Peer
@@ -97,7 +108,10 @@ public final class ChatActivityNavigator {
     let dialog = try Dialog.get(peerId: peerId).fetchOne(db)
     let state = State(
       mentionsCount: max(0, dialog?.unreadMentionsCount ?? 0),
-      reactionsCount: max(0, dialog?.unreadReactionsCount ?? 0)
+      reactionsCount: max(0, dialog?.unreadReactionsCount ?? 0),
+      unreadCount: max(0, dialog?.unreadCount ?? 0),
+      readInboxMaxId: max(0, dialog?.readInboxMaxId ?? 0),
+      unreadMark: dialog?.unreadMark == true
     )
     return Snapshot(state: state, items: try ChatActivityItem.unread(chatId: chatId).fetchAll(db))
   }
