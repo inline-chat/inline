@@ -12,9 +12,9 @@ import AppKit
 
 /// Reports this device's Focus state while the user shares it with anyone.
 ///
-/// Apple only exposes whether a Focus is on. Without an Intents extension the
-/// app learns about changes when it becomes active, reconnects, and (on macOS,
-/// where the app usually stays running) on a short poll.
+/// Apple only exposes whether a Focus is on. The app reports when it becomes
+/// active, reconnects, and (on macOS, where it usually stays running) on a short
+/// poll. On iOS the Intents extension reports changes while the app is closed.
 @MainActor
 public final class FocusStatusReporter: ObservableObject {
   public static let shared = FocusStatusReporter()
@@ -88,9 +88,14 @@ public final class FocusStatusReporter: ObservableObject {
 
   public func refresh() {
     authorization = INFocusStatusCenter.default.authorizationStatus
+    let sharing = INUserSettings.current.privacy.sharesFocusStatus
+    if let userId = Auth.shared.getCurrentUserId() {
+      // The Intents extension reads this before reporting a change in the background.
+      FocusStatusDirectReport.setSharing(sharing, userId: userId)
+    }
     guard authorization == .authorized,
           Auth.shared.getCurrentUserId() != nil,
-          INUserSettings.current.privacy.sharesFocusStatus,
+          sharing,
           // Nil when the current Focus does not share its status.
           let focused = INFocusStatusCenter.default.focusStatus.isFocused
     else { return }
