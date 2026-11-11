@@ -34,6 +34,13 @@ type InlineSdkClientCommonOptions = {
   logger?: InlineSdkLogger
   state?: InlineSdkStateStore
   catchUpUserFromStart?: boolean
+  /**
+   * Defaults to true. Request/response hosts that never read update history
+   * (for example a per-request MCP owner) set false: the client then skips
+   * update-state discovery, GET_UPDATES catch-up and replay recovery. Live
+   * events are still delivered best-effort, without gap repair.
+   */
+  syncUpdates?: boolean
   transport?: Transport
   fetch?: typeof fetch
   onAuthenticationError?: (error: InlineSdkAuthenticationError) => void

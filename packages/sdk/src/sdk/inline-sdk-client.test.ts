@@ -44,6 +44,47 @@ const irrelevantSkippedSequences = (after: number, through: number, excluding: n
     }))
 }
 
+const userGetUpdatesCalls = (transport: MockTransport) => transport.sent.filter((message) =>
+  message.body.oneofKind === "rpcCall" &&
+  message.body.rpcCall.method === Method.GET_UPDATES &&
+  message.body.rpcCall.input.oneofKind === "getUpdates" &&
+  message.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+)
+
+const getUpdatesStartSeq = (message: (typeof MockTransport.prototype.sent)[number] | undefined) => {
+  if (!message || message.body.oneofKind !== "rpcCall" || message.body.rpcCall.input.oneofKind !== "getUpdates") {
+    throw new Error("missing user getUpdates request")
+  }
+  return message.body.rpcCall.input.getUpdates.startSeq
+}
+
+const answerUpdatesState = async (
+  transport: MockTransport,
+  id: bigint,
+  result: { date: bigint; updatesFound?: boolean; seq?: number },
+) => {
+  await waitFor(() => transport.sent.some((message) =>
+    message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES_STATE))
+  const call = transport.sent.find((message) =>
+    message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES_STATE)
+  if (!call) throw new Error("missing getUpdatesState")
+  await transport.emitMessage(ServerProtocolMessage.create({
+    id,
+    body: { oneofKind: "rpcResult", rpcResult: {
+      reqMsgId: call.id,
+      result: { oneofKind: "getUpdatesState", getUpdatesState: result as any },
+    } },
+  }))
+}
+
+const emitUserHint = (transport: MockTransport, id: bigint, updateSeq: number) =>
+  transport.emitMessage(ServerProtocolMessage.create({
+    id,
+    body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+      update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq } },
+    })] } } } },
+  }))
+
 class MemoryStateStore implements InlineSdkStateStore {
   loaded: InlineSdkState | null
   saved: InlineSdkState[] = []
@@ -2706,6 +2747,9 @@ describe("InlineSdkClient", () => {
     })
 
     await connectAndOpen(client, transport)
+    // The store has no user cursor: discovery supplies the user baseline.
+    await answerUpdatesState(transport, 56n, { date: 1n, updatesFound: false, seq: 1 })
+    await waitFor(() => client.exportState().lastUserSeq === 1)
     const iter = client.events()[Symbol.asyncIterator]()
     await transport.emitMessage(ServerProtocolMessage.create({
       id: 57n,
@@ -2786,7 +2830,7 @@ describe("InlineSdkClient", () => {
               date: 2n,
               resultType: GetUpdatesResult_ResultType.SLICE,
               final: true,
-              skippedSequences: irrelevantSkippedSequences(0, 2, [2]),
+              skippedSequences: irrelevantSkippedSequences(1, 2, [2]),
             },
           },
         },
@@ -6394,6 +6438,189 @@ describe("InlineSdkClient", () => {
     await next
   })
 
+  it("skips update discovery and replay when syncUpdates is false", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      syncUpdates: false,
+    })
+    const syncCalls = () => transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" &&
+      (message.body.rpcCall.method === Method.GET_UPDATES || message.body.rpcCall.method === Method.GET_UPDATES_STATE),
+    )
+
+    await connectAndOpen(client, transport)
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 600n,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [
+        Update.create({ update: { oneofKind: "userHasNewUpdates", userHasNewUpdates: { updateSeq: 900 } } }),
+        Update.create({ update: { oneofKind: "chatHasNewUpdates", chatHasNewUpdates: { chatId: 7n, updateSeq: 40 } } }),
+        Update.create({ update: { oneofKind: "spaceHasNewUpdates", spaceHasNewUpdates: { spaceId: 3n, updateSeq: 12 } } }),
+      ] } } } },
+    }))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(syncCalls()).toHaveLength(0)
+    await client.close()
+  })
+
+  describe("user baseline without a persisted cursor", () => {
+    const statelessClient = (transport: MockTransport, extra: Record<string, unknown> = {}) =>
+      new InlineSdkClient({ baseUrl: "https://api.inline.chat", token: "test-token", transport, ...extra })
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
+    const emitUserAddedToChat = (transport: MockTransport, id: bigint, seq: number) =>
+      transport.emitMessage(ServerProtocolMessage.create({
+        id,
+        body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
+          seq,
+          date: 901n,
+          update: { oneofKind: "userAddedToChat", userAddedToChat: { chatId: 30n } } as any,
+        })] } } } },
+      }))
+
+    it("adopts the discovery frontier and ignores a hint at that frontier", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+      await answerUpdatesState(transport, 700n, { date: 900n, updatesFound: false, seq: 500 })
+      await waitFor(() => client.exportState().lastUserSeq === 500)
+
+      await emitUserHint(transport, 701n, 500)
+      await settle()
+
+      expect(userGetUpdatesCalls(transport)).toHaveLength(0)
+      expect(client.getSyncStatus().state).toBe("live")
+      await client.close()
+    })
+
+    it("catches up a hint above the discovery frontier from that frontier", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+      await answerUpdatesState(transport, 710n, { date: 900n, updatesFound: false, seq: 500 })
+      await waitFor(() => client.exportState().lastUserSeq === 500)
+
+      await emitUserHint(transport, 711n, 500)
+      await emitUserHint(transport, 712n, 503)
+      await waitFor(() => userGetUpdatesCalls(transport).length === 1)
+      await settle()
+
+      expect(userGetUpdatesCalls(transport)).toHaveLength(1)
+      expect(getUpdatesStartSeq(userGetUpdatesCalls(transport)[0])).toBe(500n)
+      await client.close()
+    })
+
+    it("holds a hint that precedes the discovery result instead of reading from 0", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+
+      await emitUserHint(transport, 720n, 500)
+      await settle()
+      expect(userGetUpdatesCalls(transport)).toHaveLength(0)
+
+      await answerUpdatesState(transport, 721n, { date: 900n, updatesFound: true, seq: 502 })
+      await waitFor(() => client.exportState().dateCursor === 900n)
+      await settle()
+
+      expect(userGetUpdatesCalls(transport)).toHaveLength(0)
+      expect(client.exportState().lastUserSeq).toBe(502)
+      expect(client.getSyncStatus().state).toBe("live")
+      await client.close()
+    })
+
+    it("catches up a held hint above the discovery frontier from that frontier", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+
+      await emitUserHint(transport, 725n, 505)
+      await answerUpdatesState(transport, 726n, { date: 900n, updatesFound: true, seq: 502 })
+      await waitFor(() => userGetUpdatesCalls(transport).length === 1)
+      const request = userGetUpdatesCalls(transport)[0]
+      expect(getUpdatesStartSeq(request)).toBe(502n)
+      if (request?.body.oneofKind === "rpcCall" && request.body.rpcCall.input.oneofKind === "getUpdates") {
+        expect(request.body.rpcCall.input.getUpdates.seqEnd).toBe(505n)
+      }
+      await client.close()
+    })
+
+    it("catches up a live userAddedToChat above the baseline from the baseline", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+      await answerUpdatesState(transport, 730n, { date: 900n, updatesFound: false, seq: 500 })
+      await waitFor(() => client.exportState().lastUserSeq === 500)
+
+      await emitUserAddedToChat(transport, 731n, 501)
+      await waitFor(() => userGetUpdatesCalls(transport).length === 1)
+
+      expect(getUpdatesStartSeq(userGetUpdatesCalls(transport)[0])).toBe(500n)
+      await client.close()
+    })
+
+    it("keeps a live userAddedToChat withheld before discovery inside the catch-up", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+
+      await emitUserAddedToChat(transport, 735n, 499)
+      await settle()
+      expect(userGetUpdatesCalls(transport)).toHaveLength(0)
+
+      // The frontier already includes the withheld event; the baseline stays
+      // below it so GET_UPDATES still delivers it.
+      await answerUpdatesState(transport, 736n, { date: 900n, updatesFound: false, seq: 500 })
+      await waitFor(() => userGetUpdatesCalls(transport).length === 1)
+
+      expect(getUpdatesStartSeq(userGetUpdatesCalls(transport)[0])).toBe(498n)
+      await client.close()
+    })
+
+    it("adopts the hinted frontier without replay when discovery is rejected", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport)
+      await connectAndOpen(client, transport)
+      await waitFor(() => transport.sent.some((message) =>
+        message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES_STATE))
+      const call = transport.sent.find((message) =>
+        message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES_STATE)
+      if (!call) throw new Error("missing getUpdatesState")
+      await transport.emitMessage(ServerProtocolMessage.create({
+        id: 740n,
+        body: { oneofKind: "rpcError", rpcError: {
+          reqMsgId: call.id, errorCode: RpcError_Code.BAD_REQUEST, message: "unsupported", code: 400,
+        } },
+      }))
+      await settle()
+
+      await emitUserHint(transport, 741n, 700)
+      await settle()
+      expect(userGetUpdatesCalls(transport)).toHaveLength(0)
+      expect(client.exportState().lastUserSeq).toBe(700)
+
+      await emitUserHint(transport, 742n, 702)
+      await waitFor(() => userGetUpdatesCalls(transport).length === 1)
+      expect(getUpdatesStartSeq(userGetUpdatesCalls(transport)[0])).toBe(700n)
+      await client.close()
+    })
+
+    it("still reads a stateless user bucket from 0 with catchUpUserFromStart", async () => {
+      const transport = new MockTransport()
+      const client = statelessClient(transport, { catchUpUserFromStart: true })
+      await connectAndOpen(client, transport)
+      await emitUserHint(transport, 750n, 503)
+      await answerUpdatesState(transport, 751n, { date: 900n, updatesFound: true, seq: 503 })
+      await waitFor(() => userGetUpdatesCalls(transport).length >= 1)
+
+      expect(getUpdatesStartSeq(userGetUpdatesCalls(transport)[0])).toBe(0n)
+      expect(client.exportState().lastUserSeq).toBeUndefined()
+      await client.close()
+    })
+  })
+
   it("catches up a hinted user frontier before advancing its durable cursor", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
@@ -6616,6 +6843,9 @@ describe("InlineSdkClient", () => {
     })
 
     await connectAndOpen(client, transport)
+    // The store has no user cursor: discovery supplies the user baseline.
+    await answerUpdatesState(transport, 629n, { date: 1n, updatesFound: false, seq: 0 })
+    await waitFor(() => client.exportState().lastUserSeq === 0)
     await transport.emitMessage(ServerProtocolMessage.create({
       id: 630n,
       body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates: [Update.create({
@@ -6653,7 +6883,7 @@ describe("InlineSdkClient", () => {
       await vi.advanceTimersByTimeAsync(0)
 
       expect(client.getSyncStatus().state).toBe("degraded")
-      expect(client.exportState().lastUserSeq).toBeUndefined()
+      expect(client.exportState().lastUserSeq).toBe(0)
       expect((client as any).userCatchUpRequested).toMatchObject({ endSeq: 3, toLatest: false })
 
       // The retained bounded target must start from the actual retry timer.

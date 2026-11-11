@@ -278,6 +278,7 @@ export class InlineSdkClient {
 
   private started = false
   private closed = false
+  private readonly syncUpdates: boolean
   private bucketCatchUpsRunning = 0
   private bucketCatchUpWaiters: Array<() => void> = []
   private openPromise: Promise<void> | null = null
@@ -298,6 +299,15 @@ export class InlineSdkClient {
   private catchUpRequestedBySpaceId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private userCatchUpInFlight: Promise<void> | null = null
   private userCatchUpRequested: { endSeq?: number; toLatest: boolean } | null = null
+  // A client without a user cursor (and without catchUpUserFromStart) never
+  // replays the user bucket from 0. It adopts the discovery frontier as its
+  // baseline; user demand seen before then waits for that baseline.
+  private userDemandAwaitingBaseline = false
+  // Lowest durable live user seq withheld before the baseline was known. The
+  // baseline stays below it so the catch-up still delivers that event.
+  private userBaselineFloor: number | undefined
+  // Discovery could not report a frontier: the next user hint is the baseline.
+  private userBaselineFromHint = false
   private peerResolutionInFlightByChatId = new Map<bigint, Promise<void>>()
   private peerResolutionRequestedByChatId = new Map<bigint, { endSeq?: number; toLatest: boolean }>()
   private recoveryReconnectInFlight: Promise<void> | null = null
@@ -324,6 +334,7 @@ export class InlineSdkClient {
 
   constructor(options: InlineSdkClientOptions) {
     this.options = options
+    this.syncUpdates = options.syncUpdates !== false
     this.log = options.logger ?? noopLogger
 
     this.httpBaseUrl = normalizeHttpBaseUrl(options.baseUrl ?? defaultApiBaseUrl)
@@ -1107,6 +1118,9 @@ export class InlineSdkClient {
   }
 
   private async initializeDateCursor() {
+    // GET_UPDATES_STATE fences writers and scans the account; skip it when
+    // this owner never replays history.
+    if (!this.syncUpdates) return
     if (this.discoveryInFlight) return this.discoveryInFlight
     if (this.discoveryCommitInFlight) return this.discoveryCommitInFlight
     if (this.discoveryRetry?.timer) return
@@ -1136,6 +1150,10 @@ export class InlineSdkClient {
         getUpdatesState: GetUpdatesStateInput.create({ date }),
       }, { timeoutMs: 1500 })
       const state = result.getUpdatesState as typeof result.getUpdatesState & { updatesFound?: boolean }
+      // Every hint sent before this result has already been handled, so a
+      // baseline adopted here cannot skip a hinted range: pending demand above
+      // it is caught up from it, and later hints compare against it.
+      this.settleUserBaselineFromDiscovery(state.seq)
       round.checkpoint = state.date
       round.updatesFound = state.updatesFound
       round.resultReceived = true
@@ -1157,6 +1175,7 @@ export class InlineSdkClient {
           ? "rate_limited" : "discovery_failed", retryAfterMsFromError(error))
       } else {
         this.log.error?.("Sync discovery unavailable", { reason: "request_rejected" })
+        this.fallBackToHintedUserBaseline("discovery_rejected")
       }
     }
   }
@@ -1442,6 +1461,7 @@ export class InlineSdkClient {
       case "userAddedToChat": {
         if (options?.source === "live" && seq > 0) {
           this.fenceLiveCursor({ kind: "user" })
+          this.noteWithheldUserSeq(seq)
           this.registerDiscoveryHint({ kind: "user" }, seq)
           this.requestCatchUpUser(true, seq)
           return Promise.resolve(true)
@@ -1667,6 +1687,7 @@ export class InlineSdkClient {
   }
 
   private prepareLiveEvent(event: InlineInboundEvent): boolean {
+    if (!this.syncUpdates) return true
     const bucket = this.sequencedBucketForEvent(event)
     if (!bucket) return true
 
@@ -1743,6 +1764,7 @@ export class InlineSdkClient {
       : admittedSeq
 
     this.fenceLiveCursor(bucket)
+    if (bucket.kind === "user") this.noteWithheldUserSeq(eventSeq)
     if (updateSeq != null) this.registerDiscoveryHint(bucket, updateSeq)
     this.requestCatchUpForLiveEvent(bucket, event, updateSeq)
     this.log.debug?.("Withheld live update until its bucket converges", {
@@ -1779,7 +1801,8 @@ export class InlineSdkClient {
   }
 
   private requestRecoveryReconnect(cause: string) {
-    if (!this.started || this.recoveryReconnectInFlight) return
+    // Without sync there is no cursor to repair; an overflow drops live events.
+    if (!this.syncUpdates || !this.started || this.recoveryReconnectInFlight) return
     const reconnect = this.protocol.reconnect({ skipDelay: true, cause })
       .catch((error) => {
         this.log.warn?.("Failed to reconnect after inbound event buffer overflow", error)
@@ -1806,6 +1829,7 @@ export class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId })
         return
       case "user":
+        this.noteWithheldUserSeq("seq" in event ? event.seq : undefined)
         this.requestCatchUpUser(true)
         return
     }
@@ -1855,6 +1879,7 @@ export class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...(updateSeq != null ? { updateSeq } : {}) })
         return
       case "user":
+        this.noteWithheldUserSeq(updateSeq)
         this.requestCatchUpUser(true, updateSeq)
         return
     }
@@ -2082,14 +2107,92 @@ export class InlineSdkClient {
   }
 
   private requestCatchUpUser(forceFromStart = false, updateSeq?: number): Promise<void> | null {
-    const lastUserSeq = this.state.lastUserSeq
-    if (lastUserSeq == null && !this.options.catchUpUserFromStart && !forceFromStart) {
-      return null
+    if (!this.syncUpdates) return null
+    if (this.awaitingUserBaseline()) {
+      if (!forceFromStart) return null
+      // Without a cursor this client has no history to repair. Never read from
+      // 0: record the demand and resolve it against the discovery frontier.
+      const hintedBaseline = this.userBaselineFromHint ? updateSeq ?? this.userBaselineFloor : undefined
+      if (hintedBaseline == null) {
+        this.recordUserCatchUpDemand(updateSeq)
+        this.userDemandAwaitingBaseline = true
+        return null
+      }
+      this.adoptUserBaseline(hintedBaseline, "hint")
+      this.resumeUserCatchUpAfterBaseline()
     }
 
-    const cursor = lastUserSeq ?? 0
+    const cursor = this.state.lastUserSeq ?? 0
     if (updateSeq != null && updateSeq <= cursor) return this.userCatchUpInFlight
 
+    this.recordUserCatchUpDemand(updateSeq)
+
+    if (this.userCatchUpInFlight) {
+      return this.userCatchUpInFlight
+    }
+
+    if (this.recoveryRetries.get("user")?.timer) return null
+    this.fenceLiveCursor({ kind: "user" })
+    return this.startUserCatchUp()
+  }
+
+  private awaitingUserBaseline(): boolean {
+    return this.syncUpdates && this.state.lastUserSeq == null && !this.options.catchUpUserFromStart
+  }
+
+  private noteWithheldUserSeq(seq: number | undefined) {
+    if (seq == null || !Number.isSafeInteger(seq) || seq <= 0 || !this.awaitingUserBaseline()) return
+    this.userBaselineFloor = Math.min(this.userBaselineFloor ?? seq, seq)
+  }
+
+  private settleUserBaselineFromDiscovery(frontier: number | undefined) {
+    if (this.awaitingUserBaseline()) {
+      if (frontier == null || !Number.isSafeInteger(frontier) || frontier < 0) {
+        this.fallBackToHintedUserBaseline("discovery_missing_seq")
+        return
+      }
+      this.adoptUserBaseline(frontier, "discovery")
+    }
+    this.resumeUserCatchUpAfterBaseline()
+  }
+
+  private fallBackToHintedUserBaseline(reason: string) {
+    if (!this.awaitingUserBaseline()) return
+    const frontier = this.userCatchUpRequested?.endSeq ?? this.userBaselineFloor
+    this.log.warn?.("Sync discovery reported no user frontier; adopting the hinted frontier without replay", {
+      reason,
+      ...(frontier != null ? { frontier } : {}),
+    })
+    if (frontier == null) {
+      this.userBaselineFromHint = true
+      return
+    }
+    this.adoptUserBaseline(frontier, "hint")
+    this.resumeUserCatchUpAfterBaseline()
+  }
+
+  private adoptUserBaseline(frontier: number, source: "discovery" | "hint") {
+    const floor = this.userBaselineFloor
+    const baseline = Math.max(0, floor != null ? Math.min(frontier, floor - 1) : frontier)
+    this.userBaselineFloor = undefined
+    this.userBaselineFromHint = false
+    this.state.lastUserSeq = baseline
+    this.scheduleStateSave()
+    this.log.debug?.("Adopted user update baseline without replaying history", { source, baseline })
+    this.satisfyDiscoveryThroughCursor({ kind: "user" }, baseline)
+  }
+
+  // Starts demand recorded while the baseline was unknown. A target at or below
+  // the baseline settles without a read.
+  private resumeUserCatchUpAfterBaseline() {
+    if (!this.userDemandAwaitingBaseline) return
+    this.userDemandAwaitingBaseline = false
+    if (!this.userCatchUpRequested || this.userCatchUpInFlight || this.recoveryRetries.get("user")?.timer) return
+    this.fenceLiveCursor({ kind: "user" })
+    void this.startUserCatchUp()
+  }
+
+  private recordUserCatchUpDemand(updateSeq?: number) {
     const previous = this.userCatchUpRequested
     const demandAlreadyCoversHint = updateSeq != null && (previous?.endSeq ?? 0) >= updateSeq
     if (!demandAlreadyCoversHint) {
@@ -2103,14 +2206,6 @@ export class InlineSdkClient {
         toLatest: previous?.toLatest === true || updateSeq == null,
       }
     }
-
-    if (this.userCatchUpInFlight) {
-      return this.userCatchUpInFlight
-    }
-
-    if (this.recoveryRetries.get("user")?.timer) return null
-    this.fenceLiveCursor({ kind: "user" })
-    return this.startUserCatchUp()
   }
 
   private startUserCatchUp(): Promise<void> {
@@ -2262,6 +2357,7 @@ export class InlineSdkClient {
   }
 
   private requestCatchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq?: number }): Promise<void> {
+    if (!this.syncUpdates) return Promise.resolve()
     if (params.peer) this.rememberChatPeer(params.chatId, params.peer)
     this.fenceLiveCursor({ kind: "chat", chatId: params.chatId, peer: params.peer })
     const previous = this.catchUpRequestedByChatId.get(params.chatId)
@@ -2453,6 +2549,7 @@ export class InlineSdkClient {
   }
 
   private requestCatchUpSpace(params: { spaceId: bigint; updateSeq?: number }): Promise<void> {
+    if (!this.syncUpdates) return Promise.resolve()
     this.fenceLiveCursor({ kind: "space", spaceId: params.spaceId })
     const previous = this.catchUpRequestedBySpaceId.get(params.spaceId)
     this.catchUpRequestedBySpaceId.set(params.spaceId, {
@@ -2625,6 +2722,7 @@ export class InlineSdkClient {
   }
 
   private resolvePersistedChatPeer(chatId: bigint, updateSeq?: number): Promise<void> {
+    if (!this.syncUpdates) return Promise.resolve()
     const previous = this.peerResolutionRequestedByChatId.get(chatId)
     this.peerResolutionRequestedByChatId.set(chatId, {
       ...(updateSeq != null || previous?.endSeq != null
