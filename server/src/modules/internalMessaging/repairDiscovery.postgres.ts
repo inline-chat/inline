@@ -16,50 +16,126 @@ const log = new Log("internalMessaging.repairDiscovery")
  * those without chat access. The normal discovery path rechecks authority.
  * SQL returns at most one ID per requested user, irrespective of chat count.
  */
-async function findChangedResourceUsers(requests: readonly RepairDiscoveryRequest[]): Promise<Set<number>> {
+async function findChangedResourceUsers(requests: readonly RepairDiscoveryRequest[], watermark: Date): Promise<Set<number>> {
   const changed = new Set<number>()
+  const horizon = BigInt(Math.floor(watermark.getTime() / 1000)) - CHANGE_DRIVEN_HORIZON_SECONDS
   for (let offset = 0; offset < requests.length; offset += REPAIR_FRONTIER_BATCH_SIZE) {
     const batch = requests.slice(offset, offset + REPAIR_FRONTIER_BATCH_SIZE)
-    // Schema timestamps store UTC without a time zone. Explicit conversion
-    // keeps this comparison independent of the PostgreSQL session time zone.
-    const values = sql.join(batch.map(({ userId, date }) =>
-      sql`(${userId}::integer, to_timestamp(${date.toString()}::double precision) at time zone 'UTC')`), sql`, `)
-    const rows = await db.execute<{ userId: number }>(sql`
-      with requested(user_id, since) as (values ${values})
-      select r.user_id as "userId" from requested r
-      inner join ${chats} on ${chats.minUserId} = r.user_id
-      where ${chats.lastUpdateDate} >= r.since
-      union
-      select r.user_id from requested r
-      inner join ${chats} on ${chats.maxUserId} = r.user_id
-      where ${chats.lastUpdateDate} >= r.since
-      union
-      select r.user_id from requested r
-      inner join ${chatParticipants} on ${chatParticipants.userId} = r.user_id
-      inner join ${chats} on ${chats.id} = ${chatParticipants.chatId}
-      where ${chats.spaceId} is null and ${chats.lastUpdateDate} >= r.since
-      union
-      select r.user_id from requested r
-      inner join ${members} on ${members.userId} = r.user_id
-      inner join ${chats} on ${chats.spaceId} = ${members.spaceId}
-      where ${chats.lastUpdateDate} >= r.since
-      union
-      select r.user_id from requested r
-      inner join ${dialogs} on ${dialogs.userId} = r.user_id
-      inner join ${chats} on ${chats.id} = ${dialogs.chatId}
-      where ${chats.lastUpdateDate} >= r.since
-      union
-      select r.user_id from requested r
-      inner join ${members} on ${members.userId} = r.user_id
-      inner join ${spaces} on ${spaces.id} = ${members.spaceId}
-      where ${spaces.lastUpdateDate} >= r.since
-    `)
-    for (const row of rows) {
-      if (!Number.isSafeInteger(row.userId) || row.userId <= 0) throw new Error("Invalid discovery candidate")
-      changed.add(row.userId)
+    const recent = batch.filter(({ date }) => date >= horizon)
+    const stale = batch.filter(({ date }) => date < horizon)
+    const queries = [
+      ...(recent.length > 0 ? [recentChangedUsersQuery(recent)] : []),
+      ...(stale.length > 0 ? [staleChangedUsersQuery(stale)] : []),
+    ]
+    for (const query of queries) {
+      for (const row of await db.execute<{ userId: number }>(query)) {
+        if (!Number.isSafeInteger(row.userId) || row.userId <= 0) throw new Error("Invalid discovery candidate")
+        changed.add(row.userId)
+      }
     }
   }
   return changed
+}
+
+/** Requests older than this, relative to the discovery watermark, use the
+ * membership-driven query, so one long-offline reconnect cannot widen the
+ * changed-chat scan for every other user in its batch. */
+const CHANGE_DRIVEN_HORIZON_SECONDS = 3600n
+
+const discoveryTag = (path: "recent" | "stale") =>
+  sql.raw(`/*application='inline-server',operation='repair_discovery',source='repair.discovery',path='${path}'*/`)
+
+// Schema timestamps store UTC without a time zone. Explicit conversion keeps
+// these comparisons independent of the PostgreSQL session time zone.
+const utcTimestamp = (date: bigint) => sql`(to_timestamp(${date.toString()}::double precision) at time zone 'UTC')`
+const requestedValues = (batch: readonly RepairDiscoveryRequest[]) =>
+  sql.join(batch.map(({ userId, date }) => sql`(${userId}::integer, ${utcTimestamp(date)})`), sql`, `)
+
+/** Change-driven: cost scales with chats changed since the batch's oldest
+ * checkpoint, not with account size. Each branch maps a changed chat back to
+ * requested users through the same relationship as the stale query, then
+ * re-applies that user's own checkpoint. The floor is a bound parameter (not
+ * a subquery) so custom plans see it and range-scan chats_last_update_date_idx.
+ * Spaces have no recency index and a user has few member spaces, so the
+ * space branch stays membership-driven. */
+function recentChangedUsersQuery(batch: readonly RepairDiscoveryRequest[]) {
+  const floor = batch.reduce((min, { date }) => (date < min ? date : min), batch[0]!.date)
+  return sql`
+    with requested(user_id, since) as materialized (values ${requestedValues(batch)}),
+    changed_chats as materialized (
+      select ${chats.id} as id, ${chats.spaceId} as space_id, ${chats.minUserId} as min_user_id,
+        ${chats.maxUserId} as max_user_id, ${chats.lastUpdateDate} as changed_at
+      from ${chats} where ${chats.lastUpdateDate} >= ${utcTimestamp(floor)}
+    ),
+    changed_space_chats as (
+      select space_id, max(changed_at) as changed_at from changed_chats
+      where space_id is not null group by space_id
+    )
+    select r.user_id as "userId" from changed_chats c
+    inner join requested r on r.user_id = c.min_user_id
+    where c.changed_at >= r.since
+    union
+    select r.user_id from changed_chats c
+    inner join requested r on r.user_id = c.max_user_id
+    where c.changed_at >= r.since
+    union
+    select r.user_id from changed_chats c
+    inner join ${chatParticipants} on ${chatParticipants.chatId} = c.id
+    inner join requested r on r.user_id = ${chatParticipants.userId}
+    where c.space_id is null and c.changed_at >= r.since
+    union
+    select r.user_id from changed_space_chats c
+    inner join ${members} on ${members.spaceId} = c.space_id
+    inner join requested r on r.user_id = ${members.userId}
+    where c.changed_at >= r.since
+    union
+    select r.user_id from changed_chats c
+    inner join ${dialogs} on ${dialogs.chatId} = c.id
+    inner join requested r on r.user_id = ${dialogs.userId}
+    where c.changed_at >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${members} on ${members.userId} = r.user_id
+    inner join ${spaces} on ${spaces.id} = ${members.spaceId}
+    where ${spaces.lastUpdateDate} >= r.since
+    ${discoveryTag("recent")}
+  `
+}
+
+/** Membership-driven: walks each user's whole catalog. Only used for
+ * checkpoints older than the horizon, where the changed set can be large. */
+function staleChangedUsersQuery(batch: readonly RepairDiscoveryRequest[]) {
+  return sql`
+    with requested(user_id, since) as (values ${requestedValues(batch)})
+    select r.user_id as "userId" from requested r
+    inner join ${chats} on ${chats.minUserId} = r.user_id
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${chats} on ${chats.maxUserId} = r.user_id
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${chatParticipants} on ${chatParticipants.userId} = r.user_id
+    inner join ${chats} on ${chats.id} = ${chatParticipants.chatId}
+    where ${chats.spaceId} is null and ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${members} on ${members.userId} = r.user_id
+    inner join ${chats} on ${chats.spaceId} = ${members.spaceId}
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${dialogs} on ${dialogs.userId} = r.user_id
+    inner join ${chats} on ${chats.id} = ${dialogs.chatId}
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${members} on ${members.userId} = r.user_id
+    inner join ${spaces} on ${spaces.id} = ${members.spaceId}
+    where ${spaces.lastUpdateDate} >= r.since
+    ${discoveryTag("stale")}
+  `
 }
 
 export const postgresRepairDiscovery: RepairDiscovery = {
@@ -77,7 +153,7 @@ export const postgresRepairDiscovery: RepairDiscovery = {
     }
     const unique = [...byUser.values()]
     const frontiers = await loadRepairUserFrontiers([...byUser.keys()])
-    const changed = await findChangedResourceUsers(unique)
+    const changed = await findChangedResourceUsers(unique, watermark)
     const timing = {
       users: unique.length, resourceCandidates: changed.size,
       batches: Math.ceil(unique.length / REPAIR_FRONTIER_BATCH_SIZE),

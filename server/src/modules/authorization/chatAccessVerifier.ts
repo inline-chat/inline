@@ -4,6 +4,7 @@ import { chatAccessState, chats } from "@in/server/db/schema"
 import { Log } from "@in/server/utils/log"
 import { effectiveChatAccessSql } from "./chatAccessProjection"
 import { isChatAccessSyncEnabled, lockChatAccess } from "./chatAccessSync"
+import { refreshChatAccessTrust, revokeChatAccessTrustIfSyncDisabled, startChatAccessTrustRefresh } from "./chatAccessTrust"
 
 const log = new Log("authorization.chatAccessVerifier")
 
@@ -175,7 +176,10 @@ export class ChatAccessVerifier {
   private running: Promise<void> | undefined
   private stopped = false
 
-  constructor(private readonly verify: () => Promise<ChatAccessVerification> = verifyChatAccess) {}
+  constructor(
+    private readonly verify: () => Promise<ChatAccessVerification> = verifyChatAccess,
+    private readonly onStop: () => void = () => {},
+  ) {}
 
   start(): void {
     this.schedule(FIRST_RUN_DELAY_MS)
@@ -183,6 +187,7 @@ export class ChatAccessVerifier {
 
   async stop(): Promise<void> {
     this.stopped = true
+    this.onStop()
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
     await this.running
@@ -225,8 +230,16 @@ export function reportVerification(result: ChatAccessVerification): void {
 }
 
 export function startChatAccessVerifier(): ChatAccessVerifier | null {
-  if (!isChatAccessSyncEnabled()) return null
-  const verifier = new ChatAccessVerifier()
+  if (!isChatAccessSyncEnabled()) {
+    void revokeChatAccessTrustIfSyncDisabled()
+    return null
+  }
+  const stopTrustRefresh = startChatAccessTrustRefresh()
+  const verifier = new ChatAccessVerifier(async () => {
+    const result = await verifyChatAccess()
+    if (result.backfill) await refreshChatAccessTrust()
+    return result
+  }, stopTrustRefresh)
   verifier.start()
   return verifier
 }

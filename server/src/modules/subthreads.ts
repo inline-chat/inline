@@ -412,6 +412,8 @@ export async function getMessageThreadProjectionsByParent(input: {
     childThreads.map((thread) => thread.chatId),
     {
       userIds: [input.userId],
+      // Callers pass `db` or a read-only history snapshot.
+      committed: true,
     },
   )
   const visibleChildThreads = childThreads.filter((thread) => childAccess.get(thread.chatId)?.has(input.userId))

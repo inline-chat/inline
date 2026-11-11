@@ -166,26 +166,46 @@ describe("materialized chat access", () => {
     await expectInSync()
   })
 
-  test("a failed sync keeps the change and leaves the repair to the verifier", async () => {
+  test("with table reads on, a failed sync fails the change instead of committing stale access", async () => {
+    const creator = await testUtils.createUser("sync-strict-creator@example.com")
+    const target = await testUtils.createUser("sync-strict-target@example.com")
+    const chat = await homeThread(creator.id, "Strict")
+    await verifyChatAccess()
+
+    await expect(db.transaction(async (tx) => {
+      await tx.insert(schema.chatParticipants).values({ chatId: chat.id, userId: target.id })
+      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
+    }, { isolationLevel: "repeatable read" })).rejects.toThrow("read committed")
+    const [participant] = await db.select().from(schema.chatParticipants)
+      .where(and(eq(schema.chatParticipants.chatId, chat.id), eq(schema.chatParticipants.userId, target.id)))
+    expect(participant).toBeUndefined()
+    await expectInSync()
+  })
+
+  test("with table reads off, a failed sync keeps the change and leaves the repair to the verifier", async () => {
     const creator = await testUtils.createUser("sync-failure-creator@example.com")
     const target = await testUtils.createUser("sync-failure-target@example.com")
     const chat = await homeThread(creator.id, "Failing")
     await verifyChatAccess()
+    process.env["INLINE_CHAT_ACCESS_READS"] = "off"
+    try {
+      // The recompute refuses snapshot isolation, which would read stale access inputs.
+      await db.transaction(async (tx) => {
+        await tx.insert(schema.chatParticipants).values({ chatId: chat.id, userId: target.id })
+        await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
+      }, { isolationLevel: "repeatable read" })
+      const [participant] = await db.select().from(schema.chatParticipants)
+        .where(and(eq(schema.chatParticipants.chatId, chat.id), eq(schema.chatParticipants.userId, target.id)))
+      expect(participant).toBeDefined()
 
-    // The recompute refuses snapshot isolation, which would read stale access inputs.
-    await db.transaction(async (tx) => {
-      await tx.insert(schema.chatParticipants).values({ chatId: chat.id, userId: target.id })
-      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
-    }, { isolationLevel: "repeatable read" })
-    const [participant] = await db.select().from(schema.chatParticipants)
-      .where(and(eq(schema.chatParticipants.chatId, chat.id), eq(schema.chatParticipants.userId, target.id)))
-    expect(participant).toBeDefined()
-
-    const drift = await verifyChatAccess({ repair: false })
-    expect(drift.missing).toBe(1)
-    expect(drift.backfill).toBe(false)
-    await verifyChatAccess()
-    await expectInSync()
+      const drift = await verifyChatAccess({ repair: false })
+      expect(drift.missing).toBe(1)
+      expect(drift.backfill).toBe(false)
+      await verifyChatAccess()
+      await expectInSync()
+    } finally {
+      delete process.env["INLINE_CHAT_ACCESS_READS"]
+    }
   })
 
   test("deleted users lose every row and orphaned rows are removed", async () => {

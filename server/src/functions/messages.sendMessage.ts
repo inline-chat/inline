@@ -1473,6 +1473,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const access = await getEffectiveChatAccessUserIds(db, [chat.id], {
     userIds: notifications.map((value) => value.userId),
     source: "messages.send",
+    committed: true,
   })
   await Promise.all(
     notifications

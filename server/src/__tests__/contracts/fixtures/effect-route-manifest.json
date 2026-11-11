@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 323,
+  "count": 324,
   "methodCounts": {
     "DELETE": 1,
     "GET": 155,
-    "POST": 165,
+    "POST": 166,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "8ab302870c520439357d6d8969f80fa4d40c69a33739b1a133e82a0e69888504",
+  "sha256": "698fa5b0b81c9dd9e39cda54cc5454cb07de62ad13d28b84fb6d3a66ffb8959b",
   "routes": [
     {
       "method": "DELETE",
@@ -1217,6 +1217,10 @@
     {
       "method": "POST",
       "path": "/v1/readMessages"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/rpc"
     },
     {
       "method": "POST",

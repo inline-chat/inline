@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { chats } from "@in/server/db/schema"
-import { effectiveChatAccessSql } from "@in/server/modules/authorization/chatAccessProjection"
+import { committedChatAccessSql } from "@in/server/modules/authorization/chatAccessProjection"
 import type { Peer, Update } from "@inline-chat/protocol/core"
 import { and, eq, or, sql } from "drizzle-orm"
 
@@ -161,7 +161,7 @@ export async function authorizeLiveDeliveries<T extends LiveDelivery>(
     where u.id in (${sql.join(personal, sql`, `)}) and u.deleted is distinct from true
   `
   const rows = await db.execute<{ kind: string; resourceId: number; userId: number }>(sql`
-    with chat_access as (${effectiveChatAccessSql(chatIds, userIds, "realtime.delivery")})
+    with chat_access as (${committedChatAccessSql(chatIds, userIds, "realtime.delivery")})
     select 'chat'::text as kind, "chatId" as "resourceId", "userId" from chat_access
     union all ${spaceAuthority}
     union all ${personalAuthority}

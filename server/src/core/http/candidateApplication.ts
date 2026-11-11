@@ -1,5 +1,6 @@
 import { Layer } from "effect"
 import { GridTranscriptionWorkerRoutesLive } from "./gridTranscription.effect"
+import { HttpRpcRoutesLive } from "./rpc.effect"
 import {
   AuthApiGroup,
 } from "../../controllers/auth.effect"
@@ -71,7 +72,7 @@ export const makeCandidateHttpApplication = ({
   const botApi = makeBotApiBase(apiBaseUrl)
     .add(BotApiGroup)
 
-  return Layer.merge(
+  return Layer.mergeAll(
     makeHttpApplication({
       platform: defineExecutableHttpApi({
         ...defineOpenApiDocument({
@@ -98,5 +99,6 @@ export const makeCandidateHttpApplication = ({
       middleware,
     }),
     GridTranscriptionWorkerRoutesLive,
+    HttpRpcRoutesLive,
   )
 }

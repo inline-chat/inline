@@ -1,7 +1,11 @@
-import type { db } from "@in/server/db"
+import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { sql, type SQL } from "drizzle-orm"
 import { accessQueryTag, databaseDiagnostics, type AccessQuerySource } from "@in/server/db/databaseDiagnostics"
+import { Log } from "@in/server/utils/log"
+import { isStoredChatAccessTrusted } from "./chatAccessTrust"
+
+const log = new Log("authorization.chatAccessProjection")
 
 type ChatAccessRow = {
   chatId: number
@@ -63,7 +67,17 @@ export async function getSpaceRootChatIdsForAccessEvents(
 export async function getEffectiveChatAccessUserIds(
   tx: ChatAccessQuery,
   chatIds: number[],
-  options?: { userIds?: number[]; source?: AccessQuerySource },
+  options?: {
+    userIds?: number[]
+    source?: AccessQuerySource
+    /**
+     * The caller reads committed access: `db`, or a transaction that has not
+     * changed access-bearing rows. Such reads answer from `chat_access` while
+     * it is trusted. Before/after diffs inside a mutation must leave this off,
+     * because the table is only recomputed just before that transaction commits.
+     */
+    committed?: boolean
+  },
 ): Promise<ChatAccessMap> {
   const ids = uniquePositiveIds(chatIds)
   const result: ChatAccessMap = new Map(ids.map((chatId) => [chatId, new Set<number>()]))
@@ -73,12 +87,85 @@ export async function getEffectiveChatAccessUserIds(
   if (constrainedUserIds?.length === 0) return result
 
   const source = options?.source ?? "authorization"
+  const stored = options?.committed === true && isStoredChatAccessTrusted()
   const rows = await databaseDiagnostics.observe(`access.${source}`, ids.length, () =>
-    tx.execute<ChatAccessRow>(effectiveChatAccessSql(ids, constrainedUserIds, source)))
+    tx.execute<ChatAccessRow>(stored
+      ? storedChatAccessSql(ids, constrainedUserIds, source)
+      : effectiveChatAccessSql(ids, constrainedUserIds, source)))
+  if (stored) shadowCompare(ids, constrainedUserIds, source, rows)
   for (const row of rows) {
     result.get(row.chatId)?.add(row.userId)
   }
   return result
+}
+
+/**
+ * Committed-state access from the materialized table, with the same output
+ * shape as the projection. The joins keep its guarantees if a row outlives its
+ * chat or user between a sync gap and the verifier's repair.
+ */
+export function storedChatAccessSql(chatIds: readonly number[], userIds?: readonly number[], source: AccessQuerySource = "authorization"): SQL {
+  const ids = uniquePositiveIds(chatIds)
+  const constrainedUserIds = userIds === undefined ? undefined : uniquePositiveIds(userIds)
+  if (ids.length === 0 || constrainedUserIds?.length === 0) {
+    return sql`select null::integer as "chatId", null::integer as "userId" where false`
+  }
+  const userFilter = constrainedUserIds === undefined
+    ? sql``
+    : sql`and a.user_id in (${sql.join(constrainedUserIds, sql`, `)})`
+  return sql`
+    select a.chat_id as "chatId", a.user_id as "userId"
+    from chat_access a
+    join chats c on c.id = a.chat_id
+    join users u on u.id = a.user_id
+    where a.chat_id in (${sql.join(ids, sql`, `)})
+      ${userFilter}
+      and u.deleted is distinct from true
+    order by a.chat_id, a.user_id
+    ${accessQueryTag(source)}
+  `
+}
+
+/** Committed access for composed queries: the table while trusted, else the projection. */
+export function committedChatAccessSql(chatIds: readonly number[], userIds?: readonly number[], source: AccessQuerySource = "authorization"): SQL {
+  return isStoredChatAccessTrusted()
+    ? storedChatAccessSql(chatIds, userIds, source)
+    : effectiveChatAccessSql(chatIds, userIds, source)
+}
+
+const shadowRate = (): number => {
+  const raw = Number(process.env["INLINE_CHAT_ACCESS_SHADOW_RATE"] ?? "0.01")
+  return Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0
+}
+
+/**
+ * Samples table answers against the projection on a separate connection after
+ * the fact. A mismatch is logged with the pairs; the verifier repairs drift.
+ */
+function shadowCompare(
+  ids: number[],
+  userIds: number[] | undefined,
+  source: AccessQuerySource,
+  storedRows: readonly ChatAccessRow[],
+): void {
+  if (Math.random() >= shadowRate()) return
+  void (async () => {
+    const projected = await db.execute<ChatAccessRow>(effectiveChatAccessSql(ids, userIds, "access.verify"))
+    const key = (row: ChatAccessRow) => `${row.chatId}:${row.userId}`
+    const expected = new Set(projected.map(key))
+    const actual = new Set(storedRows.map(key))
+    const missing = [...expected].filter((pair) => !actual.has(pair))
+    const extra = [...actual].filter((pair) => !expected.has(pair))
+    if (missing.length > 0 || extra.length > 0) {
+      // A write committing between the two reads can differ benignly; persistent
+      // differences also surface as verifier drift.
+      log.warn("Stored chat access differs from the projection", {
+        source, missing: missing.slice(0, 20), extra: extra.slice(0, 20),
+      })
+    }
+  })().catch(() => {
+    // The comparison is diagnostic only; a closed snapshot or pool error is not a read failure.
+  })
 }
 
 /** Reuses the canonical projection within a larger, single-snapshot admission query. */

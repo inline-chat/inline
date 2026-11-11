@@ -115,7 +115,7 @@ async function publishGridTranscriptMessage(input: InsertGridTranscriptMessageRe
   const [current] = await db.select({ globalId: messages.globalId }).from(messages)
     .where(eq(messages.globalId, input.message.globalId)).limit(1)
   if (!current) return
-  const access = await getEffectiveChatAccessUserIds(db, [input.message.chatId])
+  const access = await getEffectiveChatAccessUserIds(db, [input.message.chatId], { committed: true })
   await Promise.all(Array.from(access.get(input.message.chatId) ?? []).map(async (userId) => {
     const projection = (await getMessageThreadProjectionsMap({
       parentChatId: input.message.chatId, parentMessageIds: [input.message.messageId], userId,

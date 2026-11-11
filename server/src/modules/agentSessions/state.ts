@@ -119,7 +119,7 @@ async function attentionAudience(chat: DbChat, botUserId: number, attention: Age
   if (chat.type === "private") {
     return UsersModel.getActiveUserIds(requested.filter((id) => id === chat.minUserId || id === chat.maxUserId))
   }
-  const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: requested })
+  const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: requested, committed: true })
   const audience: number[] = []
   for (const id of requested) {
     if (access.get(chat.id)?.has(id)) audience.push(id)
@@ -359,7 +359,7 @@ export async function getAgentSessionStates(
   const chatRows = await db.select().from(chats).where(inArray(chats.id, [...new Set(rows.map((row) => row.chatId))]))
   const chatById = new Map(chatRows.map((chat) => [chat.id, chat]))
   const threadIds = chatRows.filter((chat) => chat.type !== "private").map((chat) => chat.id)
-  const access = await getEffectiveChatAccessUserIds(db, threadIds, { userIds: [currentUserId] })
+  const access = await getEffectiveChatAccessUserIds(db, threadIds, { userIds: [currentUserId], committed: true })
   const visible = rows.filter((row) => {
     const chat = chatById.get(row.chatId)
     if (!chat) return false

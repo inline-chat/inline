@@ -4,6 +4,7 @@ import { chatAccess } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { Log } from "@in/server/utils/log"
 import { effectiveChatAccessSql } from "./chatAccessProjection"
+import { isChatAccessReadEnabled, isChatAccessSyncEnabled } from "./chatAccessTrust"
 
 const log = new Log("authorization.chatAccessSync")
 
@@ -23,7 +24,7 @@ export type ChatAccessScope =
   | { readonly kind: "groups"; readonly groupIds: readonly number[]; readonly userIds?: readonly number[] }
   | { readonly kind: "deletedUsers"; readonly userIds: readonly number[] }
 
-export const isChatAccessSyncEnabled = (): boolean => process.env["INLINE_CHAT_ACCESS_SYNC"] !== "off"
+export { isChatAccessSyncEnabled } from "./chatAccessTrust"
 
 /**
  * Serializes every `chat_access` recompute and repair. Writers take it as the
@@ -75,11 +76,17 @@ export async function syncChatAccess(tx: Transaction, scope: ChatAccessScope): P
 }
 
 /**
- * Shadow phase: reads still use the projection, so a failed sync is contained
- * in a savepoint and logged instead of failing the user's change; the verifier
- * repairs the rows. This becomes strict when reads move to the table.
+ * Once committed-state readers may answer from the table, a failed sync fails
+ * the user's change: committing it would leave readers with stale access.
+ * With table reads switched off the sync stays contained in a savepoint and
+ * the verifier repairs the rows.
  */
 async function recomputeContained(tx: Transaction, scopes: readonly ChatAccessScope[]): Promise<void> {
+  if (isChatAccessReadEnabled()) {
+    await lockChatAccess(tx)
+    for (const scope of scopes) await recomputeChatAccess(tx, scope)
+    return
+  }
   try {
     await tx.transaction(async (savepoint) => {
       await lockChatAccess(savepoint)

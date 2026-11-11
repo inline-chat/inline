@@ -25,6 +25,13 @@ export const usesLegacySetupMiddleware = (
     return false
   }
 
+  // Stateless RPC is called server-to-server from shared egress (the MCP
+  // server), several calls per tool. It applies its own per-user, in-flight
+  // and per-IP auth-failure limits instead of the per-IP budget.
+  if (path === "/v1/rpc") {
+    return false
+  }
+
   return (
     path === "/v1" ||
     path.startsWith("/v1/") ||

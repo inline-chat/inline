@@ -53,7 +53,7 @@ export async function getGroupParticipantUserIds(chatId: number): Promise<number
 }
 
 export async function getEffectiveAccessUserIds(chat: DbChat): Promise<number[]> {
-  const access = await getEffectiveChatAccessUserIds(db, [chat.id])
+  const access = await getEffectiveChatAccessUserIds(db, [chat.id], { committed: true })
   return Array.from(access.get(chat.id) ?? [])
 }
 
