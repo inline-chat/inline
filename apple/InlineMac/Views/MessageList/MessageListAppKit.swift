@@ -1201,14 +1201,15 @@ class MessageListAppKit: NSViewController {
       constant: -(Theme.messageListBottomInset + insetForCompose)
     )
 
+    // Centered on the compose side controls' axis, the mirror of the avatar column.
     NSLayoutConstraint.activate([
-      scrollToBottomButton.trailingAnchor.constraint(
+      scrollToBottomButton.centerXAnchor.constraint(
         equalTo: scrollView.messageColumnGuide.trailingAnchor,
-        constant: -14
+        constant: -ChatFloatingButtonMetrics.centerInset
       ),
       scrollToBottomBottomConstraint,
-      scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      scrollToBottomButton.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      scrollToBottomButton.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
     ])
 
     view.addSubview(activityJumpButton)
@@ -1224,12 +1225,12 @@ class MessageListAppKit: NSViewController {
     NSLayoutConstraint.activate([
       activityJumpButton.centerXAnchor.constraint(equalTo: scrollToBottomButton.centerXAnchor),
       activityJumpBottomConstraint,
-      activityJumpButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      activityJumpButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      activityJumpButton.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      activityJumpButton.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
       reactionJumpButton.centerXAnchor.constraint(equalTo: scrollToBottomButton.centerXAnchor),
       reactionJumpBottomConstraint,
-      reactionJumpButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      reactionJumpButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      reactionJumpButton.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      reactionJumpButton.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
     ])
     startActivityNavigator()
   }
@@ -1238,7 +1239,8 @@ class MessageListAppKit: NSViewController {
 
   /// Buttons stack from the bottom: scroll-to-bottom, then @, then ♥. Hidden ones take no slot.
   private func jumpButtonBottomConstant(slot: Int) -> CGFloat {
-    -(Theme.messageListBottomInset + insetForCompose) - CGFloat(slot) * (Theme.scrollButtonSize + 10)
+    -(Theme.messageListBottomInset + insetForCompose)
+      - CGFloat(slot) * (ChatFloatingButtonMetrics.size + ChatFloatingButtonMetrics.spacing)
   }
 
   private var activityJumpBottomConstant: CGFloat {
@@ -1253,7 +1255,8 @@ class MessageListAppKit: NSViewController {
     guard let activityJumpBottomConstraint, let reactionJumpBottomConstraint else { return }
     if animate {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.2
+        context.duration = 0.25
+        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
         context.allowsImplicitAnimation = true
         activityJumpBottomConstraint.animator().constant = activityJumpBottomConstant
         reactionJumpBottomConstraint.animator().constant = reactionJumpBottomConstant
@@ -1283,6 +1286,11 @@ class MessageListAppKit: NSViewController {
   }
 
   private func applyActivityState(_ state: ChatActivityNavigator.State, animate: Bool) {
+    // Marking the chat unread supersedes what this list read before.
+    if state.unreadMark { unreadCountReadFrontier = 0 }
+    updateScrollToBottomCount()
+    guard activityJumpButton.count != state.mentionsCount || reactionJumpButton.count != state.reactionsCount
+    else { return }
     activityJumpButton.setCount(state.mentionsCount)
     reactionJumpButton.setCount(state.reactionsCount)
     updateActivityJumpPosition(animate: animate)
@@ -2425,8 +2433,8 @@ class MessageListAppKit: NSViewController {
     canFollowBottom && viewport.distanceFromBottom <= Self.exactBottomTolerance
   }
 
-  private var lastSeenMessageId: Int64 = 0
-  private var hasUnreadSinceScroll = false
+  /// The highest incoming message this list asked to read; see `ChatUnreadBadgeCount`.
+  private var unreadCountReadFrontier: Int64 = 0
 
   // Publications can overlap while AppKit finishes their animations.
   private var tableUpdateCount = 0
@@ -2520,11 +2528,6 @@ class MessageListAppKit: NSViewController {
       setScrollToBottomButtonShown(shouldShow)
       if isAtBottom {
         updateUnreadIfNeeded()
-        if chatRows.historyCoverage.isAtCertifiedLiveEnd {
-          markMessagesSeen()
-        }
-      } else {
-        updateUnreadBadgeVisibility()
       }
     }
   }
@@ -2744,7 +2747,6 @@ class MessageListAppKit: NSViewController {
     // Placement cleared the bottom state before the first bounds pass, so that pass saw no
     // transition to show the button for.
     setScrollToBottomButtonShown(!isAtBottom)
-    updateUnreadBadgeVisibility()
   }
 
   /// Keeps a held row where it landed through inset, width, height and window changes,
@@ -3449,7 +3451,7 @@ class MessageListAppKit: NSViewController {
           case .reloadAll, .remove(_), .reloadRows:
             reloadAll(animated: true, preserving: updateAnchor)
         }
-        handleIncomingMessages(newMessages)
+        updateScrollToBottomCount()
         if let pendingID = pendingArrivalMessageID,
            newMessages.contains(where: { $0.message.messageId == pendingID })
         {
@@ -4116,7 +4118,6 @@ class MessageListAppKit: NSViewController {
       // The bottom of a partial history window is not the end of the chat.
       // Clear everything only after the loaded page reaches the certified live end.
       UnreadManager.shared.readAll(peerId, chatId: chatId)
-      markMessagesSeen()
     } else {
       // In history the read marker follows what was on screen. A read the coverage
       // cannot certify waits until that history has been loaded.
@@ -4140,6 +4141,10 @@ class MessageListAppKit: NSViewController {
       chatId: chatId,
       highestVisibleIncomingID: highestVisibleIncomingID
     )
+    if highestVisibleIncomingID > unreadCountReadFrontier {
+      unreadCountReadFrontier = highestVisibleIncomingID
+      updateScrollToBottomCount()
+    }
   }
 
   /// All on-screen messages: mentions arrive on others' messages, reactions on yours.
@@ -4179,38 +4184,16 @@ class MessageListAppKit: NSViewController {
     }.max()
   }
 
-  private func latestMessageId() -> Int64? {
-    let latest = chatRows.reversed ? messages.first : messages.last
-    return latest?.message.messageId
-  }
-
-  private func markMessagesSeen() {
-    guard let latestId = latestMessageId() else {
-      hasUnreadSinceScroll = false
-      updateUnreadBadgeVisibility()
-      return
-    }
-    lastSeenMessageId = latestId
-    hasUnreadSinceScroll = false
-    updateUnreadBadgeVisibility()
-  }
-
-  private func handleIncomingMessages(_ newMessages: [FullMessage]) {
-    guard !newMessages.isEmpty else { return }
-    if isWithinFollowZone, chatRows.historyCoverage.isAtCertifiedLiveEnd {
-      markMessagesSeen()
-      return
-    }
-
-    let newestId = newMessages.map(\.message.messageId).max() ?? lastSeenMessageId
-    if newestId > lastSeenMessageId {
-      hasUnreadSinceScroll = true
-      updateUnreadBadgeVisibility()
-    }
-  }
-
-  private func updateUnreadBadgeVisibility() {
-    scrollToBottomButton.setHasUnread(!isAtBottom && hasUnreadSinceScroll)
+  /// Unread messages below the reader, falling as they scroll and kept across reopening.
+  private func updateScrollToBottomCount() {
+    let state = activityNavigator?.state ?? .empty
+    scrollToBottomButton.setCount(ChatUnreadBadgeCount.resolve(
+      unreadCount: state.unreadCount,
+      readInboxMaxId: state.readInboxMaxId,
+      readFrontier: unreadCountReadFrontier,
+      coverage: chatRows.historyCoverage,
+      loadedMessages: messages
+    ))
   }
 }
 

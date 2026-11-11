@@ -10,11 +10,7 @@ final class ScrollToBottomButtonHostingView: NSControl {
       hostingView.rootView.isHovered = isHovered
     }
   }
-  private var hasUnread = false {
-    didSet {
-      hostingView.rootView.hasUnread = hasUnread
-    }
-  }
+  private(set) var count = 0
 
   var onClick: (() -> Void)? {
     didSet {
@@ -34,8 +30,8 @@ final class ScrollToBottomButtonHostingView: NSControl {
     NSLayoutConstraint.activate([
       hostingView.centerXAnchor.constraint(equalTo: centerXAnchor),
       hostingView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      hostingView.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      hostingView.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      hostingView.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      hostingView.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
     ])
 
     alphaValue = 1
@@ -77,15 +73,22 @@ final class ScrollToBottomButtonHostingView: NSControl {
     NSLocalizedString("Scroll to bottom", comment: "Accessibility label")
   }
 
+  override func accessibilityValue() -> Any? {
+    guard count > 0 else { return nil }
+    return count == 1 ? "1 unread message" : "\(count) unread messages"
+  }
+
   func setVisibility(_ visible: Bool) {
     guard isVisible != visible else { return }
     isVisible = visible
     hostingView.rootView.isVisible = visible
   }
 
-  func setHasUnread(_ hasUnread: Bool) {
-    guard self.hasUnread != hasUnread else { return }
-    self.hasUnread = hasUnread
+  /// Unread messages below; zero hides the badge.
+  func setCount(_ count: Int) {
+    guard self.count != count else { return }
+    self.count = count
+    hostingView.rootView.count = count
   }
 
   private func setHover(_ hovered: Bool) {
