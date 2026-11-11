@@ -1468,6 +1468,45 @@ describe("mcp tool server", () => {
     } finally { await server.close() }
   })
 
+  it("pages archive discovery with one listChats call per page and no full catalog read", async () => {
+    const all = Array.from({ length: 125 }, (_, index) => defaultEligibleChat({ chatId: BigInt(index + 1), title: `Example ${index + 1}`, unreadCount: index % 2 }))
+    const getEligibleChats = vi.fn<InlineApi["getEligibleChats"]>().mockResolvedValue([])
+    const listChats = vi.fn<NonNullable<InlineApi["listChats"]>>().mockImplementation(async ({ afterChatId, limit }) => {
+      const rest = all.filter((chat) => afterChatId == null || chat.chatId > afterChatId)
+      const chats = rest.slice(0, limit)
+      return { chats, nextAfterChatId: rest.length > limit ? chats[chats.length - 1]!.chatId : null }
+    })
+    const server = createInlineMcpServer({ grant, inline: createInlineStub({ getEligibleChats, listChats }), contractVersion: "submission-v2" })
+    const authInfo = createAuthInfo(["messages:read"])
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    try {
+      let afterChatId: string | undefined
+      const ids: string[] = []
+      for (let page = 0; page < 3; page += 1) {
+        const id = page + 2
+        await sendRequest(transport, { jsonrpc: "2.0", id, method: "tools/call", params: { name: "conversations.list", arguments: { includeSubthreads: true, limit: 50, ...(afterChatId ? { afterChatId } : {}) } } } as any, { authInfo })
+        const result = (await waitForResponse(sent, id)).result
+        expect(result.isError).not.toBe(true)
+        expect(result.structuredContent).toEqual(JSON.parse(result.content[0].text))
+        expect(result.structuredContent.sort).toBe("id")
+        ids.push(...result.structuredContent.items.map((item: { chatId: string }) => item.chatId))
+        afterChatId = result.structuredContent.nextAfterChatId ?? undefined
+        expect(afterChatId).toBe(page === 0 ? "50" : page === 1 ? "100" : undefined)
+      }
+      expect(ids).toEqual(all.map((chat) => chat.chatId.toString()))
+      expect(listChats.mock.calls).toEqual([
+        [{ includeSubthreads: true, limit: 50 }],
+        [{ includeSubthreads: true, limit: 50, afterChatId: 50n }],
+        [{ includeSubthreads: true, limit: 50, afterChatId: 100n }],
+      ])
+
+      await sendRequest(transport, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "conversations.list", arguments: { includeSubthreads: true, kind: "space_chat", spaceId: "10", unreadOnly: true, limit: 5 } } } as any, { authInfo })
+      expect((await waitForResponse(sent, 9)).result.structuredContent).toMatchObject({ kind: "space_chat", spaceId: "10", unreadOnly: true })
+      expect(listChats.mock.calls[3]).toEqual([{ includeSubthreads: true, limit: 5, spaceId: 10n, kind: "space_chat", unreadOnly: true }])
+      expect(getEligibleChats).not.toHaveBeenCalled()
+    } finally { await server.close() }
+  })
+
   it("returns an empty authorized catalog and requires read scope", async () => {
     const getEligibleChats = vi.fn<InlineApi["getEligibleChats"]>().mockResolvedValue([])
     const server = createInlineMcpServer({ grant, inline: createInlineStub({ getEligibleChats }), contractVersion: "submission-v2" })

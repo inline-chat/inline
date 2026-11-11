@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { CreateSubthreadResult, ForwardMessagesResult, GetChatParticipantsResult, Method, RpcResult, Update } from "@inline-chat/protocol/core"
+import { ChatListKind, ChatListOrder, ChatListScope, CreateSubthreadResult, ForwardMessagesResult, GetChatParticipantsResult, MessageSendMode, Method, RpcResult, Update } from "@inline-chat/protocol/core"
 import type { Chat, GetChatsResult, GetSpaceMembersResult, Message, Space, User } from "@inline-chat/protocol/core"
 import { createInlineApi } from "./inline-api"
 
@@ -11,6 +11,7 @@ const realtimeSdk = vi.hoisted(() => {
     invoke: vi.fn(),
     invokeRaw: vi.fn(),
     sendMessage: vi.fn(),
+    uploadFile: vi.fn(),
   }
   return {
     client,
@@ -22,6 +23,16 @@ const realtimeSdk = vi.hoisted(() => {
 
 vi.mock("@inline-chat/realtime-sdk", () => ({
   InlineSdkClient: realtimeSdk.InlineSdkClient,
+}))
+
+// RPCs travel over the stateless HTTP invoker. The double keeps the old split:
+// methods inline-api used to send through invokeRaw still land on that mock.
+vi.mock("./rpc-invoker", () => ({
+  createHttpRpcInvoker: () => ({
+    invoke: (method: Method, input: unknown) => [Method.GET_USERS, Method.CREATE_SUBTHREAD].includes(method)
+      ? realtimeSdk.client.invokeRaw(method, input)
+      : realtimeSdk.client.invoke(method, input),
+  }),
 }))
 
 function space(id: bigint, name: string): Space {
@@ -51,7 +62,10 @@ describe("createInlineApi", () => {
     realtimeSdk.client.invoke.mockReset()
     realtimeSdk.client.invokeRaw.mockReset().mockImplementation((method, input) => realtimeSdk.client.invoke(method, input))
     realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
+    realtimeSdk.client.uploadFile.mockReset()
   })
+
+  const sendCalls = () => realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.SEND_MESSAGE)
 
   it("loads only the credential-bound self profile, including email, without catalog access", async () => {
     const self = { ...user(42n, " Jonny ", " Person ", " jonny "), email: " jonny@example.test ", phoneNumber: "+123", bio: "Private bio" }
@@ -63,7 +77,8 @@ describe("createInlineApi", () => {
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [], allowDms: false, allowHomeThreads: false } })
     try {
       await expect(api.getProfile()).resolves.toEqual({ id: 42n, name: "Jonny Person", email: "jonny@example.test", nickname: "jonny" })
-      expect(realtimeSdk.client.connect).toHaveBeenCalledTimes(1)
+      expect(realtimeSdk.InlineSdkClient).not.toHaveBeenCalled()
+      expect(realtimeSdk.client.connect).not.toHaveBeenCalled()
       expect(realtimeSdk.client.invoke).toHaveBeenCalledTimes(1)
     } finally { await api.close() }
   })
@@ -106,16 +121,91 @@ describe("createInlineApi", () => {
     const home: Chat = { id: 6n, title: "Home", date: 1n, peerId: { type: { oneofKind: "chat", chat: { chatId: 6n } } } }
     realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
       expect(method).toBe(Method.GET_CHATS)
-      const expanded = input.getChats.includeSubthreads === true
-      return { getChats: { chats: expanded ? [root, child, outside, dm, home] : [root], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (input.getChats.limit === undefined) {
+        expect(input.getChats.includeSubthreads).toBeUndefined()
+        return { getChats: { chats: [root], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      }
+      // The server must not return out-of-grant rows; if it does they are dropped.
+      return { getChats: { chats: [root, child, outside, dm, home], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
     })
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
     try {
       expect((await api.getEligibleChats()).map((chat) => chat.chatId)).toEqual([1n])
       expect((await api.getEligibleChats({ includeSubthreads: true })).map((chat) => chat.chatId)).toEqual([3n, 1n])
       expect((await api.getEligibleChats()).map((chat) => chat.chatId)).toEqual([1n])
-      expect(realtimeSdk.client.invoke).toHaveBeenCalledTimes(2)
-      expect(realtimeSdk.client.invoke.mock.calls[1]?.[1]).toMatchObject({ getChats: { includeSubthreads: true } })
+      expect(realtimeSdk.client.invoke.mock.calls.map(([, input]) => input.getChats.limit)).toEqual([undefined, 100])
+      expect(realtimeSdk.client.invoke.mock.calls[1]?.[1]).toMatchObject({
+        getChats: {
+          scope: ChatListScope.ACCESSIBLE,
+          order: ChatListOrder.ID,
+          filter: { kinds: [ChatListKind.SPACE_THREAD], spaceIds: [10n] },
+        },
+      })
+    } finally { await api.close() }
+  })
+
+  it("pages GetChats with the grant as kinds and space IDs and the server's cursor", async () => {
+    const dmPeer = { ...user(2n, "Dena", "Person", "dena"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=1&exp=2&sig=3" } }
+    const pages = [
+      {
+        chats: [spaceChat(1n, "Root", 10n, 7n), { id: 5n, title: "", date: 1n, lastMsgId: 9n, peerId: { type: { oneofKind: "user" as const, user: { userId: 2n } } } }],
+        dialogs: [{ chatId: 5n, archived: true, pinned: true, unreadCount: 3, readMaxId: 6n }],
+        spaces: [space(10n, "Inline")],
+        users: [dmPeer],
+        messages: [{ chatId: 1n, id: 7n, date: 70n, fromId: 2n }, { chatId: 5n, id: 9n, date: 90n, fromId: 2n }],
+        folders: [],
+        nextOffset: { chatId: 5n },
+      },
+      { chats: [{ id: 8n, title: "Home", date: 1n, peerId: { type: { oneofKind: "chat" as const, chat: { chatId: 8n } } } }], dialogs: [], spaces: [], users: [], messages: [], folders: [] },
+    ]
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      expect(method).toBe(Method.GET_CHATS)
+      return { getChats: pages.shift() }
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n, 11n], allowDms: true, allowHomeThreads: true } })
+    try {
+      const first = await api.listChats!({ includeSubthreads: true, limit: 2 })
+      expect(first.nextAfterChatId).toBe(5n)
+      expect(first.chats).toEqual([
+        expect.objectContaining({ chatId: 1n, kind: "space_chat", spaceName: "Inline", lastMessageId: 7n, lastMessageDate: 70n, unreadCount: 0 }),
+        expect.objectContaining({
+          chatId: 5n, kind: "dm", title: "Dena Person", peerUserId: 2n, peerUsername: "dena",
+          archived: true, pinned: true, unreadCount: 3, readMaxId: 6n, lastMessageId: 9n, lastMessageDate: 90n,
+        }),
+      ])
+      const second = await api.listChats!({ includeSubthreads: true, limit: 2, afterChatId: 5n, unreadOnly: true })
+      expect(second).toEqual({ chats: [expect.objectContaining({ chatId: 8n, kind: "home_thread" })], nextAfterChatId: null })
+      expect(realtimeSdk.client.invoke.mock.calls.map(([, input]) => input.getChats)).toEqual([
+        expect.objectContaining({
+          limit: 2,
+          scope: ChatListScope.ACCESSIBLE,
+          order: ChatListOrder.ID,
+          filter: expect.objectContaining({
+            kinds: [ChatListKind.SPACE_THREAD, ChatListKind.DM, ChatListKind.HOME_THREAD],
+            spaceIds: [10n, 11n],
+          }),
+        }),
+        expect.objectContaining({ offset: { chatId: 5n }, filter: expect.objectContaining({ unread: true }) }),
+      ])
+
+      realtimeSdk.client.invoke.mockClear()
+      realtimeSdk.client.invoke.mockResolvedValue({ getChats: { chats: [], dialogs: [], spaces: [], users: [], messages: [], folders: [] } })
+      await api.listChats!({ limit: 50, spaceId: 11n })
+      await api.listChats!({ limit: 50, kind: "dm" })
+      expect(realtimeSdk.client.invoke.mock.calls.map(([, input]) => input.getChats)).toEqual([
+        expect.objectContaining({ scope: ChatListScope.DIALOGS, filter: expect.objectContaining({ kinds: [ChatListKind.SPACE_THREAD], spaceIds: [11n] }) }),
+        expect.objectContaining({ filter: expect.objectContaining({ kinds: [ChatListKind.DM], spaceIds: [] }) }),
+      ])
+      await expect(api.listChats!({ limit: 50, spaceId: 99n })).rejects.toThrow("space is not in allowed context")
+      expect(realtimeSdk.client.invoke.mock.calls.every(([, input]) => input.getChats.limit !== undefined)).toBe(true)
+    } finally { await api.close() }
+  })
+
+  it("skips GetChats when the grant leaves nothing to list", async () => {
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [], allowDms: false, allowHomeThreads: true } })
+    try {
+      expect(await api.listChats!({ limit: 50, kind: "dm" })).toEqual({ chats: [], nextAfterChatId: null })
+      expect(realtimeSdk.client.invoke).not.toHaveBeenCalled()
     } finally { await api.close() }
   })
 
@@ -143,7 +233,8 @@ describe("createInlineApi", () => {
     } finally { await api.close() }
   })
 
-  it.each(["text", "caption", "blank caption"])("forwards %s through the SDK without changing Markdown", async (kind) => {
+  it.each(["text", "caption", "blank caption"])("forwards %s through the send RPC without changing Markdown", async (kind) => {
+    realtimeSdk.client.invoke.mockResolvedValue({ oneofKind: "sendMessage", sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: 300n, randomId: 1n } } }] } })
     const api = createInlineApi({
       baseUrl: "https://api.inline.test",
       token: "test-token",
@@ -152,21 +243,52 @@ describe("createInlineApi", () => {
     const text = kind === "blank caption" ? " \n\t " : "    code();\n\n**Ready** ~~old~~ ==new== <u>reviewed</u> $x^2$\n"
     const common = { userId: 2n, text, replyToMsgId: 9n, sendMode: "silent" as const, parseMarkdown: true }
     try {
-      if (kind === "text") await api.sendMessage(common)
-      else await api.sendMediaMessage({ ...common, media: { kind: "photo", id: 501n } })
-      expect(realtimeSdk.client.sendMessage).toHaveBeenCalledWith({
-        userId: 2n,
+      const sent = kind === "text" ? await api.sendMessage(common) : await api.sendMediaMessage({ ...common, media: { kind: "photo", id: 501n } })
+      expect(sent.messageId).toBe(300n)
+      expect(sendCalls()).toHaveLength(1)
+      const input = sendCalls()[0]![1].sendMessage
+      expect(input.randomId).not.toBe(0n)
+      expect(input).toEqual({
+        peerId: { type: { oneofKind: "user", user: { userId: 2n } } },
+        randomId: input.randomId,
         replyToMsgId: 9n,
-        sendMode: "silent",
-        ...(kind === "blank caption" ? {} : { text, parseMarkdown: true }),
-        ...(kind === "text" ? {} : { media: { kind: "photo", photoId: 501n } }),
+        sendMode: MessageSendMode.MODE_SILENT,
+        ...(kind === "blank caption" ? {} : { message: text, parseMarkdown: true }),
+        ...(kind === "text" ? {} : { media: { media: { oneofKind: "photo", photo: { photoId: 501n } } } }),
       })
     } finally {
       await api.close()
     }
   })
 
-  it("acknowledges the SDK event stream and joins it on close", async () => {
+  it("wraps a failed send like the SDK so tool errors are unchanged", async () => {
+    const failure = new Error("Peer ID is invalid")
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.SEND_MESSAGE) throw failure
+      throw new Error(`unexpected method ${method}`)
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [], allowDms: true } })
+    try {
+      const error = await api.sendMessage({ userId: 2n, text: "hi", replyToMsgId: 5n, sendMode: "normal", parseMarkdown: false }).catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toBe("sendMessage: request failed (Peer ID is invalid; target=user:2; media=none; textLen=2; replyTo=5)")
+      expect((error as Error).cause).toBe(failure)
+    } finally { await api.close() }
+  })
+
+  it("serves RPC reads without constructing a realtime client", async () => {
+    realtimeSdk.client.invoke.mockResolvedValue({
+      getChats: { dialogs: [], folders: [], chats: [], spaces: [], users: [], messages: [] },
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [] } })
+    await api.listSpaces({ limit: 1 })
+    await api.close()
+    expect(realtimeSdk.InlineSdkClient).not.toHaveBeenCalled()
+    expect(realtimeSdk.client.connect).not.toHaveBeenCalled()
+    expect(realtimeSdk.client.close).not.toHaveBeenCalled()
+  })
+
+  it("opens one lazy upload socket, acknowledges its event stream and joins it on close", async () => {
     const next = vi.fn()
       .mockResolvedValueOnce({ value: { kind: "chat.updated" }, done: false })
       .mockResolvedValueOnce({ value: undefined, done: true })
@@ -183,19 +305,20 @@ describe("createInlineApi", () => {
         allowHomeThreads: false,
       },
     })
-    realtimeSdk.client.invoke.mockResolvedValue({
-      getChats: { dialogs: [], folders: [], chats: [], spaces: [], users: [], messages: [] },
-    })
+    realtimeSdk.client.uploadFile.mockResolvedValue({ fileUniqueId: "f1", photoId: 9n })
 
-    await api.listSpaces({ limit: 1 })
+    await expect(api.uploadFile({ type: "photo", file: new Uint8Array([1]) })).resolves.toEqual({ fileUniqueId: "f1", media: { kind: "photo", id: 9n } })
+    await expect(api.uploadFile({ type: "photo", file: new Uint8Array([2]) })).resolves.toMatchObject({ fileUniqueId: "f1" })
     await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(2))
     await api.close()
 
+    expect(realtimeSdk.InlineSdkClient).toHaveBeenCalledTimes(1)
+    expect(realtimeSdk.client.connect).toHaveBeenCalledTimes(1)
     expect(realtimeSdk.client.events).toHaveBeenCalledTimes(1)
     expect(realtimeSdk.client.close).toHaveBeenCalledTimes(1)
   })
 
-  it("closes before connecting and joins the event stream", async () => {
+  it("closes a connecting upload socket and joins its event stream", async () => {
     let finishDrain: ((result: IteratorResult<unknown>) => void) | undefined
     realtimeSdk.client.events.mockReturnValue({
       [Symbol.asyncIterator]: () => ({
@@ -217,9 +340,15 @@ describe("createInlineApi", () => {
       },
     })
 
+    let finishConnect: (() => void) | undefined
+    realtimeSdk.client.connect.mockImplementationOnce(() => new Promise<void>((resolve) => { finishConnect = resolve }))
+    realtimeSdk.client.uploadFile.mockResolvedValue({ fileUniqueId: "f1", photoId: 9n })
+    const upload = api.uploadFile({ type: "photo", file: new Uint8Array([1]) })
+    await vi.waitFor(() => expect(realtimeSdk.client.connect).toHaveBeenCalledTimes(1))
     await api.close()
+    finishConnect?.()
+    await upload.catch(() => undefined)
 
-    expect(realtimeSdk.client.connect).not.toHaveBeenCalled()
     expect(realtimeSdk.client.close).toHaveBeenCalledTimes(1)
   })
 
@@ -418,7 +547,7 @@ describe("createInlineApi", () => {
     try {
       await expect(read[operation]()).rejects.toThrow("no existing approved DM conversation")
       expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHATS])
-      expect(realtimeSdk.client.sendMessage).not.toHaveBeenCalled()
+      expect(sendCalls()).toHaveLength(0)
     } finally { await api.close() }
   })
 
@@ -555,7 +684,7 @@ describe("createInlineApi", () => {
       expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHAT)).toHaveLength(1)
       expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE)).toHaveLength(1)
       if (operation === "conversation") expect(result).toMatchObject({ pinnedMessageIds: [99n], groupParticipantCount: 1, participants: [{ userId: 2n, spaceNames: ["Engineering"] }] })
-      expect(realtimeSdk.client.sendMessage).not.toHaveBeenCalled()
+      expect(sendCalls()).toHaveLength(0)
       expect(realtimeSdk.client.invokeRaw.mock.calls.every(([method]) => method === Method.GET_USERS)).toBe(true)
     } finally { await api.close() }
   })

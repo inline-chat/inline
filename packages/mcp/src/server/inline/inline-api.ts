@@ -1,4 +1,5 @@
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
+import { createHttpRpcInvoker, type InlineRpcCallOptions, type InlineRpcInvoker } from "./rpc-invoker"
 import {
   CreateChatInput,
   CreateSubthreadInput,
@@ -15,17 +16,51 @@ import {
   GetUsersInput,
   InputChatParticipant,
   InputPeer,
+  ChatListKind,
+  ChatListOrder,
+  ChatListScope,
   Method,
+  MessageSendMode,
   SearchMessagesInput,
   SearchMessagesFilter,
+  SendMessageInput,
   type Chat,
   type Dialog,
   type GetChatsResult,
   type GetChatResult,
+  type InputMedia,
   type Message,
+  type RpcCall,
+  type RpcResult,
   type Space,
+  type Update,
   type User,
 } from "@inline-chat/protocol/core"
+
+type RpcInputKind = NonNullable<RpcCall["input"]["oneofKind"]>
+type RpcInputOf<K extends RpcInputKind> = Extract<RpcCall["input"], { oneofKind: K }>
+type RpcResultOf<K extends RpcInputKind> = Extract<RpcResult["result"], { oneofKind: K }>
+
+const randomMessageId = (): bigint => {
+  const bytes = new Uint8Array(8)
+  globalThis.crypto.getRandomValues(bytes)
+  const value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigInt64(0, true)
+  return value === 0n ? 1n : value
+}
+
+/** Same receipt extraction as the SDK's sendMessage. */
+const firstMessageId = (updates: Update[] | undefined): bigint | null => {
+  for (const update of updates ?? []) {
+    if (update.update.oneofKind === "newMessage") {
+      const message = update.update.newMessage.message
+      if (message) return message.id
+    }
+    if (update.update.oneofKind === "updateMessageId") {
+      return update.update.updateMessageId.messageId
+    }
+  }
+  return null
+}
 
 export type InlineAllowedContext = {
   allowedSpaceIds: bigint[]
@@ -58,6 +93,21 @@ export type InlineEligibleChat = {
   readMaxId: bigint | null
   lastMessageId: bigint | null
   lastMessageDate: bigint | null
+}
+
+/** One server-scoped, ascending-ID page of the authorized conversation catalog (paged GetChats). */
+export type InlineListChatsParams = {
+  afterChatId?: bigint
+  limit: number
+  includeSubthreads?: boolean
+  spaceId?: bigint
+  kind?: InlineEligibleChat["kind"]
+  unreadOnly?: boolean
+}
+
+export type InlineListChatsPage = {
+  chats: InlineEligibleChat[]
+  nextAfterChatId: bigint | null
 }
 
 export type InlineConversationCandidate = InlineEligibleChat & {
@@ -193,6 +243,8 @@ export type InlineApi = {
   listSpaces(params: { query?: string; limit?: number }): Promise<InlineSpaceSummary[]>
   searchPeople(params: { query?: string; limit?: number }): Promise<{ query: string | null; bestMatch: InlinePersonCandidate | null; items: InlinePersonCandidate[] }>
   getEligibleChats(params?: { includeSubthreads?: boolean }): Promise<InlineEligibleChat[]>
+  /** Paged GetChats in ID order. Older InlineApi adapters can omit it. */
+  listChats?(params: InlineListChatsParams): Promise<InlineListChatsPage>
   resolveConversation(query: string, limit: number, filters?: InlineConversationFilters): Promise<InlineConversationResolution>
   getConversation(params: { chatId?: bigint; userId?: bigint }): Promise<InlineConversationDetails>
   /** One logical tool read; older InlineApi adapters can retain separate reads. */
@@ -299,19 +351,41 @@ export function createInlineApi(params: {
   baseUrl: string
   token: string
   allowed: InlineAllowedContext
+  /** Defaults to the stateless HTTP RPC endpoint. */
+  rpc?: InlineRpcInvoker
 }): InlineApi {
-  const client = new InlineSdkClient({ baseUrl: params.baseUrl, token: params.token })
-  // This request/response owner has no local projection, but it must still
-  // acknowledge the SDK's bounded update stream so durable account fanout
-  // cannot fill the queue and force a recovery loop.
-  const eventDrain = (async () => {
-    for await (const _event of client.events()) {
-      // Asking for the next event acknowledges the previous receipt.
+  // Every supported read and write is one stateless HTTP RPC: no realtime
+  // socket, so the server does no connection, presence or sync work for it.
+  const rpc = params.rpc ?? createHttpRpcInvoker({ baseUrl: params.baseUrl, token: params.token })
+  const invoke = async <K extends RpcInputKind>(method: Method, input: RpcInputOf<K>, options?: InlineRpcCallOptions): Promise<RpcResultOf<K>> =>
+    await rpc.invoke(method, input, options) as RpcResultOf<K>
+
+  // Native uploads stream parts over the realtime transfer path, which the
+  // HTTP endpoint deliberately does not carry. Only uploadFile opens a socket.
+  let uploadClient: { client: InlineSdkClient; connected: Promise<void>; drain: Promise<void> } | null = null
+  const uploader = async (): Promise<InlineSdkClient> => {
+    if (!uploadClient) {
+      const client = new InlineSdkClient({ baseUrl: params.baseUrl, token: params.token, syncUpdates: false })
+      // This owner keeps no projection, but must still acknowledge the SDK's
+      // bounded update stream so account fanout cannot force a recovery loop.
+      const drain = (async () => {
+        for await (const _event of client.events()) {
+          // Asking for the next event acknowledges the previous receipt.
+        }
+      })().catch(() => {})
+      const entry = { client, connected: client.connect(), drain }
+      entry.connected.catch(() => {
+        if (uploadClient === entry) uploadClient = null
+        void client.close().catch(() => {})
+      })
+      uploadClient = entry
     }
-  })().catch(() => {})
+    const entry = uploadClient
+    await entry.connected
+    return entry.client
+  }
   const allowedSpaceIdList = params.allowed.allowedSpaceIds
   const allowedSpaceIds = new Set(params.allowed.allowedSpaceIds.map((id) => id.toString()))
-  let connected: Promise<void> | null = null
   type EligibleChatContext = {
     chats: InlineEligibleChat[]
     byChatId: Map<string, InlineEligibleChat>
@@ -320,16 +394,6 @@ export function createInlineApi(params: {
   }
   let eligibleChatsCache: (EligibleChatContext & { expiresAtMs: number }) | null = null
   let eligibleChatsInFlight: Promise<EligibleChatContext> | null = null
-
-  const ensureConnected = async () => {
-    if (!connected) {
-      connected = client.connect().catch((e) => {
-        connected = null
-        throw e
-      })
-    }
-    await connected
-  }
 
   const allowDms = params.allowed.allowDms === true
   const allowHomeThreads = params.allowed.allowHomeThreads === true
@@ -365,6 +429,56 @@ export function createInlineApi(params: {
   }
 
   const buildChatPeer = (chatId: bigint) => InputPeer.create({ type: { oneofKind: "chat", chat: { chatId } } })
+
+  /** The SDK sendMessage convenience as one RPC: same validation, idempotency key, receipt and error text. */
+  const sendRpcMessage = async (message: {
+    target: { kind: "chat"; chatId: bigint } | { kind: "user"; userId: bigint }
+    text?: string
+    media?: InlineUploadedMedia
+    replyToMsgId?: bigint
+    silent: boolean
+    parseMarkdown?: boolean
+  }): Promise<{ messageId: bigint | null }> => {
+    const text = message.text
+    const hasText = typeof text === "string" && text.length > 0
+    if (!hasText && message.media == null) throw new Error("sendMessage: provide `text` and/or `media`")
+    if (message.parseMarkdown != null && !hasText) throw new Error("sendMessage: `parseMarkdown` requires non-empty `text`")
+
+    const peerId = message.target.kind === "chat"
+      ? buildChatPeer(message.target.chatId)
+      : InputPeer.create({ type: { oneofKind: "user", user: { userId: message.target.userId } } })
+    const media: InputMedia | undefined = message.media == null
+      ? undefined
+      : message.media.kind === "photo"
+        ? { media: { oneofKind: "photo", photo: { photoId: message.media.id } } }
+        : message.media.kind === "video"
+          ? { media: { oneofKind: "video", video: { videoId: message.media.id } } }
+          : { media: { oneofKind: "document", document: { documentId: message.media.id } } }
+
+    let result: RpcResultOf<"sendMessage">
+    try {
+      result = await invoke(Method.SEND_MESSAGE, {
+        oneofKind: "sendMessage",
+        sendMessage: SendMessageInput.create({
+          peerId,
+          randomId: randomMessageId(),
+          ...(hasText ? { message: text } : {}),
+          ...(media != null ? { media } : {}),
+          ...(message.replyToMsgId != null ? { replyToMsgId: message.replyToMsgId } : {}),
+          ...(message.parseMarkdown != null ? { parseMarkdown: message.parseMarkdown } : {}),
+          ...(message.silent ? { sendMode: MessageSendMode.MODE_SILENT } : {}),
+        }),
+      })
+    } catch (error) {
+      const target = message.target.kind === "chat" ? `chat:${String(message.target.chatId)}` : `user:${String(message.target.userId)}`
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `sendMessage: request failed (${detail}; target=${target}; media=${message.media?.kind ?? "none"}; textLen=${hasText ? text.length : 0}; replyTo=${message.replyToMsgId != null ? String(message.replyToMsgId) : "none"})`,
+        { cause: error as Error },
+      )
+    }
+    return { messageId: firstMessageId(result.sendMessage.updates) }
+  }
 
   const normalizeContentFilter = (content?: InlineMessageContentFilter): InlineMessageContentFilter => {
     if (!content) return "all"
@@ -448,24 +562,22 @@ export function createInlineApi(params: {
     throw new InlineAccessDeniedError("chat is not in an allowed context")
   }
 
-  const getChats = async (includeSubthreads = false): Promise<GetChatsResult> => {
-    await ensureConnected()
-    const result = await client.invoke(Method.GET_CHATS, {
+  // Ordinary (cached) catalog only. Complete archive discovery uses paged GetChats.
+  const getChats = async (): Promise<GetChatsResult> => {
+    const result = await invoke(Method.GET_CHATS, {
       oneofKind: "getChats",
-      getChats: GetChatsInput.create(includeSubthreads ? { includeSubthreads: true } : {}),
+      getChats: GetChatsInput.create({}),
     })
     return result.getChats
   }
 
   const getChatResultByPeer = async (peerId: InputPeer) => {
-    await ensureConnected()
-    const result = await client.invoke(Method.GET_CHAT, { oneofKind: "getChat", getChat: GetChatInput.create({ peerId }) })
+    const result = await invoke(Method.GET_CHAT, { oneofKind: "getChat", getChat: GetChatInput.create({ peerId }) })
     return result.getChat
   }
 
   const getSpaceMembers = async (spaceId: bigint) => {
-    await ensureConnected()
-    const result = await client.invoke(Method.GET_SPACE_MEMBERS, {
+    const result = await invoke(Method.GET_SPACE_MEMBERS, {
       oneofKind: "getSpaceMembers",
       getSpaceMembers: GetSpaceMembersInput.create({ spaceId }),
     })
@@ -473,8 +585,7 @@ export function createInlineApi(params: {
   }
 
   const getChatParticipants = async (chatId: bigint) => {
-    await ensureConnected()
-    const result = await client.invoke(Method.GET_CHAT_PARTICIPANTS, {
+    const result = await invoke(Method.GET_CHAT_PARTICIPANTS, {
       oneofKind: "getChatParticipants",
       getChatParticipants: GetChatParticipantsInput.create({ chatId }),
     })
@@ -482,8 +593,7 @@ export function createInlineApi(params: {
   }
 
   const getMessagesByIds = async (chatId: bigint, messageIds: bigint[]): Promise<Message[]> => {
-    await ensureConnected()
-    const result = await client.invoke(Method.GET_MESSAGES, {
+    const result = await invoke(Method.GET_MESSAGES, {
       oneofKind: "getMessages",
       getMessages: GetMessagesInput.create({
         peerId: buildChatPeer(chatId),
@@ -529,7 +639,7 @@ export function createInlineApi(params: {
     dialogByChatId: Map<string, Dialog>
     spaceById: Map<string, Space>
     userById: Map<string, User>
-    lastMessageByChatId: Map<string, Message>
+    lastMessageByChatId: Map<string, Pick<Message, "id" | "date">>
   }): InlineEligibleChat => {
     const chat = params.chat
     const peerType = chat.peerId?.type
@@ -650,8 +760,8 @@ export function createInlineApi(params: {
     return left.userId === right.userId ? 0 : left.userId < right.userId ? -1 : 1
   }
 
-  const buildEligibleChatContext = async (includeSubthreads = false, suppliedPayload?: GetChatsResult): Promise<EligibleChatContext> => {
-    const payload = suppliedPayload ?? await getChats(includeSubthreads)
+  const buildEligibleChatContext = async (suppliedPayload?: GetChatsResult): Promise<EligibleChatContext> => {
+    const payload = suppliedPayload ?? await getChats()
     const dialogByChatId = new Map<string, Dialog>()
     for (const dialog of payload.dialogs) {
       if (dialog.chatId == null) continue
@@ -705,6 +815,56 @@ export function createInlineApi(params: {
     }
   }
 
+  // The grant is applied in the server query as kinds plus space_ids, so each
+  // page is full and the cursor is the server's. The local check below is
+  // defense in depth and never moves the cursor.
+  const listChatsPage = async (params: InlineListChatsParams): Promise<InlineListChatsPage> => {
+    const { spaceId, kind } = params
+    if (spaceId != null && !allowedSpaceIds.has(spaceId.toString())) {
+      throw new InlineAccessDeniedError("space is not in allowed context")
+    }
+    const spaceIds = spaceId != null ? [spaceId] : allowedSpaceIdList
+    const kinds: ChatListKind[] = []
+    if (spaceIds.length > 0 && (kind == null || kind === "space_chat")) kinds.push(ChatListKind.SPACE_THREAD)
+    if (allowDms && spaceId == null && (kind == null || kind === "dm")) kinds.push(ChatListKind.DM)
+    if (allowHomeThreads && spaceId == null && (kind == null || kind === "home_thread")) kinds.push(ChatListKind.HOME_THREAD)
+    // An empty kind list would mean every kind: the grant leaves nothing to list.
+    if (kinds.length === 0) return { chats: [], nextAfterChatId: null }
+
+    const result = await invoke(Method.GET_CHATS, {
+      oneofKind: "getChats",
+      getChats: GetChatsInput.create({
+        limit: params.limit,
+        order: ChatListOrder.ID,
+        // Archive walks need every accessible chat, with or without a dialog.
+        scope: params.includeSubthreads === true ? ChatListScope.ACCESSIBLE : ChatListScope.DIALOGS,
+        ...(params.afterChatId != null ? { offset: { chatId: params.afterChatId } } : {}),
+        filter: {
+          kinds,
+          spaceIds: kinds.includes(ChatListKind.SPACE_THREAD) ? spaceIds : [],
+          ...(params.unreadOnly === true ? { unread: true } : {}),
+        },
+      }),
+    })
+    return {
+      chats: eligibleChatsFromPage(result.getChats),
+      nextAfterChatId: result.getChats.nextOffset?.chatId ?? null,
+    }
+  }
+
+  const eligibleChatsFromPage = (payload: GetChatsResult): InlineEligibleChat[] => {
+    const dialogByChatId = new Map<string, Dialog>()
+    for (const dialog of payload.dialogs) {
+      if (dialog.chatId != null) dialogByChatId.set(dialog.chatId.toString(), dialog)
+    }
+    const spaceById = new Map(payload.spaces.map((space) => [space.id.toString(), space]))
+    const userById = new Map(payload.users.map((user) => [user.id.toString(), user]))
+    const lastMessageByChatId = new Map(payload.messages.map((message) => [message.chatId.toString(), message]))
+    return payload.chats
+      .filter(isChatAllowed)
+      .map((chat) => toEligibleChat({ chat, dialogByChatId, spaceById, userById, lastMessageByChatId }))
+  }
+
   const getEligibleChatContext = async (refresh = false, suppliedPayload?: GetChatsResult): Promise<EligibleChatContext> => {
     const now = Date.now()
     if (!refresh && eligibleChatsCache && eligibleChatsCache.expiresAtMs > now) {
@@ -717,7 +877,7 @@ export function createInlineApi(params: {
     // Some operations already need a fresh catalog for Spaces or people. On a
     // cold cache, derive the context from that same snapshot instead of issuing
     // another full catalog RPC. Cache hits and in-flight loads retain their TTL.
-    eligibleChatsInFlight = buildEligibleChatContext(false, suppliedPayload)
+    eligibleChatsInFlight = buildEligibleChatContext(suppliedPayload)
       .then((context) => {
         eligibleChatsCache = {
           expiresAtMs: Date.now() + 15_000,
@@ -759,7 +919,7 @@ export function createInlineApi(params: {
       for (let index = 0; index < missing.length; index += 50) {
         const ids = missing.slice(index, index + 50)
         try {
-          const result = await client.invokeRaw(Method.GET_USERS, { oneofKind: "getUsers", getUsers: GetUsersInput.create({ userIds: ids }) })
+          const result = await rpc.invoke(Method.GET_USERS, { oneofKind: "getUsers", getUsers: GetUsersInput.create({ userIds: ids }) })
           if (result.oneofKind !== "getUsers") throw new Error("missing users")
           for (const user of result.getUsers.users) {
             if (ids.includes(user.id)) readUsers.set(user.id.toString(), user)
@@ -819,7 +979,7 @@ export function createInlineApi(params: {
       const key = rawChat.spaceId.toString()
       spacePromise = readSpaces.get(key)
       if (!spacePromise) {
-        spacePromise = client.invoke(Method.GET_SPACE, { oneofKind: "getSpace", getSpace: GetSpaceInput.create({ spaceId: rawChat.spaceId }) })
+        spacePromise = invoke(Method.GET_SPACE, { oneofKind: "getSpace", getSpace: GetSpaceInput.create({ spaceId: rawChat.spaceId }) })
           .then((response) => response.getSpace.space)
           // Private-chat access does not imply parent-space membership. Labels
           // are optional; GET_CHAT above remains the required authority.
@@ -900,9 +1060,8 @@ export function createInlineApi(params: {
     let nextOffsetId: bigint | null | undefined = params.offsetId
 
     while (messages.length < maxMessages && scannedCount < maxScanned) {
-      await ensureConnected()
       const pageLimit = Math.min(50, maxScanned - scannedCount)
-      const historyResult = await client.invoke(Method.GET_CHAT_HISTORY, {
+      const historyResult = await invoke(Method.GET_CHAT_HISTORY, {
         oneofKind: "getChatHistory",
         getChatHistory: GetChatHistoryInput.create({
           peerId: buildChatPeer(chat.chatId),
@@ -1002,13 +1161,15 @@ export function createInlineApi(params: {
 
   return {
     async close() {
-      await client.close()
-      await eventDrain
+      const entry = uploadClient
+      uploadClient = null
+      if (!entry) return
+      await entry.client.close()
+      await entry.drain
     },
 
     async getProfile() {
-      await ensureConnected()
-      const result = await client.invoke(Method.GET_ME, { oneofKind: "getMe", getMe: GetMeInput.create({}) })
+      const result = await invoke(Method.GET_ME, { oneofKind: "getMe", getMe: GetMeInput.create({}) })
       const user = result.getMe.user
       if (!user || user.id <= 0n) throw new Error("Authenticated Inline profile is unavailable")
       const name = [user.firstName?.trim(), user.lastName?.trim()].filter(Boolean).join(" ")
@@ -1170,9 +1331,28 @@ export function createInlineApi(params: {
     async getEligibleChats(params) {
       // Archive discovery is opt-in and must not expand the ordinary search
       // and mentions cache. Complete results require the upgraded backing server.
-      if (params?.includeSubthreads === true) return (await buildEligibleChatContext(true)).chats
+      if (params?.includeSubthreads === true) {
+        const chats: InlineEligibleChat[] = []
+        let afterChatId: bigint | undefined
+        do {
+          const page = await listChatsPage({ includeSubthreads: true, limit: 100, ...(afterChatId != null ? { afterChatId } : {}) })
+          chats.push(...page.chats)
+          if (page.nextAfterChatId != null && afterChatId != null && page.nextAfterChatId <= afterChatId) {
+            throw new Error("conversation listing cursor did not advance")
+          }
+          afterChatId = page.nextAfterChatId ?? undefined
+        } while (afterChatId != null)
+        return chats.sort((a, b) =>
+          compareBigIntDesc(a.lastMessageDate, b.lastMessageDate) ||
+          compareBigIntDesc(a.lastMessageId, b.lastMessageId) ||
+          compareBigIntDesc(a.chatId, b.chatId))
+      }
       const context = await getEligibleChatContext()
       return context.chats
+    },
+
+    async listChats(params) {
+      return await listChatsPage(params)
     },
 
     async resolveConversation(query, limit, filters) {
@@ -1312,8 +1492,7 @@ export function createInlineApi(params: {
       const chat = await getAllowedChat({ chatId, userId }, true, true)
 
       if (anchorMessageId != null) {
-        await ensureConnected()
-        const result = await client.invoke(Method.GET_CHAT_HISTORY, {
+        const result = await invoke(Method.GET_CHAT_HISTORY, {
           oneofKind: "getChatHistory",
           getChatHistory: GetChatHistoryInput.create({
             peerId: buildChatPeer(chat.chatId),
@@ -1416,8 +1595,7 @@ export function createInlineApi(params: {
       const chat = await getAllowedChat({ chatId, userId }, true, true)
       const peerId = buildChatPeer(chat.chatId)
 
-      await ensureConnected()
-      const result = await client.invoke(Method.SEARCH_MESSAGES, {
+      const result = await invoke(Method.SEARCH_MESSAGES, {
         oneofKind: "searchMessages",
         searchMessages: SearchMessagesInput.create({
           peerId,
@@ -1493,8 +1671,7 @@ export function createInlineApi(params: {
       }
 
       const participants = sanitizeParticipantUserIds(participantUserIds).map((userId) => InputChatParticipant.create({ userId }))
-      await ensureConnected()
-      const result = await client.invoke(Method.CREATE_CHAT, {
+      const result = await invoke(Method.CREATE_CHAT, {
         oneofKind: "createChat",
         createChat: CreateChatInput.create({
           title: safeTitle,
@@ -1528,8 +1705,7 @@ export function createInlineApi(params: {
       if (parent.spaceId == null && !allowHomeThreads) {
         throw new Error("subthread creation outside spaces requires home thread access for this grant")
       }
-      await ensureConnected()
-      const result = await client.invokeRaw(Method.CREATE_SUBTHREAD, {
+      const result = await rpc.invoke(Method.CREATE_SUBTHREAD, {
         oneofKind: "createSubthread",
         createSubthread: CreateSubthreadInput.create({
           parentChatId,
@@ -1566,9 +1742,8 @@ export function createInlineApi(params: {
       if (messageIds.length === 0 || messageIds.length > 100 || messageIds.some((id) => id <= 0n)) {
         throw new Error("forwardMessages requires one to one hundred positive message IDs")
       }
-      await ensureConnected()
       try {
-        const result = await client.invoke(Method.FORWARD_MESSAGES, {
+        const result = await invoke(Method.FORWARD_MESSAGES, {
           oneofKind: "forwardMessages",
           forwardMessages: ForwardMessagesInput.create({
             fromPeerId: buildChatPeer(sourceChatId),
@@ -1597,7 +1772,7 @@ export function createInlineApi(params: {
     },
 
     async uploadFile({ type, file, fileName, contentType, thumbnail, thumbnailFileName, thumbnailContentType, width, height, duration }) {
-      await ensureConnected()
+      const client = await uploader()
       const upload = await client.uploadFile({
         type,
         file,
@@ -1627,12 +1802,11 @@ export function createInlineApi(params: {
 
       const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null
 
-      await ensureConnected()
-      const res = await client.sendMessage({
-        ...(target.kind === "chat" ? { chatId: target.chatId } : { userId: target.userId }),
+      const res = await sendRpcMessage({
+        target,
         text,
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
-        sendMode: sendMode === "silent" ? "silent" : undefined,
+        silent: sendMode === "silent",
         parseMarkdown,
       })
       return { messageId: res.messageId, spaceId: chat?.spaceId ?? null }
@@ -1647,18 +1821,12 @@ export function createInlineApi(params: {
       const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null
       const caption = text?.trim() ? text : undefined
 
-      await ensureConnected()
-      const res = await client.sendMessage({
-        ...(target.kind === "chat" ? { chatId: target.chatId } : { userId: target.userId }),
+      const res = await sendRpcMessage({
+        target,
         ...(caption ? { text: caption } : {}),
-        media:
-          media.kind === "photo"
-            ? { kind: "photo", photoId: media.id }
-            : media.kind === "video"
-              ? { kind: "video", videoId: media.id }
-              : { kind: "document", documentId: media.id },
+        media,
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
-        sendMode: sendMode === "silent" ? "silent" : undefined,
+        silent: sendMode === "silent",
         ...(caption ? { parseMarkdown } : {}),
       })
       return { messageId: res.messageId, spaceId: chat?.spaceId ?? null }
