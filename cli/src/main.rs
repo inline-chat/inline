@@ -72,8 +72,9 @@ use crate::downloads::{
     download_message_media, resolve_batch_download_path, resolve_download_path,
 };
 use crate::errors::{
-    CliError, JsonCliError, JsonErrorEnvelope, human_cli_error, human_cli_error_from_error,
-    ReportedExit, is_reported_cli_failure, json_cli_error_from_error, reported_exit_code,
+    CliError, JsonCliError, JsonErrorEnvelope, ReportedExit, human_cli_error,
+    human_cli_error_from_error, is_reported_cli_failure, json_cli_error_from_error,
+    reported_exit_code,
 };
 use crate::identity::connect_realtime;
 use crate::message_export::{

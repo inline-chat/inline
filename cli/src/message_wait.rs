@@ -444,10 +444,22 @@ mod tests {
 
     #[test]
     fn parses_durations() {
-        assert_eq!(parse_wait_duration("--timeout", "90").unwrap(), Duration::from_secs(90));
-        assert_eq!(parse_wait_duration("--timeout", "30m").unwrap(), Duration::from_secs(1800));
-        assert_eq!(parse_wait_duration("--timeout", "2h").unwrap(), Duration::from_secs(7200));
-        assert_eq!(parse_wait_duration("--settle", "0s").unwrap(), Duration::ZERO);
+        assert_eq!(
+            parse_wait_duration("--timeout", "90").unwrap(),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            parse_wait_duration("--timeout", "30m").unwrap(),
+            Duration::from_secs(1800)
+        );
+        assert_eq!(
+            parse_wait_duration("--timeout", "2h").unwrap(),
+            Duration::from_secs(7200)
+        );
+        assert_eq!(
+            parse_wait_duration("--settle", "0s").unwrap(),
+            Duration::ZERO
+        );
         assert!(parse_wait_duration("--timeout", "soon").is_err());
         assert!(parse_wait_duration("--timeout", "5w").is_err());
         assert!(parse_wait_duration("--timeout", "").is_err());
