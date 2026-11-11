@@ -192,6 +192,7 @@ struct MessageViewContent {
     metrics.tailWidth = MessageBubbleGeometry.tailWidth(for: .leading)
     metrics.cornerRadius = MessageBubbleGeometry.cornerRadius
     metrics.maximumBubbleWidthFraction = MessageBubbleWidthPolicy.maximumWidthFraction
+    metrics.maximumBubbleWidth = MessageBubbleWidthPolicy.maximumWidth
 
     let bodyInput: MessageLayoutInput.Body = if let rich {
       .rich(rich.blocks)
@@ -250,6 +251,7 @@ struct MessageViewContent {
   private static func maximumContentWidth(context: MessageRowContext, outgoing: Bool) -> CGFloat {
     var metrics = MessageLayoutMetrics()
     metrics.maximumBubbleWidthFraction = MessageBubbleWidthPolicy.maximumWidthFraction
+    metrics.maximumBubbleWidth = MessageBubbleWidthPolicy.maximumWidth
     return MessageLayoutInput(
       rowWidth: context.rowWidth,
       grid: PixelGrid(scale: context.displayScale),
