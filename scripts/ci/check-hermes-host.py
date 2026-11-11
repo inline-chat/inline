@@ -534,15 +534,15 @@ async def exercise_ordinary_presentation():
     # Exercise the host's actual resolver; explicit operator config always wins.
     assert resolve_display_setting({}, "inline", "tool_progress") == "off"
     assert resolve_display_setting({}, "inline", "cleanup_progress") is True
-    assert resolve_display_setting({}, "inline", "interim_assistant_messages") is False
+    assert resolve_display_setting({}, "inline", "interim_assistant_messages") is True
     assert resolve_display_setting({}, "inline", "long_running_notifications") is True
     assert resolve_display_setting({"display": {"tool_progress": "all"}}, "inline", "tool_progress") == "all"
     explicit = {"display": {"tool_progress": "off", "platforms": {"inline": {
-        "tool_progress": "all", "cleanup_progress": False, "interim_assistant_messages": True,
+        "tool_progress": "all", "cleanup_progress": False, "interim_assistant_messages": False,
     }}}}
     assert resolve_display_setting(explicit, "inline", "tool_progress") == "all"
     assert resolve_display_setting(explicit, "inline", "cleanup_progress") is False
-    assert resolve_display_setting(explicit, "inline", "interim_assistant_messages") is True
+    assert resolve_display_setting(explicit, "inline", "interim_assistant_messages") is False
     assert resolve_display_setting({"display": {"tool_progress_overrides": {"inline": "new"}}},
                                    "inline", "tool_progress") == "new"
 
