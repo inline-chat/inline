@@ -1210,6 +1210,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getUnreadActivity // = 167
   case readActivity // = 168
   case setFocusStatus // = 169
+  case getSpaces // = 170
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -1387,6 +1388,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 167: self = .getUnreadActivity
     case 168: self = .readActivity
     case 169: self = .setFocusStatus
+    case 170: self = .getSpaces
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -1562,6 +1564,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getUnreadActivity: return 167
     case .readActivity: return 168
     case .setFocusStatus: return 169
+    case .getSpaces: return 170
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -1737,6 +1740,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getUnreadActivity,
     .readActivity,
     .setFocusStatus,
+    .getSpaces,
   ]
 
 }
@@ -2065,6 +2069,127 @@ public nonisolated enum DeleteDialogFolderDisposition: SwiftProtobuf.Enum, Swift
     .unspecified,
     .closeDialogs,
     .keepDialogs,
+  ]
+
+}
+
+public nonisolated enum ChatListScope: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Chats the viewer has a dialog with, except dialogs marked chat_list_hidden.
+  case dialogs // = 0
+
+  /// Every chat the viewer can access, with or without a dialog, including
+  /// linked subthreads.
+  case accessible // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .dialogs
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .dialogs
+    case 1: self = .accessible
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .dialogs: return 0
+    case .accessible: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ChatListScope] = [
+    .dialogs,
+    .accessible,
+  ]
+
+}
+
+public nonisolated enum ChatListOrder: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Latest activity first (last message date, else creation date), then chat
+  /// ID descending. Pinned chats are not moved to the front.
+  case recent // = 0
+
+  /// Ascending chat ID. Pages never shift and new chats land at the end.
+  /// For complete walks, sync and export.
+  case id // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .recent
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .recent
+    case 1: self = .id
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .recent: return 0
+    case .id: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ChatListOrder] = [
+    .recent,
+    .id,
+  ]
+
+}
+
+public nonisolated enum ChatListKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case dm // = 1
+  case spaceThread // = 2
+  case homeThread // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .dm
+    case 2: self = .spaceThread
+    case 3: self = .homeThread
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .dm: return 1
+    case .spaceThread: return 2
+    case .homeThread: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ChatListKind] = [
+    .unspecified,
+    .dm,
+    .spaceThread,
+    .homeThread,
   ]
 
 }
@@ -12104,6 +12229,14 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .setFocusStatus(newValue)}
   }
 
+  public var getSpaces: GetSpacesInput {
+    get {
+      if case .getSpaces(let v)? = input {return v}
+      return GetSpacesInput()
+    }
+    set {input = .getSpaces(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Input: Equatable, Sendable {
@@ -12275,6 +12408,7 @@ public nonisolated struct RpcCall: Sendable {
     case getUnreadActivity(GetUnreadActivityInput)
     case readActivity(ReadActivityInput)
     case setFocusStatus(SetFocusStatusInput)
+    case getSpaces(GetSpacesInput)
 
   }
 
@@ -13640,6 +13774,14 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .setFocusStatus(newValue)}
   }
 
+  public var getSpaces: GetSpacesResult {
+    get {
+      if case .getSpaces(let v)? = _storage._result {return v}
+      return GetSpacesResult()
+    }
+    set {_uniqueStorage()._result = .getSpaces(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -13811,6 +13953,7 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case getUnreadActivity(GetUnreadActivityResult)
     case readActivity(ReadActivityResult)
     case setFocusStatus(SetFocusStatusResult)
+    case getSpaces(GetSpacesResult)
 
   }
 
@@ -18995,8 +19138,7 @@ public nonisolated struct GetChatsInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Include every accessible linked subthread, regardless of dialog visibility.
-  /// Omitted/false preserves the normal chat-list snapshot.
+  /// Legacy. true is the same as scope = CHAT_LIST_SCOPE_ACCESSIBLE.
   public var includeSubthreads: Bool {
     get {_includeSubthreads ?? false}
     set {_includeSubthreads = newValue}
@@ -19006,11 +19148,154 @@ public nonisolated struct GetChatsInput: Sendable {
   /// Clears the value of `includeSubthreads`. Subsequent reads from it will return its default value.
   public mutating func clearIncludeSubthreads() {self._includeSubthreads = nil}
 
+  /// Page size, capped at 100. Absent: legacy unpaged snapshot (deprecated).
+  public var limit: Int32 {
+    get {_limit ?? 0}
+    set {_limit = newValue}
+  }
+  /// Returns true if `limit` has been explicitly set.
+  public var hasLimit: Bool {self._limit != nil}
+  /// Clears the value of `limit`. Subsequent reads from it will return its default value.
+  public mutating func clearLimit() {self._limit = nil}
+
+  /// Exclusive start. Pass the previous result's next_offset; absent = first page.
+  public var offset: ChatListOffset {
+    get {_offset ?? ChatListOffset()}
+    set {_offset = newValue}
+  }
+  /// Returns true if `offset` has been explicitly set.
+  public var hasOffset: Bool {self._offset != nil}
+  /// Clears the value of `offset`. Subsequent reads from it will return its default value.
+  public mutating func clearOffset() {self._offset = nil}
+
+  public var order: ChatListOrder = .recent
+
+  /// Predicates, ANDed. Absent fields do not constrain.
+  public var filter: ChatListFilter {
+    get {_filter ?? ChatListFilter()}
+    set {_filter = newValue}
+  }
+  /// Returns true if `filter` has been explicitly set.
+  public var hasFilter: Bool {self._filter != nil}
+  /// Clears the value of `filter`. Subsequent reads from it will return its default value.
+  public mutating func clearFilter() {self._filter = nil}
+
+  public var scope: ChatListScope = .dialogs
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _includeSubthreads: Bool? = nil
+  fileprivate var _limit: Int32? = nil
+  fileprivate var _offset: ChatListOffset? = nil
+  fileprivate var _filter: ChatListFilter? = nil
+}
+
+public nonisolated struct ChatListOffset: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chatID: Int64 = 0
+
+  /// Activity date of that chat. RECENT order only.
+  public var date: Int64 {
+    get {_date ?? 0}
+    set {_date = newValue}
+  }
+  /// Returns true if `date` has been explicitly set.
+  public var hasDate: Bool {self._date != nil}
+  /// Clears the value of `date`. Subsequent reads from it will return its default value.
+  public mutating func clearDate() {self._date = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _date: Int64? = nil
+}
+
+public nonisolated struct ChatListFilter: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Empty: all kinds.
+  public var kinds: [ChatListKind] = []
+
+  /// Restrict space threads to these spaces. Empty: all spaces.
+  public var spaceIds: [Int64] = []
+
+  /// Unread messages or a manual unread mark.
+  public var unread: Bool {
+    get {_unread ?? false}
+    set {_unread = newValue}
+  }
+  /// Returns true if `unread` has been explicitly set.
+  public var hasUnread: Bool {self._unread != nil}
+  /// Clears the value of `unread`. Subsequent reads from it will return its default value.
+  public mutating func clearUnread() {self._unread = nil}
+
+  /// The four below are tri-state on stored dialog state:
+  /// true = only, false = exclude, absent = both.
+  public var archived: Bool {
+    get {_archived ?? false}
+    set {_archived = newValue}
+  }
+  /// Returns true if `archived` has been explicitly set.
+  public var hasArchived: Bool {self._archived != nil}
+  /// Clears the value of `archived`. Subsequent reads from it will return its default value.
+  public mutating func clearArchived() {self._archived = nil}
+
+  public var `open`: Bool {
+    get {_open ?? false}
+    set {_open = newValue}
+  }
+  /// Returns true if ``open`` has been explicitly set.
+  public var hasOpen: Bool {self._open != nil}
+  /// Clears the value of ``open``. Subsequent reads from it will return its default value.
+  public mutating func clearOpen() {self._open = nil}
+
+  public var pinned: Bool {
+    get {_pinned ?? false}
+    set {_pinned = newValue}
+  }
+  /// Returns true if `pinned` has been explicitly set.
+  public var hasPinned: Bool {self._pinned != nil}
+  /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
+  public mutating func clearPinned() {self._pinned = nil}
+
+  /// Dialogs in this folder.
+  public var folderID: Int64 {
+    get {_folderID ?? 0}
+    set {_folderID = newValue}
+  }
+  /// Returns true if `folderID` has been explicitly set.
+  public var hasFolderID: Bool {self._folderID != nil}
+  /// Clears the value of `folderID`. Subsequent reads from it will return its default value.
+  public mutating func clearFolderID() {self._folderID = nil}
+
+  /// Case-insensitive match on the chat title or DM peer name. (Phase 2.)
+  public var query: String {
+    get {_query ?? String()}
+    set {_query = newValue}
+  }
+  /// Returns true if `query` has been explicitly set.
+  public var hasQuery: Bool {self._query != nil}
+  /// Clears the value of `query`. Subsequent reads from it will return its default value.
+  public mutating func clearQuery() {self._query = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _unread: Bool? = nil
+  fileprivate var _archived: Bool? = nil
+  fileprivate var _open: Bool? = nil
+  fileprivate var _pinned: Bool? = nil
+  fileprivate var _folderID: Int64? = nil
+  fileprivate var _query: String? = nil
 }
 
 public nonisolated struct GetChatsResult: Sendable {
@@ -19034,7 +19319,43 @@ public nonisolated struct GetChatsResult: Sendable {
   public var messages: [Message] = []
 
   /// Personal dialog folders. Dialogs remain present for unsupported clients.
+  /// Paged requests: complete, on the first page only.
   public var folders: [DialogFolder] = []
+
+  /// Paged requests: pass as `offset` for the next page. Absent: end of list.
+  public var nextOffset: ChatListOffset {
+    get {_nextOffset ?? ChatListOffset()}
+    set {_nextOffset = newValue}
+  }
+  /// Returns true if `nextOffset` has been explicitly set.
+  public var hasNextOffset: Bool {self._nextOffset != nil}
+  /// Clears the value of `nextOffset`. Subsequent reads from it will return its default value.
+  public mutating func clearNextOffset() {self._nextOffset = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _nextOffset: ChatListOffset? = nil
+}
+
+/// Every space the viewer is a member of. Small and unpaged.
+public nonisolated struct GetSpacesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GetSpacesResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaces: [Space] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -27826,7 +28147,7 @@ nonisolated extension AgentSessionMessageSyncState: SwiftProtobuf._ProtoNameProv
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0\u{1}REPORT_AGENT_RUNTIME\0\u{1}GET_AGENT_RUNTIME\0\u{1}UPDATE_AGENT_SESSION_STATE\0\u{1}GET_AGENT_SESSION_STATES\0\u{1}LIST_AGENT_GRANTS\0\u{1}SET_AGENT_GRANT\0\u{1}DELETE_AGENT_GRANT\0\u{1}IMPORT_AGENT_GRANTS\0\u{1}GET_AGENT_PARTICIPATIONS\0\u{1}SET_AGENT_PARTICIPATION\0\u{1}UPDATE_AGENT_SETTINGS\0\u{1}CONTROL_AGENT_SESSION\0\u{1}MOVE_AGENT_SESSION\0\u{1}UNPIN_ALL_MESSAGES\0\u{1}GET_AGENT_SETTINGS\0\u{1}GET_CONTACTS\0\u{1}GET_AGENT_ACCESS\0\u{1}GET_UNREAD_ACTIVITY\0\u{1}READ_ACTIVITY\0\u{1}SET_FOCUS_STATUS\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0\u{1}REPORT_AGENT_RUNTIME\0\u{1}GET_AGENT_RUNTIME\0\u{1}UPDATE_AGENT_SESSION_STATE\0\u{1}GET_AGENT_SESSION_STATES\0\u{1}LIST_AGENT_GRANTS\0\u{1}SET_AGENT_GRANT\0\u{1}DELETE_AGENT_GRANT\0\u{1}IMPORT_AGENT_GRANTS\0\u{1}GET_AGENT_PARTICIPATIONS\0\u{1}SET_AGENT_PARTICIPATION\0\u{1}UPDATE_AGENT_SETTINGS\0\u{1}CONTROL_AGENT_SESSION\0\u{1}MOVE_AGENT_SESSION\0\u{1}UNPIN_ALL_MESSAGES\0\u{1}GET_AGENT_SETTINGS\0\u{1}GET_CONTACTS\0\u{1}GET_AGENT_ACCESS\0\u{1}GET_UNREAD_ACTIVITY\0\u{1}READ_ACTIVITY\0\u{1}SET_FOCUS_STATUS\0\u{1}GET_SPACES\0")
 }
 
 nonisolated extension GridTranscriptionState: SwiftProtobuf._ProtoNameProviding {
@@ -27859,6 +28180,18 @@ nonisolated extension PushNotificationProvider: SwiftProtobuf._ProtoNameProvidin
 
 nonisolated extension DeleteDialogFolderDisposition: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED\0\u{1}CLOSE_DIALOGS\0\u{1}KEEP_DIALOGS\0")
+}
+
+nonisolated extension ChatListScope: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CHAT_LIST_SCOPE_DIALOGS\0\u{1}CHAT_LIST_SCOPE_ACCESSIBLE\0")
+}
+
+nonisolated extension ChatListOrder: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CHAT_LIST_ORDER_RECENT\0\u{1}CHAT_LIST_ORDER_ID\0")
+}
+
+nonisolated extension ChatListKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CHAT_LIST_KIND_UNSPECIFIED\0\u{1}CHAT_LIST_KIND_DM\0\u{1}CHAT_LIST_KIND_SPACE_THREAD\0\u{1}CHAT_LIST_KIND_HOME_THREAD\0")
 }
 
 nonisolated extension GetChatHistoryMode: SwiftProtobuf._ProtoNameProviding {
@@ -38474,7 +38807,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{1}getSpaces\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -40667,6 +41000,19 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .setFocusStatus(v)
         }
       }()
+      case 171: try {
+        var v: GetSpacesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getSpaces(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getSpaces(v)
+        }
+      }()
       default: break
       }
     }
@@ -41353,6 +41699,10 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .setFocusStatus(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 170)
     }()
+    case .getSpaces?: try {
+      guard case .getSpaces(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 171)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -41368,7 +41718,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{1}getSpaces\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -43588,6 +43938,19 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .setFocusStatus(v)
           }
         }()
+        case 171: try {
+          var v: GetSpacesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSpaces(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSpaces(v)
+          }
+        }()
         default: break
         }
       }
@@ -44275,6 +44638,10 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .setFocusStatus?: try {
         guard case .setFocusStatus(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 170)
+      }()
+      case .getSpaces?: try {
+        guard case .getSpaces(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 171)
       }()
       case nil: break
       }
@@ -52233,7 +52600,7 @@ nonisolated extension DeleteDialogFolderResult: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_subthreads\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_subthreads\0\u{1}limit\0\u{1}offset\0\u{1}order\0\u{1}filter\0\u{1}scope\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52242,6 +52609,11 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self._includeSubthreads) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._offset) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.order) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._filter) }()
+      case 6: try { try decoder.decodeSingularEnumField(value: &self.scope) }()
       default: break
       }
     }
@@ -52255,11 +52627,139 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try { if let v = self._includeSubthreads {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
     } }()
+    try { if let v = self._limit {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._offset {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    if self.order != .recent {
+      try visitor.visitSingularEnumField(value: self.order, fieldNumber: 4)
+    }
+    try { if let v = self._filter {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    if self.scope != .dialogs {
+      try visitor.visitSingularEnumField(value: self.scope, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatsInput, rhs: GetChatsInput) -> Bool {
     if lhs._includeSubthreads != rhs._includeSubthreads {return false}
+    if lhs._limit != rhs._limit {return false}
+    if lhs._offset != rhs._offset {return false}
+    if lhs.order != rhs.order {return false}
+    if lhs._filter != rhs._filter {return false}
+    if lhs.scope != rhs.scope {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ChatListOffset: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ChatListOffset"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}date\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    try { if let v = self._date {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ChatListOffset, rhs: ChatListOffset) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs._date != rhs._date {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ChatListFilter: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ChatListFilter"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kinds\0\u{3}space_ids\0\u{1}unread\0\u{1}archived\0\u{1}open\0\u{1}pinned\0\u{3}folder_id\0\u{1}query\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedEnumField(value: &self.kinds) }()
+      case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.spaceIds) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._unread) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._archived) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._open) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self._pinned) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self._folderID) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._query) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.kinds.isEmpty {
+      try visitor.visitPackedEnumField(value: self.kinds, fieldNumber: 1)
+    }
+    if !self.spaceIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.spaceIds, fieldNumber: 2)
+    }
+    try { if let v = self._unread {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._archived {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._open {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._pinned {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._folderID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._query {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ChatListFilter, rhs: ChatListFilter) -> Bool {
+    if lhs.kinds != rhs.kinds {return false}
+    if lhs.spaceIds != rhs.spaceIds {return false}
+    if lhs._unread != rhs._unread {return false}
+    if lhs._archived != rhs._archived {return false}
+    if lhs._open != rhs._open {return false}
+    if lhs._pinned != rhs._pinned {return false}
+    if lhs._folderID != rhs._folderID {return false}
+    if lhs._query != rhs._query {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -52267,7 +52767,7 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0\u{3}next_offset\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52281,12 +52781,17 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       case 5: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       case 6: try { try decoder.decodeRepeatedMessageField(value: &self.folders) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._nextOffset) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.dialogs.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 1)
     }
@@ -52305,6 +52810,9 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.folders.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.folders, fieldNumber: 6)
     }
+    try { if let v = self._nextOffset {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -52315,6 +52823,56 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.users != rhs.users {return false}
     if lhs.messages != rhs.messages {return false}
     if lhs.folders != rhs.folders {return false}
+    if lhs._nextOffset != rhs._nextOffset {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetSpacesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpacesInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpacesInput, rhs: GetSpacesInput) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetSpacesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpacesResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}spaces\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.spaces) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.spaces.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.spaces, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpacesResult, rhs: GetSpacesResult) -> Bool {
+    if lhs.spaces != rhs.spaces {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
