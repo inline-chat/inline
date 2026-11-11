@@ -155,6 +155,7 @@ class MessageListAppKit: NSViewController {
   private var lastVisibleReadCandidateID: Int64?
   private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
   private var appActivityObserverId: UUID?
+  private var statusNoticeCancellable: AnyCancellable?
 
   init(
     dependencies: AppDependencies,
@@ -211,6 +212,7 @@ class MessageListAppKit: NSViewController {
     }
 
     sizeCalculator.prepareForUse()
+    observeStatusNotice()
     rebuildRowItems()
     NotificationCenter.default.addObserver(
       self,
@@ -331,6 +333,62 @@ class MessageListAppKit: NSViewController {
 
   private func rowItem(at row: Int) -> ChatRowListViewModel.Row? {
     chatRows.row(at: row)
+  }
+
+  /// The DM peer whose status the line under the newest message describes.
+  private var statusNoticeUserId: Int64? {
+    guard let userId = peerId.asUserId(), userId != Auth.shared.getCurrentUserId() else { return nil }
+    return userId
+  }
+
+  private func observeStatusNotice() {
+    guard let userId = statusNoticeUserId else { return }
+    // Seeds the first frame from memory; rows are built right after.
+    _ = chatRows.setStatusNotice(ObjectCache.shared.getCachedUser(id: userId)?.notificationsSilencedNotice())
+    statusNoticeCancellable = ObjectCache.shared.getUserPublisher(id: userId)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] userInfo in
+        guard let userInfo else { return }
+        self?.setStatusNotice(userInfo.notificationsSilencedNotice())
+      }
+  }
+
+  /// The notice is the last row, so it never moves rows above it. A pinned list follows it.
+  private func setStatusNotice(_ text: String?) {
+    guard !isDisposed else { return }
+    let wasAtBottom = isViewLoaded && shouldKeepBottomPinned
+    let anchors = isViewLoaded && !wasAtBottom ? viewport.anchors() : []
+    let update = chatRows.setStatusNotice(text)
+    guard update != .none, isViewLoaded else { return }
+
+    let animate = wasAtBottom && !needsInitialScroll && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    let apply = { [self] in
+      let animation: NSTableView.AnimationOptions = animate ? .effectFade : []
+      switch update {
+        case let .insert(rows): tableView.insertRows(at: rows, withAnimation: animation)
+        case let .remove(rows): tableView.removeRows(at: rows, withAnimation: animation)
+        case let .reloadRows(rows):
+          tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+        case .reloadAll, .none:
+          tableView.reloadData()
+          tableView.layoutSubtreeIfNeeded()
+          if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+            viewport.restore(anchor)
+          }
+      }
+      if wasAtBottom {
+        scrollToBottom(animated: animate)
+      }
+    }
+
+    if animate {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.15
+        apply()
+      }
+    } else {
+      apply()
+    }
   }
 
   func collapseHistory(maxID: Int64?) async throws {
@@ -4540,6 +4598,14 @@ extension MessageListAppKit: NSTableViewDelegate {
         )
         return cell
 
+      case .statusNotice:
+        let identifier = NSUserInterfaceItemIdentifier("StatusNoticeCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? StatusNoticeTableCell
+          ?? StatusNoticeTableCell()
+        cell.identifier = identifier
+        cell.configure(text: chatRows.statusNotice ?? "")
+        return cell
+
       case .collapsedHistory:
         let identifier = NSUserInterfaceItemIdentifier("CollapsedHistoryCell")
         let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? CollapsedHistoryTableCell
@@ -4606,6 +4672,9 @@ extension MessageListAppKit: NSTableViewDelegate {
 
       case .collapsedHistory:
         return CollapsedHistoryTableCell.height
+
+      case .statusNotice:
+        return StatusNoticeTableCell.height
 
       case let .message(id), let .parentMessage(id):
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }

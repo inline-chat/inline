@@ -53,6 +53,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   // Privacy
   case appearInGlobalSearch
   case shareTimeZone
+  case focusStatus
 
   // Data & Storage
   case autoDownloadMedia
@@ -124,7 +125,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .audioAndVideo
     case .dockBadge, .notificationSounds:
       .notifications
-    case .appearInGlobalSearch, .shareTimeZone:
+    case .appearInGlobalSearch, .shareTimeZone, .focusStatus:
       .privacy
     case .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages:
       .dataStorage
@@ -191,6 +192,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .notificationSounds: "Notification Sounds"
     case .appearInGlobalSearch: "Appear in Global Search"
     case .shareTimeZone: "Who Can See My Local Time"
+    case .focusStatus: "Who Can See My Focus Status"
     case .autoDownloadMedia: "Media"
     case .autoDownloadFiles: "Files"
     case .autoDownloadVoiceMessages: "Voice Messages"
@@ -257,6 +259,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .notificationSounds: "Sound"
     case .appearInGlobalSearch: "Discovery"
     case .shareTimeZone: "Time Zone"
+    case .focusStatus: "Focus Status"
     case .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages: "Auto-Download"
     case .connectors: "Connectors"
     case .focusInlineHotkey, .gridMicrophoneHotkey: "Global Hotkeys"
@@ -323,6 +326,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .notificationSounds: ["alert", "mute"]
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
     case .shareTimeZone: ["local time", "timezone", "share", "privacy", "exceptions"]
+    case .focusStatus: ["do not disturb", "dnd", "notifications silenced", "focus"]
     case .autoDownloadMedia: ["photos", "images", "videos", "download"]
     case .autoDownloadFiles: ["documents", "attachments", "download"]
     case .autoDownloadVoiceMessages: ["audio", "download"]

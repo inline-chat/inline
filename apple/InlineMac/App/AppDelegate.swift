@@ -155,6 +155,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
     setupAuthAccountRecoveryObserver()
+    // After launch work, so reading Focus never delays the first window.
+    Task { @MainActor in FocusStatusReporter.shared.start() }
     dependencies.viewModel.$topLevelRoute
       .receive(on: RunLoop.main)
       .sink { [weak self] route in
