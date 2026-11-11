@@ -113,10 +113,23 @@ struct ChatToolbarLeadingView: View {
     ].joined(separator: ":")
   }
 
+  private var localTimeText: String? {
+    guard let timeZone = fullChatViewModel.peerUserInfo?.user.timeZone,
+          timeZone != TimeZone.current.identifier,
+          let text = TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone),
+          !text.isEmpty
+    else { return nil }
+    return text
+  }
+
   private var subtitleFallback: ChatSubtitle {
     let botPresence = isPrivateChat
       ? fullChatViewModel.peerUserInfo.flatMap { BotOnlineStatus.subtitle(for: $0.user) }
       : nil
+
+    if isPrivateChat, fullChatViewModel.peerUserInfo?.focus?.isActive() == true {
+      return .focus(localTime: localTimeText)
+    }
 
     if isPrivateChat,
        let user = fullChatViewModel.peerUserInfo?.user,
@@ -275,6 +288,8 @@ enum ChatSubtitle: Equatable {
   case connectionState(String)
   case composeAction(ComposeActionPresentation)
   case timezone(String)
+  /// A Focus silences the other person's notifications.
+  case focus(localTime: String?)
   case breadcrumb(ReplyThreadToolbarContext, reference: ThreadReference?)
   /// A bot's online status: "online", "last seen 3:04 PM".
   case presence(String)
@@ -289,6 +304,8 @@ enum ChatSubtitle: Equatable {
       "compose:\(presentation.action.rawValue):\(presentation.text)"
     case let .timezone(text):
       "timezone:\(text)"
+    case let .focus(localTime):
+      "focus:\(localTime ?? "")"
     case let .breadcrumb(context, reference):
       [
         "breadcrumb",
@@ -441,6 +458,17 @@ private struct ChatToolbarSubtitleContent: View {
       ChatToolbarComposeActionSubtitle(presentation: presentation)
     case let .timezone(text):
       ChatToolbarTimezoneSubtitle(text: text)
+    case let .focus(localTime):
+      HStack(spacing: 3) {
+        Image(systemName: "moon.fill")
+          .font(.caption2)
+          .foregroundStyle(.indigo)
+          .accessibilityHidden(true)
+        ChatToolbarSubtitleText(
+          text: localTime.map { "Notifications silenced · \($0)" } ?? "Notifications silenced",
+          color: .secondary
+        )
+      }
     case let .breadcrumb(context, reference):
       ChatToolbarBreadcrumbSubtitle(
         context: context,

@@ -38,6 +38,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     AgentControlErrors.report = { ToastManager.shared.showToast($0, type: .error) }
+    // After launch work, so reading Focus never delays the first frame.
+    Task { @MainActor in FocusStatusReporter.shared.start() }
     // One-time refresh attempt on launch (covers normal unlocked launches).
     Task {
       await Auth.shared.refreshFromStorage()

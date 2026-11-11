@@ -2235,6 +2235,8 @@ private extension MessagesCollectionView {
 
     private var dataSource: UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>!
     private(set) var listSections: [MessageListSection] = []
+    /// Text for the line under the newest message, such as a DM peer's silencing Focus.
+    private var statusNotice: String?
     private(set) var hasAppliedOpeningSnapshot = false
 
     var messages: [FullMessage] {
@@ -2322,6 +2324,11 @@ private extension MessagesCollectionView {
         ))
       }
 
+      if showsStatusNotice {
+        // The first section is the visual bottom, under the newest message.
+        sections.insert(MessageListSection(id: .statusNotice, dayString: nil, items: [.statusNotice]), at: 0)
+      }
+
       if let anchor = viewModel.threadAnchor {
         // The collection view is inverted, so the last section is the visual top.
         sections.append(MessageListSection(
@@ -2337,6 +2344,41 @@ private extension MessagesCollectionView {
     var initialUnreadIndexPath: IndexPath? {
       guard !isPreview, let boundary = viewModel.openingUnreadBoundary else { return nil }
       return dataSource.indexPath(for: .unreadSeparator(id: "unread-\(boundary)"))
+    }
+
+    /// Only at the live end of the history, so it never sits under an older window.
+    private var showsStatusNotice: Bool {
+      statusNotice != nil && !isPreview && !viewModel.canLoadNewerFromLocal
+    }
+
+    /// Snapshot index of the newest message section; the status notice section precedes it.
+    private func newestMessageSectionIndex(
+      in sectionIDs: [MessageListSectionID]
+    ) -> Int {
+      sectionIDs.first == .statusNotice ? 1 : 0
+    }
+
+    func setStatusNotice(_ text: String?) {
+      guard statusNotice != text else { return }
+      let changesPresence = (statusNotice == nil) != (text == nil)
+      statusNotice = text
+      guard dataSource != nil else {
+        rebuildListSections()
+        return
+      }
+      guard changesPresence else {
+        rebuildListSections()
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.statusNotice) else { return }
+        snapshot.reconfigureItems([.statusNotice])
+        safeApplySnapshot(snapshot, animatingDifferences: false)
+        return
+      }
+      // Scrolled up, the unanimated apply keeps the visible row in place.
+      setInitialData(
+        animated: isAtBottomForUnread && !UIAccessibility.isReduceMotionEnabled,
+        reconfigureExisting: false
+      )
     }
 
     func sectionId(at index: Int) -> MessageListSectionID? {
@@ -2410,7 +2452,7 @@ private extension MessagesCollectionView {
           } else {
             nil
           }
-        case .unreadSeparator, .collapsedHistory:
+        case .unreadSeparator, .collapsedHistory, .statusNotice:
           nil
       }
     }
@@ -2427,6 +2469,8 @@ private extension MessagesCollectionView {
           return MessageListItemModel(content: .unreadSeparator(title: "Unread messages"))
         case .collapsedHistory:
           return MessageListItemModel(content: .collapsedHistory(title: "Cleared"))
+        case .statusNotice:
+          return MessageListItemModel(content: .statusNotice(title: statusNotice ?? ""))
       }
     }
 
@@ -3122,6 +3166,7 @@ private extension MessagesCollectionView {
       translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
+      observeStatusNotice()
       rebuildListSections()
 
       self.viewModel.observe { [weak self] update in
@@ -3164,6 +3209,19 @@ private extension MessagesCollectionView {
         setupNotionTaskManager()
         ensureThreadAnchorCachedIfNeeded()
       }
+    }
+
+    private func observeStatusNotice() {
+      guard !isPreview, let userId = peerId.asUserId(), userId != Auth.shared.getCurrentUserId() else { return }
+      // Seeds the first frame from memory; sections are built right after.
+      statusNotice = ObjectCache.shared.getCachedUser(id: userId)?.notificationsSilencedNotice()
+      ObjectCache.shared.getUserPublisher(id: userId)
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] userInfo in
+          guard let userInfo else { return }
+          self?.setStatusNotice(userInfo.notificationsSilencedNotice())
+        }
+        .store(in: &cancellables)
     }
 
     func applyTheme(_ theme: IOSThemeSnapshot) {
@@ -3409,9 +3467,17 @@ private extension MessagesCollectionView {
                 }
               }
             }
-          case .message:
+          case .message, .statusNotice:
             break
         }
+      }
+
+      let statusNoticeRegistration = UICollectionView.CellRegistration<
+        StatusNoticeCell,
+        MessageListItem
+      > { [weak self] cell, _, item in
+        guard let self, case let .statusNotice(title)? = model(for: item)?.content else { return }
+        cell.configure(title: title)
       }
 
       dataSource = UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>(
@@ -3427,6 +3493,12 @@ private extension MessagesCollectionView {
           case .unreadSeparator, .collapsedHistory:
             collectionView.dequeueConfiguredReusableCell(
               using: separatorRegistration,
+              for: indexPath,
+              item: item
+            )
+          case .statusNotice:
+            collectionView.dequeueConfiguredReusableCell(
+              using: statusNoticeRegistration,
               for: indexPath,
               item: item
             )
@@ -4015,6 +4087,12 @@ private extension MessagesCollectionView {
       switch update {
         case .messagesAdded, .messagesDeleted, .messagesUpdated:
           rebuildListSections()
+          // Incremental paths edit the current snapshot; when a window change moved the
+          // status notice in or out, rebuild so the snapshot keeps matching listSections.
+          if dataSource.snapshot().sectionIdentifiers.contains(.statusNotice) != showsStatusNotice {
+            setInitialData(animated: false, reconfigureExisting: false)
+            return
+          }
         default:
           break
       }
@@ -4080,11 +4158,12 @@ private extension MessagesCollectionView {
           if snapshot.sectionIdentifiers.contains(sectionId) {
             anchorSectionId = sectionId
           } else {
-            anchorSectionId = snapshot.sectionIdentifiers.first
-            if sectionIndex < snapshot.sectionIdentifiers.count {
+            let snapshotIndex = sectionIndex + newestMessageSectionIndex(in: snapshot.sectionIdentifiers)
+            anchorSectionId = snapshot.sectionIdentifiers.first { $0 != .statusNotice }
+            if snapshotIndex < snapshot.sectionIdentifiers.count {
               snapshot.insertSections(
                 [sectionId],
-                beforeSection: snapshot.sectionIdentifiers[sectionIndex]
+                beforeSection: snapshot.sectionIdentifiers[snapshotIndex]
               )
             } else {
               snapshot.appendSections([sectionId])
@@ -4384,7 +4463,7 @@ private extension MessagesCollectionView {
     /// The newest cached message is in the window and on screen, so there is no place to keep.
     func showsNewestMessage(in collectionView: UICollectionView) -> Bool {
       guard !viewModel.canLoadNewerFromLocal else { return false }
-      let newest = IndexPath(item: 0, section: 0)
+      let newest = IndexPath(item: 0, section: newestMessageSectionIndex(in: listSections.map(\.id)))
       guard case .message? = item(at: newest),
             collectionView.numberOfSections > 0,
             collectionView.numberOfItems(inSection: 0) > 0,
@@ -4916,6 +4995,9 @@ private extension MessagesCollectionView {
       }
       if case .collapsedHistory = item {
         return CGSize(width: collectionView.bounds.width, height: 34)
+      }
+      if case .statusNotice = item {
+        return CGSize(width: collectionView.bounds.width, height: StatusNoticeCell.height)
       }
 
       if let cachedSize = sizeCache[item] {
