@@ -15,6 +15,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
   var replacePastedLinksWithTitles: Bool
   var messageGestures: MessageGestureValues? = nil
   var timeZoneRule: PrivacyRuleValue? = nil
+  var focusStatusRule: PrivacyRuleValue? = nil
 
   static let defaults = NotificationSettingsValues(
     mode: .all,
@@ -63,6 +64,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     shareTimeZone = privacy.shareTimeZone
     appearInGlobalSearch = privacy.appearInGlobalSearch
     timeZoneRule = privacy.timeZoneRule
+    focusStatusRule = privacy.focusStatusRule
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
     messageGestures = gestures?.accountValues
   }
@@ -86,6 +88,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     shareTimeZone = privacy.shareTimeZone
     appearInGlobalSearch = privacy.appearInGlobalSearch
     timeZoneRule = privacy.timeZoneRule
+    focusStatusRule = privacy.focusStatusRule
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
     messageGestures = settings.hasMessageGestureSettings ? MessageGestureValues(settings.messageGestureSettings) : nil
   }
@@ -110,6 +113,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
       settings.appearInGlobalSearch = appearInGlobalSearch
     }
     settings.replaceTimeZoneRule(timeZoneRule)
+    settings.replaceFocusStatusRule(focusStatusRule)
   }
 
   func apply(to settings: ComposeSettingsManager) {
@@ -845,7 +849,8 @@ private extension NotificationSettingsValues {
     PrivacySettingsManager(
       shareTimeZone: shareTimeZone,
       appearInGlobalSearch: appearInGlobalSearch,
-      timeZoneRule: timeZoneRule
+      timeZoneRule: timeZoneRule,
+      focusStatusRule: focusStatusRule
     )
   }
 

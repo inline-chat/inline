@@ -298,6 +298,7 @@ public extension User {
   static func userInfoQuery() -> QueryInterfaceRequest<UserInfo> {
     User
       .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      .including(optional: User.focusStatus.forKey(UserInfo.CodingKeys.focus))
       .asRequest(of: UserInfo.self)
   }
 }
@@ -467,6 +468,11 @@ public extension User {
       // Backward compatible as the new API doesn't send date for users
       user.date = Date()
       try user.save(db)
+    }
+
+    // Focus is present only when the server evaluated it for this viewer.
+    if protocolUser.hasStatus, protocolUser.status.hasFocus {
+      try UserFocus.save(db, userID: protocolUser.id, status: protocolUser.status.focus)
     }
 
     return user

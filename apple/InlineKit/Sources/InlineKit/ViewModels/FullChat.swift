@@ -431,7 +431,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                fullChat.chat?.parentMessageId != self.chatItem?.chat?.parentMessageId ||
                fullChat.chat?.isPublic != self.chatItem?.chat?.isPublic ||
                fullChat.chat?.canUpdateInfo != self.chatItem?.chat?.canUpdateInfo ||
-               fullChat.user != self.chatItem?.user
+               fullChat.user != self.chatItem?.user ||
+               fullChat.userInfo?.focus != self.chatItem?.userInfo?.focus
             {
               // Important Note
               // Only update if the dialog is different, ignore chat and message for performance reasons

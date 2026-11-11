@@ -122,6 +122,7 @@ struct DatabaseObjectSource: ObjectSource {
       let users = try User
         .filter(ids: userIDs)
         .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+        .including(optional: User.focusStatus.forKey(UserInfo.CodingKeys.focus))
         .asRequest(of: UserInfo.self)
         .fetchAll(db)
       for user in users {

@@ -1476,6 +1476,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user focus status") { db in
+      // Another person's Focus as the server last reported it to this viewer.
+      // Not on the user row, so user saves without Focus never clear it.
+      try db.create(table: "userFocus") { table in
+        table.column("userId", .integer).primaryKey()
+        table.column("focused", .boolean).notNull()
+        table.column("updatedAt", .datetime)
+      }
+    }
+
     return migrator
   }
 }

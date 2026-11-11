@@ -80,23 +80,47 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
   /// The server's time zone rule. Nil until a server sends one; saves then
   /// carry only the legacy flag so they cannot erase lists set elsewhere.
   @Published public private(set) var timeZoneRule: PrivacyRuleValue?
+  /// The server's Focus rule. Nil until a server sends one, and saves then omit it.
+  @Published public private(set) var focusStatusRule: PrivacyRuleValue?
 
   public init(
     shareTimeZone: Bool = true,
     appearInGlobalSearch: Bool = true,
-    timeZoneRule: PrivacyRuleValue? = nil
+    timeZoneRule: PrivacyRuleValue? = nil,
+    focusStatusRule: PrivacyRuleValue? = nil
   ) {
     self.shareTimeZone = shareTimeZone
     self.appearInGlobalSearch = appearInGlobalSearch
     self.timeZoneRule = timeZoneRule
+    self.focusStatusRule = focusStatusRule
   }
 
   convenience init(from settings: InlineProtocol.PrivacySettings) {
     self.init(
       shareTimeZone: settings.hasShareTimeZone ? settings.shareTimeZone : true,
       appearInGlobalSearch: settings.hasAppearInGlobalSearch ? settings.appearInGlobalSearch : true,
-      timeZoneRule: settings.hasTimeZone ? PrivacyRuleValue(from: settings.timeZone) : nil
+      timeZoneRule: settings.hasTimeZone ? PrivacyRuleValue(from: settings.timeZone) : nil,
+      focusStatusRule: settings.hasFocusStatus ? PrivacyRuleValue(from: settings.focusStatus) : nil
     )
+  }
+
+  /// Focus status is opt-in: nobody sees it until the user adds an audience.
+  public var effectiveFocusStatusRule: PrivacyRuleValue {
+    focusStatusRule ?? PrivacyRuleValue(audience: .nobody)
+  }
+
+  /// Whether anyone could see Focus, so devices should report it.
+  public var sharesFocusStatus: Bool {
+    let rule = effectiveFocusStatusRule
+    return rule.audience == .everyone || !rule.alwaysShare.isEmpty
+  }
+
+  public func setFocusStatusRule(_ rule: PrivacyRuleValue) {
+    if focusStatusRule != rule { focusStatusRule = rule }
+  }
+
+  func replaceFocusStatusRule(_ rule: PrivacyRuleValue?) {
+    if focusStatusRule != rule { focusStatusRule = rule }
   }
 
   /// The rule to show and edit, derived from the legacy flag when needed.
@@ -121,6 +145,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
       $0.shareTimeZone = shareTimeZone
       $0.appearInGlobalSearch = appearInGlobalSearch
       if let timeZoneRule { $0.timeZone = timeZoneRule.toProtocol() }
+      if let focusStatusRule { $0.focusStatus = focusStatusRule.toProtocol() }
     }
   }
 
@@ -128,6 +153,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     case shareTimeZone
     case appearInGlobalSearch
     case timeZoneRule
+    case focusStatusRule
   }
 
   public required init(from decoder: Decoder) throws {
@@ -135,6 +161,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     shareTimeZone = try container.decodeIfPresent(Bool.self, forKey: .shareTimeZone) ?? true
     appearInGlobalSearch = try container.decodeIfPresent(Bool.self, forKey: .appearInGlobalSearch) ?? true
     timeZoneRule = try container.decodeIfPresent(PrivacyRuleValue.self, forKey: .timeZoneRule)
+    focusStatusRule = try container.decodeIfPresent(PrivacyRuleValue.self, forKey: .focusStatusRule)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -142,5 +169,6 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     try container.encode(shareTimeZone, forKey: .shareTimeZone)
     try container.encode(appearInGlobalSearch, forKey: .appearInGlobalSearch)
     try container.encodeIfPresent(timeZoneRule, forKey: .timeZoneRule)
+    try container.encodeIfPresent(focusStatusRule, forKey: .focusStatusRule)
   }
 }

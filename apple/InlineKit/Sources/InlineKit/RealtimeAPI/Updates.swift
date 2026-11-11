@@ -2783,6 +2783,11 @@ extension InlineProtocol.UpdateUserStatus {
         Column("lastOnline").set(to: lastOnline),
       ]
     )
+
+    // Absent Focus means the server did not evaluate it; keep the cached value.
+    if status.hasFocus {
+      try UserFocus.save(db, userID: userID, status: status.focus)
+    }
   }
 }
 
