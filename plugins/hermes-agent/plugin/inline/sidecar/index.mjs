@@ -6795,6 +6795,7 @@ var Method;
   Method[Method["GET_AGENT_ACCESS"] = 166] = "GET_AGENT_ACCESS";
   Method[Method["GET_UNREAD_ACTIVITY"] = 167] = "GET_UNREAD_ACTIVITY";
   Method[Method["READ_ACTIVITY"] = 168] = "READ_ACTIVITY";
+  Method[Method["SET_FOCUS_STATUS"] = 169] = "SET_FOCUS_STATUS";
 })(Method || (Method = {}));
 var GridTranscriptionState;
 (function(GridTranscriptionState) {
@@ -18768,7 +18769,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 166, name: "getContacts", kind: "message", oneof: "input", T: () => GetContactsInput },
       { no: 167, name: "getAgentAccess", kind: "message", oneof: "input", T: () => GetAgentAccessInput },
       { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
-      { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput }
+      { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
+      { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput }
     ]);
   }
   create(value) {
@@ -19789,6 +19791,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
             readActivity: ReadActivityInput.internalBinaryRead(reader, reader.uint32(), options, message.input.readActivity)
           };
           break;
+        case 170:
+          message.input = {
+            oneofKind: "setFocusStatus",
+            setFocusStatus: SetFocusStatusInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setFocusStatus)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -20137,6 +20145,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       GetUnreadActivityInput.internalBinaryWrite(message.input.getUnreadActivity, writer.tag(168, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "readActivity")
       ReadActivityInput.internalBinaryWrite(message.input.readActivity, writer.tag(169, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "setFocusStatus")
+      SetFocusStatusInput.internalBinaryWrite(message.input.setFocusStatus, writer.tag(170, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20315,7 +20325,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 166, name: "getContacts", kind: "message", oneof: "result", T: () => GetContactsResult },
       { no: 167, name: "getAgentAccess", kind: "message", oneof: "result", T: () => GetAgentAccessResult },
       { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
-      { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult }
+      { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
+      { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult }
     ]);
   }
   create(value) {
@@ -21336,6 +21347,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
             readActivity: ReadActivityResult.internalBinaryRead(reader, reader.uint32(), options, message.result.readActivity)
           };
           break;
+        case 170:
+          message.result = {
+            oneofKind: "setFocusStatus",
+            setFocusStatus: SetFocusStatusResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setFocusStatus)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -21684,6 +21701,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       GetUnreadActivityResult.internalBinaryWrite(message.result.getUnreadActivity, writer.tag(168, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "readActivity")
       ReadActivityResult.internalBinaryWrite(message.result.readActivity, writer.tag(169, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "setFocusStatus")
+      SetFocusStatusResult.internalBinaryWrite(message.result.setFocusStatus, writer.tag(170, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26661,6 +26680,71 @@ class ReadActivityResult$Type extends import_runtime4.MessageType {
 }
 var ReadActivityResult = new ReadActivityResult$Type;
 
+class SetFocusStatusInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetFocusStatusInput", [
+      { no: 1, name: "focused", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.focused = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.focused = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.focused !== false)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.focused);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetFocusStatusInput = new SetFocusStatusInput$Type;
+
+class SetFocusStatusResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SetFocusStatusResult", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SetFocusStatusResult = new SetFocusStatusResult$Type;
+
 class CreateBotInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("CreateBotInput", [
@@ -30039,7 +30123,8 @@ class PrivacySettings$Type extends import_runtime4.MessageType {
     super("PrivacySettings", [
       { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 },
       { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 },
-      { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule }
+      { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule },
+      { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule }
     ]);
   }
   create(value) {
@@ -30062,6 +30147,9 @@ class PrivacySettings$Type extends import_runtime4.MessageType {
         case 3:
           message.timeZone = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.timeZone);
           break;
+        case 4:
+          message.focusStatus = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.focusStatus);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -30080,6 +30168,8 @@ class PrivacySettings$Type extends import_runtime4.MessageType {
       writer.tag(2, import_runtime.WireType.Varint).bool(message.appearInGlobalSearch);
     if (message.timeZone)
       PrivacyRule.internalBinaryWrite(message.timeZone, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.focusStatus)
+      PrivacyRule.internalBinaryWrite(message.focusStatus, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -39853,7 +39943,8 @@ class UserStatus$Type extends import_runtime4.MessageType {
   constructor() {
     super("UserStatus", [
       { no: 1, name: "online", kind: "enum", T: () => ["UserStatus.Status", UserStatus_Status] },
-      { no: 2, name: "last_online", kind: "message", T: () => LastOnline }
+      { no: 2, name: "last_online", kind: "message", T: () => LastOnline },
+      { no: 3, name: "focus", kind: "message", T: () => FocusStatus }
     ]);
   }
   create(value) {
@@ -39874,6 +39965,9 @@ class UserStatus$Type extends import_runtime4.MessageType {
         case 2:
           message.lastOnline = LastOnline.internalBinaryRead(reader, reader.uint32(), options, message.lastOnline);
           break;
+        case 3:
+          message.focus = FocusStatus.internalBinaryRead(reader, reader.uint32(), options, message.focus);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -39890,6 +39984,8 @@ class UserStatus$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int32(message.online);
     if (message.lastOnline)
       LastOnline.internalBinaryWrite(message.lastOnline, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.focus)
+      FocusStatus.internalBinaryWrite(message.focus, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -39897,6 +39993,55 @@ class UserStatus$Type extends import_runtime4.MessageType {
   }
 }
 var UserStatus = new UserStatus$Type;
+
+class FocusStatus$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("FocusStatus", [
+      { no: 1, name: "focused", kind: "scalar", T: 8 },
+      { no: 2, name: "updated_at", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.focused = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.focused = reader.bool();
+          break;
+        case 2:
+          message.updatedAt = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.focused !== false)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.focused);
+    if (message.updatedAt !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.updatedAt);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var FocusStatus = new FocusStatus$Type;
 
 class LastOnline$Type extends import_runtime4.MessageType {
   constructor() {
