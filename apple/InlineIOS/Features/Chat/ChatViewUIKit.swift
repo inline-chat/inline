@@ -78,7 +78,7 @@ public class ChatContainerView: UIView {
       }
       collectionView.onScrollAffordanceChanged = { [weak self] state in
         self?.setScrollButtonShown(state.isVisible)
-        self?.scrollButton.setHasUnread(state.hasUnread)
+        self?.scrollButton.setCount(state.unreadCount)
       }
       collectionView.onVisibleMessagesChanged = { [weak self] ids in
         guard let navigator = self?.activityNavigator else { return }
@@ -206,6 +206,7 @@ public class ChatContainerView: UIView {
   private var reactionButtonBottomConstraint: NSLayoutConstraint?
   private var isScrollButtonShown = false
   private var activityState = ChatActivityNavigator.State.empty
+  private var isFirstActivityState = true
 
   private var usesIOS27KeyboardWorkaround: Bool {
     if #available(iOS 27.0, *) {
@@ -431,10 +432,16 @@ public class ChatContainerView: UIView {
         borderView.topAnchor.constraint(equalTo: composeContainerView.topAnchor),
         borderView.heightAnchor.constraint(equalToConstant: 0.5),
 
-        // The hit target is 44pt while the visible glass is 34pt. Insets preserve
-        // the existing 10pt visual spacing from the trailing and compose edges.
-        scrollButton.trailingAnchor.constraint(equalTo: composeTrailingAnchor, constant: -5),
-        scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -5),
+        // Mirrors the compose plus button: the same glass circle, its trailing edge on the compose
+        // pill's, and the gap above compose equal to the gap between stacked buttons.
+        scrollButton.trailingAnchor.constraint(
+          equalTo: composeTrailingAnchor,
+          constant: -(ComposeView.textViewHorizantalMargin * 2 - BlurCircleButton.hitOutset)
+        ),
+        scrollButton.bottomAnchor.constraint(
+          equalTo: composeView.topAnchor,
+          constant: -(BlurCircleButton.stackSpacing - BlurCircleButton.hitOutset)
+        ),
 
         mentionButton.centerXAnchor.constraint(equalTo: scrollButton.centerXAnchor),
         reactionButton.centerXAnchor.constraint(equalTo: scrollButton.centerXAnchor),
@@ -448,7 +455,7 @@ public class ChatContainerView: UIView {
     startActivityNavigator()
   }
 
-  private static let floatingButtonStep: CGFloat = 42
+  private static let floatingButtonStep = BlurCircleButton.visualSize + BlurCircleButton.stackSpacing
 
   private func layoutFloatingButtons(animated: Bool) {
     let mentionSlot = isScrollButtonShown ? 1 : 0
@@ -475,6 +482,10 @@ public class ChatContainerView: UIView {
   }
 
   private func applyActivityState(_ state: ChatActivityNavigator.State) {
+    messagesCollectionView.setUnreadState(state)
+    // Read-marker updates arrive often while scrolling; only @ and ♥ changes move the stack.
+    guard !state.hasSameActivity(as: activityState) || isFirstActivityState else { return }
+    isFirstActivityState = false
     activityState = state
     mentionButton.setCount(state.mentionsCount)
     mentionButton.setVisible(state.mentionsCount > 0)

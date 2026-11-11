@@ -19,7 +19,8 @@ import UIKit
 final class MessagesCollectionView: UICollectionView {
   struct ScrollAffordanceState: Equatable {
     var isVisible = false
-    var hasUnread = false
+    /// Unread messages below the reader; see `ChatUnreadBadgeCount`.
+    var unreadCount = 0
   }
 
   private enum ScrollAffordanceMetrics {
@@ -802,10 +803,15 @@ final class MessagesCollectionView: UICollectionView {
     onScrollAffordanceChanged?(scrollAffordanceState)
   }
 
-  fileprivate func setScrollAffordanceHasUnread(_ hasUnread: Bool) {
-    guard hasUnread != scrollAffordanceState.hasUnread else { return }
-    scrollAffordanceState.hasUnread = hasUnread
+  fileprivate func setScrollAffordanceUnreadCount(_ count: Int) {
+    guard count != scrollAffordanceState.unreadCount else { return }
+    scrollAffordanceState.unreadCount = count
     onScrollAffordanceChanged?(scrollAffordanceState)
+  }
+
+  /// The dialog's unread count and read marker, from the chat's activity navigator.
+  func setUnreadState(_ state: ChatActivityNavigator.State) {
+    coordinator.setUnreadState(state)
   }
 
   var hasDeferredSendComposeInset: Bool {
@@ -4177,7 +4183,7 @@ private extension MessagesCollectionView {
               }
             }
           )
-          handleIncomingMessages()
+          updateScrollToBottomCount()
 
         case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
@@ -4340,7 +4346,6 @@ private extension MessagesCollectionView {
       if list.isAtVisualBottomForUnread, viewModel.historyCoverage.isAtCertifiedLiveEnd {
         // Only the actual live end represents all messages; a partial window's bottom does not.
         UnreadManager.shared.readAll(peerId, chatId: chatId)
-        markMessagesSeen()
       } else {
         if viewModel.historyCoverage != lastVisibleReadCoverage {
           lastVisibleReadCoverage = viewModel.historyCoverage
@@ -4351,6 +4356,10 @@ private extension MessagesCollectionView {
         {
           lastVisibleReadCandidateID = candidate
           UnreadManager.shared.readVisible(peerId: peerId, chatId: chatId, highestVisibleIncomingID: candidate)
+          if candidate > unreadCountReadFrontier {
+            unreadCountReadFrontier = candidate
+            updateScrollToBottomCount()
+          }
         }
       }
       onVisibleMessagesChanged?(visibleMessageIDs(in: collectionView))
@@ -4422,37 +4431,23 @@ private extension MessagesCollectionView {
       }.max()
     }
 
-    private func latestMessageId() -> Int64? {
-      messages.first?.message.messageId
+    func setUnreadState(_ state: ChatActivityNavigator.State) {
+      // Marking the chat unread supersedes what this list read before.
+      if state.unreadMark { unreadCountReadFrontier = 0 }
+      unreadState = state
+      updateScrollToBottomCount()
     }
 
-    private func markMessagesSeen() {
-      guard let latestId = latestMessageId() else { return }
-      lastSeenMessageId = latestId
-      if hasUnreadSinceScroll {
-        hasUnreadSinceScroll = false
-        notifyUnreadChanged()
-      }
-    }
-
-    private func handleIncomingMessages() {
-      if isAtBottomForUnread, viewModel.historyCoverage.isAtCertifiedLiveEnd {
-        markMessagesSeen()
-        return
-      }
-
-      // A newer outgoing message must neither create a badge nor hide an unseen incoming message.
-      if !hasUnreadSinceScroll, messages.contains(where: {
-        $0.message.messageId > lastSeenMessageId && $0.message.out != true
-      }) {
-        hasUnreadSinceScroll = true
-        notifyUnreadChanged()
-      }
-    }
-
-    private func notifyUnreadChanged() {
-      (currentCollectionView as? MessagesCollectionView)?
-        .setScrollAffordanceHasUnread(hasUnreadSinceScroll)
+    /// Unread messages below the reader, falling as they scroll and kept across reopening.
+    private func updateScrollToBottomCount() {
+      let count = ChatUnreadBadgeCount.resolve(
+        unreadCount: unreadState.unreadCount,
+        readInboxMaxId: unreadState.readInboxMaxId,
+        readFrontier: unreadCountReadFrontier,
+        coverage: viewModel.historyCoverage,
+        loadedMessages: viewModel.sections.lazy.flatMap(\.messages)
+      )
+      (currentCollectionView as? MessagesCollectionView)?.setScrollAffordanceUnreadCount(count)
     }
 
     private func presentPhotoGallery(
@@ -5715,8 +5710,9 @@ private extension MessagesCollectionView {
     private var isUserDragging = false
     private var isUserScrollInEffect = false
     private var isAtBottomForUnread = true
-    private var lastSeenMessageId: Int64 = 0
-    private var hasUnreadSinceScroll = false
+    private var unreadState = ChatActivityNavigator.State.empty
+    /// The highest incoming message this list asked to read; see `ChatUnreadBadgeCount`.
+    private var unreadCountReadFrontier: Int64 = 0
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
       (scrollView as? MessagesCollectionView)?.didPlaceInitialUnread = true
@@ -5785,10 +5781,6 @@ private extension MessagesCollectionView {
          let message = message(for: item)
       {
         viewModel.setHistoryAnchor(message.message.messageId)
-      }
-
-      if isAtBottom, viewModel.historyCoverage.isAtCertifiedLiveEnd {
-        markMessagesSeen()
       }
 
       if isUserScrollInEffect {
