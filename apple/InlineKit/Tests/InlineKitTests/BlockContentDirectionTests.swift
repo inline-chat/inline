@@ -22,7 +22,7 @@ struct BlockContentDirectionTests {
     #expect(BlockContentDirection.isRTL("Claude Code حداقل 2.1.321 لازم دارد، پس نسخهٔ 2.1.322 کافی است.") == true)
     #expect(BlockContentDirection.isRTL("I talked to محمد about the deploy") == false)
     // ZWNJ keeps "می‌شود" one word, so this is a tie that the Latin letter wins.
-    #expect(BlockContentDirection.isRTL("Opus می‌شود") == false)
+    #expect(BlockContentDirection.isRTL("Opus می\u{200C}شود") == false)
   }
 
   @Test("Every block gets its own direction, list items included, replacing stored flags")
