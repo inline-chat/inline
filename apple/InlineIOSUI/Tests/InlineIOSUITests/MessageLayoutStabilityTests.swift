@@ -15,6 +15,14 @@ struct MessageLayoutStabilityTests {
     #expect(MessageBubbleWidthPolicy.mode(hasLargeURLPreview: false) == .contentSizedUpToMaximum)
   }
 
+  @Test("phone widths keep the fraction while wide columns stop at the absolute cap")
+  func wideColumnsStopAtAbsoluteCap() {
+    #expect(MessageBubbleWidthPolicy.maximumWidth(forAvailableWidth: 400) == 360)
+    #expect(MessageBubbleWidthPolicy.maximumWidth(forAvailableWidth: 440) == 396)
+    #expect(MessageBubbleWidthPolicy.maximumWidth(forAvailableWidth: 900) == MessageBubbleWidthPolicy.maximumWidth)
+    #expect(MessageBubbleWidthPolicy.maximumWidth(forAvailableWidth: -10) == 0)
+  }
+
   @Test("one rendered line keeps metadata beside the text")
   func oneRenderedLineKeepsInlineMetadata() {
     let mode = MessageTextLayoutPolicy.mode(

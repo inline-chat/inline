@@ -179,6 +179,8 @@ public struct MessageLayoutMetrics: Hashable, Sendable {
   public var avatarSpacing: CGFloat = 3
   /// Bubble bodies may use this fraction of the lane.
   public var maximumBubbleWidthFraction: CGFloat = 0.9
+  /// Absolute cap on a bubble body's width, applied after the fraction. Unbounded by default.
+  public var maximumBubbleWidth: CGFloat = .greatestFiniteMagnitude
   /// Gap between the lane edge and the bubble body; the tail overhangs into the row inset.
   public var bodyEdgeInset: CGFloat = 2
   public var bubbleInsets = Insets(top: 8, leading: 12, bottom: 8, trailing: 12)
@@ -222,6 +224,6 @@ public extension MessageLayoutInput {
     let m = metrics
     let avatarColumn = isOutgoing || avatar == .none ? 0 : m.avatarSize + m.avatarSpacing
     let lane = max(0, rowWidth - m.rowLeadingInset - m.rowTrailingInset - avatarColumn)
-    return max(1, grid.floor(lane * m.maximumBubbleWidthFraction) - m.bubbleInsets.horizontal)
+    return max(1, grid.floor(min(lane * m.maximumBubbleWidthFraction, m.maximumBubbleWidth)) - m.bubbleInsets.horizontal)
   }
 }

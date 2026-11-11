@@ -91,6 +91,20 @@ struct MessageLayoutPlannerTests {
     #expect(tailed.bubble.body.minX == metrics.rowLeadingInset + metrics.bodyEdgeInset)
   }
 
+  @Test("An absolute width cap bounds wide rows, and the default leaves them unbounded")
+  func absoluteWidthCap() {
+    let long = String(repeating: "Wide message ", count: 60)
+    let wideRow: CGFloat = 900
+    let unbounded = MessageLayoutPlanner.layout(Fixtures.message(long, rowWidth: wideRow))
+    #expect(unbounded.bubble.body.width > 600)
+
+    var input = Fixtures.message(long, rowWidth: wideRow)
+    input.metrics.maximumBubbleWidth = 600
+    let capped = MessageLayoutPlanner.layout(input)
+    #expect(capped.bubble.body.width <= 600.5)
+    #expect(input.maximumContentWidth <= 600 - input.metrics.bubbleInsets.horizontal + 0.5)
+  }
+
   @Test("Right-to-left interfaces mirror the row")
   func mirroring() throws {
     let ltr = MessageLayoutPlanner.layout(Fixtures.message("Hello"))
