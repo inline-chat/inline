@@ -47,6 +47,8 @@ final class GridMediaCoordinator {
   private var lastAudioEligibility = false
   private var microphoneIntentRevision = 0
   private var activeAutomaticMicrophoneChange: GridAutomaticMicrophoneChange?
+  /// Intent revision of an unsaved Mute When Alone that may lift on arrival.
+  private var aloneMuteRevision: Int?
   private var autoUnmuteOnJoin: Bool
   private var autoMuteWhenAlone: Bool
   private var inputSelection: AudioInputSelection
@@ -65,7 +67,11 @@ final class GridMediaCoordinator {
 
   private static let microphoneEnabledKey = "grid.microphoneEnabled"
   private static let autoUnmuteOnJoinKey = "grid.autoUnmuteOnJoin"
-  private static let autoMuteWhenAloneKey = "grid.autoMuteWhenAlone"
+  /// Mute When Alone is strictly opt-in. It moved to a new key when it became
+  /// temporary, so a choice made under the old saved, one-way mute (on
+  /// purpose or not) starts off again.
+  private static let autoMuteWhenAloneKey = "grid.muteWhenAlone"
+  private static let retiredAutoMuteWhenAloneKey = "grid.autoMuteWhenAlone"
   private static let screenShareQualityProfileKey = "grid.screenShareQualityProfile"
 
   init(
@@ -93,6 +99,7 @@ final class GridMediaCoordinator {
     autoUnmuteOnJoin = defaults.bool(forKey: Self.autoUnmuteOnJoinKey)
     autoMuteWhenAlone = defaults.bool(forKey: Self.autoMuteWhenAloneKey)
     #endif
+    defaults.removeObject(forKey: Self.retiredAutoMuteWhenAloneKey)
     screenShareQualityProfile = defaults.string(forKey: Self.screenShareQualityProfileKey)
       .flatMap(InlineRTCScreenShareQualityProfile.init(rawValue:))
       ?? .automatic
@@ -228,8 +235,9 @@ final class GridMediaCoordinator {
     setMicrophoneEnabled(!isMicrophoneEnabled)
   }
 
-  /// `persist: false` changes this call's intent without rewriting the saved
-  /// preference (used when a call resumes on its own after a restart).
+  /// Only the user's own choices are saved. `persist: false` changes this
+  /// call's intent without rewriting the saved preference (resume, move, Mute
+  /// When Alone); the next explicit join returns to the saved choice.
   @discardableResult
   func setMicrophoneEnabled(_ enabled: Bool, persist: Bool = true) -> Bool {
     if holdsAudioWhileInRoom, enabled {
@@ -259,9 +267,15 @@ final class GridMediaCoordinator {
     return enabled
   }
 
-  /// A join keeps the user's microphone choice, as on the Mac. Capture for
-  /// the new room is armed when its admission lands (`setInRoom`).
-  func prepareForExplicitJoin() {
+  /// A join uses the user's saved microphone choice, undoing any unsaved
+  /// automatic mute from a resume, move or Mute When Alone. Capture for the
+  /// new room is armed when its admission lands (`setInRoom`).
+  func prepareForExplicitJoin(restoringSavedMicrophone: Bool = true) {
+    aloneMuteRevision = nil
+    let saved = defaults.bool(forKey: Self.microphoneEnabledKey)
+    if restoringSavedMicrophone, microphoneEnabled != saved {
+      setMicrophoneEnabled(saved, persist: false)
+    }
     if holdsAudioWhileInRoom {
       microphoneCapturePrepared = false
     }
@@ -293,6 +307,27 @@ final class GridMediaCoordinator {
           microphoneEnabled == change.appliedEnabled
     else { return false }
     setMicrophoneEnabled(change.previousEnabled)
+    return true
+  }
+
+  /// Mute When Alone: mutes for now without touching the saved choice.
+  func applyAloneMute() {
+    setMicrophoneEnabled(false, persist: false)
+    aloneMuteRevision = microphoneIntentRevision
+  }
+
+  /// Whether the current mute came from Mute When Alone and the user has not
+  /// changed the microphone since.
+  var isAloneMuted: Bool {
+    aloneMuteRevision == microphoneIntentRevision && !microphoneEnabled
+  }
+
+  /// Someone joined: reopen a microphone that only Mute When Alone closed.
+  @discardableResult
+  func liftAloneMute() -> Bool {
+    defer { aloneMuteRevision = nil }
+    guard isAloneMuted else { return false }
+    setMicrophoneEnabled(true, persist: false)
     return true
   }
 

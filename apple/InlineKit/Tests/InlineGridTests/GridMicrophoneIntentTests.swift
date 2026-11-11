@@ -10,9 +10,13 @@ struct GridMicrophoneIntentTests {
   #if os(macOS)
   @Test("the saved microphone choice is restored on launch and defaults to muted", arguments: [true, false, nil])
   func savedChoiceIsRestored(saved: Bool?) async {
-    let fixture = GridAuthorityTestFixture(defaultsValues: saved.map { ["grid.microphoneEnabled": $0] } ?? [:])
+    var values: [String: Bool] = ["grid.autoMuteWhenAlone": true]
+    if let saved { values["grid.microphoneEnabled"] = saved }
+    let fixture = GridAuthorityTestFixture(defaultsValues: values)
     #expect(fixture.service.media.isMicrophoneEnabled == (saved ?? false))
+    // Mute When Alone is opt-in under a new key; the old one-way setting is retired.
     #expect(!fixture.service.autoMuteWhenAlone)
+    #expect(fixture.defaults.object(forKey: "grid.autoMuteWhenAlone") == nil)
     await fixture.close()
   }
   #endif
@@ -89,12 +93,12 @@ struct GridMicrophoneIntentTests {
     case settingDisabled, withdraw, failedJoin, failedJoinWithAutoUnmute
   }
 
-  @Test("disabling solo mute, withdrawal and failed joins never restore the microphone", arguments: SoloEnd.allCases)
-  func soloMuteStaysClosed(end: SoloEnd) async throws {
+  @Test("Mute When Alone is never saved; a new join returns to the saved choice", arguments: SoloEnd.allCases)
+  func soloMuteIsNeverSaved(end: SoloEnd) async throws {
     let control = GridAuthorityMembershipControl()
     let fixture = GridAuthorityTestFixture(control: control, defaultsValues: [
       "grid.microphoneEnabled": true,
-      "grid.autoMuteWhenAlone": true,
+      "grid.muteWhenAlone": true,
       "grid.autoUnmuteOnJoin": end == .failedJoinWithAutoUnmute,
     ])
     do {
@@ -106,26 +110,28 @@ struct GridMicrophoneIntentTests {
       // actual edge rather than making this a wall-clock scheduling test.
       try await eventuallyGridAuthority { !service.media.isMicrophoneEnabled }
       try #require(service.hasLocalAdmission)
-      #expect(!fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
+      #expect(fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
 
       switch end {
         case .settingDisabled:
+          // Turning the setting off doesn't reopen the microphone by itself.
           service.autoMuteWhenAlone = false
+          #expect(!service.media.isMicrophoneEnabled)
         case .withdraw:
           let receipt = await service.withdrawLocalAdmission().value
           #expect(receipt.isLocallyQuiescent)
+          #expect(!service.media.isMicrophoneEnabled)
         case .failedJoin, .failedJoinWithAutoUnmute:
           service.createAndJoin(spaceID: 42)
           try await eventuallyGridAuthority { control.submissions.count == 1 }
-          // Only this explicit join action may open the microphone, and only
-          // when the user opted into Auto-Unmute on Join.
-          #expect(service.media.isMicrophoneEnabled == (end == .failedJoinWithAutoUnmute))
+          // The join uses the saved choice, not the temporary mute.
+          #expect(service.media.isMicrophoneEnabled)
           control.fail(0)
           try await eventuallyGridAuthority { !service.membershipMutationInFlight }
+          #expect(service.media.isMicrophoneEnabled)
       }
 
-      #expect(!service.media.isMicrophoneEnabled)
-      #expect(!fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
+      #expect(fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
       if end != .settingDisabled {
         #expect(!service.hasLocalAdmission)
         #expect(service.mediaSessionIdentity == nil)
@@ -138,13 +144,12 @@ struct GridMicrophoneIntentTests {
     await fixture.close()
   }
 
-  @Test("the opt-in solo mute persists through arrivals and departures until an explicit toggle")
-  func soloAutoMuteIsOneWay() async throws {
+  @Test("Mute When Alone lifts when someone joins unless the user changed the microphone")
+  func soloMuteLiftsOnArrival() async throws {
     let control = GridAuthorityMembershipControl()
     let fixture = GridAuthorityTestFixture(control: control, defaultsValues: [
       "grid.microphoneEnabled": true,
-      "grid.autoMuteWhenAlone": true,
-      "grid.autoUnmuteOnJoin": true,
+      "grid.muteWhenAlone": true,
     ])
     do {
       let room = try await GridMicrophoneIntentRoom(fixture: fixture, control: control)
@@ -153,35 +158,28 @@ struct GridMicrophoneIntentTests {
       await room.apply(occupants: 1, generation: 3)
       try await Task.sleep(for: .milliseconds(5_150))
       try await eventuallyGridAuthority { !service.media.isMicrophoneEnabled }
-      #expect(!service.media.isMicrophoneEnabled)
       #expect(service.grids[42]?.rooms[0].avatars[0].microphoneEnabled == false)
-      // A privacy mute is also the saved preference, including across a restart.
-      #expect(!fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
+      #expect(fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
 
-      for (occupants, generation) in [(2, 4), (1, 4), (2, 5)] {
-        await room.apply(occupants: occupants, generation: generation)
-        if occupants == 2 {
-          try await eventuallyGridAuthority { service.media.connectionState == .connected }
-          try await eventuallyGridAuthority { await fixture.rtc.microphoneMuted }
-        }
-        await room.echoAvatarMicrophone(enabled: true)
-        #expect(!service.media.isMicrophoneEnabled)
-        #expect(service.grids[42]?.rooms[0].avatars[0].microphoneEnabled == false)
-        #expect(!fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
-      }
-
-      service.toggleMicrophone(spaceID: 42)
+      // Someone joins: the microphone the setting closed opens again.
+      await room.apply(occupants: 2, generation: 4)
+      try await eventuallyGridAuthority { service.media.isMicrophoneEnabled }
+      try await eventuallyGridAuthority { service.media.connectionState == .connected }
       try await eventuallyGridAuthority { await fixture.rtc.microphoneMuted == false }
-      #expect(service.media.isMicrophoneEnabled)
       #expect(service.grids[42]?.rooms[0].avatars[0].microphoneEnabled == true)
       #expect(fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
 
-      await room.apply(occupants: 1, generation: 5)
+      // Alone again, then the user mutes on purpose; an arrival keeps that.
+      await room.apply(occupants: 1, generation: 4)
       try await Task.sleep(for: .milliseconds(5_150))
       try await eventuallyGridAuthority { !service.media.isMicrophoneEnabled }
+      service.toggleMicrophone(spaceID: 42)
+      #expect(service.media.isMicrophoneEnabled)
+      service.toggleMicrophone(spaceID: 42)
       #expect(!service.media.isMicrophoneEnabled)
+      #expect(!fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
 
-      await room.apply(occupants: 2, generation: 6)
+      await room.apply(occupants: 2, generation: 5)
       try await eventuallyGridAuthority { service.media.connectionState == .connected }
       try await eventuallyGridAuthority { await fixture.rtc.microphoneMuted }
       #expect(!service.media.isMicrophoneEnabled)

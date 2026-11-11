@@ -55,6 +55,12 @@ struct GridPresenceContinuityTests {
       #expect(!fixture.service.hasLocalAdmission)
       try await Task.sleep(for: .milliseconds(100))
       #expect(moves(control) == 1)
+
+      // An explicit Resume is listen-only too, and never rewrites the choice.
+      fixture.service.moveCallHere()
+      try await eventuallyGridAuthority { moves(control) == 2 }
+      #expect(!fixture.service.media.isMicrophoneEnabled)
+      #expect(fixture.defaults.bool(forKey: "grid.microphoneEnabled"))
     } catch {
       await fixture.close()
       throw error

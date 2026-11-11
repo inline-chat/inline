@@ -603,12 +603,13 @@ public final class GridRoomService {
   /// device. Server ownership alone never admits media after browsing.
   public func moveCallHere() {
     mayResumeAfterRestart = false
-    moveCall(automatic: false)
+    moveCall()
   }
 
-  /// Both paths start listen-only. An automatic resume leaves the saved
-  /// microphone preference alone; the microphone never opens on its own.
-  private func moveCall(automatic: Bool) {
+  /// Both paths start listen-only and leave the saved microphone choice
+  /// alone; the microphone never opens on its own, and the next explicit join
+  /// returns to the user's choice.
+  private func moveCall() {
     guard callTransferEnabled, let call = currentCall,
           !membershipMutationInFlight,
           let accountToken = try? auth.beginAccountMutation()
@@ -621,8 +622,8 @@ public final class GridRoomService {
     submittedMembership = .move(spaceID: call.spaceID, roomID: call.roomID)
     cancelPendingMembershipClaim = false
     membershipMutationRevision &+= 1
-    mediaCoordinator.prepareForExplicitJoin()
-    mediaCoordinator.setMicrophoneEnabled(false, persist: !automatic)
+    mediaCoordinator.prepareForExplicitJoin(restoringSavedMicrophone: false)
+    mediaCoordinator.setMicrophoneEnabled(false, persist: false)
     membershipSync.submit(GridMembershipOperation(
       kind: .move(callID: call.callID, roomID: call.roomID),
       spaceID: call.spaceID,
@@ -1175,6 +1176,7 @@ public final class GridRoomService {
   }
 
   private func reconcileAloneAutoMute() {
+    liftAloneMuteIfJoined()
     guard hasLocalAdmission, mediaCoordinator.shouldAutoMuteWhenAlone else {
       cancelAloneAutoMute()
       return
@@ -1227,11 +1229,23 @@ public final class GridRoomService {
     else { return }
 
     log.debug("GRID_TRACE phase=alone_auto_mute room=\(target.roomID)")
-    // This is a one-way privacy action. Persist the mute, and only reopen
-    // through an explicit user action such as Toggle or Auto-Unmute on Join.
-    mediaCoordinator.setMicrophoneEnabled(false)
+    // Temporary and never saved: someone joining reopens it, and leaving or
+    // joining another room returns to the user's own choice.
+    mediaCoordinator.applyAloneMute()
     publishOwnedMicrophoneState(spaceID: target.spaceID, roomID: target.roomID, enabled: false)
     reconcileMediaDemand()
+  }
+
+  /// Reopens a microphone that only Mute When Alone closed once someone else
+  /// is in the room. Any change by the user since then wins.
+  private func liftAloneMuteIfJoined() {
+    guard mediaCoordinator.isAloneMuted,
+          let (admission, room) = currentAdmittedRoom(),
+          room.avatars.count > 1
+    else { return }
+    guard mediaCoordinator.liftAloneMute() else { return }
+    log.debug("GRID_TRACE phase=alone_auto_mute_lifted room=\(room.id)")
+    publishOwnedMicrophoneState(spaceID: admission.spaceID, roomID: room.id, enabled: true)
   }
 
   private func cancelAloneAutoMute() {
@@ -2362,7 +2376,7 @@ public final class GridRoomService {
     else { return }
     mayResumeAfterRestart = false
     log.debug("GRID_TRACE phase=resume_after_restart")
-    moveCall(automatic: true)
+    moveCall()
   }
 
   private func admission(
