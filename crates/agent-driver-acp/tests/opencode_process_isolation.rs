@@ -211,8 +211,9 @@ for line in sys.stdin:
     elif method == 'session/prompt':
         text = ' '.join(part.get('text', '') for part in p.get('prompt', []))
         print(json.dumps({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':session,'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'ready'}}}}), flush=True)
-        if text == 'ignore-cancel': continue
-        if text == 'exit-after-turn': threading.Thread(target=exit_later, daemon=True).start()
+        # Prompts lead with the sender's context; the fixture command is the user's text at the end.
+        if text.endswith('ignore-cancel'): continue
+        if text.endswith('exit-after-turn'): threading.Thread(target=exit_later, daemon=True).start()
         value = {'stopReason':'end_turn'}
     else: value = {}
     print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':value}), flush=True)
