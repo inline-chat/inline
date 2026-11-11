@@ -278,6 +278,21 @@ public class ChatContainerView: UIView {
     }
   }
 
+  override public func layoutSubviews() {
+    super.layoutSubviews()
+    reportComposeBottomOffsetIfNeeded()
+  }
+
+  /// On iPad the compose's laid-out position is the only reliable keyboard signal: the
+  /// hardware keyboard shortcut bar and undocked keyboards report notification frames that
+  /// disagree with it. The list reserves exactly the space the compose occupies.
+  private func reportComposeBottomOffsetIfNeeded() {
+    guard IPadNavigationLane.isEnabled, !isPreview, window != nil, bounds.height > 0 else { return }
+    let offset = max(0, bounds.maxY - composeContainerView.frame.maxY)
+    guard offset.isFinite else { return }
+    messagesCollectionView.setComposeBottomOffset(offset)
+  }
+
   func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
     guard !isPreview else { return }
     guard let draftMessage else {
@@ -614,11 +629,22 @@ public class ChatContainerView: UIView {
       keyboardTrackingAccessoryView.resumeTracking()
     }
 
-    guard let inset = keyboardOverlap(with: keyboardFrame) else {
+    guard var inset = keyboardOverlap(with: keyboardFrame) else {
       if !isComposeFocused {
         animateComposeSafeAreaReset(animated: animated, notification: notification)
       }
       return
+    }
+
+    // iPad: sending or reloading input views makes the hardware keyboard shortcut bar
+    // briefly report a hidden keyboard while it stays on screen. The tracking accessory
+    // has not moved, so its display link never corrects a reset. Trust what it measures.
+    if isComposeFocused, inset <= 0.5, IPadNavigationLane.isEnabled,
+       let keyboardTop = keyboardTrackingAccessoryView.keyboardTop(in: self),
+       let measuredInset = normalizedKeyboardInset(fromKeyboardTop: keyboardTop),
+       measuredInset > 0.5
+    {
+      inset = measuredInset
     }
 
     let targetInset = isComposeFocused ? inset : 0
@@ -661,7 +687,14 @@ public class ChatContainerView: UIView {
 
   private func keyboardOverlap(with keyboardFrame: CGRect) -> CGFloat? {
     guard isFinite(keyboardFrame) else { return nil }
-    let keyboardFrameInView = convert(keyboardFrame, from: nil)
+    // Keyboard notification frames are in screen coordinates. Converting from the window
+    // (`from: nil`) only matches full screen; an iPad window offset on screen read the
+    // keyboard too low and parked the compose under the hardware keyboard shortcut bar.
+    let keyboardFrameInView = if let screen = window?.windowScene?.screen {
+      convert(keyboardFrame, from: screen.coordinateSpace)
+    } else {
+      convert(keyboardFrame, from: nil)
+    }
     return normalizedKeyboardInset(fromKeyboardTop: keyboardFrameInView.minY)
   }
 

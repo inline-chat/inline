@@ -990,6 +990,23 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   static let messagesBottomPadding = 12.0
+
+  /// Distance from the list's bottom edge to the compose container's bottom edge, reported
+  /// by the chat container from its laid-out compose. When set, it replaces the
+  /// notification-derived keyboard height. iPad keyboards (the hardware keyboard shortcut
+  /// bar, floating and undocked keyboards) report frames that do not match where the
+  /// compose actually sits, which left the newest messages under the compose.
+  private var composeBottomOffset: CGFloat?
+
+  func setComposeBottomOffset(_ offset: CGFloat) {
+    if let composeBottomOffset, abs(composeBottomOffset - offset) <= 0.5 { return }
+    let wasAtBottom = !itemsEmpty && shouldScrollToBottom
+    composeBottomOffset = offset
+    updateContentInsets()
+    guard wasAtBottom, !isContextMenuInteractionActive, contextMenuPhase == .idle else { return }
+    safeScrollToTop(animated: false)
+  }
+
   func updateContentInsets() {
     guard contextMenuPhase != .presented else {
       needsContentInsetUpdateAfterContextMenu = true
@@ -1031,7 +1048,9 @@ final class MessagesCollectionView: UICollectionView {
       bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
     }
     bottomInset += Self.messagesBottomPadding
-    if isKeyboardVisible {
+    if let composeBottomOffset {
+      bottomInset += composeBottomOffset
+    } else if isKeyboardVisible {
       bottomInset += keyboardHeight
     } else {
       bottomInset += bottomSafeArea
