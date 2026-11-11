@@ -20,6 +20,8 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		F0C05E000000000100000008 /* InlineFocusExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F0C05E000000000100000002 /* InlineFocusExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		F0C05E000000000100000009 /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = F0C05E00000000010000000A /* InlineKit */; };
 		A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */ = {isa = PBXBuildFile; productRef = A55C00022FA0003000000001 /* InlineMacScripting */; };
 		A55C00032FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef in Resources */ = {isa = PBXBuildFile; fileRef = A55C00042FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef */; };
 		A83010012F52000100000001 /* InlineAppIntents in Frameworks */ = {isa = PBXBuildFile; productRef = A83010002F52000100000001 /* InlineAppIntents */; };
@@ -94,6 +96,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		F0C05E00000000010000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F0C05E000000000100000001;
+			remoteInfo = InlineFocusExtension;
+		};
 		B7020C4A2DCE1534007099D9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
@@ -125,6 +134,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				CD3AF3002EE731EB001DA73E /* InlineNotificationExtension.appex in Embed Foundation Extensions */,
+				F0C05E000000000100000008 /* InlineFocusExtension.appex in Embed Foundation Extensions */,
 				B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
@@ -133,6 +143,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F0C05E000000000100000002 /* InlineFocusExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineFocusExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A55C00042FA0003000000001 /* InlineMacScripting/Resources/Inline.sdef */ = {isa = PBXFileReference; lastKnownFileType = text.sdef; path = InlineMacScripting/Resources/Inline.sdef; sourceTree = "<group>"; };
 		A55C00052FA0003000000001 /* InlineMacScripting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacScripting; sourceTree = "<group>"; };
 		A9E100012F50000100000001 /* MemojiKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MemojiKit; sourceTree = "<group>"; };
@@ -154,6 +165,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F0C05E000000000100000004 /* Exceptions for "InlineFocusExtension" folder in "InlineFocusExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = F0C05E000000000100000001 /* InlineFocusExtension */;
+		};
 		B7020C652DCE1534007099D9 /* Exceptions for "InlineShareExtension" folder in "InlineShareExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -211,6 +229,14 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		F0C05E000000000100000003 /* InlineFocusExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F0C05E000000000100000004 /* Exceptions for "InlineFocusExtension" folder in "InlineFocusExtension" target */,
+			);
+			path = InlineFocusExtension;
+			sourceTree = "<group>";
+		};
 		B7020C432DCE1534007099D9 /* InlineShareExtension */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -261,6 +287,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		F0C05E000000000100000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F0C05E000000000100000009 /* InlineKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B7020C3F2DCE1534007099D9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -400,6 +434,7 @@
 				E60906052FA1000100000001 /* InlineMessageTests */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 				CD3AF2FA2EE731EB001DA73E /* InlineNotificationExtension */,
+				F0C05E000000000100000003 /* InlineFocusExtension */,
 				C31675032CAC167D009A1FD8 /* Frameworks */,
 				CD2661052CA01CAE00EB186F /* Products */,
 				CD5326842CE113CD00EC348D /* Debug.xcconfig */,
@@ -416,6 +451,7 @@
 				B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */,
 				B7020C422DCE1534007099D9 /* InlineShareExtension.appex */,
 				CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */,
+				F0C05E000000000100000002 /* InlineFocusExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -433,6 +469,29 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
+		F0C05E000000000100000001 /* InlineFocusExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F0C05E00000000010000000D /* Build configuration list for PBXNativeTarget "InlineFocusExtension" */;
+			buildPhases = (
+				F0C05E000000000100000005 /* Sources */,
+				F0C05E000000000100000006 /* Frameworks */,
+				F0C05E000000000100000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F0C05E000000000100000003 /* InlineFocusExtension */,
+			);
+			name = InlineFocusExtension;
+			packageProductDependencies = (
+				F0C05E00000000010000000A /* InlineKit */,
+			);
+			productName = InlineFocusExtension;
+			productReference = F0C05E000000000100000002 /* InlineFocusExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		B7020C412DCE1534007099D9 /* InlineShareExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B7020C4D2DCE1534007099D9 /* Build configuration list for PBXNativeTarget "InlineShareExtension" */;
@@ -500,6 +559,7 @@
 			dependencies = (
 				B7020C4B2DCE1534007099D9 /* PBXTargetDependency */,
 				CD3AF2FF2EE731EB001DA73E /* PBXTargetDependency */,
+				F0C05E00000000010000000C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
@@ -662,6 +722,9 @@
 					CD3AF2F82EE731EB001DA73E = {
 						CreatedOnToolsVersion = 26.0;
 					};
+					F0C05E000000000100000001 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = CD2660FF2CA01CAE00EB186F /* Build configuration list for PBXProject "Inline" */;
@@ -699,11 +762,19 @@
 				B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */,
 				B7020C412DCE1534007099D9 /* InlineShareExtension */,
 				CD3AF2F82EE731EB001DA73E /* InlineNotificationExtension */,
+				F0C05E000000000100000001 /* InlineFocusExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		F0C05E000000000100000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B7020C402DCE1534007099D9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -769,6 +840,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		F0C05E000000000100000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B7020C3E2DCE1534007099D9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -814,6 +892,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		F0C05E00000000010000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F0C05E000000000100000001 /* InlineFocusExtension */;
+			targetProxy = F0C05E00000000010000000B /* PBXContainerItemProxy */;
+		};
 		B7020C4B2DCE1534007099D9 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
@@ -832,6 +915,136 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		F0C05E00000000010000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InlineFocusExtension/InlineFocusExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineFocusExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineFocusExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.debug.InlineFocusExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F0C05E00000000010000000F /* Debug #2 */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InlineFocusExtension/InlineFocusExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineFocusExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineFocusExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.InlineFocusExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = "Debug #2";
+		};
+		F0C05E000000000100000010 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InlineFocusExtension/InlineFocusExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineFocusExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineFocusExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.InlineFocusExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		F0C05E000000000100000011 /* DevBuild */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InlineFocusExtension/InlineFocusExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 841;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineFocusExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineFocusExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INLINE_USER_PROFILE = devbuild;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.devbuild.InlineFocusExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG_BUILD";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = DevBuild;
+		};
 		A11EC1002F97000100000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1941,6 +2154,17 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		F0C05E00000000010000000D /* Build configuration list for PBXNativeTarget "InlineFocusExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F0C05E00000000010000000E /* Debug */,
+				F0C05E00000000010000000F /* Debug #2 */,
+				F0C05E000000000100000010 /* Release */,
+				F0C05E000000000100000011 /* DevBuild */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A11EC1002F97000100000002 /* Build configuration list for PBXAggregateTarget "ApplePackageChecks" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -2110,6 +2334,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		F0C05E00000000010000000A /* InlineKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineKit;
+		};
 		7BABF642C785B35DB0C34BF2 /* InlineMacWindow */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMacWindow;
