@@ -2451,6 +2451,7 @@ enum Method {
   GET_AGENT_ACCESS = 166;
   GET_UNREAD_ACTIVITY = 167;
   READ_ACTIVITY = 168;
+  SET_FOCUS_STATUS = 169;
 }
 
 message RpcCall {
@@ -2624,6 +2625,7 @@ message RpcCall {
     GetAgentAccessInput getAgentAccess = 167;
     GetUnreadActivityInput getUnreadActivity = 168;
     ReadActivityInput readActivity = 169;
+    SetFocusStatusInput setFocusStatus = 170;
   }
 }
 
@@ -2799,6 +2801,7 @@ message RpcResult {
     GetAgentAccessResult getAgentAccess = 167;
     GetUnreadActivityResult getUnreadActivity = 168;
     ReadActivityResult readActivity = 169;
+    SetFocusStatusResult setFocusStatus = 170;
   }
 }
 
@@ -3469,6 +3472,12 @@ message ReadActivityInput {
 // order with that stream and double-count reads still in flight.
 message ReadActivityResult {}
 
+// Reports whether an Apple Focus is silencing the user's notifications.
+// Devices send it on change and when they come back online.
+message SetFocusStatusInput { bool focused = 1; }
+
+message SetFocusStatusResult {}
+
 message CreateBotInput {
   // Name of the bot
   string name = 1;
@@ -3823,6 +3832,10 @@ message PrivacySettings {
   // share_time_zone mirrors it (true only for AUDIENCE_EVERYONE). Absent means
   // the client should derive it from share_time_zone and send no rule back.
   optional PrivacyRule time_zone = 3;
+
+  // Who can see when a Focus silences the user's notifications. Absent means
+  // nobody (the default).
+  optional PrivacyRule focus_status = 4;
 }
 
 // Who can see one piece of the user's information. The user always sees their own.
@@ -5335,6 +5348,18 @@ message UserStatus {
 
   Status online = 1;
   LastOnline last_online = 2;
+
+  // Present when the server evaluated Focus for this viewer: authoritative,
+  // with focused false when it is off, stale, or hidden from the viewer.
+  // Absent means not evaluated; clients keep what they have.
+  optional FocusStatus focus = 3;
+}
+
+message FocusStatus {
+  bool focused = 1;
+  // When the user's device last reported it. Clients treat a focused status
+  // older than a day as off.
+  optional int64 updated_at = 2;
 }
 
 message LastOnline {
