@@ -46,7 +46,7 @@ enum MessageActionPerformer {
       NSPasteboard.general.setString(text, forType: .string)
       ToastCenter.shared.showSuccess("Copied")
     case let .openURL(url, _):
-      if !NSWorkspace.shared.open(url) {
+      if !InlineWebLinkOpener.open(url) {
         ToastCenter.shared.showError("No app can open this link")
       }
     case let .openLink(peer, _):
