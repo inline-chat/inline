@@ -145,7 +145,7 @@ private struct GridAudioSettingsSection: View {
       Toggle(isOn: $grid.autoMuteWhenAlone) {
         SettingsRowLabel(
           .autoMuteWhenAlone,
-          description: "Mute your microphone after five seconds alone. It stays muted until you open it again."
+          description: "Off by default. Mute your microphone after five seconds alone in a room, and unmute it when someone joins."
         )
       }
       .settingsSearchAnchor(.autoMuteWhenAlone)
