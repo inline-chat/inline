@@ -384,7 +384,9 @@ struct ExperimentalHomeView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(homeCanvas)
+    // The iPad sidebar keeps the system sidebar background, like Messages, Notes and Files,
+    // which also separates it from the white detail column.
+    .background(selection == nil ? homeCanvas : Color.clear)
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle(initialTab == .archived ? Text("Archived Chats") : Text(""))
   }
@@ -447,6 +449,21 @@ private struct ChatRowButtonStyle: ButtonStyle {
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
       .animation(.snappy(duration: 0.16), value: configuration.isPressed)
       .onChange(of: configuration.isPressed) { _, isPressed in onPressChange(isPressed) }
+  }
+}
+
+/// The iPad sidebar uses the system sidebar style: iPadOS draws an inset, rounded selection
+/// with readable text and handles keyboard focus. The plain style's selection ran edge to edge
+/// and inverted the row's secondary text and timestamp to near-invisible white.
+private struct ChatListStyleModifier: ViewModifier {
+  let isIPadSidebar: Bool
+
+  func body(content: Content) -> some View {
+    if isIPadSidebar {
+      content.listStyle(.sidebar)
+    } else {
+      content.listStyle(.plain)
+    }
   }
 }
 
@@ -598,11 +615,12 @@ private struct ExperimentalChatListView: View {
     @ViewBuilder _ content: () -> Content
   ) -> some View {
     content()
-      .listStyle(.plain)
+      .modifier(ChatListStyleModifier(isIPadSidebar: selection != nil))
       .scrollContentBackground(.hidden)
       .background(Color.clear)
       .contentMargins(.top, listTopContentMargin, for: .scrollContent)
-      .contentMargins(.bottom, 32, for: .scrollContent)
+      // The iPad sidebar's last row scrolls clear of the floating New Thread button.
+      .contentMargins(.bottom, selection != nil ? 84 : 32, for: .scrollContent)
       .listSectionSpacing(.custom(listSectionSpacing))
       .environment(\.defaultMinListRowHeight, defaultMinimumListRowHeight)
       .animation(
@@ -646,10 +664,20 @@ private struct ExperimentalChatListView: View {
   private var sectionHeaderInsets: EdgeInsets {
     EdgeInsets(
       top: 1,
-      leading: Theme.Layout.screenEdgeOpticalInset,
+      leading: leadingEdgeInset,
       bottom: chatItemRenderMode.sectionHeaderBottomInset,
-      trailing: Theme.Layout.screenEdgeOpticalInset
+      trailing: trailingEdgeInset
     )
+  }
+
+  /// The iPad sidebar style insets each row's cell 16pt from the column edge. Inside it, rows
+  /// follow Messages: room for the unread dot before the avatar, and 16pt after the date.
+  private var leadingEdgeInset: CGFloat {
+    selection != nil ? 22 : Theme.Layout.screenEdgeOpticalInset
+  }
+
+  private var trailingEdgeInset: CGFloat {
+    selection != nil ? 16 : Theme.Layout.screenEdgeOpticalInset
   }
 
   private var listTopContentMargin: CGFloat {
@@ -687,6 +715,11 @@ private struct ExperimentalChatListView: View {
     }
   }
 
+  private func isSidebarSelected(_ item: ChatListItemSnapshot) -> Bool {
+    guard let selection else { return false }
+    return selection.wrappedValue == Destination.chat(peer: item.peer)
+  }
+
   /// A phone row is lit while pressed, while its chat is opening, and while that chat is open.
   private func isLit(_ item: ChatListItemSnapshot) -> Bool {
     guard selection == nil else { return false }
@@ -697,9 +730,10 @@ private struct ExperimentalChatListView: View {
   }
 
   /// The rounded highlight stands alone, so the separators above and below a lit row hide with it.
+  /// On iPad the sidebar selection capsule is the highlight.
   private func separatorsTouchingLitRows(in items: [ChatListItemSnapshot]) -> Set<ChatListItemSnapshot.ID> {
     var ids = Set<ChatListItemSnapshot.ID>()
-    for (index, item) in items.enumerated() where isLit(item) {
+    for (index, item) in items.enumerated() where isLit(item) || isSidebarSelected(item) {
       ids.insert(item.id)
       if index > 0 { ids.insert(items[index - 1].id) }
     }
@@ -713,7 +747,8 @@ private struct ExperimentalChatListView: View {
       showsPinnedIndicator: false,
       showsActivityTime: true,
       unreadBadgeStyle: unreadBadgeStyle,
-      leadingInset: rowLeadingInset
+      leadingInset: rowLeadingInset,
+      usesSidebarMetrics: selection != nil
     )
     .equatable()
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -791,7 +826,7 @@ private struct ExperimentalChatListView: View {
       top: chatItemRenderMode.listVerticalInset,
       leading: rowLeadingInset,
       bottom: chatItemRenderMode.listVerticalInset,
-      trailing: Theme.Layout.screenEdgeOpticalInset
+      trailing: trailingEdgeInset
     )
   }
 
@@ -800,9 +835,9 @@ private struct ExperimentalChatListView: View {
     case .noLastMessage:
       // Compact keeps its outer identity close to the shared optical line while
       // preserving a small leading gutter for the unread dot.
-      max(0, Theme.Layout.screenEdgeOpticalInset - 4)
+      max(0, leadingEdgeInset - 4)
     case .oneLineLastMessage, .twoLineLastMessage, .large:
-      Theme.Layout.screenEdgeOpticalInset
+      leadingEdgeInset
     }
   }
 

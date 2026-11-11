@@ -134,6 +134,7 @@ private struct ExperimentalAuthedRootView: View {
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
+  @State private var newThreadSheet: NewThreadSheetRequest?
   @State private var isCleaningOpenChats = false
   @State private var iPadCommandRequest: IPadCommandRequest?
   @State private var homeBootstrapTask: Task<HomeBootstrapOutcome, Never>?
@@ -217,6 +218,17 @@ private struct ExperimentalAuthedRootView: View {
       .environmentObject(compactSpaceList)
       .environmentObject(homeListStore)
       .environment(homeActions)
+      .sheet(item: $newThreadSheet) { request in
+        if #available(iOS 26.0, *) {
+          NewThreadComposerSheet(initialSpaceID: request.spaceID) { peer in
+            openHomeDestination(.chat(peer: peer))
+          }
+          // Sheets do not reliably inherit environment objects installed beside them.
+          .environmentObject(compactSpaceList)
+          .environment(\.auth, auth)
+          .environment(\.realtimeV2, realtimeV2)
+        }
+      }
       .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
         let previousBootstrap = invalidateHomeBootstrap(resetProgress: true)
         nav.resetHomeDataState()
@@ -433,8 +445,7 @@ private struct ExperimentalAuthedRootView: View {
     iPadCommandRequest = nil
     switch request {
     case .newThread:
-      let spaceID: Int64? = nav.activeSpaceId
-      createThreadInstantly(spaceId: spaceID)
+      startNewThread(spaceId: nav.activeSpaceId)
     case .openArchive:
       openHomeDestination(.archived)
     }
@@ -467,16 +478,63 @@ private struct ExperimentalAuthedRootView: View {
     // ExperimentalHomeView selects its pinned disclosure persistence key in init.
     // Give each sidebar projection an explicit identity when the scope changes.
     .id(iPadSidebarScope)
-    .background(Color(.systemBackground))
     .experimentalRootTitleDisplayMode()
     .navigationTitle("")
     .toolbar {
       experimentalToolbarContent()
     }
     .gridHomeEntry(onOpen: openGrid)
-    .safeAreaInset(edge: .bottom, spacing: 0) {
+    // Layout chosen from the 2026-11 sidebar prototypes: the list is the sidebar, like Notes
+    // and Files. The scope switcher sits under the header, the header keeps only the options
+    // menu (which also holds notifications and Settings), and New Thread floats in the
+    // corner. Safe area bars give the scope switcher and status the native scroll edge effect.
+    .safeAreaBar(edge: .top, spacing: 0) {
       IPadSidebarSwitcher(selection: iPadSidebarScopeBinding)
+        .padding(.horizontal, 16)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
     }
+    .safeAreaBar(edge: .bottom, spacing: 0) {
+      if let connectionState = realtimeState.displayedConnectionState {
+        HStack(spacing: 6) {
+          connectionProgressIndicator(connectionState)
+          Text(connectionState.title)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        // Clear the floating New Thread button.
+        .padding(.trailing, Self.iPadNewThreadButtonSize + 16)
+        .padding(.leading, 16)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+    .overlay(alignment: .bottomTrailing) {
+      iPadNewThreadButton
+    }
+    // The sidebar never avoids the keyboard. A hardware keyboard's shortcut bar otherwise
+    // lifted its bottom content and exposed an unpainted strip beneath it.
+    .ignoresSafeArea(.keyboard, edges: .bottom)
+  }
+
+  private static let iPadNewThreadButtonSize: CGFloat = 52
+
+  @available(iOS 26.0, *)
+  private var iPadNewThreadButton: some View {
+    Button {
+      startNewThread(spaceId: nav.activeSpaceId)
+    } label: {
+      Image(systemName: "square.and.pencil")
+        .font(.system(size: 20, weight: .medium))
+        .frame(width: Self.iPadNewThreadButtonSize, height: Self.iPadNewThreadButtonSize)
+    }
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: .circle)
+    .disabled(isCreatingThread)
+    .accessibilityLabel("New Thread")
+    .accessibilityIdentifier("iPadNewThread")
+    .padding(.trailing, 16)
+    .padding(.bottom, 16)
   }
 
   private var phoneNavigation: some View {
@@ -565,13 +623,13 @@ private struct ExperimentalAuthedRootView: View {
       }
 
       if #available(iOS 27.0, *) {
-        Tab("New Thread", systemImage: "plus", value: .newChat, role: .prominent) {
+        Tab("New Thread", systemImage: "square.and.pencil", value: .newChat, role: .prominent) {
           Color.clear
         }
       } else if #available(iOS 26.0, *) {
         // iOS 26 has no `.prominent` role, so New Thread remains a standard
         // native tab action until the role is available.
-        Tab("New Thread", systemImage: "plus", value: .newChat) {
+        Tab("New Thread", systemImage: "square.and.pencil", value: .newChat) {
           Color.clear
         }
       }
@@ -594,7 +652,7 @@ private struct ExperimentalAuthedRootView: View {
           if RootTab(appTab: router.selectedTab) == .search {
             requestSearchExit(to: lastContentRootTab, createsThread: true)
           } else {
-            createThreadInstantly(spaceId: nav.activeSpaceId)
+            startNewThread(spaceId: nav.activeSpaceId)
           }
           return
         }
@@ -689,7 +747,7 @@ private struct ExperimentalAuthedRootView: View {
     selectRootTab(pendingSearchExit.destinationTab, previousRootTab: .search)
 
     if pendingSearchExit.createsThread {
-      createThreadInstantly(spaceId: nav.activeSpaceId)
+      startNewThread(spaceId: nav.activeSpaceId)
     }
   }
 
@@ -738,6 +796,9 @@ private struct ExperimentalAuthedRootView: View {
 
     picker
       .offset(x: activeSpace == nil ? -2 : 0)
+      // A bounded ideal width keeps the iPad sidebar title from claiming the header,
+      // which pushed its buttons into the system overflow in a 300pt sidebar.
+      .frame(maxWidth: usesIPadSplitView ? 150 : nil, alignment: .leading)
   }
 
   private func returnToCurrentTabRootAfterSpaceChange() {
@@ -921,6 +982,17 @@ private struct ExperimentalAuthedRootView: View {
     }
   }
 
+  /// New Thread opens the thread composer sheet, so the thread starts from its first
+  /// message (and gets its title from it). Before iOS 26 there is no composer: create an
+  /// empty thread and open it, as before.
+  private func startNewThread(spaceId: Int64?) {
+    if #available(iOS 26.0, *) {
+      newThreadSheet = NewThreadSheetRequest(spaceID: spaceId)
+    } else {
+      createThreadInstantly(spaceId: spaceId)
+    }
+  }
+
   private func createThreadInstantly(spaceId: Int64?) {
     guard !isCreatingThread else { return }
     guard let currentUserId = auth.currentUserId else {
@@ -1064,35 +1136,16 @@ private struct ExperimentalAuthedRootView: View {
       .sharedBackgroundVisibility(.hidden)
 
       if usesIPadSplitView {
+        // The sidebar header keeps only the options menu beside the system sidebar toggle.
+        // A 300pt sidebar fits little more; extra items collapsed into a system overflow
+        // drawn over the title. New Thread floats in the sidebar's corner instead, and
+        // notifications and Settings live in the options menu (`iPadOverflowMenuSections`).
         ToolbarItem(placement: .topBarTrailing) {
-          newChatButton(activeSpaceId: nav.activeSpaceId)
+          overflowMenu()
         }
+      } else {
+        phoneTrailingToolbarContent()
       }
-
-      if let connectionState = realtimeState.displayedConnectionState {
-        ToolbarItem(placement: .topBarTrailing) {
-          connectionProgressIndicator(connectionState)
-        }
-
-        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-      }
-
-      ToolbarItem(placement: .topBarTrailing) {
-        overflowMenu()
-      }
-
-      ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
-      ToolbarItem(placement: .topBarTrailing) {
-        NotificationSettingsButton(notificationSettings: notificationSettings)
-      }
-
-      ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
-      ToolbarItem(placement: .topBarTrailing) {
-        accountButton()
-      }
-      .sharedBackgroundVisibility(.hidden)
     } else {
       ToolbarItem(placement: .topBarLeading) {
         rootToolbarTitle
@@ -1116,9 +1169,38 @@ private struct ExperimentalAuthedRootView: View {
     }
   }
 
+  @available(iOS 26.0, *)
+  @ToolbarContentBuilder
+  private func phoneTrailingToolbarContent() -> some ToolbarContent {
+    if let connectionState = realtimeState.displayedConnectionState {
+      ToolbarItem(placement: .topBarTrailing) {
+        connectionProgressIndicator(connectionState)
+      }
+
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
+    }
+
+    ToolbarItem(placement: .topBarTrailing) {
+      overflowMenu()
+    }
+
+    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+    ToolbarItem(placement: .topBarTrailing) {
+      NotificationSettingsButton(notificationSettings: notificationSettings)
+    }
+
+    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+    ToolbarItem(placement: .topBarTrailing) {
+      accountButton()
+    }
+    .sharedBackgroundVisibility(.hidden)
+  }
+
   private func newChatButton(activeSpaceId: Int64?) -> some View {
     Button {
-      createThreadInstantly(spaceId: activeSpaceId)
+      startNewThread(spaceId: activeSpaceId)
     } label: {
       Image(systemName: "square.and.pencil")
     }
@@ -1215,12 +1297,26 @@ private struct ExperimentalAuthedRootView: View {
       },
       onGrid: GridHomeEntryProjection(store: GridIOSRuntime.shared.rooms, spaceID: nil).showsMenuEntry
         ? openGrid
-        : nil
+        : nil,
+      trailingSections: iPadOverflowMenuSections
     )
     // Fill the iPad toolbar target without changing the phone toolbar layout.
     .frame(width: usesIPadSplitView ? 44 : 28, height: usesIPadSplitView ? 44 : 28)
     .accessibilityLabel(usesIPadSplitView ? "Chat List Options" : "More")
     .accessibilityIdentifier("chatListOptions")
+  }
+
+  /// The iPad sidebar has no account button or bell; its options menu carries both.
+  private var iPadOverflowMenuSections: [UIMenuElement] {
+    guard usesIPadSplitView else { return [] }
+    let settings = notificationSettings
+    return [
+      IPadSidebarAccountMenu.section(
+        notificationMode: settings.mode,
+        onSelectNotificationMode: { settings.mode = $0 },
+        onSettings: { router.presentSheet(.settings) }
+      ),
+    ]
   }
 
   private var selectedChatItemRenderMode: ExperimentalHomeChatItemRenderMode {
@@ -1429,6 +1525,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
   let onMembers: (() -> Void)?
   let onManage: (() -> Void)?
   let onGrid: (() -> Void)?
+  var trailingSections: [UIMenuElement] = []
 
   func makeUIView(context: Context) -> UIButton {
     let button = UIButton(type: .system)
@@ -1568,6 +1665,7 @@ private struct ExperimentalOverflowMenuButton: UIViewRepresentable {
 
     return UIMenu(
       children: (grid.map { [$0] } ?? []) + [viewSection] + (cleanupSection.map { [$0] } ?? []) + [spaceSection]
+        + trailingSections
     )
   }
 }

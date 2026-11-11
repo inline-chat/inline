@@ -10,8 +10,12 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
   let showsActivityTime: Bool
   let unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle
   let leadingInset: CGFloat
+  /// iPad sidebar: Messages-style metadata (15pt secondary date, 12pt avatar gap).
+  let usesSidebarMetrics: Bool
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.layoutDirection) private var layoutDirection
+  /// Increased on a selected iPad sidebar row (blue fill, white text).
+  @Environment(\.backgroundProminence) private var backgroundProminence
   @ScaledMetric(relativeTo: .footnote) private var timestampWidth: CGFloat = 54
   @ScaledMetric(relativeTo: .footnote) private var timestampBaselineLift: CGFloat = 2
   @ScaledMetric(relativeTo: .caption) private var unreadBadgeHeight: CGFloat = 19
@@ -24,7 +28,8 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     showsPinnedIndicator: Bool = true,
     showsActivityTime: Bool = false,
     unreadBadgeStyle: ExperimentalHomeUnreadBadgeStyle = .defaultValue,
-    leadingInset: CGFloat
+    leadingInset: CGFloat,
+    usesSidebarMetrics: Bool = false
   ) {
     self.item = item
     self.layoutMode = layoutMode
@@ -32,6 +37,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     self.showsActivityTime = showsActivityTime
     self.unreadBadgeStyle = unreadBadgeStyle
     self.leadingInset = leadingInset
+    self.usesSidebarMetrics = usesSidebarMetrics
     _showsTranslatedPreview = State(
       initialValue: TranslationState.shared.isTranslationEnabled(for: item.peer)
     )
@@ -44,13 +50,14 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
       && lhs.showsActivityTime == rhs.showsActivityTime
       && lhs.unreadBadgeStyle == rhs.unreadBadgeStyle
       && lhs.leadingInset == rhs.leadingInset
+      && lhs.usesSidebarMetrics == rhs.usesSidebarMetrics
   }
 
   var body: some View {
     ZStack(alignment: .leading) {
       dotUnreadIndicator
 
-      HStack(alignment: .center, spacing: metrics.horizontalSpacing) {
+      HStack(alignment: .center, spacing: usesSidebarMetrics ? 12 : metrics.horizontalSpacing) {
         identity
 
         VStack(alignment: .leading, spacing: metrics.textSpacing) {
@@ -108,8 +115,13 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         }
       } else if let timestampText = displayedTimestampText {
         Text(timestampText)
-          .font(.footnote)
-          .foregroundStyle(.tertiary)
+          .font(usesSidebarMetrics ? .subheadline : .footnote)
+          // Tertiary turns into faint white on the blue selected row; secondary stays readable.
+          .foregroundStyle(
+            usesSidebarMetrics || backgroundProminence == .increased
+              ? AnyShapeStyle(.secondary)
+              : AnyShapeStyle(.tertiary)
+          )
           .lineLimit(1)
           .minimumScaleFactor(0.8)
           .frame(width: timestampWidth, alignment: .trailing)
@@ -369,8 +381,10 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
     }
   }
 
-  private var titleColor: Color {
-    layoutMode == .compact ? Color.primary.opacity(0.88) : .primary
+  /// Hierarchical styles follow the row's background prominence, so a selected iPad sidebar
+  /// row turns its title white on the blue fill; a fixed `Color.primary` stayed black there.
+  private var titleColor: AnyShapeStyle {
+    layoutMode == .compact ? AnyShapeStyle(.primary.opacity(0.88)) : AnyShapeStyle(.primary)
   }
 
   private var titleFont: Font {
@@ -446,7 +460,7 @@ private struct ChatListComposeActivityPreview: View {
         VStack(alignment: .leading, spacing: 0) {
           Text(senderName)
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Color.primary.opacity(0.72))
+            .foregroundStyle(.primary.opacity(0.72))
             .lineLimit(1)
 
           Text(text)
@@ -489,7 +503,7 @@ private struct ChatListPreviewText: View {
   var body: some View {
     if let senderName, senderName.isEmpty == false {
       Text(
-        "\(Text(senderName).fontWeight(.medium).foregroundStyle(Color.primary.opacity(0.70))): \(Text(text).foregroundStyle(.secondary))"
+        "\(Text(senderName).fontWeight(.medium).foregroundStyle(.primary.opacity(0.70))): \(Text(text).foregroundStyle(.secondary))"
       )
     } else {
       Text(text)
