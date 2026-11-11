@@ -169,10 +169,7 @@ final class MessagesCollectionView: UICollectionView {
     let implementation = messageViewImplementation ?? NextMessageViewFeature.selectedImplementation(
       allowsOverride: SettingsBuildAudience.showsDebugTools
     )
-    // Chat previews keep UIKit's menu; the custom one presents over the whole window.
-    let contextMenuImplementation = MessageContextMenuFeature.selectedImplementation(
-      isExperimentAvailable: SettingsBuildAudience.showsDebugTools && !isPreview
-    )
+    let contextMenuImplementation = MessageContextMenuRollout.implementation(isPreview: isPreview)
     let coordinator = Coordinator(
       peerId: peerId,
       chatId: chatId,
@@ -1559,8 +1556,10 @@ private extension MessagesCollectionView {
     var onVisibleMessagesChanged: (([Int64]?) -> Void)?
     /// `.next` draws supported message kinds with the next message view.
     private let messageViewImplementation: MessageViewImplementation
-    /// `.custom` opens `MessageContextMenuController` from a hold instead of UIKit's menu.
-    private let contextMenuImplementation: MessageContextMenuImplementation
+    /// `.custom` opens `MessageContextMenuController` from a hold instead of UIKit's menu. Falls
+    /// back to `.system` for the rest of the chat when the custom menu keeps failing to open.
+    private var contextMenuImplementation: MessageContextMenuImplementation
+    private var customContextMenuFailures = 0
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var customContextMenu: MessageContextMenuController?
     private weak var customContextMenuGesture: MessageContextMenuHoldGesture?
@@ -1941,7 +1940,8 @@ private extension MessagesCollectionView {
       let gesture = MessageContextMenuHoldGesture(target: self, action: #selector(handleCustomContextMenuHold(_:)))
       gesture.acceptsTouch = { [weak self, weak collectionView] point in
         guard let self, let collectionView, customContextMenu == nil,
-              !collectionView.isContextMenuInteractionActive else { return false }
+              !collectionView.isContextMenuInteractionActive,
+              !MessageContextMenuRollout.prefersSystemMenuNow else { return false }
         return customContextMenuTarget(at: point, in: collectionView) != nil
       }
       gesture.onPressBegan = { [weak self] point in
@@ -2111,9 +2111,24 @@ private extension MessagesCollectionView {
         cell: cell,
         pressedScale: pressedScale,
         in: collectionView
-      ) else { return }
+      ) else {
+        customContextMenuFailures += 1
+        if customContextMenuFailures >= 2 { fallBackToSystemContextMenu(in: collectionView) }
+        return
+      }
+      customContextMenuFailures = 0
       customContextMenu?.beginHold(at: gesture.location(in: nil))
       customContextMenuFeedback.impactOccurred()
+    }
+
+    /// Hands this chat to UIKit's menu after holds keep failing to open the custom one, so a
+    /// hold always opens a menu.
+    private func fallBackToSystemContextMenu(in collectionView: MessagesCollectionView) {
+      guard contextMenuImplementation == .custom else { return }
+      contextMenuImplementation = .system
+      if let customContextMenuGesture { collectionView.removeGestureRecognizer(customContextMenuGesture) }
+      customContextMenuGesture = nil
+      MessageContextMenuRollout.didFallBack(reason: "\(customContextMenuFailures) holds in a row didn't open")
     }
 
     /// Closes the custom menu without animation and drops a pending press, as when the chat
@@ -2146,11 +2161,19 @@ private extension MessagesCollectionView {
       pressedScale: CGFloat,
       in collectionView: MessagesCollectionView
     ) -> Bool {
-      guard let window = collectionView.window,
-            let geometry = contextMenuPreviewGeometry(for: cell),
-            let preview = customContextMenuLivePreview(for: cell, extent: geometry.rect)
-            ?? customContextMenuSnapshot(of: geometry.view, in: geometry.rect)
-      else { return false }
+      guard let window = collectionView.window else {
+        MessageContextMenuRollout.didFailToPresent(reason: "no window")
+        return false
+      }
+      guard let geometry = contextMenuPreviewGeometry(for: cell) else {
+        MessageContextMenuRollout.didFailToPresent(reason: "no preview geometry")
+        return false
+      }
+      let livePreview = customContextMenuLivePreview(for: cell, extent: geometry.rect)
+      guard let preview = livePreview ?? customContextMenuSnapshot(of: geometry.view, in: geometry.rect) else {
+        MessageContextMenuRollout.didFailToPresent(reason: "empty preview next=\(cell.showsNextMessageView)")
+        return false
+      }
       let frame = geometry.view.convert(geometry.rect, to: window)
       let message = fullMessage.message
 
@@ -2206,6 +2229,7 @@ private extension MessagesCollectionView {
         collectionView?.contextMenuPhase = .dismissing
       }
       controller.onDidDismiss = { [weak self, weak collectionView, weak controller] in
+        MessageContextMenuRollout.didDismiss()
         guard let self, let collectionView, customContextMenu === controller else { return }
         customContextMenu = nil
         collectionView.contextMenuPhase = .idle
@@ -2232,6 +2256,11 @@ private extension MessagesCollectionView {
         window.endEditing(true)
       }
       controller.present(from: window, overKeyboardIn: keyboardWindow)
+      MessageContextMenuRollout.didPresent(
+        overKeyboard: controller.isOverKeyboard,
+        livePreview: livePreview != nil,
+        selectableText: selectableText != nil
+      )
       return true
     }
 
@@ -5106,7 +5135,7 @@ private extension MessagesCollectionView {
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
       // The custom menu opens from its own hold gesture.
-      guard contextMenuImplementation == .system else { return nil }
+      guard contextMenuImplementation == .system || MessageContextMenuRollout.prefersSystemMenuNow else { return nil }
       guard let indexPath = indexPaths.first,
             let item = item(at: indexPath),
             !item.isThreadAnchor,

@@ -15,7 +15,7 @@ struct ExperimentalView: View {
   private var nextMessageViewEnabled = true
 
   @AppStorage(MessageContextMenuFeature.preferenceKey)
-  private var customContextMenuEnabled = false
+  private var customContextMenuEnabled = true
 
   var body: some View {
     List {
@@ -49,6 +49,22 @@ struct ExperimentalView: View {
         Text("Preserve formatting when copying messages. Show Markdown syntax when pasting formatted text or editing a message.")
       }
 
+      Section {
+        SettingsItem(
+          icon: "contextualmenu.and.cursorarrow",
+          iconColor: .indigo,
+          title: "Message Menu Text Selection"
+        ) {
+          Toggle("Message Menu Text Selection", isOn: $customContextMenuEnabled)
+            .labelsHidden()
+            .onChange(of: customContextMenuEnabled) { _, enabled in
+              if enabled { MessageContextMenuFeature.resetCrashGuard() }
+            }
+        }
+      } footer: {
+        Text("Holding a message opens Inline's menu, where you can select and quote part of the text. Turn it off to use the system menu. Reopen the chat after changing it.")
+      }
+
       if SettingsBuildAudience.showsDebugTools {
         Section {
           SettingsItem(
@@ -59,18 +75,10 @@ struct ExperimentalView: View {
             Toggle("Next Message View", isOn: $nextMessageViewEnabled)
               .labelsHidden()
           }
-          SettingsItem(
-            icon: "contextualmenu.and.cursorarrow",
-            iconColor: .indigo,
-            title: "Custom Context Menu"
-          ) {
-            Toggle("Custom Context Menu", isOn: $customContextMenuEnabled)
-              .labelsHidden()
-          }
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("The next message view is on by default. Turn it off to compare with the previous view. Custom Context Menu opens Inline's own message menu: it scrolls with long messages and lets you select text in the preview. Reopen the chat after changing these settings.")
+          Text("The next message view is on by default. Turn it off to compare with the previous view. Reopen the chat after changing it.")
         }
       }
     }
