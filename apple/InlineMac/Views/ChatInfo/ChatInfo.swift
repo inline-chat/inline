@@ -314,6 +314,10 @@ struct ChatInfo: View {
             notificationPicker
           }
 
+          if let user = fullChat.chatItem?.userInfo?.user, user.bot == true {
+            ChatInfoOutputModeRow(botUserID: user.id)
+          }
+
           if appSettings.translationUIEnabled {
             Divider()
 
@@ -501,18 +505,7 @@ struct ChatInfo: View {
   }
 
   private func infoRow(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-    HStack(alignment: .center, spacing: 12) {
-      Text(title)
-        .foregroundStyle(.secondary)
-        .frame(width: 140, alignment: .leading)
-
-      Spacer(minLength: 0)
-
-      content()
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.vertical, 8)
-    .padding(.horizontal, 10)
+    ChatInfoRow(title, content: content)
   }
 
   @ViewBuilder
@@ -929,7 +922,34 @@ private enum ChatInfoTab: String, CaseIterable, Hashable {
   }
 }
 
-private struct InlineMenuPickerLabel: View {
+/// A title on the leading edge of the chat info card and its control on the
+/// trailing edge.
+struct ChatInfoRow<Content: View>: View {
+  private let title: String
+  private let content: Content
+
+  init(_ title: String, @ViewBuilder content: () -> Content) {
+    self.title = title
+    self.content = content()
+  }
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 12) {
+      Text(title)
+        .foregroundStyle(.secondary)
+        .frame(width: 140, alignment: .leading)
+
+      Spacer(minLength: 0)
+
+      content
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.vertical, 8)
+    .padding(.horizontal, 10)
+  }
+}
+
+struct InlineMenuPickerLabel: View {
   let title: String
   let systemImage: String
   let disabled: Bool
