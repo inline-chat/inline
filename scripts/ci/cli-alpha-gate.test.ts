@@ -151,7 +151,7 @@ describe("CLI alpha publication", () => {
   test("reports a tag ruleset refusal as blocked with the fix", () => {
     const { api } = fakeApi({ main: [] })
     const refusing = (resource: string, options: any = {}) => {
-      if (resource === "git/refs") throw Object.assign(new Error("gh failed"), { stderr: "Repository rule violations found (HTTP 422)" })
+      if (resource === "git/refs") throw Object.assign(new Error("gh failed"), { stderr: "gh: Reference update failed (HTTP 422)" })
       return api(resource, options)
     }
     let error: any
@@ -190,5 +190,26 @@ describe("CLI alpha workflow boundaries", () => {
     for (const [file, name] of [["integrations.yml", "CI"], ["cli-update-qualification.yml", "CLI Update Qualification"]]) {
       expect((parse(readFileSync(path.join(root, ".github/workflows", file), "utf8")) as any).name).toBe(name)
     }
+  })
+})
+
+describe("CLI alpha outcomes", () => {
+  const workflow = parse(readFileSync(path.join(root, ".github/workflows/cli-alpha.yml"), "utf8")) as any
+  const script = workflow.jobs.release.steps.find((step: any) => step.name?.startsWith("Report")).run
+  const report = (env: Record<string, string>) => {
+    const result = Bun.spawnSync(["bash", "-e", "-c", script], { cwd: root, env: { ...process.env, GITHUB_STEP_SUMMARY: "/dev/null", SHA: sha("b"), TAG: "cli-v0.7.22-alpha.5", ...env } })
+    return { exitCode: result.exitCode, annotation: result.stdout.toString() }
+  }
+
+  test("reports a ruleset refusal as blocked with its fix, and only a dispatch as tagged", () => {
+    const blocked = report({ GATE_RESULT: "success", SHOULD_RELEASE: "true", GATE_OUTCOME: "release", REASON: "selected", PUBLISH_RESULT: "failure", PUBLISH_OUTCOME: "blocked", PUBLISH_REASON: "add it to the bypass list" })
+    expect(blocked.annotation).toContain("CLI Alpha: Blocked — add it to the bypass list")
+    const failed = report({ GATE_RESULT: "success", SHOULD_RELEASE: "true", GATE_OUTCOME: "release", REASON: "selected", PUBLISH_RESULT: "failure", PUBLISH_OUTCOME: "failed", PUBLISH_REASON: "" })
+    expect(failed.annotation).toContain("CLI Alpha: Failed")
+    const tagged = report({ GATE_RESULT: "success", SHOULD_RELEASE: "true", GATE_OUTCOME: "release", REASON: "selected", PUBLISH_RESULT: "success", PUBLISH_OUTCOME: "", PUBLISH_REASON: "" })
+    expect(tagged.annotation).toContain("tagged cli-v0.7.22-alpha.5; CLI Release builds and publishes it")
+    expect(tagged.annotation).not.toContain("Published")
+    const current = report({ GATE_RESULT: "success", SHOULD_RELEASE: "false", GATE_OUTCOME: "already-current", REASON: "nothing new", PUBLISH_RESULT: "skipped", PUBLISH_OUTCOME: "", PUBLISH_REASON: "" })
+    expect(current.annotation).toContain("Already current — nothing new")
   })
 })

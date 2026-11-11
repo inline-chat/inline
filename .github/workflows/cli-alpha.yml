@@ -64,6 +64,8 @@ jobs:
           REASON: ${{ steps.gate.outputs.reason }}
           TAG: ${{ steps.gate.outputs.tag }}
           SHA: ${{ steps.gate.outputs.sha }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outputs.outcome }}
+          PUBLISH_REASON: ${{ steps.publish.outputs.reason }}
         run: |
           set -euo pipefail
           OUTCOME="${GATE_OUTCOME:-failed}" DETAIL=""
@@ -73,6 +75,8 @@ jobs:
             if [[ "$PUBLISH_RESULT" == success ]]; then
               # Publication itself happens, and is reported, in the CLI Release run.
               OUTCOME=deferred REASON="tagged $TAG; CLI Release builds and publishes it" DETAIL="Tag $TAG"
+            elif [[ "$PUBLISH_OUTCOME" == blocked ]]; then
+              OUTCOME=blocked REASON="$PUBLISH_REASON"
             else
               OUTCOME=failed REASON="tagging or dispatch $PUBLISH_RESULT; inspect the failed step before retrying"
             fi

@@ -149,8 +149,9 @@ export function publishCliAlpha({ api = github, sha, tag, version }) {
     try {
       api("git/refs", { method: "POST", body: { ref: `refs/tags/${tag}`, sha: object.sha } })
     } catch (error) {
-      if (/rule|HTTP 403/i.test(String(error?.stderr ?? error?.message))) {
-        throw new ReleaseGateError("GitHub Actions cannot create cli-v tags; add it to the bypass list of the \"Release tags: admin creation\" ruleset")
+      // The tag was absent a moment ago, so a refusal here is the creation ruleset.
+      if (/HTTP 40[13]|HTTP 422|rule/i.test(String(error?.stderr ?? error?.message))) {
+        throw new ReleaseGateError(`GitHub Actions could not create ${tag}; add it to the bypass list of the "Release tags: admin creation" ruleset`)
       }
       throw error
     }
