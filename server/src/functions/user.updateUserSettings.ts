@@ -8,6 +8,12 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { db } from "@in/server/db"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { users } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
+import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("functions.updateUserSettings")
 
 export interface UpdateUserSettingsInput {
   general?: UserSettingsGeneralInput
@@ -73,7 +79,31 @@ export const updateUserSettings = async (
   // Push update to the current user in real-time
   RealtimeUpdates.pushToUser(context.currentUserId, [update], { skipSessionId: context.currentSessionId })
 
+  if (generalInput.privacy?.focusStatus) {
+    await republishFocusStatus(context.currentUserId)
+  }
+
   return {
     updates: [update],
   }
+}
+
+/** A Focus rule change re-sends every DM partner their view, so newly hidden viewers are cleared. */
+const republishFocusStatus = async (userId: number): Promise<void> => {
+  const [owner] = await db
+    .select({
+      online: users.online,
+      lastOnline: users.lastOnline,
+      focused: users.focused,
+      focusUpdatedAt: users.focusUpdatedAt,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+  if (!owner) return
+  await sendTransientUpdateFor({
+    reason: { userPresenceUpdate: { userId, online: owner.online, lastOnline: owner.lastOnline, focus: owner } },
+  }).catch((error: unknown) => {
+    log.warn("Could not republish Focus status after a rule change", { userId, error })
+  })
 }

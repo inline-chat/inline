@@ -10,7 +10,7 @@ import {
   type PrivacyRule,
   type UserSettingsGeneral,
 } from "@in/server/db/models/userSettings/types"
-import { effectiveTimeZoneRule, legacyShareFlag } from "@in/server/modules/privacy/privacyRules"
+import { effectiveFocusRule, effectiveTimeZoneRule, legacyShareFlag } from "@in/server/modules/privacy/privacyRules"
 import { encodeProtocolNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
 
 export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral | null }): UserSettings => {
@@ -39,6 +39,7 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
       appearInGlobalSearch:
         general?.privacy.appearInGlobalSearch ?? defaultPrivacySettings.appearInGlobalSearch,
       timeZone: encodePrivacyRule(timeZoneRule),
+      focusStatus: encodePrivacyRule(effectiveFocusRule(general?.privacy)),
     },
     composeSettings: {
       replacePastedLinksWithTitles:

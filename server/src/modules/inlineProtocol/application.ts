@@ -170,6 +170,8 @@ export const inlineProtocolRpcExecutionLane = (rpc: RpcCall): string | undefined
     case "setSpacePhoto": return `space:${rpc.input.setSpacePhoto.spaceId}`
     case "toggleSpaceGrid": return `space:${rpc.input.toggleSpaceGrid.spaceId}`
     case "updateUserSettings": return "account:settings"
+    // Ordered so quick on/off reports from one session land in sequence.
+    case "setFocusStatus": return "account:focus"
     default: return undefined
   }
 }

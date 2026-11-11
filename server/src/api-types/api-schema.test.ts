@@ -18,6 +18,8 @@ const userFixture = (): DbUserWithPhoto => ({
   deleted: false,
   online: false,
   lastOnline: null,
+  focused: null,
+  focusUpdatedAt: null,
   date: new Date("2026-08-17T10:49:00Z"),
   photoFileId: null,
   pendingSetup: false,
@@ -49,6 +51,8 @@ describe("public user encoding", () => {
       pendingSetup: false,
       online: false,
       lastOnline: null,
+      focused: null,
+      focusUpdatedAt: null,
       timeZone: "UTC",
       date: 1_786_963_740,
     })

@@ -33,7 +33,11 @@ const DurableUpdatesAvailable = Schema.Struct({
 
 const TransientPayload = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("botPresenceChanged"), botUserId: UserId, chatId: ChatId, activityId: Uuid }),
-  Schema.Struct({ kind: Schema.Literal("userPresenceChanged"), userId: UserId, online: Schema.Boolean, lastOnlineMs: Schema.NullOr(WireNonNegativeInteger) }),
+  Schema.Struct({
+    kind: Schema.Literal("userPresenceChanged"), userId: UserId, online: Schema.Boolean, lastOnlineMs: Schema.NullOr(WireNonNegativeInteger),
+    // Optional so nodes on either side of a deploy decode each other. Absent: not evaluated.
+    focused: Schema.optional(Schema.Boolean), focusUpdatedAtMs: Schema.optional(WireNonNegativeInteger),
+  }),
   Schema.Struct({ kind: Schema.Literal("composeChanged"), userId: UserId, chatId: ChatId, action: Schema.Union([Schema.Literal("none"), Schema.Literal("typing"), Schema.Literal("uploadingDocument"), Schema.Literal("uploadingPhoto"), Schema.Literal("uploadingVideo"), Schema.Literal("recordingVoice"), Schema.Literal("working")]) }),
 ])
 

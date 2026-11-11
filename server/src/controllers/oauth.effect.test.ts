@@ -588,6 +588,8 @@ describe("Effect OAuth routes", () => {
       deleted: false,
       online: false,
       lastOnline: null,
+      focused: null,
+      focusUpdatedAt: null,
       date: new Date("2026-08-17T10:49:00Z"),
       photoFileId: null,
       pendingSetup: false,

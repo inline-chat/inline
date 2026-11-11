@@ -9,7 +9,8 @@
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { type TPeerInfo, type TUpdateComposeAction } from "@in/server/api-types"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@inline-chat/protocol/core"
+import { type FocusStatus, Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@inline-chat/protocol/core"
+import { encodeFocusForViewer, focusViewersAllowed, type FocusState } from "@in/server/modules/privacy/focusStatus"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { getUpdateGroup } from "@in/server/modules/updates"
@@ -21,7 +22,15 @@ const MAX_CONCURRENT_TRANSIENT_RECIPIENTS = 32
 
 export type SendUpdateTransientReason =
   | {
-      userPresenceUpdate: { userId: number; online: boolean; lastOnline: Date | null }
+      userPresenceUpdate: {
+        userId: number
+        online: boolean
+        lastOnline: Date | null
+        /** Include each recipient's view of this Focus state; omitted, clients keep theirs. */
+        focus?: FocusState
+        /** Send only to recipients the owner's Focus rule allows. */
+        focusAudienceOnly?: boolean
+      }
     }
   | {
       composeAction: { update: TUpdateComposeAction; target: TPeerInfo; otherPeerId: TPeerInfo }
@@ -30,16 +39,23 @@ export type SendUpdateTransientReason =
 /** Sends an array of updates to a group of users tailored based on the reason, context, and user id */
 export const sendTransientUpdateFor = async ({ reason }: { reason: SendUpdateTransientReason }) => {
   if ("userPresenceUpdate" in reason) {
-    const { userId, online, lastOnline } = reason.userPresenceUpdate
+    const { userId, online, lastOnline, focus, focusAudienceOnly } = reason.userPresenceUpdate
     // 90/10 solution to get all users with private dialogs with the current user then send updates via connection manager to those users
-    const userIds = await DialogsModel.getUserIdsWeHavePrivateDialogsWith({ userId })
+    let userIds = await DialogsModel.getUserIdsWeHavePrivateDialogsWith({ userId })
+    const focusAllowed = focus ? await focusViewersAllowed(userId, userIds) : undefined
+    if (focusAllowed && focusAudienceOnly) userIds = userIds.filter((id) => focusAllowed.has(id))
     log.debug(`Sending user presence update to ${userIds.length} users`)
-    const newUpdates = getNewUpdatesForUserPresenceUpdate(userId, online, lastOnline)
+    const now = Date.now()
+    const focusFor = (targetUserId: number): FocusStatus | undefined =>
+      focus && focusAllowed ? encodeFocusForViewer(focus, focusAllowed.has(targetUserId), now) : undefined
     for (let offset = 0; offset < userIds.length; offset += MAX_CONCURRENT_TRANSIENT_RECIPIENTS) {
       const recipients = userIds.slice(offset, offset + MAX_CONCURRENT_TRANSIENT_RECIPIENTS)
       await Promise.all(recipients.map(async (targetUserId) => {
-        await RealtimeUpdates.pushToUser(targetUserId, [newUpdates])
-        transientRealtime.publishUserPresence(targetUserId, userId, online, lastOnline)
+        const targetFocus = focusFor(targetUserId)
+        await RealtimeUpdates.pushToUser(targetUserId, [
+          getNewUpdatesForUserPresenceUpdate(userId, online, lastOnline, targetFocus),
+        ])
+        transientRealtime.publishUserPresence(targetUserId, userId, online, lastOnline, targetFocus)
       }))
     }
     return
@@ -106,6 +122,7 @@ export const getNewUpdatesForUserPresenceUpdate = (
   userId: number,
   online: boolean,
   lastOnline: Date | null,
+  focus?: FocusStatus,
 ): Update => {
   return {
     update: {
@@ -117,6 +134,7 @@ export const getNewUpdatesForUserPresenceUpdate = (
           lastOnline: {
             date: lastOnline ? encodeDate(lastOnline) : undefined,
           },
+          focus,
         },
       },
     },

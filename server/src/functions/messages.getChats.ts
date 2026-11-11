@@ -1,4 +1,5 @@
 import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
+import { resolveFocusForViewer } from "@in/server/modules/privacy/focusStatus"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { Chat, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -687,10 +688,9 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
         .filter((dialog) => privateChatIds.has(dialog.chatId))
         .flatMap((dialog) => (dialog.peerUserId === null ? [] : [dialog.peerUserId])),
     )
-    const timeZoneVisible = await resolveTimeZoneVisibility(
-      currentUserId,
-      Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id)),
-    )
+    const dmPeers = Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id))
+    const timeZoneVisible = await resolveTimeZoneVisibility(currentUserId, dmPeers)
+    const focusByUserId = await resolveFocusForViewer(currentUserId, dmPeers.filter((user) => user.bot !== true))
     const encodedUsers = Array.from(usersById.values()).map((user) =>
       Encoders.user({
         user,
@@ -698,6 +698,7 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
         min: true,
         includeTimeZone: dmPeerUserIds.has(user.id),
         timeZoneVisible: timeZoneVisible.has(user.id),
+        focus: focusByUserId.get(user.id),
         includeBotStatus: dmPeerUserIds.has(user.id),
         viewerUserId: currentUserId,
       }),

@@ -1184,6 +1184,13 @@
       "when": 1794235846393,
       "tag": "0168_legacy-agent-grant-upserts",
       "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1794313646599,
+      "tag": "0169_user-focus-status",
+      "breakpoints": true
     }
   ]
 }

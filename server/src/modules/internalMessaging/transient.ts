@@ -4,7 +4,12 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { connectionManager } from "@in/server/ws/connections"
-import { UpdateComposeAction_ComposeAction, UserStatus_Status, type Update } from "@inline-chat/protocol/core"
+import {
+  UpdateComposeAction_ComposeAction,
+  UserStatus_Status,
+  type FocusStatus,
+  type Update,
+} from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { outboundPublications, type OutboundPublication } from "./outbound"
 import { internalMessaging } from "./service"
@@ -46,6 +51,7 @@ class PresencePublication implements OutboundPublication {
     private readonly actorUserId: number,
     private online: boolean,
     private lastOnlineMs: number | null,
+    private focus: FocusStatus | undefined,
   ) {
     this.key = `transient:presence:${targetUserId}:${actorUserId}`
   }
@@ -54,6 +60,10 @@ class PresencePublication implements OutboundPublication {
     await internalMessaging.publish({ target: { kind: "user", userId: UserId.make(this.targetUserId) },
       event: { kind: "TransientRealtime", payload: {
         kind: "userPresenceChanged", userId: UserId.make(this.actorUserId), online: this.online, lastOnlineMs: this.lastOnlineMs,
+        ...(this.focus ? {
+          focused: this.focus.focused,
+          ...(this.focus.updatedAt !== undefined ? { focusUpdatedAtMs: Number(this.focus.updatedAt) * 1000 } : {}),
+        } : {}),
       } } })
   }
 
@@ -63,6 +73,8 @@ class PresencePublication implements OutboundPublication {
     }
     this.online = next.online
     this.lastOnlineMs = next.lastOnlineMs
+    // An online-only hint does not carry Focus, so it keeps the pending one.
+    if (next.focus) this.focus = next.focus
   }
 }
 
@@ -98,8 +110,14 @@ export function publishComposeAction(targetUserId: number, actorUserId: number, 
   outboundPublications.enqueue(new ComposePublication(targetUserId, actorUserId, chatId, action))
 }
 
-export function publishUserPresence(targetUserId: number, actorUserId: number, online: boolean, lastOnline: Date | null): void {
-  outboundPublications.enqueue(new PresencePublication(targetUserId, actorUserId, online, lastOnline?.getTime() ?? null))
+export function publishUserPresence(
+  targetUserId: number,
+  actorUserId: number,
+  online: boolean,
+  lastOnline: Date | null,
+  focus?: FocusStatus,
+): void {
+  outboundPublications.enqueue(new PresencePublication(targetUserId, actorUserId, online, lastOnline?.getTime() ?? null, focus))
 }
 
 export function publishBotPresence(targetUserId: number, botUserId: number, chatId: number, activityId: string): void {
@@ -127,6 +145,10 @@ export function subscribeTransientRealtime(): () => void {
         userId: BigInt(payload.userId), status: {
           online: payload.online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
           lastOnline: { date: payload.lastOnlineMs === null ? undefined : encodeDate(new Date(payload.lastOnlineMs)) },
+          focus: payload.focused === undefined ? undefined : {
+            focused: payload.focused,
+            updatedAt: payload.focusUpdatedAtMs === undefined ? undefined : encodeDate(new Date(payload.focusUpdatedAtMs)),
+          },
         },
       } } }
       await RealtimeUpdates.pushToUser(recipient, [update])

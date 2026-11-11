@@ -12,6 +12,7 @@ export type PrivacyPatch = {
   shareTimeZone?: boolean
   appearInGlobalSearch?: boolean
   timeZone?: PrivacyRuleInput
+  focusStatus?: PrivacyRuleInput
 }
 
 /** Whether `viewerId` may see what `rule` protects for `ownerId`. */
@@ -33,6 +34,10 @@ export const ruleFromLegacyShare = (share: boolean): PrivacyRule => ({
   alwaysShare: [],
   neverShare: [],
 })
+
+/** Focus status is opt-in: without a rule, nobody sees it. */
+export const effectiveFocusRule = (privacy: Pick<StoredPrivacy, "focusStatus"> | undefined): PrivacyRule =>
+  privacy?.focusStatus ?? ruleFromLegacyShare(false)
 
 export const effectiveTimeZoneRule = (privacy: Pick<StoredPrivacy, "shareTimeZone" | "timeZone">): PrivacyRule =>
   privacy.timeZone ?? ruleFromLegacyShare(privacy.shareTimeZone)
@@ -76,10 +81,13 @@ export const mergePrivacyPatch = (
     timeZone = { ...currentRule, audience: patch.shareTimeZone ? "everyone" : "nobody" }
   }
 
+  const focusStatus = patch?.focusStatus ? normalizePrivacyRule(patch.focusStatus, ownerId) : base.focusStatus
+
   return {
     appearInGlobalSearch: patch?.appearInGlobalSearch ?? base.appearInGlobalSearch,
     shareTimeZone: legacyShareFlag(timeZone),
     // Keep legacy rows rule-free until the rule actually changes.
     ...(base.timeZone || timeZone !== currentRule ? { timeZone } : {}),
+    ...(focusStatus ? { focusStatus } : {}),
   }
 }

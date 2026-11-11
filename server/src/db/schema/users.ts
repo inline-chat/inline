@@ -45,6 +45,9 @@ export const users = pgTable(
     deleted: boolean("deleted"),
     online: boolean("online").default(false).notNull(),
     lastOnline: timestamp("last_online", { mode: "date", precision: 3 }),
+    /** Whether an Apple Focus silences the user's notifications, as last reported. */
+    focused: boolean("focused"),
+    focusUpdatedAt: timestamp("focus_updated_at", { mode: "date", precision: 3 }),
     date: timestamp("date", { mode: "date", precision: 3 }).defaultNow(),
     photoFileId: integer("photo_file_id").references((): AnyPgColumn => files.id),
     pendingSetup: boolean("pending_setup").default(false),
