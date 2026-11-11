@@ -840,6 +840,7 @@ async function insertMessage(
       .update(chats)
       .set({
         lastMsgId: nextId,
+        lastMessageDate: newDbMessage.date,
         messageIdCounter: nextId,
         updateSeq: update.seq,
         lastUpdateDate: update.date,
@@ -852,6 +853,7 @@ async function insertMessage(
         ...chat,
         agentContext: initialAgentContext ? Buffer.from(initialAgentContext.encoded) : chat.agentContext,
         lastMsgId: nextId,
+        lastMessageDate: newDbMessage.date,
         messageIdCounter: nextId,
         updateSeq: update.seq,
         lastUpdateDate: update.date,
@@ -921,7 +923,7 @@ async function deleteMessages(
     })
 
     // Clear first to allow for deleting
-    await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
+    await tx.update(chats).set({ lastMsgId: null, lastMessageDate: null }).where(eq(chats.id, chatId))
 
     const orphanedChatIds = await orphanReplyThreadsForDeletedMessages(tx, chatId, messageIdsNum)
 
@@ -945,7 +947,7 @@ async function deleteMessages(
     )
 
     let [message] = await tx
-      .select({ messageId: messages.messageId })
+      .select({ messageId: messages.messageId, date: messages.date })
       .from(messages)
       .where(and(eq(messages.chatId, chatId), messageActivityPredicate()))
       .orderBy(desc(messages.messageId))
@@ -971,6 +973,7 @@ async function deleteMessages(
       .set({
         // Update last message
         lastMsgId: newLastMsgId,
+        lastMessageDate: message?.date ?? null,
         // Update PTS and update date
         updateSeq: update.seq,
         lastUpdateDate: update.date,

@@ -50,6 +50,7 @@ export const HTTP_RPC_AUTH_FAILURE_LIMIT = { max: 120, windowMs: 60_000 }
 export const HTTP_RPC_METHODS: ReadonlySet<Method> = new Set<Method>([
   Method.GET_ME,
   Method.GET_CHATS,
+  Method.GET_SPACES,
   Method.GET_CHAT,
   Method.GET_SPACE,
   Method.GET_SPACE_MEMBERS,

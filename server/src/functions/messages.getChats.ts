@@ -1,7 +1,7 @@
 import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
 import { resolveFocusForViewer } from "@in/server/modules/privacy/focusStatus"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
-import type { Chat, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
+import type { Chat, ChatListOffset, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -21,7 +21,6 @@ import {
   userGroups,
   userNotDeleted,
   users,
-  type DbSpace,
   type DbChat,
   type DbDialog,
   type DbNewDialog,
@@ -36,9 +35,17 @@ import { getDialogFolders } from "@in/server/modules/dialogFolders"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { getMessageThreadProjectionsByParent } from "@in/server/modules/subthreads"
 import { catalogDiagnostics, type CatalogWork } from "@in/server/modules/message/catalogDiagnostics"
+import {
+  completeCatalogCte,
+  discoverChatListPage,
+  nextOffsetFor,
+  parseChatListRequest,
+  type ChatListRequest,
+} from "@in/server/modules/chatList/pagedChatList"
 import { connectionManager } from "@in/server/ws/connections"
 
-type Input = GetChatsInput
+// Callers may omit the paging fields; they take their protobuf defaults.
+type Input = Partial<GetChatsInput>
 
 type Output = {
   chats: Chat[]
@@ -47,6 +54,7 @@ type Output = {
   users: User[]
   messages: Message[]
   folders: DialogFolder[]
+  nextOffset?: ChatListOffset
 }
 
 const log = new Log("functions.getChats")
@@ -56,40 +64,7 @@ const log = new Log("functions.getChats")
 // authority for what may be returned, including retained grants after revocation.
 async function getCompleteCatalogChatIds(currentUserId: number, query: Pick<typeof db, "execute">): Promise<number[]> {
   const rows = await query.execute<{ chatId: number }>(sql`
-    with recursive seeds as (
-      select c.id
-      from chats c
-      where c.parent_chat_id is null
-        and (
-          (c.type = 'private' and (c.min_user_id = ${currentUserId} or c.max_user_id = ${currentUserId}))
-          or (c.type = 'thread' and exists (
-            select 1 from members m
-            where m.space_id = c.space_id and m.user_id = ${currentUserId}
-          ))
-        )
-
-      union
-
-      select cp.chat_id
-      from chat_participants cp
-      join chats c on c.id = cp.chat_id
-      where cp.user_id = ${currentUserId} and c.type = 'thread'
-
-      union
-
-      select cpg.chat_id
-      from chat_participant_groups cpg
-      join user_group_members ugm on ugm.group_id = cpg.group_id
-      join chats c on c.id = cpg.chat_id
-      where ugm.user_id = ${currentUserId} and c.type = 'thread'
-    ), catalog as (
-      select id from seeds
-
-      union
-
-      select child.id from chats child join catalog parent on child.parent_chat_id = parent.id
-      where child.type = 'thread'
-    )
+    with recursive ${completeCatalogCte(currentUserId)}
     select id as "chatId" from catalog order by id
   `)
   return rows.map((row) => row.chatId)
@@ -355,13 +330,20 @@ async function prepareCatalogDialogs(input: Input, currentUserId: number, work: 
       AND: [
         input.includeSubthreads === true
           ? {
-              // Only roots can need preparation. These are exactly the root
-              // seeds of the complete catalog; no descendant walk or separate
-              // ID query is needed before the response snapshot walks the tree.
+              // Only roots can need preparation: the root seeds of the complete
+              // catalog that can grant access. Space membership alone reaches
+              // public threads only; a private thread needs a participant or
+              // group grant, so inaccessible private threads are not re-checked
+              // against the projection on every call.
               RAW: (chat) => sql`(
                 (${chat.type} = 'private' and (${chat.minUserId} = ${currentUserId} or ${chat.maxUserId} = ${currentUserId}))
                 or (${chat.type} = 'thread' and (
-                  exists (select 1 from members m where m.space_id = ${chat.spaceId} and m.user_id = ${currentUserId})
+                  (${chat.publicThread} is true and exists (
+                    select 1 from members m
+                    where m.space_id = ${chat.spaceId}
+                      and m.user_id = ${currentUserId}
+                      and m.can_access_public_chats is distinct from false
+                  ))
                   or exists (select 1 from chat_participants cp where cp.chat_id = ${chat.id} and cp.user_id = ${currentUserId})
                   or exists (
                     select 1 from chat_participant_groups cpg
@@ -396,6 +378,7 @@ async function prepareCatalogDialogs(input: Input, currentUserId: number, work: 
     {
       userIds: [currentUserId],
       source: "chats.list",
+      committed: true,
     },
   )
   const missing = candidates.filter((chat) => access.get(chat.id)?.has(currentUserId))
@@ -416,6 +399,8 @@ async function prepareCatalogDialogs(input: Input, currentUserId: number, work: 
 }
 
 export const getChats = async (input: Input, context: FunctionContext): Promise<Output> => {
+  if (input.limit !== undefined) return getChatsPage(parseChatListRequest(input), context)
+
   const connection = context.currentConnectionId
     ? connectionManager.getConnection(context.currentConnectionId)
     : connectionManager.getConnectionBySession(context.currentUserId, context.currentSessionId)
@@ -434,23 +419,123 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   })
 }
 
+/**
+ * Paged list. Read-only: one discovery statement picks the page (scope, filter,
+ * cursor and access), then only that page is hydrated.
+ */
+async function getChatsPage(request: ChatListRequest, context: FunctionContext): Promise<Output> {
+  const currentUserId = context.currentUserId
+  return withHistoryReadSnapshot(async (tx) => {
+    const rows = await discoverChatListPage(tx, currentUserId, request)
+    const page = rows.slice(0, request.limit)
+    const nextOffset = rows.length > request.limit ? nextOffsetFor(request, page[page.length - 1]!) : undefined
+    const folders = request.offset === undefined ? (await getDialogFolders(currentUserId, tx)).map(Encoders.dialogFolder) : []
+    if (page.length === 0) return { chats: [], dialogs: [], spaces: [], users: [], messages: [], folders, nextOffset }
+
+    const pageIds = page.map((row) => row.chatId)
+    const found = await findHydratableChats(tx, currentUserId, { id: { in: pageIds } })
+    const byId = new Map(found.map((chat) => [chat.id, chat]))
+    const ordered = pageIds.flatMap((chatId) => {
+      const chat = byId.get(chatId)
+      return chat ? [chat] : []
+    })
+    const hydrated = await hydrateChats(tx, currentUserId, ordered)
+
+    const spaceIds = [...new Set(ordered.flatMap((chat) => (chat.spaceId == null ? [] : [chat.spaceId])))]
+    const spaceRows = spaceIds.length === 0
+      ? []
+      : await tx.select().from(spaces).where(and(inArray(spaces.id, spaceIds), isNull(spaces.deleted)))
+    return {
+      ...hydrated,
+      spaces: spaceRows.map((space) => Encoders.space(space, { encodingForUserId: currentUserId })),
+      folders,
+      nextOffset,
+    }
+  })
+}
+
+/** Chats with what hydration reads: the viewer's dialog and peer, and the last message with media. */
+function findHydratableChats(tx: Transaction, currentUserId: number, where: CatalogWhere) {
+  return tx.query.chats.findMany({
+    where,
+    with: {
+      // dialogs for this user
+      dialogs: {
+        where: {
+          userId: currentUserId,
+        },
+
+        with: {
+          peerUser: {
+            with: {
+              photoFile: true,
+            },
+          },
+        },
+      },
+
+      lastMsg: {
+        with: {
+          from: {
+            with: {
+              photoFile: true,
+            },
+          },
+          file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+          video: {
+            with: {
+              file: true,
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          document: {
+            with: {
+              file: true,
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          voice: { with: { file: true } },
+          blockContent: true,
+          reactions: true,
+        },
+      },
+    },
+  })
+}
+
+type HydratableChat = Awaited<ReturnType<typeof findHydratableChats>>[number]
+
 async function readCatalog(input: Input, context: FunctionContext, work: CatalogWork): Promise<Output> {
   const currentUserId = context.currentUserId
   return withHistoryReadSnapshot(async (tx) => {
     const foldersList = await getDialogFolders(currentUserId, tx)
 
-    // TEMPORARY UNTIL getChats is integrated into the clients
-    // TODO: DELETE ONCE getChats is integrated into the clients) also remove the tests
-    // await ensurePrivateChatsForSpaceMembers(currentUserId)
-
-    // Buckets for results
-    let dialogsList: DbDialog[] = []
-    let usersList: (DbUser & { photoFile?: DbFile | null })[] = []
-    let chatsList: DbChat[] = []
-    let messagesList: Message[] = []
-    let spacesList: DbSpace[] = []
-
-    // // 1. Get all spaces the user is a part of
+    // 1. Get all spaces the user is a part of
     const userSpaces = await tx.query.spaces.findMany({
       where: {
         members: {
@@ -463,484 +548,211 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
         },
       },
     })
-    spacesList = userSpaces
 
-    // Fetch a list of public threads the user is a part of and don't have a dialog
-    const candidates = await tx.query.chats.findMany({
-      where: await getCatalogWhere(currentUserId, input.includeSubthreads === true, tx),
-
-      with: {
-        // dialogs for this user
-        dialogs: {
-          where: {
-            userId: currentUserId,
-          },
-
-          with: {
-            peerUser: {
-              with: {
-                photoFile: true,
-              },
-            },
-          },
-        },
-
-        lastMsg: {
-          with: {
-            from: {
-              with: {
-                photoFile: true,
-              },
-            },
-            file: true,
-            photo: {
-              with: {
-                photoSizes: {
-                  with: {
-                    file: true,
-                  },
-                },
-              },
-            },
-            video: {
-              with: {
-                file: true,
-                photo: {
-                  with: {
-                    photoSizes: {
-                      with: {
-                        file: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            document: {
-              with: {
-                file: true,
-                photo: {
-                  with: {
-                    photoSizes: {
-                      with: {
-                        file: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            voice: { with: { file: true } },
-            blockContent: true,
-            reactions: true,
-          },
-        },
-      },
-    })
-
-    work.candidateChats = candidates.length
     // Discovery is not authorization. Check every candidate against this exact
-    // catalog snapshot before exposing its metadata, previews or senders.
+    // catalog snapshot before reading its metadata, previews or senders.
+    const candidates = await tx.query.chats.findMany({
+      columns: { id: true },
+      where: await getCatalogWhere(currentUserId, input.includeSubthreads === true, tx),
+    })
+    work.candidateChats = candidates.length
     const chatAccess = await getEffectiveChatAccessUserIds(
       tx,
       candidates.map((chat) => chat.id),
       {
         userIds: [currentUserId],
         source: "chats.list",
+        committed: true,
       },
     )
-    const chats = candidates.filter((chat) => chatAccess.get(chat.id)?.has(currentUserId) === true)
-
-    const processedLastMessages = await MessageModel.processMessages(
-      chats.flatMap((chat) => (chat.lastMsg ? [chat.lastMsg] : [])),
-      tx,
-    )
-    const processedLastMessagesByGlobalId = new Map(processedLastMessages.map((message) => [message.globalId, message]))
-    const threadProjectionsByParent = await getMessageThreadProjectionsByParent({
-      parentMessages: chats.flatMap((chat) =>
-        chat.lastMsgId == null
-          ? []
-          : [
-              {
-                chatId: chat.id,
-                messageId: chat.lastMsgId,
-              },
-            ],
-      ),
-      userId: currentUserId,
-      tx,
-    })
-
-    // Add chats to results
-    const messagesByKey = new Map<string, Message>()
-    const missingLastMsgKeys: { chatId: number; messageId: number }[] = []
-    chats.forEach((chat) => {
-      // chat
-      chatsList.push(chat)
-
-      // last message
-      if (chat.lastMsg) {
-        const processedMsg = processedLastMessagesByGlobalId.get(chat.lastMsg.globalId)
-        if (processedMsg) {
-          const threadProjection = threadProjectionsByParent.get(chat.id)?.get(processedMsg.messageId)
-          const encodedMsg = Encoders.fullMessage({
-            message: processedMsg,
-            encodingForUserId: currentUserId,
-            encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
-            replies: threadProjection?.replies,
-            subthread: threadProjection?.subthread,
-          })
-          messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
-        } else if (chat.lastMsgId) {
-          missingLastMsgKeys.push({ chatId: chat.id, messageId: chat.lastMsgId })
-        }
-
-        // sender
-        if (chat.lastMsg.from) {
-          usersList.push(chat.lastMsg.from)
-        }
-      } else if (chat.lastMsgId) {
-        // Should be rare (FK enforces validity), but keep the contract: if chat.lastMsgId is set,
-        // GetChatsResult.messages must include that message so clients never need O(n) follow-up calls.
-        missingLastMsgKeys.push({ chatId: chat.id, messageId: chat.lastMsgId })
-      }
-
-      if (chat.dialogs.length > 0) {
-        let dialog = chat.dialogs[0]
-        // dialog
-        if (dialog) {
-          dialogsList.push(dialog)
-        }
-        // peer user
-        let peerUser = dialog?.peerUser
-        if (peerUser) {
-          usersList.push(peerUser)
-        }
-      }
-    })
-
-    if (missingLastMsgKeys.length > 0) {
-      const messageIdsByChatId = new Map<number, bigint[]>()
-      for (const key of missingLastMsgKeys) {
-        let list = messageIdsByChatId.get(key.chatId)
-        if (!list) {
-          list = []
-          messageIdsByChatId.set(key.chatId, list)
-        }
-        list.push(BigInt(key.messageId))
-      }
-
-      for (const [chatId, messageIds] of messageIdsByChatId) {
-        const chat = chatsList.find((c) => c.id === chatId)
-        if (!chat) continue
-
-        const recovered = await MessageModel.getMessagesByIds(chatId, messageIds, { tx })
-        if (recovered.length !== new Set(messageIds).size) throw RealtimeRpcError.InternalError()
-        for (const msg of recovered) {
-          const threadProjection = threadProjectionsByParent.get(chatId)?.get(msg.messageId)
-          const encodedMsg = Encoders.fullMessage({
-            message: msg,
-            encodingForUserId: currentUserId,
-            encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
-            replies: threadProjection?.replies,
-            subthread: threadProjection?.subthread,
-          })
-          messagesByKey.set(`${chat.id}:${msg.messageId}`, encodedMsg)
-          usersList.push(msg.from)
-        }
-      }
-    }
-
-    messagesList = Array.from(messagesByKey.values())
-
-    // // 7. Get unread counts for all dialogs
-    const unreadCounts = await DialogsModel.getBatchUnreadCounts({
-      userId: currentUserId,
-      chatIds: dialogsList.map((d) => d.chatId),
-      tx,
-    })
-
-    const activityCounts = await getActivityCountsForChats({
-      userId: currentUserId,
-      chatIds: dialogsList.map((d) => d.chatId),
-      tx,
-    })
-
-    // // 8. Encode everything to protocol buffer types
-    const encodedDialogs = dialogsList.map((dialog) => {
-      const unreadCount = unreadCounts.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
-      return Encoders.dialog(dialog, { unreadCount, unreadActivity: activityCounts.get(dialog.chatId) })
-    })
-
-    const usersById = new Map<number, DbUser & { photoFile?: DbFile | null }>()
-    for (const user of usersList) {
-      const existing = usersById.get(user.id)
-      if (!existing || (!existing.photoFile && user.photoFile)) {
-        usersById.set(user.id, user)
-      }
-    }
-
-    const encodedChats = await Encoders.chatsForUser(chatsList, { encodingForUserId: currentUserId, tx })
-    const encodedSpaces = spacesList.map((space) => Encoders.space(space, { encodingForUserId: currentUserId }))
-    const privateChatIds = new Set(chatsList.filter((chat) => chat.type === "private").map((chat) => chat.id))
-    const dmPeerUserIds = new Set(
-      dialogsList
-        .filter((dialog) => privateChatIds.has(dialog.chatId))
-        .flatMap((dialog) => (dialog.peerUserId === null ? [] : [dialog.peerUserId])),
-    )
-    const dmPeers = Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id))
-    const timeZoneVisible = await resolveTimeZoneVisibility(currentUserId, dmPeers)
-    const focusByUserId = await resolveFocusForViewer(currentUserId, dmPeers.filter((user) => user.bot !== true))
-    const encodedUsers = Array.from(usersById.values()).map((user) =>
-      Encoders.user({
-        user,
-        photoFile: user.photoFile ?? undefined,
-        min: true,
-        includeTimeZone: dmPeerUserIds.has(user.id),
-        timeZoneVisible: timeZoneVisible.has(user.id),
-        focus: focusByUserId.get(user.id),
-        includeBotStatus: dmPeerUserIds.has(user.id),
-        viewerUserId: currentUserId,
-      }),
-    )
+    const allowedIds = candidates.flatMap((chat) => (chatAccess.get(chat.id)?.has(currentUserId) === true ? [chat.id] : []))
+    const chats = allowedIds.length === 0 ? [] : await findHydratableChats(tx, currentUserId, { id: { in: allowedIds } })
+    const hydrated = await hydrateChats(tx, currentUserId, chats)
 
     return {
-      chats: encodedChats,
-      dialogs: encodedDialogs,
-      spaces: encodedSpaces,
-      users: encodedUsers,
-      messages: messagesList,
+      ...hydrated,
+      spaces: userSpaces.map((space) => Encoders.space(space, { encodingForUserId: currentUserId })),
       folders: foldersList.map(Encoders.dialogFolder),
     }
   })
 }
 
-// export const getChats = async (input: Input, context: FunctionContext): Promise<Output> => {
-//   const currentUserId = context.currentUserId
+/**
+ * Encodes authorized chats with their dialogs, last messages and the users
+ * they reference. Shared by the unpaged snapshot and pages so objects match.
+ */
+async function hydrateChats(
+  tx: Transaction,
+  currentUserId: number,
+  chats: HydratableChat[],
+): Promise<Pick<Output, "chats" | "dialogs" | "users" | "messages">> {
+  const dialogsList: DbDialog[] = []
+  const usersList: (DbUser & { photoFile?: DbFile | null })[] = []
+  const chatsList: DbChat[] = []
 
-//   // Buckets for results
-//   let usersList: (typeof users.$inferSelect)[] = []
-//   let chatsList: (typeof chats.$inferSelect)[] = []
-//   let messagesList: Message[] = []
-//   let spacesList: DbSpace[] = []
+  const processedLastMessages = await MessageModel.processMessages(
+    chats.flatMap((chat) => (chat.lastMsg ? [chat.lastMsg] : [])),
+    tx,
+  )
+  const processedLastMessagesByGlobalId = new Map(processedLastMessages.map((message) => [message.globalId, message]))
+  const threadProjectionsByParent = await getMessageThreadProjectionsByParent({
+    parentMessages: chats.flatMap((chat) =>
+      chat.lastMsgId == null
+        ? []
+        : [
+            {
+              chatId: chat.id,
+              messageId: chat.lastMsgId,
+            },
+          ],
+    ),
+    userId: currentUserId,
+    tx,
+  })
 
-//   // // 1. Get all spaces the user is a part of
-//   const userSpaces = await db.query.spaces.findMany({
-//     where: {
-//       members: {
-//         user: {
-//           id: currentUserId,
-//         },
-//       },
-//       deleted: {
-//         isNull: true,
-//       },
-//     },
-//   })
-//   spacesList = userSpaces
+  // Add chats to results
+  const messagesByKey = new Map<string, Message>()
+  const missingLastMsgKeys: { chatId: number; messageId: number }[] = []
+  // DMs listed without a stored dialog (paged ACCESSIBLE scope) still reference their peer.
+  const peerUserIdsWithoutDialog = new Set<number>()
+  chats.forEach((chat) => {
+    // chat
+    chatsList.push(chat)
 
-//   // Fetch a list of public threads the user is a part of and don't have a dialog
-//   const publicThreadsWithNoDialogs = await db.query.chats.findMany({
-//     where: {
-//       type: "thread",
-//       publicThread: true,
+    // last message
+    if (chat.lastMsg) {
+      const processedMsg = processedLastMessagesByGlobalId.get(chat.lastMsg.globalId)
+      if (processedMsg) {
+        const threadProjection = threadProjectionsByParent.get(chat.id)?.get(processedMsg.messageId)
+        const encodedMsg = Encoders.fullMessage({
+          message: processedMsg,
+          encodingForUserId: currentUserId,
+          encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
+          replies: threadProjection?.replies,
+          subthread: threadProjection?.subthread,
+        })
+        messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
+      } else if (chat.lastMsgId) {
+        missingLastMsgKeys.push({ chatId: chat.id, messageId: chat.lastMsgId })
+      }
 
-//       // space threads
-//       space: {
-//         members: {
-//           user: {
-//             id: currentUserId,
-//           },
-//         },
-//       },
+      // sender
+      if (chat.lastMsg.from) {
+        usersList.push(chat.lastMsg.from)
+      }
+    } else if (chat.lastMsgId) {
+      // Should be rare (FK enforces validity), but keep the contract: if chat.lastMsgId is set,
+      // GetChatsResult.messages must include that message so clients never need O(n) follow-up calls.
+      missingLastMsgKeys.push({ chatId: chat.id, messageId: chat.lastMsgId })
+    }
 
-//       NOT: {
-//         dialogs: {
-//           userId: currentUserId,
-//         },
-//       },
-//     },
-//   })
+    const dialog = chat.dialogs[0]
+    if (dialog) {
+      dialogsList.push(dialog)
+      // peer user
+      if (dialog.peerUser) {
+        usersList.push(dialog.peerUser)
+      }
+    } else if (chat.type === "private") {
+      const peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+      if (peerUserId != null) peerUserIdsWithoutDialog.add(peerUserId)
+    }
+  })
 
-//   let chatsThatNeedDialogs: DbChat[] = [...publicThreadsWithNoDialogs]
+  if (missingLastMsgKeys.length > 0) {
+    const chatsById = new Map(chatsList.map((chat) => [chat.id, chat]))
+    const messageIdsByChatId = new Map<number, bigint[]>()
+    for (const key of missingLastMsgKeys) {
+      let list = messageIdsByChatId.get(key.chatId)
+      if (!list) {
+        list = []
+        messageIdsByChatId.set(key.chatId, list)
+      }
+      list.push(BigInt(key.messageId))
+    }
 
-//   // get private threads the user is a part of without dialogs
-//   const privateThreadsWithNoDialogs = await db.query.chats.findMany({
-//     where: {
-//       type: "thread",
-//       publicThread: false,
+    for (const [chatId, messageIds] of messageIdsByChatId) {
+      const chat = chatsById.get(chatId)
+      if (!chat) continue
 
-//       // that we are a participant in
-//       participants: {
-//         user: {
-//           id: currentUserId,
-//         },
-//       },
+      const recovered = await MessageModel.getMessagesByIds(chatId, messageIds, { tx })
+      if (recovered.length !== new Set(messageIds).size) throw RealtimeRpcError.InternalError()
+      for (const msg of recovered) {
+        const threadProjection = threadProjectionsByParent.get(chatId)?.get(msg.messageId)
+        const encodedMsg = Encoders.fullMessage({
+          message: msg,
+          encodingForUserId: currentUserId,
+          encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
+          replies: threadProjection?.replies,
+          subthread: threadProjection?.subthread,
+        })
+        messagesByKey.set(`${chat.id}:${msg.messageId}`, encodedMsg)
+        usersList.push(msg.from)
+      }
+    }
+  }
 
-//       // but don't have a dialog
-//       NOT: {
-//         dialogs: {
-//           userId: currentUserId,
-//         },
-//       },
-//     },
-//   })
+  if (peerUserIdsWithoutDialog.size > 0) {
+    usersList.push(...await tx.query.users.findMany({
+      where: { id: { in: [...peerUserIdsWithoutDialog] } },
+      with: { photoFile: true },
+    }))
+  }
 
-//   chatsThatNeedDialogs = [...chatsThatNeedDialogs, ...privateThreadsWithNoDialogs]
+  // Get unread counts for all dialogs
+  const dialogChatIds = dialogsList.map((d) => d.chatId)
+  const unreadCounts = new Map(
+    (await DialogsModel.getBatchUnreadCounts({ userId: currentUserId, chatIds: dialogChatIds, tx }))
+      .map((row) => [row.chatId, row.unreadCount]),
+  )
+  const activityCounts = await getActivityCountsForChats({
+    userId: currentUserId,
+    chatIds: dialogChatIds,
+    tx,
+  })
 
-//   console.log("privateThreadsWithNoDialogs", privateThreadsWithNoDialogs)
+  // Encode everything to protocol buffer types
+  const encodedDialogs = dialogsList.map((dialog) =>
+    Encoders.dialog(dialog, {
+      unreadCount: unreadCounts.get(dialog.chatId) ?? 0,
+      unreadActivity: activityCounts.get(dialog.chatId),
+    }),
+  )
 
-//   // DMs without dialogs
-//   const dmChatsWithoutDialogs = await db.query.chats.findMany({
-//     where: {
-//       type: "private",
+  const usersById = new Map<number, DbUser & { photoFile?: DbFile | null }>()
+  for (const user of usersList) {
+    const existing = usersById.get(user.id)
+    if (!existing || (!existing.photoFile && user.photoFile)) {
+      usersById.set(user.id, user)
+    }
+  }
 
-//       // that are between the user and another user
-//       OR: [
-//         {
-//           minUserId: currentUserId,
-//         },
-//         {
-//           maxUserId: currentUserId,
-//         },
-//       ],
+  const encodedChats = await Encoders.chatsForUser(chatsList, { encodingForUserId: currentUserId, tx })
+  const privateChats = chatsList.filter((chat) => chat.type === "private")
+  const dmPeerUserIds = new Set(privateChats.flatMap((chat) => {
+    const peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+    return peerUserId == null ? [] : [peerUserId]
+  }))
+  const dmPeers = Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id))
+  const timeZoneVisible = await resolveTimeZoneVisibility(currentUserId, dmPeers)
+  const focusByUserId = await resolveFocusForViewer(currentUserId, dmPeers.filter((user) => user.bot !== true))
+  const encodedUsers = Array.from(usersById.values()).map((user) =>
+    Encoders.user({
+      user,
+      photoFile: user.photoFile ?? undefined,
+      min: true,
+      includeTimeZone: dmPeerUserIds.has(user.id),
+      timeZoneVisible: timeZoneVisible.has(user.id),
+      focus: focusByUserId.get(user.id),
+      includeBotStatus: dmPeerUserIds.has(user.id),
+      viewerUserId: currentUserId,
+    }),
+  )
 
-//       // that don't have a dialog
-//       NOT: {
-//         dialogs: {
-//           userId: currentUserId,
-//         },
-//       },
-//     },
-//   })
-
-//   chatsThatNeedDialogs = [...chatsThatNeedDialogs, ...dmChatsWithoutDialogs]
-
-//   // Create dialog
-//   if (chatsThatNeedDialogs.length > 0) {
-//     await db.insert(dialogs).values(
-//       chatsThatNeedDialogs.map((t) => ({
-//         chatId: t.id,
-//         userId: currentUserId,
-//         // type-specific fields
-//         peerUserId: t.type === "private" ? (t.minUserId === currentUserId ? t.maxUserId : t.minUserId) : null,
-//         spaceId: t.type === "thread" ? t.spaceId : null,
-//       })),
-//     )
-//   }
-
-//   // Get all dialogs for the user
-//   const userDialogs = await db.query.dialogs.findMany({
-//     where: {
-//       userId: currentUserId,
-//     },
-//     with: {
-//       peerUser: true,
-
-//       chat: {
-//         with: {
-//           lastMsg: {
-//             with: {
-//               from: true,
-//               file: true,
-//               photo: {
-//                 with: {
-//                   photoSizes: {
-//                     with: {
-//                       file: true,
-//                     },
-//                   },
-//                 },
-//               },
-//               video: {
-//                 with: {
-//                   file: true,
-//                   photo: {
-//                     with: {
-//                       photoSizes: {
-//                         with: {
-//                           file: true,
-//                         },
-//                       },
-//                     },
-//                   },
-//                 },
-//               },
-//               document: {
-//                 with: {
-//                   file: true,
-//                 },
-//               },
-//               reactions: true,
-//               messageAttachments: {
-//                 with: {
-//                   externalTask: true,
-//                   linkEmbed: {
-//                     with: {
-//                       photo: {
-//                         with: {
-//                           photoSizes: {
-//                             with: {
-//                               file: true,
-//                             },
-//                           },
-//                         },
-//                       },
-//                     },
-//                   },
-//                 },
-//               },
-//             },
-//           },
-//         },
-//       },
-//     },
-//   })
-
-//   // // Add private chats to results
-//   userDialogs.forEach((dialog) => {
-//     if (dialog.chat) {
-//       chatsList.push(dialog.chat)
-
-//       if (dialog.chat.lastMsg) {
-//         const processedMsg = MessageModel.processMessage(dialog.chat.lastMsg)
-//         const encodedMsg = Encoders.fullMessage({
-//           message: processedMsg,
-//           encodingForUserId: currentUserId,
-//           encodingForPeer: { inputPeer: encodePeerFromChat(dialog.chat, { currentUserId }) },
-//         })
-//         if (processedMsg) {
-//           messagesList.push(encodedMsg)
-//         }
-//       }
-//     }
-
-//     if (dialog.peerUser) {
-//       usersList.push(dialog.peerUser)
-//     }
-//   })
-
-//   // // 7. Get unread counts for all dialogs
-//   const unreadCounts = await DialogsModel.getBatchUnreadCounts({
-//     userId: currentUserId,
-//     chatIds: userDialogs.map((d) => d.chatId),
-//   })
-
-//   // // 8. Encode everything to protocol buffer types
-//   const encodedDialogs = userDialogs.map((dialog) => {
-//     const unreadCount = unreadCounts.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
-//     return Encoders.dialog(dialog, { unreadCount })
-//   })
-
-//   const encodedChats = chatsList.map((chat) => Encoders.chat(chat, { encodingForUserId: currentUserId }))
-//   const encodedSpaces = spacesList.map((space) => Encoders.space(space, { encodingForUserId: currentUserId }))
-//   const encodedUsers = usersList.map((user) => Encoders.user({ user }))
-
-//   return {
-//     chats: encodedChats,
-//     dialogs: encodedDialogs,
-//     spaces: encodedSpaces,
-//     users: encodedUsers,
-//     messages: messagesList,
-//   }
-// }
+  return {
+    chats: encodedChats,
+    dialogs: encodedDialogs,
+    users: encodedUsers,
+    messages: Array.from(messagesByKey.values()),
+  }
+}

@@ -1191,6 +1191,13 @@
       "when": 1794313646599,
       "tag": "0169_user-focus-status",
       "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "7",
+      "when": 1794555576163,
+      "tag": "0170_chat-last-message-date",
+      "breakpoints": true
     }
   ]
 }
