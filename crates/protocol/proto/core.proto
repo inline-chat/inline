@@ -2452,6 +2452,7 @@ enum Method {
   GET_UNREAD_ACTIVITY = 167;
   READ_ACTIVITY = 168;
   SET_FOCUS_STATUS = 169;
+  GET_SPACES = 170;
 }
 
 message RpcCall {
@@ -2626,6 +2627,7 @@ message RpcCall {
     GetUnreadActivityInput getUnreadActivity = 168;
     ReadActivityInput readActivity = 169;
     SetFocusStatusInput setFocusStatus = 170;
+    GetSpacesInput getSpaces = 171;
   }
 }
 
@@ -2802,6 +2804,7 @@ message RpcResult {
     GetUnreadActivityResult getUnreadActivity = 168;
     ReadActivityResult readActivity = 169;
     SetFocusStatusResult setFocusStatus = 170;
+    GetSpacesResult getSpaces = 171;
   }
 }
 
@@ -4079,9 +4082,69 @@ message DeleteDialogFolderResult {
 }
 
 message GetChatsInput {
-  // Include every accessible linked subthread, regardless of dialog visibility.
-  // Omitted/false preserves the normal chat-list snapshot.
+  // Legacy. true is the same as scope = CHAT_LIST_SCOPE_ACCESSIBLE.
   optional bool include_subthreads = 1;
+
+  // Page size, capped at 100. Absent: legacy unpaged snapshot (deprecated).
+  optional int32 limit = 2;
+
+  // Exclusive start. Pass the previous result's next_offset; absent = first page.
+  optional ChatListOffset offset = 3;
+
+  ChatListOrder order = 4;
+
+  // Predicates, ANDed. Absent fields do not constrain.
+  optional ChatListFilter filter = 5;
+
+  ChatListScope scope = 6;
+}
+
+enum ChatListScope {
+  // Chats the viewer has a dialog with, except dialogs marked chat_list_hidden.
+  CHAT_LIST_SCOPE_DIALOGS = 0;
+  // Every chat the viewer can access, with or without a dialog, including
+  // linked subthreads.
+  CHAT_LIST_SCOPE_ACCESSIBLE = 1;
+}
+
+enum ChatListOrder {
+  // Latest activity first (last message date, else creation date), then chat
+  // ID descending. Pinned chats are not moved to the front.
+  CHAT_LIST_ORDER_RECENT = 0;
+  // Ascending chat ID. Pages never shift and new chats land at the end.
+  // For complete walks, sync and export.
+  CHAT_LIST_ORDER_ID = 1;
+}
+
+message ChatListOffset {
+  int64 chat_id = 1;
+  // Activity date of that chat. RECENT order only.
+  optional int64 date = 2;
+}
+
+enum ChatListKind {
+  CHAT_LIST_KIND_UNSPECIFIED = 0;
+  CHAT_LIST_KIND_DM = 1;
+  CHAT_LIST_KIND_SPACE_THREAD = 2;
+  CHAT_LIST_KIND_HOME_THREAD = 3;
+}
+
+message ChatListFilter {
+  // Empty: all kinds.
+  repeated ChatListKind kinds = 1;
+  // Restrict space threads to these spaces. Empty: all spaces.
+  repeated int64 space_ids = 2;
+  // Unread messages or a manual unread mark.
+  optional bool unread = 3;
+  // The four below are tri-state on stored dialog state:
+  // true = only, false = exclude, absent = both.
+  optional bool archived = 4;
+  optional bool open = 5;
+  optional bool pinned = 6;
+  // Dialogs in this folder.
+  optional int64 folder_id = 7;
+  // Case-insensitive match on the chat title or DM peer name. (Phase 2.)
+  optional string query = 8;
 }
 
 message GetChatsResult {
@@ -4101,7 +4164,18 @@ message GetChatsResult {
   repeated Message messages = 5;
 
   // Personal dialog folders. Dialogs remain present for unsupported clients.
+  // Paged requests: complete, on the first page only.
   repeated DialogFolder folders = 6;
+
+  // Paged requests: pass as `offset` for the next page. Absent: end of list.
+  optional ChatListOffset next_offset = 7;
+}
+
+// Every space the viewer is a member of. Small and unpaged.
+message GetSpacesInput {}
+
+message GetSpacesResult {
+  repeated Space spaces = 1;
 }
 
 message TranslateMessagesInput {

@@ -6553,6 +6553,12 @@ export interface RpcCall {
          */
         setFocusStatus: SetFocusStatusInput;
     } | {
+        oneofKind: "getSpaces";
+        /**
+         * @generated from protobuf field: GetSpacesInput getSpaces = 171;
+         */
+        getSpaces: GetSpacesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7575,6 +7581,12 @@ export interface RpcResult {
          * @generated from protobuf field: SetFocusStatusResult setFocusStatus = 170;
          */
         setFocusStatus: SetFocusStatusResult;
+    } | {
+        oneofKind: "getSpaces";
+        /**
+         * @generated from protobuf field: GetSpacesResult getSpaces = 171;
+         */
+        getSpaces: GetSpacesResult;
     } | {
         oneofKind: undefined;
     };
@@ -10934,12 +10946,102 @@ export interface DeleteDialogFolderResult {
  */
 export interface GetChatsInput {
     /**
-     * Include every accessible linked subthread, regardless of dialog visibility.
-     * Omitted/false preserves the normal chat-list snapshot.
+     * Legacy. true is the same as scope = CHAT_LIST_SCOPE_ACCESSIBLE.
      *
      * @generated from protobuf field: optional bool include_subthreads = 1;
      */
     includeSubthreads?: boolean;
+    /**
+     * Page size, capped at 100. Absent: legacy unpaged snapshot (deprecated).
+     *
+     * @generated from protobuf field: optional int32 limit = 2;
+     */
+    limit?: number;
+    /**
+     * Exclusive start. Pass the previous result's next_offset; absent = first page.
+     *
+     * @generated from protobuf field: optional ChatListOffset offset = 3;
+     */
+    offset?: ChatListOffset;
+    /**
+     * @generated from protobuf field: ChatListOrder order = 4;
+     */
+    order: ChatListOrder;
+    /**
+     * Predicates, ANDed. Absent fields do not constrain.
+     *
+     * @generated from protobuf field: optional ChatListFilter filter = 5;
+     */
+    filter?: ChatListFilter;
+    /**
+     * @generated from protobuf field: ChatListScope scope = 6;
+     */
+    scope: ChatListScope;
+}
+/**
+ * @generated from protobuf message ChatListOffset
+ */
+export interface ChatListOffset {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * Activity date of that chat. RECENT order only.
+     *
+     * @generated from protobuf field: optional int64 date = 2;
+     */
+    date?: bigint;
+}
+/**
+ * @generated from protobuf message ChatListFilter
+ */
+export interface ChatListFilter {
+    /**
+     * Empty: all kinds.
+     *
+     * @generated from protobuf field: repeated ChatListKind kinds = 1;
+     */
+    kinds: ChatListKind[];
+    /**
+     * Restrict space threads to these spaces. Empty: all spaces.
+     *
+     * @generated from protobuf field: repeated int64 space_ids = 2;
+     */
+    spaceIds: bigint[];
+    /**
+     * Unread messages or a manual unread mark.
+     *
+     * @generated from protobuf field: optional bool unread = 3;
+     */
+    unread?: boolean;
+    /**
+     * The four below are tri-state on stored dialog state:
+     * true = only, false = exclude, absent = both.
+     *
+     * @generated from protobuf field: optional bool archived = 4;
+     */
+    archived?: boolean;
+    /**
+     * @generated from protobuf field: optional bool open = 5;
+     */
+    open?: boolean;
+    /**
+     * @generated from protobuf field: optional bool pinned = 6;
+     */
+    pinned?: boolean;
+    /**
+     * Dialogs in this folder.
+     *
+     * @generated from protobuf field: optional int64 folder_id = 7;
+     */
+    folderId?: bigint;
+    /**
+     * Case-insensitive match on the chat title or DM peer name. (Phase 2.)
+     *
+     * @generated from protobuf field: optional string query = 8;
+     */
+    query?: string;
 }
 /**
  * @generated from protobuf message GetChatsResult
@@ -10977,10 +11079,33 @@ export interface GetChatsResult {
     messages: Message[];
     /**
      * Personal dialog folders. Dialogs remain present for unsupported clients.
+     * Paged requests: complete, on the first page only.
      *
      * @generated from protobuf field: repeated DialogFolder folders = 6;
      */
     folders: DialogFolder[];
+    /**
+     * Paged requests: pass as `offset` for the next page. Absent: end of list.
+     *
+     * @generated from protobuf field: optional ChatListOffset next_offset = 7;
+     */
+    nextOffset?: ChatListOffset;
+}
+/**
+ * Every space the viewer is a member of. Small and unpaged.
+ *
+ * @generated from protobuf message GetSpacesInput
+ */
+export interface GetSpacesInput {
+}
+/**
+ * @generated from protobuf message GetSpacesResult
+ */
+export interface GetSpacesResult {
+    /**
+     * @generated from protobuf field: repeated Space spaces = 1;
+     */
+    spaces: Space[];
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -17999,7 +18124,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SET_FOCUS_STATUS = 169;
      */
-    SET_FOCUS_STATUS = 169
+    SET_FOCUS_STATUS = 169,
+    /**
+     * @generated from protobuf enum value: GET_SPACES = 170;
+     */
+    GET_SPACES = 170
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -18160,6 +18289,64 @@ export enum DeleteDialogFolderDisposition {
      * @generated from protobuf enum value: KEEP_DIALOGS = 2;
      */
     KEEP_DIALOGS = 2
+}
+/**
+ * @generated from protobuf enum ChatListScope
+ */
+export enum ChatListScope {
+    /**
+     * Chats the viewer has a dialog with, except dialogs marked chat_list_hidden.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_SCOPE_DIALOGS = 0;
+     */
+    DIALOGS = 0,
+    /**
+     * Every chat the viewer can access, with or without a dialog, including
+     * linked subthreads.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_SCOPE_ACCESSIBLE = 1;
+     */
+    ACCESSIBLE = 1
+}
+/**
+ * @generated from protobuf enum ChatListOrder
+ */
+export enum ChatListOrder {
+    /**
+     * Latest activity first (last message date, else creation date), then chat
+     * ID descending. Pinned chats are not moved to the front.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_ORDER_RECENT = 0;
+     */
+    RECENT = 0,
+    /**
+     * Ascending chat ID. Pages never shift and new chats land at the end.
+     * For complete walks, sync and export.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_ORDER_ID = 1;
+     */
+    ID = 1
+}
+/**
+ * @generated from protobuf enum ChatListKind
+ */
+export enum ChatListKind {
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_DM = 1;
+     */
+    DM = 1,
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_SPACE_THREAD = 2;
+     */
+    SPACE_THREAD = 2,
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_HOME_THREAD = 3;
+     */
+    HOME_THREAD = 3
 }
 /**
  * @generated from protobuf enum GetChatHistoryMode
@@ -31551,7 +31738,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 167, name: "getAgentAccess", kind: "message", oneof: "input", T: () => GetAgentAccessInput },
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
             { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
-            { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput }
+            { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
+            { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -32578,6 +32766,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         setFocusStatus: SetFocusStatusInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setFocusStatus)
                     };
                     break;
+                case /* GetSpacesInput getSpaces */ 171:
+                    message.input = {
+                        oneofKind: "getSpaces",
+                        getSpaces: GetSpacesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaces)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33097,6 +33291,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SetFocusStatusInput setFocusStatus = 170; */
         if (message.input.oneofKind === "setFocusStatus")
             SetFocusStatusInput.internalBinaryWrite(message.input.setFocusStatus, writer.tag(170, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpacesInput getSpaces = 171; */
+        if (message.input.oneofKind === "getSpaces")
+            GetSpacesInput.internalBinaryWrite(message.input.getSpaces, writer.tag(171, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33279,7 +33476,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 167, name: "getAgentAccess", kind: "message", oneof: "result", T: () => GetAgentAccessResult },
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
             { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
-            { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult }
+            { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
+            { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -34306,6 +34504,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         setFocusStatus: SetFocusStatusResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setFocusStatus)
                     };
                     break;
+                case /* GetSpacesResult getSpaces */ 171:
+                    message.result = {
+                        oneofKind: "getSpaces",
+                        getSpaces: GetSpacesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaces)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -34825,6 +35029,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SetFocusStatusResult setFocusStatus = 170; */
         if (message.result.oneofKind === "setFocusStatus")
             SetFocusStatusResult.internalBinaryWrite(message.result.setFocusStatus, writer.tag(170, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpacesResult getSpaces = 171; */
+        if (message.result.oneofKind === "getSpaces")
+            GetSpacesResult.internalBinaryWrite(message.result.getSpaces, writer.tag(171, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45880,11 +46087,18 @@ export const DeleteDialogFolderResult = new DeleteDialogFolderResult$Type();
 class GetChatsInput$Type extends MessageType<GetChatsInput> {
     constructor() {
         super("GetChatsInput", [
-            { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "offset", kind: "message", T: () => ChatListOffset },
+            { no: 4, name: "order", kind: "enum", T: () => ["ChatListOrder", ChatListOrder, "CHAT_LIST_ORDER_"] },
+            { no: 5, name: "filter", kind: "message", T: () => ChatListFilter },
+            { no: 6, name: "scope", kind: "enum", T: () => ["ChatListScope", ChatListScope, "CHAT_LIST_SCOPE_"] }
         ]);
     }
     create(value?: PartialMessage<GetChatsInput>): GetChatsInput {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.order = 0;
+        message.scope = 0;
         if (value !== undefined)
             reflectionMergePartial<GetChatsInput>(this, message, value);
         return message;
@@ -45896,6 +46110,21 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
             switch (fieldNo) {
                 case /* optional bool include_subthreads */ 1:
                     message.includeSubthreads = reader.bool();
+                    break;
+                case /* optional int32 limit */ 2:
+                    message.limit = reader.int32();
+                    break;
+                case /* optional ChatListOffset offset */ 3:
+                    message.offset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.offset);
+                    break;
+                case /* ChatListOrder order */ 4:
+                    message.order = reader.int32();
+                    break;
+                case /* optional ChatListFilter filter */ 5:
+                    message.filter = ChatListFilter.internalBinaryRead(reader, reader.uint32(), options, message.filter);
+                    break;
+                case /* ChatListScope scope */ 6:
+                    message.scope = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -45912,6 +46141,21 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
         /* optional bool include_subthreads = 1; */
         if (message.includeSubthreads !== undefined)
             writer.tag(1, WireType.Varint).bool(message.includeSubthreads);
+        /* optional int32 limit = 2; */
+        if (message.limit !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.limit);
+        /* optional ChatListOffset offset = 3; */
+        if (message.offset)
+            ChatListOffset.internalBinaryWrite(message.offset, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* ChatListOrder order = 4; */
+        if (message.order !== 0)
+            writer.tag(4, WireType.Varint).int32(message.order);
+        /* optional ChatListFilter filter = 5; */
+        if (message.filter)
+            ChatListFilter.internalBinaryWrite(message.filter, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* ChatListScope scope = 6; */
+        if (message.scope !== 0)
+            writer.tag(6, WireType.Varint).int32(message.scope);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45923,6 +46167,173 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
  */
 export const GetChatsInput = new GetChatsInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ChatListOffset$Type extends MessageType<ChatListOffset> {
+    constructor() {
+        super("ChatListOffset", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatListOffset>): ChatListOffset {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ChatListOffset>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatListOffset): ChatListOffset {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatListOffset, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 date = 2; */
+        if (message.date !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatListOffset
+ */
+export const ChatListOffset = new ChatListOffset$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatListFilter$Type extends MessageType<ChatListFilter> {
+    constructor() {
+        super("ChatListFilter", [
+            { no: 1, name: "kinds", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["ChatListKind", ChatListKind, "CHAT_LIST_KIND_"] },
+            { no: 2, name: "space_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "archived", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "open", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 7, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "query", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatListFilter>): ChatListFilter {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.kinds = [];
+        message.spaceIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChatListFilter>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatListFilter): ChatListFilter {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ChatListKind kinds */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.kinds.push(reader.int32());
+                    else
+                        message.kinds.push(reader.int32());
+                    break;
+                case /* repeated int64 space_ids */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.spaceIds.push(reader.int64().toBigInt());
+                    else
+                        message.spaceIds.push(reader.int64().toBigInt());
+                    break;
+                case /* optional bool unread */ 3:
+                    message.unread = reader.bool();
+                    break;
+                case /* optional bool archived */ 4:
+                    message.archived = reader.bool();
+                    break;
+                case /* optional bool open */ 5:
+                    message.open = reader.bool();
+                    break;
+                case /* optional bool pinned */ 6:
+                    message.pinned = reader.bool();
+                    break;
+                case /* optional int64 folder_id */ 7:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
+                case /* optional string query */ 8:
+                    message.query = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatListFilter, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ChatListKind kinds = 1; */
+        if (message.kinds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.kinds.length; i++)
+                writer.int32(message.kinds[i]);
+            writer.join();
+        }
+        /* repeated int64 space_ids = 2; */
+        if (message.spaceIds.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.spaceIds.length; i++)
+                writer.int64(message.spaceIds[i]);
+            writer.join();
+        }
+        /* optional bool unread = 3; */
+        if (message.unread !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.unread);
+        /* optional bool archived = 4; */
+        if (message.archived !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.archived);
+        /* optional bool open = 5; */
+        if (message.open !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.open);
+        /* optional bool pinned = 6; */
+        if (message.pinned !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.pinned);
+        /* optional int64 folder_id = 7; */
+        if (message.folderId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.folderId);
+        /* optional string query = 8; */
+        if (message.query !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.query);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatListFilter
+ */
+export const ChatListFilter = new ChatListFilter$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GetChatsResult$Type extends MessageType<GetChatsResult> {
     constructor() {
         super("GetChatsResult", [
@@ -45931,7 +46342,8 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
             { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
             { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
             { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
-            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder }
+            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder },
+            { no: 7, name: "next_offset", kind: "message", T: () => ChatListOffset }
         ]);
     }
     create(value?: PartialMessage<GetChatsResult>): GetChatsResult {
@@ -45969,6 +46381,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
                 case /* repeated DialogFolder folders */ 6:
                     message.folders.push(DialogFolder.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional ChatListOffset next_offset */ 7:
+                    message.nextOffset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.nextOffset);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45999,6 +46414,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
         /* repeated DialogFolder folders = 6; */
         for (let i = 0; i < message.folders.length; i++)
             DialogFolder.internalBinaryWrite(message.folders[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatListOffset next_offset = 7; */
+        if (message.nextOffset)
+            ChatListOffset.internalBinaryWrite(message.nextOffset, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -46009,6 +46427,78 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
  * @generated MessageType for protobuf message GetChatsResult
  */
 export const GetChatsResult = new GetChatsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpacesInput$Type extends MessageType<GetSpacesInput> {
+    constructor() {
+        super("GetSpacesInput", []);
+    }
+    create(value?: PartialMessage<GetSpacesInput>): GetSpacesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSpacesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpacesInput): GetSpacesInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: GetSpacesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpacesInput
+ */
+export const GetSpacesInput = new GetSpacesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpacesResult$Type extends MessageType<GetSpacesResult> {
+    constructor() {
+        super("GetSpacesResult", [
+            { no: 1, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpacesResult>): GetSpacesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaces = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetSpacesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpacesResult): GetSpacesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Space spaces */ 1:
+                    message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpacesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Space spaces = 1; */
+        for (let i = 0; i < message.spaces.length; i++)
+            Space.internalBinaryWrite(message.spaces[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpacesResult
+ */
+export const GetSpacesResult = new GetSpacesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TranslateMessagesInput$Type extends MessageType<TranslateMessagesInput> {
     constructor() {
