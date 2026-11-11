@@ -534,7 +534,14 @@ async def exercise_ordinary_presentation():
     # Exercise the host's actual resolver; explicit operator config always wins.
     assert resolve_display_setting({}, "inline", "tool_progress") == "off"
     assert resolve_display_setting({}, "inline", "cleanup_progress") is True
-    assert resolve_display_setting({}, "inline", "interim_assistant_messages") is True
+    # The adapter's interim default reaches hosts with PlatformEntry.display_overrides.
+    # Older hosts keep their own Inline entry, which the adapter doesn't override.
+    adapter_module = sys.modules[type(adapter).__module__]
+    interim = resolve_display_setting({}, "inline", "interim_assistant_messages")
+    if adapter_module._display_registration_fields():
+        assert interim is adapter_module._INLINE_DISPLAY_DEFAULTS["interim_assistant_messages"]
+    else:
+        assert isinstance(interim, bool)
     assert resolve_display_setting({}, "inline", "long_running_notifications") is True
     assert resolve_display_setting({"display": {"tool_progress": "all"}}, "inline", "tool_progress") == "all"
     explicit = {"display": {"tool_progress": "off", "platforms": {"inline": {
