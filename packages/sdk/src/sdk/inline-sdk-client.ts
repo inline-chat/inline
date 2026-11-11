@@ -152,6 +152,7 @@ const replaySafeRpcMethods = new Set<Method>([
   Method.GET_SPACE_MEMBERS,
   Method.GET_CHAT_PARTICIPANTS,
   Method.GET_CHATS,
+  Method.GET_SPACES,
   Method.GET_USER_SETTINGS,
   Method.GET_UPDATES_STATE,
   Method.GET_CHAT,
