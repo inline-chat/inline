@@ -28,7 +28,7 @@ const github = (resource) => JSON.parse(execFileSync("gh", ["api", `repos/${REPO
   encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
 }))
 
-function requireWorkflowJobs(sha, workflow, names, surface, label, api) {
+export function requireWorkflowJobs(sha, workflow, names, surface, label, api) {
   const runs = api(`actions/workflows/${workflow}/runs?branch=main&event=push&head_sha=${sha}&per_page=100`).workflow_runs
     .filter((run) => run.head_sha === sha && run.head_branch === "main" && run.event === "push" &&
       run.head_repository?.full_name === REPOSITORY)

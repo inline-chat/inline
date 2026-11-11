@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { compareVersions } from "./publish-npm-release.mjs";
 
 export function parseCliReleaseTag(tag: string) {
   const number = "(?:0|[1-9][0-9]*)";
@@ -104,13 +105,39 @@ export async function verifyCliReleaseVersion(root: string, tag: string) {
   return release;
 }
 
+/** Automated alpha releases (CLI Alpha workflow) tag a green main commit without a
+ * version commit, like Tip and Early Testers build numbers. */
+export const AUTOMATED_ALPHA_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-alpha\.(0|[1-9][0-9]*)$/;
+
+/**
+ * Verify the committed release version, or stamp it into the checkout for an
+ * automated alpha tag that is newer than the committed version. Every other tag
+ * must still be committed by `release:cli` before it is pushed.
+ */
+export async function applyCliReleaseVersion(root: string, tag: string) {
+  const { release, edits } = await planCliReleaseVersion(root, tag);
+  let committed = true;
+  for (const [file, contents] of edits) if (contents !== await readFile(file, "utf8")) committed = false;
+  if (committed) return { ...release, stamped: false };
+  const workspace = Bun.TOML.parse(await readFile(join(root, "Cargo.toml"), "utf8")) as Cargo;
+  const previous = workspace.workspace!.package!.version!;
+  if (!AUTOMATED_ALPHA_VERSION.test(release.version) || compareVersions(previous, release.version) >= 0) {
+    throw new Error(`Commit the release version before tagging: only alpha tags newer than the committed ${previous} are stamped at build time`);
+  }
+  for (const [file, contents] of edits) await writeFile(file, contents);
+  return { ...release, stamped: true };
+}
+
 if (import.meta.main) {
   const [command, tag, directory] = process.argv.slice(2);
-  if (!tag || !["parse", "stamp", "verify"].includes(command ?? "")) throw new Error("Usage: cli-release-version.ts <parse|stamp|verify> TAG [WORKSPACE]");
+  if (!tag || !["parse", "stamp", "verify", "apply"].includes(command ?? "")) throw new Error("Usage: cli-release-version.ts <parse|stamp|verify|apply> TAG [WORKSPACE]");
+  const workspaceRoot = resolve(directory ?? join(dirname(import.meta.path), "../.."));
   const release = command === "stamp"
-    ? await stampCliReleaseVersion(resolve(directory ?? join(dirname(import.meta.path), "../..")), tag)
+    ? await stampCliReleaseVersion(workspaceRoot, tag)
     : command === "verify"
-    ? await verifyCliReleaseVersion(resolve(directory ?? join(dirname(import.meta.path), "../..")), tag)
+    ? await verifyCliReleaseVersion(workspaceRoot, tag)
+    : command === "apply"
+    ? await applyCliReleaseVersion(workspaceRoot, tag)
     : parseCliReleaseTag(tag);
   console.log(JSON.stringify(release));
 }
