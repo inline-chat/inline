@@ -29,7 +29,6 @@ struct Code: View {
   @EnvironmentObject var mainViewRouter: MainViewRouter
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
-  @Environment(\.realtime) private var realtime
   #endif
 
   init(email: String, challengeToken: String? = nil, inviteCode: String? = nil) {
@@ -88,9 +87,6 @@ extension Code {
     formState.startLoading()
     Task {
       do {
-        let bearerLoginAttempt = InlineProtocolNativeLogin.shared.isAvailable
-          ? nil
-          : try await auth.beginLoginAttempt()
         let result = try await api.verifyCode(
           code: code,
           email: email,
@@ -98,34 +94,7 @@ extension Code {
           inviteCode: inviteCode
         )
 
-        let accountMutationToken: AuthAccountMutationToken
-        if let token = result.token {
-          do {
-            guard let loginAttempt = bearerLoginAttempt else {
-              throw AuthStorageError.loginSuperseded
-            }
-            let commit = try await LoginStatePreparation.commit(
-              auth: auth.handle,
-              loginAttempt: loginAttempt,
-              targetUserID: result.userId,
-              persistCredentials: {
-                try await auth.saveCredentials(
-                  token: token,
-                  userId: result.userId,
-                  loginAttempt: loginAttempt
-                )
-              }
-            ) { db in
-              try result.user.saveFull(db)
-            }
-            accountMutationToken = commit.accountMutationToken
-          } catch {
-            _ = try? await ApiClient.shared.logout(bearerToken: token)
-            throw error
-          }
-        } else if let nativeToken = result.accountMutationToken {
-          accountMutationToken = nativeToken
-        } else {
+        guard let accountMutationToken = result.accountMutationToken else {
           throw AuthStorageError.loginSuperseded
         }
 

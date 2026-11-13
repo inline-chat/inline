@@ -86,7 +86,6 @@ private enum LocalDataResetPerformer {
     defer { SharedAudioPlayer.shared.endLocalDataMaintenance() }
     await ReservedChatIDPool.shared.pauseAndDrain()
     await realtimeV2.loggedOut()
-    await Realtime.shared.loggedOut()
 
     do {
       await FileUploader.shared.cancelAll()
@@ -129,6 +128,5 @@ private enum LocalDataResetPerformer {
   private static func resumeAccountWork(realtimeV2: RealtimeV2) async {
     await realtimeV2.resumeAfterLocalDataReset()
     await ReservedChatIDPool.shared.resume(realtimeV2: realtimeV2)
-    await Realtime.shared.start()
   }
 }

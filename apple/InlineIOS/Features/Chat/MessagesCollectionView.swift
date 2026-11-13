@@ -4623,11 +4623,11 @@ private extension MessagesCollectionView {
       }
       actions.delete = { item in
         guard let message = item.message else { return }
-        _ = Transactions.shared.mutate(transaction: .deleteMessage(.init(
-          messageIds: [message.messageId],
+        MessageViewActions.sendDeleteMessage(
+          messageId: message.messageId,
           peerId: message.peerId,
           chatId: message.chatId
-        )))
+        )
       }
 
       let viewer = MediaGalleryViewController(
@@ -4996,19 +4996,9 @@ private extension MessagesCollectionView {
         .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 })
         .first != nil
       {
-        Transactions.shared.mutate(transaction: .deleteReaction(.init(
-          message: message,
-          emoji: emoji,
-          peerId: message.peerId,
-          chatId: message.chatId
-        )))
+        MessageViewActions.sendReactionMutation(.deleteReaction(emoji: emoji, message: message))
       } else {
-        Transactions.shared.mutate(transaction: .addReaction(.init(
-          message: message,
-          emoji: emoji,
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          peerId: message.peerId
-        )))
+        MessageViewActions.sendReactionMutation(.addReaction(emoji: emoji, message: message))
         ReactionPickerEmojiUsageStore.recordPick(emoji)
       }
     }
@@ -5540,17 +5530,7 @@ private extension MessagesCollectionView {
 
       alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
         guard let self else { return }
-        Task {
-          let _ = Transactions.shared.mutate(
-            transaction: .deleteMessage(
-              .init(
-                messageIds: [messageId],
-                peerId: peerId,
-                chatId: chatId
-              )
-            )
-          )
-        }
+        MessageViewActions.sendDeleteMessage(messageId: messageId, peerId: peerId, chatId: chatId)
       })
 
       viewController.present(alert, animated: true)

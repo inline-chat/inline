@@ -23,7 +23,6 @@ struct ChatInfoView: View {
   @State var participantSearchTask: Task<Void, Never>?
   @State var participantSearchGeneration: UInt64 = 0
   @EnvironmentObject var nav: Navigation
-  @EnvironmentObject var api: ApiClient
   @Environment(Router.self) var router
   @Environment(\.dismiss) private var dismiss
   @State var selectedTab: ChatInfoTab

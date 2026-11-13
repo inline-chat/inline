@@ -390,19 +390,9 @@ class UIMessageView: UIView {
       if let reaction = fullMessage.reactions
         .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 }).first
       {
-        Transactions.shared.mutate(transaction: .deleteReaction(.init(
-          message: message,
-          emoji: emoji,
-          peerId: message.peerId,
-          chatId: message.chatId
-        )))
+        MessageViewActions.sendReactionMutation(.deleteReaction(emoji: emoji, message: message))
       } else {
-        Transactions.shared.mutate(transaction: .addReaction(.init(
-          message: message,
-          emoji: emoji,
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          peerId: message.peerId
-        )))
+        MessageViewActions.sendReactionMutation(.addReaction(emoji: emoji, message: message))
       }
     }
     return view
@@ -2690,17 +2680,11 @@ class UIMessageView: UIView {
 
     alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
       guard let self else { return }
-      Task {
-        let _ = Transactions.shared.mutate(
-          transaction: .deleteMessage(
-            .init(
-              messageIds: [self.message.messageId],
-              peerId: self.message.peerId,
-              chatId: self.message.chatId
-            )
-          )
-        )
-      }
+      MessageViewActions.sendDeleteMessage(
+        messageId: self.message.messageId,
+        peerId: self.message.peerId,
+        chatId: self.message.chatId
+      )
     })
 
     viewController.present(alert, animated: true)

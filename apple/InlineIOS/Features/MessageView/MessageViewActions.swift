@@ -11,6 +11,28 @@ import UIKit
 /// current view's copy goes away with it.
 @MainActor
 enum MessageViewActions {
+  /// Queues a reaction change on the durable RealtimeV2 transaction queue (same pattern as macOS).
+  static func sendReactionMutation(_ transaction: AddReactionTransaction) {
+    Task(priority: .userInitiated) { await Api.realtime.sendQueued(transaction) }
+  }
+
+  static func sendReactionMutation(_ transaction: DeleteReactionTransaction) {
+    Task(priority: .userInitiated) { await Api.realtime.sendQueued(transaction) }
+  }
+
+  /// Deletes a sent message through the durable RealtimeV2 queue.
+  /// Local-only ids (unsent messages) never reach the server.
+  static func sendDeleteMessage(messageId: Int64, peerId: Peer, chatId: Int64) {
+    guard messageId > 0 else { return }
+    Task(priority: .userInitiated) {
+      await Api.realtime.sendQueued(DeleteMessageTransaction(
+        messageIds: [messageId],
+        peerId: peerId,
+        chatId: chatId
+      ))
+    }
+  }
+
   /// True when the character carries something tappable.
   static func isInteractive(_ text: NSAttributedString, at index: Int) -> Bool {
     guard index >= 0, index < text.length else { return false }
@@ -80,19 +102,9 @@ enum MessageViewActions {
     let currentUserID = Auth.shared.getCurrentUserId() ?? 0
     let model = message.message
     if message.reactions.contains(where: { $0.reaction.emoji == emoji && $0.reaction.userId == currentUserID }) {
-      Transactions.shared.mutate(transaction: .deleteReaction(.init(
-        message: model,
-        emoji: emoji,
-        peerId: model.peerId,
-        chatId: model.chatId
-      )))
+      sendReactionMutation(.deleteReaction(emoji: emoji, message: model))
     } else {
-      Transactions.shared.mutate(transaction: .addReaction(.init(
-        message: model,
-        emoji: emoji,
-        userId: currentUserID,
-        peerId: model.peerId
-      )))
+      sendReactionMutation(.addReaction(emoji: emoji, message: model))
     }
   }
 
@@ -240,11 +252,7 @@ enum MessageViewActions {
     )
     alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
     alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
-      _ = Transactions.shared.mutate(transaction: .deleteMessage(.init(
-        messageIds: [message.messageId],
-        peerId: message.peerId,
-        chatId: message.chatId
-      )))
+      sendDeleteMessage(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
     })
     presenter.present(alert, animated: true)
   }

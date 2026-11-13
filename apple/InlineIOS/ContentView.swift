@@ -7,7 +7,6 @@ import SwiftUI
 struct ContentView2: View {
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) private var scene
-  @Environment(\.realtime) var realtime
 
   private var onboardingNav: OnboardingNavigation { mainViewRouter.onboardingNavigation }
   @StateObject var api = ApiClient()

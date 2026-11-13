@@ -60,7 +60,6 @@ private struct InlineSceneRoot: View {
         appDelegate.sceneRouterRegistry.attachWindow(window, sceneID: sceneID)
       })
       .environment(\.auth, Auth.shared)
-      .environment(\.realtime, Realtime.shared)
       .environment(\.transactions, Transactions.shared)
       .environment(router)
       .focusedSceneValue(\.iPadSceneCommandGate, IPadNavigationLane.isEnabled
