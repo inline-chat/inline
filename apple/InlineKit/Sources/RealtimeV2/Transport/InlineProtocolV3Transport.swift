@@ -995,6 +995,13 @@ public actor NegotiatingRealtimeTransport: Transport {
 
   public nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
+  /// How long a V3 start may take before an upgraded session falls back to V2 for the cooldown.
+  /// 3 s threw away nearly finished V3 handshakes on slow mobile networks (TCP, TLS, key
+  /// verification, and init are four round trips), then pinned the session to V2 for 5 minutes.
+  /// It must stay well under `ConnectionPolicy.connectTimeout` (10 s): that timeout is cancelled by
+  /// the same `.connected` event, so the V2 fallback needs time left to connect inside it.
+  static let defaultFallbackDeadline: Duration = .seconds(6)
+
   public init(
     auth: AuthHandle,
     rsaPublicKeys: [InlineProtocolRSAPublicKey] = [],
@@ -1010,7 +1017,7 @@ public actor NegotiatingRealtimeTransport: Transport {
     }
     upgrade = automaticallyUpgradeLegacySession
       ? LegacyProtocolUpgradeCoordinator(auth: auth, rsaPublicKeys: rsaPublicKeys) : nil
-    fallbackDeadline = .seconds(3)
+    fallbackDeadline = Self.defaultFallbackDeadline
     fallbackCooldown = .seconds(300)
   }
 
@@ -1021,7 +1028,7 @@ public actor NegotiatingRealtimeTransport: Transport {
     makeInlineProtocolTransport: @escaping TransportFactory,
     upgrade: (any LegacyProtocolUpgrading)? = nil,
     transportPreference: UpgradedSessionTransportPreference = .init(prefersLegacy: { false }, record: { _ in }),
-    fallbackDeadline: Duration = .seconds(3),
+    fallbackDeadline: Duration = NegotiatingRealtimeTransport.defaultFallbackDeadline,
     fallbackCooldown: Duration = .seconds(300)
   ) {
     self.transportPreference = transportPreference

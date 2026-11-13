@@ -8,13 +8,18 @@ public struct BackoffPolicy: Sendable {
   }
 
   public static let `default` = BackoffPolicy { attempt in
-    if attempt >= 8 {
-      let base = 8.0
-      let jitter = Double.random(in: 0.0 ... 5.0)
-      return .seconds(base + jitter)
-    }
+    defaultDelay(attempt: attempt, unitRandom: Double.random(in: 0.0 ... 1.0))
+  }
 
-    let computed = min(8.0, 0.2 + pow(Double(attempt), 1.5) * 0.4)
-    return .seconds(computed)
+  /// Early retries grow from 0.2 s to 8 s with ±25% jitter, so clients that lost the same
+  /// server (a deploy, a load balancer drain) do not reconnect in synchronized waves.
+  /// From the eighth attempt the delay is 8–13 s.
+  static func defaultDelay(attempt: UInt32, unitRandom: Double) -> Duration {
+    let unit = min(1.0, max(0.0, unitRandom))
+    if attempt >= 8 {
+      return .seconds(8.0 + unit * 5.0)
+    }
+    let base = min(8.0, 0.2 + pow(Double(attempt), 1.5) * 0.4)
+    return .seconds(base * (0.75 + unit * 0.5))
   }
 }
