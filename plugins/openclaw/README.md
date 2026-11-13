@@ -67,7 +67,7 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `1.0.0-alpha.2` | `>=2026.11.1` | `0.0.22` | Prerelease | Detailed and Friendly output modes; an authorized `/stop` retires queued input. |
+| `1.0.0-alpha.2` | `>=2026.11.1` | `0.0.23` | Prerelease | Detailed and Friendly output modes; an authorized `/stop` retires queued input. Protocol `0.0.15` and SDK `0.0.23` releases come first. |
 | `1.0.0-alpha.1` | `>=2026.11.1` | `0.0.22` | Previous | First major. Async host SDK and `MessagePresentation` only; see Upgrading to 1.0. Carries widget calls and submitted forms, so the protocol `0.0.14` and SDK `0.0.22` releases come first. |
 | `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable | Last line for OpenClaw `2026.8.2`–`2026.10.x`; 1.0 requires `2026.11.1`. Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
 | `0.0.71` | `>=2026.8.2` | `0.0.19` | Previous | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |

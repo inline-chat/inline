@@ -36,7 +36,7 @@
     "check:host": "bun scripts/check-host.mjs"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.22",
+    "@inline-chat/realtime-sdk": "0.0.23",
     "zod": "4.6.7"
   },
   "peerDependencies": {
