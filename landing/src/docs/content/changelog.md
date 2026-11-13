@@ -9,7 +9,7 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ## November 13, 2026
 
-[CLI 0.7.23](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.23) · [Hermes adapter 1.2.0](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.0) · [OpenClaw plugin 1.0.0-alpha.2](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.2)
+[CLI 0.7.24](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.24) · [Hermes adapter 1.2.0](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.0) · [OpenClaw plugin 1.0.0-alpha.2](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.2)
 
 ### New
 
@@ -18,7 +18,7 @@ Release notes for Inline apps, developer tools, and integrations.
 - 🔴 **Unread mentions and reactions** get their own badges and jump buttons. Chats open at your first unread message, or where you left off if you've caught up.
 - ☑️ **Select several messages** on macOS. Choose **Select** from the message menu or drag across messages, then forward, delete, or press Command-C to copy them.
 - 🌙 **Focus status.** When a Focus is on, people you choose see "Notifications silenced" in your DM. Pick who in Privacy settings, where you can now also choose who sees your time zone.
-- 🤖 **Friendly or detailed agent output.** Choose per bot from Chat Info whether it shows each step of its work or just short updates. Works with Codex and Claude on [CLI](/docs/cli) 0.7.23, [Hermes](/docs/hermes) 1.2.0 and [OpenClaw](/docs/openclaw) 1.0 alpha. Working rows also show a live timer.
+- 🤖 **Friendly or detailed agent output.** Choose per bot from Chat Info whether it shows each step of its work or just short updates. Works with Codex and Claude on [CLI](/docs/cli) 0.7.24, [Hermes](/docs/hermes) 1.2.0 and [OpenClaw](/docs/openclaw) 1.0 alpha. Working rows also show a live timer.
 - 📱 **A new iPad layout** with a native sidebar, a floating New Thread button that opens a composer, and a compose bar that stays above the keyboard shortcut bar.
 
 ### Quality of life improvements
@@ -45,7 +45,7 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ### Better tools and APIs for agents and hackers
 
-- [CLI](/docs/cli) **0.7.23** keeps Linux bridges running after you log out or close the SSH session when installed as a service, and repairs that setting whenever the service starts. A bridge started in a terminal now reports the hangup instead of quietly stopping. CLIs with automatic updates pick this up on their own.
+- [CLI](/docs/cli) **0.7.24** keeps Linux bridges running after you log out or close the SSH session when installed as a service, and repairs that setting whenever the service starts. A bridge started in a terminal now reports the hangup instead of quietly stopping. CLIs with automatic updates pick this up on their own.
 - Detailed agent output hides tokens and other credentials in commands, their output, and edit diffs.
 - When someone without access mentions your agent, it now replies once to say who it takes requests from, instead of staying silent.
 - Share a bot with a whole space or user group: `inline bots access grant --space-id <id>` or `--group-id <id>`.
