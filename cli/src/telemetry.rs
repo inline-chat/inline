@@ -1226,6 +1226,14 @@ mod tests {
         );
         assert_eq!(log_message_code("12 sessions lost"), "unclassified");
         assert_eq!(
+            log_message_code("turn failed: OAuth session expired"),
+            "turn_failed"
+        );
+        assert_eq!(
+            log_message_code("provider login failed: run claude and /login"),
+            "provider_login_failed"
+        );
+        assert_eq!(
             log_message_code("invalid retained output: bad json"),
             "invalid_retained_output"
         );

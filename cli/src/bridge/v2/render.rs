@@ -604,6 +604,13 @@ impl Renderer {
                 TurnOutcome::Failed | TurnOutcome::AuthenticationRequired
             )
         {
+            // The person sees the callout; log it too so a provider that keeps
+            // failing (expired login, usage limit, crash) reaches Sentry.
+            if outcome == TurnOutcome::AuthenticationRequired {
+                log::warn!(target: "inline::bridge::v2", "provider login failed: {error}");
+            } else {
+                log::warn!(target: "inline::bridge::v2", "turn failed: {error}");
+            }
             let mut builder = DocBuilder::new();
             builder.callout(CalloutKind::Error, "The turn failed", error);
             ops.push(RenderOp::Notice {
