@@ -185,15 +185,10 @@ class GlassComposeAppKit: NSView {
   // Mention completion
   private var mentionCompletionMenu: MentionCompletionMenu?
   private var mentionDetector = MentionDetector()
-  private var chatParticipantsViewModel: InlineKit.ChatParticipantsWithMembersViewModel?
+  private var mentionSource: MentionCandidatesSource?
   private var currentMentionRange: MentionRange?
   private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
-  private var didRequestMentionParticipants = false
-  private var mentionParticipantsTask: Task<Void, Never>?
-  private var mentionAgentsTask: Task<Void, Never>?
-  private var mentionCandidates = MentionCompletionCandidates.empty
-  private var mentionAgents: [MentionableBotAgent] = []
 
   // Slash command completion
   private var commandCompletionMenu: CommandCompletionMenu?
@@ -1595,33 +1590,32 @@ class GlassComposeAppKit: NSView {
   private func ensureMentionCompletion() {
     guard mentionCompletionMenu == nil else { return }
 
-    let candidateUpdates: AnyPublisher<MentionCompletionCandidates, Never>
+    let source: MentionCandidatesSource
     switch usage {
       case .chat:
-        guard let chatId else { return }
-        let viewModel = InlineKit.ChatParticipantsWithMembersViewModel(
+        guard let chatId, let chatPeerID else { return }
+        source = MentionCandidatesSource(
           db: dependencies.database,
-          chatId: chatId,
-          purpose: .mentionCandidates
+          scope: .chat(chatId: chatId, peer: chatPeerID)
         )
-        chatParticipantsViewModel = viewModel
-        candidateUpdates = viewModel.$mentionCandidates.eraseToAnyPublisher()
       case let .newThread(context):
-        candidateUpdates = context.mentionSource.candidateUpdates
+        source = context.mentionSource.source
     }
+    mentionSource = source
+    // The first session reads the database synchronously, so the menu opens filled.
+    source.beginSession()
 
-    // Create mention completion menu
     mentionCompletionMenu = MentionCompletionMenu(surfaceStyle: .glass)
     mentionCompletionMenu?.delegate = self
     mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
+    mentionCompletionMenu?.updateCandidates(source.candidates)
 
-    // Subscribe to participants updates
-    candidateUpdates
+    source.updates
+      .dropFirst()
       .sink { [weak self] candidates in
         guard let self else { return }
         log.trace("Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
-        mentionCandidates = candidates
-        applyMentionCandidates()
+        mentionCompletionMenu?.updateCandidates(candidates)
 
         if let currentMentionRange,
            mentionCompletionMenu?.hasItems == true,
@@ -1631,58 +1625,6 @@ class GlassComposeAppKit: NSView {
         }
       }
       .store(in: &cancellables)
-
-    NotificationCenter.default.publisher(for: .botAgentsChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.loadMentionAgents(forceRefresh: true)
-        }
-      }
-      .store(in: &cancellables)
-
-    loadMentionAgents()
-  }
-
-  private func loadMentionAgents(forceRefresh: Bool = false) {
-    guard let chatPeerID else { return }
-    mentionAgentsTask?.cancel()
-    mentionAgentsTask = Task { @MainActor [weak self, peerId = chatPeerID] in
-      guard let self else { return }
-      do {
-        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId, forceRefresh: forceRefresh)
-      } catch is CancellationError {
-        return
-      } catch {
-        mentionAgents = []
-      }
-      applyMentionCandidates()
-    }
-  }
-
-  private func applyMentionCandidates() {
-    var candidates = mentionCandidates
-    if case .chat = usage {
-      candidates.agents = mentionAgents
-    }
-    mentionCompletionMenu?.updateCandidates(candidates)
-  }
-
-  private func refetchMentionParticipantsIfNeeded() {
-    guard !didRequestMentionParticipants else { return }
-    didRequestMentionParticipants = true
-
-    mentionParticipantsTask?.cancel()
-    mentionParticipantsTask = Task { @MainActor [weak self] in
-      await Task.yield()
-      guard !Task.isCancelled, let self else { return }
-      log.trace("Fetching mention candidates from server")
-      switch usage {
-        case .chat:
-          await chatParticipantsViewModel?.refetchParticipants()
-        case let .newThread(context):
-          await context.mentionSource.refresh()
-      }
-    }
   }
 
   private func addMentionMenuToSuperview() {
@@ -1836,7 +1778,6 @@ class GlassComposeAppKit: NSView {
 
     mentionCompletionMenu.filterParticipants(with: query)
     mentionCompletionMenu.show()
-    refetchMentionParticipantsIfNeeded()
 
     // Add escape handler for mention menu
     mentionKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -1851,6 +1792,7 @@ class GlassComposeAppKit: NSView {
   private func hideMentionCompletion() {
     currentMentionRange = nil
     mentionCompletionMenu?.hide()
+    mentionSource?.endSession()
 
     // Remove escape handler
     mentionKeyMonitorEscUnsubscribe?()
@@ -1949,7 +1891,7 @@ class GlassComposeAppKit: NSView {
       let isNewMentionSession = currentMentionRange?.range.location != mentionRange.range.location
       currentMentionRange = mentionRange
       if isNewMentionSession {
-        loadMentionAgents()
+        mentionSource?.beginSession()
       }
       showMentionCompletion(for: mentionRange.query)
     } else {
@@ -3331,10 +3273,6 @@ class GlassComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
     mentionCompletionMenu?.removeFromSuperview()
-    mentionParticipantsTask?.cancel()
-    mentionParticipantsTask = nil
-    mentionAgentsTask?.cancel()
-    mentionAgentsTask = nil
 
     if case .newThread = usage {
       autocompleteKeyMonitorEscUnsubscribe?()

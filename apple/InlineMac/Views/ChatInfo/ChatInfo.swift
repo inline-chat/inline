@@ -1204,11 +1204,7 @@ private final class ChatInfoParticipantsState: ObservableObject {
     guard chatId > 0 else { return }
     guard chatId != currentChatId else { return }
     currentChatId = chatId
-    participantsViewModel = ChatParticipantsWithMembersViewModel(
-      db: db,
-      chatId: chatId,
-      purpose: .participantsList
-    )
+    participantsViewModel = ChatParticipantsWithMembersViewModel(db: db, chatId: chatId)
   }
 }
 

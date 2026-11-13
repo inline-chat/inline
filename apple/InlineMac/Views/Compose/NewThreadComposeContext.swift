@@ -29,11 +29,9 @@ enum NewThreadComposeDestination: Equatable {
 /// new-thread usage receives this service.
 @MainActor
 protocol NewThreadComposeMentionSource: AnyObject {
-  var candidates: MentionCompletionCandidates { get }
-  var candidateUpdates: AnyPublisher<MentionCompletionCandidates, Never> { get }
+  var source: MentionCandidatesSource { get }
 
   func setDestination(_ destination: NewThreadComposeDestination)
-  func refresh() async
 }
 
 /// Window-local attachment materialization for the short interval before a
@@ -173,65 +171,22 @@ final class NewThreadComposeAttachmentStore {
   }
 }
 
+/// Home offers the user's bots and known DM contacts; a space adds its members
+/// and groups. A bot outside the space is offered too; sending asks to add it.
 @MainActor
 final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource {
-  private let viewModel: NewThreadMentionCandidatesViewModel
-  private let updates: CurrentValueSubject<MentionCompletionCandidates, Never>
-  private var agents: [MentionableBotAgent] = []
-  private var ownedBots: [UserInfo] = []
-  private var cancellable: AnyCancellable?
+  let source: MentionCandidatesSource
 
   var candidates: MentionCompletionCandidates {
-    merged(viewModel.candidates)
-  }
-
-  var candidateUpdates: AnyPublisher<MentionCompletionCandidates, Never> {
-    viewModel.startObserving()
-    updates.send(candidates)
-    return updates.removeDuplicates().eraseToAnyPublisher()
+    source.candidates
   }
 
   init(db: AppDatabase, destination: NewThreadComposeDestination) {
-    let viewModel = NewThreadMentionCandidatesViewModel(db: db, spaceID: destination.spaceID)
-    self.viewModel = viewModel
-    updates = CurrentValueSubject(viewModel.candidates)
-    cancellable = viewModel.$candidates.sink { [weak self] candidates in
-      guard let self else { return }
-      updates.send(merged(candidates))
-    }
+    source = MentionCandidatesSource(db: db, scope: .newThread(spaceId: destination.spaceID))
   }
 
   func setDestination(_ destination: NewThreadComposeDestination) {
-    viewModel.setSpaceID(destination.spaceID)
-  }
-
-  func refresh() async {
-    await viewModel.refresh()
-  }
-
-  func setAgents(_ agents: [MentionableBotAgent], ownedBots: [UserInfo]) {
-    self.agents = agents
-    self.ownedBots = ownedBots
-    // Read the bots from the database too, so a rename or new photo shows
-    // while the menu is open.
-    viewModel.setOwnedBotIDs(ownedBots.map(\.id))
-    updates.send(candidates)
-  }
-
-  private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
-    // A bot outside the selected space is offered too; sending asks to add it.
-    // The observed rows are current; the listed bots only fill in any that
-    // aren't saved locally yet.
-    let observedIDs = Set(candidates.users.map(\.userInfo.id))
-    var candidates = candidates.addingOwnedBots(ownedBots.filter { !observedIDs.contains($0.id) })
-    let usersByID = Dictionary(
-      candidates.users.map { ($0.userInfo.id, $0.userInfo) },
-      uniquingKeysWith: { first, _ in first }
-    )
-    candidates.agents = agents.map { agent in
-      usersByID[agent.botUserId].map(agent.withBotUserInfo) ?? agent
-    }
-    return candidates
+    source.setScope(.newThread(spaceId: destination.spaceID))
   }
 }
 
