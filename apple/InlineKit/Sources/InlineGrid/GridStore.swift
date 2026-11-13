@@ -71,8 +71,8 @@ public final class GridRoomService {
     }
   }
 
-  /// Off by default while it is being tried out: a short cue when you open or
-  /// close your microphone yourself. Automatic changes stay silent.
+  /// On by default: a short cue when you open or close your microphone
+  /// yourself. Automatic changes stay silent.
   public var playsMicrophoneSounds: Bool {
     didSet { userDefaults.set(playsMicrophoneSounds, forKey: Self.microphoneSoundsKey) }
   }
@@ -153,7 +153,7 @@ public final class GridRoomService {
     self.realtime = realtime
     self.auth = auth
     self.userDefaults = userDefaults
-    playsMicrophoneSounds = userDefaults.bool(forKey: Self.microphoneSoundsKey)
+    playsMicrophoneSounds = userDefaults.object(forKey: Self.microphoneSoundsKey) as? Bool ?? true
     let api = GridRoomAPI(realtime: realtime, auth: auth, send: sendGridTransaction)
     self.api = api
     avatarStateSync = GridAvatarStateSync(api: api)
