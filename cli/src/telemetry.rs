@@ -260,6 +260,81 @@ pub(crate) fn report_bridge_linger_refused() {
     );
 }
 
+/// Forwards a bridge `error!` log line, so a failure that is only logged on
+/// the user's machine still reaches Sentry. Grouped by the log target and the
+/// message's leading words, and admitted once per day like other bridge events.
+pub(crate) fn report_bridge_log_error(target: &str, message: &str) {
+    thread_local! {
+        static REPORTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if REPORTING.with(|reporting| reporting.replace(true)) {
+        return;
+    }
+    capture_bridge_runtime_event(
+        &log_target_code(target),
+        "log_error",
+        &log_message_code(message),
+        None,
+        Some(message),
+        None,
+    );
+    REPORTING.with(|reporting| reporting.set(false));
+}
+
+/// `inline::bridge::v2` → `inline_bridge_v2`.
+fn log_target_code(target: &str) -> String {
+    let code: String = target
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let code = code
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    code.chars().take(80).collect()
+}
+
+/// The words before the first variable part of a log message: "cannot retain
+/// output: disk full" → `cannot_retain_output`. Ids, paths and values follow a
+/// colon, `=` or digit in bridge logs, so they never reach the group key.
+fn log_message_code(message: &str) -> String {
+    let mut words = Vec::new();
+    for token in message.split_whitespace() {
+        // Leading `chat=12`-style context carries ids, not the failure.
+        if words.is_empty() && token.contains('=') {
+            continue;
+        }
+        let (word, ends) = match token.strip_suffix(':') {
+            Some(word) => (word, true),
+            None => (token, false),
+        };
+        if word.is_empty()
+            || !word
+                .chars()
+                .all(|character| character.is_ascii_alphabetic() || matches!(character, '-' | '_'))
+        {
+            break;
+        }
+        words.push(word.to_ascii_lowercase().replace('-', "_"));
+        if ends || words.len() == 6 {
+            break;
+        }
+    }
+    let code = words.join("_");
+    if code.is_empty() {
+        "unclassified".to_owned()
+    } else {
+        code.chars().take(80).collect()
+    }
+}
+
 pub(crate) fn report_bridge_owner_dm_event(
     target: &str,
     phase: &'static str,
@@ -280,7 +355,7 @@ pub(crate) fn bridge_error_requires_provider_restart(
 fn capture_bridge_runtime_event(
     target: &str,
     phase: &str,
-    failure: &'static str,
+    failure: &str,
     attempt: Option<u32>,
     failure_text: Option<&str>,
     limit: Option<BridgeRuntimeLimit>,
@@ -296,7 +371,7 @@ fn capture_bridge_runtime_event(
         .insert("error_code".into(), "bridge_runtime_failure".into());
     event.tags.insert("target".into(), safe_code(target));
     event.tags.insert("phase".into(), safe_code(phase));
-    event.tags.insert("failure".into(), failure.into());
+    event.tags.insert("failure".into(), safe_code(failure));
     if let Some(attempt) = attempt {
         event.tags.insert("attempt".into(), attempt.to_string());
     }
@@ -1136,6 +1211,24 @@ mod tests {
             "progress_ledger_invalid"
         );
         assert_eq!(bridge_runtime_limit(&invalid), None);
+    }
+
+    #[test]
+    fn forwarded_error_logs_group_by_their_fixed_words() {
+        assert_eq!(log_target_code("inline::bridge::v2"), "inline_bridge_v2");
+        assert_eq!(
+            log_message_code("cannot retain output: disk full at /Users/me/x"),
+            "cannot_retain_output"
+        );
+        assert_eq!(
+            log_message_code("chat=123 edit refused: too long"),
+            "edit_refused"
+        );
+        assert_eq!(log_message_code("12 sessions lost"), "unclassified");
+        assert_eq!(
+            log_message_code("invalid retained output: bad json"),
+            "invalid_retained_output"
+        );
     }
 
     #[test]

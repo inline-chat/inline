@@ -174,8 +174,18 @@ fn sentry_http_envelope_contains_allowlisted_scrubbed_failure_text() {
         event["fingerprint"],
         serde_json::json!(["inline-cli", "search", "missing_peer", "", ""])
     );
+    let mut tags = event["tags"].clone();
+    let service_manager = tags
+        .as_object_mut()
+        .unwrap()
+        .remove("service_manager")
+        .expect("every event says how the process was started");
+    assert!(
+        ["systemd", "launchd", "multiplexer", "terminal"]
+            .contains(&service_manager.as_str().unwrap())
+    );
     assert_eq!(
-        event["tags"],
+        tags,
         serde_json::json!({
             "command": "search", "error_code": "missing_peer", "os": std::env::consts::OS, "arch": std::env::consts::ARCH
         })
