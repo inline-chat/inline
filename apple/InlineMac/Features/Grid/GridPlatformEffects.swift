@@ -12,6 +12,8 @@ extension GridPlatformEffects {
         case .join: GridSoundEffects.shared.play(.join)
         case .leave: GridSoundEffects.shared.play(.leave)
         case .connected: GridSoundEffects.shared.play(.connected)
+        case .microphoneOn: GridSoundEffects.shared.play(.microphoneOn)
+        case .microphoneOff: GridSoundEffects.shared.play(.microphoneOff)
       }
     }
     effects.displayIDUnderPointer = {

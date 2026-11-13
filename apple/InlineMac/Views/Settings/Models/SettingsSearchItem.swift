@@ -45,6 +45,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case outputDevice
   case autoUnmuteOnJoin
   case autoMuteWhenAlone
+  case microphoneSounds
 
   // Notifications
   case dockBadge
@@ -121,7 +122,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearance, .theme, .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
          .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize:
       .appearance
-    case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone:
+    case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds:
       .audioAndVideo
     case .dockBadge, .notificationSounds:
       .notifications
@@ -188,6 +189,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .outputDevice: "Output Device"
     case .autoUnmuteOnJoin: "Auto-Unmute on Join"
     case .autoMuteWhenAlone: "Auto-Mute When Alone"
+    case .microphoneSounds: "Microphone Sounds"
     case .dockBadge: "Dock Badge"
     case .notificationSounds: "Notification Sounds"
     case .appearInGlobalSearch: "Appear in Global Search"
@@ -254,7 +256,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .centeredChats: "Chat Layout"
     case .fonts, .fontSize: "Typography"
     case .inputDevice, .outputDevice: "Devices"
-    case .autoUnmuteOnJoin, .autoMuteWhenAlone: "Grid"
+    case .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds: "Grid"
     case .dockBadge: "Dock"
     case .notificationSounds: "Sound"
     case .appearInGlobalSearch: "Discovery"
@@ -322,6 +324,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .outputDevice: ["speaker", "headphones"]
     case .autoUnmuteOnJoin: ["microphone", "call", "room"]
     case .autoMuteWhenAlone: ["microphone", "call", "room"]
+    case .microphoneSounds: ["mute", "unmute", "sound", "effect", "microphone"]
     case .dockBadge: ["unread", "count", "icon"]
     case .notificationSounds: ["alert", "mute"]
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]

@@ -498,6 +498,7 @@ private struct GridSpeakingAvatar: View {
             audioLevel: audioLevel,
             microphoneEnabled: avatar.microphoneEnabled,
             showsConnectingIndicator: showsConnectingIndicator,
+            isScreenSharing: isScreenSharing,
             size: 45
           )
         }
@@ -509,6 +510,7 @@ private struct GridSpeakingAvatar: View {
           audioLevel: audioLevel,
           microphoneEnabled: avatar.ownedByCurrentSession && !allowsLocalControls ? false : avatar.microphoneEnabled,
           showsConnectingIndicator: false,
+          isScreenSharing: isScreenSharing,
           size: 45
         )
         .help(helpText)
@@ -575,11 +577,13 @@ private struct GridAvatarImage: View {
   let audioLevel: Float
   let microphoneEnabled: Bool
   let showsConnectingIndicator: Bool
+  let isScreenSharing: Bool
   let size: CGFloat
 
   var body: some View {
     UserAvatar(user: InlineKit.User(from: user), size: size)
       .padding(2)
+      .gridSpeakingHalo(level: microphoneEnabled ? audioLevel : 0, maxWidth: 2.5)
       .overlay(
         Circle()
           .stroke(
@@ -594,6 +598,18 @@ private struct GridAvatarImage: View {
         if showsConnectingIndicator {
           GridAvatarConnectingIndicator()
         }
+      }
+      // The screen share badge holds the trailing corner, so muted moves over.
+      .overlay(alignment: isScreenSharing ? .bottomLeading : .bottomTrailing) {
+        ZStack {
+          if !microphoneEnabled, !showsConnectingIndicator {
+            GridMutedBadge(diameter: 16)
+              .transition(.gridBadge)
+          }
+        }
+        .offset(x: isScreenSharing ? -2 : 2, y: 1)
+        // Scoped to the badge so the face itself never inherits it.
+        .animation(.smoothSnappy, value: microphoneEnabled)
       }
   }
 
