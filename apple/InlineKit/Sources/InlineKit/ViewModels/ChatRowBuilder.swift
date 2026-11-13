@@ -114,9 +114,17 @@ public enum ChatRowBuilder {
     }
 
     let unreadTarget = unreadLineTarget(in: visible, line: input.unreadLine, reachesOldest: input.reachesOldest)
-    // The unread line sits above the first positive message at or after the target.
-    let unreadIndex = unreadTarget.flatMap { target in
-      visible.firstIndex { $0.message.messageId > 0 && $0.message.messageId >= target }
+    // The unread line sits above the first positive message at or after the
+    // target, only when the boundary falls inside this window: that message is
+    // the target itself, an older message is shown above it, or the window
+    // starts at the chat's first message. A window entirely after the line
+    // (after a jump) shows none.
+    let unreadIndex = unreadTarget.flatMap { target -> Int? in
+      guard let index = visible.firstIndex(where: { $0.message.messageId > 0 && $0.message.messageId >= target })
+      else { return nil }
+      let inWindow = visible[index].message.messageId == target || input.reachesOldest
+        || visible[..<index].contains { $0.message.messageId > 0 }
+      return inWindow ? index : nil
     }
 
     var rows: [Draft] = []

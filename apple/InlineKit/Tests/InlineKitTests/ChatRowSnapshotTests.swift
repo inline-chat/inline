@@ -111,6 +111,32 @@ struct ChatRowSnapshotTests {
     #expect(Self.describe(deleted) == ["day0", "m1", "unread", "m3"])
   }
 
+  @Test func `a pinned unread line shows only in a window that holds its boundary`() {
+    let all = (1 ... 30).map { Self.message(Int64($0), at: TimeInterval($0) * 60) }
+    let line = ChatRowBuilder.UnreadLine(boundary: 9, pinnedMessageId: 10)
+    let pinnedWindow = Self.snapshot(Self.input(Array(all[4 ..< 15]), unread: line))
+    #expect(pinnedWindow.unreadLineMessageId == 10)
+    // A jump to a window entirely newer than the line: no line at its top.
+    let newer = Self.snapshot(Self.input(Array(all[19 ..< 30]), unread: line), after: pinnedWindow)
+    #expect(newer.unreadLineMessageId == nil)
+    #expect(!Self.describe(newer).contains("unread"))
+    // Entirely older: nothing at or after the line.
+    let older = Self.snapshot(Self.input(Array(all[0 ..< 8]), unread: line), after: newer)
+    #expect(older.unreadLineMessageId == nil)
+    // Back to a window holding the boundary: the line returns above message 10.
+    let back = Self.snapshot(Self.input(Array(all[6 ..< 20]), unread: line), after: older)
+    #expect(back.unreadLineMessageId == 10)
+    #expect(Self.describe(back)[Self.describe(back).firstIndex(of: "unread")! + 1] == "m10")
+    // A window starting at the pinned message itself still shows it.
+    let startsAtPin = Self.snapshot(Self.input(Array(all[9 ..< 20]), unread: line), after: back)
+    #expect(startsAtPin.unreadLineMessageId == 10)
+    // Starting just after a deleted pin at the chat's first message, it moves on.
+    let fromStart = Self.snapshot(
+      Self.input(Array(all[10 ..< 20]), unread: line, reachesOldest: true), after: startsAtPin
+    )
+    #expect(fromStart.unreadLineMessageId == 11)
+  }
+
   @Test func `grouping follows sender, time and day`() {
     let rows = Self.snapshot(Self.input([
       Self.message(1, at: 10), Self.message(2, at: 70), Self.message(3, at: 500),
