@@ -6,6 +6,8 @@ struct PrivacySettingsDetailView: View {
   @ObservedObject private var privacy = INUserSettings.current.privacy
   @State private var fileLinkSenders: [LocalFileLinkTrust.Sender] = []
   @State private var isEditingTimeZoneExceptions = false
+  @State private var isEditingFocusExceptions = false
+  @ObservedObject private var focusReporter = FocusStatusReporter.shared
 
   var body: some View {
     Form {
@@ -42,6 +44,31 @@ struct PrivacySettingsDetailView: View {
         SettingsSectionHeader("Time Zone")
       }
 
+      Section {
+        Picker(selection: focusAudience) {
+          Text("Everyone").tag(PrivacyRuleValue.Audience.everyone)
+          Text("Nobody").tag(PrivacyRuleValue.Audience.nobody)
+        } label: {
+          SettingsRowLabel(
+            .focusStatus,
+            description: "Show “Notifications silenced” in direct messages when a Focus is on."
+          )
+        }
+        .settingsSearchAnchor(.focusStatus)
+
+        LabeledContent(focusRule.exceptionsTitle) {
+          Button(Self.peopleButtonTitle(focusRule.exceptions.count)) {
+            isEditingFocusExceptions = true
+          }
+        }
+
+        if privacy.sharesFocusStatus {
+          focusAccessRow
+        }
+      } header: {
+        SettingsSectionHeader("Focus Status")
+      }
+
       if !fileLinkSenders.isEmpty {
         Section {
           ForEach(fileLinkSenders) { sender in
@@ -59,6 +86,19 @@ struct PrivacySettingsDetailView: View {
     }
     .settingsFormStyle()
     .onAppear { fileLinkSenders = LocalFileLinkTrust.senders }
+    .sheet(isPresented: $isEditingFocusExceptions) {
+      PrivacyPeopleEditor(
+        title: focusRule.exceptionsTitle,
+        footer: focusRule.audience == .everyone
+          ? "These people won’t see when your notifications are silenced."
+          : "Only these people will see when your notifications are silenced.",
+        selectedIDs: focusRule.exceptions
+      ) { ids in
+        var rule = privacy.effectiveFocusStatusRule
+        rule.exceptions = ids
+        privacy.setFocusStatusRule(rule)
+      }
+    }
     .sheet(isPresented: $isEditingTimeZoneExceptions) {
       PrivacyPeopleEditor(
         title: timeZoneRule.exceptionsTitle,
@@ -90,8 +130,45 @@ struct PrivacySettingsDetailView: View {
   }
 
   private var exceptionsButtonTitle: String {
-    let count = timeZoneRule.exceptions.count
-    return count == 0 ? "Add People…" : (count == 1 ? "1 Person…" : "\(count) People…")
+    Self.peopleButtonTitle(timeZoneRule.exceptions.count)
+  }
+
+  private static func peopleButtonTitle(_ count: Int) -> String {
+    count == 0 ? "Add People…" : (count == 1 ? "1 Person…" : "\(count) People…")
+  }
+
+  private var focusRule: PrivacyRuleValue {
+    privacy.effectiveFocusStatusRule
+  }
+
+  private var focusAudience: Binding<PrivacyRuleValue.Audience> {
+    Binding(
+      get: { privacy.effectiveFocusStatusRule.audience },
+      set: { audience in
+        var rule = privacy.effectiveFocusStatusRule
+        rule.audience = audience
+        privacy.setFocusStatusRule(rule)
+      }
+    )
+  }
+
+  /// Apple's own permission, needed before the Mac can read Focus at all.
+  @ViewBuilder
+  private var focusAccessRow: some View {
+    switch focusReporter.authorization {
+      case .authorized:
+        EmptyView()
+      case .notDetermined:
+        LabeledContent("This Mac can’t read Focus yet") {
+          Button("Allow…") {
+            Task { await focusReporter.requestAuthorization() }
+          }
+        }
+      default:
+        Text("Allow Inline under Focus › Focus Status in System Settings to share it from this Mac.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+    }
   }
 }
 

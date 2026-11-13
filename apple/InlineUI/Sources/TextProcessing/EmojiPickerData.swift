@@ -88,14 +88,29 @@ public enum EmojiSkinTonePreferenceStore {
 }
 
 public enum EmojiPickerData {
-  public static func suggestions(matching query: String, limit: Int = 64) -> [EmojiPickerItem] {
-    guard limit > 0 else { return [] }
+  /// Base emoji (no skin tone variants) ranked by match quality, popularity, and the user's own usage.
+  public static func suggestions(
+    matching query: String,
+    limit: Int = 64,
+    usage: EmojiUsageSnapshot = EmojiUsageStore.snapshot()
+  ) -> [EmojiPickerItem] {
+    EmojiAutocomplete.suggestions(matching: query, limit: limit, usage: usage).map(EmojiPickerItem.init)
+  }
 
-    return Array(EmojiAutocomplete.suggestions(matching: query, limit: .max)
-      .lazy
-      .filter { !containsSkinToneModifier(in: $0.emoji) }
-      .prefix(limit)
-      .map(EmojiPickerItem.init))
+  public static let frequentlyUsedSectionID = "frequent"
+
+  /// The user's most used emoji, or nil before they have used any.
+  public static func frequentlyUsedSection(limit: Int) -> EmojiPickerSection? {
+    let items = EmojiUsageStore.frequentlyUsed(limit: limit).compactMap { emoji in
+      EmojiAutocomplete.suggestion(forEmoji: emoji).map(EmojiPickerItem.init)
+    }
+    guard !items.isEmpty else { return nil }
+    return EmojiPickerSection(id: frequentlyUsedSectionID, title: "Frequently Used", items: items)
+  }
+
+  /// Call when the user inserts or reacts with an emoji from any picker.
+  public static func recordUse(_ emoji: String) {
+    EmojiUsageStore.record(emoji)
   }
 
   public static let defaultSections: [EmojiPickerSection] = makeDefaultSections()

@@ -643,6 +643,7 @@ final class ComposeAutocompleteManager: NSObject {
 
     case let .emoji(value, _):
       let preferredValue = EmojiSkinTonePreferenceStore.current().applying(to: value)
+      ComposeEmojiAutocompleteProvider.recordSelection(preferredValue)
       let result = emojiDetector.replaceEmojiAutocomplete(
         in: currentAttributedText,
         range: match.range,

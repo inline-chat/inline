@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   canSeeWithRule,
+  effectiveFocusRule,
   effectiveTimeZoneRule,
   isPublicRule,
   mergePrivacyPatch,
@@ -56,5 +57,14 @@ describe("privacy rules", () => {
       alwaysShare: [2],
       neverShare: [3],
     })
+  })
+})
+
+describe("focus status rule", () => {
+  test("defaults to nobody and survives unrelated privacy saves", () => {
+    expect(effectiveFocusRule(undefined)).toEqual({ audience: "nobody", alwaysShare: [], neverShare: [] })
+    const withRule = mergePrivacyPatch(undefined, { focusStatus: { audience: "nobody", alwaysShare: [7] } }, owner)
+    const afterSave = mergePrivacyPatch(withRule, { appearInGlobalSearch: false, shareTimeZone: true }, owner)
+    expect(afterSave.focusStatus).toEqual({ audience: "nobody", alwaysShare: [7], neverShare: [] })
   })
 })

@@ -570,15 +570,15 @@ extension NSTextView {
 
   private func resetLinkTypingAttributesIfNeeded() {
     let selection = selectedRange()
-    guard selection.length == 0,
-          typingAttributes[.link] != nil ||
-          (typingAttributes[.foregroundColor] as? NSColor) == ComposeTextEditor.linkColor
+    guard typingAttributes[.link] != nil ||
+      (typingAttributes[.foregroundColor] as? NSColor) == ComposeTextEditor.linkColor
     else { return }
 
     // Keep editing a surviving link's label, but never extend its formatting
-    // past its boundaries or retain it after the linked text has been deleted.
+    // past its boundaries or retain it after the linked text has been deleted
+    // or typed over as a whole (e.g. Select All, then type).
     let text = attributedString()
-    if selection.location > 0, selection.location < text.length {
+    if selection.location < text.length, selection.location > 0 || selection.length > 0 {
       var linkRange = NSRange()
       let link = text.attribute(
         .link,
@@ -586,7 +586,13 @@ extension NSTextView {
         longestEffectiveRange: &linkRange,
         in: NSRange(location: 0, length: text.length)
       )
-      if link != nil, selection.location > linkRange.location { return }
+      if link != nil {
+        if selection.length == 0, selection.location > linkRange.location { return }
+        if selection.length > 0,
+           NSIntersectionRange(linkRange, selection) == selection,
+           linkRange != selection
+        { return }
+      }
     }
 
     var attributes = typingAttributes

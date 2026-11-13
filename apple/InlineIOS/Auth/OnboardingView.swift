@@ -14,39 +14,43 @@ struct OnboardingView: View {
   var body: some View {
     NavigationStack(path: $navigation.path) {
       Welcome()
+        .onboardingReadableWidth()
         .navigationDestination(for: OnboardingStep.self) { step in
-          switch step {
-            case .getStarted:
-              GetStarted()
-            case let .email(prevEmail):
-              Email(prevEmail: prevEmail)
-            case let .code(email, challengeToken, inviteCode):
-              Code(email: email, challengeToken: challengeToken, inviteCode: inviteCode)
-            case let .inviteCodeForEmail(email, challengeToken):
-              InviteCode(destination: .email(email: email, challengeToken: challengeToken))
-            case let .inviteCodeForPhone(phoneNumber):
-              InviteCode(destination: .phone(phoneNumber: phoneNumber))
-            case let .profile(userId):
-              Profile(userId: userId)
-                .id(userId)
-            case let .username(userId):
-              OnboardingUsername(userId: userId)
-                .id(userId)
-            case .welcome:
-              Welcome()
-            case .main:
-              EmptyView()
-            case let .phoneNumber(prevPhoneNumber):
-              PhoneNumber(prevPhoneNumber: prevPhoneNumber)
-            case let .phoneNumberCode(phoneNumber, inviteCode):
-              PhoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode)
-            case let .provider(provider):
-              ProviderSignInProgress(provider: provider)
-            case .nativeAppleProgress:
-              NativeAppleSignInProgress()
-            case .nativeAppleInvite:
-              InviteCode(destination: .nativeApple)
+          Group {
+            switch step {
+              case .getStarted:
+                GetStarted()
+              case let .email(prevEmail):
+                Email(prevEmail: prevEmail)
+              case let .code(email, challengeToken, inviteCode):
+                Code(email: email, challengeToken: challengeToken, inviteCode: inviteCode)
+              case let .inviteCodeForEmail(email, challengeToken):
+                InviteCode(destination: .email(email: email, challengeToken: challengeToken))
+              case let .inviteCodeForPhone(phoneNumber):
+                InviteCode(destination: .phone(phoneNumber: phoneNumber))
+              case let .profile(userId):
+                Profile(userId: userId)
+                  .id(userId)
+              case let .username(userId):
+                OnboardingUsername(userId: userId)
+                  .id(userId)
+              case .welcome:
+                Welcome()
+              case .main:
+                EmptyView()
+              case let .phoneNumber(prevPhoneNumber):
+                PhoneNumber(prevPhoneNumber: prevPhoneNumber)
+              case let .phoneNumberCode(phoneNumber, inviteCode):
+                PhoneNumberCode(phoneNumber: phoneNumber, inviteCode: inviteCode)
+              case let .provider(provider):
+                ProviderSignInProgress(provider: provider)
+              case .nativeAppleProgress:
+                NativeAppleSignInProgress()
+              case .nativeAppleInvite:
+                InviteCode(destination: .nativeApple)
+            }
           }
+          .onboardingReadableWidth()
         }
     }
     #if !IOS_ONBOARDING_GALLERY_APP
@@ -128,3 +132,25 @@ struct OnboardingView: View {
     }
 }
 #endif
+
+/// Regular-width windows (iPad, large iPhones in landscape) keep onboarding in a centered
+/// readable column instead of stretching fields and buttons across the whole screen.
+private struct OnboardingReadableWidth: ViewModifier {
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+  func body(content: Content) -> some View {
+    if horizontalSizeClass == .regular {
+      content
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity)
+    } else {
+      content
+    }
+  }
+}
+
+extension View {
+  func onboardingReadableWidth() -> some View {
+    modifier(OnboardingReadableWidth())
+  }
+}

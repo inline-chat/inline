@@ -4,17 +4,16 @@ import SwiftUI
 /// Edits one privacy exception list: who is in it, and people to add.
 public struct PrivacyPeopleEditor: View {
   @Environment(\.dismiss) private var dismiss
-  @StateObject private var model = PrivacyPeoplePickerModel()
+  @StateObject private var model: PrivacyPeoplePickerModel
 
   private let title: String
   private let footer: String
-  private let initialIDs: [Int64]
   private let onSave: ([Int64]) -> Void
 
   public init(title: String, footer: String, selectedIDs: [Int64], onSave: @escaping ([Int64]) -> Void) {
     self.title = title
     self.footer = footer
-    initialIDs = selectedIDs
+    _model = StateObject(wrappedValue: PrivacyPeoplePickerModel(selectedIDs: selectedIDs))
     self.onSave = onSave
   }
 
@@ -85,7 +84,7 @@ public struct PrivacyPeopleEditor: View {
         }
       }
     }
-    .task { await model.load(selectedIDs: initialIDs) }
+    .task { await model.load() }
   }
 }
 

@@ -298,7 +298,7 @@ describe("inline/bot-commands-sync", () => {
   it("scopes native skill commands per account route", async () => {
     vi.resetModules()
 
-    const listSkillCommandsForAgents = vi.fn(
+    const prepareSkillCommandsForAgents = vi.fn(
       ({ agentIds }: { agentIds?: string[] }) =>
         agentIds?.[0] === "ops"
           ? [{ name: "ops_skill", description: "Ops skill" }]
@@ -318,7 +318,7 @@ describe("inline/bot-commands-sync", () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/skill-commands-runtime")
       return {
         ...actual,
-        listSkillCommandsForAgents,
+        prepareSkillCommandsForAgents,
       }
     })
     vi.doMock("openclaw/plugin-sdk/native-command-registry", async () => {
@@ -372,11 +372,11 @@ describe("inline/bot-commands-sync", () => {
       },
     })
 
-    expect(listSkillCommandsForAgents).toHaveBeenCalledWith({
+    expect(prepareSkillCommandsForAgents).toHaveBeenCalledWith({
       cfg: expect.any(Object),
       agentIds: ["main"],
     })
-    expect(listSkillCommandsForAgents).toHaveBeenCalledWith({
+    expect(prepareSkillCommandsForAgents).toHaveBeenCalledWith({
       cfg: expect.any(Object),
       agentIds: ["ops"],
     })
@@ -432,7 +432,7 @@ describe("inline/bot-commands-sync", () => {
   it("uses plugin-sdk native/skill/plugin command helpers when available", async () => {
     vi.resetModules()
 
-    const listSkillCommandsForAgents = vi.fn(() => [
+    const prepareSkillCommandsForAgents = vi.fn(() => [
       { name: "weather_skill", description: "Weather skill" },
     ])
     const listNativeCommandSpecsForConfig = vi.fn(
@@ -460,7 +460,7 @@ describe("inline/bot-commands-sync", () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/skill-commands-runtime")
       return {
         ...actual,
-        listSkillCommandsForAgents,
+        prepareSkillCommandsForAgents,
       }
     })
     vi.doMock("openclaw/plugin-sdk/native-command-registry", async () => {
@@ -510,7 +510,7 @@ describe("inline/bot-commands-sync", () => {
       logger,
     })
 
-    expect(listSkillCommandsForAgents).toHaveBeenCalledWith({
+    expect(prepareSkillCommandsForAgents).toHaveBeenCalledWith({
       cfg: expect.any(Object),
       agentIds: ["main"],
     })

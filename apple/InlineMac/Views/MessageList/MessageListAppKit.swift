@@ -33,6 +33,9 @@ class MessageListAppKit: NSViewController {
   private var initialTargetMessageId: Int64?
   /// Set while history around an uncached unread line is fetched; see `beginUnreadFetchIfNeeded`.
   private var unreadFetchBoundary: Int64?
+  /// The saved reading place the chat opens at, placed in the first layout; see
+  /// `placeInitialReadingPlaceIfNeeded`. Cleared once initial placement finishes.
+  private var initialReadingPlace: ChatReadingPlace?
   private let initialPinnedMessage: PreparedPinnedMessage?
   private let surfaceStyle: ChatViewAppearance.SurfaceStyle
   private let additionalTopContentInset: CGFloat
@@ -92,8 +95,6 @@ class MessageListAppKit: NSViewController {
 
   // Testing
   private var feature_updatesHeightsOnLiveResizeEnd = true
-  private var feature_scrollsToBottomInDidLayout = true
-  private var feature_maintainsScrollFromBottomOnResize = true
 
   /// Not needed
   private var feature_updatesHeightsOnOffsetChange = false
@@ -154,6 +155,7 @@ class MessageListAppKit: NSViewController {
   private var lastVisibleReadCandidateID: Int64?
   private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
   private var appActivityObserverId: UUID?
+  private var statusNoticeCancellable: AnyCancellable?
 
   init(
     dependencies: AppDependencies,
@@ -174,6 +176,9 @@ class MessageListAppKit: NSViewController {
     self.showUnreadAfter = showUnreadAfter
     self.initialTargetMessageId = initialTargetMessageId
     self.unreadFetchBoundary = initialTargetMessageId == nil ? unreadFetchBoundary : nil
+    if initialTargetMessageId == nil, case let .saved(place)? = initialState?.openAnchor {
+      initialReadingPlace = place
+    }
     self.initialPinnedMessage = initialPinnedMessage
     self.surfaceStyle = surfaceStyle
     self.additionalTopContentInset = additionalTopContentInset
@@ -207,6 +212,7 @@ class MessageListAppKit: NSViewController {
     }
 
     sizeCalculator.prepareForUse()
+    observeStatusNotice()
     rebuildRowItems()
     NotificationCenter.default.addObserver(
       self,
@@ -243,7 +249,9 @@ class MessageListAppKit: NSViewController {
             self_.scrollToMsgAndHighlight(request)
 
           case .scrollToBottom:
-            if !self_.isAtBottom || self_.chatRows.canLoadNewerFromLocal {
+            // Sent from here (compose) or asked for: the chat reopens at its latest messages.
+            ChatReadingPlaceStore.shared.clear(for: self_.peerId)
+            if !self_.isWithinFollowZone || self_.chatRows.canLoadNewerFromLocal {
               self_.scrollToNewestAvailable(animated: true)
             }
         }
@@ -327,14 +335,70 @@ class MessageListAppKit: NSViewController {
     chatRows.row(at: row)
   }
 
+  /// The DM peer whose status the line under the newest message describes.
+  private var statusNoticeUserId: Int64? {
+    guard let userId = peerId.asUserId(), userId != Auth.shared.getCurrentUserId() else { return nil }
+    return userId
+  }
+
+  private func observeStatusNotice() {
+    guard let userId = statusNoticeUserId else { return }
+    // Seeds the first frame from memory; rows are built right after.
+    _ = chatRows.setStatusNotice(ObjectCache.shared.getCachedUser(id: userId)?.notificationsSilencedNotice())
+    statusNoticeCancellable = ObjectCache.shared.getUserPublisher(id: userId)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] userInfo in
+        guard let userInfo else { return }
+        self?.setStatusNotice(userInfo.notificationsSilencedNotice())
+      }
+  }
+
+  /// The notice is the last row, so it never moves rows above it. A pinned list follows it.
+  private func setStatusNotice(_ text: String?) {
+    guard !isDisposed else { return }
+    let wasAtBottom = isViewLoaded && shouldKeepBottomPinned
+    let anchors = isViewLoaded && !wasAtBottom ? viewport.anchors() : []
+    let update = chatRows.setStatusNotice(text)
+    guard update != .none, isViewLoaded else { return }
+
+    let animate = wasAtBottom && !needsInitialScroll && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    let apply = { [self] in
+      let animation: NSTableView.AnimationOptions = animate ? .effectFade : []
+      switch update {
+        case let .insert(rows): tableView.insertRows(at: rows, withAnimation: animation)
+        case let .remove(rows): tableView.removeRows(at: rows, withAnimation: animation)
+        case let .reloadRows(rows):
+          tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+        case .reloadAll, .none:
+          tableView.reloadData()
+          tableView.layoutSubtreeIfNeeded()
+          if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+            viewport.restore(anchor)
+          }
+      }
+      if wasAtBottom {
+        scrollToBottom(animated: animate)
+      }
+    }
+
+    if animate {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.15
+        apply()
+      }
+    } else {
+      apply()
+    }
+  }
+
   func collapseHistory(maxID: Int64?) async throws {
     let effectiveMaxID = try await Api.realtime.collapseHistory(peer: peerId.toInputPeer(), maxID: maxID)
     setCollapsedMaxId(effectiveMaxID)
   }
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
-    let wasAtBottom = isViewLoaded && isAtAbsoluteBottom
-    let anchor = isViewLoaded ? captureVisibleMessageAnchor() : nil
+    let wasAtBottom = isViewLoaded && shouldKeepBottomPinned
+    let anchors = isViewLoaded ? viewport.anchors() : []
     guard chatRows.setCollapsedMaxId(collapsedMaxId) != .none, isViewLoaded else { return }
 
     clearHoveredMessage()
@@ -342,38 +406,18 @@ class MessageListAppKit: NSViewController {
     tableView.layoutSubtreeIfNeeded()
     if wasAtBottom {
       scrollToBottom(animated: false)
-    } else if let anchor {
-      restoreVisibleMessageAnchor(anchor)
+    } else if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+      viewport.restore(anchor)
     }
     syncAvatarOverlayAfterTableLayout()
     scheduleMediaWarmupForVisibleAndNearby(reason: "collapse_boundary")
   }
 
-  private struct VisibleMessageAnchor {
-    let stableId: Int64
-    let offset: CGFloat
+  private var viewport: MessageListViewport {
+    MessageListViewport(table: tableView, scroll: scrollView, rows: chatRows)
   }
 
-  private func captureVisibleMessageAnchor() -> VisibleMessageAnchor? {
-    let visibleRect = tableView.visibleRect
-    let range = tableView.rows(in: visibleRect)
-    guard range.location != NSNotFound, range.length > 0 else { return nil }
-
-    for row in range.location ..< NSMaxRange(range) {
-      guard let stableId = messageStableId(forRow: row) else { continue }
-      return VisibleMessageAnchor(
-        stableId: stableId,
-        offset: tableView.rect(ofRow: row).minY - visibleRect.minY
-      )
-    }
-    return nil
-  }
-
-  private func restoreVisibleMessageAnchor(_ anchor: VisibleMessageAnchor) {
-    guard let row = chatRows.rowIndex(forMessageStableId: anchor.stableId) else { return }
-    let target = tableView.rect(ofRow: row).minY - anchor.offset
-    scrollView.contentView.updateBounds(NSPoint(x: 0, y: clampScrollOffset(target)), cancel: true)
-  }
+  private typealias VisibleMessageAnchor = MessageListViewport.Anchor
 
   private func messageStableId(forRow row: Int) -> Int64? {
     chatRows.messageStableId(forRow: row)
@@ -505,12 +549,11 @@ class MessageListAppKit: NSViewController {
     let active = messageSelection.isActive
     let modeChanged = showsForwardSelection != active
     // Snapshot the old geometry before exposing the new measurement width or changing cell constraints.
-    let anchor = modeChanged ? captureVisibleMessageAnchor() : nil
-    let wasAtBottom = isAtAbsoluteBottom
-    let wasPerformingUpdate = isPerformingUpdate
+    let anchor = modeChanged ? viewport.anchors().first : nil
+    let wasAtBottom = shouldKeepBottomPinned
     let wasSuppressingResize = suppressResizeScrollMaintenance
     if modeChanged {
-      isPerformingUpdate = true
+      tableUpdateCount += 1
       suppressResizeScrollMaintenance = true
       CATransaction.begin()
       CATransaction.setDisableActions(true)
@@ -522,10 +565,9 @@ class MessageListAppKit: NSViewController {
       if modeChanged {
         // Refresh the resize handler's baseline after restoring the viewport, before releasing the guard.
         handleBoundsChange()
-        previousViewportHeight = scrollView.contentView.bounds.height
         NSAnimationContext.endGrouping()
         CATransaction.commit()
-        isPerformingUpdate = wasPerformingUpdate
+        endTableUpdate()
         suppressResizeScrollMaintenance = wasSuppressingResize
       }
     }
@@ -559,9 +601,9 @@ class MessageListAppKit: NSViewController {
       if wasAtBottom {
         scrollToBottom(animated: false)
       } else if let anchor {
-        restoreVisibleMessageAnchor(anchor)
+        viewport.restore(anchor)
       }
-      maintainUnreadLineHoldIfNeeded()
+      maintainReadingHoldIfNeeded()
       syncAvatarOverlayAfterTableLayout()
       // Avatars live in one overlay; they all move with the message column, so slide it as a whole.
       if usesAvatarOverlay {
@@ -593,6 +635,8 @@ class MessageListAppKit: NSViewController {
   private var replyThreadSourceMessageId: Int64?
   /// Holds the source message's viewport offset while the pane slides in or out.
   private var replyThreadSourceAnchor: VisibleMessageAnchor?
+  /// A reader resting at latest when the pane moves keeps following it while the source still fits.
+  private var replyThreadSourceKeepsBottom = false
   private var replyThreadSourceAnchorWidth: CGFloat?
   private var replyThreadSourceAnchorExpiry: DispatchWorkItem?
   private var isObservingReplyThreadPane = false
@@ -689,13 +733,14 @@ class MessageListAppKit: NSViewController {
             let stableId = messageStableId(forRow: row)
       else { continue }
 
-      // Opening or closing a thread is newer intent than the unread landing; two holds
-      // would fight, and the unread one runs last.
-      releaseUnreadLineHold()
+      // Opening or closing a thread is newer intent than the unread or saved landing; two
+      // holds would fight, and the reading one runs last.
+      releaseReadingHold()
       replyThreadSourceAnchor = VisibleMessageAnchor(
-        stableId: stableId,
+        id: .message(id: stableId), oldIndex: row,
         offset: tableView.rect(ofRow: row).minY - visibleRect.minY
       )
+      replyThreadSourceKeepsBottom = viewport.distanceFromBottom <= Self.exactBottomTolerance
       replyThreadSourceAnchorWidth = measurementWidth()
 
       let expiry = DispatchWorkItem { [weak self] in
@@ -711,6 +756,7 @@ class MessageListAppKit: NSViewController {
     replyThreadSourceAnchorExpiry?.cancel()
     replyThreadSourceAnchorExpiry = nil
     replyThreadSourceAnchor = nil
+    replyThreadSourceKeepsBottom = false
     replyThreadSourceAnchorWidth = nil
   }
 
@@ -719,16 +765,17 @@ class MessageListAppKit: NSViewController {
     clearReplyThreadSourceAnchor()
     guard !isDisposed, let startWidth, let width = measurementWidth(), abs(width - startWidth) > 0.5 else { return }
     // Per-frame passes only remeasure visible rows; settle the rest like a finished live resize.
-    fullWidthAsyncCalc(maintainScroll: !isAtAbsoluteBottom)
+    fullWidthAsyncCalc()
   }
 
-  /// Runs last in `viewDidLayout`, after width remeasurement and bottom pinning.
+  /// Runs last in `viewDidLayout`, after width remeasurement. A reader who was resting at latest
+  /// is kept there by the remeasurement while `replyThreadSourceKeepsBottom` holds.
   private func maintainReplyThreadSourceAnchorIfNeeded() {
     guard let anchor = replyThreadSourceAnchor,
           !isUserScrolling,
           !isPerformingUpdate,
           !needsInitialScroll,
-          let row = chatRows.rowIndex(forMessageStableId: anchor.stableId)
+          let row = viewport.index(of: anchor)
     else { return }
 
     let rowRect = tableView.rect(ofRow: row)
@@ -738,9 +785,11 @@ class MessageListAppKit: NSViewController {
     let visibleBottom = bounds.maxY - insets.bottom
 
     // Staying pinned to the live bottom wins while the source is still fully visible there.
-    if isAtAbsoluteBottom, rowRect.minY >= visibleTop, rowRect.maxY <= visibleBottom {
+    if viewport.distanceFromBottom <= Self.exactBottomTolerance, rowRect.minY >= visibleTop, rowRect.maxY <= visibleBottom {
       return
     }
+    // Keeping the source in view now means leaving latest; later passes must not pull it back down.
+    replyThreadSourceKeepsBottom = false
 
     var target = rowRect.minY - anchor.offset
     // Rewrapping can grow the row; keep all of it inside the unobscured viewport.
@@ -953,6 +1002,7 @@ class MessageListAppKit: NSViewController {
   private var insetForCompose: CGFloat = Theme.composeMinHeight
   func updateInsetForCompose(_ inset: CGFloat, animate: Bool = true) {
     let inset = messageSelectionInset ?? inset
+    let shouldFollow = canFollowBottom && isWithinFollowZone
     insetForCompose = inset
 
     scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
@@ -967,7 +1017,7 @@ class MessageListAppKit: NSViewController {
     }
     updateActivityJumpPosition(animate: animate)
 
-    if isAtBottom {
+    if shouldFollow {
       tableView.scrollToBottomWithInset(cancel: false)
     }
 
@@ -1030,7 +1080,7 @@ class MessageListAppKit: NSViewController {
     if scrollView.contentInsets.top != topInset {
       log.trace("Adjusting view's insets")
 
-      let wasAtBottom = isAtBottom
+      let wasAtBottom = canFollowBottom && viewport.distanceFromBottom <= Self.exactBottomTolerance
       let topAnchor = captureTopAnchor()
       suppressResizeScrollMaintenance = true
 
@@ -1049,10 +1099,10 @@ class MessageListAppKit: NSViewController {
 
       updateToolbar()
 
-      if unreadLineHold != nil {
+      if readingHold != nil {
         // A pinned header appearing, even before the first frame settles, moves the
-        // line under the new inset, as Telegram re-pins it in the same pass.
-        maintainUnreadLineHoldIfNeeded()
+        // held row under the new inset, as Telegram re-pins it in the same pass.
+        maintainReadingHoldIfNeeded()
       } else if !needsInitialScroll {
         if wasAtBottom {
           scrollToBottom(animated: false)
@@ -1209,14 +1259,15 @@ class MessageListAppKit: NSViewController {
       constant: -(Theme.messageListBottomInset + insetForCompose)
     )
 
+    // Centered on the compose side controls' axis, the mirror of the avatar column.
     NSLayoutConstraint.activate([
-      scrollToBottomButton.trailingAnchor.constraint(
+      scrollToBottomButton.centerXAnchor.constraint(
         equalTo: scrollView.messageColumnGuide.trailingAnchor,
-        constant: -14
+        constant: -ChatFloatingButtonMetrics.centerInset
       ),
       scrollToBottomBottomConstraint,
-      scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      scrollToBottomButton.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      scrollToBottomButton.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
     ])
 
     view.addSubview(activityJumpButton)
@@ -1232,12 +1283,12 @@ class MessageListAppKit: NSViewController {
     NSLayoutConstraint.activate([
       activityJumpButton.centerXAnchor.constraint(equalTo: scrollToBottomButton.centerXAnchor),
       activityJumpBottomConstraint,
-      activityJumpButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      activityJumpButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      activityJumpButton.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      activityJumpButton.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
       reactionJumpButton.centerXAnchor.constraint(equalTo: scrollToBottomButton.centerXAnchor),
       reactionJumpBottomConstraint,
-      reactionJumpButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      reactionJumpButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      reactionJumpButton.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      reactionJumpButton.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
     ])
     startActivityNavigator()
   }
@@ -1246,7 +1297,8 @@ class MessageListAppKit: NSViewController {
 
   /// Buttons stack from the bottom: scroll-to-bottom, then @, then ♥. Hidden ones take no slot.
   private func jumpButtonBottomConstant(slot: Int) -> CGFloat {
-    -(Theme.messageListBottomInset + insetForCompose) - CGFloat(slot) * (Theme.scrollButtonSize + 10)
+    -(Theme.messageListBottomInset + insetForCompose)
+      - CGFloat(slot) * (ChatFloatingButtonMetrics.size + ChatFloatingButtonMetrics.spacing)
   }
 
   private var activityJumpBottomConstant: CGFloat {
@@ -1261,7 +1313,8 @@ class MessageListAppKit: NSViewController {
     guard let activityJumpBottomConstraint, let reactionJumpBottomConstraint else { return }
     if animate {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.2
+        context.duration = 0.25
+        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
         context.allowsImplicitAnimation = true
         activityJumpBottomConstraint.animator().constant = activityJumpBottomConstant
         reactionJumpBottomConstraint.animator().constant = reactionJumpBottomConstant
@@ -1291,6 +1344,11 @@ class MessageListAppKit: NSViewController {
   }
 
   private func applyActivityState(_ state: ChatActivityNavigator.State, animate: Bool) {
+    // Marking the chat unread supersedes what this list read before.
+    if state.unreadMark { unreadCountReadFrontier = 0 }
+    updateScrollToBottomCount()
+    guard activityJumpButton.count != state.mentionsCount || reactionJumpButton.count != state.reactionsCount
+    else { return }
     activityJumpButton.setCount(state.mentionsCount)
     reactionJumpButton.setCount(state.reactionsCount)
     updateActivityJumpPosition(animate: animate)
@@ -1320,7 +1378,9 @@ class MessageListAppKit: NSViewController {
           let window = view.window,
           window.isVisible,
           !view.isHiddenOrHasHiddenAncestor,
-          !needsInitialScroll
+          !needsInitialScroll,
+          // The list is hidden over the latest page while history around the unread line loads.
+          unreadFetchBoundary == nil
     else {
       activityNavigator.clearVisible()
       return
@@ -1844,7 +1904,11 @@ class MessageListAppKit: NSViewController {
   }
 
   private func scrollToNewestAvailable(animated: Bool) {
-    releaseUnreadLineHold()
+    releaseReadingHold()
+    // Returning to latest forgets the reading place; the place being left is not saved again
+    // while the latest messages load or the list scrolls down to them.
+    ChatReadingPlaceStore.shared.clear(for: peerId)
+    readingPlaceCaptureBlocked = true
     guard !chatRows.historyCoverage.isAtCertifiedLiveEnd else {
       scrollToBottom(animated: animated)
       return
@@ -1859,26 +1923,12 @@ class MessageListAppKit: NSViewController {
       guard let self else { return }
       do {
         guard let account else { throw CancellationError() }
-        try await chatRows.loadLatestWindow()
-        guard !Task.isCancelled, !isDisposed else { return }
-        rebuildRowItems()
-        clearHoveredMessage()
-        tableView.reloadData()
-        pruneMessageSelection()
-        scheduleMessageHoverRefresh()
-        await Task.yield()
-        guard !Task.isCancelled, !isDisposed else { return }
-        scrollToBottom(animated: animated)
+        guard try await applyLatestWindow(animated: animated) else { return }
         var transaction = GetChatHistoryTransaction(peer: peerId, mode: .historyModeLatest)
         transaction.type = .ephemeral()
         _ = try await Api.realtime.send(transaction, expectedAccount: account)
-        guard !Task.isCancelled, !isDisposed else { return }
-        try await chatRows.loadLatestWindow()
-        rebuildRowItems()
-        tableView.reloadData()
-        await Task.yield()
-        guard !Task.isCancelled, !isDisposed else { return }
-        scrollToBottom(animated: animated)
+        try Task.checkCancellation()
+        _ = try await applyLatestWindow(animated: animated)
       } catch is CancellationError {
         return
       } catch {
@@ -1888,9 +1938,29 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  private func applyLatestWindow(animated: Bool) async throws -> Bool {
+    guard try await chatRows.loadLatestWindow(), !isDisposed else { return false }
+    let anchors = Task.isCancelled ? viewport.anchors() : []
+    rebuildRowItems()
+    clearHoveredMessage()
+    tableView.reloadData()
+    pruneMessageSelection()
+    scheduleMessageHoverRefresh()
+    tableView.layoutSubtreeIfNeeded()
+    if Task.isCancelled {
+      if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+        viewport.restore(anchor)
+      }
+      return false
+    }
+    scrollToBottom(animated: animated)
+    return true
+  }
+
   private func scrollToBottom(animated: Bool) {
     guard chatRows.rowCount > 0 else { return }
-    releaseUnreadLineHold()
+    scrolledAwayFromBottom = false
+    releaseReadingHold()
     #if DEBUG
     log.trace("Scrolling to bottom animated=\(animated)")
     #endif
@@ -1933,6 +2003,10 @@ class MessageListAppKit: NSViewController {
 
   private func setupScrollObserver() {
     // Use direct observation for immediate response
+    scrollView.shouldPinBottomOnHeightChange = { [weak self] in
+      guard let self, !needsInitialScroll, !suppressResizeScrollMaintenance else { return false }
+      return shouldKeepBottomPinned
+    }
     scrollView.contentView.postsFrameChangedNotifications = true
     scrollView.contentView.postsBoundsChangedNotifications = true
 
@@ -1948,6 +2022,13 @@ class MessageListAppKit: NSViewController {
       selector: #selector(scrollViewBoundsChanged),
       name: NSView.boundsDidChangeNotification,
       object: scrollView.contentView
+    )
+
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(userDidScroll),
+      name: NSScrollView.didLiveScrollNotification,
+      object: scrollView
     )
 
     // Add scroll wheel notification
@@ -1976,12 +2057,16 @@ class MessageListAppKit: NSViewController {
     let rows = chatRows.rowIndexes(forMessageStableId: stableID)
     guard let lastRow = rows.last, lastRow < tableView.numberOfRows else { return }
 
+    let pinned = shouldKeepBottomPinned
+    let anchor = pinned ? nil : viewport.anchors().first
     NSAnimationContext.runAnimationGroup { [weak self] context in
       guard let self else { return }
       // A moving header can leave NSButton's tracking rect between mouse-down
       // and mouse-up when the next disclosure is clicked quickly.
       let isDisclosureToggle = notification.object is RichBlockLocalStateStore
-      context.duration = isDisclosureToggle || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.16
+      let movesAnchor = anchor?.hasChangesAbove(rows) == true
+      let animate = !isDisclosureToggle && !movesAnchor && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+      context.duration = animate ? 0.16 : 0
       MessageGestureTrace
         .debug("MessageList.richLayout rows=\(rows) disclosure=\(isDisclosureToggle) duration=\(context.duration)")
       // Do not wrap a reload plus height invalidation in begin/endUpdates.
@@ -1989,9 +2074,9 @@ class MessageListAppKit: NSViewController {
       // its hit-test bounds smaller or larger than the visible message row.
       tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
       tableView.noteHeightOfRows(withIndexesChanged: rows)
-      tableView.layoutSubtreeIfNeeded()
+      restoreAfterRemeasure(pinned: pinned, anchor: anchor)
     } completionHandler: { [weak self] in
-      self?.maintainUnreadLineHoldIfNeeded()
+      self?.maintainReadingHoldIfNeeded()
       self?.syncAvatarOverlayAfterTableLayout()
       self?.refreshMessageHoverAfterGeometryChange()
     }
@@ -2260,10 +2345,50 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  @objc private func userDidScroll() {
+    // A discrete wheel can deliver just this notification. Its new position still owns
+    // the viewport, even if a publication arrives before the next wheel tick.
+    let unbracketed = !isUserScrolling
+    if unbracketed { scrollWheelBegan() }
+    let originY = scrollView.contentView.bounds.minY
+    if viewport.distanceFromBottom <= Self.exactBottomTolerance {
+      scrolledAwayFromBottom = false
+    } else if originY == clipOriginY, originY != clipOriginBeforeLastMoveY {
+      // AppKit posts this right after its own clip move, so the last move is the user's.
+      // Rows arriving below grow the distance without moving the origin, so they can't detach.
+      scrolledAwayFromBottom = originY < clipOriginBeforeLastMoveY
+    } else if unbracketed {
+      scrolledAwayFromBottom = true
+    }
+    if isAtBottom != isWithinFollowZone {
+      handleBoundsChange(afterUserScroll: true)
+    }
+    if unbracketed { scrollWheelEnded() }
+  }
+
   @objc private func scrollWheelBegan() {
     log.trace("scroll wheel began")
     isUserScrolling = true
-    releaseUnreadLineHold()
+    // User input supersedes both an in-flight fetch and an animated jump. Advance the
+    // revision first: stopping the animation runs its completion at once, and that checks it.
+    targetScrollRevision &+= 1
+    targetScrollTask?.cancel()
+    if needsInitialScroll, didQueueInitialFinalize {
+      needsInitialScroll = false
+      initialTargetMessageId = nil
+      initialReadingPlace = nil
+    }
+    if isProgrammaticScroll {
+      // A zero-length animation of the same property replaces the running one where it is.
+      let clipView = scrollView.contentView
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0
+        clipView.animator().setBoundsOrigin(clipView.bounds.origin)
+      }
+      endProgrammaticScroll()
+    }
+    releaseReadingHold()
+    readingPlaceCaptureBlocked = false
     clearReplyThreadSourceAnchor()
     pendingArrivalMessageID = nil
     scrollState = .scrolling
@@ -2274,8 +2399,11 @@ class MessageListAppKit: NSViewController {
     log.trace("scroll wheel ended")
     isUserScrolling = false
     scrollState = .idle
+    // A discrete wheel tick can end before the first throttled bounds notification.
+    handleBoundsChange(afterUserScroll: true)
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+      self?.captureReadingPlace()
       self?.updateUnreadIfNeeded()
       self?.scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_idle")
       self?.scheduleMessageHoverRefresh()
@@ -2296,12 +2424,12 @@ class MessageListAppKit: NSViewController {
   }
 
   /// Precalcs width in bg and does full recalc, only call in special cases, not super performant for realtime call
-  private func fullWidthAsyncCalc(maintainScroll: Bool = true) {
+  private func fullWidthAsyncCalc() {
     precalculateHeightsInBackground()
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
       // Recalculate all height when user is done resizing
-      self?.recalculateHeightsOnWidthChange(buffer: 400, maintainScroll: maintainScroll)
+      self?.recalculateHeightsOnWidthChange(buffer: 400)
     }
   }
 
@@ -2321,38 +2449,75 @@ class MessageListAppKit: NSViewController {
   /// True when user is scrolling via trackpad or mouse wheel
   private var isUserScrolling = false
 
-  /// True when user is at the bottom of the scroll view within a ~0-10px threshold
+  /// Distance from latest at which a reader scrolling back down can resume following.
+  private static let bottomFollowZone: CGFloat = 44
+  /// Only a list resting at the bottom is pinned through geometry changes. AppKit snaps the
+  /// scroll limit to the pixel grid, so this allows a point.
+  private static let exactBottomTolerance: CGFloat = 1
+
+  /// Last state reported to the history model and scroll button.
   private var isAtBottom = true {
     didSet {
       chatRows.setAtBottom(isAtBottom)
     }
   }
 
-  // When exactly at the bottom
-  private var isAtAbsoluteBottom = true
-  private var lastSeenMessageId: Int64 = 0
-  private var hasUnreadSinceScroll = false
+  private var scrolledAwayFromBottom = false
+  /// Clip origin after and before its latest move. Programmatic restores update these too, so a
+  /// live-scroll notification compares only against the user's own movement.
+  private var clipOriginY: CGFloat = 0
+  private var clipOriginBeforeLastMoveY: CGFloat = 0
 
-  /// This must be true for the whole duration of animation
-  private var isPerformingUpdate = false {
-    didSet {
-      // Every message update ends here, animated or not. The lab showed rows growing above
-      // the line and anchor restores both move it, so a held line is re-pinned after each.
-      if oldValue, !isPerformingUpdate {
-        maintainUnreadLineHoldIfNeeded()
+  private func noteClipOriginChange() {
+    let originY = scrollView.contentView.bounds.minY
+    guard originY != clipOriginY else { return }
+    clipOriginBeforeLastMoveY = clipOriginY
+    clipOriginY = originY
+  }
+
+  /// The 44-point follow zone lets a reader returning towards latest reattach. A wheel
+  /// tick away from latest detaches immediately, including between discrete mouse ticks.
+  private var isWithinFollowZone: Bool {
+    let distance = viewport.distanceFromBottom
+    return distance <= Self.exactBottomTolerance || (!scrolledAwayFromBottom && distance <= Self.bottomFollowZone)
+  }
+
+  private var canFollowBottom: Bool {
+    !isUserScrolling && !isProgrammaticScroll && readingHold == nil &&
+      (replyThreadSourceAnchor == nil || replyThreadSourceKeepsBottom)
+  }
+
+  private var shouldKeepBottomPinned: Bool {
+    canFollowBottom && viewport.distanceFromBottom <= Self.exactBottomTolerance
+  }
+
+  /// The highest incoming message this list asked to read; see `ChatUnreadBadgeCount`.
+  private var unreadCountReadFrontier: Int64 = 0
+
+  // Publications can overlap while AppKit finishes their animations.
+  private var tableUpdateCount = 0
+  private var isPerformingUpdate: Bool { tableUpdateCount > 0 }
+
+  private func endTableUpdate() {
+    tableUpdateCount -= 1
+    if !isPerformingUpdate {
+      maintainReadingHoldIfNeeded()
+      if let buffer = deferredWidthBuffer, !isDisposed {
+        deferredWidthBuffer = nil
+        recalculateHeightsOnWidthChange(buffer: buffer)
       }
     }
   }
 
-  private var prevContentSize: CGSize = .zero
-  private var prevOffset: CGFloat = 0
+  private let boundsThrottleID = UUID().uuidString
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    noteClipOriginChange()
     updateMessageViewColors()
     scheduleAvatarOverlaySync(force: false)
     refreshMessageHoverAfterGeometryChange()
 
-    throttle(.milliseconds(32), identifier: "chat.scrollViewBoundsChanged", by: .mainActor, option: .default) { [
+    throttle(.milliseconds(32), identifier: boundsThrottleID, by: .mainActor, option: .default) { [
       weak self
     ] in
       self?.handleBoundsChange()
@@ -2374,15 +2539,14 @@ class MessageListAppKit: NSViewController {
     }
   }
 
-  private func handleBoundsChange() {
+  private func handleBoundsChange(afterUserScroll: Bool = false) {
+    guard !isDisposed else { return }
+    let userMoved = isUserScrolling || afterUserScroll
     let scrollOffset = scrollView.contentView.bounds.origin
     let viewportSize = scrollView.contentView.bounds.size
     let contentSize = scrollView.documentView?.frame.size ?? .zero
     let maxScrollableHeight = contentSize.height - viewportSize.height
     let currentScrollOffset = scrollOffset.y
-
-    // Update stores values
-    oldDistanceFromBottom = contentSize.height - scrollOffset.y - viewportSize.height
 
     updateToolbarDebounced()
 
@@ -2393,26 +2557,25 @@ class MessageListAppKit: NSViewController {
 
     reportVisibleActivity()
 
-    // Prevent iaAtBottom false negative when elastic scrolling
-    let overScrolledToBottom = currentScrollOffset > maxScrollableHeight
+    // Measured from the bottom origin `scrollToBottomWithInset` scrolls to, which includes the
+    // bottom inset under the composer. Negative while elastic scrolling past the bottom.
     let prevAtBottom = isAtBottom
-    isAtBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 5.0
-    isAtAbsoluteBottom = overScrolledToBottom || abs(currentScrollOffset - maxScrollableHeight) <= 0.1
+    isAtBottom = isWithinFollowZone
 
-    if isUserScrolling, !isAtBottom,
-       let anchor = captureVisibleMessageAnchor(),
-       let messageIndex = chatRows.messageIndex(forStableMessageId: anchor.stableId)
-    {
-      chatRows.setHistoryAnchor(messages[messageIndex].message.messageId)
+    if userMoved, !isAtBottom {
+      let visible = quoteViewport
+      if let place = topReadingPlace(visibleTop: visible.minY, visibleBottom: visible.maxY, width: visible.width) {
+        chatRows.setHistoryAnchor(place.messageId)
+      }
     }
 
     // Check if we're approaching the top
-    if feature_loadsMoreWhenApproachingTop, isUserScrolling, currentScrollOffset < viewportSize.height {
+    if feature_loadsMoreWhenApproachingTop, userMoved, currentScrollOffset < viewportSize.height {
       loadBatch(at: .older)
     }
 
     if feature_loadsMoreWhenApproachingBottom,
-       isUserScrolling,
+       userMoved,
        maxScrollableHeight - currentScrollOffset < viewportSize.height
     {
       loadBatch(at: .newer)
@@ -2423,11 +2586,6 @@ class MessageListAppKit: NSViewController {
       setScrollToBottomButtonShown(shouldShow)
       if isAtBottom {
         updateUnreadIfNeeded()
-        if chatRows.historyCoverage.isAtCertifiedLiveEnd {
-          markMessagesSeen()
-        }
-      } else {
-        updateUnreadBadgeVisibility()
       }
     }
   }
@@ -2441,101 +2599,15 @@ class MessageListAppKit: NSViewController {
     log.trace("\(name) took \(String(format: "%.2f", timeElapsed))ms")
   }
 
-  var oldScrollViewHeight: CGFloat = 0.0
-  var oldDistanceFromBottom: CGFloat = 0.0
-  var previousViewportHeight: CGFloat = 0.0
-
   @objc func scrollViewFrameChanged(notification: Notification) {
     updateMessageViewColors()
     scheduleAvatarOverlaySync()
     refreshMessageHoverAfterGeometryChange()
-
-    if suppressResizeScrollMaintenance {
-      return
-    }
-
-    // keep scroll view anchored from the bottom
-    guard feature_maintainsScrollFromBottomOnResize else { return }
-
-    // Already handled in this case
-    if feature_scrollsToBottomInDidLayout, isAtAbsoluteBottom {
-      return
-    }
-
-    if needsInitialScroll {
-      return
-    }
-
-    // A held unread line is re-pinned from the top in `viewDidLayout`; keeping the distance
-    // from the bottom here would only move it first.
-    if unreadLineHold != nil {
-      return
-    }
-
-    guard let documentView = scrollView.documentView else { return }
-
-    if isPerformingUpdate {
-      // Do not maintain scroll when performing update, TODO: Fix later
-      return
-    }
-
-    #if DEBUG
-    log.trace("scroll view frame changed, maintaining scroll from bottom")
-    #endif
-
-    let viewportSize = scrollView.contentView.bounds.size
-
-    // DISABLED CHECK BECAUSE WIDTH CAN CHANGE THE MESSAGES
-    // Only do this if frame height changed. Width is handled in another function
-//    if abs(viewportSize.height - previousViewportHeight) < 0.1 {
-//      return
-//    }
-
-    let scrollOffset = scrollView.contentView.bounds.origin
-    let contentSize = scrollView.documentView?.frame.size ?? .zero
-
-    #if DEBUG
-    log
-      .trace(
-        "scroll view frame changed, maintaining scroll from bottom \(contentSize.height) \(previousViewportHeight)"
-      )
-    #endif
-    previousViewportHeight = viewportSize.height
-
-    // TODO: min max
-    let nextScrollPosition = contentSize.height - (oldDistanceFromBottom + viewportSize.height)
-
-    if nextScrollPosition == scrollOffset.y {
-      #if DEBUG
-      log.trace("scroll position is same, skipping maintaining")
-      #endif
-      return
-    }
-
-    // Early return if no change needed
-    if abs(nextScrollPosition - scrollOffset.y) < 0.5 {
-      return
-    }
-
-    scrollView.contentView.updateBounds(NSPoint(x: 0, y: nextScrollPosition), cancel: true)
-
-    // CATransaction.begin()
-    // CATransaction.setDisableActions(true)
-    // Set new scroll position
-    // documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-    // scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: nextScrollPosition))
-    // CATransaction.commit()
-
-    //    Looked a bit laggy to me
-//    NSAnimationContext.runAnimationGroup { context in
-//      context.duration = 0
-//      context.allowsImplicitAnimation = false
-//      documentView.scroll(NSPoint(x: 0, y: nextScrollPosition))
-//    }
   }
 
   private var lastKnownWidth: CGFloat = 0
   private var needsInitialScroll = true
+  private var didQueueInitialFinalize = false
 
   private func hideScrollbars() {
     // Keep native overlay scrollers available during initial scroll positioning.
@@ -2604,20 +2676,25 @@ class MessageListAppKit: NSViewController {
 
       // A targeted open must never paint the live bottom first; that also
       // overrides any later scroll request queued before this first layout.
-      if !centerInitialTargetIfNeeded(), !placeInitialUnreadLineIfNeeded() {
+      if !centerInitialTargetIfNeeded(), !placeInitialReadingPlaceIfNeeded() {
         scrollToBottom(animated: false)
       }
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-        guard let self else { return }
-        // Finalize heights one last time to ensure no broken heights on initial load
-        needsInitialScroll = false
-        scheduleAvatarOverlaySync()
-        focusInitialTargetIfNeeded()
-        finishInitialUnreadPlacement()
-        if revealsAfterInitialPlacement {
-          revealsAfterInitialPlacement = false
-          revealListAfterLayout()
+      // Every pass until then re-places the list; the finalize work is queued once.
+      if !didQueueInitialFinalize {
+        didQueueInitialFinalize = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+          guard let self else { return }
+          // Finalize heights one last time to ensure no broken heights on initial load
+          needsInitialScroll = false
+          scheduleAvatarOverlaySync()
+          focusInitialTargetIfNeeded()
+          finishInitialReadingPlacement()
+          if revealsAfterInitialPlacement {
+            revealsAfterInitialPlacement = false
+            revealListAfterLayout()
+          }
+          updateUnreadIfNeeded()
         }
       }
     }
@@ -2625,29 +2702,38 @@ class MessageListAppKit: NSViewController {
     checkWidthChangeForHeights()
     scheduleChatNavigationReadyAfterInitialLayout()
 
-    if feature_scrollsToBottomInDidLayout {
-      // Note(@mo): This is a hack to fix scroll jumping when user is resizing the window at bottom.
-      if isAtAbsoluteBottom, !isPerformingUpdate, !needsInitialScroll {
-        // TODO: see how we can avoid this when user is sending message and we're resizing it's fucked up
-        scrollToBottom(animated: false)
-      }
-    }
-
     maintainReplyThreadSourceAnchorIfNeeded()
-    maintainUnreadLineHoldIfNeeded()
+    maintainReadingHoldIfNeeded()
   }
 
-  // MARK: - Unread line placement
+  // MARK: - Reading place placement
 
-  /// Distance of the unread line below the visible top while the list holds it there, as
-  /// Telegram holds an unread landing until the user scrolls. Nil when nothing is held.
-  private var unreadLineHold: CGFloat?
-
-  private func unreadLineRow() -> Int? {
-    chatRows.rows.firstIndex(of: .unreadSeparator)
+  /// The row the list holds in place: the unread line's, or a saved reading place's message.
+  private enum ReadingHoldRow: Equatable {
+    case unreadLine
+    case message(stableId: Int64)
   }
 
-  private func unreadLineGeometry(row: Int) -> UnreadLineGeometry {
+  /// A row whose top the list keeps `offset` points below the visible top (the top inset), as
+  /// Telegram holds an unread landing until the user scrolls. The unread line is held at 0.
+  private struct ReadingHold: Equatable {
+    let row: ReadingHoldRow
+    let offset: CGFloat
+  }
+
+  /// Nil when nothing is held.
+  private var readingHold: ReadingHold?
+
+  private func rowIndex(for row: ReadingHoldRow) -> Int? {
+    switch row {
+      case .unreadLine:
+        chatRows.rows.firstIndex(of: .unreadSeparator)
+      case let .message(stableId):
+        chatRows.rowIndex(forMessageStableId: stableId)
+    }
+  }
+
+  private func readingGeometry(row: Int) -> UnreadLineGeometry {
     let insets = scrollView.contentInsets
     return UnreadLineGeometry(
       lineTop: tableView.rect(ofRow: row).minY,
@@ -2658,19 +2744,39 @@ class MessageListAppKit: NSViewController {
     )
   }
 
-  /// Opens with the unread line at the top, once, in the first layout pass, without animation.
-  /// When less than a screen follows the line, the chat opens at the bottom as usual.
-  private func placeInitialUnreadLineIfNeeded() -> Bool {
-    guard initialTargetMessageId == nil, let row = unreadLineRow(),
-          let origin = unreadLineGeometry(row: row).landingOrigin
-    else { return false }
+  /// Opens at the saved reading place, else with the unread line at the top, in the initial
+  /// layout passes, without animation. When the rows from there down fit on screen, the chat
+  /// opens at the bottom as usual. The unread line is still drawn under a saved place.
+  private func placeInitialReadingPlaceIfNeeded() -> Bool {
+    guard initialTargetMessageId == nil else { return false }
+    if let place = initialReadingPlace,
+       let stableId = messages.first(where: { $0.message.messageId == place.messageId })?.id
+    {
+      // A saved place whose rows now fit on screen opens at the bottom. It is not handed to
+      // the unread line, which can sit far above it.
+      return placeInitialReadingHold(
+        ReadingHold(row: .message(stableId: stableId), offset: place.offset),
+        historyAnchor: place.messageId
+      )
+    }
+    return placeInitialReadingHold(
+      ReadingHold(row: .unreadLine, offset: 0),
+      historyAnchor: chatRows.unreadLineMessageId
+    )
+  }
 
-    unreadLineHold = 0
+  private func placeInitialReadingHold(_ hold: ReadingHold, historyAnchor: Int64?) -> Bool {
+    guard let row = rowIndex(for: hold.row) else { return false }
+    // Landing puts the row's top at the visible top; an offset lowers that line by as much.
+    var landing = readingGeometry(row: row)
+    landing.lineTop -= hold.offset
+    guard let origin = landing.landingOrigin else { return false }
+
+    readingHold = hold
     isAtBottom = false
-    isAtAbsoluteBottom = false
     // A window opened inside history leaves new messages to paging, as after a jump.
-    if !chatRows.historyCoverage.isAtCertifiedLiveEnd, let firstUnread = chatRows.unreadLineMessageId {
-      chatRows.setHistoryAnchor(firstUnread)
+    if !chatRows.historyCoverage.isAtCertifiedLiveEnd, let historyAnchor {
+      chatRows.setHistoryAnchor(historyAnchor)
     }
     beginProgrammaticScroll()
     scrollView.contentView.scroll(to: NSPoint(x: 0, y: origin))
@@ -2679,38 +2785,111 @@ class MessageListAppKit: NSViewController {
     return true
   }
 
-  /// Runs once initial measurement settles: pins the line on final heights and insets, and
+  /// Runs once initial measurement settles: pins the held row on final heights and insets, and
   /// refreshes the bottom state the initial pass skipped.
-  private func finishInitialUnreadPlacement() {
-    guard unreadLineHold != nil else { return }
-    maintainUnreadLineHoldIfNeeded()
+  private func finishInitialReadingPlacement() {
+    initialReadingPlace = nil
+    guard let hold = readingHold else { return }
+    maintainReadingHoldIfNeeded()
     handleBoundsChange()
+    #if DEBUG
+    let bounds = scrollView.contentView.bounds
+    let insets = scrollView.contentInsets
+    let top = topReadingPlace(
+      visibleTop: bounds.minY + insets.top, visibleBottom: bounds.maxY - insets.bottom, width: bounds.width
+    )
+    log.debug(
+      "reading hold landed row=\(hold.row) offset=\(hold.offset) topMessage=\(top?.messageId ?? 0) topOffset=\(top?.offset ?? 0) atBottom=\(isAtBottom)"
+    )
+    #endif
     // Placement cleared the bottom state before the first bounds pass, so that pass saw no
     // transition to show the button for.
-    scrollToBottomButton.setVisibility(!isAtBottom)
-    updateUnreadBadgeVisibility()
+    setScrollToBottomButtonShown(!isAtBottom)
   }
 
-  /// Keeps a held unread line where it landed through inset, width, height and window changes,
+  /// Keeps a held row where it landed through inset, width, height and window changes,
   /// clamped to the scroll range. Only the user or an explicit scroll releases it.
-  private func maintainUnreadLineHoldIfNeeded() {
-    guard let hold = unreadLineHold, !isUserScrolling, !isPerformingUpdate, !isDisposed else { return }
-    guard let row = unreadLineRow() else {
-      unreadLineHold = nil
+  private func maintainReadingHoldIfNeeded() {
+    guard let hold = readingHold, !isUserScrolling, !isPerformingUpdate, !isDisposed else { return }
+    guard let row = rowIndex(for: hold.row) else {
+      readingHold = nil
       return
     }
 
     // Compare with where AppKit will actually go, so a hold clamped at a pixel-snapped limit
     // does not re-scroll on every layout pass.
-    let target = clampScrollOffset(unreadLineGeometry(row: row).heldOrigin(hold: hold))
+    let target = clampScrollOffset(readingGeometry(row: row).heldOrigin(hold: hold.offset))
     guard abs(target - scrollView.contentView.bounds.minY) >= UnreadLineGeometry.tolerance else { return }
     beginProgrammaticScroll()
     scrollView.contentView.updateBounds(NSPoint(x: 0, y: target), cancel: true)
     endProgrammaticScroll()
   }
 
-  private func releaseUnreadLineHold() {
-    unreadLineHold = nil
+  private func releaseReadingHold() {
+    readingHold = nil
+  }
+
+  // MARK: - Saving the reading place
+
+  /// Set by a return to latest until the list lands at the bottom, the user scrolls or jumps,
+  /// so the place it is leaving is not saved again while the latest messages load.
+  private var readingPlaceCaptureBlocked = false
+
+  /// Saves where the user is reading when the newest message is off screen, and clears the
+  /// saved place when it is on screen. Skipped while the list is unplaced, hidden for the
+  /// unread fetch, or moving through an animated jump, where its geometry is not the user's.
+  private func captureReadingPlace() {
+    guard isViewLoaded, !isDisposed, !needsInitialScroll, unreadFetchBoundary == nil, !isProgrammaticScroll,
+          !isPerformingUpdate, tableView.numberOfRows == chatRows.rowCount, tableView.numberOfRows > 0
+    else { return }
+
+    let bounds = scrollView.contentView.bounds
+    let insets = scrollView.contentInsets
+    let visibleTop = bounds.minY + insets.top
+    let visibleBottom = bounds.maxY - insets.bottom
+    guard visibleBottom > visibleTop else { return }
+
+    let store = ChatReadingPlaceStore.shared
+    if isNewestMessageOnScreen(visibleBottom: visibleBottom) {
+      readingPlaceCaptureBlocked = false
+      store.clear(for: peerId)
+      log.debug("reading place cleared: newest message on screen")
+      return
+    }
+    guard !readingPlaceCaptureBlocked,
+          let place = topReadingPlace(visibleTop: visibleTop, visibleBottom: visibleBottom, width: bounds.width)
+    else { return }
+    store.save(place, for: peerId)
+    log.debug("reading place saved message=\(place.messageId) offset=\(place.offset)")
+  }
+
+  /// No newer message is cached past the window, and the last message row starts above the
+  /// composer. A chat left a few lines up still opens at the bottom.
+  private func isNewestMessageOnScreen(visibleBottom: CGFloat) -> Bool {
+    guard !chatRows.canLoadNewerFromLocal else { return false }
+    guard let lastMessageRow = chatRows.rows.lastIndex(where: {
+      if case .message = $0 { return true }
+      return false
+    }) else { return true }
+    return tableView.rect(ofRow: lastMessageRow).minY < visibleBottom
+  }
+
+  /// The first message row reaching below the top inset that has a server id, with its top's
+  /// distance below that inset (negative when it starts under the toolbar).
+  private func topReadingPlace(visibleTop: CGFloat, visibleBottom: CGFloat, width: CGFloat) -> ChatReadingPlace? {
+    let range = tableView.rows(in: NSRect(x: 0, y: visibleTop, width: max(1, width), height: visibleBottom - visibleTop))
+    guard range.location != NSNotFound, range.length > 0 else { return nil }
+
+    for row in range.location ..< min(NSMaxRange(range), tableView.numberOfRows) {
+      guard case .message? = rowItem(at: row),
+            let message = message(forRow: row),
+            message.message.messageId > 0
+      else { continue }
+      let rect = tableView.rect(ofRow: row)
+      guard rect.maxY > visibleTop else { continue }
+      return ChatReadingPlace(messageId: message.message.messageId, offset: rect.minY - visibleTop)
+    }
+    return nil
   }
 
   // MARK: - Uncached unread line
@@ -2784,10 +2963,10 @@ class MessageListAppKit: NSViewController {
       tableView.reloadData()
       pruneMessageSelection()
       scheduleMessageHoverRefresh()
-      if !placeInitialUnreadLineIfNeeded() {
+      if !placeInitialReadingPlaceIfNeeded() {
         scrollToBottom(animated: false)
       }
-      finishInitialUnreadPlacement()
+      finishInitialReadingPlacement()
     }
 
     if needsInitialScroll {
@@ -2795,13 +2974,15 @@ class MessageListAppKit: NSViewController {
     } else {
       revealListAfterLayout()
     }
+    // Nothing was read or reported while the list was hidden.
+    updateUnreadIfNeeded()
   }
 
   /// Fades the list in on the frame after placement, so the first frame shown is already settled.
   private func revealListAfterLayout() {
     DispatchQueue.main.async { [weak self] in
       guard let self, !isDisposed else { return }
-      maintainUnreadLineHoldIfNeeded()
+      maintainReadingHoldIfNeeded()
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -2893,6 +3074,8 @@ class MessageListAppKit: NSViewController {
   override func viewWillDisappear() {
     super.viewWillDisappear()
     log.trace("viewWillDisappear() called")
+    // Leaving with the view still in its window, so its geometry is the one the user saw.
+    captureReadingPlace()
   }
 
   override func viewDidDisappear() {
@@ -2938,7 +3121,7 @@ class MessageListAppKit: NSViewController {
     refreshMessageHoverAfterGeometryChange()
   }
 
-  private var wasLastResizeAboveLimit = false
+  private var deferredWidthBuffer: Int?
 
   /// Called on did layout
   func checkWidthChangeForHeights() {
@@ -2950,58 +3133,9 @@ class MessageListAppKit: NSViewController {
     #endif
     guard let newWidth = measurementWidth() else { return }
 
-    // Using this prevents an issue where cells height was stuck in a cut off way when using
-    // MessageSizeCalculator.safeAreaWidth as the diff
-    // let magicWidthDiff = 15.0
-
-    // Experimental
-    // let magicWidthDiff = 1.0
-    let magicWidthDiff = 0.5
-
-    if abs(newWidth - lastKnownWidth) > magicWidthDiff {
+    if abs(newWidth - lastKnownWidth) > 0.5 {
       lastKnownWidth = newWidth
-
-      // Below used to check if width is above max width to not calculate anything, but
-      // this results in very subtle bugs, eg. when window was smaller, then increased width beyond max (so the
-      // calculations are paused, then increases height. now the recalc doesn't happen for older messages.
-
-      // Previous initial-width path, kept as a clear rollback reference for the initial sizing experiment.
-      // The new path handles this once in `finalizeInitialMeasurementWidthIfNeeded(width:)`.
-      //
-      // let wasPrevWidthZero = lastKnownWidth == 0
-      // if needsInitialScroll, !wasPrevWidthZero {
-      //   recalculateHeightsOnWidthChange(duringLiveResize: false, maintainScroll: false)
-      //   return
-      // }
-
-      // TODO: Calculate buffer based on screen height to get smooth maximize
-
-      recalculateHeightsOnWidthChange(
-        buffer: 3,
-        duringLiveResize: true,
-        maintainScroll: !isAtBottom
-        // maintainScroll: false
-      )
-
-      // COMMENTED FOR NOW TO SEE IF IT WAS OWRTH THE EXTRA BUGS THAT
-      // APPEAR during live resize while maximize
-
-//
-//      let availableWidth = sizeCalculator.getAvailableWidth(
-//        tableWidth: tableWidth()
-//      )
-//      if availableWidth < Theme.messageMaxWidth {
-//        recalculateHeightsOnWidthChange(duringLiveResize: true)
-//        wasLastResizeAboveLimit = false
-//      } else {
-//        if !wasLastResizeAboveLimit {
-//          // One last time just before stopping at the limit. This is import so stuff don't get stuck
-//          recalculateHeightsOnWidthChange(duringLiveResize: true)
-//          wasLastResizeAboveLimit = true
-//        } else {
-//          log.trace("skipped width recalc")
-//        }
-//      }
+      recalculateHeightsOnWidthChange(buffer: 3, duringLiveResize: true)
     }
   }
 
@@ -3122,7 +3256,6 @@ class MessageListAppKit: NSViewController {
         case .newer:
           messages.last?.message.messageId
       }
-      var didInsertRows = false
 
       log.trace("Loading \(loadDirectionLabel(direction)) batch")
       let didLoadLocalBatch = await chatRows.loadBatchAsync(
@@ -3130,55 +3263,7 @@ class MessageListAppKit: NSViewController {
       )
       guard !Task.isCancelled else { return }
 
-      let applyLoadedBatch: () -> Bool? = { [weak self] in
-        guard let self else { return false }
-        guard !Task.isCancelled else { return false }
-
-        let rowUpdate = chatRows.syncFromViewModelAfterManualMutation()
-        defer { pruneMessageSelection() }
-
-        switch rowUpdate {
-          case let .insert(inserted) where !inserted.isEmpty:
-            clearHoveredMessage()
-            tableView.beginUpdates()
-            tableView.insertRows(at: inserted, withAnimation: .none)
-            tableView.endUpdates()
-            syncAvatarOverlayAfterTableLayout()
-            scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch_insert")
-            scheduleMessageHoverRefresh()
-            didInsertRows = true
-            return true
-
-          case .none:
-            didInsertRows = false
-            return false
-
-          case .reloadAll:
-            clearHoveredMessage()
-            tableView.reloadData()
-            syncAvatarOverlayAfterTableLayout()
-            scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch_reload")
-            scheduleMessageHoverRefresh()
-            didInsertRows = true
-            return true
-
-          case .remove(_), .reloadRows(_), .insert:
-            clearHoveredMessage()
-            tableView.reloadData()
-            syncAvatarOverlayAfterTableLayout()
-            scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch_fallback")
-            scheduleMessageHoverRefresh()
-            didInsertRows = true
-            return true
-        }
-      }
-
-      if didLoadLocalBatch, direction == .older {
-        // Preserve scroll position from bottom if we're loading at top.
-        maintainingBottomScroll(applyLoadedBatch)
-      } else if didLoadLocalBatch {
-        _ = applyLoadedBatch()
-      }
+      let didInsertRows = didLoadLocalBatch && applyLoadedBatch()
 
       guard !Task.isCancelled else { return }
       guard !didInsertRows else { return }
@@ -3194,6 +3279,34 @@ class MessageListAppKit: NSViewController {
           requestRemoteNewerBatch(afterMessageId: boundaryMessageIdBeforeLoad)
       }
     }
+  }
+
+  /// Capture after the page read. Either edge can yield a replacement window when
+  /// a publication or a coverage change is reconciled with the page.
+  private func applyLoadedBatch() -> Bool {
+    let anchors = viewport.anchors()
+    let rowUpdate = chatRows.syncFromViewModelAfterManualMutation()
+    guard rowUpdate != .none else { return false }
+
+    clearHoveredMessage()
+    if case let .insert(inserted) = rowUpdate {
+      tableView.beginUpdates()
+      tableView.insertRows(at: inserted, withAnimation: .none)
+      tableView.endUpdates()
+      reloadGroupBoundaryRows(groupBoundaryRefreshRows(aroundInsertedRows: inserted))
+    } else {
+      tableView.reloadData()
+    }
+    tableView.layoutSubtreeIfNeeded()
+    if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+      viewport.restore(anchor)
+    }
+    maintainReadingHoldIfNeeded()
+    syncAvatarOverlayAfterTableLayout()
+    scheduleMediaWarmupForVisibleAndNearby(reason: "local_batch")
+    scheduleMessageHoverRefresh()
+    pruneMessageSelection()
+    return true
   }
 
   func applyInitialData() {
@@ -3253,15 +3366,18 @@ class MessageListAppKit: NSViewController {
       )
     }
 
-    isPerformingUpdate = true
+    tableUpdateCount += 1
 
-    // using "atBottom" here might add jitter if user is scrolling slightly up and then we move it down quickly
-    let wasAtBottom = isAtAbsoluteBottom
+    // Only new arrivals use the wider follow zone. Other mutations preserve the reading row.
     let animationDuration = debug_slowAnimation ? 1.5 : 0.15
-    let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage &&
-      !isUserScrolling // to prevent jitter when user is scrolling
-    let updateAnchor = shouldScroll ? nil : captureVisibleMessageAnchor()
+    let shouldScroll: Bool
+    switch update {
+      case .added: shouldScroll = feature_scrollsToBottomOnNewMessage && canFollowBottom && isWithinFollowZone
+      default: shouldScroll = shouldKeepBottomPinned
+    }
+    let anchors = shouldScroll ? [] : viewport.anchors()
     let rowUpdate = chatRows.apply(update)
+    let updateAnchor = anchors.first { viewport.index(of: $0) != nil }
     defer { pruneMessageSelection() }
     if rowUpdate != .none {
       clearHoveredMessage()
@@ -3273,40 +3389,46 @@ class MessageListAppKit: NSViewController {
     }
 
     func reloadAll(animated: Bool, preserving anchor: VisibleMessageAnchor? = nil) {
-      if animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+      if animated, anchor == nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
         NSAnimationContext.runAnimationGroup { [weak self] context in
           guard let self else { return }
           context.duration = animationDuration
           tableView.reloadData()
           tableView.layoutSubtreeIfNeeded()
-          if let anchor {
-            restoreVisibleMessageAnchor(anchor)
-          }
           syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
           if shouldScroll {
             scrollToBottom(animated: true)
           }
         } completionHandler: { [weak self] in
-          self?.isPerformingUpdate = false
+          self?.endTableUpdate()
         }
       } else {
         tableView.reloadData()
         tableView.layoutSubtreeIfNeeded()
         if let anchor {
-          restoreVisibleMessageAnchor(anchor)
+          viewport.restore(anchor)
         }
         syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll {
           scrollToBottom(animated: false)
         }
-        isPerformingUpdate = false
+        endTableUpdate()
       }
     }
 
     func applyStructuralInsert(animated: Bool, inserted: IndexSet) {
       let boundaryRows = groupBoundaryRefreshRows(aroundInsertedRows: inserted)
+      // NSTableView keeps the clip origin, so rows inserted above the visible ones would push
+      // them down. Those go in without animation and the visible rows are put back.
+      var keptAnchor: VisibleMessageAnchor?
+      if let updateAnchor,
+         let anchorRow = viewport.index(of: updateAnchor),
+         let firstInserted = inserted.first, firstInserted < anchorRow
+      {
+        keptAnchor = updateAnchor
+      }
 
-      if animated {
+      if animated, keptAnchor == nil {
         NSAnimationContext.runAnimationGroup { [weak self] context in
           guard let self else { return }
           context.duration = animationDuration
@@ -3317,23 +3439,34 @@ class MessageListAppKit: NSViewController {
             scrollToBottom(animated: true)
           }
         } completionHandler: { [weak self] in
-          self?.isPerformingUpdate = false
+          self?.endTableUpdate()
         }
       } else {
         tableView.beginUpdates()
         tableView.insertRows(at: inserted, withAnimation: .none)
         tableView.endUpdates()
         reloadGroupBoundaryRows(boundaryRows)
+        if let keptAnchor {
+          tableView.layoutSubtreeIfNeeded()
+          viewport.restore(keptAnchor)
+        }
         syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll {
           scrollToBottom(animated: false)
         }
-        isPerformingUpdate = false
+        endTableUpdate()
       }
     }
 
     func applyStructuralRemove(animated: Bool, removed: IndexSet) {
-      if animated {
+      // NSTableView keeps the clip origin, so rows removed above the visible ones would pull
+      // them up. Those go without animation and the visible rows are put back.
+      var keptAnchor: VisibleMessageAnchor?
+      if let updateAnchor, let firstRemoved = removed.first, firstRemoved < updateAnchor.oldIndex {
+        keptAnchor = updateAnchor
+      }
+
+      if animated, keptAnchor == nil {
         NSAnimationContext.runAnimationGroup { [weak self] context in
           guard let self else { return }
           context.duration = animationDuration
@@ -3343,17 +3476,21 @@ class MessageListAppKit: NSViewController {
             scrollToBottom(animated: true)
           }
         } completionHandler: { [weak self] in
-          self?.isPerformingUpdate = false
+          self?.endTableUpdate()
         }
       } else {
         tableView.beginUpdates()
         tableView.removeRows(at: removed, withAnimation: .none)
         tableView.endUpdates()
+        if let keptAnchor {
+          tableView.layoutSubtreeIfNeeded()
+          viewport.restore(keptAnchor)
+        }
         syncUpdateAvatarOverlayAfterTableLayout(on: self)
         if shouldScroll {
           scrollToBottom(animated: false)
         }
-        isPerformingUpdate = false
+        endTableUpdate()
       }
     }
 
@@ -3368,17 +3505,19 @@ class MessageListAppKit: NSViewController {
             if shouldScroll {
               scrollToBottom(animated: true)
             }
-            isPerformingUpdate = false
+            endTableUpdate()
           case .reloadAll, .remove(_), .reloadRows:
-            reloadAll(animated: true)
+            reloadAll(animated: true, preserving: updateAnchor)
         }
-        handleIncomingMessages(newMessages)
+        updateScrollToBottomCount()
         if let pendingID = pendingArrivalMessageID,
            newMessages.contains(where: { $0.message.messageId == pendingID })
         {
           pendingArrivalMessageID = nil
+          let revision = targetScrollRevision
           DispatchQueue.main.async { [weak self] in
-            self?.scrollToMessage(pendingID, shouldHighlight: true)
+            guard let self, !isDisposed, targetScrollRevision == revision else { return }
+            scrollToMessage(pendingID, shouldHighlight: true)
           }
         }
 
@@ -3390,9 +3529,9 @@ class MessageListAppKit: NSViewController {
             if shouldScroll {
               scrollToBottom(animated: true)
             }
-            isPerformingUpdate = false
+            endTableUpdate()
           case .reloadAll, .insert(_), .reloadRows:
-            reloadAll(animated: true)
+            reloadAll(animated: true, preserving: updateAnchor)
         }
 
       case let .updated(updatedMessages, indexSet, animated):
@@ -3402,11 +3541,12 @@ class MessageListAppKit: NSViewController {
         switch rowUpdate {
           case let .reloadRows(rowsToReload):
             if rowsToReload.isEmpty {
-              isPerformingUpdate = false
+              endTableUpdate()
               break
             }
 
-            if animated == true, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let movesAnchor = updateAnchor?.hasChangesAbove(rowsToReload) == true
+            if animated == true, !movesAnchor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
               NSAnimationContext.runAnimationGroup { [weak self] context in
                 guard let self else { return }
                 context.duration = animationDuration
@@ -3415,14 +3555,14 @@ class MessageListAppKit: NSViewController {
                 updateHeightsForRows(at: rowsToReload)
                 tableView.layoutSubtreeIfNeeded()
                 if let updateAnchor {
-                  restoreVisibleMessageAnchor(updateAnchor)
+                  viewport.restore(updateAnchor)
                 }
                 syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
                 if shouldScroll {
                   scrollToBottom(animated: true)
                 }
               } completionHandler: { [weak self] in
-                self?.isPerformingUpdate = false
+                self?.endTableUpdate()
               }
             } else {
               tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
@@ -3430,17 +3570,17 @@ class MessageListAppKit: NSViewController {
               updateHeightsForRows(at: rowsToReload)
               tableView.layoutSubtreeIfNeeded()
               if let updateAnchor {
-                restoreVisibleMessageAnchor(updateAnchor)
+                viewport.restore(updateAnchor)
               }
               syncUpdateAvatarOverlayAfterTableLayout(on: self)
               if shouldScroll {
                 scrollToBottom(animated: false)
               }
-              isPerformingUpdate = false
+              endTableUpdate()
             }
 
           case .none:
-            isPerformingUpdate = false
+            endTableUpdate()
 
           case .reloadAll, .insert(_), .remove:
             reloadAll(animated: animated == true, preserving: updateAnchor)
@@ -3448,134 +3588,13 @@ class MessageListAppKit: NSViewController {
 
       case .reload:
         log.trace("reloading data")
-        switch rowUpdate {
-          case .none:
-            tableView.reloadData()
-            syncUpdateAvatarOverlayAfterTableLayout(on: self)
-            if shouldScroll {
-              scrollToBottom(animated: false)
-            }
-            isPerformingUpdate = false
-          case .reloadAll, .insert(_), .remove(_), .reloadRows:
-            reloadAll(animated: false, preserving: updateAnchor)
-        }
+        reloadAll(animated: false, preserving: updateAnchor)
     }
   }
 
-  // TODO: probably can optimize this
-  private func maintainingBottomScroll(_ closure: () -> Bool?) {
-    // Capture current scroll position relative to bottom
-    let viewportHeight = scrollView.contentView.bounds.height
-    let currentOffset = scrollView.contentView.bounds.origin.y
-
-    // Execute the closure that modifies the data
-    if let shouldMaintain = closure(), !shouldMaintain {
-      return
-    }
-
-    // scrollView.layoutSubtreeIfNeeded()
-
-    // Calculate and set new scroll position
-    let newContentHeight = scrollView.documentView?.frame.height ?? 0
-    //    let newOffset = newContentHeight - (distanceFromBottom + viewportHeight)
-    let newOffset = newContentHeight - (oldDistanceFromBottom + viewportHeight)
-
-    #if DEBUG
-    log.trace("Maintaining scroll from bottom, oldOffset=\(currentOffset), newOffset=\(newOffset)")
-    #endif
-
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    scrollView.documentView?.scroll(NSPoint(x: 0, y: newOffset))
-    CATransaction.commit()
-  }
-
-  enum ScrollAnchorPosition {
-    case bottomRow
-  }
-
-  enum ScrollAnchor {
-    case bottom(row: Int, distanceFromViewportBottom: CGFloat)
-  }
-
-  ///
-  /// Notes:
-  /// - this relies on item index so doesn't work if items are added/removed for now
-  private func anchorScroll(to: ScrollAnchorPosition) -> (() -> Void) {
-    // let visibleRect = scrollView.contentView.bounds
-    let visibleRect = tableView.visibleRect
-
-    let bottomInset = scrollView.contentInsets.bottom
-    let visibleRectInsetted = NSRect(
-      x: visibleRect.origin.x,
-      y: visibleRect.origin.y,
-      width: visibleRect.width,
-      height: visibleRect.height - bottomInset
-    )
-    #if DEBUG
-    log.trace("Anchoring to bottom. Visible rect: \(visibleRectInsetted) inset: \(bottomInset)")
-    #endif
-
-    let viewportHeight = scrollView.contentView.bounds.height
-    let currentOffset = scrollView.contentView.bounds.origin.y
-    let viewportMinYOffset: CGFloat = currentOffset + viewportHeight
-
-    // Capture anchor snapshot
-    var anchor: ScrollAnchor
-
-    switch to {
-      case .bottomRow:
-        // last one fails to give correct rect...
-        let index = min(tableView.rows(in: visibleRectInsetted).max - 1, tableView.numberOfRows - 2)
-
-        let rowRect = tableView.rect(ofRow: index)
-
-        // Calculate distance from row's TOP edge to viewport's bottom edge
-        let topEdgeToViewportBottom = rowRect.minY - visibleRect.maxY
-
-        anchor = .bottom(row: index, distanceFromViewportBottom: topEdgeToViewportBottom)
-        #if DEBUG
-//        log.trace("""
-//                Anchoring to bottom row: \(index),
-//                distance: \(topEdgeToViewportBottom)
-//                row.minY=\(rowRect.minY)
-//                row.maxY=\(rowRect.maxY)
-//                row.height=\(rowRect.height)
-//                visibleRect.minY=\(visibleRect.minY)
-//                visibleRect.maxY=\(visibleRect.maxY)
-//        """)
-        #endif
-    }
-
-    return { [weak self] in
-      guard let self else { return }
-
-      // see if it's needed
-      scrollView.layoutSubtreeIfNeeded()
-
-      switch anchor {
-        case let .bottom(row, distanceFromViewportBottom):
-          // Get the updated rect for the anchor row
-          let rowRect = tableView.rect(ofRow: row)
-
-          // Calculate new scroll position to maintain the same distance from viewport bottom
-          let viewportHeight = scrollView.contentView.bounds.height
-          let targetY = rowRect.minY - viewportHeight - distanceFromViewportBottom
-
-          // Apply new scroll position
-          let newOrigin = CGPoint(x: 0, y: targetY)
-
-          scrollView.contentView.updateBounds(newOrigin, cancel: true)
-      }
-    }
-  }
-
-  /// Note this function will stop any animation that is happening so must be used with caution
-  /// increasing buffer results in unstable scroll if not maintained
   private func recalculateHeightsOnWidthChange(
     buffer: Int = 0,
-    duringLiveResize: Bool = false,
-    maintainScroll: Bool = true
+    duringLiveResize: Bool = false
   ) {
     heightRecalcCount += 1
 
@@ -3583,9 +3602,8 @@ class MessageListAppKit: NSViewController {
     log.trace("Recalculating heights on width change")
     #endif
 
-    // should we keep this??
     if isPerformingUpdate {
-      log.trace("Ignoring recalculation due to ongoing update")
+      deferredWidthBuffer = max(buffer, deferredWidthBuffer ?? 0)
       return
     }
 
@@ -3616,7 +3634,7 @@ class MessageListAppKit: NSViewController {
         name: "MessageListHeightRecalc",
         signpostID: signpostID,
         "%{public}s",
-        "count=\(heightRecalcCount) rows=\(rowsToUpdate.count) width=\(tableWidth()) initial=\(needsInitialScroll) live=\(duringLiveResize) maintain=\(maintainScroll)"
+        "count=\(heightRecalcCount) rows=\(rowsToUpdate.count) width=\(tableWidth()) initial=\(needsInitialScroll) live=\(duringLiveResize)"
       )
     }
     defer {
@@ -3628,11 +3646,8 @@ class MessageListAppKit: NSViewController {
     #if DEBUG
     log.trace("Rows to update: \(rowsToUpdate)")
     #endif
-    let apply: (() -> Void)? = if maintainScroll {
-      anchorScroll(to: .bottomRow)
-    } else {
-      nil
-    }
+    let pinned = shouldKeepBottomPinned
+    let anchor = pinned ? nil : viewport.anchors().first
     CATransaction.begin()
     NSAnimationContext.beginGrouping()
     NSAnimationContext.current.duration = 0
@@ -3645,12 +3660,21 @@ class MessageListAppKit: NSViewController {
     tableView.noteHeightOfRows(withIndexesChanged: rowsToUpdate)
     tableView.endUpdates()
 
-    apply?()
-    maintainUnreadLineHoldIfNeeded()
+    restoreAfterRemeasure(pinned: pinned, anchor: anchor)
+    maintainReadingHoldIfNeeded()
     NSAnimationContext.endGrouping()
     CATransaction.commit()
     syncAvatarOverlayAfterTableLayout()
     refreshMessageHoverAfterGeometryChange()
+  }
+
+  private func restoreAfterRemeasure(pinned: Bool, anchor: VisibleMessageAnchor?) {
+    tableView.layoutSubtreeIfNeeded()
+    if pinned {
+      tableView.scrollToBottomWithInset(cancel: true)
+    } else if let anchor {
+      viewport.restore(anchor)
+    }
   }
 
   private func updateHeightsForRows(at indexSet: IndexSet, width: CGFloat? = nil) {
@@ -4144,13 +4168,41 @@ class MessageListAppKit: NSViewController {
           !view.isHiddenOrHasHiddenAncestor
     else { return }
 
-    // Temporary read-on-open workaround: do not wait for history coverage or
-    // an advancing incoming marker. readAll clears locally before sending.
-    UnreadManager.shared.readAll(peerId, chatId: chatId)
-    if isAtBottom {
-      markMessagesSeen()
+    // Nothing is read before the list has landed: until then it sits at the bottom of the
+    // latest page, hidden or unplaced, and would read past an unread line it is about to open at.
+    guard !needsInitialScroll, unreadFetchBoundary == nil else { return }
+
+    if isWithinFollowZone, chatRows.historyCoverage.isAtCertifiedLiveEnd {
+      // The bottom of a partial history window is not the end of the chat.
+      // Clear everything only after the loaded page reaches the certified live end.
+      UnreadManager.shared.readAll(peerId, chatId: chatId)
+    } else {
+      // In history the read marker follows what was on screen. A read the coverage
+      // cannot certify waits until that history has been loaded.
+      readVisibleIncomingMessages()
     }
     reportVisibleActivity()
+  }
+
+  private func readVisibleIncomingMessages() {
+    let coverage = chatRows.historyCoverage
+    if coverage != lastVisibleReadCoverage {
+      lastVisibleReadCoverage = coverage
+      lastVisibleReadCandidateID = nil
+    }
+    guard let highestVisibleIncomingID = highestVisibleIncomingMessageID(),
+          highestVisibleIncomingID > (lastVisibleReadCandidateID ?? 0)
+    else { return }
+    lastVisibleReadCandidateID = highestVisibleIncomingID
+    UnreadManager.shared.readVisible(
+      peerId: peerId,
+      chatId: chatId,
+      highestVisibleIncomingID: highestVisibleIncomingID
+    )
+    if highestVisibleIncomingID > unreadCountReadFrontier {
+      unreadCountReadFrontier = highestVisibleIncomingID
+      updateScrollToBottomCount()
+    }
   }
 
   /// All on-screen messages: mentions arrive on others' messages, reactions on yours.
@@ -4190,38 +4242,16 @@ class MessageListAppKit: NSViewController {
     }.max()
   }
 
-  private func latestMessageId() -> Int64? {
-    let latest = chatRows.reversed ? messages.first : messages.last
-    return latest?.message.messageId
-  }
-
-  private func markMessagesSeen() {
-    guard let latestId = latestMessageId() else {
-      hasUnreadSinceScroll = false
-      updateUnreadBadgeVisibility()
-      return
-    }
-    lastSeenMessageId = latestId
-    hasUnreadSinceScroll = false
-    updateUnreadBadgeVisibility()
-  }
-
-  private func handleIncomingMessages(_ newMessages: [FullMessage]) {
-    guard !newMessages.isEmpty else { return }
-    if isAtBottom, chatRows.historyCoverage.isAtCertifiedLiveEnd {
-      markMessagesSeen()
-      return
-    }
-
-    let newestId = newMessages.map(\.message.messageId).max() ?? lastSeenMessageId
-    if newestId > lastSeenMessageId {
-      hasUnreadSinceScroll = true
-      updateUnreadBadgeVisibility()
-    }
-  }
-
-  private func updateUnreadBadgeVisibility() {
-    scrollToBottomButton.setHasUnread(!isAtBottom && hasUnreadSinceScroll)
+  /// Unread messages below the reader, falling as they scroll and kept across reopening.
+  private func updateScrollToBottomCount() {
+    let state = activityNavigator?.state ?? .empty
+    scrollToBottomButton.setCount(ChatUnreadBadgeCount.resolve(
+      unreadCount: state.unreadCount,
+      readInboxMaxId: state.readInboxMaxId,
+      readFrontier: unreadCountReadFrontier,
+      coverage: chatRows.historyCoverage,
+      loadedMessages: messages
+    ))
   }
 }
 
@@ -4568,6 +4598,14 @@ extension MessageListAppKit: NSTableViewDelegate {
         )
         return cell
 
+      case .statusNotice:
+        let identifier = NSUserInterfaceItemIdentifier("StatusNoticeCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? StatusNoticeTableCell
+          ?? StatusNoticeTableCell()
+        cell.identifier = identifier
+        cell.configure(text: chatRows.statusNotice ?? "")
+        return cell
+
       case .collapsedHistory:
         let identifier = NSUserInterfaceItemIdentifier("CollapsedHistoryCell")
         let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? CollapsedHistoryTableCell
@@ -4635,6 +4673,9 @@ extension MessageListAppKit: NSTableViewDelegate {
       case .collapsedHistory:
         return CollapsedHistoryTableCell.height
 
+      case .statusNotice:
+        return StatusNoticeTableCell.height
+
       case let .message(id), let .parentMessage(id):
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }
         let props = messageProps(for: row)
@@ -4694,7 +4735,8 @@ extension MessageListAppKit {
   // MARK: - Scroll to message
 
   func scrollToMsgAndHighlight(_ request: ScrollToMessageRequest) {
-    releaseUnreadLineHold()
+    releaseReadingHold()
+    readingPlaceCaptureBlocked = false
     targetScrollRevision &+= 1
     isProgrammaticScroll = false
     targetScrollTask?.cancel()
@@ -5053,6 +5095,9 @@ extension MessageListAppKit {
 
 extension MessageListAppKit {
   func dispose() {
+    // The controller is rebuilt on every navigation, so leaving the chat ends here. Captured
+    // before anything is torn down, while the rows and scroll geometry are still the user's.
+    captureReadingPlace()
     isDisposed = true
     cancellables.removeAll()
     clearReplyThreadSourceAnchor()

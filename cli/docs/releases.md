@@ -10,7 +10,7 @@ The release command updates and commits the Cargo workspace version, inherited
 crate versions in `Cargo.lock`, and internal path dependency requirements
 together. It pushes that commit, waits for its release checks, then creates and
 pushes an annotated tag. CI verifies the committed versions match the tag before
-building; it does not rewrite release versions. Independently versioned crates
+building; it only stamps a version for automated alpha tags (see below). Independently versioned crates
 and the private unversioned `cli/package.json` retain their source versions.
 
 ## Select and release a candidate
@@ -43,6 +43,34 @@ existing tag; repository tag rules also prevent tag updates and deletion.
 Release notes use GitHub's automatic notes. If CI or a push fails, rerun the same
 preparation command to reuse its version commit. If main advances while CI runs,
 the release retains the selected commit.
+
+## Automated alphas
+
+The CLI Alpha workflow cuts alphas on its own, the way macOS Tip and iOS Early
+Testers ship Apple builds. Each CI or CLI Update Qualification completion on
+main, plus a three-hourly sweep, selects the newest main commit that changed CLI
+inputs and passed both the **Rust workspace all targets** / **Workflow and
+release contracts** jobs and the updater qualification jobs. It waits while a
+newer CLI change is still in CI and while any CLI release is running, and cuts at
+most one alpha every three hours (a manual run skips the interval).
+
+It tags that commit with the next alpha above every CLI tag and the committed
+workspace version (`0.7.22-alpha.4` → `0.7.22-alpha.5`; after stable `0.7.22`,
+`0.7.23-alpha.1`), then dispatches CLI Release for the tag. There is no version
+commit: for an `-alpha.N` tag newer than the committed version, each release job
+stamps the tag's version into its checkout (`cli-release-version.ts apply`), like
+a build number. Every other tag still needs the version commit from
+`release:cli`, which remains the way to publish stable and beta releases or an
+out-of-band alpha.
+
+```sh
+# Cut an alpha now from the newest green CLI change, ignoring the interval.
+gh workflow run cli-alpha.yml --repo inline-chat/inline --ref main
+```
+
+Creating `cli-v*` tags is limited to repository admins by the "Release tags:
+admin creation" ruleset; the workflow needs GitHub Actions on that ruleset's
+bypass list. The immutability ruleset (no tag updates or deletion) still applies.
 
 Credentials-only and build diagnostics can use an exact green main commit
 without creating a tag. They never publish. Target overrides and signed-only

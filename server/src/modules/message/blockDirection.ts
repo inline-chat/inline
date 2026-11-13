@@ -45,14 +45,35 @@ const rtlLetterRanges: ReadonlyArray<readonly [number, number]> = [
 ]
 
 const strongLetter = /^[\p{L}\p{Nl}]$/u
+const inWordMark = /^[\p{M}\u200c\u200d]$/u
 
-export function detectFirstStrongIsRtl(value: string): boolean | undefined {
+/**
+ * Base direction of prose: the direction with more words, a tie going to the first strong
+ * letter. Persian and Hebrew prose routinely opens with Latin product names, identifiers and
+ * paths ("Claude Code حداقل ۲.۱ لازم دارد"), which the first-strong rule alone reads as LTR.
+ * A word is a run of letters with the marks and ZWNJ/ZWJ Arabic-script words carry inside
+ * them; it counts for the direction of its first letter. Apple clients apply the same rule.
+ */
+export function detectIsRtl(value: string): boolean | undefined {
+  let rtlWords = 0
+  let ltrWords = 0
+  let firstStrong: boolean | undefined
+  let inWord = false
   for (const scalar of value) {
-    if (!strongLetter.test(scalar)) continue
-    const codePoint = scalar.codePointAt(0)!
-    return rtlLetterRanges.some(([start, end]) => codePoint >= start && codePoint <= end)
+    if (strongLetter.test(scalar)) {
+      if (inWord) continue
+      inWord = true
+      const codePoint = scalar.codePointAt(0)!
+      const isRtl = rtlLetterRanges.some(([start, end]) => codePoint >= start && codePoint <= end)
+      if (isRtl) rtlWords += 1
+      else ltrWords += 1
+      firstStrong ??= isRtl
+    } else if (!inWordMark.test(scalar)) {
+      inWord = false
+    }
   }
-  return undefined
+  if (rtlWords !== ltrWords) return rtlWords > ltrWords
+  return firstStrong
 }
 
 export function annotateBlockContentDirections(text: string, content: BlockContent): void {
@@ -189,7 +210,7 @@ function annotateLeafText(
 
 function directionForText(text: string, range: BlockText | undefined): boolean | undefined {
   if (!range) return undefined
-  return detectFirstStrongIsRtl(
+  return detectIsRtl(
     text.slice(Number(range.offset), Number(range.offset + range.length)),
   )
 }

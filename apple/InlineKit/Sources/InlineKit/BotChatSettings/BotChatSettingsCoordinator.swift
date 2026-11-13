@@ -257,6 +257,9 @@ public final class BotChatSettingsCoordinator {
 
   public let peer: Peer
   public private(set) var bots: [BotChatSettingsBot] = []
+  /// Bots in this chat that declare the Output setting (`BotCapability.outputMode`),
+  /// such as the Hermes and OpenClaw plugins, which report no runtime.
+  public private(set) var outputModeBotIDs: Set<Int64> = []
   public private(set) var selectedBotID: Int64?
   public private(set) var isDiscovering = false
   public private(set) var isMutating = false
@@ -629,6 +632,10 @@ public final class BotChatSettingsCoordinator {
         else { return nil }
         return BotChatSettingsBot(user: peerBot.bot)
       }
+      outputModeBotIDs = Set(result.bots.compactMap { peerBot -> Int64? in
+        guard peerBot.hasBot, peerBot.capabilities.contains(where: { $0.kind == .outputMode }) else { return nil }
+        return peerBot.bot.id
+      })
       applyDiscoveredBots(
         compatible,
         suggestedBotID: result.hasSuggestedBotUserID ? result.suggestedBotUserID : nil

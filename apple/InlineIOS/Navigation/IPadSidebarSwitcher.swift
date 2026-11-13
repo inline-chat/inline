@@ -42,8 +42,6 @@ struct IPadSidebarSwitcher: View {
 
   var body: some View {
     styledPicker
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
   }
 
   @ViewBuilder

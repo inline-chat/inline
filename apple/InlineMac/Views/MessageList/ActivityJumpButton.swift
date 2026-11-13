@@ -18,80 +18,31 @@ enum ActivityJumpButtonKind {
 /// Floating "@" or "♥" button above scroll-to-bottom. Shows how many items are unseen;
 /// clicking jumps to the oldest one, right-clicking offers to mark them all read.
 struct ActivityJumpButtonView: View {
-  @Environment(\.colorScheme) private var colorScheme
   var kind: ActivityJumpButtonKind = .mention
   var isHovered = false
   var count = 0
   var themeRevision = 0
   var onClick: (() -> Void)?
 
-  private let buttonSize: CGFloat = Theme.scrollButtonSize
-
-  private var isVisible: Bool { count > 0 }
-
   var body: some View {
-    let button = Button(action: { onClick?() }) {
+    ChatFloatingButtonChrome(
+      isHovered: isHovered,
+      isVisible: count > 0,
+      count: count,
+      badgeTint: kind.tint,
+      onClick: onClick
+    ) {
       Group {
         switch kind {
           case .mention:
-            Text("@").font(.system(size: 14, weight: .semibold, design: .rounded))
+            Text("@").font(.system(size: ChatFloatingButtonMetrics.iconPointSize, weight: .semibold, design: .rounded))
+              .offset(y: -0.5)
           case .reaction:
-            Image(systemName: "heart.fill").font(.system(size: 12, weight: .semibold))
+            Image(systemName: "heart.fill").font(.system(size: ChatFloatingButtonMetrics.iconPointSize - 1, weight: .medium))
         }
       }
-        .foregroundStyle(kind.tint)
-        .frame(width: buttonSize, height: buttonSize)
-        .contentShape(.interaction, Circle())
+      .foregroundStyle(kind.tint)
     }
-    .focusable(false)
-
-    let styled: AnyView = if #available(macOS 26.0, *) {
-      AnyView(
-        button
-          .buttonStyle(.plain)
-          .glassEffect(
-            Glass.regular
-              .tint(isHovered ? (colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)) : nil)
-              .interactive(),
-            in: .circle
-          )
-      )
-    } else {
-      AnyView(
-        button
-          .buttonStyle(ScrollToBottomButtonStyle())
-          .background(
-            Circle()
-              .fill(.ultraThinMaterial)
-              .overlay(
-                Circle().strokeBorder(
-                  (colorScheme == .dark ? Color.white : Color.black).opacity(isHovered ? 0.22 : 0.1),
-                  lineWidth: 0.5
-                )
-              )
-              .shadow(color: .black.opacity(colorScheme == .dark ? 0.1 : 0.15), radius: 2, x: 0, y: -1)
-          )
-      )
-    }
-
-    return styled
-      .overlay(alignment: .topTrailing) {
-        if isVisible {
-          Text(count > 99 ? "99+" : "\(count)")
-            .font(.system(size: 10, weight: .semibold).monospacedDigit())
-            .foregroundStyle(.white)
-            .padding(.horizontal, 4)
-            .frame(minWidth: 16, minHeight: 16)
-            .background(Capsule().fill(kind.tint))
-            .offset(x: 5, y: -5)
-            .allowsHitTesting(false)
-        }
-      }
-      .opacity(isVisible ? 1 : 0)
-      .scaleEffect(isVisible ? 1 : 0.92)
-      .animation(.easeInOut(duration: 0.12), value: isHovered)
-      .animation(.easeInOut(duration: 0.2), value: isVisible)
-      .allowsHitTesting(isVisible)
   }
 }
 
@@ -118,8 +69,8 @@ final class ActivityJumpButtonHostingView: NSControl {
     NSLayoutConstraint.activate([
       hostingView.centerXAnchor.constraint(equalTo: centerXAnchor),
       hostingView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      hostingView.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
-      hostingView.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      hostingView.widthAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
+      hostingView.heightAnchor.constraint(equalToConstant: ChatFloatingButtonMetrics.size),
     ])
     setAccessibilityElement(true)
     setAccessibilityRole(.button)

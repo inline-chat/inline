@@ -10,6 +10,9 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   var onTextLongPress: ((NSEvent) -> Void)?
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableView] = [:]
+  /// Removed nodes still fading out. Never reused, hit-tested or selected.
+  private var fadingOutViews: [RichBlockRenderableView] = []
+  private let styleCache = RichBlockStyledTextCache()
   private var previousSource: String?
   private var previousContent: InlineProtocol.BlockContent?
   private var currentPlan: RichBlockLayoutPlan?
@@ -90,9 +93,16 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       previous: previousContent, current: content,
       previousSource: previousSource, currentSource: relatedMessage.text ?? ""
     )
+    // Only an update of an already shown message animates nodes in and out; a
+    // first bind or a different message appears as a whole.
+    let isUpdate = previousContent != nil
     previousSource = relatedMessage.text
     previousContent = content
     currentPlan = plan
+    styleCache.begin(
+      source: attributedText,
+      environment: .init(baseFontSize: baseFontSize, math: math, palette: palette, appearance: effectiveAppearance)
+    )
     let context = RichBlockRenderContext(
       math: math,
       attributedText: attributedText,
@@ -113,8 +123,13 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       isContentVisible: isContentVisible,
       codePresentation: codePresentation,
       renderStyle: renderStyle,
-      contentHorizontalInset: plan.contentHorizontalInset
+      contentHorizontalInset: plan.contentHorizontalInset,
+      styleCache: styleCache
     )
+
+    let shouldAnimate = animated && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    // Same rule as `animate`: an enclosing zero-duration context is immediate.
+    let fadesNodes = shouldAnimate && isUpdate && NSAnimationContext.current.duration > 0
 
     // Detach the dictionary before applying moves: a swap must not overwrite
     // the view we still need for a later destination.
@@ -126,13 +141,23 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       else { continue }
       nodeViews[node.path] = remainingViews.removeValue(forKey: oldPath)
     }
+    var fadeOuts: [RichBlockRenderableView] = []
     for removed in remainingViews.values {
-      removed.prepareForReuse()
-      removed.removeFromSuperview()
+      if fadesNodes {
+        // Out of `nodeViews`, so selection and gesture routing already skip it.
+        for surface in removed.orderedTextSurfaces {
+          surface.clearCoordinatedSelection()
+        }
+        fadingOutViews.append(removed)
+        fadeOuts.append(removed)
+      } else {
+        removed.prepareForReuse()
+        removed.removeFromSuperview()
+      }
     }
 
-    let shouldAnimate = animated && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     var frameChanges: [(RichBlockRenderableView, CGRect)] = []
+    var fadeIns: [RichBlockRenderableView] = []
     for node in plan.nodes {
       let view: RichBlockRenderableView
       if let reusable = nodeViews[node.path],
@@ -143,6 +168,10 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
         view = RichBlockViewFactory.make(for: node)
         nodeViews[node.path] = view
         addSubview(view)
+        if fadesNodes {
+          view.alphaValue = 0
+          fadeIns.append(view)
+        }
       }
       // New renderers need their measured bounds before apply; image views use
       // those bounds to choose an initial decode target.
@@ -169,7 +198,7 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       }
     }
 
-    animate(frameChanges)
+    animate(frameChanges, fadeIns: fadeIns, fadeOuts: fadeOuts)
     configureMultiSurfaceSelection(for: plan)
     mathMessageStableID = relatedMessage.stableId
     updateMathPreparation(math, layoutSignature: plan.mathSignature)
@@ -245,6 +274,13 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       view.removeFromSuperview()
     }
     nodeViews.removeAll(keepingCapacity: true)
+    // Their fade completions find nothing left to do.
+    for view in fadingOutViews {
+      view.prepareForReuse()
+      view.removeFromSuperview()
+    }
+    fadingOutViews.removeAll()
+    styleCache.removeAll()
     previousContent = nil
     previousSource = nil
     currentPlan = nil
@@ -728,11 +764,18 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     clearPreview()
   }
 
-  private func animate(_ changes: [(RichBlockRenderableView, CGRect)]) {
-    guard !changes.isEmpty else { return }
+  /// Callers only pass fades when the enclosing context animates (see `update`).
+  private func animate(
+    _ changes: [(RichBlockRenderableView, CGRect)],
+    fadeIns: [RichBlockRenderableView] = [],
+    fadeOuts: [RichBlockRenderableView] = []
+  ) {
+    guard !changes.isEmpty || !fadeIns.isEmpty || !fadeOuts.isEmpty else { return }
     // Honor the enclosing row's immediate layout for local disclosure clicks.
     guard NSAnimationContext.current.duration > 0 else {
       for (view, frame) in changes { view.frame = frame }
+      for view in fadeIns { view.alphaValue = 1 }
+      finishFadingOut(fadeOuts)
       return
     }
     NSAnimationContext.runAnimationGroup { context in
@@ -741,7 +784,38 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       for (view, frame) in changes {
         view.animator().frame = frame
       }
+      for view in fadeIns {
+        view.animator().alphaValue = 1
+      }
+      for view in fadeOuts {
+        view.animator().alphaValue = 0
+      }
+    } completionHandler: { [weak self] in
+      guard !fadeOuts.isEmpty else { return }
+      self?.finishFadingOut(fadeOuts)
     }
+  }
+
+  /// Skips views a reset already removed.
+  private func finishFadingOut(_ views: [RichBlockRenderableView]) {
+    for view in views {
+      guard let index = fadingOutViews.firstIndex(where: { $0 === view }) else { continue }
+      fadingOutViews.remove(at: index)
+      view.prepareForReuse()
+      view.removeFromSuperview()
+    }
+  }
+
+  // Fading views stay on screen but must not take clicks from the live nodes
+  // underneath, so they are skipped here.
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard !fadingOutViews.isEmpty else { return super.hitTest(point) }
+    guard !isHidden, frame.contains(point) else { return nil }
+    let local = convert(point, from: superview)
+    for child in subviews.reversed() where !fadingOutViews.contains(where: { $0 === child }) {
+      if let hit = child.hitTest(local) { return hit }
+    }
+    return self
   }
 }
 

@@ -1,0 +1,84 @@
+name: CLI Alpha
+
+# Every CI or CLI Update Qualification completion on main re-runs the gate, which
+# tags the newest green CLI change as the next alpha when the last CLI tag is over
+# three hours old, then starts CLI Release for that tag. CLI Release requalifies
+# the tag and stamps the alpha version at build time, so no version commit is
+# needed. The 3-hourly sweep catches anything the interval deferred. The summary
+# states whether the run tagged a release, was already current, deferred, blocked
+# or failed.
+on:
+  workflow_run:
+    workflows: [CI, CLI Update Qualification]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '29 */3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cli-alpha
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write # Dispatch CLI Release for the new tag.
+      contents: write # Create immutable alpha tags; never move an existing tag.
+    steps:
+      # Always use trusted default-branch scripts, never workflow_run artifacts.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Select newest green CLI change on main
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/cli-alpha-gate.mjs select
+      - name: Tag the alpha and start CLI Release
+        id: publish
+        if: steps.gate.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.gate.outputs.sha }}
+          TAG: ${{ steps.gate.outputs.tag }}
+          VERSION: ${{ steps.gate.outputs.version }}
+        run: node scripts/ci/cli-alpha-gate.mjs publish
+      - name: Report tagged, already current, deferred, blocked or failed
+        if: always()
+        env:
+          GATE_RESULT: ${{ steps.gate.outcome }}
+          PUBLISH_RESULT: ${{ steps.publish.outcome }}
+          SHOULD_RELEASE: ${{ steps.gate.outputs.should_release }}
+          GATE_OUTCOME: ${{ steps.gate.outputs.outcome }}
+          REASON: ${{ steps.gate.outputs.reason }}
+          TAG: ${{ steps.gate.outputs.tag }}
+          SHA: ${{ steps.gate.outputs.sha }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outputs.outcome }}
+          PUBLISH_REASON: ${{ steps.publish.outputs.reason }}
+        run: |
+          set -euo pipefail
+          OUTCOME="${GATE_OUTCOME:-failed}" DETAIL=""
+          if [[ "$GATE_RESULT" != success ]]; then
+            OUTCOME="${GATE_OUTCOME:-failed}" REASON="${REASON:-candidate selection $GATE_RESULT}"
+          elif [[ "$SHOULD_RELEASE" == true ]]; then
+            if [[ "$PUBLISH_RESULT" == success ]]; then
+              # Publication itself happens, and is reported, in the CLI Release run.
+              OUTCOME=deferred REASON="tagged $TAG; CLI Release builds and publishes it" DETAIL="Tag $TAG"
+            elif [[ "$PUBLISH_OUTCOME" == blocked ]]; then
+              OUTCOME=blocked REASON="$PUBLISH_REASON"
+            else
+              OUTCOME=failed REASON="tagging or dispatch $PUBLISH_RESULT; inspect the failed step before retrying"
+            fi
+          fi
+          bash scripts/ci/release-summary.sh "CLI Alpha" "$OUTCOME" "$REASON" "$SHA" "$DETAIL"

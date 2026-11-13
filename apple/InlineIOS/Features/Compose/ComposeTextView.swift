@@ -1239,9 +1239,44 @@ extension UITextView {
     }
   }
 
+  /// Drops link formatting from typing attributes unless the caret is editing inside a surviving link label,
+  /// so deleting or typing over a pasted link never turns the next text into that link.
+  private func resetLinkTypingAttributesIfNeeded() {
+    let linkColor = (self as? ComposeTextView)?.composeView?.linkColor ?? ThemeManager.shared.selected.accent
+    guard typingAttributes[.link] != nil ||
+      (typingAttributes[.foregroundColor] as? UIColor) == linkColor
+    else { return }
+
+    let selection = selectedRange
+    let text = attributedText ?? NSAttributedString()
+    if selection.location < text.length, selection.location > 0 || selection.length > 0 {
+      var linkRange = NSRange()
+      let link = text.attribute(
+        .link,
+        at: selection.location,
+        longestEffectiveRange: &linkRange,
+        in: NSRange(location: 0, length: text.length)
+      )
+      if link != nil {
+        if selection.length == 0, selection.location > linkRange.location { return }
+        if selection.length > 0,
+           NSIntersectionRange(linkRange, selection) == selection,
+           linkRange != selection
+        { return }
+      }
+    }
+
+    var attributes = typingAttributes
+    attributes.removeValue(forKey: .link)
+    attributes[.foregroundColor] = UIColor.label
+    typingAttributes = attributes
+  }
+
   /// Update typing attributes based on cursor position to prevent style leakage
   func updateTypingAttributesIfNeeded() {
     let selectedRange = selectedRange
+
+    resetLinkTypingAttributesIfNeeded()
 
     // If cursor is after a mention/bold text or typing attributes have special styling, reset to default
     if selectedRange.length == 0,

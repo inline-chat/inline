@@ -666,6 +666,7 @@ public extension Dialog {
     .including(
       optional: Dialog.peerUser.forKey("userInfo")
         .including(all: User.photos.forKey("profilePhoto"))
+        .including(optional: User.focusStatus.forKey("focus"))
     )
     // chat through user
     .including(optional: Dialog.peerUserChat)
@@ -677,6 +678,7 @@ public extension Dialog {
     including(
       optional: Dialog.peerUser.forKey("userInfo")
         .including(all: User.photos.forKey("profilePhoto"))
+        .including(optional: User.focusStatus.forKey("focus"))
     )
     // chat through user
     .including(

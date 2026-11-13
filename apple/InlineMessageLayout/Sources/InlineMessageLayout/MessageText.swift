@@ -8,9 +8,13 @@ public struct MessageText: Hashable, @unchecked Sendable {
   // NSAttributedString is immutable and safe to read from any thread; a mutable subclass is
   // copied on init so later mutation by the caller cannot change a cached layout.
   public let attributedString: NSAttributedString
+  // The text never changes, so its hash is computed once: cache lookups then cost O(1) to hash,
+  // and texts that differ almost always fail `==` without comparing their contents.
+  private let contentHash: Int
 
   public init(_ attributedString: NSAttributedString) {
     self.attributedString = attributedString.copy() as! NSAttributedString
+    contentHash = Self.hash(of: self.attributedString.string as NSString)
   }
 
   public var string: String { attributedString.string }
@@ -18,12 +22,31 @@ public struct MessageText: Hashable, @unchecked Sendable {
   public var isEmpty: Bool { attributedString.length == 0 }
 
   public static func == (lhs: MessageText, rhs: MessageText) -> Bool {
-    lhs.attributedString === rhs.attributedString || lhs.attributedString.isEqual(to: rhs.attributedString)
+    lhs.attributedString === rhs.attributedString
+      || (lhs.contentHash == rhs.contentHash && lhs.attributedString.isEqual(to: rhs.attributedString))
   }
 
   public func hash(into hasher: inout Hasher) {
-    hasher.combine(attributedString.length)
-    hasher.combine(attributedString.string)
+    hasher.combine(contentHash)
+  }
+
+  /// Hash of the UTF-16 code units. Equal attributed strings have code-unit-equal strings, so
+  /// this agrees with `==`; unlike `String` hashing it needs no Unicode normalization.
+  private static func hash(of string: NSString) -> Int {
+    var hasher = Hasher()
+    let length = string.length
+    hasher.combine(length)
+    let chunk = 1024
+    withUnsafeTemporaryAllocation(of: unichar.self, capacity: chunk) { buffer in
+      var location = 0
+      while location < length {
+        let count = min(chunk, length - location)
+        string.getCharacters(buffer.baseAddress!, range: NSRange(location: location, length: count))
+        hasher.combine(bytes: UnsafeRawBufferPointer(start: buffer.baseAddress, count: count * MemoryLayout<unichar>.size))
+        location += count
+      }
+    }
+    return hasher.finalize()
   }
 }
 
@@ -43,6 +66,42 @@ public enum TextDirection: Hashable, Sendable {
       if scalar.properties.isAlphabetic { return .leftToRight }
     }
     return fallback
+  }
+
+  /// Base direction of prose: the direction with more words, a tie going to the first strong
+  /// letter.
+  ///
+  /// Persian and Hebrew prose routinely opens with Latin product names, identifiers and paths,
+  /// which the first-strong rule alone reads as left to right. A word is a run of letters with
+  /// the marks and joiners Arabic-script words carry inside them; it counts for the direction of
+  /// its first letter. Same contract as InlineKit's `BlockContentDirection` and the server's
+  /// `blockDirection.ts`. Text with no letters uses `fallback`.
+  public static func dominant(in string: NSString, range: NSRange, fallback: TextDirection) -> TextDirection {
+    guard range.length > 0 else { return fallback }
+    var rightToLeftWords = 0
+    var leftToRightWords = 0
+    var firstStrong: TextDirection?
+    var inWord = false
+    for scalar in string.substring(with: range).unicodeScalars {
+      switch scalar.properties.generalCategory {
+      case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .letterNumber:
+        guard !inWord else { continue }
+        inWord = true
+        let direction: TextDirection = isRightToLeftLetter(scalar) ? .rightToLeft : .leftToRight
+        if direction == .rightToLeft { rightToLeftWords += 1 } else { leftToRightWords += 1 }
+        if firstStrong == nil { firstStrong = direction }
+      case .nonspacingMark, .spacingMark, .enclosingMark:
+        continue
+      case .format where scalar.value == 0x200C || scalar.value == 0x200D:
+        continue
+      default:
+        inWord = false
+      }
+    }
+    if rightToLeftWords != leftToRightWords {
+      return rightToLeftWords > leftToRightWords ? .rightToLeft : .leftToRight
+    }
+    return firstStrong ?? fallback
   }
 
   static func isRightToLeftLetter(_ scalar: Unicode.Scalar) -> Bool {

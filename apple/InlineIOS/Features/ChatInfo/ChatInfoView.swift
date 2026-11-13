@@ -253,7 +253,8 @@ struct ChatInfoView: View {
               if isDM {
                 DirectMessageInfoTabView(
                   username: directMessageUsername,
-                  notificationSelection: notificationSelectionBinding
+                  notificationSelection: notificationSelectionBinding,
+                  botUserID: chatItem.userInfo?.user.bot == true ? chatItem.userInfo?.user.id : nil
                 )
                 if let userInfo = chatItem.userInfo, userInfo.user.bot == true {
                   OwnedBotManageCard(bot: userInfo)
@@ -865,6 +866,8 @@ private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
 private struct DirectMessageInfoTabView: View {
   let username: String?
   @Binding var notificationSelection: DialogNotificationSettingSelection
+  /// Set in a direct chat with a bot, for its Output row.
+  let botUserID: Int64?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -884,10 +887,36 @@ private struct DirectMessageInfoTabView: View {
       }
 
       DialogNotificationSettingsRows(selection: $notificationSelection)
+
+      if let botUserID {
+        ChatInfoOutputModeRows(botUserID: botUserID)
+      }
     }
     .background(Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     .padding(.horizontal, 16)
+  }
+}
+
+/// How the bot replies in this direct chat, with its default as a submenu.
+/// Shown for bots that report a runtime or declare the Output setting; the
+/// same choice as the chat's Agent Settings.
+private struct ChatInfoOutputModeRows: View {
+  let botUserID: Int64
+  @ObservedObject private var store = AgentWorkStateStore.shared
+
+  var body: some View {
+    Group {
+      if store.offersOutputMode(botUserID: botUserID) {
+        Divider()
+          .padding(.horizontal, 16)
+
+        AgentOutputModeSection(peer: .user(id: botUserID), botUserID: botUserID, style: .card)
+      }
+    }
+    .task(id: botUserID) {
+      await store.loadDirectChatOutputModes(botUserID: botUserID)
+    }
   }
 }
 

@@ -120,7 +120,7 @@ describe("inline/threadreply-command", () => {
     expect(mutateConfigFile).toHaveBeenCalledWith(expect.objectContaining({
       afterWrite: {
         mode: "none",
-        reason: "Inline reads the refreshed runtime config in-process.",
+        reason: "Inline applies chat settings in-process without restarting the channel.",
       },
     }))
     expect(result.text).toContain("Reply threads in this chat: On.")

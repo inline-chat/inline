@@ -150,10 +150,6 @@ public struct CreateSubthreadTransaction: Transaction2 {
     let redirectedFrom = context.reservedChatId.flatMap { $0 == response.chat.id ? nil : $0 }
     do {
       let unsentTexts = try await AppDatabase.shared.dbWriter.write { db -> [String] in
-        // Another client created this message's reply thread first. Drop the
-        // local shell and keep whatever was written in it.
-        let unsentTexts = try redirectedFrom.map { try Self.removeShell(db, chatId: $0) } ?? []
-
         var chat = Chat(from: response.chat)
         if let existingChat = try Chat.fetchOne(db, key: chat.id), chat.lastMsgId == nil {
           chat.lastMsgId = existingChat.lastMsgId
@@ -162,6 +158,15 @@ public struct CreateSubthreadTransaction: Transaction2 {
 
         if response.hasDialog {
           _ = try response.dialog.saveFull(db)
+        }
+
+        let unsentTexts: [String]
+        if let redirectedFrom {
+          // Save the target before moving rows, so its foreign keys exist. Queued
+          // sends keep their old dependency and fail; the moved rows are explicit retries.
+          unsentTexts = try Self.removeShell(db, chatId: redirectedFrom, redirectingTo: chat.id)
+        } else {
+          unsentTexts = []
         }
 
         // The returned anchor is owned by the parent bucket. Creation's
@@ -218,38 +223,90 @@ public struct CreateSubthreadTransaction: Transaction2 {
     }
   }
 
-  /// Deletes a reservation shell and returns the text of messages written in it,
-  /// oldest first. Its queued sends then fail their `.chatCreated` dependency
-  /// instead of reaching a chat that does not exist.
-  static func removeShell(_ db: Database, chatId: Int64) throws -> [String] {
-    let messages = try Message
+  /// Retains media sends as recoverable failed rows in the existing thread and returns
+  /// plain queued text for its draft, as before. Queued sends still name the deleted shell,
+  /// so they fail their `.chatCreated` dependency instead of posting twice.
+  static func removeShell(_ db: Database, chatId: Int64, redirectingTo targetChatId: Int64) throws -> [String] {
+    let unsent = try Message
       .filter(Message.Columns.chatId == chatId)
       .order(Message.Columns.date.asc)
       .fetchAll(db)
+    guard try Chat.fetchOne(db, key: targetChatId) != nil else { throw RedirectError.targetMissing }
+    for message in unsent {
+      guard message.messageId < 0, message.out == true,
+            message.status == .sending || message.status == .failed
+      else { throw RedirectError.unexpectedMessage }
+      // The local key is per chat and uses ON CONFLICT REPLACE. Never let an
+      // improbable negative-ID collision erase a different target message.
+      if hasRecoverableMedia(message) {
+        guard try Message.fetchOne(db, key: ["messageId": message.messageId, "chatId": targetChatId]) == nil else {
+          throw RedirectError.messageIdentityConflict
+        }
+      }
+    }
+    for var message in unsent where hasRecoverableMedia(message) {
+      message.chatId = targetChatId
+      message.peerThreadId = targetChatId
+      message.peerUserId = nil
+      message.status = .failed
+      try message.update(db)
+    }
+    // Rehomed media rows are no longer in this selection. Only plain queued text remains.
     try Message.filter(Message.Columns.chatId == chatId).deleteAll(db)
     try Dialog.deleteOne(db, key: Dialog.getDialogId(peerThreadId: chatId))
     try Chat.deleteOne(db, key: chatId)
-    return messages.compactMap { message in
-      guard let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-        return nil
-      }
+    return unsent.compactMap { message in
+      guard !hasRecoverableMedia(message),
+            let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty
+      else { return nil }
       return text
     }
   }
 
-  /// Carries the shell's draft and unsent messages into the existing thread's
-  /// draft, ahead of anything already drafted there.
-  static func moveDraft(from reservedChatId: Int64, to chatId: Int64, unsentTexts: [String], drafts: Drafts2 = .shared) {
+  private static func hasRecoverableMedia(_ message: Message) -> Bool {
+    message.hasPhoto || message.hasVideo || message.documentId != nil || message.hasVoice
+  }
+
+  private enum RedirectError: Error {
+    case targetMissing
+    case unexpectedMessage
+    case messageIdentityConflict
+  }
+
+  /// Carries plain queued text and the remaining composer draft into the existing thread.
+  /// Media messages remain failed rows, so their captions are not duplicated in this draft.
+  static func moveDraft(from reservedChatId: Int64, to chatId: Int64, unsentTexts: [String] = [], drafts: Drafts2 = .shared) {
     let reservedPeer = Peer.thread(id: reservedChatId)
     let targetPeer = Peer.thread(id: chatId)
-    let parts = unsentTexts
-      + [drafts.load(peer: reservedPeer)?.text, drafts.load(peer: targetPeer)?.text].compactMap { text in
-        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
-        return text
+    let reservedDraft = drafts.load(peer: reservedPeer)
+    let draftParts = [reservedDraft, drafts.load(peer: targetPeer)].compactMap { draft -> (text: String, entities: MessageEntities?)? in
+      guard let draft, !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+      return (draft.text, draft.entities)
+    }
+    let parts = unsentTexts.map { (text: $0, entities: Optional<MessageEntities>.none) } + draftParts
+    if !parts.isEmpty {
+      let text = parts.map(\.text).joined(separator: "\n\n")
+      var entities: [InlineProtocol.MessageEntity] = []
+      var offset: Int64 = 0
+      for part in parts {
+        entities += (part.entities?.entities ?? []).map { entity in
+          var entity = entity
+          entity.offset += offset
+          return entity
+        }
+        offset += Int64(part.text.utf16.count) + 2
       }
+      let revision = drafts.updateText(peer: targetPeer, text: text)
+      drafts.updateEntities(
+        peer: targetPeer,
+        entities: entities.isEmpty ? nil : MessageEntities.with { $0.entities = entities },
+        forRevision: revision
+      )
+    }
+    for attachment in reservedDraft?.attachments ?? [] {
+      drafts.appendAttachment(peer: targetPeer, media: attachment.media, id: attachment.id)
+    }
     drafts.clear(peer: reservedPeer)
-    guard !parts.isEmpty else { return }
-    drafts.updateText(peer: targetPeer, text: parts.joined(separator: "\n\n"))
   }
 }
 

@@ -1,3 +1,4 @@
+import InlineKit
 import UIKit
 
 private final class ScrollGlassButton: UIButton {
@@ -6,14 +7,24 @@ private final class ScrollGlassButton: UIButton {
   }
 }
 
+/// Floating chat button (scroll-to-bottom, @, ♥). Matches the compose plus button: a 42pt glass
+/// circle with a 16pt medium glyph, with an optional count capsule on its top trailing edge.
 final class BlurCircleButton: UIView {
+  /// The visible circle, the compose plus button's size.
+  static let visualSize: CGFloat = 42
+  static let hitTargetSize: CGFloat = 44
+  /// How far the hit target extends past the circle on each side.
+  static let hitOutset: CGFloat = (hitTargetSize - visualSize) / 2
+  /// Gap between stacked buttons, and between the bottom one and compose.
+  static let stackSpacing: CGFloat = 8
+
   private enum Metrics {
-    static let hitTargetSize: CGFloat = 44
-    static let visualSize: CGFloat = 34
+    static let hitTargetSize = BlurCircleButton.hitTargetSize
+    static let visualSize = BlurCircleButton.visualSize
     static let iconPointSize: CGFloat = 16
     static let hiddenTranslationY: CGFloat = 12
-    static let hiddenScale: CGFloat = 0.9
-    static let visibilityDuration: TimeInterval = 0.22
+    static let hiddenScale: CGFloat = 0.86
+    static let visibilityDuration: TimeInterval = 0.3
     static let reduceMotionDuration: TimeInterval = 0.14
   }
 
@@ -22,7 +33,7 @@ final class BlurCircleButton: UIView {
     button.translatesAutoresizingMaskIntoConstraints = false
 
     let image = UIImage(systemName: symbolName)?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: Metrics.iconPointSize, weight: .semibold)
+      UIImage.SymbolConfiguration(pointSize: Metrics.iconPointSize, weight: .medium)
     )
 
     if #available(iOS 26.0, *) {
@@ -57,8 +68,10 @@ final class BlurCircleButton: UIView {
     return view
   }()
 
-  private let unreadBadgeView = UIView()
-  private let countLabel = UILabel()
+  private lazy var countBadge = FloatingButtonCountBadge(
+    // The count matches a colored symbol (heart); the default chevron button uses the accent.
+    tint: symbolTint == .label ? ThemeManager.shared.selected.accent : symbolTint
+  )
   private let symbolName: String
   private let symbolTint: UIColor
   private let accessibilityTitle: String
@@ -153,37 +166,10 @@ final class BlurCircleButton: UIView {
       button.heightAnchor.constraint(equalToConstant: Metrics.visualSize),
     ])
 
-    unreadBadgeView.translatesAutoresizingMaskIntoConstraints = false
-    unreadBadgeView.backgroundColor = ThemeManager.shared.selected.accent
-    unreadBadgeView.layer.cornerRadius = 3
-    unreadBadgeView.isUserInteractionEnabled = false
-    unreadBadgeView.isHidden = true
-    addSubview(unreadBadgeView)
-
+    addSubview(countBadge)
     NSLayoutConstraint.activate([
-      unreadBadgeView.widthAnchor.constraint(equalToConstant: 6),
-      unreadBadgeView.heightAnchor.constraint(equalToConstant: 6),
-      unreadBadgeView.topAnchor.constraint(equalTo: button.topAnchor),
-      unreadBadgeView.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-    ])
-
-    countLabel.translatesAutoresizingMaskIntoConstraints = false
-    countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-    countLabel.textColor = .white
-    countLabel.textAlignment = .center
-    // The count matches a colored symbol (heart); the default chevron button uses the accent.
-    countLabel.backgroundColor = symbolTint == .label ? ThemeManager.shared.selected.accent : symbolTint
-    countLabel.layer.cornerRadius = 9
-    countLabel.layer.cornerCurve = .continuous
-    countLabel.clipsToBounds = true
-    countLabel.isUserInteractionEnabled = false
-    countLabel.isHidden = true
-    addSubview(countLabel)
-    NSLayoutConstraint.activate([
-      countLabel.heightAnchor.constraint(equalToConstant: 18),
-      countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
-      countLabel.centerYAnchor.constraint(equalTo: button.topAnchor, constant: 2),
-      countLabel.centerXAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
+      countBadge.centerYAnchor.constraint(equalTo: button.topAnchor, constant: 3),
+      countBadge.centerXAnchor.constraint(equalTo: button.trailingAnchor, constant: -4),
     ])
 
     isHidden = false
@@ -286,16 +272,9 @@ final class BlurCircleButton: UIView {
     }
   }
 
-  func setHasUnread(_ hasUnread: Bool) {
-    unreadBadgeView.isHidden = !hasUnread
-  }
-
   /// Count capsule on the top trailing edge; zero hides it.
   func setCount(_ count: Int) {
-    countLabel.isHidden = count <= 0
-    let text = count > 99 ? "99+" : "\(count)"
-    // Padding for multi-digit counts without a stack view.
-    countLabel.text = text.count > 1 ? " \(text) " : text
+    countBadge.setCount(count, animated: window != nil && alpha > 0.01)
     button.accessibilityValue = count > 0 ? "\(count)" : nil
   }
 
@@ -303,5 +282,87 @@ final class BlurCircleButton: UIView {
   func setMenu(_ menu: UIMenu?) {
     button.menu = menu
     button.showsMenuAsPrimaryAction = false
+  }
+}
+
+/// Count capsule for a floating button. Digits cross-fade as the count changes; it scales in
+/// and out when the count reaches or leaves zero.
+private final class FloatingButtonCountBadge: UIView {
+  private enum Metrics {
+    static let height: CGFloat = 18
+    static let horizontalPadding: CGFloat = 5
+    static let hiddenScale: CGFloat = 0.5
+  }
+
+  private let label = UILabel()
+  private var count = 0
+
+  init(tint: UIColor) {
+    super.init(frame: .zero)
+    translatesAutoresizingMaskIntoConstraints = false
+    isUserInteractionEnabled = false
+    backgroundColor = tint
+    layer.cornerRadius = Metrics.height / 2
+    layer.cornerCurve = .continuous
+
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    label.textColor = .white
+    label.textAlignment = .center
+    label.adjustsFontForContentSizeCategory = false
+    addSubview(label)
+    NSLayoutConstraint.activate([
+      heightAnchor.constraint(equalToConstant: Metrics.height),
+      widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.height),
+      label.centerYAnchor.constraint(equalTo: centerYAnchor),
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+      label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+    ])
+
+    alpha = 0
+    transform = CGAffineTransform(scaleX: Metrics.hiddenScale, y: Metrics.hiddenScale)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func setCount(_ newCount: Int, animated: Bool) {
+    let newCount = max(0, newCount)
+    guard newCount != count else { return }
+    let wasVisible = count > 0
+    let isVisible = newCount > 0
+    count = newCount
+
+    let animated = animated && !UIAccessibility.isReduceMotionEnabled
+    if isVisible {
+      let text = ChatUnreadBadgeCount.format(newCount)
+      if animated, wasVisible, label.text != text {
+        UIView.transition(with: label, duration: 0.15, options: [.transitionCrossDissolve, .beginFromCurrentState]) {
+          self.label.text = text
+        }
+      } else {
+        label.text = text
+      }
+    }
+    guard wasVisible != isVisible else { return }
+
+    let apply = {
+      self.alpha = isVisible ? 1 : 0
+      self.transform = isVisible ? .identity : CGAffineTransform(scaleX: Metrics.hiddenScale, y: Metrics.hiddenScale)
+    }
+    guard animated else {
+      UIView.performWithoutAnimation(apply)
+      return
+    }
+    UIView.animate(
+      withDuration: 0.25,
+      delay: 0,
+      usingSpringWithDamping: 0.8,
+      initialSpringVelocity: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction],
+      animations: apply
+    )
   }
 }

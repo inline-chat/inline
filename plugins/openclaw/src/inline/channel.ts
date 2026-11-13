@@ -15,8 +15,8 @@ import {
 } from "openclaw/plugin-sdk/channel-outbound"
 import { PlatformMessageNotDispatchedError } from "openclaw/plugin-sdk/error-runtime"
 import {
-  presentationToInteractiveReply,
   renderMessagePresentationFallbackText,
+  type MessagePresentation,
 } from "openclaw/plugin-sdk/interactive-runtime"
 import {
   buildDmGroupAccountAllowlistAdapter,
@@ -59,8 +59,10 @@ import { getInlineActiveThreadRoute } from "./active-thread-route.js"
 import { lookupInlineReplyThreadRouteByThreadId } from "./thread-routes.js"
 import {
   buildInlineInboundFormattingHints,
+  isInlineHostNoReplyFallback,
   sanitizeInlineOutgoingText,
 } from "./message-formatting.js"
+import { isInlineQuietHandBack } from "./quiet-hand-backs.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import {
   inlineBotWideReplyThreadOnKeys,
@@ -69,6 +71,12 @@ import {
   resolveInlineGroupToolPolicy,
 } from "./policy.js"
 import {
+  acquireInlineAccountClient,
+  withInlineAccountClient,
+  type InlineClientLease,
+} from "./client-registry.js"
+import {
+  buildInlinePresentationButtons,
   inlineMessageActions,
   resolveInlineMessageActionsParam,
   supportsInlineMessageButtonsForConfig,
@@ -726,6 +734,32 @@ function resolveInlinePayloadActions(payload: Record<string, unknown>): MessageA
   return resolveInlineMessageActionsParam(payload)
 }
 
+/**
+ * Carry rendered presentation controls to sendPayload as Inline button rows.
+ * Explicit Inline or Telegram-compatible buttons already on the payload win,
+ * matching resolveInlinePayloadActions precedence.
+ */
+function resolveInlinePresentationChannelData(
+  channelData: Record<string, unknown> | undefined,
+  presentation: MessagePresentation,
+): { channelData?: Record<string, unknown> } {
+  const inlineData = asRecord(channelData?.inline)
+  const telegramData = asRecord(channelData?.telegram)
+  if (Object.hasOwn(inlineData ?? {}, "buttons") || Object.hasOwn(telegramData ?? {}, "buttons")) {
+    return {}
+  }
+  const buttons = buildInlinePresentationButtons(presentation)
+  if (buttons.length === 0) {
+    return {}
+  }
+  return {
+    channelData: {
+      ...channelData,
+      inline: { ...inlineData, buttons },
+    },
+  }
+}
+
 function formatInlineResultChatId(target: InlineParsedOutboundTarget): string {
   if (target.kind === "user") {
     return `user:${target.normalizedNumeric}`
@@ -848,16 +882,10 @@ async function withInlineClient<T>(params: {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
   }
   const token = await resolveInlineToken(account)
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-  await client.connect()
-  try {
-    return await params.fn(client, account)
-  } finally {
-    await client.close().catch(() => {})
-  }
+  return await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    (client) => params.fn(client, account),
+  )
 }
 
 async function sendTypingInline(params: {
@@ -917,22 +945,16 @@ async function notifyPairingApprovedInline(params: {
   }
 
   const token = await resolveInlineToken(account)
-
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-
-  await client.connect()
-  try {
-    await client.sendMessage({
-      userId,
-      text: PAIRING_APPROVED_MESSAGE,
-      parseMarkdown: account.config.parseMarkdown ?? true,
-    })
-  } finally {
-    await client.close().catch(() => {})
-  }
+  await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    async (client) => {
+      await client.sendMessage({
+        userId,
+        text: PAIRING_APPROVED_MESSAGE,
+        parseMarkdown: account.config.parseMarkdown ?? true,
+      })
+    },
+  )
 }
 
 async function sendMessageInline(params: {
@@ -947,6 +969,7 @@ async function sendMessageInline(params: {
 } & InlinePlatformSendContext): Promise<InlinePlatformSendResult> {
   let platformSendStarted = false
   let client: InlineSdkClient | null = null
+  let lease: InlineClientLease | null = null
   try {
     const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
     if (!account.configured || !account.baseUrl) {
@@ -958,7 +981,11 @@ async function sendMessageInline(params: {
       context: "sendText",
     })
     const visibleText = sanitizeInlineVisibleText(params.text)
-    if (visibleText.shouldSkip) {
+    const quietHandBack =
+      target.kind !== "user" &&
+      isInlineHostNoReplyFallback(params.text) &&
+      isInlineQuietHandBack(account.accountId, target.normalizedNumeric)
+    if (visibleText.shouldSkip || quietHandBack) {
       return {
         outcome: "not_sent",
         messageId: "",
@@ -967,11 +994,13 @@ async function sendMessageInline(params: {
     }
     const text = sanitizeInlineOutgoingText(visibleText.text)
 
-    client = new InlineSdkClient({
+    lease = await acquireInlineAccountClient({
+      accountId: account.accountId,
       baseUrl: account.baseUrl,
       token,
+      signal: params.signal,
     })
-    await client.connect(params.signal)
+    client = lease.client
 
     // Inline "threads" are modeled as chats (chatId). OpenClaw's threadId is not a message id.
     // Only map OpenClaw replyToId -> Inline replyToMsgId.
@@ -1024,7 +1053,7 @@ async function sendMessageInline(params: {
     if (!platformSendStarted) throw asInlinePlatformNotDispatched(error)
     throw error
   } finally {
-    await client?.close().catch(() => {})
+    await lease?.release()
   }
 }
 
@@ -1044,6 +1073,7 @@ async function sendMediaInline(params: {
 } & InlinePlatformSendContext): Promise<InlinePlatformSendResult> {
   let platformSendStarted = false
   let client: InlineSdkClient | null = null
+  let lease: InlineClientLease | null = null
   try {
     const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
     if (!account.configured || !account.baseUrl) {
@@ -1058,11 +1088,13 @@ async function sendMediaInline(params: {
     const visibleText = sanitizeInlineVisibleText(params.text)
     const caption = visibleText.shouldSkip ? "" : sanitizeInlineOutgoingText(visibleText.text).trim()
 
-    client = new InlineSdkClient({
+    lease = await acquireInlineAccountClient({
+      accountId: account.accountId,
       baseUrl: account.baseUrl,
       token,
+      signal: params.signal,
     })
-    await client.connect(params.signal)
+    client = lease.client
 
     const resolvedTarget = await resolveInlineOutboundTarget({
       client,
@@ -1123,7 +1155,7 @@ async function sendMediaInline(params: {
     if (!platformSendStarted) throw asInlinePlatformNotDispatched(error)
     throw error
   } finally {
-    await client?.close().catch(() => {})
+    await lease?.release()
   }
 }
 
@@ -1300,17 +1332,19 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
     selects: true,
     context: true,
     divider: false,
+    charts: false,
+    tables: false,
   },
   renderPresentation: ({ payload, presentation }) => {
     const text = renderMessagePresentationFallbackText({
       ...(payload.text !== undefined ? { text: payload.text } : {}),
       presentation,
     })
-    const interactive = presentationToInteractiveReply(presentation)
+    const { presentation: _presentation, presentationTextMode: _textMode, ...rest } = payload
     return {
-      ...payload,
+      ...rest,
       text,
-      ...(interactive ? { interactive } : {}),
+      ...resolveInlinePresentationChannelData(payload.channelData, presentation),
     }
   },
   sendPayload: async (context) => {
@@ -1335,8 +1369,10 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
     const text =
       resolveInlineInteractiveTextFallback({
         text: payload.text ?? undefined,
-        interactive: payload.interactive,
+        // Untyped legacy input from producers that still emit `interactive`.
+        interactive: (payload as Record<string, unknown>).interactive,
         presentation: payload.presentation,
+        ...(payload.presentationTextMode === "fallback" ? { presentationTextMode: "fallback" as const } : {}),
       }) ??
       payload.text ??
       ""
@@ -1808,8 +1844,13 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       if (!currentChannelId) {
         return undefined
       }
+      // The host's exact-current read gate for installed plugins compares typed
+      // targets by kind. An untyped current id only accepts `user:`/`dm:` in a
+      // DM, so agents passing the `chat:<id>` form we document get rejected.
+      const currentMessagingTarget = resolveInlineSessionTarget({ id: currentChannelId })
       return {
         currentChannelId,
+        ...(currentMessagingTarget ? { currentMessagingTarget } : {}),
         // To remains the parent chat for DM children as well. From is a user
         // identity in DMs and must never substitute for the parent chat ID.
         currentGraphChannelId: resolveInlineSessionTarget({
@@ -1849,6 +1890,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       supportsInlineMessageButtonsForConfig(cfg, accountId ?? null) ? ["inlineButtons"] : [],
     messageToolHints: ({ cfg, accountId }) => [
       "- Inline targeting: omit `target` to reply in the current chat.",
+      "- Inline messages you send yourself: once a message, card or buttons are sent with the message tool, don't describe or repeat them in your reply.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
       "- Inline discovery: use `channel-list` to discover available chats and users. Use `scope: groups|peers|all` when helpful, and reuse returned `target` values.",
       "- Inline widgets: `show_widget` posts one Inline widget message in the current chat, so it uses Inline's widget theme (`--foreground`, `--muted-foreground` for secondary text, `--primary` for accents; `--muted` and `--accent` are subtle fills). To keep prose and a widget in one message, put the `<iframe>` widget block in a normal reply. A viewer's `inline.action(name, payload)` arrives as an Inline widget call turn; answer it with a new message.",
@@ -1856,6 +1898,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
         ? [
             "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows with `callback_data` for callbacks and `copy_text`/`copyText` for copy buttons. For quick button feedback, JSON `callback_data` can include `callbackToast`/`toast`. A callback turn identifies the source message; your normal response replaces that message, omitting buttons clears them, and returning buttons replaces them.",
+            "- Inline buttons: the buttons are the choices. Ask in one short line and don't also list the options in the text.",
           ]
         : []),
       ...(supportsInlineReactionsForConfig(cfg, accountId ?? null)
@@ -1863,6 +1906,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
             "- Inline reactions: pass `messageId` for `react` when you have it; on inbound turns, the current inbound message id can be used as fallback.",
           ]
         : []),
+      "- Inline history tools: name the chat even when it is the current one; targetless reads are rejected. `read` takes `target: \"chat:<chatId>\"`; `search` takes `chatId: \"<chatId>\"` (not `target` or `to`).",
       "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable. `search` is chat-scoped; run it per chat.",
       "- Inline bot command discovery: use `peer-bot-commands`/`bot-commands` to read commands available in the current or target chat/user/reply thread; use `inline_bot_commands` only to manage this bot's registered command menu.",
       "- Inline special tools: use `inline_members` to find users in a space and reuse returned `user:<id>` DM targets. It can infer `spaceId` inside a current Inline space chat/reply thread; pass `spaceId` explicitly otherwise. Use `inline_parent_context` for more parent-chat history from the current reply thread, with `beforeMessageId`, `afterMessageId`, or `messageId` for older/newer/around windows.",

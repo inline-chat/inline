@@ -14,10 +14,12 @@ public enum RichLayoutPlanner {
     grid: PixelGrid,
     layoutDirection: TextDirection = .leftToRight,
     metrics: RichLayoutMetrics = .init(),
-    cache: TextLayoutCache? = nil
+    cache: TextLayoutCache? = nil,
+    sources: [RichPath: Range<Int>]? = nil
   ) -> RichLayout? {
     guard !blocks.isEmpty, maximumWidth.isFinite, maximumWidth >= 1 else { return nil }
     var builder = Builder(metrics: metrics, grid: grid, fallbackDirection: layoutDirection, cache: cache)
+    builder.sources = sources
     guard builder.layout(blocks, parent: RichPath(), x: 0, width: maximumWidth, depth: 0, isRightToLeft: false) else {
       return nil
     }
@@ -39,6 +41,8 @@ private struct Builder {
   let grid: PixelGrid
   let fallbackDirection: TextDirection
   let cache: TextLayoutCache?
+  /// Each block's characters in the message's flat text, by path, for streaming.
+  var sources: [RichPath: Range<Int>]?
 
   var nodes: [RichLayout.Placed] = []
   var anchors: [Anchor] = []
@@ -70,9 +74,67 @@ private struct Builder {
     typeset(text, width: .greatestFiniteMagnitude, isRightToLeft: false)
   }
 
+  /// The first line of `text`, ending in an ellipsis when it is wider than `width`.
+  func singleLine(_ text: MessageText, width: CGFloat, isRightToLeft: Bool) -> TextLayout {
+    let full = typeset(text, width: .greatestFiniteMagnitude, isRightToLeft: isRightToLeft)
+    guard let first = full.lines.first, first.width > width || full.lineCount > 1 else { return full }
+    let attributed = text.attributedString
+    let string = attributed.string as NSString
+    // The first line's characters, without its line break or trailing spaces.
+    var end = NSMaxRange(first.range)
+    while end > first.range.location,
+          let scalar = Unicode.Scalar(string.character(at: end - 1)),
+          CharacterSet.whitespacesAndNewlines.contains(scalar)
+    {
+      end -= 1
+    }
+    let start = first.range.location
+    func candidate(_ cut: Int, ellipsis: Bool) -> TextLayout {
+      let value = NSMutableAttributedString(attributedString: attributed.attributedSubstring(from: NSRange(location: start, length: cut - start)))
+      if ellipsis {
+        let attributes = attributed.length > 0 ? attributed.attributes(at: max(start, min(cut, end) - 1), effectiveRange: nil) : [:]
+        value.append(NSAttributedString(string: "\u{2026}", attributes: attributes))
+      }
+      let style = TextLayoutStyle(fallbackDirection: isRightToLeft ? .rightToLeft : fallbackDirection)
+      // Uncached: trial cuts would only crowd the shared cache.
+      return TextLayouter.layout(MessageText(value), style: style, maximumWidth: .greatestFiniteMagnitude, grid: grid)
+    }
+    // A later line only: show the first line whole when it fits.
+    if first.width <= width {
+      return candidate(end, ellipsis: false)
+    }
+    // Longest prefix, cut between characters, that fits with its ellipsis.
+    var boundaries: [Int] = []
+    var index = start
+    while index < end {
+      index = NSMaxRange(string.rangeOfComposedCharacterSequence(at: index))
+      boundaries.append(index)
+    }
+    var best = candidate(start, ellipsis: true)
+    var low = 0
+    var high = boundaries.count - 1
+    while low <= high {
+      let middle = (low + high) / 2
+      var cut = boundaries[middle]
+      while cut > start, let scalar = Unicode.Scalar(string.character(at: cut - 1)),
+            CharacterSet.whitespaces.contains(scalar)
+      {
+        cut -= 1
+      }
+      let layout = candidate(cut, ellipsis: true)
+      if layout.size.width <= width {
+        best = layout
+        low = middle + 1
+      } else {
+        high = middle - 1
+      }
+    }
+    return best
+  }
+
   mutating func append(_ path: RichPath, _ frame: CGRect, _ node: RichLayout.Node, anchor: Anchor) -> Bool {
     guard nodes.count < metrics.maximumNodes else { return false }
-    nodes.append(.init(path: path, frame: frame, node: node))
+    nodes.append(.init(path: path, frame: frame, node: node, sourceRange: sources?[path]))
     anchors.append(anchor)
     trailingTextIndex = nil
     return true
@@ -186,17 +248,18 @@ private struct Builder {
 
   mutating func layout(list: RichList, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
     guard depth <= metrics.maximumDepth, !list.items.isEmpty else { return false }
-    let isRightToLeft = list.isRightToLeft
     let markers = list.items.map { unbounded($0.marker) }
     let widestMarker = markers.map(\.size.width).max() ?? 0
     let markerWidth = grid.ceil(max(metrics.unorderedMarkerWidth, widestMarker + metrics.listMarkerGap))
     let isNested = depth > 1
     let inset = metrics.listLeadingInset + (isNested ? metrics.nestedListIndent : 0)
-    let listX = isRightToLeft ? x : x + inset
     let listWidth = max(1, width - inset)
     let childWidth = max(1, listWidth - markerWidth)
     for (index, item) in list.items.enumerated() {
       if index > 0 { y += metrics.listItemSpacing }
+      // Each item reads in its own direction, so its marker sits on its own leading side.
+      let isRightToLeft = item.isRightToLeft ?? list.isRightToLeft
+      let listX = isRightToLeft ? x : x + inset
       let itemPath = path.appending(index)
       let marker = markers[index]
       let markerFrame = CGRect(
@@ -205,7 +268,7 @@ private struct Builder {
         width: marker.size.width,
         height: marker.size.height
       )
-      guard append(itemPath.appending(-1), markerFrame, .marker(marker), anchor: isRightToLeft ? .trailing : .leading) else {
+      guard append(itemPath.appending(-1), markerFrame, .marker(marker, symbol: item.symbol), anchor: isRightToLeft ? .trailing : .leading) else {
         return false
       }
       record(markerFrame)
@@ -299,8 +362,9 @@ private struct Builder {
     var maximum = Array(repeating: CGFloat(1), count: columns)
     for row in table.rows {
       for (column, cell) in row.enumerated() {
-        let natural = unbounded(cell).size.width
-        let word = widestWord(cell)
+        let measured = unbounded(cell)
+        let natural = measured.size.width
+        let word = widestWord(measured)
         let low = ceil(word + padding * 2)
         let high = max(low, min(max(1, width), ceil(natural) + padding * 2))
         minimum[column] = max(minimum[column], low)
@@ -359,20 +423,9 @@ private struct Builder {
   }
 
   /// The widest run between whitespace: a column can't be narrower without breaking a word.
-  func widestWord(_ text: MessageText) -> CGFloat {
-    let string = text.attributedString.string as NSString
-    var widest: CGFloat = 0
-    var location = 0
-    while location < string.length {
-      let space = string.rangeOfCharacter(from: .whitespacesAndNewlines, options: [], range: NSRange(location: location, length: string.length - location))
-      let end = space.location == NSNotFound ? string.length : space.location
-      if end > location {
-        let word = MessageText(text.attributedString.attributedSubstring(from: NSRange(location: location, length: end - location)))
-        widest = max(widest, unbounded(word).size.width)
-      }
-      location = space.location == NSNotFound ? string.length : space.location + max(1, space.length)
-    }
-    return widest
+  /// Read from the cell's own unbounded layout instead of typesetting each word.
+  func widestWord(_ cell: TextLayout) -> CGFloat {
+    grid.ceil(cell.widestUnbreakableRunWidth())
   }
 
   /// Column widths between each column's minimum and maximum, sharing spare width by how much
@@ -436,10 +489,10 @@ private struct Builder {
 
   mutating func layout(disclosure: RichDisclosure, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
     let m = metrics
-    let summary = typeset(disclosure.summary, width: .greatestFiniteMagnitude, isRightToLeft: disclosure.isRightToLeft)
     let activity = disclosure.hasActivityIcon ? m.disclosureActivitySide + m.disclosureActivityGap : 0
     let elapsed = disclosure.elapsed.map { m.disclosureElapsedGap + $0.reservedWidth } ?? 0
     let viewport = max(1, width - m.disclosureChevronSide - m.disclosureChevronGap - activity - elapsed)
+    let summary = singleLine(disclosure.summary, width: viewport, isRightToLeft: disclosure.isRightToLeft)
     let titleWidth = min(summary.lines.first?.width ?? 0, viewport)
     let height = max(summary.lines.first?.frame.height ?? 0, m.disclosureChevronSide)
     let lineHeight = summary.lines.first?.frame.height ?? height
@@ -451,6 +504,7 @@ private struct Builder {
     }
     let node = RichLayout.Disclosure(
       summary: summary,
+      fullSummary: disclosure.summary,
       titleFrame: grid.round(place(activity, titleWidth, lineHeight)),
       chevronFrame: grid.round(place(activity + titleWidth + elapsed + m.disclosureChevronGap, m.disclosureChevronSide, m.disclosureChevronSide)),
       activityFrame: disclosure.hasActivityIcon ? grid.round(place(0, m.disclosureActivitySide, m.disclosureActivitySide)) : nil,
@@ -504,5 +558,108 @@ private extension RichBlock {
   var textRole: RichTextRole? {
     if case let .text(_, role) = self { return role }
     return nil
+  }
+}
+
+// MARK: - Streaming reveal
+
+public extension RichLayout {
+  /// The content as shown while a message streams, with the first `count` characters of the
+  /// message's flat text revealed.
+  ///
+  /// Nodes map the count through their `sourceRange`. Nodes before the frontier show whole, the
+  /// text node holding it shows its lines up to the frontier line, and later nodes are left out,
+  /// so the content grows a line at a time inside text and a node at a time otherwise. Markers,
+  /// quote rails, images and separators carry no text: they show with the next node that does,
+  /// or, at the end, once everything before them is revealed.
+  ///
+  /// Nil when nothing would be hidden, or when the nodes have no sources or have them out of
+  /// order; the caller then shows everything.
+  func revealing(_ count: Int, grid: PixelGrid, metrics: RichLayoutMetrics = .init()) -> RichLayout? {
+    // The count at which each node shows.
+    var thresholds = [Int?](repeating: nil, count: nodes.count)
+    var lastStart = Int.min
+    for (index, placed) in nodes.enumerated() {
+      guard let range = placed.sourceRange else { continue }
+      guard range.lowerBound >= lastStart else { return nil }
+      lastStart = range.lowerBound
+      thresholds[index] = range.lowerBound + min(1, range.count)
+    }
+    guard let lastSourced = nodes.lastIndex(where: { $0.sourceRange != nil }) else { return nil }
+    var next: Int?
+    for index in nodes.indices.reversed() {
+      if let threshold = thresholds[index] { next = threshold } else { thresholds[index] = next }
+    }
+    var revealedEnd = 0
+    for index in nodes.indices {
+      if let range = nodes[index].sourceRange {
+        revealedEnd = max(revealedEnd, range.upperBound)
+      } else if index > lastSourced {
+        thresholds[index] = revealedEnd
+      }
+    }
+
+    var kept: [Placed] = []
+    var bottoms: [CGFloat] = []
+    var frontierLines: [Int: TextLayout.Line] = [:]
+    var hidesAny = false
+    var limit: Int?
+    func stale(at value: Int) { limit = min(limit ?? value, value) }
+    for (index, node) in nodes.enumerated() {
+      var placed = node
+      let threshold = thresholds[index] ?? 0
+      guard count >= threshold else {
+        hidesAny = true
+        stale(at: threshold)
+        continue
+      }
+      var bottom = placed.frame.maxY
+      if case let .text(text, _) = placed.node, let range = placed.sourceRange {
+        let local = max(0, count - range.lowerBound)
+        if local < min(text.length, range.count), text.lineCount > 0 {
+          // The frontier: the line holding the next character to reveal, as for plain text.
+          let line = text.lines.firstIndex { NSMaxRange($0.range) > local } ?? text.lineCount - 1
+          placed.revealedLength = local
+          frontierLines[kept.count] = text.lines[line]
+          bottom = placed.frame.minY + text.lines[line].frame.maxY
+          hidesAny = true
+          if line < text.lineCount - 1 {
+            stale(at: range.lowerBound + NSMaxRange(text.lines[line].range))
+          }
+        }
+      }
+      kept.append(placed)
+      bottoms.append(bottom)
+    }
+    guard hidesAny else { return nil }
+
+    // Quotes end under their revealed children; inner quotes first, so outer ones see them.
+    for index in kept.indices.reversed() {
+      guard case .quote = kept[index].node else { continue }
+      let prefix = kept[index].path.components
+      var inner = kept[index].frame.minY
+      for child in kept.indices where child != index && kept[child].path.components.starts(with: prefix) {
+        inner = max(inner, bottoms[child])
+      }
+      let height = min(kept[index].frame.height, max(1, inner + metrics.quoteVerticalInset - kept[index].frame.minY))
+      kept[index].frame.size.height = grid.ceil(height)
+      bottoms[index] = kept[index].frame.maxY
+    }
+
+    var result = self
+    result.nodes = kept
+    result.size.height = grid.ceil(bottoms.max() ?? 0)
+    result.revealLimit = limit
+    // The time can follow the last revealed line when it closes a root paragraph, as it does
+    // once everything shows.
+    result.trailingLine = nil
+    if let last = kept.indices.last, case let .text(text, _) = kept[last].node,
+       kept[last].path.components.count == 1,
+       let line = frontierLines[last] ?? text.lastLine
+    {
+      let frame = kept[last].frame
+      result.trailingLine = .init(maxX: frame.minX + line.frame.maxX, baseline: frame.minY + line.baseline, direction: line.direction)
+    }
+    return result
   }
 }

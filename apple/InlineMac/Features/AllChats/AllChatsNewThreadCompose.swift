@@ -1328,6 +1328,31 @@ private final class NewThreadComposeOverlayHostView: NSView {
     }
     return nil
   }
+
+  private var scrollMonitor: Any?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if let scrollMonitor {
+      NSEvent.removeMonitor(scrollMonitor)
+      self.scrollMonitor = nil
+    }
+    guard window != nil else { return }
+    // This overlay lives in the window frame view, outside the content view.
+    // Scroll wheel events aren't reliably routed there, so the mention and
+    // command menus wouldn't scroll. Send wheel events over a menu to it.
+    scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+      guard let self, let window, event.window === window, !self.subviews.isEmpty,
+            let superview,
+            let hit = hitTest(superview.convert(event.locationInWindow, from: nil)),
+            let scrollView = (hit as? NSScrollView) ?? hit.enclosingScrollView
+      else {
+        return event
+      }
+      scrollView.scrollWheel(with: event)
+      return nil
+    }
+  }
 }
 
 @available(macOS 26.0, *)

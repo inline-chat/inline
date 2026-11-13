@@ -74,6 +74,20 @@ struct RichLayoutTests {
     #expect(marker.frame.minX >= text.frame.maxX - 0.01)
   }
 
+  @Test("Each list item puts its marker on its own leading side")
+  func mixedDirectionListItems() throws {
+    let list = RichBlock.list(RichList(items: [
+      .init(marker: Fixtures.text("•"), children: [Self.p("سلام دنیا")], isRightToLeft: true),
+      .init(marker: Fixtures.text("•"), children: [Self.p("Hello world")], isRightToLeft: false),
+    ]))
+    let layout = try Self.layout([list], width: 300)
+    let markers = layout.nodes.filter { if case .marker = $0.node { true } else { false } }
+    let texts = layout.nodes.filter { if case .text = $0.node { true } else { false } }
+    try #require(markers.count == 2 && texts.count == 2)
+    #expect(markers[0].frame.minX >= texts[0].frame.maxX - 0.01)
+    #expect(markers[1].frame.maxX <= texts[1].frame.minX + 0.01)
+  }
+
   @Test("Quotes inset their children and their rail spans them")
   func quotes() throws {
     let layout = try Self.layout([.quote(children: [Self.p("Quoted words"), Self.p("More")], isRightToLeft: false)])

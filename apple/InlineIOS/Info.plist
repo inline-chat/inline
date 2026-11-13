@@ -54,6 +54,8 @@
 	<string>Inline uses your contacts on this device to help you find people to invite. Your address book is not uploaded.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>Inline needs access to documents to share files in your conversations.</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Inline shows people you choose when a Focus silences your notifications.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Inline needs access to your microphone to speak in Grid and record audio messages and videos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

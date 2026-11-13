@@ -201,4 +201,46 @@ for mode: ComposeControlMode in [.glass, .legacy] {
   check(textView.attributedString().attribute(.link, at: 3, effectiveRange: nil) as? String == "https://example.com",
         "\(mode): editing inside a link lost its target")
   print("PASS: \(mode) editing inside surviving link")
+
+  // Pasted-URL flows: a link that fills the whole composer, then select all and delete or type over it.
+  func checkKeyboardTyping(_ label: String) {
+    let start = textView.selectedRange().location
+    textView.insertText("hello", replacementRange: NSRange(location: NSNotFound, length: 0))
+    let attributes = textView.attributedString().attributes(at: start, effectiveRange: nil)
+    check(attributes[.link] == nil, "\(mode) \(label): new text is still a link")
+    check(attributes[.foregroundColor] as? NSColor == ComposeTextEditor.textColor,
+          "\(mode) \(label): new text is still blue")
+    print("PASS: \(mode) \(label)")
+  }
+
+  var pastedAttributes = textView.defaultTypingAttributes
+  pastedAttributes[.link] = "https://inline.chat/s/1"
+  pastedAttributes[.foregroundColor] = ComposeTextEditor.linkColor
+  pastedAttributes[.underlineStyle] = 0
+  pastedAttributes[.cursor] = NSCursor.pointingHand
+  let pasted = NSAttributedString(string: "https://inline.chat/s/1", attributes: pastedAttributes)
+
+  editor.replaceAttributedString(pasted)
+  textView.setSelectedRange(NSRange(location: pasted.length, length: 0))
+  textView.selectAll(nil)
+  textView.deleteBackward(nil)
+  check(textView.string.isEmpty, "\(mode): select all + delete left text")
+  checkKeyboardTyping("select all, delete, type")
+
+  editor.replaceAttributedString(pasted)
+  textView.setSelectedRange(NSRange(location: pasted.length, length: 0))
+  textView.selectAll(nil)
+  checkKeyboardTyping("select all, type over link")
+
+  editor.replaceAttributedString(pasted)
+  textView.setSelectedRange(NSRange(location: pasted.length, length: 0))
+  for _ in 0..<pasted.length { textView.deleteBackward(nil) }
+  checkKeyboardTyping("backspace pasted URL, keyboard type")
+
+  loadLink()
+  textView.setSelectedRange(NSRange(location: 2, length: 3))
+  textView.insertText("x", replacementRange: NSRange(location: NSNotFound, length: 0))
+  check(textView.attributedString().attribute(.link, at: 2, effectiveRange: nil) as? String == "https://example.com",
+        "\(mode): typing over part of a link label lost its target")
+  print("PASS: \(mode) typing over part of a link label")
 }

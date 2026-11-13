@@ -2343,10 +2343,21 @@ class UIMessageView: UIView {
       )
     }
     bubbleWidthConstraint.identifier = "message-bubble-width"
+    // The absolute cap applies on wide columns, matching the measured width MessageCell
+    // passes in (`MessageBubbleWidthPolicy.maximumWidth(forAvailableWidth:)`). A fixed-width
+    // preview bubble yields its fraction to the cap.
+    if bubbleWidthConstraint.relation == .equal {
+      bubbleWidthConstraint.priority = .required - 1
+    }
+    let bubbleWidthCap = bubbleView.contentView.widthAnchor.constraint(
+      lessThanOrEqualToConstant: MessageBubbleWidthPolicy.maximumWidth
+    )
+    bubbleWidthCap.identifier = "message-bubble-width-cap"
 
     let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
       bubbleWidthConstraint,
+      bubbleWidthCap,
       bubbleView.contentView.heightAnchor.constraint(
         greaterThanOrEqualToConstant: MessageBubbleView.minimumBodyHeight
       ),

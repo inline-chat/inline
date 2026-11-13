@@ -6,45 +6,93 @@ import InlineProtocol
 public extension AgentWorkStateStore {
   /// Refreshes the bot's runtime and default. The cached values render meanwhile.
   func loadAgentSettings(botUserID: Int64) async {
-    guard botUserID > 0 else { return }
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+  }
+
+  private func loadAgentSettings(botUserID: Int64, owner: OutputModeRequestOwner) async {
     // The runtime also carries status, and mirrors the default for servers
     // without the settings read.
-    if case let .getAgentRuntime(result)? = try? await Api.realtime.callRpcDirect(
+    if case let .getAgentRuntime(result)? = try? await callOutputModeRPC(
       method: .getAgentRuntime,
-      input: .getAgentRuntime(.with { $0.botUserID = botUserID })
+      input: .getAgentRuntime(.with { $0.botUserID = botUserID }),
+      owner: owner
     ), result.hasRuntime {
       apply(runtime: result.runtime)
     }
     // Settings exist for every owned bot and win over the mirror.
-    if case let .getAgentSettings(result)? = try? await Api.realtime.callRpcDirect(
+    if case let .getAgentSettings(result)? = try? await callOutputModeRPC(
       method: .getAgentSettings,
-      input: .getAgentSettings(.with { $0.botUserID = botUserID })
+      input: .getAgentSettings(.with { $0.botUserID = botUserID }),
+      owner: owner
     ), result.hasSettings {
       apply(settings: result.settings, botUserID: botUserID)
     }
   }
 
+  /// The bot's settings, plus whether a bot without a runtime declares the
+  /// Output setting, for its profile in Settings.
+  func loadBotSettings(botUserID: Int64) async {
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+    await loadOutputModeDeclaration(botUserID: botUserID, owner: owner)
+  }
+
   /// The bot's default and this chat's override, for a chat's Agent Settings.
   func loadOutputModes(peer: Peer, botUserID: Int64) async {
-    await loadAgentSettings(botUserID: botUserID)
-    if case let .getAgentParticipations(result)? = try? await Api.realtime.callRpcDirect(
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+    await loadParticipations(peer: peer, owner: owner)
+  }
+
+  /// Everything the Output row in a direct chat's info needs: the bot's
+  /// default, whether a bot without a runtime declares the setting, and this
+  /// chat's override.
+  func loadDirectChatOutputModes(botUserID: Int64) async {
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+    await loadOutputModeDeclaration(botUserID: botUserID, owner: owner)
+    await loadParticipations(peer: .user(id: botUserID), owner: owner)
+  }
+
+  /// Capabilities are per chat, so this reads them in the viewer's direct
+  /// chat with the bot.
+  private func loadOutputModeDeclaration(botUserID: Int64, owner: OutputModeRequestOwner) async {
+    guard !runtimeBotUserIDs.contains(botUserID),
+          case let .getPeerBots(result)? = try? await callOutputModeRPC(
+            method: .getPeerBots,
+            input: .getPeerBots(.with { $0.peerID = Peer.user(id: botUserID).toInputPeer() }),
+            owner: owner
+          )
+    else { return }
+    let declares = result.bots.contains { peerBot in
+      peerBot.hasBot && peerBot.bot.id == botUserID && peerBot.capabilities.contains { $0.kind == .outputMode }
+    }
+    setDeclaresOutputMode(declares, botUserID: botUserID)
+  }
+
+  private func loadParticipations(peer: Peer, owner: OutputModeRequestOwner) async {
+    if case let .getAgentParticipations(result)? = try? await callOutputModeRPC(
       method: .getAgentParticipations,
-      input: .getAgentParticipations(.with { $0.peerID = peer.toInputPeer() })
+      input: .getAgentParticipations(.with { $0.peerID = peer.toInputPeer() }),
+      owner: owner
     ) {
       result.participations.forEach { apply(participation: $0) }
     }
   }
 
   func updateDefaultOutputMode(_ mode: AgentThreadOutputMode, botUserID: Int64) async throws {
+    let owner = try beginOutputModeRequest()
     let previous = defaultOutputMode(botUserID: botUserID)
     setDefaultOutputMode(mode, botUserID: botUserID)
     do {
-      let response = try await Api.realtime.callRpcDirect(
+      let response = try await callOutputModeRPC(
         method: .updateAgentSettings,
         input: .updateAgentSettings(.with {
           $0.botUserID = botUserID
           $0.defaultOutputMode = mode.protocolValue
-        })
+        }),
+        owner: owner
       )
       guard case let .updateAgentSettings(result)? = response else { return }
       if result.hasSettings {
@@ -53,30 +101,32 @@ public extension AgentWorkStateStore {
         apply(runtime: result.runtime)
       }
     } catch {
-      setDefaultOutputMode(previous, botUserID: botUserID)
+      if isCurrentOutputModeRequest(owner) { setDefaultOutputMode(previous, botUserID: botUserID) }
       throw error
     }
   }
 
   /// Nil clears the thread's override back to the agent's default.
   func updateOutputModeOverride(_ mode: AgentThreadOutputMode?, peer: Peer, botUserID: Int64) async throws {
+    let owner = try beginOutputModeRequest()
     let previous = outputModeOverride(peer: peer, botUserID: botUserID)
     setOutputModeOverride(mode, peer: peer, botUserID: botUserID)
     do {
-      let response = try await Api.realtime.callRpcDirect(
+      let response = try await callOutputModeRPC(
         method: .setAgentParticipation,
         input: .setAgentParticipation(.with {
           $0.peerID = peer.toInputPeer()
           $0.botUserID = botUserID
           // Unspecified clears the override back to the agent's default.
           $0.outputMode = mode?.protocolValue ?? .unspecified
-        })
+        }),
+        owner: owner
       )
       if case let .setAgentParticipation(result)? = response {
         apply(participation: result.participation)
       }
     } catch {
-      setOutputModeOverride(previous, peer: peer, botUserID: botUserID)
+      if isCurrentOutputModeRequest(owner) { setOutputModeOverride(previous, peer: peer, botUserID: botUserID) }
       throw error
     }
   }

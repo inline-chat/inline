@@ -24,17 +24,21 @@ public struct HomeSpaceItem: FetchableRecord, Identifiable, Codable, Hashable, P
 public struct UserInfo: Codable, FetchableRecord, PersistableRecord, Hashable, Sendable, Identifiable {
   public var user: User
   public var profilePhoto: [File]?
+  /// Present only for queries that join it (direct chats and user lookups).
+  public var focus: UserFocus?
   public var id: Int64 { user.id }
 
   // coding keys
   public enum CodingKeys: String, CodingKey {
     case user
     case profilePhoto
+    case focus
   }
 
-  public init(user: User, profilePhotos: [File]? = nil) {
+  public init(user: User, profilePhotos: [File]? = nil, focus: UserFocus? = nil) {
     self.user = user
     profilePhoto = profilePhotos
+    self.focus = focus
   }
 
   public static let deleted = Self(user: .deletedInstance, profilePhotos: nil)

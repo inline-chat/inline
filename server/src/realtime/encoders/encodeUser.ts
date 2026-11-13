@@ -1,5 +1,5 @@
 import type { DbBotAvatarAsset, DbFile, DbUser } from "@in/server/db/schema"
-import { User, UserStatus_Status } from "@inline-chat/protocol/core"
+import { type FocusStatus, User, UserStatus_Status } from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { encodeBotAvatar } from "@in/server/realtime/encoders/encodeBotAvatar"
@@ -12,6 +12,7 @@ export const encodeUser = ({
   min = false,
   includeTimeZone = false,
   timeZoneVisible,
+  focus,
   includeBotStatus = false,
   viewerUserId,
 }: {
@@ -26,6 +27,11 @@ export const encodeUser = ({
    * resolveTimeZoneVisibility. Without it only a rule open to everyone shows it.
    */
   timeZoneVisible?: boolean
+  /**
+   * This viewer's Focus value, from resolveFocusForViewer. When set, status is
+   * sent even in a min projection; when absent, clients keep their Focus value.
+   */
+  focus?: FocusStatus
   /** Bot presence in a min projection, for viewers with a DM with the bot or its owner. */
   includeBotStatus?: boolean
   viewerUserId?: number
@@ -49,11 +55,12 @@ export const encodeUser = ({
     phoneNumber: includeContact ? user.phoneNumber ?? undefined : undefined,
     pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,
     min: min ?? false,
-    status: min && !(includeBotStatus && user.bot === true)
+    status: min && !(includeBotStatus && user.bot === true) && !focus
       ? undefined
       : {
           online: user.online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,
           lastOnline: { date: user.lastOnline ? encodeDate(user.lastOnline) : undefined },
+          focus,
         },
     timeZone:
       (min && !includeTimeZone) ||

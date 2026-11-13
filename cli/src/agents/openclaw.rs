@@ -23,6 +23,10 @@ const MINIMUM_SETUP_PLUGIN_VERSION: &str = "0.0.71";
 const LEGACY_SETUP_PLUGIN_VERSION: &str = "0.0.63";
 const SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline";
 const LEGACY_SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.63";
+/// Plugin 1.0 requires OpenClaw 2026.11.1 and OpenClaw rejects it on older
+/// hosts instead of falling back, so 2026.8.2–2026.10.x keep the 0.0.x line.
+const PRE_ONE_SETUP_PLUGIN_VERSION: &str = "0.0.72";
+const PRE_ONE_SETUP_PLUGIN_SPEC: &str = "@inline-openclaw/inline@0.0.72";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SetupPluginCompatibility {
@@ -501,12 +505,18 @@ fn inspect_plugin(
     if !output.success {
         // The host reports an actual lookup miss as exit 1, even with --json.
         // A broken config, permission error, or crash must not authorize --force.
+        let envelope = serde_json::from_str::<serde_json::Value>(&output.stdout).ok();
+        let message = envelope
+            .as_ref()
+            .filter(|value| value["ok"] == false && value["error"]["type"] == "cli_error")
+            .and_then(|value| value["error"]["message"].as_str());
+        let detail = message.unwrap_or(&output.stderr);
+        let is_lookup_miss = |line: &str| {
+            let line = line.trim();
+            line == "Plugin not found: inline" || line.starts_with("Plugin not found: inline. Run ")
+        };
         if output.exit_code == Some(1)
-            && output.stderr.lines().any(|line| {
-                let line = line.trim();
-                line == "Plugin not found: inline"
-                    || line.starts_with("Plugin not found: inline. Run ")
-            })
+            && message.map_or_else(|| output.stderr.lines().any(is_lookup_miss), is_lookup_miss)
         {
             return Ok(PluginState::Missing);
         }
@@ -514,7 +524,8 @@ fn inspect_plugin(
             "plugin_probe_failed",
             format!(
                 "could not inspect the OpenClaw Inline plugin (exit {:?}): {}",
-                output.exit_code, output.stderr
+                output.exit_code,
+                crate::diagnostics::safe_text(detail)
             ),
         )
         .into());
@@ -648,11 +659,24 @@ fn setup_plugin_compatibility(output: &str) -> SetupPluginCompatibility {
             semver::Version::parse(token.strip_prefix('v').unwrap_or(token)).ok()
         })
         .next();
-    if version.is_some_and(|version| version.major == 2026 && matches!(version.minor, 6 | 7)) {
+    if version
+        .as_ref()
+        .is_some_and(|version| version.major == 2026 && matches!(version.minor, 6 | 7))
+    {
         SetupPluginCompatibility {
             minimum_plugin_version: LEGACY_SETUP_PLUGIN_VERSION,
             install_spec: LEGACY_SETUP_PLUGIN_SPEC,
             accept_capabilities: false,
+        }
+    } else if version.as_ref().is_some_and(|version| {
+        version.major == 2026
+            && matches!(version.minor, 8..=10)
+            && !(version.minor == 8 && version.patch < 2)
+    }) {
+        SetupPluginCompatibility {
+            minimum_plugin_version: PRE_ONE_SETUP_PLUGIN_VERSION,
+            install_spec: PRE_ONE_SETUP_PLUGIN_SPEC,
+            accept_capabilities: true,
         }
     } else {
         // Let current/future OpenClaw releases own package compatibility and
@@ -1046,7 +1070,7 @@ mod tests {
     use super::*;
 
     fn current_compatibility() -> SetupPluginCompatibility {
-        setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)")
+        setup_plugin_compatibility("OpenClaw 2026.11.1 (4ffdd20)")
     }
 
     #[test]
@@ -1201,6 +1225,20 @@ mod tests {
             inspect_plugin(&output, current_compatibility()).unwrap(),
             PluginState::Missing
         ));
+        let missing = std::mem::take(&mut output.stderr);
+        output.stdout =
+            serde_json::json!({"ok":false,"error":{"type":"cli_error","message":missing}})
+                .to_string();
+        assert!(matches!(
+            inspect_plugin(&output, current_compatibility()).unwrap(),
+            PluginState::Missing
+        ));
+        output.exit_code = Some(2);
+        assert!(inspect_plugin(&output, current_compatibility()).is_err());
+        output.exit_code = Some(1);
+        output.stdout = r#"{"ok":false,"error":{"type":"cli_error","message":"Plugin not found: inline-other"}}"#.into();
+        assert!(inspect_plugin(&output, current_compatibility()).is_err());
+        output.stdout.clear();
         output.stderr = "config load failed: permission denied".into();
         assert!(inspect_plugin(&output, current_compatibility()).is_err());
         output.success = true;
@@ -1291,7 +1329,7 @@ mod tests {
 
     #[test]
     fn host_version_selects_a_compatible_plugin_and_capability_policy() {
-        let current = setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)");
+        let current = setup_plugin_compatibility("OpenClaw 2026.11.1 (4ffdd20)");
         assert_eq!(current.minimum_plugin_version, "0.0.71");
         assert_eq!(
             current.install_args(current.install_spec),
@@ -1304,9 +1342,29 @@ mod tests {
             ]
         );
         assert_eq!(
-            setup_plugin_compatibility("OpenClaw 2026.9.1-beta.1").install_spec,
+            setup_plugin_compatibility("OpenClaw 2026.12.0-beta.1").install_spec,
             SETUP_PLUGIN_SPEC
         );
+
+        // Plugin 1.0 needs 2026.11.1 and OpenClaw rejects it on older hosts.
+        for output in [
+            "OpenClaw 2026.8.2 (0965053)",
+            "OpenClaw 2026.9.1-beta.1",
+            "OpenClaw 2026.10.10 (7dc3350)",
+        ] {
+            let pre_one = setup_plugin_compatibility(output);
+            assert_eq!(pre_one.minimum_plugin_version, "0.0.72");
+            assert_eq!(
+                pre_one.install_args(pre_one.install_spec),
+                [
+                    "plugins",
+                    "install",
+                    "@inline-openclaw/inline@0.0.72",
+                    "--force",
+                    "--accept-capabilities",
+                ]
+            );
+        }
 
         for output in ["OpenClaw 2026.7.1-2", "openclaw v2026.6.34"] {
             let legacy = setup_plugin_compatibility(output);

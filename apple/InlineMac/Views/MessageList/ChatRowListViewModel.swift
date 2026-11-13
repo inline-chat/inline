@@ -12,6 +12,8 @@ final class ChatRowListViewModel {
     case collapsedHistory
     case parentMessage(id: Int64)
     case message(id: Int64)
+    /// A line under the newest message about the other person, such as a silencing Focus.
+    case statusNotice
   }
 
   enum UpdateKind: Equatable {
@@ -41,6 +43,9 @@ final class ChatRowListViewModel {
   private var rowIdxsByMsgId: [Int64: IndexSet] = [:]
 
   private(set) var showUnreadAfter: Int64?
+  /// Text for the `.statusNotice` row. It shows only while the window reaches the newest
+  /// cached message, so it always sits at the real bottom.
+  private(set) var statusNotice: String?
   private(set) var collapsedMaxId: Int64?
   var threadAnchor: FullMessage? {
     progressiveViewModel.threadAnchor
@@ -185,6 +190,24 @@ final class ChatRowListViewModel {
     return .reloadAll
   }
 
+  func setStatusNotice(_ text: String?) -> UpdateKind {
+    guard statusNotice != text else { return .none }
+    let oldRows = rows
+    statusNotice = text
+    let newRows = makeRows(for: messages)
+    setRows(newRows)
+
+    let oldBody = Self.bodyRows(oldRows)
+    let newBody = Self.bodyRows(newRows)
+    guard oldBody.elementsEqual(newBody) else { return .reloadAll }
+    switch (oldBody.count < oldRows.count, newBody.count < newRows.count) {
+      case (false, true): return .insert(IndexSet(integer: newBody.count))
+      case (true, false): return .remove(IndexSet(integer: oldBody.count))
+      case (true, true): return .reloadRows(IndexSet(integer: newBody.count))
+      case (false, false): return .none
+    }
+  }
+
   func loadLocalWindowAroundMessage(messageId: Int64, publish: Bool = true) -> Bool {
     progressiveViewModel.loadLocalWindowAroundMessage(messageId: messageId, publish: publish)
   }
@@ -208,7 +231,7 @@ final class ChatRowListViewModel {
     switch row {
       case let .message(id), let .parentMessage(id):
         return id
-      case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory:
+      case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory, .statusNotice:
         return nil
     }
   }
@@ -329,14 +352,23 @@ final class ChatRowListViewModel {
         return .reloadAll
 
       case .append:
-        guard newRows.count >= oldRows.count,
-              newRows.prefix(oldRows.count).elementsEqual(oldRows)
+        // The status notice stays last, so appended rows go in above it.
+        let oldBody = Self.bodyRows(oldRows)
+        let newBody = Self.bodyRows(newRows)
+        let oldHasNotice = oldBody.count < oldRows.count
+        let newHasNotice = newBody.count < newRows.count
+        guard newBody.count >= oldBody.count,
+              newBody.prefix(oldBody.count).elementsEqual(oldBody),
+              !(oldHasNotice && !newHasNotice)
         else {
           setRows(newRows)
           return .reloadAll
         }
 
-        let inserted = IndexSet(integersIn: oldRows.count ..< newRows.count)
+        var inserted = IndexSet(integersIn: oldBody.count ..< newBody.count)
+        if newHasNotice, !oldHasNotice {
+          inserted.insert(newBody.count)
+        }
         setRows(newRows)
         return inserted.isEmpty ? .none : .insert(inserted)
 
@@ -409,7 +441,7 @@ final class ChatRowListViewModel {
         case let .parentMessage(id):
           allIdxsByMsgId[id, default: []].insert(rowIdx)
 
-        case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory:
+        case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory, .statusNotice:
           break
       }
     }
@@ -500,15 +532,22 @@ final class ChatRowListViewModel {
       messages: messages,
       unreadLineMessageId: resolveUnreadLineMessageId(in: messages),
       showsCollapsedHistory: collapsedMaxId != nil,
-      parentMessageStableId: threadAnchor?.id
+      parentMessageStableId: threadAnchor?.id,
+      showsStatusNotice: statusNotice != nil && !progressiveViewModel.canLoadNewerFromLocal
     )
+  }
+
+  /// Rows without the trailing status notice.
+  private static func bodyRows(_ rows: [Row]) -> ArraySlice<Row> {
+    rows.last == .statusNotice ? rows.dropLast() : rows[...]
   }
 
   private static func makeRows(
     messages: [FullMessage],
     unreadLineMessageId: Int64?,
     showsCollapsedHistory: Bool,
-    parentMessageStableId: Int64?
+    parentMessageStableId: Int64?,
+    showsStatusNotice: Bool
   ) -> [Row] {
     var out: [Row] = []
     out.reserveCapacity(messages.count + 9)
@@ -538,6 +577,10 @@ final class ChatRowListViewModel {
       }
 
       out.append(.message(id: msg.id))
+    }
+
+    if showsStatusNotice {
+      out.append(.statusNotice)
     }
 
     return out

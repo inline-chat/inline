@@ -63,6 +63,7 @@ import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.up
 import { markAsUnread } from "./messages.markAsUnread"
 import { readMessages } from "./messages.readMessages"
 import { getUnreadActivity, readActivity } from "./messages.unreadActivity"
+import { setFocusStatusHandler } from "./user.setFocusStatus"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
@@ -941,6 +942,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "readActivity") throw RealtimeRpcError.BadRequest()
       const result = await readActivity(call.input.readActivity, handlerContext)
       return { oneofKind: "readActivity", readActivity: result }
+    }
+
+    case Method.SET_FOCUS_STATUS: {
+      if (call.input.oneofKind !== "setFocusStatus") throw RealtimeRpcError.BadRequest()
+      const result = await setFocusStatusHandler(call.input.setFocusStatus, handlerContext)
+      return { oneofKind: "setFocusStatus", setFocusStatus: result }
     }
     
     case Method.GET_UPDATES_STATE: {

@@ -265,7 +265,7 @@ struct PrivacySettingsView: View {
 
       Section {
         NavigationLink {
-          TimeZonePrivacySettingsView()
+          PrivacyRuleSettingsView(kind: .timeZone)
         } label: {
           SettingsItem(
             icon: "clock.fill",
@@ -276,8 +276,21 @@ struct PrivacySettingsView: View {
               .foregroundStyle(.secondary)
           }
         }
+
+        NavigationLink {
+          PrivacyRuleSettingsView(kind: .focusStatus)
+        } label: {
+          SettingsItem(
+            icon: "moon.fill",
+            iconColor: .indigo,
+            title: "Focus Status"
+          ) {
+            Text(privacy.effectiveFocusStatusRule.summary)
+              .foregroundStyle(.secondary)
+          }
+        }
       } footer: {
-        Text("Choose who can see your local time.")
+        Text("Choose who can see your local time and when a Focus silences your notifications.")
       }
     }
     .listStyle(.insetGrouped)
@@ -286,21 +299,59 @@ struct PrivacySettingsView: View {
   }
 }
 
-struct TimeZonePrivacySettingsView: View {
+/// Which privacy rule a settings page edits, with its wording.
+enum PrivacyRuleKind {
+  case timeZone
+  case focusStatus
+
+  var title: String {
+    switch self {
+      case .timeZone: "Time Zone"
+      case .focusStatus: "Focus Status"
+    }
+  }
+
+  var pickerTitle: String {
+    switch self {
+      case .timeZone: "Who Can See My Local Time"
+      case .focusStatus: "Who Can See My Focus Status"
+    }
+  }
+
+  /// What the rule protects, finishing "won’t see …" and "can see …".
+  var subject: String {
+    switch self {
+      case .timeZone: "your local time"
+      case .focusStatus: "when your notifications are silenced"
+    }
+  }
+}
+
+struct PrivacyRuleSettingsView: View {
+  let kind: PrivacyRuleKind
   @ObservedObject private var privacy = INUserSettings.current.privacy
+  @ObservedObject private var focusReporter = FocusStatusReporter.shared
   @State private var isEditingExceptions = false
 
+  init(kind: PrivacyRuleKind) {
+    self.kind = kind
+  }
+
   var body: some View {
-    let rule = privacy.effectiveTimeZoneRule
+    let rule = currentRule
     List {
       Section {
-        Picker("Who Can See My Local Time", selection: audience) {
+        Picker(kind.pickerTitle, selection: audience) {
           Text("Everyone").tag(PrivacyRuleValue.Audience.everyone)
           Text("Nobody").tag(PrivacyRuleValue.Audience.nobody)
         }
         .pickerStyle(.inline)
       } header: {
-        Text("Who Can See My Local Time")
+        Text(kind.pickerTitle)
+      } footer: {
+        if kind == .focusStatus {
+          Text("Shows “Notifications silenced” in direct messages when a Focus is on. Apple shares only whether a Focus is on, not which one.")
+        }
       }
 
       Section {
@@ -322,35 +373,80 @@ struct TimeZonePrivacySettingsView: View {
         Text("Exceptions")
       } footer: {
         Text(rule.audience == .everyone
-          ? "Add people who shouldn’t see your local time."
-          : "Add people who can see your local time.")
+          ? "Add people who shouldn’t see \(kind.subject)."
+          : "Add people who can see \(kind.subject).")
+      }
+
+      if kind == .focusStatus, privacy.sharesFocusStatus {
+        focusAccessSection
       }
     }
     .listStyle(.insetGrouped)
-    .navigationTitle("Time Zone")
+    .navigationTitle(kind.title)
     .navigationBarTitleDisplayMode(.inline)
     .sheet(isPresented: $isEditingExceptions) {
       PrivacyPeopleEditor(
         title: rule.exceptionsTitle,
         footer: rule.audience == .everyone
-          ? "These people won’t see your local time."
-          : "Only these people will see your local time.",
+          ? "These people won’t see \(kind.subject)."
+          : "Only these people will see \(kind.subject).",
         selectedIDs: rule.exceptions
       ) { ids in
-        var updated = privacy.effectiveTimeZoneRule
+        var updated = currentRule
         updated.exceptions = ids
-        privacy.setTimeZoneRule(updated)
+        save(updated)
       }
+    }
+  }
+
+  /// Apple's own permission, needed before this iPhone can read Focus at all.
+  @ViewBuilder
+  private var focusAccessSection: some View {
+    switch focusReporter.authorization {
+      case .authorized:
+        EmptyView()
+      case .notDetermined:
+        Section {
+          Button("Allow Focus Access") {
+            Task { await focusReporter.requestAuthorization() }
+          }
+        } footer: {
+          Text("Inline needs permission to read whether a Focus is on.")
+        }
+      default:
+        Section {
+          Button("Open Settings") {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+              UIApplication.shared.open(url)
+            }
+          }
+        } footer: {
+          Text("Turn on Focus for Inline in Settings to share it from this iPhone.")
+        }
+    }
+  }
+
+  private var currentRule: PrivacyRuleValue {
+    switch kind {
+      case .timeZone: privacy.effectiveTimeZoneRule
+      case .focusStatus: privacy.effectiveFocusStatusRule
+    }
+  }
+
+  private func save(_ rule: PrivacyRuleValue) {
+    switch kind {
+      case .timeZone: privacy.setTimeZoneRule(rule)
+      case .focusStatus: privacy.setFocusStatusRule(rule)
     }
   }
 
   private var audience: Binding<PrivacyRuleValue.Audience> {
     Binding(
-      get: { privacy.effectiveTimeZoneRule.audience },
+      get: { currentRule.audience },
       set: { audience in
-        var rule = privacy.effectiveTimeZoneRule
+        var rule = currentRule
         rule.audience = audience
-        privacy.setTimeZoneRule(rule)
+        save(rule)
       }
     )
   }

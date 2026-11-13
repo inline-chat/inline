@@ -28,7 +28,7 @@ public enum MessageLayoutPlanner {
     let avatarColumn = input.isOutgoing || input.avatar == .none ? 0 : m.avatarSize + m.avatarSpacing
     let laneMinX = m.rowLeadingInset + avatarColumn
     let laneWidth = max(0, input.rowWidth - m.rowLeadingInset - m.rowTrailingInset - avatarColumn)
-    let maximumBodyWidth = grid.floor(laneWidth * m.maximumBubbleWidthFraction)
+    let maximumBodyWidth = grid.floor(min(laneWidth * m.maximumBubbleWidthFraction, m.maximumBubbleWidth))
 
     // Blocks. Large emoji carry none. The first edge-to-edge block above the text sets the body
     // width, scaled down to fit the lane; a caption wraps to it.
@@ -58,16 +58,23 @@ public enum MessageLayoutPlanner {
       return TextLayouter.layout(text, style: style, maximumWidth: width, grid: grid)
     }
     let text = bodyText.isEmpty ? TextLayout.empty : typeset(bodyText, width: maximumContentWidth)
-    let rich = richBlocks.flatMap {
+    let fullRich = richBlocks.flatMap {
       RichLayoutPlanner.layout(
         $0,
         maximumWidth: maximumContentWidth,
         grid: grid,
         layoutDirection: input.layoutDirection,
         metrics: input.richMetrics,
-        cache: cache
+        cache: cache,
+        sources: input.revealedLength == nil ? nil : input.richSources
       )
     }
+    // A streaming rich body shows the nodes up to the frontier, and the frontier node's lines
+    // up to the one holding it.
+    let revealedRich = input.revealedLength.flatMap { revealed in
+      fullRich?.revealing(revealed, grid: grid, metrics: input.richMetrics)
+    }
+    let rich = revealedRich ?? fullRich
     // The body's measurements, whichever kind it is.
     // While a text body streams, only the lines up to the one holding the last revealed
     // character count: they set the body's width and height.
@@ -397,7 +404,7 @@ public enum MessageLayoutPlanner {
       hiddenNodes: input.footer.visibility == .reserved ? [.time] : [],
       text: text.lineCount > 0 ? alignedText : nil,
       rich: rich,
-      revealedLength: revealedLines == nil ? nil : input.revealedLength,
+      revealedLength: revealedLines == nil && revealedRich == nil ? nil : input.revealedLength,
       name: name,
       time: time,
       timePlacement: placement,

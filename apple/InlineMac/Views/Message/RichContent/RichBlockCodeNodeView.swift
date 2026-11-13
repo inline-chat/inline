@@ -26,16 +26,25 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
 
   private let gutter = RichBlockCodeGutterView(frame: .zero)
   private let surface = RichBlockTextSurface(frame: .zero)
-  private let highlighter = CodeSyntaxHighlighter()
   private var rawText = ""
   private var gutterWidth: CGFloat = 0
   private var highlightGeneration: UInt64 = 0
   private var highlightTask: Task<Void, Never>?
   private var copyFeedbackTask: Task<Void, Never>?
+  /// Set while the shown text still waits for its final tokens.
   private var highlightInput: HighlightInput?
+  /// Tokens currently drawn and the raw text they were drawn on, so a
+  /// streamed extension can keep its colors while new tokens load.
+  private var shownTokens: ShownTokens?
   private var renderSignature: RenderSignature?
 
   override var orderedTextSurfaces: [RichBlockTextSurface] { [surface] }
+
+  private struct ShownTokens {
+    let rawText: String
+    let language: String?
+    let tokens: [CodeToken]
+  }
 
   private struct HighlightInput {
     let baseText: NSAttributedString
@@ -98,9 +107,11 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     copyButton.target = self
     copyButton.action = #selector(copyCode)
     addSubview(languageLabel)
-    addSubview(copyButton)
     addSubview(gutter)
     addSubview(surface)
+    // Without a language header the button overlays the text surface, so it
+    // must be the topmost subview or the surface takes its clicks.
+    addSubview(copyButton)
   }
 
   @available(*, unavailable)
@@ -148,18 +159,29 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
       font: RichBlockCodeMetrics.gutterFont,
       color: context.palette.tertiary
     )
-    surface.apply(
-      text: text,
+    let input = HighlightInput(
+      baseText: text,
+      language: code.language,
+      palette: context.palette,
       linkColor: context.palette.link,
       onEntityClick: context.interactions.onTextEntityClick
     )
-    if context.codePresentation == .syntaxHighlighted {
-      highlightInput = .init(
-        baseText: text,
-        language: code.language,
-        palette: context.palette,
-        linkColor: context.palette.link,
-        onEntityClick: context.interactions.onTextEntityClick
+    if showsGutter {
+      if let tokens = CodeSyntaxHighlighter.cachedTokens(for: rawText, language: code.language) {
+        // Already computed somewhere: color the first frame, no async work.
+        applyTokens(tokens, input: input)
+      } else {
+        // Streaming extends the previous text. Keep its colors on the shared
+        // prefix so the block does not flash plain while new tokens load.
+        applyTokens(carriedTokens(to: rawText, language: code.language), input: input)
+        highlightInput = input
+      }
+    } else {
+      shownTokens = nil
+      surface.apply(
+        text: text,
+        linkColor: input.linkColor,
+        onEntityClick: input.onEntityClick
       )
     }
     requestHighlightIfNeeded()
@@ -184,6 +206,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     copyFeedbackTask = nil
     setCopyFeedback(copied: false)
     highlightInput = nil
+    shownTokens = nil
     renderSignature = nil
   }
 
@@ -267,33 +290,62 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
           let input = highlightInput,
           CodeSyntaxHighlighter.supports(language: input.language)
     else { return }
-    let highlighter = highlighter
     let rawText = input.baseText.string
+    // Another view or an earlier task may have finished it meanwhile.
+    if let tokens = CodeSyntaxHighlighter.cachedTokens(for: rawText, language: input.language) {
+      applyTokens(tokens, input: input)
+      highlightInput = nil
+      needsLayout = true
+      return
+    }
     highlightTask = Task { [weak self] in
-      guard let tokens = try? await highlighter.tokens(for: rawText, language: input.language),
+      guard let tokens = try? await CodeSyntaxHighlighter.shared.tokens(for: rawText, language: input.language),
             !Task.isCancelled,
             let self,
             self.highlightGeneration == generation,
             self.rawText == rawText
       else { return }
-      let highlighted = NSMutableAttributedString(attributedString: input.baseText)
-      let fullLength = highlighted.length
-      for token in tokens where token.range.location >= 0
-        && token.range.location <= fullLength
-        && token.range.length <= fullLength - token.range.location
-      {
-        highlighted.addAttribute(
-          .foregroundColor,
-          value: tokenColor(token.kind, palette: input.palette),
-          range: token.range
-        )
-      }
-      surface.apply(
-        text: highlighted,
-        linkColor: input.linkColor,
-        onEntityClick: input.onEntityClick
-      )
+      applyTokens(tokens, input: input)
+      highlightInput = nil
       needsLayout = true
+    }
+  }
+
+  private func applyTokens(_ tokens: [CodeToken], input: HighlightInput) {
+    let highlighted = NSMutableAttributedString(attributedString: input.baseText)
+    let fullLength = highlighted.length
+    for token in tokens where token.range.location >= 0
+      && token.range.location <= fullLength
+      && token.range.length <= fullLength - token.range.location
+    {
+      highlighted.addAttribute(
+        .foregroundColor,
+        value: tokenColor(token.kind, palette: input.palette),
+        range: token.range
+      )
+    }
+    shownTokens = .init(rawText: input.baseText.string, language: input.language, tokens: tokens)
+    surface.apply(
+      text: highlighted,
+      linkColor: input.linkColor,
+      onEntityClick: input.onEntityClick
+    )
+  }
+
+  /// Previous tokens that still hold when `rawText` extends the shown text.
+  /// A token touching the old end is dropped because the new text may extend
+  /// it (an identifier or string that is still being typed).
+  private func carriedTokens(to rawText: String, language: String?) -> [CodeToken] {
+    guard let shown = shownTokens,
+          shown.language == language,
+          !shown.tokens.isEmpty,
+          rawText.utf16.starts(with: shown.rawText.utf16)
+    else { return [] }
+    let prefixLength = shown.rawText.utf16.count
+    let keepsBoundary = rawText.utf16.count == prefixLength
+    return shown.tokens.filter { token in
+      let end = NSMaxRange(token.range)
+      return end < prefixLength || (keepsBoundary && end == prefixLength)
     }
   }
 

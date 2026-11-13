@@ -1950,6 +1950,7 @@ mod tests {
             status: Some(proto::UserStatus {
                 online: proto::user_status::Status::Online as i32,
                 last_online: None,
+                focus: None,
             }),
             ..Default::default()
         };
@@ -1964,6 +1965,7 @@ mod tests {
             status: Some(proto::UserStatus {
                 online: proto::user_status::Status::Offline as i32,
                 last_online: None,
+                focus: None,
             }),
             ..Default::default()
         };

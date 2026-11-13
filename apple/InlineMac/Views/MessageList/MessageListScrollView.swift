@@ -14,6 +14,11 @@ class MessageListScrollView: NSScrollView {
   static let centeredChatWidth = ChatLayoutMetrics.maximumWidth
   let messageColumnGuide = NSLayoutGuide()
   private var columnWidth: NSLayoutConstraint?
+  var shouldPinBottomOnHeightChange: (() -> Bool)? {
+    didSet {
+      (contentView as? CenteredMessageClipView)?.shouldPinBottomOnHeightChange = shouldPinBottomOnHeightChange
+    }
+  }
 
   var messageContentWidth: CGFloat {
     min(contentSize.width, maximumContentWidth ?? contentSize.width)
@@ -57,6 +62,8 @@ class MessageListScrollView: NSScrollView {
     return hit
   }
 
+  // Don't override scrollWheel(with:): AppKit then opts this view out of responsive scrolling.
+
   override func flashScrollers() {
     // Do nothing to prevent flashing
   }
@@ -65,6 +72,17 @@ class MessageListScrollView: NSScrollView {
 /// Keep the native viewport and scroller full-width. Center the narrower table
 /// in document coordinates, including programmatic scrolls that request x = 0.
 private final class CenteredMessageClipView: NSClipView {
+  var shouldPinBottomOnHeightChange: (() -> Bool)?
+
+  override func setFrameSize(_ newSize: NSSize) {
+    // Only the old viewport can tell us whether a reader was pinned when a resize began.
+    let pinBottom = newSize.height != frame.height && shouldPinBottomOnHeightChange?() == true
+    super.setFrameSize(newSize)
+    if pinBottom, let table = documentView as? NSTableView {
+      table.scrollToBottomWithInset(cancel: true)
+    }
+  }
+
   var maximumDocumentWidth: CGFloat? {
     didSet { recenterDocument() }
   }

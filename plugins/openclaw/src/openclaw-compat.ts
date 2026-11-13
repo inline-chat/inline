@@ -1,4 +1,4 @@
-import { z, type ZodTypeAny } from "zod"
+import { z, type ZodType } from "zod"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 
 const MB = 1024 * 1024
@@ -38,7 +38,7 @@ export function setOpenClawAgentDefaultModel(
   }
 }
 
-type ZodSchemaWithToJsonSchema = ZodTypeAny & {
+type ZodSchemaWithToJsonSchema = ZodType & {
   toJSONSchema?: (params?: Record<string, unknown>) => unknown
 }
 
@@ -88,7 +88,7 @@ export function emptyPluginConfigSchema() {
   }
 }
 
-export function buildChannelConfigSchema(schema: ZodTypeAny) {
+export function buildChannelConfigSchema(schema: ZodType) {
   const schemaWithJson = schema as ZodSchemaWithToJsonSchema
   if (typeof schemaWithJson.toJSONSchema === "function") {
     return {
@@ -132,7 +132,7 @@ const ToolPolicyBaseSchema = z
 export const ToolPolicySchema = ToolPolicyBaseSchema.superRefine((value, ctx) => {
   if (value.allow && value.allow.length > 0 && value.alsoAllow && value.alsoAllow.length > 0) {
     ctx.addIssue({
-      code: z.ZodIssueCode.custom,
+      code: "custom",
       message:
         "tools policy cannot set both allow and alsoAllow in the same scope (merge alsoAllow into allow, or remove allow and use profile + alsoAllow)",
     })
@@ -154,7 +154,7 @@ export function requireOpenAllowFrom(params: {
     return
   }
   params.ctx.addIssue({
-    code: z.ZodIssueCode.custom,
+    code: "custom",
     path: params.path,
     message: params.message,
   })

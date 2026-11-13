@@ -380,12 +380,17 @@ class ChatViewAppKit: NSViewController {
         os_signpost(.end, log: signpostLog, name: "MessageListSetup", signpostID: signpostID)
       }
 
+      // Without a prepared payload a saved reading place is resolved here, so back, forward and
+      // restored routes open at it in the first frame too.
+      let coldOpeningState = preparedPayload == nil
+        ? ChatOpenPreloader.coldOpeningState(peer: peerId, database: dependencies.database)
+        : nil
       messageListVC_ = MessageListAppKit(
         dependencies: dependencies,
         peerId: peerId,
         chat: chat,
-        showUnreadAfter: unreadBoundaryAtOpen(),
-        initialState: preparedPayload?.messagesInitialState,
+        showUnreadAfter: unreadBoundaryAtOpen(coldOpeningState: coldOpeningState),
+        initialState: preparedPayload?.messagesInitialState ?? coldOpeningState,
         initialTargetMessageId: preparedPayload?.targetMessageId,
         unreadFetchBoundary: preparedPayload?.unreadFetchBoundary,
         collapsedMaxId: dialog?.collapsedMaxId,
@@ -456,7 +461,11 @@ class ChatViewAppKit: NSViewController {
     }
   }
 
-  private func unreadBoundaryAtOpen() -> Int64? {
+  private func unreadBoundaryAtOpen(coldOpeningState: MessagesProgressiveViewModel.InitialState?) -> Int64? {
+    // A saved place's window was chosen with the boundary read in its own snapshot.
+    if let coldOpeningState {
+      return coldOpeningState.unreadBoundary
+    }
     // The preloader chose the window from this same dialog snapshot.
     let openDialog = preparedPayload?.chatItem?.dialog ?? dialog
     guard let openDialog else { return nil }

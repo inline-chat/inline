@@ -2,6 +2,8 @@ import Foundation
 import InlineKit
 
 enum MessageListSectionID: Hashable {
+  /// The line under the newest message. Section 0, the visual bottom of the inverted list.
+  case statusNotice
   case messages(dayStart: Date)
   case collapsedHistory
   case threadContext
@@ -10,7 +12,7 @@ enum MessageListSectionID: Hashable {
     switch self {
       case .messages:
         true
-      case .collapsedHistory, .threadContext:
+      case .statusNotice, .collapsedHistory, .threadContext:
         false
     }
   }
@@ -27,12 +29,13 @@ enum MessageListItem: Hashable {
   case threadAnchor(id: Int64)
   case unreadSeparator(id: String)
   case collapsedHistory
+  case statusNotice
 
   var messageStableId: Int64? {
     switch self {
       case let .message(id), let .threadAnchor(id):
         id
-      case .unreadSeparator, .collapsedHistory:
+      case .unreadSeparator, .collapsedHistory, .statusNotice:
         nil
     }
   }
@@ -50,6 +53,7 @@ struct MessageListItemModel {
     case message(FullMessage, displayMode: MessageDisplayMode)
     case unreadSeparator(title: String)
     case collapsedHistory(title: String)
+    case statusNotice(title: String)
   }
 
   var content: Content

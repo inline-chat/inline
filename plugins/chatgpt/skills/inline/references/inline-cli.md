@@ -118,6 +118,17 @@ Destructive commands never prompt in JSON mode and require `--yes`. Pass it only
 
 Send text and attachment captions support [rich Markdown](message-formatting.md), including tables, code, images, disclosures, inline styles, and math. Use `--text-file report.md` or `--stdin` for multiline content, or single-quote `--text` to protect backticks and dollar signs from the shell. `inline messages send --help` lists the syntax. Explicit `--mention` ranges disable Markdown parsing; use Markdown mention links when combining mentions with formatting.
 
+## Wait for a reply
+
+To wait for a human reply after sending, make one blocking call instead of polling `messages list`. Pass the sent message's id as `--after` so a reply that already arrived is returned immediately:
+
+```bash
+inline messages wait --user-id USER_ID --after SENT_MESSAGE_ID --timeout 30m --json --compact
+inline messages wait --chat-id CHAT_ID --thread PARENT_ID --after SENT_MESSAGE_ID --sender-id USER_ID --settle 30s --json --compact
+```
+
+Only other people's messages count unless `--include-own` is set; `--sender-id` narrows to one author; `--settle` collects a burst into one result. JSON returns `messages` (oldest first), `cursor`, and `timedOut`. Exit status is 0 with messages and 124 on timeout; pass `cursor` as `--after` to keep waiting without gaps or repeats. Dropped connections are retried until the timeout. Keep `--timeout` within your host's command time limit, or run it in the background.
+
 ## Select and forward messages
 
 `--user-id` chooses a DM with a person; `--sender-id` selects an author inside that conversation. Message IDs belong to the source chat, so resolve source and destination separately. List/search time and sender filters apply to the fetched page after its limit, not to all history. JSON includes `page.fetchedCount`, `page.returnedCount`, `page.nextOffsetId`, and `page.filtersAppliedToPage`; continue with `--offset-id` even after an empty filtered page. Named days and date-only boundaries use UTC.

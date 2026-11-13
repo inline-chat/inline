@@ -3,6 +3,13 @@ label: Inline
 kind: platform
 provides_tools:
   - inline
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - subagent_start
+  - subagent_stop
+  - pre_approval_request
+  - post_approval_response
 version: 1.1.0
 requires_hermes: ">=0.21.3"
 description: >

@@ -202,7 +202,7 @@ async fn reconnect_native_download(
     Ok(())
 }
 
-fn retryable_transport_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+pub(crate) fn retryable_transport_failure(error: &(dyn std::error::Error + 'static)) -> bool {
     error
         .downcast_ref::<RealtimeError>()
         .is_some_and(resumable_v2_upload_error)
@@ -217,7 +217,7 @@ fn retryable_transport_failure(error: &(dyn std::error::Error + 'static)) -> boo
         )
 }
 
-fn server_range_retryable(error: &(dyn std::error::Error + 'static)) -> bool {
+pub(crate) fn server_range_retryable(error: &(dyn std::error::Error + 'static)) -> bool {
     let internal_error = proto::rpc_error::Code::InternalError as i32;
     let rate_limit = proto::rpc_error::Code::RateLimit as i32;
     matches!(error.downcast_ref::<RealtimeError>(),

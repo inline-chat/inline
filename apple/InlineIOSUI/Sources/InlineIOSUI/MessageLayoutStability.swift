@@ -7,6 +7,13 @@ public enum MessageBubbleWidthMode: Equatable, Sendable {
 
 public enum MessageBubbleWidthPolicy {
   public static let maximumWidthFraction: CGFloat = 0.9
+  /// Absolute cap on bubble width. Phones never reach it (0.9 × 440pt ≈ 396pt); on iPad and
+  /// other wide columns it keeps lines at a readable length instead of spanning the column.
+  public static let maximumWidth: CGFloat = 600
+
+  public static func maximumWidth(forAvailableWidth availableWidth: CGFloat) -> CGFloat {
+    min(max(0, availableWidth) * maximumWidthFraction, maximumWidth)
+  }
 
   public static func mode(hasLargeURLPreview: Bool) -> MessageBubbleWidthMode {
     hasLargeURLPreview ? .fixedMaximum : .contentSizedUpToMaximum

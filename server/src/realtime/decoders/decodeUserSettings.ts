@@ -51,6 +51,7 @@ const decodePrivacyPatch = (settings: NonNullable<UserSettings["privacySettings"
   if (settings.shareTimeZone !== undefined) patch.shareTimeZone = settings.shareTimeZone
   if (settings.appearInGlobalSearch !== undefined) patch.appearInGlobalSearch = settings.appearInGlobalSearch
   if (settings.timeZone) patch.timeZone = decodePrivacyRule(settings.timeZone)
+  if (settings.focusStatus) patch.focusStatus = decodePrivacyRule(settings.focusStatus)
   return patch
 }
 

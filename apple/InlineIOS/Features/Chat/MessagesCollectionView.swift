@@ -19,7 +19,8 @@ import UIKit
 final class MessagesCollectionView: UICollectionView {
   struct ScrollAffordanceState: Equatable {
     var isVisible = false
-    var hasUnread = false
+    /// Unread messages below the reader; see `ChatUnreadBadgeCount`.
+    var unreadCount = 0
   }
 
   private enum ScrollAffordanceMetrics {
@@ -112,7 +113,24 @@ final class MessagesCollectionView: UICollectionView {
   /// otherwise cancel an in-flight animation and leave the chat at the bottom.
   private var pendingScrollAnimated = true
   private var pendingScrollLoadTask: Task<Void, Never>?
+  private var didPlaceInitialUnread = false
+  private var isPlacingInitialUnread = false
+  /// Where the chat opens, decided with its first window. An explicit message focus wins.
+  private let openAnchor: ChatOpenAnchor
+  /// The opening place landed above the bottom and the user has not scrolled since; a pinned
+  /// header that appears keeps it below the header instead of covering it.
+  private var holdsOpeningPlace = false
+  /// A send or a return to latest cleared the saved place; nothing is saved again until the
+  /// user scrolls, so leaving mid-animation or still scrolled up does not bring it back.
+  private var suspendsReadingPlaceCapture = false
   private var returnToLatestTask: Task<Void, Never>?
+  /// The user dragged while return to latest was in flight. Its fetch still
+  /// reaches the rows through the publisher's reload, but it no longer scrolls.
+  private var returnToLatestWasInterrupted = false
+  /// Names the running return to latest. A message focus advances `messageFocusRevision`
+  /// without ending the return, which used to leave its finished task in place and the
+  /// button ignoring every later tap.
+  private var returnToLatestGeneration: UInt64 = 0
   private var messageFocusRevision: UInt64 = 0
   private let sendAnimationScrollState = SendMessageAnimationScrollState()
   private var scrollAffordanceState = ScrollAffordanceState()
@@ -138,6 +156,7 @@ final class MessagesCollectionView: UICollectionView {
     isPreview: Bool = false,
     sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
     theme: IOSThemeSnapshot,
+    openAnchor: ChatOpenAnchor = .latest,
     viewModel: MessagesSectionedViewModel? = nil,
     messageViewImplementation: MessageViewImplementation? = nil
   ) {
@@ -146,13 +165,11 @@ final class MessagesCollectionView: UICollectionView {
     self.spaceId = spaceId
     self.isPreview = isPreview
     self.theme = theme
+    self.openAnchor = openAnchor
     let implementation = messageViewImplementation ?? NextMessageViewFeature.selectedImplementation(
       allowsOverride: SettingsBuildAudience.showsDebugTools
     )
-    // Chat previews keep UIKit's menu; the custom one presents over the whole window.
-    let contextMenuImplementation = MessageContextMenuFeature.selectedImplementation(
-      isExperimentAvailable: SettingsBuildAudience.showsDebugTools && !isPreview
-    )
+    let contextMenuImplementation = MessageContextMenuRollout.implementation(isPreview: isPreview)
     let coordinator = Coordinator(
       peerId: peerId,
       chatId: chatId,
@@ -280,6 +297,8 @@ final class MessagesCollectionView: UICollectionView {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
+      // Leaving the chat: remember where the user was reading, while rows still have frames.
+      captureReadingPlace()
       coordinator.dismissCustomContextMenuImmediately()
       cancelContextMenuKeyboardRestoration()
       isKeyboardVisible = false
@@ -300,6 +319,7 @@ final class MessagesCollectionView: UICollectionView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    placeInitialUnreadIfNeeded()
     if pendingScrollMessageID != nil, pendingScrollLoadTask == nil {
       resolvePendingMessageScroll()
     }
@@ -357,19 +377,28 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   func scrollToBottom() {
+    didPlaceInitialUnread = true
+    clearReadingPlace()
     cancelContextMenuKeyboardRestoration()
     guard !coordinator.viewModel.historyCoverage.isAtCertifiedLiveEnd else {
       scrollToLoadedWindowBottom()
       return
     }
-    guard returnToLatestTask == nil else { return }
+    if let inFlightTask = returnToLatestTask {
+      // A tap after the user scrolled away from the first landing starts over.
+      guard returnToLatestWasInterrupted else { return }
+      inFlightTask.cancel()
+      returnToLatestTask = nil
+    }
     cancelPendingMessageFocus()
-    let revision = messageFocusRevision
+    returnToLatestWasInterrupted = false
+    returnToLatestGeneration &+= 1
+    let generation = returnToLatestGeneration
     let account = try? Auth.shared.handle.beginAccountMutation()
     returnToLatestTask = Task { @MainActor [weak self] in
       guard let self else { return }
       defer {
-        if messageFocusRevision == revision {
+        if returnToLatestGeneration == generation {
           returnToLatestTask = nil
         }
       }
@@ -383,18 +412,25 @@ final class MessagesCollectionView: UICollectionView {
         transaction.type = .ephemeral()
         _ = try await Api.realtime.send(transaction, expectedAccount: account)
         try Task.checkCancellation()
+        // A user who scrolled since landing keeps their place; replacing the
+        // window here would move what they are reading.
+        guard !returnToLatestWasInterrupted else { return }
         _ = try await coordinator.viewModel.loadLatestWindowAsync()
         await Task.yield()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, !returnToLatestWasInterrupted else { return }
         scrollToLoadedWindowBottom()
       } catch is CancellationError {
         return
       } catch {
-        // Keep a useful cached latest window while retaining unknown coverage.
-        _ = try? await coordinator.viewModel.loadLatestWindowAsync()
-        await Task.yield()
-        guard !Task.isCancelled else { return }
-        scrollToLoadedWindowBottom()
+        if !returnToLatestWasInterrupted {
+          // Keep a useful cached latest window while retaining unknown coverage.
+          _ = try? await coordinator.viewModel.loadLatestWindowAsync()
+          await Task.yield()
+          guard !Task.isCancelled else { return }
+          if !returnToLatestWasInterrupted {
+            scrollToLoadedWindowBottom()
+          }
+        }
         ToastManager.shared.showToast("Could not load latest history", type: .error)
       }
     }
@@ -429,6 +465,8 @@ final class MessagesCollectionView: UICollectionView {
     cancelContextMenuKeyboardRestoration()
     returnToLatestTask?.cancel()
     returnToLatestTask = nil
+    // An explicit focus wins over the opening place and moves the list away from it.
+    holdsOpeningPlace = false
     messageFocusRevision &+= 1
     pendingScrollMessageID = messageID
     pendingScrollAnimated = window != nil
@@ -536,11 +574,68 @@ final class MessagesCollectionView: UICollectionView {
     pendingScrollMessageID = nil
   }
 
+  /// A drag during return to latest keeps its fetch running but stops it from
+  /// scrolling or replacing the window again.
+  fileprivate func interruptReturnToLatest() {
+    guard returnToLatestTask != nil else { return }
+    returnToLatestWasInterrupted = true
+  }
+
   func cancelPendingMessageFocus() {
     messageFocusRevision &+= 1
     pendingScrollLoadTask?.cancel()
     pendingScrollLoadTask = nil
     pendingScrollMessageID = nil
+  }
+
+  /// Puts the row's top `offset` points below the visual top inset, as far as the content
+  /// allows. Rows that come on screen self-size during layout and move it, so the row is
+  /// measured again until it stays.
+  private func placeRowTop(at indexPath: IndexPath, offset: CGFloat) {
+    UIView.performWithoutAnimation {
+      for _ in 0 ..< 3 {
+        guard isValidIndexPath(indexPath),
+              let frame = layoutAttributesForItem(at: indexPath)?.frame
+        else { return }
+        // Inverted: a row's visual top is its maxY, and the visual top inset edge sits at
+        // contentOffset.y + height - contentInset.bottom.
+        let target = clampedSendAnimationContentOffset(CGPoint(
+          x: contentOffset.x,
+          y: frame.maxY + offset - bounds.height + contentInset.bottom
+        ))
+        guard abs(target.y - contentOffset.y) > 0.5 else { return }
+        setContentOffset(target, animated: false)
+        layoutIfNeeded()
+      }
+    }
+  }
+
+  /// Saves where the user is reading while the newest message is off screen, and clears the
+  /// saved place while it is on screen, so a chat left a few lines up still opens at the bottom.
+  /// Runs when a scroll ends and when the list leaves its window, never before the list was placed.
+  fileprivate func captureReadingPlace() {
+    guard !isPreview, didPlaceInitialUnread, !isPlacingInitialUnread, !suspendsReadingPlaceCapture,
+          bounds.height > 0, !itemsEmpty
+    else { return }
+    if coordinator.showsNewestMessage(in: self) {
+      ChatReadingPlaceStore.shared.clear(for: peerId)
+    } else if let place = coordinator.topVisibleReadingPlace(in: self) {
+      ChatReadingPlaceStore.shared.save(place, for: peerId)
+    }
+  }
+
+  /// A send or a return to latest: the saved place goes, and is not saved again until the user scrolls.
+  fileprivate func clearReadingPlace() {
+    guard !isPreview else { return }
+    suspendsReadingPlaceCapture = true
+    holdsOpeningPlace = false
+    ChatReadingPlaceStore.shared.clear(for: peerId)
+  }
+
+  /// The user started scrolling: the opening place is theirs to move, and scroll ends save again.
+  fileprivate func userBeganScrolling() {
+    holdsOpeningPlace = false
+    suspendsReadingPlaceCapture = false
   }
 
   @discardableResult
@@ -561,6 +656,7 @@ final class MessagesCollectionView: UICollectionView {
     // keep the request pending for `layoutSubviews`.
     guard window != nil, bounds.height > 0 else { return true }
 
+    didPlaceInitialUnread = true
     let animated = pendingScrollAnimated
     pendingScrollMessageID = nil
     pendingScrollLoadTask?.cancel()
@@ -592,6 +688,49 @@ final class MessagesCollectionView: UICollectionView {
       }
     }
     return true
+  }
+
+  /// The inverted list's physical bottom is its visual top. Place where the chat opens (the
+  /// saved reading place, or the frozen unread separator) in the first usable layout, before
+  /// visibility can advance the read cursor. The latest messages need nothing: the list starts
+  /// there, and an unread line among them is drawn, not placed.
+  fileprivate func placeInitialUnreadIfNeeded() {
+    guard !didPlaceInitialUnread, coordinator.hasAppliedOpeningSnapshot,
+          window != nil, bounds.height > 0 else { return }
+    // An explicit message focus or the user's own gesture supersedes the normal opening.
+    guard pendingScrollMessageID == nil, !isTracking, !isDragging, !isDecelerating else {
+      didPlaceInitialUnread = true
+      return
+    }
+    didPlaceInitialUnread = true
+    let candidate: IndexPath?
+    let offset: CGFloat
+    let placedMessageID: Int64?
+    switch openAnchor {
+      case let .saved(place):
+        candidate = findIndexPath(forMessageId: place.messageId, chatId: chatId, includeThreadAnchor: false)
+        offset = place.offset
+        placedMessageID = place.messageId
+      case .unread:
+        candidate = coordinator.initialUnreadIndexPath
+        offset = 0
+        placedMessageID = coordinator.viewModel.firstUnreadMessageId
+      case .latest:
+        return
+    }
+    guard let target = candidate, isValidIndexPath(target) else { return }
+    isPlacingInitialUnread = true
+    placeRowTop(at: target, offset: offset)
+    isPlacingInitialUnread = false
+    coordinator.viewModel.setAtBottom(isAtVisualBottomForUnread)
+    if !isAtVisualBottomForUnread, let placedMessageID {
+      coordinator.viewModel.setHistoryAnchor(placedMessageID)
+      holdsOpeningPlace = true
+    }
+    // Reading waited for the placement; it runs once the placed rows are on screen.
+    DispatchQueue.main.async { [weak self] in
+      self?.coordinator.updateUnreadIfNeeded()
+    }
   }
 
   private struct PendingSendAnimationComposeInset {
@@ -661,10 +800,15 @@ final class MessagesCollectionView: UICollectionView {
     onScrollAffordanceChanged?(scrollAffordanceState)
   }
 
-  fileprivate func setScrollAffordanceHasUnread(_ hasUnread: Bool) {
-    guard hasUnread != scrollAffordanceState.hasUnread else { return }
-    scrollAffordanceState.hasUnread = hasUnread
+  fileprivate func setScrollAffordanceUnreadCount(_ count: Int) {
+    guard count != scrollAffordanceState.unreadCount else { return }
+    scrollAffordanceState.unreadCount = count
     onScrollAffordanceChanged?(scrollAffordanceState)
+  }
+
+  /// The dialog's unread count and read marker, from the chat's activity navigator.
+  func setUnreadState(_ state: ChatActivityNavigator.State) {
+    coordinator.setUnreadState(state)
   }
 
   var hasDeferredSendComposeInset: Bool {
@@ -674,12 +818,17 @@ final class MessagesCollectionView: UICollectionView {
   func updatePinnedHeaderHeight(_ height: CGFloat) {
     guard abs(pinnedHeaderHeight - height) > 0.5 else { return }
     let previousOffset = contentOffset
+    let previousTopInset = contentInset.bottom
     let wasAtBottom = visualBottomDistance <= 1
     pinnedHeaderHeight = height
     UIView.performWithoutAnimation {
       updateContentInsets()
       guard window != nil else { return }
-      let target = wasAtBottom ? CGPoint(x: previousOffset.x, y: -contentInset.top) : previousOffset
+      var target = wasAtBottom ? CGPoint(x: previousOffset.x, y: -contentInset.top) : previousOffset
+      if !wasAtBottom, holdsOpeningPlace {
+        // The opening place stays the same distance below the visual top inset (`contentInset.bottom`).
+        target.y += contentInset.bottom - previousTopInset
+      }
       setContentOffset(clampedSendAnimationContentOffset(target), animated: false)
     }
   }
@@ -838,6 +987,23 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   static let messagesBottomPadding = 12.0
+
+  /// Distance from the list's bottom edge to the compose container's bottom edge, reported
+  /// by the chat container from its laid-out compose. When set, it replaces the
+  /// notification-derived keyboard height. iPad keyboards (the hardware keyboard shortcut
+  /// bar, floating and undocked keyboards) report frames that do not match where the
+  /// compose actually sits, which left the newest messages under the compose.
+  private var composeBottomOffset: CGFloat?
+
+  func setComposeBottomOffset(_ offset: CGFloat) {
+    if let composeBottomOffset, abs(composeBottomOffset - offset) <= 0.5 { return }
+    let wasAtBottom = !itemsEmpty && shouldScrollToBottom
+    composeBottomOffset = offset
+    updateContentInsets()
+    guard wasAtBottom, !isContextMenuInteractionActive, contextMenuPhase == .idle else { return }
+    safeScrollToTop(animated: false)
+  }
+
   func updateContentInsets() {
     guard contextMenuPhase != .presented else {
       needsContentInsetUpdateAfterContextMenu = true
@@ -879,7 +1045,9 @@ final class MessagesCollectionView: UICollectionView {
       bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
     }
     bottomInset += Self.messagesBottomPadding
-    if isKeyboardVisible {
+    if let composeBottomOffset {
+      bottomInset += composeBottomOffset
+    } else if isKeyboardVisible {
       bottomInset += keyboardHeight
     } else {
       bottomInset += bottomSafeArea
@@ -1388,8 +1556,10 @@ private extension MessagesCollectionView {
     var onVisibleMessagesChanged: (([Int64]?) -> Void)?
     /// `.next` draws supported message kinds with the next message view.
     private let messageViewImplementation: MessageViewImplementation
-    /// `.custom` opens `MessageContextMenuController` from a hold instead of UIKit's menu.
-    private let contextMenuImplementation: MessageContextMenuImplementation
+    /// `.custom` opens `MessageContextMenuController` from a hold instead of UIKit's menu. Falls
+    /// back to `.system` for the rest of the chat when the custom menu keeps failing to open.
+    private var contextMenuImplementation: MessageContextMenuImplementation
+    private var customContextMenuFailures = 0
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var customContextMenu: MessageContextMenuController?
     private weak var customContextMenuGesture: MessageContextMenuHoldGesture?
@@ -1770,7 +1940,8 @@ private extension MessagesCollectionView {
       let gesture = MessageContextMenuHoldGesture(target: self, action: #selector(handleCustomContextMenuHold(_:)))
       gesture.acceptsTouch = { [weak self, weak collectionView] point in
         guard let self, let collectionView, customContextMenu == nil,
-              !collectionView.isContextMenuInteractionActive else { return false }
+              !collectionView.isContextMenuInteractionActive,
+              !MessageContextMenuRollout.prefersSystemMenuNow else { return false }
         return customContextMenuTarget(at: point, in: collectionView) != nil
       }
       gesture.onPressBegan = { [weak self] point in
@@ -1940,9 +2111,24 @@ private extension MessagesCollectionView {
         cell: cell,
         pressedScale: pressedScale,
         in: collectionView
-      ) else { return }
+      ) else {
+        customContextMenuFailures += 1
+        if customContextMenuFailures >= 2 { fallBackToSystemContextMenu(in: collectionView) }
+        return
+      }
+      customContextMenuFailures = 0
       customContextMenu?.beginHold(at: gesture.location(in: nil))
       customContextMenuFeedback.impactOccurred()
+    }
+
+    /// Hands this chat to UIKit's menu after holds keep failing to open the custom one, so a
+    /// hold always opens a menu.
+    private func fallBackToSystemContextMenu(in collectionView: MessagesCollectionView) {
+      guard contextMenuImplementation == .custom else { return }
+      contextMenuImplementation = .system
+      if let customContextMenuGesture { collectionView.removeGestureRecognizer(customContextMenuGesture) }
+      customContextMenuGesture = nil
+      MessageContextMenuRollout.didFallBack(reason: "\(customContextMenuFailures) holds in a row didn't open")
     }
 
     /// Closes the custom menu without animation and drops a pending press, as when the chat
@@ -1975,11 +2161,19 @@ private extension MessagesCollectionView {
       pressedScale: CGFloat,
       in collectionView: MessagesCollectionView
     ) -> Bool {
-      guard let window = collectionView.window,
-            let geometry = contextMenuPreviewGeometry(for: cell),
-            let preview = customContextMenuLivePreview(for: cell, extent: geometry.rect)
-            ?? customContextMenuSnapshot(of: geometry.view, in: geometry.rect)
-      else { return false }
+      guard let window = collectionView.window else {
+        MessageContextMenuRollout.didFailToPresent(reason: "no window")
+        return false
+      }
+      guard let geometry = contextMenuPreviewGeometry(for: cell) else {
+        MessageContextMenuRollout.didFailToPresent(reason: "no preview geometry")
+        return false
+      }
+      let livePreview = customContextMenuLivePreview(for: cell, extent: geometry.rect)
+      guard let preview = livePreview ?? customContextMenuSnapshot(of: geometry.view, in: geometry.rect) else {
+        MessageContextMenuRollout.didFailToPresent(reason: "empty preview next=\(cell.showsNextMessageView)")
+        return false
+      }
       let frame = geometry.view.convert(geometry.rect, to: window)
       let message = fullMessage.message
 
@@ -2035,6 +2229,7 @@ private extension MessagesCollectionView {
         collectionView?.contextMenuPhase = .dismissing
       }
       controller.onDidDismiss = { [weak self, weak collectionView, weak controller] in
+        MessageContextMenuRollout.didDismiss()
         guard let self, let collectionView, customContextMenu === controller else { return }
         customContextMenu = nil
         collectionView.contextMenuPhase = .idle
@@ -2061,6 +2256,11 @@ private extension MessagesCollectionView {
         window.endEditing(true)
       }
       controller.present(from: window, overKeyboardIn: keyboardWindow)
+      MessageContextMenuRollout.didPresent(
+        overKeyboard: controller.isOverKeyboard,
+        livePreview: livePreview != nil,
+        selectableText: selectableText != nil
+      )
       return true
     }
 
@@ -2083,6 +2283,9 @@ private extension MessagesCollectionView {
 
     private var dataSource: UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>!
     private(set) var listSections: [MessageListSection] = []
+    /// Text for the line under the newest message, such as a DM peer's silencing Focus.
+    private var statusNotice: String?
+    private(set) var hasAppliedOpeningSnapshot = false
 
     var messages: [FullMessage] {
       viewModel.sections.flatMap(\.messages)
@@ -2148,12 +2351,30 @@ private extension MessagesCollectionView {
         )
       }
 
+      if !isPreview, let firstUnread = viewModel.firstUnreadMessageId,
+         let boundary = viewModel.openingUnreadBoundary,
+         let stableID = messages.first(where: { $0.message.messageId == firstUnread })?.id
+      {
+        let messageItem = MessageListItem.message(id: stableID)
+        for sectionIndex in sections.indices {
+          guard let messageIndex = sections[sectionIndex].items.firstIndex(of: messageItem) else { continue }
+          // Newest-first items are inverted, so the line above this message follows it.
+          sections[sectionIndex].items.insert(.unreadSeparator(id: "unread-\(boundary)"), at: messageIndex + 1)
+          break
+        }
+      }
+
       if viewModel.collapsedMaxId != nil {
         sections.append(MessageListSection(
           id: .collapsedHistory,
           dayString: nil,
           items: [.collapsedHistory]
         ))
+      }
+
+      if showsStatusNotice {
+        // The first section is the visual bottom, under the newest message.
+        sections.insert(MessageListSection(id: .statusNotice, dayString: nil, items: [.statusNotice]), at: 0)
       }
 
       if let anchor = viewModel.threadAnchor {
@@ -2166,6 +2387,46 @@ private extension MessagesCollectionView {
       }
 
       return sections
+    }
+
+    var initialUnreadIndexPath: IndexPath? {
+      guard !isPreview, let boundary = viewModel.openingUnreadBoundary else { return nil }
+      return dataSource.indexPath(for: .unreadSeparator(id: "unread-\(boundary)"))
+    }
+
+    /// Only at the live end of the history, so it never sits under an older window.
+    private var showsStatusNotice: Bool {
+      statusNotice != nil && !isPreview && !viewModel.canLoadNewerFromLocal
+    }
+
+    /// Snapshot index of the newest message section; the status notice section precedes it.
+    private func newestMessageSectionIndex(
+      in sectionIDs: [MessageListSectionID]
+    ) -> Int {
+      sectionIDs.first == .statusNotice ? 1 : 0
+    }
+
+    func setStatusNotice(_ text: String?) {
+      guard statusNotice != text else { return }
+      let changesPresence = (statusNotice == nil) != (text == nil)
+      statusNotice = text
+      guard dataSource != nil else {
+        rebuildListSections()
+        return
+      }
+      guard changesPresence else {
+        rebuildListSections()
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.statusNotice) else { return }
+        snapshot.reconfigureItems([.statusNotice])
+        safeApplySnapshot(snapshot, animatingDifferences: false)
+        return
+      }
+      // Scrolled up, the unanimated apply keeps the visible row in place.
+      setInitialData(
+        animated: isAtBottomForUnread && !UIAccessibility.isReduceMotionEnabled,
+        reconfigureExisting: false
+      )
     }
 
     func sectionId(at index: Int) -> MessageListSectionID? {
@@ -2239,7 +2500,7 @@ private extension MessagesCollectionView {
           } else {
             nil
           }
-        case .unreadSeparator, .collapsedHistory:
+        case .unreadSeparator, .collapsedHistory, .statusNotice:
           nil
       }
     }
@@ -2256,6 +2517,8 @@ private extension MessagesCollectionView {
           return MessageListItemModel(content: .unreadSeparator(title: "Unread messages"))
         case .collapsedHistory:
           return MessageListItemModel(content: .collapsedHistory(title: "Cleared"))
+        case .statusNotice:
+          return MessageListItemModel(content: .statusNotice(title: statusNotice ?? ""))
       }
     }
 
@@ -2951,6 +3214,7 @@ private extension MessagesCollectionView {
       translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
+      observeStatusNotice()
       rebuildListSections()
 
       self.viewModel.observe { [weak self] update in
@@ -2993,6 +3257,19 @@ private extension MessagesCollectionView {
         setupNotionTaskManager()
         ensureThreadAnchorCachedIfNeeded()
       }
+    }
+
+    private func observeStatusNotice() {
+      guard !isPreview, let userId = peerId.asUserId(), userId != Auth.shared.getCurrentUserId() else { return }
+      // Seeds the first frame from memory; sections are built right after.
+      statusNotice = ObjectCache.shared.getCachedUser(id: userId)?.notificationsSilencedNotice()
+      ObjectCache.shared.getUserPublisher(id: userId)
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] userInfo in
+          guard let userInfo else { return }
+          self?.setStatusNotice(userInfo.notificationsSilencedNotice())
+        }
+        .store(in: &cancellables)
     }
 
     func applyTheme(_ theme: IOSThemeSnapshot) {
@@ -3238,9 +3515,17 @@ private extension MessagesCollectionView {
                 }
               }
             }
-          case .message:
+          case .message, .statusNotice:
             break
         }
+      }
+
+      let statusNoticeRegistration = UICollectionView.CellRegistration<
+        StatusNoticeCell,
+        MessageListItem
+      > { [weak self] cell, _, item in
+        guard let self, case let .statusNotice(title)? = model(for: item)?.content else { return }
+        cell.configure(title: title)
       }
 
       dataSource = UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>(
@@ -3256,6 +3541,12 @@ private extension MessagesCollectionView {
           case .unreadSeparator, .collapsedHistory:
             collectionView.dequeueConfiguredReusableCell(
               using: separatorRegistration,
+              for: indexPath,
+              item: item
+            )
+          case .statusNotice:
+            collectionView.dequeueConfiguredReusableCell(
+              using: statusNoticeRegistration,
               for: indexPath,
               item: item
             )
@@ -3384,10 +3675,14 @@ private extension MessagesCollectionView {
       )
 
       let completion = { [weak self] in
+        guard let self else { return }
+        hasAppliedOpeningSnapshot = true
+        currentCollectionView?.layoutIfNeeded()
+        (currentCollectionView as? MessagesCollectionView)?.placeInitialUnreadIfNeeded()
         // Kick-off the auto-hide timer on first load as well (after layout pass)
         DispatchQueue.main.async {
-          self?.scheduleHideDateSeparators()
-          self?.updateUnreadIfNeeded()
+          self.scheduleHideDateSeparators()
+          self.updateUnreadIfNeeded()
         }
       }
 
@@ -3840,8 +4135,21 @@ private extension MessagesCollectionView {
       switch update {
         case .messagesAdded, .messagesDeleted, .messagesUpdated:
           rebuildListSections()
+          // Incremental paths edit the current snapshot; when a window change moved the
+          // status notice in or out, rebuild so the snapshot keeps matching listSections.
+          if dataSource.snapshot().sectionIdentifiers.contains(.statusNotice) != showsStatusNotice {
+            setInitialData(animated: false, reconfigureExisting: false)
+            return
+          }
         default:
           break
+      }
+
+      // Deleting the first unread row can move the separator across a section boundary.
+      // The incremental delete path only removes message items, so rebuild that structure.
+      if case .messagesDeleted = update, viewModel.openingUnreadBoundary != nil {
+        setInitialData(animated: false, reconfigureExisting: false)
+        return
       }
 
       switch update {
@@ -3854,6 +4162,10 @@ private extension MessagesCollectionView {
         case let .messagesAdded(sectionIndex, messageIds):
           var snapshot = dataSource.snapshot()
           let items = messageIds.map { MessageListItem.message(id: $0) }
+          // A message still sending was sent from this device: a send clears the saved place.
+          if items.contains(where: { message(for: $0)?.message.status == .sending }) {
+            (currentCollectionView as? MessagesCollectionView)?.clearReadingPlace()
+          }
 
           // Validate section index
           guard sectionIndex >= 0, sectionIndex < viewModel.sections.count else {
@@ -3894,11 +4206,12 @@ private extension MessagesCollectionView {
           if snapshot.sectionIdentifiers.contains(sectionId) {
             anchorSectionId = sectionId
           } else {
-            anchorSectionId = snapshot.sectionIdentifiers.first
-            if sectionIndex < snapshot.sectionIdentifiers.count {
+            let snapshotIndex = sectionIndex + newestMessageSectionIndex(in: snapshot.sectionIdentifiers)
+            anchorSectionId = snapshot.sectionIdentifiers.first { $0 != .statusNotice }
+            if snapshotIndex < snapshot.sectionIdentifiers.count {
               snapshot.insertSections(
                 [sectionId],
-                beforeSection: snapshot.sectionIdentifiers[sectionIndex]
+                beforeSection: snapshot.sectionIdentifiers[snapshotIndex]
               )
             } else {
               snapshot.appendSections([sectionId])
@@ -3997,7 +4310,7 @@ private extension MessagesCollectionView {
               }
             }
           )
-          handleIncomingMessages()
+          updateScrollToBottomCount()
 
         case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
@@ -4007,6 +4320,19 @@ private extension MessagesCollectionView {
               MessageListItem.threadAnchor(id: id),
             ]
           }.filter { snapshot.itemIdentifiers.contains($0) }
+          // Scrolled up, a delete off screen applies without animation so
+          // safeApplySnapshot keeps the visible row in place. A visible delete
+          // and any delete at the bottom still animate.
+          let showsDeletedItem = currentCollectionView.map { collectionView in
+            let visibleBounds = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+            return deletedItems.contains { item in
+              guard let indexPath = dataSource.indexPath(for: item),
+                    let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame
+              else { return false }
+              return frame.intersects(visibleBounds)
+            }
+          } ?? false
+          let animatesDelete = isAtBottomForUnread || showsDeletedItem
           let boundaryItems = groupBoundaryItems(around: deletedItems, in: snapshot)
           snapshot.deleteItems(deletedItems)
           let existingBoundaryItems = boundaryItems.filter { snapshot.itemIdentifiers.contains($0) }
@@ -4014,7 +4340,7 @@ private extension MessagesCollectionView {
             snapshot.reconfigureItems(existingBoundaryItems)
             reconfigureVisibleItems(existingBoundaryItems)
           }
-          safeApplySnapshot(snapshot, animatingDifferences: true)
+          safeApplySnapshot(snapshot, animatingDifferences: animatesDelete)
 
         case let .messagesUpdated(_, messageIds, animated):
           applyUpdatedMessages(messageIds, animated: animated)
@@ -4136,14 +4462,33 @@ private extension MessagesCollectionView {
             !collectionView.isHidden,
             collectionView.alpha > 0.01,
             window.windowScene?.activationState == .foregroundActive,
-            UIApplication.shared.applicationState == .active
+            UIApplication.shared.applicationState == .active,
+            let list = collectionView as? MessagesCollectionView,
+            list.didPlaceInitialUnread, !list.isPlacingInitialUnread,
+            list.pendingScrollMessageID == nil
       else {
         onVisibleMessagesChanged?(nil)
         return
       }
-      // Temporary read-on-open workaround: do not wait for history coverage or
-      // an advancing incoming marker. readAll clears locally before sending.
-      UnreadManager.shared.readAll(peerId, chatId: chatId)
+      if list.isAtVisualBottomForUnread, viewModel.historyCoverage.isAtCertifiedLiveEnd {
+        // Only the actual live end represents all messages; a partial window's bottom does not.
+        UnreadManager.shared.readAll(peerId, chatId: chatId)
+      } else {
+        if viewModel.historyCoverage != lastVisibleReadCoverage {
+          lastVisibleReadCoverage = viewModel.historyCoverage
+          lastVisibleReadCandidateID = nil
+        }
+        if let candidate = highestVisibleIncomingMessageID(in: collectionView),
+           candidate > (lastVisibleReadCandidateID ?? 0)
+        {
+          lastVisibleReadCandidateID = candidate
+          UnreadManager.shared.readVisible(peerId: peerId, chatId: chatId, highestVisibleIncomingID: candidate)
+          if candidate > unreadCountReadFrontier {
+            unreadCountReadFrontier = candidate
+            updateScrollToBottomCount()
+          }
+        }
+      }
       onVisibleMessagesChanged?(visibleMessageIDs(in: collectionView))
     }
 
@@ -4161,6 +4506,37 @@ private extension MessagesCollectionView {
         else { return nil }
         return message.message.messageId
       }
+    }
+
+    /// The newest cached message is in the window and on screen, so there is no place to keep.
+    func showsNewestMessage(in collectionView: UICollectionView) -> Bool {
+      guard !viewModel.canLoadNewerFromLocal else { return false }
+      let newest = IndexPath(item: 0, section: newestMessageSectionIndex(in: listSections.map(\.id)))
+      guard case .message? = item(at: newest),
+            collectionView.numberOfSections > 0,
+            collectionView.numberOfItems(inSection: 0) > 0,
+            let frame = collectionView.layoutAttributesForItem(at: newest)?.frame
+      else { return true }
+      return frame.intersects(collectionView.bounds.inset(by: collectionView.adjustedContentInset))
+    }
+
+    /// The visually top-most message on screen with a server id, and how far its top sits below
+    /// the top inset (negative when it is cut off).
+    func topVisibleReadingPlace(in collectionView: UICollectionView) -> ChatReadingPlace? {
+      let visibleRect = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+      guard !visibleRect.isEmpty, !visibleRect.isNull else { return nil }
+      // Inverted: the visual top is the larger y, for rows and for the viewport.
+      let topRow = collectionView.indexPathsForVisibleItems.compactMap { indexPath -> (id: Int64, top: CGFloat)? in
+        guard case .message? = item(at: indexPath),
+              let message = message(at: indexPath),
+              message.message.messageId > 0,
+              let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+              frame.intersects(visibleRect)
+        else { return nil }
+        return (message.message.messageId, frame.maxY)
+      }.max { $0.top < $1.top }
+      guard let top = topRow else { return nil }
+      return ChatReadingPlace(messageId: top.id, offset: visibleRect.maxY - top.top)
     }
 
     private func highestVisibleIncomingMessageID(in collectionView: UICollectionView) -> Int64? {
@@ -4182,37 +4558,23 @@ private extension MessagesCollectionView {
       }.max()
     }
 
-    private func latestMessageId() -> Int64? {
-      messages.first?.message.messageId
+    func setUnreadState(_ state: ChatActivityNavigator.State) {
+      // Marking the chat unread supersedes what this list read before.
+      if state.unreadMark { unreadCountReadFrontier = 0 }
+      unreadState = state
+      updateScrollToBottomCount()
     }
 
-    private func markMessagesSeen() {
-      guard let latestId = latestMessageId() else { return }
-      lastSeenMessageId = latestId
-      if hasUnreadSinceScroll {
-        hasUnreadSinceScroll = false
-        notifyUnreadChanged()
-      }
-    }
-
-    private func handleIncomingMessages() {
-      if isAtBottomForUnread, viewModel.historyCoverage.isAtCertifiedLiveEnd {
-        markMessagesSeen()
-        return
-      }
-
-      // A newer outgoing message must neither create a badge nor hide an unseen incoming message.
-      if !hasUnreadSinceScroll, messages.contains(where: {
-        $0.message.messageId > lastSeenMessageId && $0.message.out != true
-      }) {
-        hasUnreadSinceScroll = true
-        notifyUnreadChanged()
-      }
-    }
-
-    private func notifyUnreadChanged() {
-      (currentCollectionView as? MessagesCollectionView)?
-        .setScrollAffordanceHasUnread(hasUnreadSinceScroll)
+    /// Unread messages below the reader, falling as they scroll and kept across reopening.
+    private func updateScrollToBottomCount() {
+      let count = ChatUnreadBadgeCount.resolve(
+        unreadCount: unreadState.unreadCount,
+        readInboxMaxId: unreadState.readInboxMaxId,
+        readFrontier: unreadCountReadFrontier,
+        coverage: viewModel.historyCoverage,
+        loadedMessages: viewModel.sections.lazy.flatMap(\.messages)
+      )
+      (currentCollectionView as? MessagesCollectionView)?.setScrollAffordanceUnreadCount(count)
     }
 
     private func presentPhotoGallery(
@@ -4682,6 +5044,9 @@ private extension MessagesCollectionView {
       if case .collapsedHistory = item {
         return CGSize(width: collectionView.bounds.width, height: 34)
       }
+      if case .statusNotice = item {
+        return CGSize(width: collectionView.bounds.width, height: StatusNoticeCell.height)
+      }
 
       if let cachedSize = sizeCache[item] {
         return cachedSize
@@ -4770,7 +5135,7 @@ private extension MessagesCollectionView {
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
       // The custom menu opens from its own hold gesture.
-      guard contextMenuImplementation == .system else { return nil }
+      guard contextMenuImplementation == .system || MessageContextMenuRollout.prefersSystemMenuNow else { return nil }
       guard let indexPath = indexPaths.first,
             let item = item(at: indexPath),
             !item.isThreadAnchor,
@@ -5475,13 +5840,17 @@ private extension MessagesCollectionView {
     private var isUserDragging = false
     private var isUserScrollInEffect = false
     private var isAtBottomForUnread = true
-    private var lastSeenMessageId: Int64 = 0
-    private var hasUnreadSinceScroll = false
+    private var unreadState = ChatActivityNavigator.State.empty
+    /// The highest incoming message this list asked to read; see `ChatUnreadBadgeCount`.
+    private var unreadCountReadFrontier: Int64 = 0
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+      (scrollView as? MessagesCollectionView)?.didPlaceInitialUnread = true
       customContextMenuGesture?.cancelPress()
       (scrollView as? MessagesCollectionView)?.cancelContextMenuKeyboardRestoration()
       (scrollView as? MessagesCollectionView)?.cancelMessageFocusAwaitingArrival()
+      (scrollView as? MessagesCollectionView)?.interruptReturnToLatest()
+      (scrollView as? MessagesCollectionView)?.userBeganScrolling()
       olderHistoryPagination.beginGesture()
       isUserDragging = true
       isUserScrollInEffect = true
@@ -5498,6 +5867,7 @@ private extension MessagesCollectionView {
         scheduleHideDateSeparators()
         scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_drag_end")
         updateUnreadIfNeeded()
+        (scrollView as? MessagesCollectionView)?.captureReadingPlace()
       }
     }
 
@@ -5507,6 +5877,7 @@ private extension MessagesCollectionView {
       scheduleHideDateSeparators()
       scheduleMediaWarmupForVisibleAndNearby(reason: "scroll_deceleration_end")
       updateUnreadIfNeeded()
+      (scrollView as? MessagesCollectionView)?.captureReadingPlace()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -5540,10 +5911,6 @@ private extension MessagesCollectionView {
          let message = message(for: item)
       {
         viewModel.setHistoryAnchor(message.message.messageId)
-      }
-
-      if isAtBottom, viewModel.historyCoverage.isAtCertifiedLiveEnd {
-        markMessagesSeen()
       }
 
       if isUserScrollInEffect {

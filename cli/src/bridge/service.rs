@@ -375,6 +375,10 @@ pub(super) fn install_service(
         // `start` is a no-op for an active unit. Setup must restart here so a
         // second provider or changed provider configuration is loaded now.
         run_systemctl(["--user", "restart", &unit_name])?;
+        // Without linger, systemd stops the user manager, and the bridge with
+        // it, when the last login session ends: on a headless box the agent
+        // goes silent as soon as the setup SSH session closes.
+        ensure_linux_linger();
         Ok(unit_path)
     }
 }
@@ -918,6 +922,35 @@ fn linux_linger_enabled() -> Option<bool> {
         .status
         .success()
         .then(|| parse_linux_linger_enabled(&String::from_utf8_lossy(&output.stdout)))?
+}
+
+/// Turns on linger for this user so the bridge keeps running after logout.
+/// systemd lets a user enable their own linger on most distributions; when
+/// policy refuses, setup still succeeds and says how to fix it.
+#[cfg(target_os = "linux")]
+fn ensure_linux_linger() {
+    if linux_linger_enabled() == Some(true) {
+        return;
+    }
+    let user_id = unsafe { libc::geteuid() }.to_string();
+    let enabled = ["/usr/bin/loginctl", "/bin/loginctl", "loginctl"]
+        .iter()
+        .any(|program| {
+            Command::new(program)
+                .args(["enable-linger", &user_id])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        });
+    if !enabled {
+        crate::telemetry::report_bridge_linger_refused();
+        log::warn!(target: "inline::bridge", "could not enable systemd linger");
+        eprintln!(
+            "Warning: the bridge will stop when you log out of this machine. Run `sudo loginctl enable-linger $USER` to keep it running."
+        );
+    }
 }
 
 #[cfg(any(target_os = "linux", test))]

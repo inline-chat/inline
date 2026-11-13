@@ -68,6 +68,7 @@ zip = "0.6.6"
 
 [dev-dependencies]
 prost.workspace = true
+tokio = { version = "1.43.0", features = ["test-util"] }
 tokio-tungstenite.workspace = true
 
 [[bin]]

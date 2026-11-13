@@ -18,7 +18,7 @@ import {
   validateBlockContent,
 } from "./blockContent"
 import { encodeBlockContentToMarkdown } from "./blockContentMarkdown"
-import { detectFirstStrongIsRtl } from "./blockDirection"
+import { detectIsRtl } from "./blockDirection"
 import { processOutgoingText } from "./processOutgoingText"
 
 const textFor = (markdown: string, range: BlockText | undefined): string => {
@@ -189,11 +189,16 @@ describe("block content parser", () => {
     expect(parseMarkdown(encoded).text).toContain("a|b")
   })
 
-  test("annotates deterministic first-strong direction without Markdown syntax", () => {
-    expect(detectFirstStrongIsRtl("123 😀 —")).toBeUndefined()
-    expect(detectFirstStrongIsRtl("123 😀 سلام English")).toBe(true)
-    expect(detectFirstStrongIsRtl("123 😀 English سلام")).toBe(false)
-    expect(detectFirstStrongIsRtl("\u200fEnglish")).toBe(false)
+  test("annotates deterministic word-majority direction without Markdown syntax", () => {
+    expect(detectIsRtl("123 😀 —")).toBeUndefined()
+    expect(detectIsRtl("123 😀 سلام English")).toBe(true)
+    expect(detectIsRtl("123 😀 English سلام")).toBe(false)
+    expect(detectIsRtl("\u200fEnglish")).toBe(false)
+    // Persian prose that opens with Latin names still reads right to left.
+    expect(detectIsRtl("Claude Code حداقل 2.1.321 لازم دارد، پس نسخهٔ 2.1.322 کافی است.")).toBe(true)
+    // ZWNJ keeps "می‌شود" one word; English with one Persian name stays left to right.
+    expect(detectIsRtl("Opus می‌شود")).toBe(false)
+    expect(detectIsRtl("I talked to محمد about the deploy")).toBe(false)
 
     const markdown = [
       "😀 سلام English",

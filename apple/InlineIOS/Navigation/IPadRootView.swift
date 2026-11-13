@@ -1,3 +1,4 @@
+import InlineKit
 import SwiftUI
 
 /// The iPad container has no tabs and keeps selection in the existing router path.
@@ -106,6 +107,7 @@ private struct IPadDetailView: View {
 /// Keeping it outside NavigationStack does not install it on a pushed page.
 @available(iOS 26.0, *)
 private struct IPadDetailPage: View {
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   let destination: Destination?
   let isNested: Bool
   let router: Router
@@ -124,20 +126,59 @@ private struct IPadDetailPage: View {
           onMigrateLegacySpaceDestination: onMigrateLegacySpaceDestination
         )
       } else {
-        ContentUnavailableView("Select a Chat", systemImage: "bubble.left.and.bubble.right")
+        IPadEmptyDetailView(spaceID: nav.activeSpaceId) { peer in
+          router[IPadNavigationLane.canonicalTab] = [.chat(peer: peer)]
+        }
       }
     }
     .voicePlaybackRootPill(router: router, destination: destination)
     .navigationBarBackButtonHidden(isNested)
     .toolbar {
-      ToolbarItemGroup(placement: .topBarLeading) {
-        Button("Back", systemImage: "chevron.backward") { router.goBack() }
-          .disabled(!router.canGoBack)
-          .accessibilityIdentifier("iPadHistoryBack")
-        Button("Forward", systemImage: "chevron.forward") { router.goForward() }
-          .disabled(!router.canGoForward)
-          .accessibilityIdentifier("iPadHistoryForward")
+      // A compact window collapses the split view and shows the system back button to
+      // the sidebar. A second back chevron beside it read as a duplicate; history
+      // navigation stays on the keyboard commands there.
+      if horizontalSizeClass != .compact {
+        ToolbarItemGroup(placement: .topBarLeading) {
+          Button("Back", systemImage: "chevron.backward") { router.goBack() }
+            .disabled(!router.canGoBack)
+            .accessibilityIdentifier("iPadHistoryBack")
+          Button("Forward", systemImage: "chevron.forward") { router.goForward() }
+            .disabled(!router.canGoForward)
+            .accessibilityIdentifier("iPadHistoryForward")
+        }
       }
+    }
+  }
+}
+
+/// No chat selected: like the macOS empty page, the detail column is a place to start a
+/// thread. The composer sits at the bottom where a chat's compose would be.
+@available(iOS 26.0, *)
+private struct IPadEmptyDetailView: View {
+  let spaceID: Int64?
+  let onCreated: (Peer) -> Void
+
+  var body: some View {
+    ZStack(alignment: .bottom) {
+      VStack(spacing: 8) {
+        Image(systemName: "bubble.left.and.text.bubble.right")
+          .font(.system(size: 40, weight: .light))
+          .foregroundStyle(.tertiary)
+          .padding(.bottom, 4)
+        Text("Start a Thread")
+          .font(.title3.weight(.semibold))
+        Text("Write the first message. It becomes a new thread in Home or the space you pick.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: 320)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+      NewThreadComposer(initialSpaceID: spaceID, onCreated: onCreated)
+        .frame(maxWidth: 640)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
   }
 }

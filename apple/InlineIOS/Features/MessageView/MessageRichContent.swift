@@ -17,6 +17,9 @@ struct MessageRichContent {
   let blocks: [RichBlock]
   /// Ready photos by image id.
   let photos: [String: PhotoInfo]
+  /// Each block's characters in the body text, by path, so a streaming message's revealed
+  /// count maps to the block holding it.
+  let sources: [RichPath: Range<Int>]
 
   struct Style {
     var baseFont: UIFont
@@ -35,12 +38,14 @@ struct MessageRichContent {
     expanded: [RichPath: Bool]
   ) -> MessageRichContent? {
     // Block ranges index the original text; a translation replaces it.
-    if message.translationText == nil, let content = message.message.blockContentPayload?.content {
+    if message.translationText == nil, let stored = message.message.blockContentPayload?.content {
+      // Direction is decided per block from its own text, replacing the stored flags.
+      let content = BlockContentDirection.resolved(stored, text: body.string)
       var builder = Builder(body: body, style: style, expanded: expanded, messageDate: message.message.date)
       guard builder.withinLimits(content), let blocks = builder.blocks(content.blocks, path: RichPath()),
             !blocks.isEmpty
       else { return nil }
-      return MessageRichContent(blocks: blocks, photos: builder.photos)
+      return MessageRichContent(blocks: blocks, photos: builder.photos, sources: builder.sources)
     }
     return codeFences(in: message, body: body, style: style)
   }
@@ -53,6 +58,7 @@ struct MessageRichContent {
     let builder = Builder(body: body, style: style, expanded: [:])
     let string = body.string as NSString
     var blocks: [RichBlock] = []
+    var sources: [RichPath: Range<Int>] = [:]
     var location = 0
     func paragraph(upTo end: Int) {
       guard end > location else { return }
@@ -61,6 +67,7 @@ struct MessageRichContent {
       while range.length > 0, string.character(at: range.location) == 10 { range.location += 1; range.length -= 1 }
       while range.length > 0, string.character(at: NSMaxRange(range) - 1) == 10 { range.length -= 1 }
       guard range.length > 0 else { return }
+      sources[RichPath([blocks.count])] = range.location ..< NSMaxRange(range)
       blocks.append(.text(MessageText(body.attributedSubstring(from: range)), role: .paragraph))
     }
     for fence in fences {
@@ -68,11 +75,12 @@ struct MessageRichContent {
       guard range.location >= location, NSMaxRange(range) <= string.length else { return nil }
       paragraph(upTo: range.location)
       let language: String? = if case let .pre(pre)? = fence.entity, !pre.language.isEmpty { pre.language } else { nil }
+      sources[RichPath([blocks.count])] = range.location ..< NSMaxRange(range)
       blocks.append(builder.code(string.substring(with: range), language: language))
       location = NSMaxRange(range)
     }
     paragraph(upTo: string.length)
-    return MessageRichContent(blocks: blocks, photos: [:])
+    return MessageRichContent(blocks: blocks, photos: [:], sources: sources)
   }
 
   // MARK: - Builder
@@ -84,6 +92,8 @@ struct MessageRichContent {
     /// Where a working row counts from when it sent no start of its own.
     let messageDate: Date
     var photos: [String: PhotoInfo] = [:]
+    /// Text-bearing blocks' ranges in the body, by the path the planner gives their nodes.
+    var sources: [RichPath: Range<Int>] = [:]
 
     init(body: NSAttributedString, style: Style, expanded: [RichPath: Bool], messageDate: Date = .distantPast) {
       self.body = body
@@ -145,33 +155,43 @@ struct MessageRichContent {
     mutating func block(_ block: Block, path: RichPath) -> RichBlock? {
       switch block.kind {
       case let .paragraph(text)?, let .math(text)?:
+        record(text, at: path)
         return slice(text).map { .text($0, role: .paragraph) }
       case let .heading(heading)?:
         let level = Int(min(max(heading.level, 1), 6))
         // Medium weight and phone-sized: a little larger than the body, not much.
         let scale: CGFloat = [1.18, 1.1, 1.05, 1.0, 1.0, 1.0][level - 1]
         let font = UIFont.systemFont(ofSize: style.baseFont.pointSize * scale, weight: level == 1 ? .semibold : .medium)
+        record(heading.text, at: path)
         return slice(heading.text, font: font).map { .text($0, role: .heading(level: level)) }
       case let .footer(text)?:
         let font = style.baseFont.withSize(style.baseFont.pointSize * 0.82)
+        record(text, at: path)
         return slice(text, font: font, color: style.secondaryColor).map { .text($0, role: .footer) }
       case let .code(code)?:
         guard let range = range(code.text) else { return nil }
+        record(code.text, at: path)
         return self.code((body.string as NSString).substring(with: range), language: code.hasLanguage && !code.language.isEmpty ? code.language : nil)
       case let .list(list)?:
         guard list.kind == .ordered || list.kind == .unordered, !list.items.isEmpty else { return nil }
         let first = list.kind == .ordered && list.hasStart ? list.start : 1
         var items: [RichList.Item] = []
         for (index, item) in list.items.enumerated() {
-          let marker = if item.hasChecked {
-            item.checked ? "☑" : "☐"
+          // Bullets and checkboxes are drawn as shapes; their glyphs still size the column.
+          let (marker, symbol): (String, RichListSymbol?) = if item.hasChecked {
+            (item.checked ? "☑" : "☐", .checkbox(isChecked: item.checked))
           } else if list.kind == .ordered {
-            "\(first + Int64(index))."
+            ("\(first + Int64(index)).", nil)
           } else {
-            "•"
+            ("•", .bullet)
           }
           guard let children = blocks(item.children, path: path.appending(index)) else { return nil }
-          items.append(.init(marker: styled(marker), children: children))
+          items.append(.init(
+            marker: styled(marker),
+            symbol: symbol,
+            children: children,
+            isRightToLeft: BlockContentDirection.direction(of: item)
+          ))
         }
         return .list(RichList(items: items, isRightToLeft: list.hasIsRtl && list.isRtl))
       case let .quote(quote)?:
@@ -179,15 +199,20 @@ struct MessageRichContent {
         return .quote(children: children, isRightToLeft: quote.hasIsRtl && quote.isRtl)
       case let .table(table)?:
         var rows: [[MessageText]] = []
+        var covered: Range<Int>?
         for (rowIndex, row) in table.rows.enumerated() {
           var cells: [MessageText] = []
           for cell in row.cells {
             let font = rowIndex == 0 ? UIFont.systemFont(ofSize: style.baseFont.pointSize, weight: .semibold) : nil
-            guard let text = slice(cell, font: font) else { return nil }
+            guard let text = slice(cell, font: font), let range = range(cell) else { return nil }
             cells.append(text)
+            let cellRange = range.location ..< NSMaxRange(range)
+            covered = covered.map { min($0.lowerBound, cellRange.lowerBound) ..< max($0.upperBound, cellRange.upperBound) } ?? cellRange
           }
           rows.append(cells)
         }
+        // The table shows whole once the frontier reaches its first cell.
+        if let covered { sources[path] = covered }
         let alignments: [RichTable.Alignment] = table.alignments.map {
           switch $0 {
           case .center: .center
@@ -207,6 +232,7 @@ struct MessageRichContent {
         guard disclosure.hasSummary, let summary = slice(disclosure.summary, color: style.secondaryColor, removesLinks: true),
               let children = blocks(disclosure.children, path: path)
         else { return nil }
+        record(disclosure.summary, at: path)
         let activity = disclosure.activityKind
         return .disclosure(RichDisclosure(
           summary: summary,
@@ -273,6 +299,12 @@ struct MessageRichContent {
       let range = NSRange(location: Int(text.offset), length: Int(text.length))
       guard range.location >= 0, range.length >= 0, NSMaxRange(range) <= body.length else { return nil }
       return range
+    }
+
+    /// Notes where the node at `path` reads from in the body.
+    mutating func record(_ text: BlockText, at path: RichPath) {
+      guard let range = range(text) else { return }
+      sources[path] = range.location ..< NSMaxRange(range)
     }
 
     /// The block's text from the body, with its font replaced or its color changed for a role.

@@ -583,7 +583,7 @@ final class URLPreviewAttachmentView: NSView, AttachmentView {
       return
     }
     MessageGestureTrace.debug("URLPreviewAttachmentView.openPreviewURL url=\(MessageGestureTrace.url(previewURL))")
-    NSWorkspace.shared.open(previewURL)
+    InlineWebLinkOpener.open(previewURL)
   }
 
   @objc private func openPreviewURLFromMenu() {

@@ -15,6 +15,8 @@ const user: DbUser = {
   deleted: null,
   online: false,
   lastOnline: null,
+  focused: null,
+  focusUpdatedAt: null,
   date: new Date("2026-08-14T00:00:00Z"),
   photoFileId: null,
   pendingSetup: false,

@@ -110,7 +110,11 @@ describe("public CI contracts", () => {
     const integration = read(".github/workflows/integrations.yml")
     expect(integration).toContain("host: ['v2026.9.14', 'v2026.9.21', latest, main]")
     expect(integration).not.toContain('pip" install "hermes-agent==')
+    expect(integration).toContain("node scripts/ci/prepare-hermes-candidate.mjs")
+    expect(read(".github/workflows/umbrel-compatibility.yml")).toContain("node scripts/ci/prepare-hermes-candidate.mjs")
     const publish = read(".github/workflows/npm-publish.yml")
+    expect(publish).toContain("release-stage.mjs --dry-run --verify-source-bundle")
+    expect(publish).not.toContain("prepare-hermes-candidate.mjs")
     expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')
     expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
       publish.indexOf("Retain the exact checked artifact and integrity receipt"),

@@ -17,7 +17,52 @@ const INLINE_FORMATTING_RULES = [
   "Keep ordinary quoted prose, names, titles, statuses, and natural-language labels as plain text; quotation marks do not make text code.",
 ]
 
-const INLINE_COPY_REPLACEMENTS: Array<[RegExp, string]> = [
+type InlineCopyReplacement = [RegExp, string | ((match: string, ...groups: string[]) => string)]
+
+const INLINE_APPROVAL_DECISION_COPY: Record<string, string> = {
+  "allow-once": "Allowed once.",
+  "allow-always": "Always allowed.",
+  deny: "Denied.",
+}
+
+// OpenClaw writes these for every channel. Inline shows them shorter, the way
+// Hermes and bridge v2 do: the result, not the ids and operator advice.
+const INLINE_HOST_NOTICE_REPLACEMENTS: InlineCopyReplacement[] = [
+  [
+    /^✅ Approval (allow-once|allow-always|deny) submitted for [\w-]+\.$/,
+    (_match, decision) => INLINE_APPROVAL_DECISION_COPY[decision] ?? "Answered.",
+  ],
+  [
+    /^Approval required\. I sent the approval request to (.+?), not this chat\.$/,
+    (_match, destination) =>
+      destination === "Inline DMs" ? "Waiting for approval in your DM." : `Waiting for approval in ${destination}.`,
+  ],
+  [
+    /^⚠️ OpenClaw couldn't produce or deliver a reply\. Please try again\. If this keeps happening, ask the operator to check the gateway logs\.(?: Reference: [\w-]+\.)?$/,
+    "⚠️ Couldn't answer that. Try again.",
+  ],
+  [/^⚠️ The AI service returned an empty reply\. Please try again\.$/, "⚠️ Couldn't answer that. Try again."],
+  [
+    /^Current thinking level: ([^.\n]+)\.\nChoose level for \/think\.(?:\nOptions: [^\n]*)?$/,
+    (_match, level) => `Thinking: ${level}`,
+  ],
+  [
+    // The buttons browse providers; the typed /model syntax stays in /model status.
+    /^Current: ([^\n]+)\n(?:Think: ([^\s(]+)[^\n]*\n)?Tap below to select a model, or use:\n[\s\S]*$/,
+    (_match, model, think) => (think ? `Model: ${model}\nThinking: ${think}` : `Model: ${model}`),
+  ],
+]
+
+// Before and after the Inline copy rewrite below; transformReplyPayload runs first.
+const INLINE_HOST_NO_REPLY_FALLBACK = /^⚠️ (?:OpenClaw couldn't produce or deliver a reply\.|The AI service returned an empty reply\. Please try again\.$|Couldn't answer that\. Try again\.$)/
+
+/** OpenClaw's notice for a turn that ended without a visible reply. */
+export function isInlineHostNoReplyFallback(text: string | undefined | null): boolean {
+  return typeof text === "string" && INLINE_HOST_NO_REPLY_FALLBACK.test(text.trim())
+}
+
+const INLINE_COPY_REPLACEMENTS: InlineCopyReplacement[] = [
+  ...INLINE_HOST_NOTICE_REPLACEMENTS,
   [
     /Bind this (?:thread \(Discord\) or topic\/conversation \(Telegram\)|thread or topic\/conversation) to a session target\.?/gi,
     "Bind this Inline conversation to a session target.",
@@ -53,7 +98,7 @@ function isBareHttpUrl(text: string): boolean {
 export function adaptInlineVisibleCopy(text: string): string {
   let result = text
   for (const [from, to] of INLINE_COPY_REPLACEMENTS) {
-    result = result.replace(from, to)
+    result = typeof to === "string" ? result.replace(from, to) : result.replace(from, to as (...args: string[]) => string)
   }
   return result
 }

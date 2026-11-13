@@ -47,7 +47,8 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// A streaming message revealed into a new line, or finished; the host replans the row with
   /// the short line motion.
   var onRevealLineChange: ((FullMessage) -> Void)?
-  /// The line count the pending replan was asked for, so each new line asks once.
+  /// The line the pending replan was asked for, or a rich plan's reveal limit, so each new
+  /// line or node asks once.
   private var requestedRevealLine: Int?
   /// Rich bodies: lists, code, tables and the rest. Created on first use.
   private var richView: MessageRichView?
@@ -106,25 +107,40 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         crossfadeText(from: textView.frame)
       }
       textView.setLayout(layout.text ?? .empty)
-      // A streaming message keeps drawing at the pacer's count, which runs ahead of the plan
-      // within the planned line.
-      let pacer = MessageStreamPacer.shared
-      if pacer.isStreaming(content.message.id), layout.text != nil {
-        pacer.attach(self, to: content.message.id)
-        textView.revealedLength = pacer.revealedLength(for: content.message.id) ?? layout.revealedLength
-      } else {
-        textView.revealedLength = layout.revealedLength
-      }
-      requestedRevealLine = nil
-      textView.accessibilityLabel = content.accessibilityLabel
       if let rich = layout.rich {
         let view = richView ?? makeRichView()
         view.isHidden = false
-        view.apply(rich, palette: content.richPalette, photos: content.rich?.photos ?? [:], animated: animated)
-        view.accessibilityLabel = content.accessibilityLabel
+        view.apply(
+          rich,
+          palette: content.richPalette,
+          photos: content.rich?.photos ?? [:],
+          animated: animated,
+          isNewMessage: !isSameMessage
+        )
+        view.accessibilityLead = content.accessibilityLead
+        view.accessibilityTime = content.accessibilityTime
       } else {
         richView?.isHidden = true
       }
+      // A streaming message keeps drawing at the pacer's count, which runs ahead of the plan
+      // within the planned line. Rich rows attach too, so the stream's end reaches them.
+      let pacer = MessageStreamPacer.shared
+      let pacedLength = pacer.isStreaming(content.message.id) && (layout.text != nil || layout.rich != nil)
+        ? pacer.revealedLength(for: content.message.id)
+        : nil
+      if pacedLength != nil {
+        pacer.attach(self, to: content.message.id)
+      }
+      if layout.rich != nil {
+        // Only a plan that mapped the count has a frontier to draw at.
+        richView?.reveal(layout.revealedLength == nil ? nil : pacedLength ?? layout.revealedLength)
+      } else {
+        textView.revealedLength = pacedLength ?? layout.revealedLength
+      }
+      requestedRevealLine = nil
+      textView.accessibilityLabel = content.accessibilityLabel
+      // A rich body reads node by node, so its controls are reachable.
+      textView.isAccessibilityElement = layout.rich == nil
       nameView.setLayout(layout.name ?? .empty)
       nameView.isHidden = layout.name == nil
       timeView.configure(
@@ -229,6 +245,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
 
     let appearingViews = appearing
     let leavingViews = leaving
+    let leavingRichNodes = richView?.leavingNodes ?? []
     // New pills keep their starting scale on the row's curve and settle with the pop's bounce.
     let poppingPills = animated ? appearing.compactMap { $0 as? MessageReactionPillView } : []
     motion.animate({ [self] in
@@ -286,6 +303,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         leavingReactionViews[id] = nil
         view.removeFromSuperview()
       }
+      richView?.removeLeavingNodes(leavingRichNodes)
       for view in reactionViews.values {
         view.removeFinishedTransitions()
       }
@@ -400,7 +418,18 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// Draws the first `length` characters. Entering a line past the planned ones asks the host
   /// to replan, so the bubble and row grow a line at a time.
   func reveal(_ length: Int) {
-    guard let layout, let text = layout.text, let message = content?.message else { return }
+    guard let layout, let message = content?.message else { return }
+    if let rich = layout.rich {
+      // Rich bodies grow a line inside the frontier text, or a node at a time; the plan says
+      // at which count it goes stale. Without a mapping it shows whole and waits for the end.
+      guard layout.revealedLength != nil else { return }
+      richView?.reveal(length)
+      guard let limit = rich.revealLimit, length >= limit, requestedRevealLine != limit else { return }
+      requestedRevealLine = limit
+      onRevealLineChange?(message)
+      return
+    }
+    guard let text = layout.text else { return }
     textView.revealedLength = length
     let planned = Self.lineIndex(of: layout.revealedLength ?? text.length, in: text)
     let current = Self.lineIndex(of: length, in: text)
@@ -412,6 +441,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// The stream went idle: draw everything and let the host show the time.
   func finishStreaming() {
     textView.revealedLength = nil
+    richView?.reveal(nil)
     guard let message = content?.message else { return }
     onRevealLineChange?(message)
   }
@@ -569,8 +599,6 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
 
   private func makeRichView() -> MessageRichView {
     let view = MessageRichView()
-    view.isAccessibilityElement = true
-    view.accessibilityTraits = .staticText
     view.onDisclosureToggle = { [weak self] path, isExpanded in
       guard let message = self?.content?.message else { return }
       MessageRichState.shared.set(isExpanded, at: path, for: message.id)

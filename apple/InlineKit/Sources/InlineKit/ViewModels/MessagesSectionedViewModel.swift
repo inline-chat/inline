@@ -75,6 +75,19 @@ public class MessagesSectionedViewModel {
     progressiveViewModel.threadAnchor
   }
 
+  /// Frozen when the opening window was prepared. Reading while this visit is visible
+  /// must not move its separator or change the initial landing.
+  public let openingUnreadBoundary: Int64?
+
+  public var firstUnreadMessageId: Int64? {
+    guard let openingUnreadBoundary else { return nil }
+    return ChatUnreadOpening.firstUnreadMessageId(
+      in: messages,
+      boundary: openingUnreadBoundary,
+      of: progressiveViewModel
+    )
+  }
+
   public private(set) var collapsedMaxId: Int64?
   public var highestPositiveMessageId: Int64? {
     progressiveViewModel.messages.lazy
@@ -101,6 +114,7 @@ public class MessagesSectionedViewModel {
     publisher: MessagesPublisher = .shared
   ) {
     self.collapsedMaxId = collapsedMaxId
+    openingUnreadBoundary = initialState?.unreadBoundary
     progressiveViewModel = MessagesProgressiveViewModel(
       peer: peer,
       chatId: chatId,

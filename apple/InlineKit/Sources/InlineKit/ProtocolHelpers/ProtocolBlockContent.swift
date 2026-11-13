@@ -106,7 +106,7 @@ public struct BlockContentPayload: Codable, Hashable, Sendable {
           $0.offset = Int64(start)
           $0.length = Int64(end - start)
           let paragraph = String(decoding: units[start ..< end], as: UTF16.self)
-          if let isRTL = firstStrongIsRTL(paragraph) { $0.isRtl = isRTL }
+          if let isRTL = directionIsRTL(paragraph) { $0.isRtl = isRTL }
         }
       })
     }
@@ -150,7 +150,7 @@ public struct BlockContentPayload: Codable, Hashable, Sendable {
       blocks.append(.with { block in
         block.paragraph = .with {
           $0.length = Int64(units.count)
-          if let isRTL = firstStrongIsRTL(text) { $0.isRtl = isRTL }
+          if let isRTL = directionIsRTL(text) { $0.isRtl = isRTL }
         }
       })
     }
@@ -159,29 +159,9 @@ public struct BlockContentPayload: Codable, Hashable, Sendable {
     })
   }
 
-  // Same first-letter contract as server/modules/message/blockDirection.ts.
-  // Neutral digits, marks and controls must not override Persian/Hebrew prose.
-  private static func firstStrongIsRTL(_ text: String) -> Bool? {
-    let rtlRanges: [ClosedRange<UInt32>] = [
-      0x0590...0x05FF, 0x0600...0x06FF, 0x0700...0x074F, 0x0750...0x077F,
-      0x0780...0x07BF, 0x07C0...0x07FF, 0x0800...0x083F, 0x0840...0x085F,
-      0x0860...0x086F, 0x0870...0x089F, 0x08A0...0x08FF, 0xFB1D...0xFB4F,
-      0xFB50...0xFDFF, 0xFE70...0xFEFF, 0x10840...0x1085F, 0x10860...0x1087F,
-      0x10880...0x108AF, 0x108E0...0x108FF, 0x10900...0x1091F, 0x10920...0x1093F,
-      0x10980...0x109FF, 0x10A00...0x10A5F, 0x10A60...0x10A7F, 0x10A80...0x10A9F,
-      0x10AC0...0x10AFF, 0x10B00...0x10B3F, 0x10B40...0x10B5F, 0x10B60...0x10B7F,
-      0x10B80...0x10BAF, 0x10C00...0x10C4F, 0x10C80...0x10CFF, 0x10D00...0x10D8F,
-      0x10E80...0x10EBF, 0x10F00...0x10FFF, 0x1E800...0x1E8DF, 0x1E900...0x1E95F,
-      0x1EE00...0x1EEFF,
-    ]
-    for scalar in text.unicodeScalars {
-      switch scalar.properties.generalCategory {
-      case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .letterNumber:
-        return rtlRanges.contains { $0.contains(scalar.value) }
-      default: continue
-      }
-    }
-    return nil
+  // Same word-majority contract as server/modules/message/blockDirection.ts.
+  private static func directionIsRTL(_ text: String) -> Bool? {
+    BlockContentDirection.isRTL(text)
   }
 
   private init(content: InlineProtocol.BlockContent, payload: Data) {

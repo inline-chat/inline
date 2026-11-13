@@ -155,6 +155,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
     setupAuthAccountRecoveryObserver()
+    // After launch work, so reading Focus never delays the first window.
+    Task { @MainActor in FocusStatusReporter.shared.start() }
     dependencies.viewModel.$topLevelRoute
       .receive(on: RunLoop.main)
       .sink { [weak self] route in
@@ -1087,6 +1089,9 @@ extension AppDelegate {
           log.warning("Failed to resolve notification conversation")
           return
         }
+        // A notification opens where the news is, as Telegram: at the unread line or the latest
+        // messages, never back at a saved reading place.
+        ChatReadingPlaceStore.shared.clear(for: peerId)
         self.openChat(peer: peerId, targetMessageId: target.focusMessageID)
         guard !Task.isCancelled, MessageNotificationAccount.isCurrent(account) else { return }
         await self.unarchiveIfNeeded(peer: peerId)

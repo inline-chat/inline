@@ -254,7 +254,7 @@ final class MessageWidgetHost: NSObject, WidgetCoordinatorDelegate {
       NSPasteboard.general.setString(text, forType: .string)
       ToastCenter.shared.showSuccess("Copied")
     case let .openLink(url):
-      NSWorkspace.shared.open(url)
+      InlineWebLinkOpener.open(url)
     case let .sendPrompt(text):
       if case let .user(id) = message.peerId, id == message.fromId, message.out != true {
         // A DM with the widget's bot: the prompt goes only to that bot, so send it as a reply.

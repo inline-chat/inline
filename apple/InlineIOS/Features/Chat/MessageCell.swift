@@ -1425,7 +1425,7 @@ extension MessageCollectionViewCell {
     }
 
     let messageViewWidth = max(0, collectionWidth - leadingInset - trailingInset)
-    return messageViewWidth * MessageBubbleWidthPolicy.maximumWidthFraction
+    return MessageBubbleWidthPolicy.maximumWidth(forAvailableWidth: messageViewWidth)
   }
 
   /// Add avatar if we have user info

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   adaptInlineVisibleCopy,
+  isInlineHostNoReplyFallback,
   buildInlineInboundFormattingHints,
   buildInlineChatMarkdownLink,
   buildInlineSystemPrompt,
@@ -95,6 +96,31 @@ describe("inline/message-formatting", () => {
     expect(
       adaptInlineVisibleCopy("/unbind - Remove the current thread or topic/conversation binding"),
     ).toBe("/unbind - Remove the current Inline conversation binding.")
+  })
+
+  it("shortens OpenClaw's notices and menus for Inline", () => {
+    expect(adaptInlineVisibleCopy("✅ Approval allow-once submitted for 6b28e27d-ff13-4b89-bf9c-2e6d6e29215c.")).toBe("Allowed once.")
+    expect(adaptInlineVisibleCopy("✅ Approval deny submitted for 297c1458-1ee9-472b-be47-f04810a72fd8.")).toBe("Denied.")
+    expect(adaptInlineVisibleCopy("Approval required. I sent the approval request to Inline DMs, not this chat.")).toBe("Waiting for approval in your DM.")
+    expect(adaptInlineVisibleCopy("⚠️ OpenClaw couldn't produce or deliver a reply. Please try again. If this keeps happening, ask the operator to check the gateway logs. Reference: ba72cfc1-e8ba-4470-af43-8f7f2d7bb86f.")).toBe("⚠️ Couldn't answer that. Try again.")
+    expect(adaptInlineVisibleCopy("⚠️ The AI service returned an empty reply. Please try again.")).toBe("⚠️ Couldn't answer that. Try again.")
+    expect(adaptInlineVisibleCopy("Current thinking level: high.\nChoose level for /think.\nOptions: default, off, low, medium, high, xhigh, max.")).toBe("Thinking: high")
+    expect(adaptInlineVisibleCopy([
+      "Current: anthropic/claude-sonnet-5-5",
+      "Think: high (change with /think <level>)",
+      "Tap below to select a model, or use:",
+      "/model <provider/model> -s for this session only",
+      "/model <provider/model> -a to update this agent's default",
+      "/model <provider/model> -g to update the global default",
+      "/model <provider/model> --runtime <runtime> -s to switch harnesses",
+      "/model status for details",
+    ].join("\n"))).toBe("Model: anthropic/claude-sonnet-5-5\nThinking: high")
+    expect(isInlineHostNoReplyFallback("⚠️ Couldn't answer that. Try again.")).toBe(true)
+    expect(isInlineHostNoReplyFallback("⚠️ OpenClaw couldn't produce or deliver a reply. Please try again.")).toBe(true)
+    expect(isInlineHostNoReplyFallback("⚠️ The AI service returned an empty reply. Please try again.")).toBe(true)
+    expect(isInlineHostNoReplyFallback("Couldn't answer that, sorry")).toBe(false)
+    // Agent text that only mentions these words is left alone.
+    expect(adaptInlineVisibleCopy("The approval required. I sent it.")).toBe("The approval required. I sent it.")
   })
 
   it("leaves widget HTML untouched when cleaning outgoing text", () => {

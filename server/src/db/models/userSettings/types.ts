@@ -70,6 +70,8 @@ export const UserSettingsGeneralSchema = z.object({
       appearInGlobalSearch: z.boolean().optional().default(defaultPrivacySettings.appearInGlobalSearch),
       /** Authoritative once written; shareTimeZone mirrors it for older clients. */
       timeZone: PrivacyRuleSchema.optional(),
+      /** Who sees Focus status. Absent means nobody. */
+      focusStatus: PrivacyRuleSchema.optional(),
     })
     .optional()
     .default(defaultPrivacySettings),

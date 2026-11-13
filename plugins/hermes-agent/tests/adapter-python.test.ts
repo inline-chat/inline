@@ -345,7 +345,7 @@ for legacy_activity_flag in (None, "false", "true"):
     _install_inline_display_defaults()
     assert display_config._PLATFORM_DEFAULTS["inline"]["tool_progress"] == "off"
     assert display_config._PLATFORM_DEFAULTS["inline"]["cleanup_progress"] is True
-    assert display_config._PLATFORM_DEFAULTS["inline"]["interim_assistant_messages"] is False
+    assert display_config._PLATFORM_DEFAULTS["inline"]["interim_assistant_messages"] is True
     default_adapter = InlineAdapter(PlatformConfig(extra={"token": "fake"}))
     async def assert_ordinary_processing():
         calls=[]
@@ -587,7 +587,7 @@ inline_display = display_config._PLATFORM_DEFAULTS["inline"]
 assert inline_display["tool_progress"] == "off"
 assert inline_display["cleanup_progress"] is True
 assert inline_display["streaming"] is False
-assert inline_display["interim_assistant_messages"] is False
+assert inline_display["interim_assistant_messages"] is True
 assert "display_overrides" not in ctx.platform
 
 saved_platform_fields = PlatformEntry.__dataclass_fields__
@@ -601,7 +601,7 @@ try:
     assert display_ctx.platform["display_overrides"]["tool_progress"] == "off"
     assert display_ctx.platform["display_overrides"]["cleanup_progress"] is True
     assert display_ctx.platform["display_overrides"]["streaming"] is False
-    assert display_ctx.platform["display_overrides"]["interim_assistant_messages"] is False
+    assert display_ctx.platform["display_overrides"]["interim_assistant_messages"] is True
 finally:
     PlatformEntry.__dataclass_fields__ = saved_platform_fields
     _install_inline_display_defaults()

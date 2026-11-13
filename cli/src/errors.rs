@@ -50,6 +50,23 @@ impl std::fmt::Display for ReportedCliFailure {
 
 impl std::error::Error for ReportedCliFailure {}
 
+/// Ends the command with a specific exit status after its result was printed,
+/// e.g. `messages wait` exits 124 on timeout.
+#[derive(Debug)]
+pub(crate) struct ReportedExit(pub(crate) i32);
+
+impl std::fmt::Display for ReportedExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "command exited with status {}", self.0)
+    }
+}
+
+impl std::error::Error for ReportedExit {}
+
+pub(crate) fn reported_exit_code(error: &(dyn std::error::Error + 'static)) -> Option<i32> {
+    find_error_in_chain::<ReportedExit>(error).map(|exit| exit.0)
+}
+
 pub(crate) fn is_reported_cli_failure(error: &(dyn std::error::Error + 'static)) -> bool {
     find_error_in_chain::<ReportedCliFailure>(error).is_some()
 }

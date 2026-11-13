@@ -55,6 +55,7 @@ public class ChatContainerView: UIView {
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator,
       theme: theme,
+      openAnchor: initialMessages?.openAnchor ?? .latest,
       viewModel: MessagesSectionedViewModel(
         peer: peerId,
         chatId: chatId,
@@ -77,7 +78,7 @@ public class ChatContainerView: UIView {
       }
       collectionView.onScrollAffordanceChanged = { [weak self] state in
         self?.setScrollButtonShown(state.isVisible)
-        self?.scrollButton.setHasUnread(state.hasUnread)
+        self?.scrollButton.setCount(state.unreadCount)
       }
       collectionView.onVisibleMessagesChanged = { [weak self] ids in
         guard let navigator = self?.activityNavigator else { return }
@@ -205,6 +206,7 @@ public class ChatContainerView: UIView {
   private var reactionButtonBottomConstraint: NSLayoutConstraint?
   private var isScrollButtonShown = false
   private var activityState = ChatActivityNavigator.State.empty
+  private var isFirstActivityState = true
 
   private var usesIOS27KeyboardWorkaround: Bool {
     if #available(iOS 27.0, *) {
@@ -274,6 +276,21 @@ public class ChatContainerView: UIView {
       attachEdgePanHandlerIfNeeded()
       resetComposeToSafeAreaIfKeyboardClosed()
     }
+  }
+
+  override public func layoutSubviews() {
+    super.layoutSubviews()
+    reportComposeBottomOffsetIfNeeded()
+  }
+
+  /// On iPad the compose's laid-out position is the only reliable keyboard signal: the
+  /// hardware keyboard shortcut bar and undocked keyboards report notification frames that
+  /// disagree with it. The list reserves exactly the space the compose occupies.
+  private func reportComposeBottomOffsetIfNeeded() {
+    guard IPadNavigationLane.isEnabled, !isPreview, window != nil, bounds.height > 0 else { return }
+    let offset = max(0, bounds.maxY - composeContainerView.frame.maxY)
+    guard offset.isFinite else { return }
+    messagesCollectionView.setComposeBottomOffset(offset)
   }
 
   func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
@@ -430,10 +447,16 @@ public class ChatContainerView: UIView {
         borderView.topAnchor.constraint(equalTo: composeContainerView.topAnchor),
         borderView.heightAnchor.constraint(equalToConstant: 0.5),
 
-        // The hit target is 44pt while the visible glass is 34pt. Insets preserve
-        // the existing 10pt visual spacing from the trailing and compose edges.
-        scrollButton.trailingAnchor.constraint(equalTo: composeTrailingAnchor, constant: -5),
-        scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -5),
+        // Mirrors the compose plus button: the same glass circle, its trailing edge on the compose
+        // pill's, and the gap above compose equal to the gap between stacked buttons.
+        scrollButton.trailingAnchor.constraint(
+          equalTo: composeTrailingAnchor,
+          constant: -(ComposeView.textViewHorizantalMargin * 2 - BlurCircleButton.hitOutset)
+        ),
+        scrollButton.bottomAnchor.constraint(
+          equalTo: composeView.topAnchor,
+          constant: -(BlurCircleButton.stackSpacing - BlurCircleButton.hitOutset)
+        ),
 
         mentionButton.centerXAnchor.constraint(equalTo: scrollButton.centerXAnchor),
         reactionButton.centerXAnchor.constraint(equalTo: scrollButton.centerXAnchor),
@@ -447,7 +470,7 @@ public class ChatContainerView: UIView {
     startActivityNavigator()
   }
 
-  private static let floatingButtonStep: CGFloat = 42
+  private static let floatingButtonStep = BlurCircleButton.visualSize + BlurCircleButton.stackSpacing
 
   private func layoutFloatingButtons(animated: Bool) {
     let mentionSlot = isScrollButtonShown ? 1 : 0
@@ -474,6 +497,10 @@ public class ChatContainerView: UIView {
   }
 
   private func applyActivityState(_ state: ChatActivityNavigator.State) {
+    messagesCollectionView.setUnreadState(state)
+    // Read-marker updates arrive often while scrolling; only @ and ♥ changes move the stack.
+    guard !state.hasSameActivity(as: activityState) || isFirstActivityState else { return }
+    isFirstActivityState = false
     activityState = state
     mentionButton.setCount(state.mentionsCount)
     mentionButton.setVisible(state.mentionsCount > 0)
@@ -602,11 +629,22 @@ public class ChatContainerView: UIView {
       keyboardTrackingAccessoryView.resumeTracking()
     }
 
-    guard let inset = keyboardOverlap(with: keyboardFrame) else {
+    guard var inset = keyboardOverlap(with: keyboardFrame) else {
       if !isComposeFocused {
         animateComposeSafeAreaReset(animated: animated, notification: notification)
       }
       return
+    }
+
+    // iPad: sending or reloading input views makes the hardware keyboard shortcut bar
+    // briefly report a hidden keyboard while it stays on screen. The tracking accessory
+    // has not moved, so its display link never corrects a reset. Trust what it measures.
+    if isComposeFocused, inset <= 0.5, IPadNavigationLane.isEnabled,
+       let keyboardTop = keyboardTrackingAccessoryView.keyboardTop(in: self),
+       let measuredInset = normalizedKeyboardInset(fromKeyboardTop: keyboardTop),
+       measuredInset > 0.5
+    {
+      inset = measuredInset
     }
 
     let targetInset = isComposeFocused ? inset : 0
@@ -649,7 +687,14 @@ public class ChatContainerView: UIView {
 
   private func keyboardOverlap(with keyboardFrame: CGRect) -> CGFloat? {
     guard isFinite(keyboardFrame) else { return nil }
-    let keyboardFrameInView = convert(keyboardFrame, from: nil)
+    // Keyboard notification frames are in screen coordinates. Converting from the window
+    // (`from: nil`) only matches full screen; an iPad window offset on screen read the
+    // keyboard too low and parked the compose under the hardware keyboard shortcut bar.
+    let keyboardFrameInView = if let screen = window?.windowScene?.screen {
+      convert(keyboardFrame, from: screen.coordinateSpace)
+    } else {
+      convert(keyboardFrame, from: nil)
+    }
     return normalizedKeyboardInset(fromKeyboardTop: keyboardFrameInView.minY)
   }
 

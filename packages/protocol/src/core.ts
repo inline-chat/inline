@@ -6547,6 +6547,12 @@ export interface RpcCall {
          */
         readActivity: ReadActivityInput;
     } | {
+        oneofKind: "setFocusStatus";
+        /**
+         * @generated from protobuf field: SetFocusStatusInput setFocusStatus = 170;
+         */
+        setFocusStatus: SetFocusStatusInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7563,6 +7569,12 @@ export interface RpcResult {
          * @generated from protobuf field: ReadActivityResult readActivity = 169;
          */
         readActivity: ReadActivityResult;
+    } | {
+        oneofKind: "setFocusStatus";
+        /**
+         * @generated from protobuf field: SetFocusStatusResult setFocusStatus = 170;
+         */
+        setFocusStatus: SetFocusStatusResult;
     } | {
         oneofKind: undefined;
     };
@@ -9292,6 +9304,23 @@ export interface ReadActivityInput {
 export interface ReadActivityResult {
 }
 /**
+ * Reports whether an Apple Focus is silencing the user's notifications.
+ * Devices send it on change and when they come back online.
+ *
+ * @generated from protobuf message SetFocusStatusInput
+ */
+export interface SetFocusStatusInput {
+    /**
+     * @generated from protobuf field: bool focused = 1;
+     */
+    focused: boolean;
+}
+/**
+ * @generated from protobuf message SetFocusStatusResult
+ */
+export interface SetFocusStatusResult {
+}
+/**
  * @generated from protobuf message CreateBotInput
  */
 export interface CreateBotInput {
@@ -10288,6 +10317,13 @@ export interface PrivacySettings {
      * @generated from protobuf field: optional PrivacyRule time_zone = 3;
      */
     timeZone?: PrivacyRule;
+    /**
+     * Who can see when a Focus silences the user's notifications. Absent means
+     * nobody (the default).
+     *
+     * @generated from protobuf field: optional PrivacyRule focus_status = 4;
+     */
+    focusStatus?: PrivacyRule;
 }
 /**
  * Who can see one piece of the user's information. The user always sees their own.
@@ -14108,6 +14144,14 @@ export interface UserStatus {
      * @generated from protobuf field: LastOnline last_online = 2;
      */
     lastOnline?: LastOnline;
+    /**
+     * Present when the server evaluated Focus for this viewer: authoritative,
+     * with focused false when it is off, stale, or hidden from the viewer.
+     * Absent means not evaluated; clients keep what they have.
+     *
+     * @generated from protobuf field: optional FocusStatus focus = 3;
+     */
+    focus?: FocusStatus;
 }
 /**
  * @generated from protobuf enum UserStatus.Status
@@ -14125,6 +14169,22 @@ export enum UserStatus_Status {
      * @generated from protobuf enum value: OFFLINE = 2;
      */
     OFFLINE = 2
+}
+/**
+ * @generated from protobuf message FocusStatus
+ */
+export interface FocusStatus {
+    /**
+     * @generated from protobuf field: bool focused = 1;
+     */
+    focused: boolean;
+    /**
+     * When the user's device last reported it. Clients treat a focused status
+     * older than a day as off.
+     *
+     * @generated from protobuf field: optional int64 updated_at = 2;
+     */
+    updatedAt?: bigint;
 }
 /**
  * @generated from protobuf message LastOnline
@@ -17935,7 +17995,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: READ_ACTIVITY = 168;
      */
-    READ_ACTIVITY = 168
+    READ_ACTIVITY = 168,
+    /**
+     * @generated from protobuf enum value: SET_FOCUS_STATUS = 169;
+     */
+    SET_FOCUS_STATUS = 169
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -31486,7 +31550,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 166, name: "getContacts", kind: "message", oneof: "input", T: () => GetContactsInput },
             { no: 167, name: "getAgentAccess", kind: "message", oneof: "input", T: () => GetAgentAccessInput },
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
-            { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput }
+            { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
+            { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -32507,6 +32572,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         readActivity: ReadActivityInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).readActivity)
                     };
                     break;
+                case /* SetFocusStatusInput setFocusStatus */ 170:
+                    message.input = {
+                        oneofKind: "setFocusStatus",
+                        setFocusStatus: SetFocusStatusInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setFocusStatus)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33023,6 +33094,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* ReadActivityInput readActivity = 169; */
         if (message.input.oneofKind === "readActivity")
             ReadActivityInput.internalBinaryWrite(message.input.readActivity, writer.tag(169, WireType.LengthDelimited).fork(), options).join();
+        /* SetFocusStatusInput setFocusStatus = 170; */
+        if (message.input.oneofKind === "setFocusStatus")
+            SetFocusStatusInput.internalBinaryWrite(message.input.setFocusStatus, writer.tag(170, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33204,7 +33278,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 166, name: "getContacts", kind: "message", oneof: "result", T: () => GetContactsResult },
             { no: 167, name: "getAgentAccess", kind: "message", oneof: "result", T: () => GetAgentAccessResult },
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
-            { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult }
+            { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
+            { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -34225,6 +34300,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         readActivity: ReadActivityResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).readActivity)
                     };
                     break;
+                case /* SetFocusStatusResult setFocusStatus */ 170:
+                    message.result = {
+                        oneofKind: "setFocusStatus",
+                        setFocusStatus: SetFocusStatusResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setFocusStatus)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -34741,6 +34822,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* ReadActivityResult readActivity = 169; */
         if (message.result.oneofKind === "readActivity")
             ReadActivityResult.internalBinaryWrite(message.result.readActivity, writer.tag(169, WireType.LengthDelimited).fork(), options).join();
+        /* SetFocusStatusResult setFocusStatus = 170; */
+        if (message.result.oneofKind === "setFocusStatus")
+            SetFocusStatusResult.internalBinaryWrite(message.result.setFocusStatus, writer.tag(170, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -40247,6 +40331,78 @@ class ReadActivityResult$Type extends MessageType<ReadActivityResult> {
  */
 export const ReadActivityResult = new ReadActivityResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class SetFocusStatusInput$Type extends MessageType<SetFocusStatusInput> {
+    constructor() {
+        super("SetFocusStatusInput", [
+            { no: 1, name: "focused", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SetFocusStatusInput>): SetFocusStatusInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.focused = false;
+        if (value !== undefined)
+            reflectionMergePartial<SetFocusStatusInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetFocusStatusInput): SetFocusStatusInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool focused */ 1:
+                    message.focused = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SetFocusStatusInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool focused = 1; */
+        if (message.focused !== false)
+            writer.tag(1, WireType.Varint).bool(message.focused);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetFocusStatusInput
+ */
+export const SetFocusStatusInput = new SetFocusStatusInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SetFocusStatusResult$Type extends MessageType<SetFocusStatusResult> {
+    constructor() {
+        super("SetFocusStatusResult", []);
+    }
+    create(value?: PartialMessage<SetFocusStatusResult>): SetFocusStatusResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SetFocusStatusResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SetFocusStatusResult): SetFocusStatusResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: SetFocusStatusResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SetFocusStatusResult
+ */
+export const SetFocusStatusResult = new SetFocusStatusResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class CreateBotInput$Type extends MessageType<CreateBotInput> {
     constructor() {
         super("CreateBotInput", [
@@ -43977,7 +44133,8 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
         super("PrivacySettings", [
             { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule }
+            { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule },
+            { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule }
         ]);
     }
     create(value?: PartialMessage<PrivacySettings>): PrivacySettings {
@@ -44000,6 +44157,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
                 case /* optional PrivacyRule time_zone */ 3:
                     message.timeZone = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.timeZone);
                     break;
+                case /* optional PrivacyRule focus_status */ 4:
+                    message.focusStatus = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.focusStatus);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -44021,6 +44181,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
         /* optional PrivacyRule time_zone = 3; */
         if (message.timeZone)
             PrivacyRule.internalBinaryWrite(message.timeZone, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional PrivacyRule focus_status = 4; */
+        if (message.focusStatus)
+            PrivacyRule.internalBinaryWrite(message.focusStatus, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -54832,7 +54995,8 @@ class UserStatus$Type extends MessageType<UserStatus> {
     constructor() {
         super("UserStatus", [
             { no: 1, name: "online", kind: "enum", T: () => ["UserStatus.Status", UserStatus_Status] },
-            { no: 2, name: "last_online", kind: "message", T: () => LastOnline }
+            { no: 2, name: "last_online", kind: "message", T: () => LastOnline },
+            { no: 3, name: "focus", kind: "message", T: () => FocusStatus }
         ]);
     }
     create(value?: PartialMessage<UserStatus>): UserStatus {
@@ -54853,6 +55017,9 @@ class UserStatus$Type extends MessageType<UserStatus> {
                 case /* LastOnline last_online */ 2:
                     message.lastOnline = LastOnline.internalBinaryRead(reader, reader.uint32(), options, message.lastOnline);
                     break;
+                case /* optional FocusStatus focus */ 3:
+                    message.focus = FocusStatus.internalBinaryRead(reader, reader.uint32(), options, message.focus);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -54871,6 +55038,9 @@ class UserStatus$Type extends MessageType<UserStatus> {
         /* LastOnline last_online = 2; */
         if (message.lastOnline)
             LastOnline.internalBinaryWrite(message.lastOnline, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional FocusStatus focus = 3; */
+        if (message.focus)
+            FocusStatus.internalBinaryWrite(message.focus, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -54881,6 +55051,60 @@ class UserStatus$Type extends MessageType<UserStatus> {
  * @generated MessageType for protobuf message UserStatus
  */
 export const UserStatus = new UserStatus$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class FocusStatus$Type extends MessageType<FocusStatus> {
+    constructor() {
+        super("FocusStatus", [
+            { no: 1, name: "focused", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "updated_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<FocusStatus>): FocusStatus {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.focused = false;
+        if (value !== undefined)
+            reflectionMergePartial<FocusStatus>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: FocusStatus): FocusStatus {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool focused */ 1:
+                    message.focused = reader.bool();
+                    break;
+                case /* optional int64 updated_at */ 2:
+                    message.updatedAt = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: FocusStatus, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool focused = 1; */
+        if (message.focused !== false)
+            writer.tag(1, WireType.Varint).bool(message.focused);
+        /* optional int64 updated_at = 2; */
+        if (message.updatedAt !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.updatedAt);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message FocusStatus
+ */
+export const FocusStatus = new FocusStatus$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class LastOnline$Type extends MessageType<LastOnline> {
     constructor() {

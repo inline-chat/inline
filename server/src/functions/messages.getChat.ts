@@ -1,4 +1,5 @@
 import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
+import { resolveFocusForViewer } from "@in/server/modules/privacy/focusStatus"
 import type { Chat, Dialog, InputPeer, Message, User } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -345,6 +346,9 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
       const peerTimeZoneVisible = peer
         ? (await resolveTimeZoneVisibility(currentUserId, [peer.user])).has(peer.user.id)
         : false
+      const peerFocus = peer && peer.user.bot !== true
+        ? (await resolveFocusForViewer(currentUserId, [peer.user])).get(peer.user.id)
+        : undefined
 
       return {
         chat: encodedChat,
@@ -356,6 +360,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
               user: peer.user,
               photoFile: peer.photoFile,
               timeZoneVisible: peerTimeZoneVisible,
+              focus: peerFocus,
               viewerUserId: currentUserId,
             })
           : undefined,

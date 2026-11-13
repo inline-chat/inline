@@ -14,6 +14,7 @@ import {
   GetChatInput,
   Method,
   InputPeer,
+  MessageSendMode,
   registerBotCapabilitiesWithRetry,
   MessageAction,
   MessageActionCallback,
@@ -58,6 +59,13 @@ import {
   type Target,
 } from "./contract.js"
 import { InlineUserDirectory } from "./user-directory.js"
+import {
+  ActivityHub,
+  firstMessageId,
+  parseActivityEvent,
+  randomMessageId,
+  type OutputModeSettings,
+} from "./activity.js"
 import {
   HERMES_TELEMETRY_EXIT_TIMEOUT_MS,
   reportHermesPluginError,
@@ -159,7 +167,10 @@ async function connectClientLoop() {
       meUsername = normalizeOwnUsername(me.username)
       void registerBotCapabilitiesWithRetry({
         register: () => client.setMyBotCapabilities({
-          capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }],
+          capabilities: [
+            { kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 },
+            { kind: BotCapability_Kind.OUTPUT_MODE, version: 1 },
+          ],
         }),
         isCancelled: () => stopping,
         onFailure: (error, willRetry) => {
@@ -282,6 +293,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     case "/send":
       await endpointSend(res, body)
       return
+    case "/activity":
+      await endpointActivity(res, body)
+      return
+    case "/activity/flush":
+      await endpointActivityFlush(res, body)
+      return
     case "/edit":
       await endpointEdit(res, body)
       return
@@ -394,6 +411,93 @@ async function endpointSend(res: ServerResponse, body: unknown) {
     ? await client.sendMessage({ chatId: target.chatId, ...params })
     : await client.sendMessage({ userId: target.userId, ...params })
   writeJson(res, 200, { ok: true, result: { messageId: result.messageId?.toString() ?? null } })
+}
+
+async function endpointActivity(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const target = parseTarget(record)
+  const event = parseActivityEvent(record.event)
+  const turnId = readOptionalString(record, "turnId") || activityTargetKey(target)
+  const at = readOptionalNumber(record, "at")
+  const lazy = readOptionalBoolean(record, "lazy") ?? false
+  const result = await activityHub.apply(turnId, target, event, {
+    ...(at !== undefined && Number.isFinite(at) ? { at } : {}),
+    lazy,
+  })
+  writeJson(res, 200, { ok: true, result })
+}
+
+async function endpointActivityFlush(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const target = parseTarget(record)
+  const turnId = readOptionalString(record, "turnId") || activityTargetKey(target)
+  await activityHub.flush(turnId)
+  writeJson(res, 200, { ok: true, result: {} })
+}
+
+function activityTargetKey(target: Target): string {
+  return "chatId" in target ? `chat:${target.chatId.toString()}` : `user:${target.userId.toString()}`
+}
+
+/** Detailed progress messages: block content, sent silently, never parsed as Markdown. */
+function progressTransport(target: Target) {
+  const peerId = inputPeerFromTarget(target)
+  return {
+    async send(doc: { text: string; blockContent: unknown }): Promise<bigint> {
+      const result = await client.invokeRaw(Method.SEND_MESSAGE, {
+        oneofKind: "sendMessage",
+        sendMessage: {
+          peerId,
+          randomId: randomMessageId(),
+          message: doc.text,
+          blockContent: doc.blockContent,
+          sendMode: MessageSendMode.MODE_SILENT,
+        },
+      })
+      const messageId = firstMessageId(result)
+      if (messageId == null) throw new Error("sendMessage returned no message id")
+      return messageId
+    },
+    async edit(messageId: bigint, doc: { text: string; blockContent: unknown }): Promise<void> {
+      await client.invokeRaw(Method.EDIT_MESSAGE, {
+        oneofKind: "editMessage",
+        editMessage: { messageId, peerId, text: doc.text, blockContent: doc.blockContent },
+      })
+    },
+  }
+}
+
+const AGENT_SETTINGS_CACHE_MS = 30_000
+let agentDefaultOutputMode: { value: number | undefined; at: number } | undefined
+
+/** This bot's default output mode (cached) and its participation override in the target chat. */
+async function readOutputModeSettings(target: Target): Promise<OutputModeSettings> {
+  const peerId = inputPeerFromTarget(target)
+  const [defaultMode, participations] = await Promise.all([
+    (async () => {
+      if (agentDefaultOutputMode && Date.now() - agentDefaultOutputMode.at < AGENT_SETTINGS_CACHE_MS) {
+        return agentDefaultOutputMode.value
+      }
+      const result = asOptionalRecord(await client.invokeRaw(Method.GET_AGENT_SETTINGS, {
+        oneofKind: "getAgentSettings",
+        getAgentSettings: { botUserId: 0n },
+      }))
+      const settings = asOptionalRecord(asOptionalRecord(result?.getAgentSettings)?.settings)
+      const value = typeof settings?.defaultOutputMode === "number" ? settings.defaultOutputMode : undefined
+      agentDefaultOutputMode = { value, at: Date.now() }
+      return value
+    })(),
+    client.invokeRaw(Method.GET_AGENT_PARTICIPATIONS, {
+      oneofKind: "getAgentParticipations",
+      getAgentParticipations: { peerId },
+    }),
+  ])
+  const list = asOptionalRecord(asOptionalRecord(participations)?.getAgentParticipations)?.participations
+  const mine = Array.isArray(list) && meId != null
+    ? list.map(asOptionalRecord).find((entry) => entry != null && String(entry.botUserId) === meId)
+    : undefined
+  const override = typeof mine?.outputMode === "number" ? mine.outputMode : undefined
+  return { defaultMode, override }
 }
 
 async function endpointEdit(res: ServerResponse, body: unknown) {
@@ -1164,6 +1268,7 @@ type SidecarClient = {
   setMyBotCapabilities(params: { capabilities: Array<{ kind: BotCapability_Kind; version: number }> }): Promise<unknown>
   answerBotChatSettings(params: { requestId: bigint; response: BotChatSettingsResponse }): Promise<void>
   invoke(method: Method, input: unknown): Promise<unknown>
+  invokeRaw(method: Method, input: unknown): Promise<unknown>
   invokeUncheckedRaw(method: Method, input: unknown, options?: { timeoutMs: number }): Promise<unknown>
 }
 
@@ -1436,6 +1541,34 @@ class MockInlineClient implements SidecarClient {
     return {}
   }
 
+  async invokeRaw(method: Method, input: unknown): Promise<unknown> {
+    this.record(`invokeRaw:${methodName(method)}`, input)
+    if (method === Method.SEND_MESSAGE) {
+      this.messageId += 1n
+      return {
+        oneofKind: "sendMessage",
+        sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: this.messageId, randomId: 1n } } }] },
+      }
+    }
+    if (method === Method.EDIT_MESSAGE) return { oneofKind: "editMessage", editMessage: { updates: [] } }
+    if (method === Method.GET_AGENT_SETTINGS) {
+      return {
+        oneofKind: "getAgentSettings",
+        getAgentSettings: { settings: { botUserId: 999n, defaultOutputMode: mockOutputMode("INLINE_SIDECAR_TEST_DEFAULT_OUTPUT_MODE"), revision: 0n } },
+      }
+    }
+    if (method === Method.GET_AGENT_PARTICIPATIONS) {
+      const override = mockOutputMode("INLINE_SIDECAR_TEST_OUTPUT_MODE_OVERRIDE")
+      return {
+        oneofKind: "getAgentParticipations",
+        getAgentParticipations: {
+          participations: override ? [{ botUserId: 999n, mode: 1, revision: 1n, date: 1n, outputMode: override }] : [],
+        },
+      }
+    }
+    return { oneofKind: undefined }
+  }
+
   async invokeUncheckedRaw(method: Method, input: unknown): Promise<unknown> {
     this.record(`invokeUncheckedRaw:${methodName(method)}`, input)
     if (method === Method.GET_CHAT_PARTICIPANTS) {
@@ -1556,7 +1689,24 @@ function methodName(method: Method): string {
   return Method[method] ?? String(method)
 }
 
+function mockOutputMode(name: string): number {
+  const value = readEnv(name)
+  return value === "detailed" ? 1 : value === "friendly" ? 2 : 0
+}
+
 const client: SidecarClient = createClient(clientOptions)
+const activityHub = new ActivityHub({
+  transportFor: progressTransport,
+  readMode: readOutputModeSettings,
+  onError: (error, operation) => {
+    if (operation === "mode") {
+      console.error(`inline-sidecar: output mode lookup failed: ${redactError(error)}; using the last known mode`)
+      return
+    }
+    reportHermesPluginError(`activity.${operation}`, error)
+    console.error(`inline-sidecar: progress ${operation} failed: ${redactError(error)}`)
+  },
+})
 const userDirectory = new InlineUserDirectory(client, {
   onError: (operation, error) => {
     reportHermesPluginError(`sender_directory.${operation}`, error)

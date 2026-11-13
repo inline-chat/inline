@@ -38,6 +38,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     AgentControlErrors.report = { ToastManager.shared.showToast($0, type: .error) }
+    // After launch work, so reading Focus never delays the first frame.
+    Task { @MainActor in FocusStatusReporter.shared.start() }
     // One-time refresh attempt on launch (covers normal unlocked launches).
     Task {
       await Auth.shared.refreshFromStorage()
@@ -411,6 +413,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       completionHandler()
       return
     }
+    // A notification opens at the unread line or the latest messages, as Telegram does, never
+    // far back at a saved place. Cleared before navigation starts the chat's window read.
+    ChatReadingPlaceStore.shared.clear(for: peerId)
     if waitsForSceneActivation {
       let accepted = sceneRouterRegistry.navigate(
         .externalChat(peer: peerId, contextSpaceID: nil, messageID: messageID),

@@ -170,6 +170,7 @@ class GlassComposeAppKit: NSView {
 
   private lazy var voiceViewModel = ComposeVoiceRecordingViewModel(peerId: chatPeerID)
   private var voiceEscapeKeyUnsubscribe: (() -> Void)?
+  private var attachmentEscUnsubscribe: (() -> Void)?
   private var voiceReturnKeyUnsubscribe: (() -> Void)?
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
 
@@ -515,6 +516,7 @@ class GlassComposeAppKit: NSView {
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
+    syncAttachmentEscHandler()
 
     guard window != nil else {
       removeNewThreadScrollObserver()
@@ -4152,6 +4154,7 @@ extension GlassComposeAppKit: ComposeAutocompleteMenuDelegate {
 
       case let .emoji(value, _):
         let preferredValue = AppSettings.shared.preferredEmojiSkinTone.applying(to: value)
+        ComposeEmojiAutocompleteProvider.recordSelection(preferredValue)
         let result = emojiAutocompleteDetector.replaceEmojiAutocomplete(
           in: textEditor.attributedString,
           range: match.range,
@@ -4464,6 +4467,28 @@ extension GlassComposeAppKit {
 extension GlassComposeAppKit: ComposeImplementation, ComposeAttachmentOwner {
   var view: NSView {
     self
+  }
+
+  func composeAttachmentsDidChangeStaged(_: Bool) {
+    syncAttachmentEscHandler()
+  }
+
+  /// While attachments are staged, Escape removes the last one instead of
+  /// reaching the window's root handler, which closes the chat.
+  private func syncAttachmentEscHandler() {
+    let wantsHandler = window != nil && attachments.hasAttachments
+    if wantsHandler, attachmentEscUnsubscribe == nil {
+      attachmentEscUnsubscribe = dependencies.keyMonitor?.addHandler(
+        for: .escape,
+        key: "compose_attachments_\(composeSessionKey)",
+        handler: { [weak self] _ in
+          self?.attachments.removeLastAttachment()
+        }
+      )
+    } else if !wantsHandler, let unsubscribe = attachmentEscUnsubscribe {
+      unsubscribe()
+      attachmentEscUnsubscribe = nil
+    }
   }
 
   func hostWillMove(toSuperview newSuperview: NSView?) {

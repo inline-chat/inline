@@ -236,8 +236,12 @@ public final class AgentWorkStateStore: ObservableObject {
   @Published public private(set) var runtimeBotUserIDs: Set<Int64> = []
   /// Bots whose runtime the server reports offline (lapsed heartbeats).
   @Published public private(set) var offlineBotUserIDs: Set<Int64> = []
+  /// Bots without a runtime that declare the Output setting (`OUTPUT_MODE`),
+  /// such as the OpenClaw and Hermes plugins.
+  @Published public private(set) var outputModeBotUserIDs: Set<Int64> = []
 
   private let auth: AuthHandle
+  private let outputModeRealtime: @Sendable () -> any InlineRPCRealtime
   // Writer closures run synchronously on GRDB's queue. withLockUnchecked below
   // keeps the non-Sendable Database on that queue while fencing a reset.
   private let persistenceGeneration = OSAllocatedUnfairLock(initialState: UInt64(0))
@@ -249,12 +253,56 @@ public final class AgentWorkStateStore: ObservableObject {
   /// or for another account, never repopulates the cleared state.
   private var generation: UInt64 = 0
 
-  public init(database: AppDatabase? = nil, auth: AuthHandle = Auth.shared.handle) {
+  public convenience init(database: AppDatabase? = nil, auth: AuthHandle = Auth.shared.handle) {
+    self.init(database: database, auth: auth, outputModeRealtime: { Api.realtime })
+  }
+
+  init(
+    database: AppDatabase? = nil,
+    auth: AuthHandle,
+    outputModeRealtime: @escaping @Sendable () -> any InlineRPCRealtime
+  ) {
     self.auth = auth
+    self.outputModeRealtime = outputModeRealtime
     self.database = database
     // Hydrate before any view reads, so first-frame reads never publish
     // from inside a view update.
     hydrateIfNeeded()
+  }
+
+  /// A response and its optimistic rollback belong to both the login that sent
+  /// the request and the store generation before a reset.
+  struct OutputModeRequestOwner {
+    let account: AuthAccountMutationToken
+    let generation: UInt64
+  }
+
+  func beginOutputModeRequest() throws -> OutputModeRequestOwner {
+    .init(account: try auth.beginAccountMutation(), generation: generation)
+  }
+
+  func isCurrentOutputModeRequest(_ owner: OutputModeRequestOwner) -> Bool {
+    generation == owner.generation && (try? auth.validateAccountMutation(owner.account)) != nil
+  }
+
+  func callOutputModeRPC(
+    method: InlineProtocol.Method,
+    input: InlineProtocol.RpcCall.OneOf_Input?,
+    owner: OutputModeRequestOwner
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    try Task.checkCancellation()
+    guard isCurrentOutputModeRequest(owner) else { throw CancellationError() }
+    let response = try await outputModeRealtime().callRpcDirect(
+      method: method, input: input, timeout: .seconds(15), accountToken: owner.account
+    )
+    // A confirmed write remains authoritative when its caller is cancelled
+    // while the response is returning. Reads may still be discarded. Account
+    // and reset fences apply to both kinds of response.
+    if method != .updateAgentSettings, method != .setAgentParticipation {
+      try Task.checkCancellation()
+    }
+    guard isCurrentOutputModeRequest(owner) else { throw CancellationError() }
+    return response
   }
 
   // MARK: Reads
@@ -305,6 +353,17 @@ public final class AgentWorkStateStore: ObservableObject {
   public func defaultOutputMode(botUserID: Int64) -> AgentThreadOutputMode {
     hydrateIfNeeded()
     return defaultOutputModes[botUserID] ?? .detailed
+  }
+
+  /// Whether the bot applies its Output setting: it reports a runtime or declares `OUTPUT_MODE`.
+  public func offersOutputMode(botUserID: Int64) -> Bool {
+    hydrateIfNeeded()
+    return runtimeBotUserIDs.contains(botUserID) || outputModeBotUserIDs.contains(botUserID)
+  }
+
+  func setDeclaresOutputMode(_ declares: Bool, botUserID: Int64) {
+    guard outputModeBotUserIDs.contains(botUserID) != declares else { return }
+    if declares { outputModeBotUserIDs.insert(botUserID) } else { outputModeBotUserIDs.remove(botUserID) }
   }
 
   // MARK: Server input
@@ -451,6 +510,7 @@ public final class AgentWorkStateStore: ObservableObject {
     defaultOutputModes.removeAll()
     runtimeBotUserIDs.removeAll()
     offlineBotUserIDs.removeAll()
+    outputModeBotUserIDs.removeAll()
     overrideRevisions.removeAll()
     guard let database, let account = try? auth.beginAccountMutation() else { return }
     let auth = auth

@@ -510,21 +510,22 @@ struct CLIAgentSetupRunnerTests {
     let pipe = Pipe()
     let firstChunk = DispatchSemaphore(value: 0)
     let drained = DispatchSemaphore(value: 0)
-    DispatchQueue.global(qos: .utility).async {
+    // A dedicated thread: a blocking read must not wait for a busy shared pool on CI.
+    Thread {
       _ = CLIAgentSetupRunner.boundedDrain(
         pipe.fileHandleForReading,
         onOverflow: nil,
         onChunk: { _ in firstChunk.signal() }
       )
       drained.signal()
-    }
+    }.start()
     try pipe.fileHandleForWriting.write(contentsOf: Data("{\"event\":\"phase.started\"}\n".utf8))
 
     // The writer is still open: a chunk must arrive without waiting for EOF.
-    #expect(firstChunk.wait(timeout: .now() + 2) == .success)
+    #expect(firstChunk.wait(timeout: .now() + 10) == .success)
 
     try pipe.fileHandleForWriting.close()
-    #expect(drained.wait(timeout: .now() + 2) == .success)
+    #expect(drained.wait(timeout: .now() + 10) == .success)
   }
 
   private func drain(_ payload: Data, through pipe: Pipe) async -> Data {

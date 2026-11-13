@@ -649,6 +649,85 @@ describe("sidecar runtime", () => {
     }
   })
 
+  it("draws Detailed progress through /activity as silent block-content messages", async () => {
+    const dir = await tempDir()
+    const outdir = path.join(dir, "bundle")
+    buildSidecarBundle(outdir)
+    const port = await getOpenPort()
+    const token = "runtime-token"
+    const sidecar = spawn(process.execPath, [path.join(outdir, "index.mjs")], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        INLINE_TOKEN: "fake-inline-token",
+        INLINE_BASE_URL: "http://127.0.0.1/mock-inline",
+        INLINE_SIDECAR_TOKEN: token,
+        INLINE_SIDECAR_PORT: String(port),
+        INLINE_SIDECAR_BIND: "127.0.0.1",
+        INLINE_STATE_PATH: path.join(dir, "state.json"),
+        INLINE_SIDECAR_TEST_MOCK: "1",
+        INLINE_SIDECAR_TEST_ALLOW_MOCK: "1",
+        // The bot defaults to Friendly; this chat's participation overrides it to Detailed.
+        INLINE_SIDECAR_TEST_DEFAULT_OUTPUT_MODE: "friendly",
+        INLINE_SIDECAR_TEST_OUTPUT_MODE_OVERRIDE: "detailed",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const logs = collectOutput(sidecar)
+    const auth = { "x-hermes-sidecar-token": token }
+    try {
+      await waitForConnected(port, token, sidecar, logs)
+      const target = { chatId: "456" }
+      const start = await post(port, "/activity", { target, turnId: "t1", event: { type: "turn.start" }, at: 1_000 }, auth)
+      expect(start.status).toBe(200)
+      expect(resultOf(start.body)).toEqual({ mode: "detailed" })
+      await expectOk(post(port, "/activity", {
+        target, turnId: "t1", at: 2_000,
+        event: { type: "item", id: "tool:1", state: "running", body: { kind: "command", command: "ls" } },
+      }, auth))
+      await expectOk(post(port, "/activity", { target, turnId: "t1", at: 3_000, event: { type: "commentary", text: "Looking around" } }, auth))
+      await expectOk(post(port, "/activity", { target, turnId: "t1", at: 4_000, event: { type: "turn.end", outcome: "success" } }, auth))
+      await expectOk(post(port, "/activity/flush", { target, turnId: "t1" }, auth))
+
+      const invalid = await post(port, "/activity", { target, turnId: "t2", event: { type: "item" } }, auth)
+      expect(invalid.status).toBe(400)
+      const ignored = await post(port, "/activity", { target, turnId: "never-started", event: { type: "split" } }, auth)
+      expect(resultOf(ignored.body)).toEqual({ ignored: true })
+
+      const health = await post(port, "/healthz", {}, auth)
+      const calls = (resultOf(health.body).diagnostics as {
+        calls: Array<{ method: string; params?: Record<string, Record<string, unknown>> }>
+      }).calls
+      const methods = calls.map((call) => call.method)
+      expect(methods).toContain("invokeRaw:GET_AGENT_SETTINGS")
+      expect(methods).toContain("invokeRaw:GET_AGENT_PARTICIPATIONS")
+      const sends = calls.filter((call) => call.method === "invokeRaw:SEND_MESSAGE")
+      const edits = calls.filter((call) => call.method === "invokeRaw:EDIT_MESSAGE")
+      expect(sends).toHaveLength(1)
+      expect(edits.length).toBeGreaterThanOrEqual(1)
+      const sent = sends[0]!.params!.sendMessage!
+      expect(sent.peerId).toEqual({ type: { oneofKind: "chat", chat: { chatId: "456" } } })
+      expect(sent.sendMode).toBe(1)
+      expect(sent).not.toHaveProperty("parseMarkdown")
+      expect(String(sent.message)).toContain("Working")
+      expect((sent.blockContent as { blocks: unknown[] }).blocks.length).toBeGreaterThan(0)
+      const lastEdit = edits.at(-1)!.params!.editMessage!
+      expect(lastEdit.messageId).toBe("9001")
+      expect(String(lastEdit.text)).toContain("Worked for 3s")
+      expect(String(lastEdit.text)).toContain("Looking around")
+      expect(lastEdit).not.toHaveProperty("parseMarkdown")
+      const capabilities = calls.find((call) => call.method === "setMyBotCapabilities")?.params as unknown as {
+        capabilities: Array<{ kind: number; version: number }>
+      }
+      // CHAT_SETTINGS and OUTPUT_MODE.
+      expect(capabilities.capabilities).toEqual([{ kind: 1, version: 1 }, { kind: 3, version: 1 }])
+    } finally {
+      await post(port, "/shutdown", {}, auth).catch(() => undefined)
+      sidecar.kill("SIGTERM")
+      await waitForExit(sidecar, 2_000)
+    }
+  })
+
   it("rejects attachments over the configured upload cap before reading them", async () => {
     const dir = await tempDir()
     const outdir = path.join(dir, "bundle")

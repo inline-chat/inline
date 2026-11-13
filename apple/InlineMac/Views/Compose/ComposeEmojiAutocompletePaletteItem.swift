@@ -51,7 +51,7 @@ final class ComposeEmojiAutocompletePaletteItem: NSCollectionViewItem {
 
     emojiLabel.stringValue = item.emoji ?? ""
     view.toolTip = item.title
-    view.setAccessibilityLabel(item.title)
+    view.setAccessibilityLabel([item.subtitle, item.title].compactMap { $0 }.joined(separator: ", "))
   }
 
   private func setupView() {
@@ -64,7 +64,7 @@ final class ComposeEmojiAutocompletePaletteItem: NSCollectionViewItem {
     emojiLabel.isSelectable = false
     emojiLabel.alignment = .center
     emojiLabel.backgroundColor = .clear
-    emojiLabel.font = .systemFont(ofSize: 22)
+    emojiLabel.font = .systemFont(ofSize: 24)
     emojiLabel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(emojiLabel)
 
@@ -93,9 +93,9 @@ final class ComposeEmojiAutocompletePaletteItem: NSCollectionViewItem {
     let bgColor: NSColor
 
     if isActive {
-      bgColor = NSColor.controlAccentColor.withAlphaComponent(isDark ? 0.52 : 0.34)
+      bgColor = NSColor.controlAccentColor.withAlphaComponent(isDark ? 0.36 : 0.22)
     } else if isHovered {
-      bgColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.12 : 0.07)
+      bgColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.10 : 0.06)
     } else {
       bgColor = .clear
     }

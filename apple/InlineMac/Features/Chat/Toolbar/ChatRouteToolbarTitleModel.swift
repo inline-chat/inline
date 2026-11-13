@@ -423,6 +423,9 @@ final class ChatRouteToolbarTitleModel {
       if let user = resolvedUserInfo()?.user, let presence = BotOnlineStatus.subtitle(for: user) {
         return .text(presence)
       }
+      if resolvedUserInfo()?.focus?.isActive() == true {
+        return .text(Self.focusSubtitle(localTime: resolvedLocalTime()))
+      }
       return resolvedLocalTime().map(Status.text) ?? .none
     }
 
@@ -438,6 +441,12 @@ final class ChatRouteToolbarTitleModel {
     }
 
     return .text(localTime)
+  }
+
+  /// "notifications silenced", with local time when that is shown too.
+  static func focusSubtitle(localTime: String?) -> String {
+    guard let localTime else { return "notifications silenced" }
+    return "notifications silenced · \(localTime)"
   }
 
   private func resolvedUserInfo() -> UserInfo? {

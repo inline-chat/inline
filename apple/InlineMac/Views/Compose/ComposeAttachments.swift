@@ -8,8 +8,43 @@ final class ComposeAttachments: NSView {
   private var attachments: [String: ImageAttachmentView] = [:]
   private var videoAttachments: [String: VideoAttachmentView] = [:]
   private var documentModels: [String: DocumentAttachmentModel] = [:]
-  private var orderedDocumentIds: [String] = []
-  private var orderedMediaIds: [String] = []
+  private var orderedDocumentIds: [String] = [] {
+    didSet { reportStagedChange() }
+  }
+  private var orderedMediaIds: [String] = [] {
+    didSet { reportStagedChange() }
+  }
+  private var reportedHasAttachments = false
+
+  var hasAttachments: Bool {
+    !orderedMediaIds.isEmpty || !orderedDocumentIds.isEmpty
+  }
+
+  private func reportStagedChange() {
+    let hasAttachments = hasAttachments
+    guard hasAttachments != reportedHasAttachments else { return }
+    reportedHasAttachments = hasAttachments
+    compose?.composeAttachmentsDidChangeStaged(hasAttachments)
+  }
+
+  /// Removes the trailing media item, or else the trailing document, through
+  /// the owner so the draft is updated too. Returns false when nothing is staged.
+  @discardableResult
+  func removeLastAttachment() -> Bool {
+    if let id = orderedMediaIds.last {
+      if mediaMeta[id]?.kind == .video {
+        compose?.removeVideo(id)
+      } else {
+        compose?.removeImage(id)
+      }
+      return true
+    }
+    if let id = orderedDocumentIds.last {
+      compose?.removeFile(id)
+      return true
+    }
+    return false
+  }
   private var mediaMeta: [String: MediaMeta] = [:]
 
   private enum MediaSection {

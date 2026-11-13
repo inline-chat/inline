@@ -33,9 +33,12 @@ private struct BotChatSettingsSheetContent: View {
   let coordinator: BotChatSettingsCoordinator
   @ObservedObject private var agentWork = AgentWorkStateStore.shared
 
-  /// Output mode applies to bridge v2 agents, which report a runtime.
+  /// Output mode applies to agents that report a runtime (the bridge) or
+  /// declare the Output capability (the Hermes and OpenClaw plugins).
   private var outputModeBotUserID: Int64? {
-    coordinator.selectedBotID.flatMap { agentWork.runtimeBotUserIDs.contains($0) ? $0 : nil }
+    coordinator.selectedBotID.flatMap {
+      agentWork.runtimeBotUserIDs.contains($0) || coordinator.outputModeBotIDs.contains($0) ? $0 : nil
+    }
   }
 
   var body: some View {

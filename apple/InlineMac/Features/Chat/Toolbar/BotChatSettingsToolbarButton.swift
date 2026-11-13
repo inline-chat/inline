@@ -19,9 +19,12 @@ struct BotChatSettingsToolbarButton: View {
     agentThreadModel.context?.botUserID ?? coordinator.selectedBotID
   }
 
-  /// Output mode applies to bridge v2 agents, which report a runtime.
+  /// Output mode applies to agents that report a runtime (the bridge) or
+  /// declare the Output capability (the Hermes and OpenClaw plugins).
   private var showsOutputMode: Bool {
-    settingsBotUserID.map { agentWorkStore.runtimeBotUserIDs.contains($0) } ?? false
+    settingsBotUserID.map {
+      agentWorkStore.runtimeBotUserIDs.contains($0) || coordinator.outputModeBotIDs.contains($0)
+    } ?? false
   }
 
   /// One note when this chat's rows are read-only, instead of one per group.

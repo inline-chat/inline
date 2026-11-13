@@ -111,7 +111,7 @@ describe("inline/update-command", () => {
   })
 
   it("falls back to the OpenClaw executable on PATH", async () => {
-    const runner = vi.fn(async () => ({ exitCode: 0, stdout: "updated", stderr: "" }))
+    const runner = vi.fn(async () => ({ exitCode: 0, stdout: "Updated inline: 0.0.72 -> 1.0.0.", stderr: "" }))
 
     await runInlineOpenClawUpdate({ env: { PATH: "/usr/bin" }, runner })
 
@@ -124,7 +124,7 @@ describe("inline/update-command", () => {
 
   it("returns restart guidance after a successful update", async () => {
     const pluginApi = api()
-    const runner = vi.fn(async () => ({ exitCode: 0, stdout: "updated", stderr: "" }))
+    const runner = vi.fn(async () => ({ exitCode: 0, stdout: "Updated inline: 0.0.72 -> 1.0.0.", stderr: "" }))
 
     await expect(
       handleInlineUpdateCommand(pluginApi, commandCtx(), { runner }),
@@ -134,6 +134,24 @@ describe("inline/update-command", () => {
     expect(pluginApi.logger.info).toHaveBeenCalledWith(
       "[inline-update] OpenClaw plugin updater completed successfully",
     )
+  })
+
+  it.each([
+    ["inline is up to date (1.0.0).", "Inline is up to date for the installed package selection."],
+    ['Skipping "inline" (missing npm spec).', "OpenClaw did not confirm a version change. Check the tracked install with openclaw plugins inspect inline --json on the host."],
+    ["inline already at 1.0.0.", "Inline is up to date for the installed package selection."],
+    ["inline is pinned to @inline-openclaw/inline@0.0.72 (installed 0.0.72); registry latest resolves to 1.0.0.", "Inline is pinned. To change versions, update the package selection on the OpenClaw host."],
+  ])("reports the host's unchanged selection for %s", async (stdout, text) => {
+    const runner = async () => ({ exitCode: 0, stdout, stderr: "" })
+    await expect(handleInlineUpdateCommand(api(), commandCtx(), { runner })).resolves.toEqual({ text })
+  })
+
+  it("explains how to finish an update when the gateway owns the state", async () => {
+    const runner = async () => ({
+      exitCode: 1, stdout: "", stderr: "Cannot admit plugins.update: This operation requires exclusive offline state ownership.",
+    })
+    const result = await handleInlineUpdateCommand(api(), commandCtx(), { runner })
+    expect(result.text).toContain("stop this gateway, run openclaw plugins update inline --accept-capabilities")
   })
 
   it("redacts and bounds failed updater diagnostics", async () => {
@@ -203,7 +221,7 @@ describe("inline/update-command", () => {
     await expect(
       handleInlineUpdateCommand(api(), commandCtx(), { runner }),
     ).resolves.toEqual({ text: "An Inline plugin update is already running." })
-    finish?.({ exitCode: 0, stdout: "updated", stderr: "" })
+    finish?.({ exitCode: 0, stdout: "Updated inline: 0.0.72 -> 1.0.0.", stderr: "" })
     await expect(first).resolves.toEqual({
       text: "Inline plugin update completed. Run /restart to load the installed version.",
     })
@@ -229,7 +247,7 @@ describe("inline/update-command", () => {
 
     await expect(
       handleInlineUpdateCommand(api(), commandCtx(), {
-        runner: async () => ({ exitCode: 0, stdout: "updated", stderr: "" }),
+        runner: async () => ({ exitCode: 0, stdout: "Updated inline: 0.0.72 -> 1.0.0.", stderr: "" }),
       }),
     ).resolves.toEqual({
       text: "Inline plugin update completed. Run /restart to load the installed version.",

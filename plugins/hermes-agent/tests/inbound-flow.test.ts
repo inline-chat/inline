@@ -16,6 +16,57 @@ const flush = async () => {
   for (let i = 0; i < 10; i++) await new Promise<void>(resolve => setImmediate(resolve))
 }
 
+it.each(["widget", "form"] as const)("the installed SDK carries %s action details from the wire to Python", async (kind) => {
+  const { client, transport } = createWireClient(false)
+  const stream = new InboundStream()
+  const consumer = new PassThrough()
+  const lines: string[] = []
+  consumer.on("data", (chunk) => lines.push(chunk.toString()))
+  stream.attach(consumer)
+  const abort = new AbortController()
+  let consuming: Promise<void> | undefined
+  try {
+    const connecting = client.connect()
+    await flush()
+    await transport.connect()
+    await flush()
+    await transport.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    await connecting
+    consuming = client.consumeEvents((event) => deliverInboundEvent(event, {
+      meId: "777", meUsername: "bot", signal: abort.signal,
+      resolveSender: async () => ({ profile: { id: "42", bot: false }, provenanceVerified: true }),
+      deliver: (event) => stream.deliver(event),
+    }))
+    const form = { values: [{ fieldId: "name", value: { oneofKind: "text" as const, text: "Ada" }, redacted: false }] }
+    const details = kind === "widget"
+      ? { widgetCall: { name: "pick", payload: new TextEncoder().encode('{"slot":"10:00"}') } }
+      : { form }
+    const message = ServerProtocolMessage.create({ body: { oneofKind: "message", message: {
+      payload: { oneofKind: "update", update: { updates: [Update.create({ seq: 2, date: 100n,
+        update: { oneofKind: "messageActionInvoked", messageActionInvoked: {
+          interactionId: 99n, chatId: 10n, messageId: 3n, actorUserId: 42n, actionId: "pick", ...details,
+        } },
+      })] } },
+    } } })
+    await transport.emitMessage(ServerProtocolMessage.fromBinary(ServerProtocolMessage.toBinary(message)))
+    await flush()
+    expect(lines).toHaveLength(1)
+    const event = JSON.parse(lines[0]!)
+    expect(event).toMatchObject({ kind: "message.action.invoke", actorUserId: "42", actionId: "pick" })
+    if (kind === "widget") expect(event.widgetCall).toEqual({ name: "pick", payloadJson: '{"slot":"10:00"}' })
+    else expect(event.form).toEqual(form)
+    expect(client.exportState().lastUserSeq).toBeUndefined()
+    stream.acknowledge(event._inlineDeliveryId)
+    await flush()
+    expect(client.exportState().lastUserSeq).toBe(2)
+  } finally {
+    abort.abort()
+    stream.close()
+    await client.close()
+    await consuming
+  }
+})
+
 it.each([
   { kind: "newMessage", serviceKind: "threadBacklink" },
   { kind: "editMessage", serviceKind: "threadBacklink" },
@@ -87,7 +138,7 @@ it.each([
   }
 })
 
-function createWireClient() {
+function createWireClient(persistState = true) {
   // Script only the remote wire; all SDK, directory and delivery objects are real.
   const wire = new Readable({ objectMode: true, read() {} })
   const transport = {
@@ -132,10 +183,10 @@ function createWireClient() {
   const client = new InlineSdkClient({
     token: "test",
     transport,
-    state: {
-      load: async () => ({ version: 1, lastSeqByChatId: { "10": 1, "20": 1 } }),
+    ...(persistState ? { state: {
+      load: async () => ({ version: 1 as const, lastSeqByChatId: { "10": 1, "20": 1 } }),
       save: async () => {},
-    },
+    } } : {}),
   })
   return { client, transport, reply }
 }

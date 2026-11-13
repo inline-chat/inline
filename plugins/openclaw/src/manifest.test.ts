@@ -337,10 +337,10 @@ describe("plugin manifest", () => {
 
     expect(json.openclaw?.install?.clawhubSpec).toBe("clawhub:@inline-openclaw/inline")
     expect(json.openclaw?.install?.defaultChoice).toBe("clawhub")
-    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.8.2")
-    expect(json.peerDependencies?.openclaw).toBe(">=2026.8.2")
+    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.11.1")
+    expect(json.peerDependencies?.openclaw).toBe(">=2026.11.1")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)
-    expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.8.2")
+    expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.11.1")
     expect(json.devDependencies?.openclaw).toBe("2026.11.1")
     expect(json.openclaw?.build?.openclawVersion).toBe(json.devDependencies?.openclaw)
     expect(json.openclaw?.release?.publishToClawHub).toBe(true)
@@ -377,7 +377,8 @@ describe("plugin manifest", () => {
     expect(readme).toContain('`groupPolicy` defaults to `"open"`, and `requireMention` defaults to `true`')
     expect(setup).toContain('Groups use `groupPolicy: "open"` and `requireMention: true` by default')
     expect(compatibilityVersions[0]).toBe(packageJson.version)
-    expect(compatibilityVersions).toHaveLength(6)
+    const unreleasedRows = [...readme.matchAll(/^\| Next \(unreleased\) \|/gm)].length
+    expect(compatibilityVersions.length + unreleasedRows).toBe(6)
     expect(new Set(compatibilityVersions).size).toBe(compatibilityVersions.length)
     expect(packageJson.scripts?.test).toContain("--maxWorkers=2")
   })
