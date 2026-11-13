@@ -453,6 +453,20 @@ pub fn print_update_check(check: &UpdateCheck) {
         );
     }
 }
+pub fn print_launchers_needing_administrator(state: &store::State) {
+    for path in &state.launchers_needing_administrator {
+        let version = state
+            .launchers
+            .get(path)
+            .map(|receipt| format!(" at v{}", receipt.version))
+            .unwrap_or_default();
+        eprintln!(
+            "{} stays{version}: only an administrator can replace it. Update it from the Inline Mac app (Inline › Update Inline CLI…) or replace it with administrator rights.",
+            path.display()
+        );
+    }
+}
+
 pub fn newer(candidate: &str, current: &str) -> Result<bool, UpdateError> {
     Ok(Version::parse(candidate)?
         .cmp_precedence(&Version::parse(current)?)
@@ -636,10 +650,15 @@ fn publish_staged(
         state.staged = Some(artifact.clone());
         state.outcome = "staged".into();
         let mut failure = None;
+        let mut needing_administrator = Vec::new();
         for (path, receipt) in &mut state.launchers {
-            if installation_method(path, store) != "managed" || !owned_regular_file(path) {
+            if installation_method(path, store) != "managed" || !regular_file(path) {
                 continue;
             }
+            // An administrator may have replaced an enrolled launcher (for
+            // example the Mac app's password prompt). Read it to keep its
+            // receipt current, but never write a file this user doesn't own.
+            let owned = owned_regular_file(path);
             let Ok(actual) = file_hash(path) else {
                 continue;
             };
@@ -664,11 +683,27 @@ fn publish_staged(
                 .ok()
                 .zip(fs::metadata(&artifact.executable).ok())
                 .is_some_and(|(installed, staged)| installed.permissions() == staged.permissions());
-            if (actual != artifact.executable_sha256 || !same_permissions)
-                && let Err(error) = copy_binary_atomically(&artifact.executable, path)
-            {
-                failure.get_or_insert(error);
-                continue;
+            let current = actual == artifact.executable_sha256;
+            if !current || (owned && !same_permissions) {
+                if !owned {
+                    *receipt = known;
+                    needing_administrator.push(path.clone());
+                    continue;
+                }
+                match copy_binary_atomically(&artifact.executable, path) {
+                    Ok(()) => {}
+                    // A folder only an administrator can write won't recover by
+                    // retrying; report it instead of scheduling failures.
+                    Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                        *receipt = known;
+                        needing_administrator.push(path.clone());
+                        continue;
+                    }
+                    Err(error) => {
+                        failure.get_or_insert(error);
+                        continue;
+                    }
+                }
             }
             // A prior rename may have succeeded before its receipt write.
             *receipt = store::Launcher {
@@ -676,6 +711,7 @@ fn publish_staged(
                 version: artifact.version.clone(),
             };
         }
+        state.launchers_needing_administrator = needing_administrator;
         // One unwritable launcher must not hold back private bridges or discard
         // receipts for other launchers that were successfully replaced.
         Ok((true, failure))
@@ -684,6 +720,10 @@ fn publish_staged(
         return Err(error.into());
     }
     Ok(published)
+}
+
+fn regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
 }
 
 fn owned_regular_file(path: &Path) -> bool {
@@ -1063,7 +1103,7 @@ mod tests {
     }
 
     #[test]
-    fn updater_launcher_failure_keeps_bridge_staging_and_other_launchers_recoverable() {
+    fn updater_reports_admin_only_launcher_and_keeps_bridge_staging_and_other_launchers_recoverable() {
         use std::os::unix::fs::PermissionsExt;
         // Hosted Mac/Linux qualification runs unprivileged. Root bypasses the
         // filesystem permission failure this regression deliberately exercises.
@@ -1109,8 +1149,11 @@ mod tests {
         let result = publish_staged(&store, &artifact, true, 0);
         // Restore permissions before assertions so the fixture always cleans up.
         fs::set_permissions(&blocked_directory, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(matches!(result, Err(UpdateError::Io(_))));
+        // A folder only an administrator can write is reported, not retried
+        // as a failed update.
+        assert!(result.unwrap());
         let partial = store.read().unwrap();
+        assert_eq!(partial.launchers_needing_administrator, vec![blocked.clone()]);
         assert_eq!(partial.staged.as_ref(), Some(&artifact));
         assert_eq!(fs::read(&blocked).unwrap(), b"working old executable");
         assert_eq!(file_hash(&writable).unwrap(), artifact.executable_sha256);
@@ -1123,6 +1166,7 @@ mod tests {
         assert!(!needs_release_staging(&partial, "2.0.0", "3.0.0").unwrap());
         assert!(publish_staged(&store, &artifact, true, 0).unwrap());
         let repaired = store.read().unwrap();
+        assert!(repaired.launchers_needing_administrator.is_empty());
         for path in [&blocked, &writable] {
             assert_eq!(file_hash(path).unwrap(), artifact.executable_sha256);
             assert_eq!(repaired.launchers[path].version, artifact.version);

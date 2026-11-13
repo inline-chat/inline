@@ -3205,6 +3205,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     output::print_json(&result, json_format)?;
                 } else {
                     println!("Inline CLI update: {}", result.state.outcome);
+                    update::print_launchers_needing_administrator(&result.state);
                 }
             }
         }

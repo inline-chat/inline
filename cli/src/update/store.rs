@@ -35,6 +35,10 @@ pub struct State {
     pub consecutive_failures: u32,
     pub outcome: String,
     pub failure: Option<String>,
+    /// Owned launchers the updater can't replace without an administrator,
+    /// such as one in a root-owned `/usr/local/bin`. Updates never elevate,
+    /// so these wait for the Mac app or a manual replacement.
+    pub launchers_needing_administrator: Vec<PathBuf>,
 }
 
 impl Default for State {
@@ -58,6 +62,7 @@ impl Default for State {
             consecutive_failures: 0,
             outcome: "not_checked".into(),
             failure: None,
+            launchers_needing_administrator: Vec::new(),
         }
     }
 }
