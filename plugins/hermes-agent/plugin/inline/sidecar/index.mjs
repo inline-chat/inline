@@ -34,7 +34,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
 var require_json_typings = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.isJsonObject = exports.typeofJsonValue = undefined;
@@ -55,7 +55,7 @@ var require_json_typings = __commonJS(function(exports) {
   exports.isJsonObject = isJsonObject;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
 var require_base64 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.base64encode = exports.base64decode = undefined;
@@ -147,7 +147,7 @@ var require_base64 = __commonJS(function(exports) {
   exports.base64encode = base64encode;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
 var require_protobufjs_utf8 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.utf8read = undefined;
@@ -184,7 +184,7 @@ var require_protobufjs_utf8 = __commonJS(function(exports) {
   exports.utf8read = utf8read;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
 var require_binary_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.WireType = exports.mergeBinaryOptions = exports.UnknownFieldHandler = undefined;
@@ -224,7 +224,7 @@ var require_binary_format_contract = __commonJS(function(exports) {
   })(WireType = exports.WireType || (exports.WireType = {}));
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
 var require_goog_varint = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.varint32read = exports.varint32write = exports.int64toString = exports.int64fromString = exports.varint64write = exports.varint64read = undefined;
@@ -391,7 +391,7 @@ var require_goog_varint = __commonJS(function(exports) {
   exports.varint32read = varint32read;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
 var require_pb_long = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.PbLong = exports.PbULong = exports.detectBi = undefined;
@@ -575,7 +575,7 @@ var require_pb_long = __commonJS(function(exports) {
   PbLong.ZERO = new PbLong(0, 0);
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
 var require_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryReader = exports.binaryReadOptions = undefined;
@@ -697,7 +697,7 @@ var require_binary_reader = __commonJS(function(exports) {
   exports.BinaryReader = BinaryReader;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
 var require_assert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assertFloat32 = exports.assertUInt32 = exports.assertInt32 = exports.assertNever = exports.assert = undefined;
@@ -741,7 +741,7 @@ var require_assert = __commonJS(function(exports) {
   exports.assertFloat32 = assertFloat32;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
 var require_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryWriter = exports.binaryWriteOptions = undefined;
@@ -896,7 +896,7 @@ var require_binary_writer = __commonJS(function(exports) {
   exports.BinaryWriter = BinaryWriter;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
 var require_json_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.mergeJsonOptions = exports.jsonWriteOptions = exports.jsonReadOptions = undefined;
@@ -926,14 +926,14 @@ var require_json_format_contract = __commonJS(function(exports) {
   exports.mergeJsonOptions = mergeJsonOptions;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
 var require_message_type_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MESSAGE_TYPE = undefined;
   exports.MESSAGE_TYPE = Symbol.for("protobuf-ts/message-type");
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
 var require_lower_camel_case = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.lowerCamelCase = undefined;
@@ -961,7 +961,7 @@ var require_lower_camel_case = __commonJS(function(exports) {
   exports.lowerCamelCase = lowerCamelCase;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
 var require_reflection_info = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.readMessageOption = exports.readFieldOption = exports.readFieldOptions = exports.normalizeFieldInfo = exports.RepeatType = exports.LongType = exports.ScalarType = undefined;
@@ -1035,7 +1035,7 @@ var require_reflection_info = __commonJS(function(exports) {
   exports.readMessageOption = readMessageOption;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
 var require_oneof = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSelectedOneofValue = exports.clearOneofValue = exports.setUnknownOneofValue = exports.setOneofValue = exports.getOneofValue = exports.isOneofGroup = undefined;
@@ -1095,7 +1095,7 @@ var require_oneof = __commonJS(function(exports) {
   exports.getSelectedOneofValue = getSelectedOneofValue;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
 var require_reflection_type_check = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionTypeCheck = undefined;
@@ -1296,7 +1296,7 @@ var require_reflection_type_check = __commonJS(function(exports) {
   exports.ReflectionTypeCheck = ReflectionTypeCheck;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
 var require_reflection_long_convert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionLongConvert = undefined;
@@ -1314,7 +1314,7 @@ var require_reflection_long_convert = __commonJS(function(exports) {
   exports.reflectionLongConvert = reflectionLongConvert;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
 var require_reflection_json_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonReader = undefined;
@@ -1588,7 +1588,7 @@ var require_reflection_json_reader = __commonJS(function(exports) {
   exports.ReflectionJsonReader = ReflectionJsonReader;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
 var require_reflection_json_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonWriter = undefined;
@@ -1791,7 +1791,7 @@ var require_reflection_json_writer = __commonJS(function(exports) {
   exports.ReflectionJsonWriter = ReflectionJsonWriter;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
 var require_reflection_scalar_default = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionScalarDefault = undefined;
@@ -1823,7 +1823,7 @@ var require_reflection_scalar_default = __commonJS(function(exports) {
   exports.reflectionScalarDefault = reflectionScalarDefault;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
 var require_reflection_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryReader = undefined;
@@ -1983,7 +1983,7 @@ var require_reflection_binary_reader = __commonJS(function(exports) {
   exports.ReflectionBinaryReader = ReflectionBinaryReader;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
 var require_reflection_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryWriter = undefined;
@@ -2181,7 +2181,7 @@ var require_reflection_binary_writer = __commonJS(function(exports) {
   exports.ReflectionBinaryWriter = ReflectionBinaryWriter;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
 var require_reflection_create = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionCreate = undefined;
@@ -2215,7 +2215,7 @@ var require_reflection_create = __commonJS(function(exports) {
   exports.reflectionCreate = reflectionCreate;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
 var require_reflection_merge_partial = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionMergePartial = undefined;
@@ -2282,7 +2282,7 @@ var require_reflection_merge_partial = __commonJS(function(exports) {
   exports.reflectionMergePartial = reflectionMergePartial;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
 var require_reflection_equals = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionEquals = undefined;
@@ -2350,7 +2350,7 @@ var require_reflection_equals = __commonJS(function(exports) {
   }
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
 var require_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MessageType = undefined;
@@ -2456,7 +2456,7 @@ var require_message_type = __commonJS(function(exports) {
   exports.MessageType = MessageType;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
 var require_reflection_contains_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.containsMessageType = undefined;
@@ -2467,7 +2467,7 @@ var require_reflection_contains_message_type = __commonJS(function(exports) {
   exports.containsMessageType = containsMessageType;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
 var require_enum_object = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.listEnumNumbers = exports.listEnumNames = exports.listEnumValues = exports.isEnumObject = undefined;
@@ -2519,7 +2519,7 @@ var require_enum_object = __commonJS(function(exports) {
   exports.listEnumNumbers = listEnumNumbers;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/index.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/index.js
 var require_commonjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var json_typings_1 = require_json_typings();
@@ -2702,7 +2702,7 @@ var require_commonjs = __commonJS(function(exports) {
   } });
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/constants.js
+// node_modules/ws/lib/constants.js
 var require_constants = __commonJS(function(exports, module) {
   var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
   var hasBlob = typeof Blob !== "undefined";
@@ -2722,8 +2722,9 @@ var require_constants = __commonJS(function(exports, module) {
   };
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/buffer-util.js
+// node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS(function(exports, module) {
+  var { websocketMask, websocketUnmask } = __require("http");
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
   function concat(list, totalLength) {
@@ -2781,7 +2782,20 @@ var require_buffer_util = __commonJS(function(exports, module) {
     toBuffer,
     unmask: _unmask
   };
-  if (!process.env.WS_NO_BUFFER_UTIL) {
+  if (websocketMask) {
+    module.exports.mask = function(source, mask, output, offset, length) {
+      if (length < 24)
+        _mask(source, mask, output, offset, length);
+      else
+        websocketMask(source, mask, output, offset, length);
+    };
+    module.exports.unmask = function(buffer, mask) {
+      if (buffer.length < 24)
+        _unmask(buffer, mask);
+      else
+        websocketUnmask(buffer, mask);
+    };
+  } else if (!process.env.WS_NO_BUFFER_UTIL) {
     try {
       const bufferUtil = (()=>{throw new Error("Cannot require module "+"bufferutil");})();
       module.exports.mask = function(source, mask2, output, offset, length) {
@@ -2800,7 +2814,7 @@ var require_buffer_util = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/limiter.js
+// node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS(function(exports, module) {
   var kDone = Symbol("kDone");
   var kRun = Symbol("kRun");
@@ -2832,7 +2846,7 @@ var require_limiter = __commonJS(function(exports, module) {
   module.exports = Limiter;
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/permessage-deflate.js
+// node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS(function(exports, module) {
   var zlib = __require("zlib");
   var bufferUtil = require_buffer_util();
@@ -3096,7 +3110,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/validation.js
+// node_modules/ws/lib/validation.js
 var require_validation = __commonJS(function(exports, module) {
   var { isUtf8 } = __require("buffer");
   var { hasBlob } = require_constants();
@@ -3283,7 +3297,7 @@ var require_validation = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/receiver.js
+// node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS(function(exports, module) {
   var { Writable } = __require("stream");
   var PerMessageDeflate = require_permessage_deflate();
@@ -3677,7 +3691,7 @@ var require_receiver = __commonJS(function(exports, module) {
   module.exports = Receiver;
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/sender.js
+// node_modules/ws/lib/sender.js
 var require_sender = __commonJS(function(exports, module) {
   var { Duplex } = __require("stream");
   var { randomFillSync } = __require("crypto");
@@ -3769,13 +3783,16 @@ var require_sender = __commonJS(function(exports, module) {
         target[2] = target[3] = 0;
         target.writeUIntBE(dataLength, 4, 6);
       }
-      if (!options.mask)
-        return [target, data];
+      if (!options.mask) {
+        return dataLength ? [target, data] : [target];
+      }
       target[1] |= 128;
       target[offset - 4] = mask[0];
       target[offset - 3] = mask[1];
       target[offset - 2] = mask[2];
       target[offset - 1] = mask[3];
+      if (!dataLength)
+        return [target];
       if (skipMasking)
         return [target, data];
       if (merge) {
@@ -4036,7 +4053,7 @@ var require_sender = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/event-target.js
+// node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS(function(exports, module) {
   var { kForOnEventAttribute, kListener } = require_constants();
   var kCode = Symbol("kCode");
@@ -4187,7 +4204,7 @@ var require_event_target = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/extension.js
+// node_modules/ws/lib/extension.js
 var require_extension = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function push(dest, name, elem) {
@@ -4352,7 +4369,7 @@ var require_extension = __commonJS(function(exports, module) {
   module.exports = { format, parse };
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket.js
+// node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var https = __require("https");
@@ -4409,11 +4426,23 @@ var require_websocket = __commonJS(function(exports, module) {
         this._isServer = false;
         this._redirects = 0;
         if (protocols === undefined) {
-          protocols = [];
+          if (!options || options.protocols === undefined) {
+            protocols = [];
+          } else if (Array.isArray(options.protocols)) {
+            protocols = options.protocols;
+          } else {
+            protocols = [options.protocols];
+          }
         } else if (!Array.isArray(protocols)) {
           if (typeof protocols === "object" && protocols !== null) {
             options = protocols;
-            protocols = [];
+            if (options.protocols === undefined) {
+              protocols = [];
+            } else if (Array.isArray(options.protocols)) {
+              protocols = options.protocols;
+            } else {
+              protocols = [options.protocols];
+            }
           } else {
             protocols = [protocols];
           }
@@ -4532,7 +4561,6 @@ var require_websocket = __commonJS(function(exports, module) {
         }
         return;
       }
-      this._readyState = WebSocket.CLOSING;
       this._sender.close(code, data, !this._isServer, (err) => {
         if (err)
           return;
@@ -4541,6 +4569,7 @@ var require_websocket = __commonJS(function(exports, module) {
           this._socket.end();
         }
       });
+      this._readyState = WebSocket.CLOSING;
       setCloseTimer(this);
     }
     pause() {
@@ -4728,6 +4757,7 @@ var require_websocket = __commonJS(function(exports, module) {
       socketPath: undefined,
       hostname: undefined,
       protocol: undefined,
+      protocols: undefined,
       timeout: undefined,
       method: "GET",
       host: undefined,
@@ -4822,9 +4852,14 @@ var require_websocket = __commonJS(function(exports, module) {
       opts.auth = `${parsedUrl.username}:${parsedUrl.password}`;
     }
     if (isIpcUrl) {
-      const parts = opts.path.split(":");
-      opts.socketPath = parts[0];
-      opts.path = parts[1];
+      const i = opts.path.indexOf(":");
+      if (i === -1) {
+        opts.socketPath = opts.path;
+        opts.path = "";
+      } else {
+        opts.socketPath = opts.path.slice(0, i);
+        opts.path = opts.path.slice(i + 1);
+      }
     }
     let req;
     if (opts.followRedirects) {
@@ -5124,7 +5159,7 @@ var require_websocket = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/stream.js
+// node_modules/ws/lib/stream.js
 var require_stream = __commonJS(function(exports, module) {
   var WebSocket = require_websocket();
   var { Duplex } = __require("stream");
@@ -5227,7 +5262,7 @@ var require_stream = __commonJS(function(exports, module) {
   module.exports = createWebSocketStream;
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/subprotocol.js
+// node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function parse(header) {
@@ -5272,7 +5307,7 @@ var require_subprotocol = __commonJS(function(exports, module) {
   module.exports = { parse };
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket-server.js
+// node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var http = __require("http");
@@ -6079,7 +6114,7 @@ import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile as readFile3, stat } from "node:fs/promises";
 import path from "node:path";
 
-// ../../packages/protocol/dist/core.js
+// node_modules/@inline-chat/protocol/dist/core.js
 var import_runtime = __toESM(require_commonjs(), 1);
 var import_runtime2 = __toESM(require_commonjs(), 1);
 var import_runtime3 = __toESM(require_commonjs(), 1);
@@ -6761,6 +6796,7 @@ var Method;
   Method[Method["GET_UNREAD_ACTIVITY"] = 167] = "GET_UNREAD_ACTIVITY";
   Method[Method["READ_ACTIVITY"] = 168] = "READ_ACTIVITY";
   Method[Method["SET_FOCUS_STATUS"] = 169] = "SET_FOCUS_STATUS";
+  Method[Method["GET_SPACES"] = 170] = "GET_SPACES";
 })(Method || (Method = {}));
 var GridTranscriptionState;
 (function(GridTranscriptionState) {
@@ -6816,6 +6852,23 @@ var DeleteDialogFolderDisposition;
   DeleteDialogFolderDisposition[DeleteDialogFolderDisposition["CLOSE_DIALOGS"] = 1] = "CLOSE_DIALOGS";
   DeleteDialogFolderDisposition[DeleteDialogFolderDisposition["KEEP_DIALOGS"] = 2] = "KEEP_DIALOGS";
 })(DeleteDialogFolderDisposition || (DeleteDialogFolderDisposition = {}));
+var ChatListScope;
+(function(ChatListScope) {
+  ChatListScope[ChatListScope["DIALOGS"] = 0] = "DIALOGS";
+  ChatListScope[ChatListScope["ACCESSIBLE"] = 1] = "ACCESSIBLE";
+})(ChatListScope || (ChatListScope = {}));
+var ChatListOrder;
+(function(ChatListOrder) {
+  ChatListOrder[ChatListOrder["RECENT"] = 0] = "RECENT";
+  ChatListOrder[ChatListOrder["ID"] = 1] = "ID";
+})(ChatListOrder || (ChatListOrder = {}));
+var ChatListKind;
+(function(ChatListKind) {
+  ChatListKind[ChatListKind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  ChatListKind[ChatListKind["DM"] = 1] = "DM";
+  ChatListKind[ChatListKind["SPACE_THREAD"] = 2] = "SPACE_THREAD";
+  ChatListKind[ChatListKind["HOME_THREAD"] = 3] = "HOME_THREAD";
+})(ChatListKind || (ChatListKind = {}));
 var GetChatHistoryMode;
 (function(GetChatHistoryMode) {
   GetChatHistoryMode[GetChatHistoryMode["HISTORY_MODE_UNSPECIFIED"] = 0] = "HISTORY_MODE_UNSPECIFIED";
@@ -18735,7 +18788,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 167, name: "getAgentAccess", kind: "message", oneof: "input", T: () => GetAgentAccessInput },
       { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
       { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
-      { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput }
+      { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
+      { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput }
     ]);
   }
   create(value) {
@@ -19762,6 +19816,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
             setFocusStatus: SetFocusStatusInput.internalBinaryRead(reader, reader.uint32(), options, message.input.setFocusStatus)
           };
           break;
+        case 171:
+          message.input = {
+            oneofKind: "getSpaces",
+            getSpaces: GetSpacesInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getSpaces)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -20112,6 +20172,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       ReadActivityInput.internalBinaryWrite(message.input.readActivity, writer.tag(169, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "setFocusStatus")
       SetFocusStatusInput.internalBinaryWrite(message.input.setFocusStatus, writer.tag(170, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getSpaces")
+      GetSpacesInput.internalBinaryWrite(message.input.getSpaces, writer.tag(171, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20291,7 +20353,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 167, name: "getAgentAccess", kind: "message", oneof: "result", T: () => GetAgentAccessResult },
       { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
       { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
-      { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult }
+      { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
+      { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult }
     ]);
   }
   create(value) {
@@ -21318,6 +21381,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
             setFocusStatus: SetFocusStatusResult.internalBinaryRead(reader, reader.uint32(), options, message.result.setFocusStatus)
           };
           break;
+        case 171:
+          message.result = {
+            oneofKind: "getSpaces",
+            getSpaces: GetSpacesResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getSpaces)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -21668,6 +21737,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       ReadActivityResult.internalBinaryWrite(message.result.readActivity, writer.tag(169, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "setFocusStatus")
       SetFocusStatusResult.internalBinaryWrite(message.result.setFocusStatus, writer.tag(170, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getSpaces")
+      GetSpacesResult.internalBinaryWrite(message.result.getSpaces, writer.tag(171, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31668,11 +31739,18 @@ var DeleteDialogFolderResult = new DeleteDialogFolderResult$Type;
 class GetChatsInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetChatsInput", [
-      { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 }
+      { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 },
+      { no: 2, name: "limit", kind: "scalar", opt: true, T: 5 },
+      { no: 3, name: "offset", kind: "message", T: () => ChatListOffset },
+      { no: 4, name: "order", kind: "enum", T: () => ["ChatListOrder", ChatListOrder, "CHAT_LIST_ORDER_"] },
+      { no: 5, name: "filter", kind: "message", T: () => ChatListFilter },
+      { no: 6, name: "scope", kind: "enum", T: () => ["ChatListScope", ChatListScope, "CHAT_LIST_SCOPE_"] }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
+    message.order = 0;
+    message.scope = 0;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -31684,6 +31762,21 @@ class GetChatsInput$Type extends import_runtime4.MessageType {
       switch (fieldNo) {
         case 1:
           message.includeSubthreads = reader.bool();
+          break;
+        case 2:
+          message.limit = reader.int32();
+          break;
+        case 3:
+          message.offset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.offset);
+          break;
+        case 4:
+          message.order = reader.int32();
+          break;
+        case 5:
+          message.filter = ChatListFilter.internalBinaryRead(reader, reader.uint32(), options, message.filter);
+          break;
+        case 6:
+          message.scope = reader.int32();
           break;
         default:
           let u = options.readUnknownField;
@@ -31699,6 +31792,16 @@ class GetChatsInput$Type extends import_runtime4.MessageType {
   internalBinaryWrite(message, writer, options) {
     if (message.includeSubthreads !== undefined)
       writer.tag(1, import_runtime.WireType.Varint).bool(message.includeSubthreads);
+    if (message.limit !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.limit);
+    if (message.offset)
+      ChatListOffset.internalBinaryWrite(message.offset, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.order !== 0)
+      writer.tag(4, import_runtime.WireType.Varint).int32(message.order);
+    if (message.filter)
+      ChatListFilter.internalBinaryWrite(message.filter, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.scope !== 0)
+      writer.tag(6, import_runtime.WireType.Varint).int32(message.scope);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31706,6 +31809,157 @@ class GetChatsInput$Type extends import_runtime4.MessageType {
   }
 }
 var GetChatsInput = new GetChatsInput$Type;
+
+class ChatListOffset$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ChatListOffset", [
+      { no: 1, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "date", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.date = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.chatId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.date !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.date);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ChatListOffset = new ChatListOffset$Type;
+
+class ChatListFilter$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("ChatListFilter", [
+      { no: 1, name: "kinds", kind: "enum", repeat: 1, T: () => ["ChatListKind", ChatListKind, "CHAT_LIST_KIND_"] },
+      { no: 2, name: "space_ids", kind: "scalar", repeat: 1, T: 3, L: 0 },
+      { no: 3, name: "unread", kind: "scalar", opt: true, T: 8 },
+      { no: 4, name: "archived", kind: "scalar", opt: true, T: 8 },
+      { no: 5, name: "open", kind: "scalar", opt: true, T: 8 },
+      { no: 6, name: "pinned", kind: "scalar", opt: true, T: 8 },
+      { no: 7, name: "folder_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 8, name: "query", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.kinds = [];
+    message.spaceIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.kinds.push(reader.int32());
+          else
+            message.kinds.push(reader.int32());
+          break;
+        case 2:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.spaceIds.push(reader.int64().toBigInt());
+          else
+            message.spaceIds.push(reader.int64().toBigInt());
+          break;
+        case 3:
+          message.unread = reader.bool();
+          break;
+        case 4:
+          message.archived = reader.bool();
+          break;
+        case 5:
+          message.open = reader.bool();
+          break;
+        case 6:
+          message.pinned = reader.bool();
+          break;
+        case 7:
+          message.folderId = reader.int64().toBigInt();
+          break;
+        case 8:
+          message.query = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.kinds.length) {
+      writer.tag(1, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.kinds.length; i++)
+        writer.int32(message.kinds[i]);
+      writer.join();
+    }
+    if (message.spaceIds.length) {
+      writer.tag(2, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.spaceIds.length; i++)
+        writer.int64(message.spaceIds[i]);
+      writer.join();
+    }
+    if (message.unread !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.unread);
+    if (message.archived !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.archived);
+    if (message.open !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.open);
+    if (message.pinned !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).bool(message.pinned);
+    if (message.folderId !== undefined)
+      writer.tag(7, import_runtime.WireType.Varint).int64(message.folderId);
+    if (message.query !== undefined)
+      writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.query);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var ChatListFilter = new ChatListFilter$Type;
 
 class GetChatsResult$Type extends import_runtime4.MessageType {
   constructor() {
@@ -31715,7 +31969,8 @@ class GetChatsResult$Type extends import_runtime4.MessageType {
       { no: 3, name: "spaces", kind: "message", repeat: 1, T: () => Space },
       { no: 4, name: "users", kind: "message", repeat: 1, T: () => User },
       { no: 5, name: "messages", kind: "message", repeat: 1, T: () => Message },
-      { no: 6, name: "folders", kind: "message", repeat: 1, T: () => DialogFolder }
+      { no: 6, name: "folders", kind: "message", repeat: 1, T: () => DialogFolder },
+      { no: 7, name: "next_offset", kind: "message", T: () => ChatListOffset }
     ]);
   }
   create(value) {
@@ -31753,6 +32008,9 @@ class GetChatsResult$Type extends import_runtime4.MessageType {
         case 6:
           message.folders.push(DialogFolder.internalBinaryRead(reader, reader.uint32(), options));
           break;
+        case 7:
+          message.nextOffset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.nextOffset);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -31777,6 +32035,8 @@ class GetChatsResult$Type extends import_runtime4.MessageType {
       Message.internalBinaryWrite(message.messages[i], writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
     for (let i = 0;i < message.folders.length; i++)
       DialogFolder.internalBinaryWrite(message.folders[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.nextOffset)
+      ChatListOffset.internalBinaryWrite(message.nextOffset, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31784,6 +32044,71 @@ class GetChatsResult$Type extends import_runtime4.MessageType {
   }
 }
 var GetChatsResult = new GetChatsResult$Type;
+
+class GetSpacesInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetSpacesInput", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetSpacesInput = new GetSpacesInput$Type;
+
+class GetSpacesResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetSpacesResult", [
+      { no: 1, name: "spaces", kind: "message", repeat: 1, T: () => Space }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaces = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.spaces.length; i++)
+      Space.internalBinaryWrite(message.spaces[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetSpacesResult = new GetSpacesResult$Type;
 
 class TranslateMessagesInput$Type extends import_runtime4.MessageType {
   constructor() {
@@ -46972,7 +47297,7 @@ class AnswerBotFilesystemResult$Type extends import_runtime4.MessageType {
 }
 var AnswerBotFilesystemResult = new AnswerBotFilesystemResult$Type;
 
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/hashes/esm/utils.js
 /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -47032,7 +47357,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
+// node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE);
@@ -47153,7 +47478,7 @@ var SHA256_IV = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
+// node_modules/@noble/hashes/esm/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -47293,7 +47618,7 @@ class SHA256 extends HashMD {
 }
 var sha256 = /* @__PURE__ */ createHasher(() => new SHA256);
 
-// ../../packages/protocol/dist/transfers.js
+// node_modules/@inline-chat/protocol/dist/transfers.js
 var INLINE_TRANSFER_PART_SIZE = 512 * 1024;
 var INLINE_UPLOAD_MAX_PARTS = 1000;
 var INLINE_MEDIA_UPLOAD_MAX_BYTES = {
@@ -47356,7 +47681,7 @@ var REPLAY_EXEMPT_METHODS = new Set([
   ...READ_ONLY_RPC_METHODS
 ]);
 
-// ../../packages/protocol/dist/uploads.js
+// node_modules/@inline-chat/protocol/dist/uploads.js
 var HASH_READ_SIZE = 1024 * 1024;
 var DEFAULT_GLOBAL_CONCURRENCY = 3;
 var DEFAULT_UPLOAD_CONCURRENCY = 2;
@@ -47789,7 +48114,7 @@ class NativeUploadError extends Error {
   }
 }
 
-// ../../packages/sdk/dist/ids.js
+// node_modules/@inline-chat/realtime-sdk/dist/ids.js
 class InlineIdError extends Error {
   constructor(message) {
     super(message);
@@ -47808,7 +48133,7 @@ var asInlineId = (value, fieldName = "id") => {
   return BigInt(value);
 };
 
-// ../../packages/sdk/dist/utils/async-channel.js
+// node_modules/@inline-chat/realtime-sdk/dist/utils/async-channel.js
 class ChannelConsumerError extends Error {
   constructor(message) {
     super(message);
@@ -48110,7 +48435,7 @@ class AcknowledgedAsyncChannel {
   }
 }
 
-// ../../packages/sdk/dist/realtime/ping-pong.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/ping-pong.js
 class PingPongService {
   log;
   crypto;
@@ -48239,7 +48564,10 @@ class PingPongService {
 }
 var isCrypto = (value) => typeof value === "object" && value !== null && ("getRandomValues" in value) && typeof value.getRandomValues === "function";
 
-// ../../packages/sdk/dist/realtime/transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/rpc-input.js
+var normalizeRpcInput = (method, input) => RpcCall.create({ method, input }).input;
+
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/transport.js
 class TransportError extends Error {
   code;
   constructor(message, code = "generic") {
@@ -48261,7 +48589,7 @@ class TransportError extends Error {
   }
 }
 
-// ../../packages/sdk/dist/sdk/errors.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/errors.js
 class InlineSdkAuthenticationError extends Error {
   code;
   reason;
@@ -48286,7 +48614,7 @@ function authenticationErrorFromConnectionReason(reason) {
   }
 }
 
-// ../../packages/sdk/dist/realtime/protocol-client.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/protocol-client.js
 var emptyRpcInput = { oneofKind: undefined };
 var defaultRpcTimeoutMs = 30000;
 var defaultMaxPendingRpcRequests = 64;
@@ -48387,7 +48715,7 @@ class ProtocolClient {
     assertValidRpcMethod(method);
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
-      rpcCall: { method, input }
+      rpcCall: { method, input: normalizeRpcInput(method, input) }
     });
     await this.transport.send(message);
     return message.id;
@@ -48404,7 +48732,7 @@ class ProtocolClient {
     }
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
-      rpcCall: { method, input }
+      rpcCall: { method, input: normalizeRpcInput(method, input) }
     });
     return await new Promise((resolve, reject) => {
       const pending = {
@@ -48809,7 +49137,7 @@ function describeConnectionError(error) {
   return `server connection error${suffix}: ${message}`;
 }
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/wrapper.mjs
+// node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -48819,7 +49147,7 @@ var import_subprotocol = __toESM(require_subprotocol(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// ../../packages/sdk/dist/realtime/ws-transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/ws-transport.js
 var defaultHandshakeTimeoutMs = 15000;
 
 class WebSocketTransport {
@@ -49063,14 +49391,14 @@ function redactUrlForDiagnostics(raw) {
   }
 }
 
-// ../../packages/sdk/dist/realtime/v3-connection.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
 import { randomBytes } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
-// ../../packages/protocol/dist/secure/node.js
+// node_modules/@inline-chat/protocol/dist/secure/node.js
 import { createCipheriv, createDecipheriv } from "node:crypto";
 
-// ../../node_modules/.bun/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/utils.js
+// node_modules/@noble/ciphers/esm/utils.js
 /*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) */
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -49162,7 +49490,7 @@ function copyBytes(bytes) {
   return Uint8Array.from(bytes);
 }
 
-// ../../node_modules/.bun/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/aes.js
+// node_modules/@noble/ciphers/esm/aes.js
 var BLOCK_SIZE = 16;
 var POLY = 283;
 function mul2(n) {
@@ -49395,7 +49723,7 @@ var ecb = /* @__PURE__ */ wrapCipher({ blockSize: 16 }, function aesecb(key, opt
   };
 });
 
-// ../../packages/protocol/dist/secure/aesPure.js
+// node_modules/@inline-chat/protocol/dist/secure/aesPure.js
 var BLOCK_BYTES = 16;
 var makePureAesBackend = () => ({
   name: "pure-js",
@@ -49460,7 +49788,7 @@ var makePureAesBackend = () => ({
   }
 });
 
-// ../../packages/protocol/dist/secure/aesBackend.js
+// node_modules/@inline-chat/protocol/dist/secure/aesBackend.js
 var current;
 var setAesBackend = (backend) => {
   const previous = getAesBackend();
@@ -49471,7 +49799,7 @@ var getAesBackend = () => current ?? (current = pureAesBackend());
 var pure;
 var pureAesBackend = () => pure ?? (pure = makePureAesBackend());
 
-// ../../packages/protocol/dist/secure/node.js
+// node_modules/@inline-chat/protocol/dist/secure/node.js
 var BLOCK_BYTES2 = 16;
 var toUint8Array = (buffer) => {
   const copy = new Uint8Array(buffer.byteLength);
@@ -49542,7 +49870,7 @@ var installNodeAesBackend = () => {
   setAesBackend(nodeAesBackend);
 };
 
-// ../../packages/protocol/dist/secure/bytes.js
+// node_modules/@inline-chat/protocol/dist/secure/bytes.js
 var MAX_PACKET_BYTES = 16 * 1024 * 1024;
 var concatBytes2 = (...parts) => {
   const length = parts.reduce((sum, part) => sum + part.length, 0);
@@ -49594,7 +49922,7 @@ var hexToBytes = (hex) => {
     throw new RangeError("Invalid hexadecimal bytes");
   return Uint8Array.from({ length: hex.length / 2 }, (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16));
 };
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/legacy.js
+// node_modules/@noble/hashes/esm/legacy.js
 var SHA1_IV = /* @__PURE__ */ Uint32Array.from([
   1732584193,
   4023233417,
@@ -49669,7 +49997,7 @@ class SHA1 extends HashMD {
 }
 var sha1 = /* @__PURE__ */ createHasher(() => new SHA1);
 
-// ../../packages/protocol/dist/secure/crypto.js
+// node_modules/@inline-chat/protocol/dist/secure/crypto.js
 var BLOCK_BYTES3 = 16;
 var assertLength = (name, bytes, length) => {
   if (bytes.length !== length)
@@ -49727,7 +50055,7 @@ class AesCtrStream {
   }
 }
 
-// ../../packages/protocol/dist/secure/tl.js
+// node_modules/@inline-chat/protocol/dist/secure/tl.js
 var TL_VECTOR_CONSTRUCTOR = 481674261;
 var encodeTlBytes = (value) => {
   if (value.length > 16777215 || value.length > MAX_PACKET_BYTES)
@@ -49813,7 +50141,7 @@ class TlReader {
   }
 }
 
-// ../../packages/protocol/dist/secure/binding.js
+// node_modules/@inline-chat/protocol/dist/secure/binding.js
 var BindingConstructor = {
   bindAuthKeyInner: 1973679973,
   bindTempAuthKey: 3453233669
@@ -49853,7 +50181,7 @@ var createTemporaryKeyBindingProof = (input) => {
   const { key, iv } = deriveV1Aes(input.permanentAuthKey, messageKey);
   return concatBytes2(authKeyId(input.permanentAuthKey), messageKey, aesIgeEncrypt(concatBytes2(plaintextWithoutPadding, input.randomPadding), key, iv));
 };
-// ../../packages/protocol/dist/secure/application.js
+// node_modules/@inline-chat/protocol/dist/secure/application.js
 var INLINE_RESULT_CONSTRUCTOR = 2889735252;
 var INLINE_UPDATE_CONSTRUCTOR = 3695258776;
 var INLINE_INVOKE_CONSTRUCTOR = 3950856870;
@@ -49878,7 +50206,7 @@ var decodeInlineApplicationObject = (bytes) => {
     return { kind: "update", payload };
   throw new RangeError("Unknown Inline application constructor");
 };
-// ../../packages/protocol/dist/secure/carrier.js
+// node_modules/@inline-chat/protocol/dist/secure/carrier.js
 var FORBIDDEN_PREFIXES = new Set([1145128264, 1414745936, 542393671, 1230262351, 4008636142, 3722304989, 33620758]);
 var encodeAbridgedPacket = (payload, quickAckRequested = false) => {
   if (payload.length === 0 || payload.length > MAX_PACKET_BYTES || payload.length % 4 !== 0)
@@ -49933,7 +50261,7 @@ var createObfuscatedClientHeader = (randomHeader, dc = 1) => {
   const encryptedHeader = outbound.process(plaintext);
   return { wireHeader: concatBytes2(plaintext.slice(0, 56), encryptedHeader.slice(56)), outbound, inbound };
 };
-// ../../packages/protocol/dist/secure/handshake.js
+// node_modules/@inline-chat/protocol/dist/secure/handshake.js
 var TELEGRAM_DH_PRIME = hexToBytes("c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" + "48198a0aa7c14058229493d22530f4dbfa336f6e0ac925139543aed44cce7c372" + "0fd51f69458705ac68cd4fe6b6b13abdc9746512969328454f18faf8c595f642" + "477fe96bb2a941d5bcd1d4ac8cc49880708fa9b378e3c4f3a9060bee67cf9a4a" + "4a695811051907e162753b56b0f6b410dba74d8a84b2a14b3144e0ef1284754f" + "d17ed950d5965b4b9dd46582db1178d169c6bc465b0d6ff9ca3928fef5b9ae4e" + "418fc15e83ebea0f87fa9ff5eed70050ded2849f47bf959d956850ce929851f0d" + "8115f635b105ee2e4e15d04b2454bf6f4fadf034b10403119cd8e3b92fcc5b");
 
 class RsaPadRetry extends Error {
@@ -50152,7 +50480,7 @@ var factorPq = (pqBytes, randomBytes, maximumAttempts = 32) => {
   }
   throw new RangeError("Unable to factor pq challenge");
 };
-// ../../packages/protocol/dist/secure/handshakeSchema.js
+// node_modules/@inline-chat/protocol/dist/secure/handshakeSchema.js
 var HandshakeConstructor = {
   resPq: 85337187,
   pQInnerDataDc: 2851430293,
@@ -50256,7 +50584,7 @@ var constructorReaderPrefix = (body, expected) => {
     throw new RangeError("Unexpected TL constructor");
   return new TlReader(body.slice(4));
 };
-// ../../packages/protocol/dist/secure/handshakeState.js
+// node_modules/@inline-chat/protocol/dist/secure/handshakeState.js
 var PQ = hexToBytes("17ed48941a08f981");
 var P = hexToBytes("494c553b");
 var Q = hexToBytes("53911073");
@@ -50426,7 +50754,7 @@ var makeRsaPublicKey = (modulus, exponent) => ({
   exponent,
   fingerprint: rsaPublicKeyFingerprint(modulus, exponent)
 });
-// ../../packages/protocol/dist/secure/record.js
+// node_modules/@inline-chat/protocol/dist/secure/record.js
 class InvalidEncryptedRecord extends Error {
   constructor() {
     super("Invalid Inline Protocol encrypted record");
@@ -50501,7 +50829,7 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
   }
 };
 var decryptRecord = (record, authKey, validation) => decryptRecordWithMetadata(record, authKey, validation).fields;
-// ../../packages/protocol/dist/secure/session.js
+// node_modules/@inline-chat/protocol/dist/secure/session.js
 class MessageIdGenerator {
   #last = 0n;
   next(estimatedServerUnixMillis, randomLowBits, modulo) {
@@ -50563,7 +50891,7 @@ class AuthenticatedServerClock {
     return this.#serverUnixMilliseconds + elapsed;
   }
 }
-// ../../packages/protocol/dist/secure/service.js
+// node_modules/@inline-chat/protocol/dist/secure/service.js
 var MAX_CONTAINER_MESSAGES = 1024;
 var MAX_SERVICE_MESSAGE_IDS = 8192;
 var MAX_GZIP_OUTPUT_BYTES = MAX_PACKET_BYTES;
@@ -50692,7 +51020,7 @@ var readerFor = (body, expected) => {
     throw new RangeError("Unexpected service constructor");
   return new TlReader(body.slice(4));
 };
-// ../../packages/protocol/dist/secure/serverSession.js
+// node_modules/@inline-chat/protocol/dist/secure/serverSession.js
 var MAX_DEFERRED_INVOKE_AFTER_BYTES = 32 * 1024 * 1024;
 var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.msgContainer,
@@ -50708,7 +51036,7 @@ var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.pong,
   ServiceConstructor.httpWait
 ]);
-// ../../packages/sdk/dist/realtime/v3-connection.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
 installNodeAesBackend();
 var BOOL_TRUE = 2574415285;
 var CONNECT_TIMEOUT_MS = 30000;
@@ -50995,7 +51323,8 @@ class InlineProtocolV3Connection {
       throw new InlineProtocolV3Error("protocol", "Unexpected auth.complete response");
     return response.body.authComplete;
   }
-  async callRpc(rpc, signal) {
+  async callRpc(call, signal) {
+    const rpc = { method: call.method, input: normalizeRpcInput(call.method, call.input) };
     const request = { body: { oneofKind: "rpc", rpc } };
     const response = readOnlyRpcMethods.has(rpc.method) ? await this.#invoke(request, undefined, signal) : await this.#invokeMutation(request, signal);
     if (response.body.oneofKind === "rpcError")
@@ -51513,7 +51842,7 @@ class InlineProtocolV3Connection {
   }
 }
 
-// ../../packages/sdk/dist/realtime/v3-transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-transport.js
 var pendingUpdateCapacity = 256;
 var pendingUpdateByteCapacity = 8 * 1024 * 1024;
 var transportEventByteCapacity = 8 * 1024 * 1024;
@@ -52135,7 +52464,7 @@ class InlineProtocolV3Transport {
   }
 }
 
-// ../../packages/sdk/dist/realtime/production-trust-roots.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/production-trust-roots.js
 var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   {
     modulus: "y4mCEOAFrQU02g6WBGLvsy6hBh9jOfV6Hg6lvKvnRKj2vybdLTISXilcYbN2ItUfXhFf7Tk660OLhD7lBv2Pme9YVmWswHJ9j7PyyIa6klTiBLSADPPCuknvID1X7bX-Ut5IwmJDciSITHy0Qxf5yGnhRWPWOgxWDt4EdwHiOd9uHwCxLn9k8LfIXN2DOT8aPH306IB0IWMsTlnXBZ7om8nZniJG0NWG1u-BJDEk4Hz8eko1cF4wc-naVY4qcDh9zD9iXrbMJ5b8aw2JG11dvJGEBmWqjPcPJy1VqFNAZOxGUf-LXWRTnNuwECRpgvqm5oO_CFfwXUvM5W1Tw7lIVQ",
@@ -52149,7 +52478,7 @@ var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   }
 ];
 
-// ../../packages/sdk/dist/sdk/types.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/types.js
 var rpcInputKindByMethod = {
   0: undefined,
   1: "getMe",
@@ -52217,7 +52546,8 @@ var rpcInputKindByMethod = {
   121: "cancelUpload",
   127: "getSpace",
   131: "updateBotAgent",
-  132: "deleteBotAgent"
+  132: "deleteBotAgent",
+  170: "getSpaces"
 };
 var rpcResultKindByMethod = {
   0: undefined,
@@ -52286,13 +52616,14 @@ var rpcResultKindByMethod = {
   121: "cancelUpload",
   127: "getSpace",
   131: "updateBotAgent",
-  132: "deleteBotAgent"
+  132: "deleteBotAgent",
+  170: "getSpaces"
 };
 
-// ../../packages/sdk/dist/sdk/logger.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
 var noopLogger = {};
 
-// ../../packages/sdk/dist/sdk/sdk-version.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/sdk-version.js
 import { readFileSync } from "node:fs";
 var cached = null;
 var getSdkVersion = () => {
@@ -52316,7 +52647,7 @@ var getSdkVersion = () => {
   return cached;
 };
 
-// ../../packages/sdk/dist/sdk/inline-sdk-client.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/inline-sdk-client.js
 var nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
 var sdkLayer = 1;
 var defaultApiBaseUrl = "https://api.inline.chat";
@@ -52370,6 +52701,7 @@ var replaySafeRpcMethods = new Set([
   Method.GET_SPACE_MEMBERS,
   Method.GET_CHAT_PARTICIPANTS,
   Method.GET_CHATS,
+  Method.GET_SPACES,
   Method.GET_USER_SETTINGS,
   Method.GET_UPDATES_STATE,
   Method.GET_CHAT,
@@ -52480,6 +52812,7 @@ class InlineSdkClient {
   });
   started = false;
   closed = false;
+  syncUpdates;
   bucketCatchUpsRunning = 0;
   bucketCatchUpWaiters = [];
   openPromise = null;
@@ -52498,6 +52831,9 @@ class InlineSdkClient {
   catchUpRequestedBySpaceId = new Map;
   userCatchUpInFlight = null;
   userCatchUpRequested = null;
+  userDemandAwaitingBaseline = false;
+  userBaselineFloor;
+  userBaselineFromHint = false;
   peerResolutionInFlightByChatId = new Map;
   peerResolutionRequestedByChatId = new Map;
   recoveryReconnectInFlight = null;
@@ -52516,6 +52852,7 @@ class InlineSdkClient {
   botCapabilitiesRegistrationInFlight = null;
   constructor(options) {
     this.options = options;
+    this.syncUpdates = options.syncUpdates !== false;
     this.log = options.logger ?? noopLogger;
     this.httpBaseUrl = normalizeHttpBaseUrl(options.baseUrl ?? defaultApiBaseUrl);
     this.fetchImpl = options.fetch ?? fetch;
@@ -53161,6 +53498,8 @@ class InlineSdkClient {
     }
   }
   async initializeDateCursor() {
+    if (!this.syncUpdates)
+      return;
     if (this.discoveryInFlight)
       return this.discoveryInFlight;
     if (this.discoveryCommitInFlight)
@@ -53190,6 +53529,7 @@ class InlineSdkClient {
         getUpdatesState: GetUpdatesStateInput.create({ date })
       }, { timeoutMs: 1500 });
       const state = result.getUpdatesState;
+      this.settleUserBaselineFromDiscovery(state.seq);
       round.checkpoint = state.date;
       round.updatesFound = state.updatesFound;
       round.resultReceived = true;
@@ -53203,6 +53543,7 @@ class InlineSdkClient {
         this.scheduleDiscoveryRetry(error.rpcCode === RpcError_Code.RATE_LIMIT || error.rpcCode === 429 ? "rate_limited" : "discovery_failed", retryAfterMsFromError(error));
       } else {
         this.log.error?.("Sync discovery unavailable", { reason: "request_rejected" });
+        this.fallBackToHintedUserBaseline("discovery_rejected");
       }
     }
   }
@@ -53469,6 +53810,7 @@ class InlineSdkClient {
       case "userAddedToChat": {
         if (options?.source === "live" && seq > 0) {
           this.fenceLiveCursor({ kind: "user" });
+          this.noteWithheldUserSeq(seq);
           this.registerDiscoveryHint({ kind: "user" }, seq);
           this.requestCatchUpUser(true, seq);
           return Promise.resolve(true);
@@ -53667,6 +54009,8 @@ class InlineSdkClient {
     }
   }
   prepareLiveEvent(event) {
+    if (!this.syncUpdates)
+      return true;
     const bucket = this.sequencedBucketForEvent(event);
     if (!bucket)
       return true;
@@ -53731,6 +54075,8 @@ class InlineSdkClient {
     const admittedSeq = this.liveAdmittedSeqByBucket.get(key);
     const updateSeq = eventSeq != null ? Math.max(eventSeq, admittedSeq ?? 0) : admittedSeq;
     this.fenceLiveCursor(bucket);
+    if (bucket.kind === "user")
+      this.noteWithheldUserSeq(eventSeq);
     if (updateSeq != null)
       this.registerDiscoveryHint(bucket, updateSeq);
     this.requestCatchUpForLiveEvent(bucket, event, updateSeq);
@@ -53762,7 +54108,7 @@ class InlineSdkClient {
     }
   }
   requestRecoveryReconnect(cause) {
-    if (!this.started || this.recoveryReconnectInFlight)
+    if (!this.syncUpdates || !this.started || this.recoveryReconnectInFlight)
       return;
     const reconnect = this.protocol.reconnect({ skipDelay: true, cause }).catch((error) => {
       this.log.warn?.("Failed to reconnect after inbound event buffer overflow", error);
@@ -53787,6 +54133,7 @@ class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId });
         return;
       case "user":
+        this.noteWithheldUserSeq("seq" in event ? event.seq : undefined);
         this.requestCatchUpUser(true);
         return;
     }
@@ -53835,6 +54182,7 @@ class InlineSdkClient {
         this.requestCatchUpSpace({ spaceId: bucket.spaceId, ...updateSeq != null ? { updateSeq } : {} });
         return;
       case "user":
+        this.noteWithheldUserSeq(updateSeq);
         this.requestCatchUpUser(true, updateSeq);
         return;
     }
@@ -54055,13 +54403,85 @@ class InlineSdkClient {
     this.satisfyDiscoveryThroughCursor({ kind: "user" }, seq);
   }
   requestCatchUpUser(forceFromStart = false, updateSeq) {
-    const lastUserSeq = this.state.lastUserSeq;
-    if (lastUserSeq == null && !this.options.catchUpUserFromStart && !forceFromStart) {
+    if (!this.syncUpdates)
       return null;
+    if (this.awaitingUserBaseline()) {
+      if (!forceFromStart)
+        return null;
+      const hintedBaseline = this.userBaselineFromHint ? updateSeq ?? this.userBaselineFloor : undefined;
+      if (hintedBaseline == null) {
+        this.recordUserCatchUpDemand(updateSeq);
+        this.userDemandAwaitingBaseline = true;
+        return null;
+      }
+      this.adoptUserBaseline(hintedBaseline, "hint");
+      this.resumeUserCatchUpAfterBaseline();
     }
-    const cursor = lastUserSeq ?? 0;
+    const cursor = this.state.lastUserSeq ?? 0;
     if (updateSeq != null && updateSeq <= cursor)
       return this.userCatchUpInFlight;
+    this.recordUserCatchUpDemand(updateSeq);
+    if (this.userCatchUpInFlight) {
+      return this.userCatchUpInFlight;
+    }
+    if (this.recoveryRetries.get("user")?.timer)
+      return null;
+    this.fenceLiveCursor({ kind: "user" });
+    return this.startUserCatchUp();
+  }
+  awaitingUserBaseline() {
+    return this.syncUpdates && this.state.lastUserSeq == null && !this.options.catchUpUserFromStart;
+  }
+  noteWithheldUserSeq(seq) {
+    if (seq == null || !Number.isSafeInteger(seq) || seq <= 0 || !this.awaitingUserBaseline())
+      return;
+    this.userBaselineFloor = Math.min(this.userBaselineFloor ?? seq, seq);
+  }
+  settleUserBaselineFromDiscovery(frontier) {
+    if (this.awaitingUserBaseline()) {
+      if (frontier == null || !Number.isSafeInteger(frontier) || frontier < 0) {
+        this.fallBackToHintedUserBaseline("discovery_missing_seq");
+        return;
+      }
+      this.adoptUserBaseline(frontier, "discovery");
+    }
+    this.resumeUserCatchUpAfterBaseline();
+  }
+  fallBackToHintedUserBaseline(reason) {
+    if (!this.awaitingUserBaseline())
+      return;
+    const frontier = this.userCatchUpRequested?.endSeq ?? this.userBaselineFloor;
+    this.log.warn?.("Sync discovery reported no user frontier; adopting the hinted frontier without replay", {
+      reason,
+      ...frontier != null ? { frontier } : {}
+    });
+    if (frontier == null) {
+      this.userBaselineFromHint = true;
+      return;
+    }
+    this.adoptUserBaseline(frontier, "hint");
+    this.resumeUserCatchUpAfterBaseline();
+  }
+  adoptUserBaseline(frontier, source) {
+    const floor = this.userBaselineFloor;
+    const baseline = Math.max(0, floor != null ? Math.min(frontier, floor - 1) : frontier);
+    this.userBaselineFloor = undefined;
+    this.userBaselineFromHint = false;
+    this.state.lastUserSeq = baseline;
+    this.scheduleStateSave();
+    this.log.debug?.("Adopted user update baseline without replaying history", { source, baseline });
+    this.satisfyDiscoveryThroughCursor({ kind: "user" }, baseline);
+  }
+  resumeUserCatchUpAfterBaseline() {
+    if (!this.userDemandAwaitingBaseline)
+      return;
+    this.userDemandAwaitingBaseline = false;
+    if (!this.userCatchUpRequested || this.userCatchUpInFlight || this.recoveryRetries.get("user")?.timer)
+      return;
+    this.fenceLiveCursor({ kind: "user" });
+    this.startUserCatchUp();
+  }
+  recordUserCatchUpDemand(updateSeq) {
     const previous = this.userCatchUpRequested;
     const demandAlreadyCoversHint = updateSeq != null && (previous?.endSeq ?? 0) >= updateSeq;
     if (!demandAlreadyCoversHint) {
@@ -54070,13 +54490,6 @@ class InlineSdkClient {
         toLatest: previous?.toLatest === true || updateSeq == null
       };
     }
-    if (this.userCatchUpInFlight) {
-      return this.userCatchUpInFlight;
-    }
-    if (this.recoveryRetries.get("user")?.timer)
-      return null;
-    this.fenceLiveCursor({ kind: "user" });
-    return this.startUserCatchUp();
   }
   startUserCatchUp() {
     const initialDemand = this.userCatchUpRequested;
@@ -54210,6 +54623,8 @@ class InlineSdkClient {
     return false;
   }
   requestCatchUpChat(params) {
+    if (!this.syncUpdates)
+      return Promise.resolve();
     if (params.peer)
       this.rememberChatPeer(params.chatId, params.peer);
     this.fenceLiveCursor({ kind: "chat", chatId: params.chatId, peer: params.peer });
@@ -54376,6 +54791,8 @@ class InlineSdkClient {
     return false;
   }
   requestCatchUpSpace(params) {
+    if (!this.syncUpdates)
+      return Promise.resolve();
     this.fenceLiveCursor({ kind: "space", spaceId: params.spaceId });
     const previous = this.catchUpRequestedBySpaceId.get(params.spaceId);
     this.catchUpRequestedBySpaceId.set(params.spaceId, {
@@ -54525,6 +54942,8 @@ class InlineSdkClient {
     return false;
   }
   resolvePersistedChatPeer(chatId, updateSeq) {
+    if (!this.syncUpdates)
+      return Promise.resolve();
     const previous = this.peerResolutionRequestedByChatId.get(chatId);
     this.peerResolutionRequestedByChatId.set(chatId, {
       ...updateSeq != null || previous?.endSeq != null ? { endSeq: Math.max(previous?.endSeq ?? 0, updateSeq ?? 0) } : {},
@@ -55167,7 +55586,7 @@ var resolveRealtimeV3Url = (baseUrl) => {
   return url.toString();
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
-// ../../packages/sdk/dist/sdk/bot-capabilities.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/bot-capabilities.js
 async function registerBotCapabilitiesWithRetry(params) {
   const retryDelaysMs = params.retryDelaysMs ?? [500, 2000, 5000];
   const wait = params.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -55186,10 +55605,10 @@ async function registerBotCapabilitiesWithRetry(params) {
     }
   }
 }
-// ../../packages/sdk/dist/state/json-file-state-store.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
-// ../../packages/sdk/dist/state/serde.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
 var serializeStateV1 = (state) => {
   const json = {
     version: 1,
@@ -55248,7 +55667,7 @@ var isStateJsonV1 = (value) => {
   return true;
 };
 
-// ../../packages/sdk/dist/state/json-file-state-store.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 class JsonFileStateStore {
   path;
   constructor(path) {
@@ -55269,7 +55688,7 @@ class JsonFileStateStore {
     await rename(tempPath, this.path);
   }
 }
-// ../../packages/protocol/dist/vectors.js
+// node_modules/@inline-chat/protocol/dist/vectors.js
 var portableCoreV1Vector = {
   authKeyHex: Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0")).join(""),
   direction: "client-to-server",
