@@ -7,6 +7,73 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## November 13, 2026
+
+[CLI 0.7.23](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.23) · [Hermes adapter 1.2.0](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.0) · [OpenClaw plugin 1.0.0-alpha.2](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.2)
+
+### New
+
+- 🔍 **Search inside a chat** on macOS. Press Command-F to see matching messages with an exact count, Return to jump to one, and Command-G to step through the rest, even far back in history.
+- 💬 **Quote replies.** Select part of a message and choose **Quote** to reply to just those words. Tap the quote to go back to where it came from.
+- 🔴 **Unread mentions and reactions** get their own badges and jump buttons. Chats open at your first unread message, or where you left off if you've caught up.
+- ☑️ **Select several messages** on macOS. Choose **Select** from the message menu or drag across messages, then forward, delete, or press Command-C to copy them.
+- 🌙 **Focus status.** When a Focus is on, people you choose see "Notifications silenced" in your DM. Pick who in Privacy settings, where you can now also choose who sees your time zone.
+- 🤖 **Friendly or detailed agent output.** Choose per bot from Chat Info whether it shows each step of its work or just short updates. Works with Codex and Claude on [CLI](/docs/cli) 0.7.23, [Hermes](/docs/hermes) 1.2.0 and [OpenClaw](/docs/openclaw) 1.0 alpha. Working rows also show a live timer.
+- 📱 **A new iPad layout** with a native sidebar, a floating New Thread button that opens a composer, and a compose bar that stays above the keyboard shortcut bar.
+
+### Quality of life improvements
+
+- Hold the mic button on iOS to start recording a voice message right away.
+- Photos and videos on iOS open in a swipeable gallery.
+- Sending photos shows upload progress, and you can cancel from the photo's menu.
+- The scroll-to-bottom button shows how many unread messages are below.
+- See who can use your bots and edit their profile from Chat Info. On macOS, you can also rename a bot from the chat header.
+- A bot's DM header and the mention menu show whether the bot is online.
+- Anyone in a private thread can add people to it, and chat creators on iOS can add and remove members.
+- inline.chat links to chats, spaces, and invites open in the app. Chat menus have **Copy Deep Link**.
+- On macOS, **Settings → Updates** shows your local agent bridge's status, with Restart, Stop, Logs, and Update Now. Agent setup shows its progress live.
+- Reply threads on macOS open instantly and slide in next to their message.
+- Messages that mix right-to-left and left-to-right text lay out each paragraph in its own direction.
+- Message bubbles stay a readable width in wide windows.
+- Emoji search ranks closer matches and the emoji you use most first. On iOS, `:` search shows results in a strip.
+- Slash command suggestions rank better and list the nearest bot's commands first.
+- The new message menu on iOS is now on for everyone.
+- Grid keeps your mic the way you left it when you resume or move a call. **Mute When Alone** is now opt-in and lifts when someone joins.
+- Grid shows a muted badge and a speaking halo on each person, and plays a sound when you mute or unmute.
+- Stickers from the iOS keyboard send as stickers instead of photos.
+- On macOS, click a message avatar to open that person's profile, use Control-N and Control-P in compose menus, and press Escape to remove a staged attachment without closing the chat. Unsent edits survive relaunching the app.
+
+### Better tools and APIs for agents and hackers
+
+- [CLI](/docs/cli) **0.7.23** keeps Linux bridges running after you log out or close the SSH session when installed as a service, and repairs that setting whenever the service starts. A bridge started in a terminal now reports the hangup instead of quietly stopping. CLIs with automatic updates pick this up on their own.
+- Detailed agent output hides tokens and other credentials in commands, their output, and edit diffs.
+- When someone without access mentions your agent, it now replies once to say who it takes requests from, instead of staying silent.
+- Share a bot with a whole space or user group: `inline bots access grant --space-id <id>` or `--group-id <id>`.
+- In your DM with a bridge agent, the agent can split work into task threads, each its own session, and report back when they finish. `/stop` in the DM stops them too.
+- Agents can look up people and bots, ask them by mentioning them, and pick up their replies.
+- New CLI commands: `inline messages wait` blocks until a reply arrives, `inline sidebar` opens, closes, orders, pins, and folders chats, `inline bots` manages profiles, photos, tokens, settings, and access, `messages list --include-threads` and `messages send --thread` read and post in reply threads, and `inline cli search "<task>"` finds the right command.
+- OpenCode runs natively on bridge v2. Claude runs the newest installed version and finds your saved Claude project folders.
+- An explicit `inline update` switches the background bridge at its next idle moment.
+- The [Bot API](/docs/bot-api) adds `getContacts`, an `owner_id` on bot users, and access grants for spaces and user groups. `sendMessage` takes `add_mentioned_users: true` to add mentioned people to a private thread.
+- Bots can send a sandboxed HTML **widget** in a message, such as a chart or mockup. See [Widgets](/docs/bot-api#widgets). Viewing them is experimental on macOS, under **Settings → Experimental**.
+- [Hermes](/docs/hermes) **1.1.0** and **1.2.0** add friendly and detailed output and approval buttons that resolve only the request you tapped. It also shows the session's context window in agent settings, sends widgets, and no longer posts a partly sent reply twice. Upgrade with `npm install -g @inline-chat/hermes-agent-adapter@latest`, `inline-hermes install --force`, and restart the gateway.
+- [OpenClaw](/docs/openclaw) **1.0.0-alpha.2** supports OpenClaw 2026.11.1 and later, with friendly and detailed output. It is an alpha; `0.0.72` stays the default for earlier OpenClaw versions.
+
+### Fixes
+
+- Fixed message lists on macOS jumping while new messages, edits, or reply panes change.
+- File names, code, and agent progress summaries no longer turn into links.
+- A pasted link no longer carries into text typed after it, and deleting a link on iOS clears its formatting.
+- Mentions survive copy and paste in compose, and a partly deleted mention on iOS is cleared.
+- Fixed swipe-to-reply getting clipped in centered chats on macOS.
+- Fixed the code block copy button on macOS.
+- Deleted bots now leave mentions and the sidebar.
+- A photo send you cancel no longer comes back.
+- Notifications on iOS are more reliable.
+- Improved server reliability under heavy load.
+
+---
+
 ## November 5, 2026
 
 [CLI 0.7.21](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.21) · [Hermes adapter 1.0.0](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.0.0)
