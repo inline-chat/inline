@@ -247,6 +247,19 @@ pub(crate) fn report_bridge_output_refused(kind: &'static str) {
     );
 }
 
+/// Linux setup could not enable systemd linger, so the bridge stops at logout.
+#[cfg(target_os = "linux")]
+pub(crate) fn report_bridge_linger_refused() {
+    capture_bridge_runtime_event(
+        "systemd",
+        "service_install",
+        "linger_refused",
+        None,
+        None,
+        None,
+    );
+}
+
 pub(crate) fn report_bridge_owner_dm_event(
     target: &str,
     phase: &'static str,
@@ -620,6 +633,22 @@ pub(crate) fn report_update(outcome: &str, channel: &str, from: &str, to: &str, 
     capture_once_per_window(key, event);
 }
 
+/// What started this process: a background service or a person's terminal.
+/// A foreground bridge stops when its terminal or SSH session closes, so this
+/// separates "the agent went silent" reports by how the bridge was run.
+fn service_manager() -> &'static str {
+    let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    if set("INVOCATION_ID") {
+        "systemd"
+    } else if std::env::var("XPC_SERVICE_NAME").is_ok_and(|name| !name.is_empty() && name != "0") {
+        "launchd"
+    } else if set("TMUX") || set("STY") {
+        "multiplexer"
+    } else {
+        "terminal"
+    }
+}
+
 fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protocol::Event<'static> {
     // Reconstruct instead of blacklisting: future integrations/scope changes
     // cannot silently add usernames, request bodies, breadcrumbs, or stacks.
@@ -694,6 +723,8 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         }
     }
     safe.tags.insert("os".into(), std::env::consts::OS.into());
+    safe.tags
+        .insert("service_manager".into(), service_manager().into());
     safe.tags
         .insert("arch".into(), std::env::consts::ARCH.into());
     safe.fingerprint = if surface == Some("update") {

@@ -323,6 +323,9 @@ pub(crate) struct Runtime {
     loop_guards: LoopGuards,
     /// Chat → the root of its thread tree, the loop cap's scope.
     loop_roots: HashMap<i64, i64>,
+    /// (chat, person) → when they were last told they can't use this agent,
+    /// so a mention without access gets an answer instead of silence.
+    access_notices: HashMap<(i64, i64), tokio::time::Instant>,
     skills: Option<SkillPublisher>,
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
     listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
@@ -419,6 +422,7 @@ impl Runtime {
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
             loop_roots: HashMap::new(),
+            access_notices: HashMap::new(),
             skills: None,
             listed_skills: HashMap::new(),
             agent_profiles: None,
@@ -1149,6 +1153,40 @@ impl Runtime {
         .await
         {
             log::warn!(target: "inline::bridge::v2", "loop cap notice failed: {error}");
+        }
+    }
+
+    /// Answers a person who addressed the agent without access, at most once
+    /// per chat every few hours, so they know to ask the owner instead of
+    /// assuming the agent is broken.
+    async fn access_notice(&mut self, chat_id: i64, group: &GroupMessage) {
+        const QUIET: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+        let now = tokio::time::Instant::now();
+        let key = (chat_id, group.author.user_id);
+        if self
+            .access_notices
+            .get(&key)
+            .is_some_and(|sent| now.duration_since(*sent) < QUIET)
+        {
+            return;
+        }
+        self.access_notices.insert(key, now);
+        let owner = self.agent.names.of(self.config.owner_user_id).await;
+        let text = format!(
+            "I only take requests from {owner} and people they've added. {owner} can add you with /allowlist in their chat with {}.",
+            self.config.agent_name
+        );
+        if let Err(error) = api::send_doc(
+            &self.agent.bot,
+            chat_id,
+            Some(group.message_id),
+            &paragraph(&text),
+            None,
+            Notify::Normal,
+        )
+        .await
+        {
+            log::warn!(target: "inline::bridge::v2", "access notice failed: {error}");
         }
     }
 
@@ -2372,6 +2410,20 @@ impl Runtime {
             }
             decision => decision,
         };
+        if widget_call.is_none()
+            && !group.author.kind.is_agent()
+            && matches!(
+                decision,
+                IntakeDecision::Observe {
+                    reason: ObserveReason::NotGranted,
+                    ..
+                } | IntakeDecision::Skip {
+                    reason: inline_agent_bridge::group::SkipReason::NotGranted,
+                }
+            )
+        {
+            self.access_notice(chat_id, &group).await;
+        }
         match decision {
             IntakeDecision::Act { join, required, .. } => {
                 if join

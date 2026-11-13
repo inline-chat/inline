@@ -50,7 +50,7 @@ use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use std::{env, fs, io};
@@ -3077,13 +3077,15 @@ async fn run_cli(cli: Cli, flags: DetectedGlobalFlags, started_at: Instant) {
                 error: error_payload,
             };
 
+            // A closed terminal makes eprintln! panic; the failure is
+            // already reported, so a lost stderr line must not add a panic.
             if let Ok(text) = output::json_string(&payload, flags.json_format) {
-                eprintln!("{text}");
+                let _ = writeln!(io::stderr(), "{text}");
             } else {
-                eprintln!("{}", error);
+                let _ = writeln!(io::stderr(), "{}", error);
             }
         } else {
-            eprintln!("{}", human_cli_error(&error_payload));
+            let _ = writeln!(io::stderr(), "{}", human_cli_error(&error_payload));
         }
         drop(telemetry);
         std::process::exit(1);
@@ -3097,12 +3099,24 @@ async fn run_until_terminated(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut termination =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    // A closed terminal or SSH session used to kill a foreground bridge with
+    // no trace; end it as a reported failure that says how to keep it running.
+    let mut hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
     tokio::select! {
         result = run(cli, started_at) => result,
         _ = termination.recv() => Err(CliError {
             code: "setup_cancelled",
             message: "The command was cancelled.".to_string(),
             hint: None,
+            examples: Vec::new(),
+        }.into()),
+        _ = hangup.recv() => Err(CliError {
+            code: "terminal_hangup",
+            message: "The terminal session ended.".to_string(),
+            hint: Some(
+                "Run `inline setup` to install the bridge as a background service that keeps running after you log out."
+                    .to_string(),
+            ),
             examples: Vec::new(),
         }.into()),
     }
