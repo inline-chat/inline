@@ -71,6 +71,14 @@ public final class GridRoomService {
     }
   }
 
+  /// Off by default while it is being tried out: a short cue when you open or
+  /// close your microphone yourself. Automatic changes stay silent.
+  public var playsMicrophoneSounds: Bool {
+    didSet { userDefaults.set(playsMicrophoneSounds, forKey: Self.microphoneSoundsKey) }
+  }
+
+  @ObservationIgnored private let userDefaults: UserDefaults
+  private static let microphoneSoundsKey = "grid.microphoneSounds"
   @ObservationIgnored private var platformEffects = GridPlatformEffects()
   /// A cold start may resume the call the server still lists for this
   /// session, once, until the user's first explicit Grid action in this
@@ -144,6 +152,8 @@ public final class GridRoomService {
   ) {
     self.realtime = realtime
     self.auth = auth
+    self.userDefaults = userDefaults
+    playsMicrophoneSounds = userDefaults.bool(forKey: Self.microphoneSoundsKey)
     let api = GridRoomAPI(realtime: realtime, auth: auth, send: sendGridTransaction)
     self.api = api
     avatarStateSync = GridAvatarStateSync(api: api)
@@ -795,6 +805,7 @@ public final class GridRoomService {
     if !hasLocalAdmission, let pending = pendingMembership, pending.isJoining, pending.spaceID == spaceID {
       // The choice carries into the room once it is admitted.
       let enabled = mediaCoordinator.toggleMicrophone()
+      playMicrophoneSound(enabled: enabled)
       let roomID: Int64? = if case let .join(_, joinRoomID) = pending {
         joinRoomID
       } else {
@@ -810,8 +821,14 @@ public final class GridRoomService {
           room.avatars.contains(where: \.ownedByCurrentSession)
     else { return }
     let enabled = mediaCoordinator.toggleMicrophone()
+    playMicrophoneSound(enabled: enabled)
     publishOwnedMicrophoneState(spaceID: spaceID, roomID: grid.currentRoomID, enabled: enabled)
     reconcileMediaDemand()
+  }
+
+  private func playMicrophoneSound(enabled: Bool) {
+    guard playsMicrophoneSounds else { return }
+    platformEffects.playSound?(enabled ? .microphoneOn : .microphoneOff)
   }
 
   private func publishOwnedMicrophoneState(spaceID: Int64, roomID: Int64, enabled: Bool) {
