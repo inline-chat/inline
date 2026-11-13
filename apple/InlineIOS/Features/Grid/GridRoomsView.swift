@@ -593,7 +593,9 @@ private struct GridRoomCapsule: View {
 }
 
 /// A face with the Mac's microphone ring: green while the mic is open, wider
-/// as the person speaks. Your own face in your room toggles your microphone.
+/// as the person speaks, with a faint halo outside it while they talk and a
+/// crossed-mic badge while muted. Your own face in your room toggles your
+/// microphone.
 private struct GridRoomFace: View {
   let store: GridRoomService
   let call: GridLocalCall
@@ -620,8 +622,11 @@ private struct GridRoomFace: View {
     let shares = isCurrentRoom ? store.screenShares(avatar: avatar) : []
     let user = InlineKit.User(from: avatar.user)
 
+    let showsConnecting = isYouHere && call.isPending
+
     return UserAvatar(user: user, size: GridRoomCapsule.faceSize - 4)
       .padding(2)
+      .gridSpeakingHalo(level: microphoneOpen ? level : 0)
       .overlay {
         Circle()
           .strokeBorder(
@@ -631,9 +636,20 @@ private struct GridRoomFace: View {
           .animation(.easeOut(duration: 0.12), value: level)
       }
       .overlay(alignment: .bottomTrailing) {
-        if isYouHere, call.isPending {
+        if showsConnecting {
           GridConnectingDot()
         }
+      }
+      .overlay(alignment: .bottomTrailing) {
+        ZStack {
+          if !microphoneOpen, !showsConnecting {
+            GridMutedBadge(diameter: 18)
+              .transition(.gridBadge)
+          }
+        }
+        .offset(x: 2, y: 1)
+        // Scoped to the badge so the face itself never inherits it.
+        .animation(.smooth(duration: 0.2), value: microphoneOpen)
       }
       .overlay(alignment: .topTrailing) {
         if !shares.isEmpty {
