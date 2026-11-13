@@ -27,16 +27,14 @@ public enum ChatRowID: Hashable, Sendable {
 
 /// Where a message sits in its sender group. Part of the row's content, so a
 /// neighbour inserted or deleted changes the revision of the rows whose
-/// rendering changes, and consumers never recompute groups.
+/// rendering changes, and consumers never recompute groups. Whether a row is
+/// the window's first or last message is positional (its index); it is left
+/// out so a new message does not change the previous newest row.
 public struct ChatRowGrouping: Hashable, Sendable {
   /// No earlier message in the same group (oldest of its group).
   public var isFirstInGroup: Bool
   /// No later message in the same group (newest of its group).
   public var isLastInGroup: Bool
-  /// The oldest message in the window.
-  public var isFirstMessage: Bool
-  /// The newest message in the window.
-  public var isLastMessage: Bool
   /// Group chats: the sender's name heads the group.
   public var showsSenderName: Bool
   /// Group chats: the message belongs to an avatar group (incoming, not a
@@ -45,13 +43,10 @@ public struct ChatRowGrouping: Hashable, Sendable {
 
   public init(
     isFirstInGroup: Bool = true, isLastInGroup: Bool = true,
-    isFirstMessage: Bool = false, isLastMessage: Bool = false,
     showsSenderName: Bool = false, showsAvatar: Bool = false
   ) {
     self.isFirstInGroup = isFirstInGroup
     self.isLastInGroup = isLastInGroup
-    self.isFirstMessage = isFirstMessage
-    self.isLastMessage = isLastMessage
     self.showsSenderName = showsSenderName
     self.showsAvatar = showsAvatar
   }

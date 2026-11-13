@@ -143,14 +143,14 @@ struct ChatRowSnapshotTests {
       Self.message(4, at: 510, from: 3), Self.message(5, at: 520, out: true),
     ]))
     let g1 = Self.grouping(rows, 1001), g2 = Self.grouping(rows, 1002), g3 = Self.grouping(rows, 1003)
-    #expect(g1?.isFirstInGroup == true && g1?.isLastInGroup == false && g1?.isFirstMessage == true)
+    #expect(g1?.isFirstInGroup == true && g1?.isLastInGroup == false)
     #expect(g1?.showsSenderName == true && g1?.showsAvatar == true)
     #expect(g2?.isFirstInGroup == false && g2?.isLastInGroup == true && g2?.showsSenderName == false)
     // Seven minutes later starts a new group.
     #expect(g3?.isFirstInGroup == true && g3?.isLastInGroup == true)
     #expect(Self.grouping(rows, 1004)?.isFirstInGroup == true)
     let own = Self.grouping(rows, 1005)
-    #expect(own?.showsAvatar == false && own?.showsSenderName == false && own?.isLastMessage == true)
+    #expect(own?.showsAvatar == false && own?.showsSenderName == false)
   }
 
   @Test func `direct chats show no names or avatars`() {
@@ -165,7 +165,7 @@ struct ChatRowSnapshotTests {
     let inserted = Self.snapshot(Self.input(base + [Self.message(3, at: 30)]), after: before, reason: .liveAdd)
     let diff = ChatRowDiff(from: before, to: inserted)
     #expect(diff.insertions.map(\.id) == [.message(1003)])
-    // m2 is no longer last in its group, nor the last message; m1 is unchanged.
+    // m2 is no longer last in its group; m1 is unchanged.
     #expect(diff.updates.map(\.id) == [.message(1002)])
     #expect(inserted.row(for: .message(1001))?.revision == before.row(for: .message(1001))?.revision)
     let deleted = Self.snapshot(Self.input(base), after: inserted, reason: .delete)
@@ -184,8 +184,6 @@ struct ChatRowSnapshotTests {
     ))
     #expect(Self.describe(rows) == ["parent7", "replies", "collapsed", "day0", "m3"])
     #expect(rows.rows.first?.id == .threadParent(77))
-    // The remaining message is the first in the window.
-    #expect(Self.grouping(rows, 1003)?.isFirstMessage == true)
   }
 
   @Test func `an acknowledged send keeps its row`() {
@@ -236,12 +234,12 @@ struct ChatRowSnapshotTests {
     #expect(up.insertions.map(\.id) == older.map { .message($0.id) })
     #expect(up.insertions.map(\.index) == Array(1 ... 10))
     #expect(up.removals.isEmpty && up.moves.isEmpty)
-    // m11 is no longer the first message in the window.
-    #expect(up.updates.map(\.id) == [.message(1011)])
+    // Paging leaves existing rows untouched.
+    #expect(up.updates.isEmpty)
     let appended = Self.snapshot(Self.input(window + newer), after: before, reason: .newerPage)
     let down = ChatRowDiff(from: before, to: appended)
     #expect(down.insertions.map(\.id) == newer.map { .message($0.id) })
-    #expect(down.updates.map(\.id) == [.message(1020)])
+    #expect(down.updates.isEmpty)
   }
 
   @Test func `an edit updates one row`() {

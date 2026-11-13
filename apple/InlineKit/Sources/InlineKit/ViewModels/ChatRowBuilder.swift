@@ -171,8 +171,6 @@ public enum ChatRowBuilder {
       let grouping = ChatRowGrouping(
         isFirstInGroup: isFirstInGroup,
         isLastInGroup: !joinsNext,
-        isFirstMessage: index == 0,
-        isLastMessage: index == visible.count - 1,
         showsSenderName: incoming && isFirstInGroup,
         showsAvatar: incoming
       )

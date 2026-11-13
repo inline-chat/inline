@@ -185,6 +185,34 @@ struct ChatRowFeedPublicationTests {
     #expect(!after.rows.contains { $0.id == .collapsedHistory })
   }
 
+  /// The view model replaces only the edited row; rows quoting it keep their
+  /// embedded copy. The change hint therefore skips nothing a full comparison
+  /// would find.
+  @Test @MainActor
+  func editingARepliedToMessageGivesTheSameRowsAsAFullComparison() async throws {
+    let fixture = try await RowFixture()
+    let reply = try fixture.insertReply(messageId: 101, date: 101, to: 95)
+    #expect(reply.repliedToMessage?.message.messageId == 95)
+    let model = fixture.model(rows: Array(fixture.messages[89 ... 99]) + [reply])
+    defer { model.dispose() }
+    let recorder = Recorder(model)
+    let before = try #require(model.rowFeed.snapshot)
+    var edited = fixture.messages[94]
+    edited.message.text = "edited original"
+    fixture.publisher.publisher.send(.update(.init(message: edited, animated: true, peer: fixture.peer)))
+    let hinted = try #require(recorder.last?.snapshot)
+    let output = ChatRowBuilder.build(.init(
+      messages: model.messages, chatKind: .group, reachesOldest: hinted.coverage.reachesOldest,
+      calendar: model.rowFeed.calendar
+    ))
+    let full = ChatRowSnapshot.next(after: before, rows: output.rows, reason: .liveUpdate, coverage: hinted.coverage)
+    #expect(hinted.rows == full.rows)
+    #expect(recorder.last?.diff.updates.map(\.id) == [.message(edited.id)])
+    // The quoting row still carries the original text: the view model's data, not the projection.
+    let quoting = model.messages.first { $0.id == reply.id }
+    #expect(quoting?.repliedToMessage?.message.text == "Fixture")
+  }
+
   @Test @MainActor
   func aFeedNobodyTurnedOnBuildsOnlyWhenRead() async throws {
     let fixture = try await RowFixture()
@@ -256,6 +284,19 @@ private struct RowFixture {
         messageId: messageId, randomId: messageId < 0 ? -messageId : nil, fromId: out ? 1 : 2,
         date: Date(timeIntervalSince1970: date), text: "Live", peerUserId: nil, peerThreadId: 1, chatId: 1,
         out: out, status: status
+      )
+      try message.saveMessage(db)
+      return try #require(
+        try FullMessage.queryRequest(currentUserId: 1).filter(Column("messageId") == messageId).fetchOne(db)
+      )
+    }
+  }
+
+  func insertReply(messageId: Int64, date: Double, to repliedTo: Int64) throws -> FullMessage {
+    try database.dbWriter.write { db in
+      var message = Message(
+        messageId: messageId, fromId: 2, date: Date(timeIntervalSince1970: date), text: "Reply",
+        peerUserId: nil, peerThreadId: 1, chatId: 1, repliedToMessageId: repliedTo
       )
       try message.saveMessage(db)
       return try #require(
