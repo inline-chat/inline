@@ -2134,6 +2134,17 @@ public extension AppDatabase {
         fatalError("Unable to initialize test database: \(error)")
       }
     }
+    #if DEBUG
+    // The iOS ChatList harness runs on an in-memory database: the app's own
+    // database is never opened, and realtime never starts without persistent storage.
+    if CommandLine.arguments.contains("--chatlist-harness") {
+      do {
+        return try AppDatabase(DatabaseQueue(configuration: makeConfiguration(passphrase: "chatlist-harness")))
+      } catch {
+        fatalError("Unable to initialize harness database: \(error)")
+      }
+    }
+    #endif
     let startedAt = Date()
     let sharedSpan = PerformanceTrace.begin("DatabaseMakeShared", category: .launch)
     defer { sharedSpan.end() }

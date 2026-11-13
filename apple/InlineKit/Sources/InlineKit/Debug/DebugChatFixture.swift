@@ -29,7 +29,7 @@ public final class DebugChatFixture {
     (1, "Me", "Self"), (2, "Alice", "Moreno"), (3, "Bob", "Okafor"), (4, "رنا", "حداد"), (5, "Dana", "Levi"),
   ]
 
-  private static let texts = [
+  private nonisolated static let texts = [
     "ok",
     "On my way 🚲",
     "Can you look at the build when you have a minute? CI is red on main again.",
@@ -44,61 +44,53 @@ public final class DebugChatFixture {
     "Agreed. Shipping it behind the debug switch first.",
   ]
 
-  /// Seeds `messageCount` messages ending now.
-  public init(messageCount: Int = 420) throws {
-    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "debug-fixture"))
-    database = try AppDatabase(queue)
-    publisher = MessagesPublisher(database: database)
+  /// Messages below this id exist only "on the server" until `loadRemoteOlder` brings them in.
+  private var remoteFloor: Int64
+  private let seedStart: Date
+  private let seedStep: TimeInterval
+  private let seedNow: Date
+
+  /// Seeds `messageCount` messages ending now into `database` (a new
+  /// in-memory one by default). With `remoteFloor`, messages below it are
+  /// held back as remote history behind a coverage hole.
+  public init(
+    messageCount: Int = 420, remoteFloor: Int? = nil,
+    database: AppDatabase? = nil, publisher: MessagesPublisher? = nil
+  ) throws {
+    let database = try database ?? AppDatabase(
+      DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "debug-fixture"))
+    )
+    self.database = database
+    self.publisher = publisher ?? MessagesPublisher(database: database)
     peer = .thread(id: 1)
     let total = Int64(messageCount)
     unreadBoundary = total - 40
-    savedPlace = ChatReadingPlace(messageId: total - 180, offset: 140)
+    savedPlace = ChatReadingPlace(messageId: total - min(180, total / 2), offset: 140)
     nextMessageId = total + 1
+    let floor = Int64(remoteFloor ?? 1)
+    self.remoteFloor = floor
     let chatId = chatId
     let now = Date()
-    try queue.write { db in
+    // Spread over four days so day separators fall inside the window.
+    let start = now.addingTimeInterval(-86_400 * 3.2)
+    let step = (now.timeIntervalSince(start) - 60) / Double(messageCount)
+    seedStart = start
+    seedStep = step
+    seedNow = now
+    try database.dbWriter.write { db in
       for (id, first, last) in Self.users {
         try User(id: id, email: nil, firstName: first, lastName: last).insert(db)
       }
       try Chat(id: chatId, date: now.addingTimeInterval(-86_400 * 30), type: .thread, title: "List lab",
                spaceId: nil, lastMsgId: total).insert(db)
-      // Spread over four days so day separators fall inside the window.
-      let start = now.addingTimeInterval(-86_400 * 3.2)
-      let step = (now.timeIntervalSince(start) - 60) / Double(messageCount)
-      for index in 1 ... messageCount {
-        let id = Int64(index)
-        let run = (index / 3) % 7
-        let from: Int64 = [2, 2, 3, 1, 4, 5, 1][run]
-        var text: String? = Self.texts[(index * 7 + run) % Self.texts.count]
-        var payload: Client_MessageContentPayload?
-        var photoId: Int64?
-        if index % 97 == 0 {
-          text = "Pinned a message"
-          payload = .with { $0.serviceMessage = .with { $0.pinnedMessage = .with { $0.messageID = id - 3 } } }
-        } else if index % 29 == 0 {
-          photoId = 9_000 + id
-          let photo = try Photo(photoId: 9_000 + id, date: now, format: .jpeg).insertAndFetch(db)
-          // Sizes reference the photo's local row id.
-          try PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: index % 2 == 0 ? 800 : 1_600)
-            .insert(db)
-          if index % 2 == 0 { text = nil }
-        }
-        var message = Message(
-          messageId: id, fromId: from, date: start.addingTimeInterval(Double(index) * step), text: text,
-          peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == 1, status: from == 1 ? .sent : nil,
-          repliedToMessageId: index % 11 == 0 && index > 5 ? id - 5 : nil, photoId: photoId,
-          contentPayload: payload
-        )
-        try message.saveMessage(db)
-        if index % 7 == 0 {
-          for (offset, emoji) in ["👍", "❤️", "😂"].prefix(index % 3 + 1).enumerated() {
-            try Reaction(id: id * 10 + Int64(offset), messageId: id, userId: Int64(offset + 2), emoji: emoji, date: now, chatId: chatId)
-              .insert(db)
-          }
-        }
+      for (id, _, _) in Self.users {
+        try ChatParticipant(chatId: chatId, userId: id, date: now).insert(db)
+      }
+      for index in Int(floor) ... messageCount {
+        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now)
       }
       try MessageHistoryCoverageStore.subtract(
-        db, chatId: chatId, lowerId: 1, upperId: MessageHistoryHole.positiveMessageIDMax
+        db, chatId: chatId, lowerId: floor, upperId: MessageHistoryHole.positiveMessageIDMax
       )
       var dialog = Dialog(optimisticForChat: Chat(id: chatId, date: now, type: .thread, title: "List lab", spaceId: nil))
       dialog.unreadCount = 0
@@ -106,8 +98,68 @@ public final class DebugChatFixture {
     }
     #if os(iOS)
     // On iOS, deletes and reloads reach only chats a screen has activated, as `ChatView` does.
-    activeChat = publisher.activateChat(peer: peer)
+    activeChat = self.publisher.activateChat(peer: peer)
     #endif
+  }
+
+  private nonisolated static func seed(
+    _ db: Database, index: Int, chatId: Int64, start: Date, step: TimeInterval, now: Date
+  ) throws {
+    let id = Int64(index)
+    let run = (index / 3) % 7
+    let from: Int64 = [2, 2, 3, 1, 4, 5, 1][run]
+    var text: String? = Self.texts[(index * 7 + run) % Self.texts.count]
+    var payload: Client_MessageContentPayload?
+    var photoId: Int64?
+    if index % 97 == 0 {
+      text = "Pinned a message"
+      payload = .with { $0.serviceMessage = .with { $0.pinnedMessage = .with { $0.messageID = id - 3 } } }
+    } else if index % 29 == 0 {
+      photoId = 9_000 + id
+      let photo = try Photo(photoId: 9_000 + id, date: now, format: .jpeg).insertAndFetch(db)
+      // Sizes reference the photo's local row id.
+      try PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: index % 2 == 0 ? 800 : 1_600)
+        .insert(db)
+      if index % 2 == 0 { text = nil }
+    }
+    var message = Message(
+      messageId: id, fromId: from, date: start.addingTimeInterval(Double(index) * step), text: text,
+      peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == 1, status: from == 1 ? .sent : nil,
+      repliedToMessageId: index % 11 == 0 && index > 5 ? id - 5 : nil, photoId: photoId,
+      contentPayload: payload
+    )
+    try message.saveMessage(db)
+    if index % 7 == 0 {
+      for (offset, emoji) in ["👍", "❤️", "😂"].prefix(index % 3 + 1).enumerated() {
+        try Reaction(id: id * 10 + Int64(offset), messageId: id, userId: Int64(offset + 2), emoji: emoji,
+                     date: now, chatId: chatId).insert(db)
+      }
+    }
+  }
+
+  /// Simulates a server page of older history: up to `limit` messages below
+  /// the remote floor are written and their range certified. False when none remain.
+  public func loadRemoteOlder(limit: Int = 100, latency: Duration = .milliseconds(600)) async throws -> Bool {
+    guard remoteFloor > 1 else { return false }
+    try await Task.sleep(for: latency)
+    let upper = remoteFloor - 1
+    let lower = max(1, upper - Int64(limit) + 1)
+    let (chatId, start, step, now) = (chatId, seedStart, seedStep, seedNow)
+    try await database.dbWriter.write { db in
+      for index in Int(lower) ... Int(upper) {
+        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now)
+      }
+      try MessageHistoryCoverageStore.subtract(db, chatId: chatId, lowerId: lower, upperId: upper)
+    }
+    remoteFloor = lower
+    return true
+  }
+
+  /// Simulates fetching the history around `messageId`: remote pages arrive until it is stored.
+  public func loadRemoteAround(messageId: Int64, latency: Duration = .milliseconds(600)) async throws {
+    while remoteFloor > max(1, messageId - 20) {
+      guard try await loadRemoteOlder(limit: 200, latency: latency) else { return }
+    }
   }
 
   #if os(iOS)
@@ -115,7 +167,9 @@ public final class DebugChatFixture {
   #endif
 
   /// The prepared first frame for an opening, as `ChatOpenPreparation` reads it.
-  public func initialState(for opening: Opening) async throws -> MessagesProgressiveViewModel.InitialState {
+  public func initialState(
+    for opening: Opening, limit: Int? = nil
+  ) async throws -> MessagesProgressiveViewModel.InitialState {
     let unreadCount = opening == .unread ? Int(nextMessageId - 1 - unreadBoundary) : 0
     let boundary: Int64? = opening == .unread ? unreadBoundary : nil
     let chatId = chatId
@@ -125,7 +179,8 @@ public final class DebugChatFixture {
       )
     }
     return try await MessagesProgressiveViewModel.prepareInitialState(
-      peer: peer, chatId: chatId, savedPlace: opening == .saved ? savedPlace : nil,
+      peer: peer, chatId: chatId, limit: limit ?? MessagesProgressiveViewModel.defaultInitialLimit(),
+      savedPlace: opening == .saved ? savedPlace : nil,
       database: database, publisher: publisher, currentUserId: currentUserId
     )
   }
@@ -138,19 +193,35 @@ public final class DebugChatFixture {
     }
   }
 
-  private func insert(text: String, from: Int64, messageId: Int64, status: MessageSendingStatus? = nil) throws
-    -> FullMessage?
-  {
+  private func insert(
+    text: String, from: Int64, messageId: Int64, status: MessageSendingStatus? = nil,
+    replyToMessageId: Int64? = nil
+  ) throws -> FullMessage? {
     let chatId = chatId
     let saved = try database.dbWriter.write { db -> Message in
       var message = Message(
         messageId: messageId, randomId: messageId < 0 ? Int64.random(in: 1 ... .max) : nil, fromId: from,
         date: Date(), text: text, peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == currentUserId,
-        status: status
+        status: status, repliedToMessageId: replyToMessageId
       )
       return try message.saveMessage(db)
     }
     return try saved.globalId.flatMap(fetch(globalId:))
+  }
+
+  /// The production composer's send, into this chat: a pending row, then the ack.
+  public func sendFromComposer(text: String, replyToMessageId: Int64?) async throws {
+    try await sendAndAcknowledge(text: text, replyToMessageId: replyToMessageId)
+  }
+
+  /// The production composer's edit of a message (server id).
+  public func editFromComposer(messageId: Int64, text: String) throws {
+    let chatId = chatId
+    guard let message = try database.reader.read({ db in
+      try FullMessage.queryRequest(currentUserId: currentUserId)
+        .filter(Column("chatId") == chatId && Column("messageId") == messageId).fetchOne(db)
+    }) else { return }
+    try setText(text, of: message)
   }
 
   /// Someone else's message arrives.
@@ -161,11 +232,14 @@ public final class DebugChatFixture {
   }
 
   /// The current user sends; the server acknowledges after `delay`.
-  public func sendAndAcknowledge(after delay: Duration = .milliseconds(700)) async throws {
+  public func sendAndAcknowledge(
+    text: String = "Sent from the harness", replyToMessageId: Int64? = nil,
+    after delay: Duration = .milliseconds(700)
+  ) async throws {
     let temporary = nextTemporaryId
     nextTemporaryId -= 1
-    guard let pending = try insert(text: "Sent from the harness", from: currentUserId, messageId: temporary,
-                                   status: .sending) else { return }
+    guard let pending = try insert(text: text, from: currentUserId, messageId: temporary,
+                                   status: .sending, replyToMessageId: replyToMessageId) else { return }
     publisher.publisher.send(.add(.init(messages: [pending], peer: peer)))
     try await Task.sleep(for: delay)
     let serverId = nextMessageId
@@ -195,6 +269,15 @@ public final class DebugChatFixture {
     }
     if let updated = try fetch(globalId: message.id) {
       publisher.publisher.send(.update(.init(message: updated, animated: true, peer: peer)))
+    }
+  }
+
+  /// The server id of the current user's newest sent message.
+  public func newestOutgoingMessageId() throws -> Int64? {
+    let chatId = chatId
+    return try database.reader.read { db in
+      try Message.filter(Column("chatId") == chatId && Column("out") == true && Column("messageId") > 0)
+        .order(Column("messageId").desc).fetchOne(db)?.messageId
     }
   }
 
