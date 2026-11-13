@@ -1,7 +1,41 @@
 import Foundation
 import GRDB
 @testable import InlineKit
+import InlineProtocol
 import Testing
+
+private final class AttemptCounter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var value: Int {
+    lock.withLock { count }
+  }
+
+  func next() -> Int {
+    lock.withLock {
+      count += 1
+      return count
+    }
+  }
+}
+
+private final class KeyLog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var entries: [MentionRosterRefresher.Key] = []
+
+  var keys: [MentionRosterRefresher.Key] {
+    lock.withLock { entries }
+  }
+
+  var count: Int {
+    keys.count
+  }
+
+  func append(_ key: MentionRosterRefresher.Key) {
+    lock.withLock { entries.append(key) }
+  }
+}
 
 private final class PostedCount: @unchecked Sendable {
   private let lock = NSLock()
@@ -17,32 +51,37 @@ private final class PostedCount: @unchecked Sendable {
 }
 
 @MainActor
-@Suite("Mention candidate chat priority")
+@Suite("Mention candidate sources")
 struct MentionCompletionCandidatesTests {
-  @Test("Home and space projections carry chat priority without changing eligibility")
+  private nonisolated static let me: Int64 = 1
+
+  private nonisolated func roster(
+    _ db: Database,
+    _ scope: MentionCandidatesSource.Scope
+  ) throws -> MentionCompletionCandidates {
+    try MentionCandidatesSource.roster(db, scope: scope, currentUserId: Self.me).candidates
+  }
+
+  @Test("Home and space projections carry DM recency and pins without changing eligibility")
   func newThreadProjections() async throws {
     let database = AppDatabase.empty()
     let (home, space) = try await database.dbWriter.write { db in
       try Self.seed(db)
-      return try (
-        ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(db, spaceID: nil),
-        ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(db, spaceID: 900)
-      )
+      return try (roster(db, .newThread(spaceId: nil)), roster(db, .newThread(spaceId: 900)))
     }
 
     #expect(Set(home.users.map(\.userInfo.id)) == [901, 902])
     #expect(home.users.allSatisfy { $0.source == .directChat })
     #expect(Set(space.users.map(\.userInfo.id)) == [901, 902, 903])
-    #expect(space.users.count == 3)
     let danny = try #require(space.users.first { $0.userInfo.id == 902 })
     #expect(danny.source == .spaceMember)
     #expect(danny.isPinned)
-    #expect(danny.lastMsgId == 10)
+    #expect(danny.lastDirectMessageDate == Date(timeIntervalSince1970: 10))
     // An optimistic pinned DM without history boosts an already-eligible member,
     // but does not make them a new Home candidate.
     #expect(space.users.first { $0.userInfo.id == 903 }?.isPinned == true)
 
-    let ranker = MentionCompletionViewModel(currentUserId: { nil })
+    let ranker = MentionCompletionViewModel(currentUserId: { Self.me })
     for candidates in [home, space] {
       ranker.updateCandidates(candidates)
       ranker.filter(with: "dan")
@@ -51,81 +90,159 @@ struct MentionCompletionCandidatesTests {
   }
 
   @Test(
-    "existing Home and private/public space threads retain participant source and chat signals",
+    "existing Home and private/public space threads rank people in the chat first",
     arguments: [nil, false, true] as [Bool?]
   )
   func existingThreadProjections(isPublic: Bool?) async throws {
     let database = AppDatabase.empty()
-    try await database.dbWriter.write { db in
+    let candidates = try await database.dbWriter.write { db in
       try Self.seed(db)
       let date = Date(timeIntervalSince1970: 1)
       try Chat(
         id: 1_000, date: date, type: .thread, title: "Thread",
         spaceId: isPublic == nil ? nil : 900, isPublic: isPublic
       ).insert(db)
-      try ChatParticipant(chatId: 1_000, userId: 902, date: date).insert(db)
+      try ChatParticipant(chatId: 1_000, userId: 901, date: date).insert(db)
+      return try roster(db, .chat(chatId: 1_000, peer: .thread(id: 1_000)))
     }
 
-    let source = ChatParticipantsWithMembersViewModel(db: database, chatId: 1_000, purpose: .mentionCandidates)
-    let ranker = MentionCompletionViewModel(currentUserId: { nil })
-    ranker.updateCandidates(source.mentionCandidates)
+    let ranker = MentionCompletionViewModel(currentUserId: { Self.me })
+    ranker.updateCandidates(candidates)
     ranker.filter(with: "dan")
-    #expect(ranker.items.map(\.id) == ["user:902", "user:901"])
-    guard case let .user(danny) = ranker.items.first else {
-      Issue.record("Expected Danny first")
-      return
+    let daniel = try #require(candidates.users.first { $0.userInfo.id == 901 })
+    #expect(daniel.source == .participant)
+    if isPublic == true {
+      // Every member can read a public thread, so pinned Danny leads its members.
+      #expect(ranker.items.map(\.id) == ["user:902", "user:901"])
+    } else {
+      // Pinned Danny isn't in the thread, so the participant wins.
+      #expect(ranker.items.map(\.id) == ["user:901", "user:902"])
     }
-    #expect(danny.source == .participant)
-    #expect(danny.isPinned)
-    #expect(danny.lastMsgId == 10)
   }
 
-  @Test("existing DMs retain peer priority and still hide other DMs at bare at")
+  @Test("existing DMs keep the peer first and still hide other DMs at bare at")
   func existingDirectChatProjection() async throws {
     let database = AppDatabase.empty()
-    try await database.dbWriter.write { db in try Self.seed(db) }
-    let source = ChatParticipantsWithMembersViewModel(db: database, chatId: 912, purpose: .mentionCandidates)
-    let ranker = MentionCompletionViewModel(currentUserId: { nil })
-    ranker.updateCandidates(source.mentionCandidates)
+    let candidates = try await database.dbWriter.write { db in
+      try Self.seed(db)
+      return try roster(db, .chat(chatId: 912, peer: .user(id: 902)))
+    }
+    let ranker = MentionCompletionViewModel(currentUserId: { Self.me })
+    ranker.updateCandidates(candidates)
     #expect(ranker.items.map(\.id) == ["user:902"])
     ranker.filter(with: "dan")
     #expect(ranker.items.map(\.id) == ["user:902", "user:901"])
   }
 
-  @Test("an owned bot with an empty DM is listed at bare at and when searched")
+  @Test("a fresh owned bot with an empty DM is offered everywhere, before any chat")
   func ownedBotWithoutHistory() async throws {
     let database = AppDatabase.empty()
-    let home = try await database.dbWriter.write { db in
+    let (home, space, thread, otherUser) = try await database.dbWriter.write { db in
       try Self.seed(db)
-      return try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(db, spaceID: nil)
+      try Self.makeOwnedBot(904, owner: Self.me, in: db)
+      return try (
+        roster(db, .newThread(spaceId: nil)),
+        roster(db, .newThread(spaceId: 900)),
+        roster(db, .chat(chatId: 912, peer: .user(id: 902))),
+        MentionCandidatesSource.roster(db, scope: .newThread(spaceId: nil), currentUserId: 2).candidates
+      )
     }
-    // 904 has an opened but empty DM, as a bot does right after setup.
-    #expect(!home.users.contains { $0.userInfo.id == 904 })
 
-    let bot = UserInfo(user: User(id: 904, email: nil, firstName: "No History"))
-    let ranker = MentionCompletionViewModel(currentUserId: { nil })
-    ranker.updateCandidates(home.addingOwnedBots([bot]))
-    #expect(ranker.items.map(\.id) == ["user:904"])
-    ranker.filter(with: "no h")
-    #expect(ranker.items.map(\.id) == ["user:904"])
+    let ranker = MentionCompletionViewModel(currentUserId: { Self.me })
+    for candidates in [home, space, thread] {
+      let bot = try #require(candidates.users.first { $0.userInfo.id == 904 })
+      #expect(bot.source == .ownedBot)
+      ranker.updateCandidates(candidates)
+      #expect(ranker.items.contains { $0.id == "user:904" })
+      ranker.filter(with: "no h")
+      #expect(ranker.items.map(\.id) == ["user:904"])
+      ranker.filter(with: "")
+    }
+    // Someone else's bot stays theirs.
+    #expect(!otherUser.users.contains { $0.userInfo.id == 904 })
   }
 
-  @Test("an owned bot outside the selected space is still offered there")
-  func ownedBotOutsideSpace() async throws {
+  @Test("an existing space chat offers the user's bots once they are space members")
+  func ownedBotInSpaceChat() async throws {
     let database = AppDatabase.empty()
-    let space = try await database.dbWriter.write { db in
+    let (outside, member) = try await database.dbWriter.write { db in
       try Self.seed(db)
-      return try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(db, spaceID: 900)
+      try Self.makeOwnedBot(904, owner: Self.me, in: db)
+      try Chat(id: 1_001, date: Date(), type: .thread, title: "Space Thread", spaceId: 900).insert(db)
+      let scope = MentionCandidatesSource.Scope.chat(chatId: 1_001, peer: .thread(id: 1_001))
+      let outside = try roster(db, scope)
+      try Member(id: 990, date: Date(), userId: 904, spaceId: 900).insert(db)
+      return try (outside, roster(db, scope))
     }
-    // 904 isn't a member of 900, like a new bot in the user's usual space.
-    #expect(!space.users.contains { $0.userInfo.id == 904 })
+    // The server adds only space members to a space thread.
+    #expect(!outside.users.contains { $0.userInfo.id == 904 })
+    #expect(member.users.first { $0.userInfo.id == 904 }?.source == .ownedBot)
+  }
 
-    let bot = UserInfo(user: User(id: 904, email: nil, firstName: "No History"))
-    let ranker = MentionCompletionViewModel(currentUserId: { nil })
-    ranker.updateCandidates(space.addingOwnedBots([bot]))
-    #expect(ranker.items.contains { $0.id == "user:904" })
-    ranker.filter(with: "no h")
-    #expect(ranker.items.map(\.id) == ["user:904"])
+  @Test("recent senders in the chat are ranked by who spoke last")
+  func recentSenders() async throws {
+    let database = AppDatabase.empty()
+    let candidates = try await database.dbWriter.write { db in
+      try Self.seed(db)
+      let date = Date(timeIntervalSince1970: 1)
+      try Chat(id: 1_000, date: date, type: .thread, title: "Thread", spaceId: 900).insert(db)
+      for userId in [Int64(901), 902, 903] {
+        try ChatParticipant(chatId: 1_000, userId: userId, date: date).insert(db)
+      }
+      for (messageId, fromId) in [(Int64(1), Int64(903)), (2, 901), (3, 903)] {
+        try Message(
+          messageId: messageId, fromId: fromId, date: date, text: "Hi",
+          peerUserId: nil, peerThreadId: 1_000, chatId: 1_000
+        ).insert(db)
+      }
+      return try roster(db, .chat(chatId: 1_000, peer: .thread(id: 1_000)))
+    }
+    let ranks = Dictionary(uniqueKeysWithValues: candidates.users.map { ($0.userInfo.id, $0.recentSenderRank) })
+    #expect(ranks[903] == 0)
+    #expect(ranks[901] == 1)
+    #expect(ranks[902] == .some(nil))
+
+    let ranker = MentionCompletionViewModel(currentUserId: { Self.me })
+    ranker.updateCandidates(candidates)
+    #expect(ranker.items.prefix(3).map(\.id) == ["user:903", "user:901", "user:902"])
+  }
+
+  @Test("listing bots saves their owner and drops bots no longer listed")
+  func listingSavesOwnedBots() async throws {
+    let database = AppDatabase.empty()
+    let owned = try await database.dbWriter.write { db in
+      try Self.seed(db)
+      try User(id: 905, email: nil, firstName: "Deleted Elsewhere").insert(db)
+      try Self.makeOwnedBot(905, owner: Self.me, in: db)
+      var bot = InlineProtocol.User()
+      bot.id = 904
+      bot.firstName = "No History"
+      bot.bot = true
+      try ListBotsTransaction.saveOwnedBots([bot], ownerUserId: Self.me, in: db)
+      return try BotOwner.ownedBotIds(db, ownerUserId: Self.me).sorted()
+    }
+    #expect(owned == [904])
+  }
+
+  @Test("a protocol user keeps its bot owner across saves that omit it")
+  func botOwnerSurvivesPartialSaves() async throws {
+    let database = AppDatabase.empty()
+    let owner = try await database.dbWriter.write { db in
+      var bot = InlineProtocol.User()
+      bot.id = 906
+      bot.firstName = "Claude"
+      bot.bot = true
+      bot.botInfo = .with { $0.owner = .ownerUserID(Self.me) }
+      _ = try User.save(db, user: bot)
+
+      var min = InlineProtocol.User()
+      min.id = 906
+      min.firstName = "Claude 2"
+      min.min = true
+      _ = try User.save(db, user: min)
+      return try BotOwner.fetchOne(db, key: 906)?.ownerUserId
+    }
+    #expect(owner == Self.me)
   }
 
   @Test("sending only adds the user's own bots that aren't members yet")
@@ -141,14 +258,15 @@ struct MentionCompletionCandidatesTests {
   @Test("an owned bot with DM history stays unique and keeps its chat priority")
   func ownedBotWithHistory() throws {
     let bot = UserInfo(user: User(id: 950, email: nil, firstName: "Claude"))
+    let date = Date(timeIntervalSince1970: 30)
     let candidates = MentionCompletionCandidates(
-      users: [MentionCompletionUser(userInfo: bot, source: .directChat, lastMsgId: 30, isPinned: true)],
+      users: [MentionCompletionUser(userInfo: bot, source: .directChat, lastDirectMessageDate: date, isPinned: true)],
       groups: []
     ).addingOwnedBots([bot])
     #expect(candidates.users.count == 1)
     let user = try #require(candidates.users.first)
     #expect(user.source == .ownedBot)
-    #expect(user.lastMsgId == 30)
+    #expect(user.lastDirectMessageDate == date)
     #expect(user.isPinned)
   }
 
@@ -173,13 +291,21 @@ struct MentionCompletionCandidatesTests {
     #expect(posted.value == 2)
   }
 
-  @Test("the existing observation refreshes pin and message signals")
-  func liveChatPriorityUpdates() async throws {
+  @Test("the source follows pin and DM changes and observes only during a session")
+  func liveSourceUpdates() async throws {
     let database = AppDatabase.empty()
     try await database.dbWriter.write { db in try Self.seed(db) }
-    let source = NewThreadMentionCandidatesViewModel(db: database, spaceID: 900)
-    source.startObserving()
-    let ranker = MentionCompletionViewModel(currentUserId: { nil })
+    let source = MentionCandidatesSource(
+      db: database,
+      scope: .newThread(spaceId: 900),
+      services: .offline,
+      currentUserId: { Self.me }
+    )
+    source.beginSession()
+    // The first session reads synchronously for the menu's first frame.
+    #expect(source.candidates.users.contains { $0.userInfo.id == 902 })
+
+    let ranker = MentionCompletionViewModel(currentUserId: { Self.me })
     ranker.updateCandidates(source.candidates)
     ranker.filter(with: "dan")
     #expect(ranker.items.first?.id == "user:902")
@@ -190,20 +316,98 @@ struct MentionCompletionCandidatesTests {
     }
     try await waitFor { source.candidates.users.first { $0.userInfo.id == 902 }?.isPinned == false }
     ranker.updateCandidates(source.candidates)
+    // Daniel's DM is newer once pins are equal.
     #expect(ranker.items.first?.id == "user:901")
     #expect(ranker.selectedItem?.id == "user:902")
 
     try await database.dbWriter.write { db in
       try Message(
-        messageId: 300, fromId: 902, date: Date(timeIntervalSince1970: 2),
+        messageId: 11, fromId: 902, date: Date(timeIntervalSince1970: 500),
         text: "New message", peerUserId: 902, peerThreadId: nil, chatId: 912
       ).insert(db)
       _ = try Chat.filter(Chat.Columns.id == 912)
-        .updateAll(db, Chat.Columns.lastMsgId.set(to: 300))
+        .updateAll(db, Chat.Columns.lastMsgId.set(to: 11))
     }
-    try await waitFor { source.candidates.users.first { $0.userInfo.id == 902 }?.lastMsgId == 300 }
+    try await waitFor {
+      source.candidates.users.first { $0.userInfo.id == 902 }?.lastDirectMessageDate ==
+        Date(timeIntervalSince1970: 500)
+    }
     ranker.updateCandidates(source.candidates)
     #expect(ranker.items.first?.id == "user:902")
+
+    // Ending the session stops observing but keeps the last candidates.
+    source.endSession()
+    try await database.dbWriter.write { db in
+      try Member(id: 990, date: Date(), userId: 904, spaceId: 900).insert(db)
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(!source.candidates.users.contains { $0.userInfo.id == 904 })
+    source.beginSession()
+    try await waitFor { source.candidates.users.contains { $0.userInfo.id == 904 } }
+  }
+
+  @Test("a failed owned-bot refresh keeps the bots and Agents already shown")
+  func ownedBotsSurviveFailedRefresh() async throws {
+    let attempts = AttemptCounter()
+    var now = Date(timeIntervalSince1970: 1_000)
+    let bot = UserInfo(user: User(id: 904, email: nil, firstName: "No History"))
+    var profile = BotAgentProfile()
+    profile.id = 70
+    profile.botUserID = 904
+    profile.name = "Researcher"
+    let agent = MentionableBotAgent(profile: profile, botUserInfo: bot)
+    let directory = OwnedBotsDirectory(
+      fetcher: {
+        if attempts.next() == 1 {
+          return OwnedBotsDirectory.Listing(bots: [bot], agentsByBotId: [904: .some([agent])])
+        }
+        throw CancellationError()
+      },
+      now: { now },
+      freshness: 60,
+      retryDelay: 10
+    )
+    await directory.refreshIfNeeded()
+    #expect(directory.snapshot.agents.map(\.id) == [70])
+
+    await directory.refreshIfNeeded()
+    #expect(attempts.value == 1)
+
+    now.addTimeInterval(61)
+    await directory.refreshIfNeeded()
+    #expect(attempts.value == 2)
+    #expect(directory.snapshot.bots.map(\.id) == [904])
+    #expect(directory.snapshot.agents.map(\.id) == [70])
+
+    // A failure waits out its retry delay instead of refetching every session.
+    await directory.refreshIfNeeded()
+    #expect(attempts.value == 2)
+  }
+
+  @Test("roster refreshes are throttled per key, and failures retry later")
+  func rosterRefreshThrottle() async throws {
+    let log = KeyLog()
+    var now = Date(timeIntervalSince1970: 1_000)
+    let refresher = MentionRosterRefresher(
+      fetcher: { key in
+        log.append(key)
+        if key == .userGroups(900) { throw CancellationError() }
+      },
+      now: { now },
+      freshness: 300,
+      retryDelay: 15
+    )
+    let keys: [MentionRosterRefresher.Key] = [.chatParticipants(1), .spaceMembers(900), .userGroups(900)]
+    await refresher.refresh(keys)
+    #expect(log.count == 3)
+    await refresher.refresh(keys)
+    #expect(log.count == 3)
+    now.addTimeInterval(16)
+    await refresher.refresh(keys)
+    #expect(log.count == 4)
+    #expect(log.keys.last == .userGroups(900))
+    await refresher.refresh(keys, force: true)
+    #expect(log.count == 7)
   }
 
   private func waitFor(_ condition: () -> Bool) async throws {
@@ -212,6 +416,13 @@ struct MentionCompletionCandidatesTests {
       try await Task.sleep(for: .milliseconds(10))
     }
     #expect(condition(), "Candidate observation did not refresh")
+  }
+
+  private nonisolated static func makeOwnedBot(_ id: Int64, owner: Int64, in db: Database) throws {
+    guard var user = try User.fetchOne(db, id: id) else { return }
+    user.bot = true
+    try user.save(db)
+    try BotOwner(botUserId: id, ownerUserId: owner).save(db)
   }
 
   private nonisolated static func seed(_ db: Database) throws {
@@ -251,11 +462,11 @@ struct MentionCompletionCandidatesTests {
       lastMsgId: nil
     ).insert(db)
     try Message(
-      messageId: 200, fromId: 901, date: date, text: "History",
+      messageId: 200, fromId: 901, date: Date(timeIntervalSince1970: 200), text: "History",
       peerUserId: 901, peerThreadId: nil, chatId: 911
     ).insert(db)
     try Message(
-      messageId: 10, fromId: 902, date: date, text: "History",
+      messageId: 10, fromId: 902, date: Date(timeIntervalSince1970: 10), text: "History",
       peerUserId: 902, peerThreadId: nil, chatId: 912
     ).insert(db)
     for userId in [Int64(902), 903, 904] {

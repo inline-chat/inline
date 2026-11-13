@@ -36,13 +36,11 @@ struct ChatParticipantsSourceTests {
 
       let participantSource = try ChatParticipantsWithMembersViewModel.participantsSourceChat(
         db,
-        chatId: 12,
-        purpose: .participantsList
+        chatId: 12
       )
       let mentionSource = try ChatParticipantsWithMembersViewModel.participantsSourceChat(
         db,
-        chatId: 12,
-        purpose: .mentionCandidates
+        chatId: 12
       )
 
       #expect(participantSource?.id == 10)
@@ -241,8 +239,7 @@ struct ChatParticipantsSourceTests {
 
       let cycleSource = try ChatParticipantsWithMembersViewModel.participantsSourceChat(
         db,
-        chatId: 10,
-        purpose: .mentionCandidates
+        chatId: 10
       )
       #expect(cycleSource?.id == 11)
 

@@ -106,6 +106,8 @@ public final class ObjectCache {
 
   public func clear() {
     BotAgentDirectory.shared.clear()
+    OwnedBotsDirectory.shared.clear()
+    MentionRosterRefresher.shared.clear()
     stopTracking()
     remoteLoader?.reset()
     store.reset()

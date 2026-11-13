@@ -1,4 +1,6 @@
+import Auth
 import Foundation
+import GRDB
 import InlineProtocol
 import Logger
 import RealtimeV2
@@ -32,6 +34,38 @@ public struct ListBotsTransaction: Transaction2 {
     }
 
     log.trace("listBots result count: \(response.bots.count)")
+    guard let ownerUserId = Auth.shared.getCurrentUserId() else { return }
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        try Self.saveOwnedBots(response.bots, ownerUserId: ownerUserId, in: db)
+      }
+    } catch {
+      log.error("Failed to save listed bots", error: error)
+    }
+  }
+
+  /// The list is the complete set of the owner's bots: save each one and drop
+  /// ownership from any local bot that is no longer in it.
+  static func saveOwnedBots(_ bots: [InlineProtocol.User], ownerUserId: Int64, in db: Database) throws {
+    var ids: [Int64] = []
+    for bot in bots where bot.id > 0 {
+      ids.append(bot.id)
+      // Listing runs on every app activation; leave unchanged rows alone so
+      // their observers don't fire.
+      let listed = User(from: bot)
+      if let saved = try User.fetchOne(db, id: bot.id),
+         saved.bot,
+         saved.firstName == listed.firstName,
+         saved.lastName == listed.lastName,
+         saved.username == listed.username,
+         saved.pendingSetup == listed.pendingSetup,
+         saved.profileFileUniqueId == listed.profileFileUniqueId
+      {
+        continue
+      }
+      _ = try User.save(db, user: bot)
+    }
+    try BotOwner.replaceOwnedBots(db, botUserIds: ids, ownerUserId: ownerUserId)
   }
 
   public func failed(error: TransactionError2) async {

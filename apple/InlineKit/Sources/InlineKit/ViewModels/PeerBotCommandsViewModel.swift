@@ -97,6 +97,9 @@ public final class BotAgentDirectory {
     self.maxCachedPeers = max(1, maxCachedPeers)
   }
 
+  /// Fresh agents for `peer`. A fetch overtaken by `invalidate` or `clear`
+  /// throws `CancellationError`, never an empty list, so callers keep what
+  /// they show instead of dropping every Agent.
   public func agents(for peer: Peer, forceRefresh: Bool = false) async throws -> [MentionableBotAgent] {
     if !forceRefresh, let cached = freshCachedAgents(for: peer) {
       return cached
@@ -104,7 +107,7 @@ public final class BotAgentDirectory {
     let requestGeneration = generation
     if let task = inFlight[peer] {
       let result = try await task.value
-      guard requestGeneration == generation else { return [] }
+      guard requestGeneration == generation else { throw CancellationError() }
       return store(result, for: peer)
     }
 
@@ -117,8 +120,22 @@ public final class BotAgentDirectory {
       }
     }
     let result = try await task.value
-    guard requestGeneration == generation else { return [] }
+    guard requestGeneration == generation else { throw CancellationError() }
     return store(result, for: peer)
+  }
+
+  /// The last agents fetched for `peer`, even when stale, for a first frame
+  /// while `agents(for:)` revalidates.
+  public func cachedAgents(for peer: Peer) -> [MentionableBotAgent]? {
+    guard let agents = agentsByPeer[peer] else { return nil }
+    touch(peer)
+    return agents
+  }
+
+  /// Whether `agents(for:)` would fetch instead of answering from the cache.
+  public func needsRefresh(for peer: Peer) -> Bool {
+    guard let cachedAt = cachedAtByPeer[peer] else { return true }
+    return now().timeIntervalSince(cachedAt) >= cacheTTL
   }
 
   public func cached(agentId: Int64, botUserId: Int64, for peer: Peer) -> MentionableBotAgent? {
@@ -164,11 +181,11 @@ public final class BotAgentDirectory {
   }
 
   private func freshCachedAgents(for peer: Peer) -> [MentionableBotAgent]? {
+    // Stale entries stay for `cachedAgents(for:)`; only the LRU bound evicts.
     guard let agents = agentsByPeer[peer],
           let cachedAt = cachedAtByPeer[peer],
           now().timeIntervalSince(cachedAt) < cacheTTL
     else {
-      removeCachedPeer(peer)
       return nil
     }
     touch(peer)

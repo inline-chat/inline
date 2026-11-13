@@ -2,32 +2,43 @@ import Auth
 import Foundation
 import Observation
 
+/// Where a mention candidate comes from, strongest first. A user reachable
+/// several ways keeps the strongest source.
 public enum MentionCompletionSource: Int, Sendable {
+  /// Already has access to this chat.
   case participant
-  case spaceMember
+  /// One of the current user's own bots, offered everywhere. Sending asks to add it.
   case ownedBot
+  /// A member of the chat's space.
+  case spaceMember
+  /// Someone with DM history. Offered only when searched.
   case directChat
 }
 
 public struct MentionCompletionUser: Hashable, Sendable {
   public var userInfo: UserInfo
   public var source: MentionCompletionSource
-  public var lastMsgId: Int64?
+  /// When the DM with this user last had a message.
+  public var lastDirectMessageDate: Date?
+  /// Position among this chat's most recent senders; 0 spoke last.
+  public var recentSenderRank: Int?
   public var isPinned: Bool
 
   public init(
     userInfo: UserInfo,
     source: MentionCompletionSource,
-    lastMsgId: Int64? = nil,
+    lastDirectMessageDate: Date? = nil,
+    recentSenderRank: Int? = nil,
     isPinned: Bool = false
   ) {
     self.userInfo = userInfo
     self.source = source
-    self.lastMsgId = lastMsgId
+    self.lastDirectMessageDate = lastDirectMessageDate
+    self.recentSenderRank = recentSenderRank
     self.isPinned = isPinned
   }
 
-  /// Keep the strongest source without losing the same person's direct-chat signals.
+  /// Keep the strongest source without losing the same person's other signals.
   static func mergingDuplicates(_ users: [Self]) -> [Self] {
     var indicesById: [Int64: Int] = [:]
     var merged: [Self] = []
@@ -41,7 +52,12 @@ public struct MentionCompletionUser: Hashable, Sendable {
       let existing = merged[index]
       var preferred = existing.source.rawValue <= user.source.rawValue ? existing : user
       preferred.isPinned = existing.isPinned || user.isPinned
-      preferred.lastMsgId = max(existing.lastMsgId ?? 0, user.lastMsgId ?? 0)
+      preferred.lastDirectMessageDate = [existing.lastDirectMessageDate, user.lastDirectMessageDate]
+        .compactMap(\.self)
+        .max()
+      preferred.recentSenderRank = [existing.recentSenderRank, user.recentSenderRank]
+        .compactMap(\.self)
+        .min()
       merged[index] = preferred
     }
     return merged
@@ -51,26 +67,44 @@ public struct MentionCompletionUser: Hashable, Sendable {
 public struct MentionCompletionCandidates: Equatable, Sendable {
   public var users: [MentionCompletionUser]
   public var groups: [UserGroup]
+  /// Groups that already have access to this chat.
+  public var groupIdsWithAccess: Set<Int64>
   public var agents: [MentionableBotAgent]
 
-  public static let empty = MentionCompletionCandidates(users: [], groups: [], agents: [])
+  public static let empty = MentionCompletionCandidates(users: [], groups: [])
 
   public init(
     users: [MentionCompletionUser],
     groups: [UserGroup],
+    groupIdsWithAccess: Set<Int64> = [],
     agents: [MentionableBotAgent] = []
   ) {
     self.users = users
     self.groups = groups
+    self.groupIdsWithAccess = groupIdsWithAccess
     self.agents = agents
   }
 
-  /// A bot the user just set up has an empty DM, so direct chat history can't surface it yet.
+  /// Adds the current user's bots, including ones not saved locally yet.
   public func addingOwnedBots(_ bots: [UserInfo]) -> Self {
     var candidates = self
     candidates.users = MentionCompletionUser.mergingDuplicates(
       users + bots.map { MentionCompletionUser(userInfo: $0, source: .ownedBot) }
     )
+    return candidates
+  }
+
+  /// Adds Agents not listed yet, showing each with its bot's current name and photo.
+  public func addingAgents(_ newAgents: [MentionableBotAgent]) -> Self {
+    var candidates = self
+    var seen = Set(agents.map(\.id))
+    let usersById = Dictionary(
+      users.map { ($0.userInfo.id, $0.userInfo) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    for agent in newAgents where seen.insert(agent.id).inserted {
+      candidates.agents.append(usersById[agent.botUserId].map(agent.withBotUserInfo) ?? agent)
+    }
     return candidates
   }
 }
@@ -200,7 +234,7 @@ public final class MentionCompletionViewModel {
     let currentUserId = currentUserId()
     let users = MentionCompletionUser.mergingDuplicates(input.users.filter { user in
       user.userInfo.user.pendingSetup != true &&
-        (user.source != .directChat || (user.lastMsgId ?? 0) > 0) &&
+        (user.source != .directChat || user.lastDirectMessageDate != nil) &&
         user.userInfo.user.id != currentUserId
     })
     let usersById = Dictionary(uniqueKeysWithValues: users.map { ($0.userInfo.id, $0) })
@@ -208,7 +242,11 @@ public final class MentionCompletionViewModel {
     var agentCandidatesById: [Int64: MentionCompletionCandidate] = [:]
 
     for group in input.groups where group.id > 0 {
-      groupCandidatesById[group.id] = MentionCompletionCandidate(group: group, locale: locale)
+      groupCandidatesById[group.id] = MentionCompletionCandidate(
+        group: group,
+        hasAccess: input.groupIdsWithAccess.contains(group.id),
+        locale: locale
+      )
     }
 
     for agent in input.agents where agent.id > 0 && agent.botUserId > 0 {
@@ -225,25 +263,7 @@ public final class MentionCompletionViewModel {
       Array(groupCandidatesById.values) +
         Array(agentCandidatesById.values) +
         users.map { MentionCompletionCandidate(user: $0, locale: locale) }
-    ).sorted {
-      if $0.isPinned != $1.isPinned {
-        return $0.isPinned
-      }
-
-      if $0.lastMsgId != $1.lastMsgId {
-        return $0.lastMsgId > $1.lastMsgId
-      }
-
-      if $0.sortRank != $1.sortRank {
-        return $0.sortRank < $1.sortRank
-      }
-
-      if $0.sortText != $1.sortText {
-        return $0.sortText < $1.sortText
-      }
-
-      return $0.id < $1.id
-    }
+    ).sorted(by: MentionCompletionCandidate.precedes)
 
     let selectedId = selectedItem?.id
     applyFilter(resetSelection: false, selectedId: selectedId)
@@ -420,10 +440,13 @@ private enum MentionMatchRank: Int, CaseIterable {
 
 private struct MentionCompletionCandidate {
   let item: MentionCompletionItem
+  /// Has access to this chat: ranks ahead of everyone else in its relevance tier.
+  let hasAccess: Bool
+  let recentSenderRank: Int
+  let isPinned: Bool
+  let lastDirectMessageDate: Date
   let sortRank: Int
   let sortText: String
-  let isPinned: Bool
-  let lastMsgId: Int64
   private let fields: [MatchField]
 
   var id: String {
@@ -437,11 +460,27 @@ private struct MentionCompletionCandidate {
     return false
   }
 
+  /// People already in the chat first, then whoever spoke there most recently,
+  /// pinned DMs, the latest DM, source, name and identity.
+  static func precedes(_ lhs: Self, _ rhs: Self) -> Bool {
+    if lhs.hasAccess != rhs.hasAccess { return lhs.hasAccess }
+    if lhs.recentSenderRank != rhs.recentSenderRank { return lhs.recentSenderRank < rhs.recentSenderRank }
+    if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+    if lhs.lastDirectMessageDate != rhs.lastDirectMessageDate {
+      return lhs.lastDirectMessageDate > rhs.lastDirectMessageDate
+    }
+    if lhs.sortRank != rhs.sortRank { return lhs.sortRank < rhs.sortRank }
+    if lhs.sortText != rhs.sortText { return lhs.sortText < rhs.sortText }
+    return lhs.id < rhs.id
+  }
+
   init(user: MentionCompletionUser, locale: Locale) {
     item = .user(user)
-    sortRank = user.source.rawValue + 1
+    hasAccess = user.source == .participant
+    recentSenderRank = user.recentSenderRank ?? Int.max
     isPinned = user.isPinned
-    lastMsgId = user.lastMsgId ?? 0
+    lastDirectMessageDate = user.lastDirectMessageDate ?? .distantPast
+    sortRank = user.source.rawValue + 1
     fields = Self.fields([user.userInfo.user.username], exactRank: .exactUsername, locale: locale) +
       Self.fields(
         [user.userInfo.user.displayName, user.userInfo.user.fullName],
@@ -452,11 +491,13 @@ private struct MentionCompletionCandidate {
     sortText = MentionCompletionViewModel.normalized(user.userInfo.user.displayName, locale: locale)
   }
 
-  init(group: UserGroup, locale: Locale) {
+  init(group: UserGroup, hasAccess: Bool, locale: Locale) {
     item = .group(group)
-    sortRank = 0
+    self.hasAccess = hasAccess
+    recentSenderRank = Int.max
     isPinned = false
-    lastMsgId = 0
+    lastDirectMessageDate = .distantPast
+    sortRank = 0
     fields = Self.fields(
       [group.name],
       exactRank: .exactName,
@@ -469,9 +510,11 @@ private struct MentionCompletionCandidate {
 
   init(agent: MentionableBotAgent, relationship: MentionCompletionUser?, locale: Locale) {
     item = .agent(agent)
-    sortRank = 1
+    hasAccess = relationship?.source == .participant
+    recentSenderRank = relationship?.recentSenderRank ?? Int.max
     isPinned = relationship?.isPinned ?? false
-    lastMsgId = relationship?.lastMsgId ?? 0
+    lastDirectMessageDate = relationship?.lastDirectMessageDate ?? .distantPast
+    sortRank = 1
     fields = Self.fields([agent.handle], exactRank: .exactUsername, locale: locale) +
       Self.fields([agent.name], exactRank: .exactName, supportsExactToken: true, locale: locale) +
       Self.fields(

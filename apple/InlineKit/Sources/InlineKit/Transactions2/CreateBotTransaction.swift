@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import InlineProtocol
 import Logger
@@ -39,6 +40,20 @@ public struct CreateBotTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
     log.trace("createBot succeeded for botId: \(response.bot.id)")
+    // Save the bot right away so mention menus offer it before any chat exists.
+    if response.hasBot, response.bot.id > 0 {
+      let creatorId = Auth.shared.getCurrentUserId()
+      do {
+        try await AppDatabase.shared.dbWriter.write { db in
+          _ = try User.save(db, user: response.bot)
+          if let ownerUserId = BotOwner.ownerUserId(from: response.bot) ?? creatorId {
+            try BotOwner.set(db, botUserId: response.bot.id, ownerUserId: ownerUserId)
+          }
+        }
+      } catch {
+        log.error("Failed to save created bot", error: error)
+      }
+    }
     NotificationCenter.default.post(name: .botAgentsChanged, object: response.bot.id)
   }
 

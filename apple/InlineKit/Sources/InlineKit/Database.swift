@@ -1486,6 +1486,18 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("bot owner") { db in
+      // Who each bot acts for, from the server's `botInfo`. Not on the user row,
+      // so user saves without it never clear it. Listing the current user's
+      // bots fills it for bots saved before this existed.
+      try db.create(table: "botOwner") { table in
+        table.column("botUserId", .integer)
+          .primaryKey()
+          .references("user", column: "id", onDelete: .cascade)
+        table.column("ownerUserId", .integer).notNull().indexed()
+      }
+    }
+
     return migrator
   }
 }
