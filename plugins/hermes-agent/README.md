@@ -240,10 +240,10 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- Inline transport: the 1.2.0 candidate sidecar uses `@inline-chat/realtime-sdk@0.0.22` and is
+- Inline transport: the 1.2.0 candidate sidecar uses `@inline-chat/realtime-sdk@0.0.23` and is
   bundled into the npm package, so Hermes startup does not run `npm install`.
-  This SDK includes widget calls and submitted forms; protocol `0.0.14` and SDK
-  `0.0.22` must be published before the adapter's registry-only release preflight.
+  This SDK includes widget calls, submitted forms and focus status; protocol `0.0.15` and SDK
+  `0.0.23` must be published before the adapter's registry-only release preflight.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
 
