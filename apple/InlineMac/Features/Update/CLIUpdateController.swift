@@ -326,6 +326,10 @@ final class CLIUpdateController {
         "The working version was kept. The update will retry automatically."
       }
     }
+    let administratorLauncher = status.launchersNeedingAdministrator?.first
+    if failureText == nil, let administratorLauncher {
+      failureText = "\(administratorLauncher) can only be replaced by an administrator. Update it from the Inline menu and enter an administrator password."
+    }
     let phases = status.bridges?.map(\.phase) ?? []
     bridgeMigrationRequired = phases.contains("migration_required")
     if bridgeMigrationRequired { statusText = "Bridge Restart Required" }
@@ -334,6 +338,7 @@ final class CLIUpdateController {
     else if phases.contains("trial") { statusText = "Starting Updated Bridge" }
     else if phases.contains("rolled_back") { statusText = "Previous Bridge Version Restored" }
     else if status.failure != nil { statusText = "CLI Update Will Retry" }
+    else if administratorLauncher != nil { statusText = "CLI Update Needs Administrator" }
     else if !automaticUpdatesEnabled { statusText = "Automatic CLI Updates Off" }
     else if status.outcome == "staged" { statusText = "CLI Update Ready" }
     else { statusText = "Up to Date" }
