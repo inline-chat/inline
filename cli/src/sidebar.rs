@@ -1204,6 +1204,7 @@ async fn load_sidebar(
     let payload = realtime
         .call(proto::GetChatsInput {
             include_subthreads: Some(false),
+            ..Default::default()
         })
         .await?;
     Sidebar::build(payload, current_user)

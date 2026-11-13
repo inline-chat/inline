@@ -3750,6 +3750,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let payload = realtime
                         .call(proto::GetChatsInput {
                             include_subthreads: Some(args.include_subthreads),
+                            ..Default::default()
                         })
                         .await?;
                     let payload = apply_chat_list_scope(payload, &args.scope);
@@ -9831,6 +9832,7 @@ mod cli_parsing_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
 
         filter_users_payload(&mut payload, Some("mo"));

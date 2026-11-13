@@ -838,6 +838,7 @@ async fn codex_round_trip_through_inline() {
                 proto::Method::GetChats,
                 proto::rpc_call::Input::GetChats(proto::GetChatsInput {
                     include_subthreads: Some(true),
+                    ..Default::default()
                 }),
             )
             .await
