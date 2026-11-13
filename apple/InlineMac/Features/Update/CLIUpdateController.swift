@@ -240,7 +240,11 @@ final class CLIUpdateController {
       }
       nextCheck = Date().addingTimeInterval(60 * 60)
       do {
-        let bootstrap = CLIInstallerService(configuration: .production(channel: channel()), requiresSignedManifest: true)
+        let bootstrap = CLIInstallerService(
+          configuration: .production(channel: channel()),
+          requiresSignedManifest: true,
+          allowsAdministratorAuthorization: manual
+        )
         bootstrapIsAutomatic = !manual
         let task = Task { try await bootstrap.install(progress: { _ in }) }
         bootstrapTask = task
