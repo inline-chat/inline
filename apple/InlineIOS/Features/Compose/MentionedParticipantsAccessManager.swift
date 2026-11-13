@@ -29,6 +29,8 @@ final class MentionedParticipantsAccessManager {
     let users: [UserInfo]
     let groups: [InlineKit.UserGroup]
     let canRemoveParticipants: Bool
+    /// The user's own mentioned bots that must join the space first.
+    let ownedBotAdmission: OwnedBotSpaceAdmission.Need?
   }
 
   private enum GroupAction {
@@ -93,8 +95,10 @@ final class MentionedParticipantsAccessManager {
           canRemoveParticipants: snapshot.canRemoveParticipants
         )
 
+        // Bots outside the space need to join it; that is asked separately.
+        let ownedBotAdmission = snapshot.ownedBotAdmission
         let userAction = MentionedParticipantAddPolicy.action(
-          for: request.reservedUserIds,
+          for: request.reservedUserIds.subtracting(ownedBotAdmission?.botIds ?? []),
           context: context
         )
         let groupItems = Self.groupItems(
@@ -105,6 +109,9 @@ final class MentionedParticipantsAccessManager {
         )
         let groupAction = Self.groupAction(for: groupItems, context: context)
 
+        if let ownedBotAdmission {
+          await self?.promptOwnedBotAdmission(ownedBotAdmission, chatId: snapshot.chat.id, users: snapshot.users)
+        }
         await self?.apply(
           userAction: userAction,
           groupAction: groupAction,
@@ -238,9 +245,69 @@ final class MentionedParticipantsAccessManager {
     )
   }
 
+  private func promptOwnedBotAdmission(
+    _ need: OwnedBotSpaceAdmission.Need,
+    chatId: Int64,
+    users: [UserInfo]
+  ) {
+    // Reserved ids are released by `apply`; this flow only holds its own bots.
+    pendingUserIds.formUnion(need.botIds)
+    let release = { [weak self] in
+      self?.pendingUserIds.subtract(need.botIds)
+    }
+    guard need.canAddMembers else {
+      ToastManager.shared.showToast(OwnedBotSpaceAdmission.failureMessage(need: need), type: .error)
+      release()
+      return
+    }
+    // UIKit drops a second alert while one is up, which would strand these ids.
+    guard let composeView, let presenter = composeView.attachmentFlowPresenter(),
+          !(presenter is UIAlertController)
+    else {
+      release()
+      return
+    }
+
+    let names = Self.userInfos(for: need.botIds, from: users).map(\.user.displayName)
+    let alert = UIAlertController(
+      title: OwnedBotSpaceAdmission.confirmationTitle(names: names, need: need),
+      message: OwnedBotSpaceAdmission.confirmationMessage(need: need),
+      preferredStyle: .actionSheet
+    )
+    alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        defer { release() }
+        do {
+          let admitted = try await OwnedBotSpaceAdmission.admit(need, chatId: chatId)
+          let admittedNames = Self.userInfos(for: admitted, from: users).map(\.user.displayName)
+          ToastManager.shared.showToast(
+            admittedNames.count == 1
+              ? "Added \(admittedNames[0]) to \(need.spaceName)"
+              : "Added \(admittedNames.count) agents to \(need.spaceName)",
+            type: .success,
+            systemImage: "person.badge.plus"
+          )
+        } catch {
+          self?.log.error("Failed to add owned bots to the space", error: error)
+          ToastManager.shared.showToast(OwnedBotSpaceAdmission.failureMessage(need: need), type: .error)
+        }
+      }
+    })
+    alert.addAction(UIAlertAction(title: "Not Now", style: .cancel) { _ in release() })
+
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = composeView.sendButton
+      popover.sourceRect = composeView.sendButton.bounds
+    }
+
+    presenter.present(alert, animated: true)
+  }
+
   private func prompt(_ items: [MentionCompletionItem], chatId: Int64, allowsUndo: Bool) {
     guard !items.isEmpty else { return }
-    guard let composeView, let presenter = composeView.attachmentFlowPresenter() else {
+    guard let composeView, let presenter = composeView.attachmentFlowPresenter(),
+          !(presenter is UIAlertController)
+    else {
       release(items: items)
       return
     }
@@ -399,6 +466,10 @@ final class MentionedParticipantsAccessManager {
         .filter(Array(groupIds).contains(InlineKit.UserGroup.Columns.id))
         .fetchAll(db)
 
+      let ownedBotAdmission = try currentUserId.flatMap {
+        try OwnedBotSpaceAdmission.need(db, chat: chat, mentionedUserIds: userIds, currentUserId: $0)
+      }
+
       return Snapshot(
         chat: chat,
         messageCount: messageCount,
@@ -406,7 +477,8 @@ final class MentionedParticipantsAccessManager {
         groupParticipantIds: access.groupIds,
         users: users,
         groups: groups,
-        canRemoveParticipants: canRemoveParticipants
+        canRemoveParticipants: canRemoveParticipants,
+        ownedBotAdmission: ownedBotAdmission
       )
     }
   }
