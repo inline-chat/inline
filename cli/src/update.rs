@@ -1103,7 +1103,8 @@ mod tests {
     }
 
     #[test]
-    fn updater_reports_admin_only_launcher_and_keeps_bridge_staging_and_other_launchers_recoverable() {
+    fn updater_reports_admin_only_launcher_and_keeps_bridge_staging_and_other_launchers_recoverable()
+     {
         use std::os::unix::fs::PermissionsExt;
         // Hosted Mac/Linux qualification runs unprivileged. Root bypasses the
         // filesystem permission failure this regression deliberately exercises.
@@ -1153,7 +1154,10 @@ mod tests {
         // as a failed update.
         assert!(result.unwrap());
         let partial = store.read().unwrap();
-        assert_eq!(partial.launchers_needing_administrator, vec![blocked.clone()]);
+        assert_eq!(
+            partial.launchers_needing_administrator,
+            vec![blocked.clone()]
+        );
         assert_eq!(partial.staged.as_ref(), Some(&artifact));
         assert_eq!(fs::read(&blocked).unwrap(), b"working old executable");
         assert_eq!(file_hash(&writable).unwrap(), artifact.executable_sha256);
