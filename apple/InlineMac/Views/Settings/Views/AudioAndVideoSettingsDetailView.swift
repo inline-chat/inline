@@ -153,7 +153,7 @@ private struct GridAudioSettingsSection: View {
       Toggle(isOn: $grid.playsMicrophoneSounds) {
         SettingsRowLabel(
           .microphoneSounds,
-          description: "Off by default. Play a short sound when you mute or unmute your microphone."
+          description: "Play a short sound when you mute or unmute your microphone."
         )
       }
       .settingsSearchAnchor(.microphoneSounds)
