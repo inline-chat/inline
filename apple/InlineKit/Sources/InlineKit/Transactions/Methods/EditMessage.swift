@@ -3,7 +3,6 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-import MultipartFormDataKit
 
 public struct TransactionEditMessage: Transaction {
   // Properties

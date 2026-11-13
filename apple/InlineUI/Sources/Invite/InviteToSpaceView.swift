@@ -9,7 +9,6 @@ import AppKit
 
 public struct InviteToSpaceView: View {
   @Environment(\.appDatabase) var db
-  @Environment(\.realtime) var realtime
   @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.dismiss) private var dismiss
 
