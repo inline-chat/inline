@@ -65,6 +65,12 @@ struct ChatInfo: View {
   @State private var groupPendingRemoval: UserGroup?
   @State private var showRemoveGroupConfirmation = false
 
+  /// The bot this direct chat is with, whose chat info leads with its status and access.
+  private var botUserInfo: UserInfo? {
+    guard let userInfo = fullChat.chatItem?.userInfo, userInfo.user.bot else { return nil }
+    return userInfo
+  }
+
   private var chatTitle: String {
     if let userInfo = fullChat.chatItem?.userInfo {
       userInfo.user.fullName
@@ -200,6 +206,10 @@ struct ChatInfo: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
         header
+        if let botUserInfo {
+          BotChatInfoStatusSection(user: botUserInfo.user)
+          BotChatInfoAccessSection(bot: botUserInfo)
+        }
         infoCard
 
         Picker("Tabs", selection: resourceTabSelection) {
@@ -292,15 +302,23 @@ struct ChatInfo: View {
       Text(chatTitle)
         .font(.title3)
         .fontWeight(.semibold)
+
+      // Bot usernames are mostly noise; the status says more.
+      if let bot = botUserInfo?.user {
+        BotChatInfoStatusLine(user: bot)
+      }
     }
     .frame(maxWidth: .infinity)
   }
 
   private var infoCard: some View {
     VStack(alignment: .leading, spacing: 8) {
+      if botUserInfo != nil {
+        ChatInfoSectionTitle("This Chat")
+      }
       GroupBox {
         VStack(alignment: .leading, spacing: 0) {
-          if let username = fullChat.chatItem?.userInfo?.user.username, !username.isEmpty {
+          if botUserInfo == nil, let username = fullChat.chatItem?.userInfo?.user.username, !username.isEmpty {
             infoRow("Username") {
               Text("@\(username)")
                 .foregroundStyle(.secondary)
@@ -1840,9 +1858,13 @@ private struct ChatInfoParticipantRow: View {
     .contentShape(Rectangle())
     .contextMenu {
       // The bot's own chat info carries its profile and settings.
-      if isOwnedBot {
+      if participant.user.bot == true {
         Button(action: onOpenChatInfo) {
-          Label("Manage Bot…", systemImage: "slider.horizontal.3")
+          if isOwnedBot {
+            Label("Manage Bot…", systemImage: "slider.horizontal.3")
+          } else {
+            Label("Bot Info…", systemImage: "info.circle")
+          }
         }
       }
       if canRemove {

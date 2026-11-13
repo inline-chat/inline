@@ -25,13 +25,17 @@ struct ChatInfoOwnedBotSection: View {
   var body: some View {
     VStack(spacing: 0) {
       if isOwned {
+        ChatInfoSectionTitle("Manage")
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.top, 12)
+          .padding(.bottom, 6)
         GroupBox {
           VStack(alignment: .leading, spacing: 0) {
             row("Profile", detail: "Photo, name, and username") {
               button("Edit…", kind: .profile)
             }
             Divider()
-            row("Bot Settings", detail: "Output, token, and avatar") {
+            row("Bot Settings", detail: "Default output, token, avatar, and skills") {
               button("Open…", kind: .settings)
             }
           }
