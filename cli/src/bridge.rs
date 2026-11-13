@@ -421,8 +421,27 @@ fn install_bridge_logger(trace: bool) {
         .filter_module("inline_agent_bridge", level)
         .filter_module("inline_agent_driver_codex", level)
         .filter_module("inline_agent_driver_acp", level)
-        .format_timestamp_millis()
-        .write_style(env_logger::WriteStyle::Never);
+        .write_style(env_logger::WriteStyle::Never)
+        .format(|buf, record| {
+            use std::io::Write as _;
+            let message = record.args().to_string();
+            // Errors, and warnings that report a failed step (a send, reply,
+            // publish or ledger write), are how a bridge goes quietly silent.
+            if record.level() == log::Level::Error
+                || (record.level() == log::Level::Warn
+                    && (message.contains("failed") || message.contains("refused")))
+            {
+                crate::telemetry::report_bridge_log_error(record.target(), &message);
+            }
+            writeln!(
+                buf,
+                "[{} {:<5} {}] {}",
+                buf.timestamp_millis(),
+                record.level(),
+                record.target(),
+                message
+            )
+        });
     let _ = logger.try_init();
 }
 
