@@ -30,7 +30,7 @@ _MACHINE_SETUP_PROTOCOL_VERSION = 1
 # Hermes' own tolerance: macOS readings of one process's start time drift about a second
 # after boot-clock adjustments, and 200 is 2 s on every platform's scale.
 _START_TIME_DRIFT_TOLERANCE = 200
-_PROBE_USER_AGENT = "inline-hermes-agent-adapter/1.1.0"
+_PROBE_USER_AGENT = "inline-hermes-agent-adapter/1.2.0"
 _ENV_REFERENCE_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 

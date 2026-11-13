@@ -10,7 +10,7 @@ provides_hooks:
   - subagent_stop
   - pre_approval_request
   - post_approval_response
-version: 1.1.0
+version: 1.2.0
 requires_hermes: ">=0.21.3"
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
