@@ -30,7 +30,6 @@ enum MacLogoutPhase: String, Sendable {
   case accountTasks = "account_tasks"
   case grid = "grid"
   case realtimeV2 = "realtime_v2"
-  case legacyRealtime = "legacy_realtime"
   case uploads = "uploads"
   case cachedDownloads = "cached_downloads"
   case downloads = "downloads"
@@ -49,7 +48,7 @@ enum MacLogoutPhase: String, Sendable {
     case .accountTasks: 4
     case .grid: 5
     case .realtimeV2: 6
-    case .legacyRealtime: 7
+    // 7 was the retired legacy realtime phase; codes stay stable for diagnostics.
     case .uploads: 8
     case .cachedDownloads: 9
     case .downloads: 10
@@ -249,9 +248,6 @@ extension AppDelegate {
     guard await runLogoutPhase(.realtimeV2, attempt: attempt, operation: {
       await Api.realtime.loggedOut()
       await ReservedChatIDPool.shared.drainForAccountTransition()
-    }) else { return }
-    guard await runLogoutPhase(.legacyRealtime, attempt: attempt, operation: {
-      await dependencies.realtime.loggedOut()
     }) else { return }
     guard await runLogoutPhase(.uploads, attempt: attempt, operation: {
       await FileUploader.shared.cancelAll()

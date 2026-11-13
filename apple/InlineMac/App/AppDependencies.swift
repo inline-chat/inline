@@ -35,7 +35,6 @@ public struct AppDependencies {
   let cliUpdates: CLIUpdateController
   let navigation = tracedLaunchDependency("DependencyNavigation") { NavigationModel.shared }
   let transactions = tracedLaunchDependency("DependencyTransactions") { Transactions.shared }
-  let realtime = tracedLaunchDependency("DependencyRealtimeLegacy") { Realtime.shared }
   let realtimeV2 = tracedLaunchDependency("DependencyRealtimeV2") { Api.realtime }
   let database = tracedLaunchDependency("DependencyDatabase") { AppDatabase.shared }
   let data = tracedLaunchDependency("DependencyDataManager") {
@@ -91,7 +90,6 @@ extension View {
       .environmentObject(deps.userSettings.notification)
       .environmentObject(Api.realtime.stateObject)
       .environment(\.transactions, deps.transactions)
-      .environment(\.realtime, deps.realtime)
       .environment(\.realtimeV2, deps.realtimeV2)
       .appDatabase(deps.database)
       .environment(\.logOut, deps.logOut)

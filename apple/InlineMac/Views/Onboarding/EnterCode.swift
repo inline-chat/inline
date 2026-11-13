@@ -105,9 +105,6 @@ struct OnboardingEnterCode: View {
 
     Task {
       do {
-        let bearerLoginAttempt = InlineProtocolNativeLogin.shared.isAvailable
-          ? nil
-          : try await Auth.shared.beginLoginAttempt()
         let result = if !onboardingViewModel.email.isEmpty {
           try await ApiClient.shared.verifyCode(
             code: code,
@@ -125,33 +122,7 @@ struct OnboardingEnterCode: View {
           throw APIError.error(error: "INVALID_REQUEST", errorCode: 401, description: "Email and phone empty")
         }
 
-        let accountMutationToken: AuthAccountMutationToken
-        if let token = result.token {
-          do {
-            guard let loginAttempt = bearerLoginAttempt else {
-              throw AuthStorageError.loginSuperseded
-            }
-            let commit = try await LoginStatePreparation.commit(
-              loginAttempt: loginAttempt,
-              targetUserID: result.userId,
-              persistCredentials: {
-                try await Auth.shared.saveCredentials(
-                  token: token,
-                  userId: result.userId,
-                  loginAttempt: loginAttempt
-                )
-              }
-            ) { db in
-              try result.user.saveFull(db)
-            }
-            accountMutationToken = commit.accountMutationToken
-          } catch {
-            _ = try? await ApiClient.shared.logout(bearerToken: token)
-            throw error
-          }
-        } else if let nativeToken = result.accountMutationToken {
-          accountMutationToken = nativeToken
-        } else {
+        guard let accountMutationToken = result.accountMutationToken else {
           throw AuthStorageError.loginSuperseded
         }
 
