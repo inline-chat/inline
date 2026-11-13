@@ -1207,6 +1207,13 @@ fn path_list(paths: &[std::path::PathBuf]) -> String {
 
 /// The end of a long text from a line start, with the hidden line count, as
 /// Codex's output previews show it ("… +120 lines").
+/// Hides credentials (assignments, auth headers, secret flags, URL
+/// passwords) and local paths before agent work is shown in a chat that
+/// people other than the owner may read.
+fn scrub(text: &str) -> String {
+    inline_agent_bridge::sanitize_diagnostic_text(text).unwrap_or_default()
+}
+
 fn tail(text: &str) -> String {
     let count = text.chars().count();
     if count <= MAX_DETAIL_CHARS {
@@ -1256,12 +1263,12 @@ fn row_title(
                     ActivityKind::Explore,
                 ),
                 Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => (
-                    format!("Ran {}", first_line(command, 80)),
+                    format!("Ran {}", first_line(&scrub(command), 80)),
                     meta,
                     ActivityKind::Command,
                 ),
                 Vocabulary::Claude => (
-                    format!("Bash {}", first_line(command, 80)),
+                    format!("Bash {}", first_line(&scrub(command), 80)),
                     meta,
                     ActivityKind::Command,
                 ),
@@ -1322,7 +1329,7 @@ fn row_title(
             let argument = ["file_path", "path", "pattern", "query", "url", "command"]
                 .iter()
                 .find_map(|key| input.get(*key).and_then(Value::as_str))
-                .map(|argument| first_line(&relative(argument, folder), 60));
+                .map(|argument| first_line(&scrub(&relative(argument, folder)), 60));
             let title = match (vocabulary, server) {
                 (Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp, Some(server)) => {
                     format!("Called {server}.{name}")
@@ -1423,9 +1430,9 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
                     CommandAction::Unknown { .. } => {}
                 }
             }
-            builder.code(&format!("$ {command}"), Some("sh"));
+            builder.code(&format!("$ {}", scrub(command)), Some("sh"));
             let output = output.as_deref().unwrap_or(delta);
-            builder.code(&tail(output), None);
+            builder.code(&tail(&scrub(output)), None);
             if let Some(code) = exit_code.filter(|code| *code != 0) {
                 builder.paragraph(&format!("Exit code {code}"));
             }
@@ -1444,7 +1451,7 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
                     .diff
                     .as_deref()
                     .filter(|_| shown < MAX_ROW_DIFF_CHARS)
-                    .map(tail);
+                    .map(|diff| tail(&scrub(diff)));
                 shown += diff.as_deref().map_or(0, str::len);
                 builder.diff(
                     &relative(&change.path.display().to_string(), folder),
@@ -1469,15 +1476,17 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
         } => {
             if !input.is_null() {
                 builder.code(
-                    &tail(&serde_json::to_string_pretty(input).unwrap_or_default()),
+                    &tail(&scrub(
+                        &serde_json::to_string_pretty(input).unwrap_or_default(),
+                    )),
                     Some("json"),
                 );
             }
             if let Some(output) = output.as_deref().or((!delta.is_empty()).then_some(delta)) {
-                builder.code(&tail(output), None);
+                builder.code(&tail(&scrub(output)), None);
             }
             if let Some(error) = error {
-                builder.paragraph(error);
+                builder.paragraph(&scrub(error));
             }
         }
         ItemBody::Plan {
@@ -2233,6 +2242,68 @@ mod tests {
             }),
         ));
         ended_text(&run(&mut renderer, events))
+    }
+
+    #[test]
+    fn detailed_work_never_shows_credentials() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1,
+                    completed(
+                        "c1",
+                        ItemBody::Command {
+                            command: "curl -H 'Authorization: Bearer abcdefghijklmnop' https://api.example.com".to_owned(),
+                            cwd: None,
+                            actions: Vec::new(),
+                            output: Some("API_TOKEN=supersecretoutput1".to_owned()),
+                            exit_code: Some(0),
+                            duration_ms: Some(10),
+                        },
+                        None,
+                    ),
+                ),
+                (
+                    2,
+                    completed(
+                        "f1",
+                        ItemBody::FileChange {
+                            changes: vec![FileDiff {
+                                path: "/work/.env.example".into(),
+                                change: FileChangeKind::Update { moved_to: None },
+                                diff: Some(
+                                    "@@ -1 +1 @@\n-API_TOKEN=supersecretold2\n+API_TOKEN=supersecretnew3"
+                                        .to_owned(),
+                                ),
+                            }],
+                        },
+                        None,
+                    ),
+                ),
+                (
+                    3,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: Some(1_000),
+                    }),
+                ),
+            ],
+        );
+        let sent = format!("{ops:?}");
+        assert!(sent.contains("API_TOKEN"), "{sent}");
+        for secret in [
+            "abcdefghijklmnop",
+            "supersecretoutput1",
+            "supersecretold2",
+            "supersecretnew3",
+        ] {
+            assert!(!sent.contains(secret), "{secret} reached the chat: {sent}");
+        }
     }
 
     #[test]
