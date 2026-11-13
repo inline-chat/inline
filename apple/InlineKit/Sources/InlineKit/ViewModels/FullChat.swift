@@ -519,6 +519,12 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
   }
 
+  /// The locally stored chat item for a peer, read synchronously so a chat
+  /// info opened from elsewhere renders on its first frame.
+  public static func cachedChatItem(peer: Peer, db: AppDatabase = .shared) -> SpaceChatItem? {
+    try? db.reader.read { db in try fetchChatItem(peer: peer, db: db) }
+  }
+
   /// Query chat item from database directly.
   private func queryChatItemFromDatabase() async throws -> SpaceChatItem? {
     let peer_ = peer

@@ -227,6 +227,8 @@ public final class AgentWorkStateStore: ObservableObject {
     var botUserID: Int64
     var mode: AgentThreadOutputMode?
     var isOffline: Bool?
+    /// Absent in rows saved before runtime details were kept.
+    var runtime: AgentRuntimeInfo?
   }
 
   @Published public private(set) var states: [AgentWorkState.Key: AgentWorkState] = [:]
@@ -239,6 +241,8 @@ public final class AgentWorkStateStore: ObservableObject {
   /// Bots without a runtime that declare the Output setting (`OUTPUT_MODE`),
   /// such as the OpenClaw and Hermes plugins.
   @Published public private(set) var outputModeBotUserIDs: Set<Int64> = []
+  /// What each bot's runtime last reported: machine, harness, setup state.
+  @Published public private(set) var runtimeInfos: [Int64: AgentRuntimeInfo] = [:]
 
   private let auth: AuthHandle
   private let outputModeRealtime: @Sendable () -> any InlineRPCRealtime
@@ -361,6 +365,12 @@ public final class AgentWorkStateStore: ObservableObject {
     return runtimeBotUserIDs.contains(botUserID) || outputModeBotUserIDs.contains(botUserID)
   }
 
+  /// The bot's last reported runtime, for its chat info.
+  public func runtimeInfo(botUserID: Int64) -> AgentRuntimeInfo? {
+    hydrateIfNeeded()
+    return runtimeInfos[botUserID]
+  }
+
   func setDeclaresOutputMode(_ declares: Bool, botUserID: Int64) {
     guard outputModeBotUserIDs.contains(botUserID) != declares else { return }
     if declares { outputModeBotUserIDs.insert(botUserID) } else { outputModeBotUserIDs.remove(botUserID) }
@@ -423,10 +433,12 @@ public final class AgentWorkStateStore: ObservableObject {
     if isOffline != offlineBotUserIDs.contains(runtime.botUserID) {
       if isOffline { offlineBotUserIDs.insert(runtime.botUserID) } else { offlineBotUserIDs.remove(runtime.botUserID) }
     }
+    let info = AgentRuntimeInfo(runtime)
+    if runtimeInfos[runtime.botUserID] != info { runtimeInfos[runtime.botUserID] = info }
     persist(
       .outputDefault,
       key: "\(runtime.botUserID)",
-      value: OutputDefault(botUserID: runtime.botUserID, mode: mode, isOffline: isOffline)
+      value: OutputDefault(botUserID: runtime.botUserID, mode: mode, isOffline: isOffline, runtime: info)
     )
   }
 
@@ -511,6 +523,7 @@ public final class AgentWorkStateStore: ObservableObject {
     runtimeBotUserIDs.removeAll()
     offlineBotUserIDs.removeAll()
     outputModeBotUserIDs.removeAll()
+    runtimeInfos.removeAll()
     overrideRevisions.removeAll()
     guard let database, let account = try? auth.beginAccountMutation() else { return }
     let auth = auth
@@ -592,7 +605,8 @@ public final class AgentWorkStateStore: ObservableObject {
     let value = OutputDefault(
       botUserID: runtime.botUserID,
       mode: AgentThreadOutputMode(runtime.defaultOutputMode),
-      isOffline: runtime.status == .offline
+      isOffline: runtime.status == .offline,
+      runtime: AgentRuntimeInfo(runtime)
     )
     try Row(kind: Kind.outputDefault.rawValue, key: "\(runtime.botUserID)", payload: JSONEncoder().encode(value)).save(db)
     return true
@@ -601,18 +615,20 @@ public final class AgentWorkStateStore: ObservableObject {
   /// Re-reads the committed projection after a sync batch.
   public func reloadCommitted() {
     didHydrate = false
-    let local = (outputOverrides, defaultOutputModes)
+    let local = (outputOverrides, defaultOutputModes, runtimeInfos)
     states.removeAll()
     outputOverrides.removeAll()
     overrideRevisions.removeAll()
     defaultOutputModes.removeAll()
     runtimeBotUserIDs.removeAll()
     offlineBotUserIDs.removeAll()
+    runtimeInfos.removeAll()
     hydrateIfNeeded()
     // Without a database (previews, tests) keep the local values.
     if database == nil {
       outputOverrides = local.0
       defaultOutputModes = local.1
+      runtimeInfos = local.2
     }
   }
 
@@ -639,6 +655,7 @@ public final class AgentWorkStateStore: ObservableObject {
           defaultOutputModes[value.botUserID] = value.mode
           runtimeBotUserIDs.insert(value.botUserID)
           if value.isOffline == true { offlineBotUserIDs.insert(value.botUserID) }
+          if let runtime = value.runtime { runtimeInfos[value.botUserID] = runtime }
         }
       case nil:
         break
