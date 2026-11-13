@@ -477,6 +477,12 @@ pub async fn run_service(
     let Some(_instance_lock) = wait_for_instance_lock(&paths.instance_lock).await? else {
         return Ok(());
     };
+    // Installs from before linger repair, and runtimes the updater activated,
+    // never ran setup's repair; check it whenever systemd starts the service.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("INVOCATION_ID").is_some() {
+        service::ensure_linux_linger();
+    }
     // The service manager restarts a failed exit every ten seconds; keep the
     // persisted backoff for repeated failures it cannot see.
     let service_ledger = FailureLedger::service(&paths);

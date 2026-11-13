@@ -896,7 +896,7 @@ fn linux_linger_enabled() -> Option<bool> {
 /// systemd lets a user enable their own linger on most distributions; when
 /// policy refuses, setup still succeeds and says how to fix it.
 #[cfg(target_os = "linux")]
-fn ensure_linux_linger() {
+pub(super) fn ensure_linux_linger() {
     if linux_linger_enabled() == Some(true) {
         return;
     }
@@ -905,7 +905,8 @@ fn ensure_linux_linger() {
         .iter()
         .any(|program| {
             Command::new(program)
-                .args(["enable-linger", &user_id])
+                // A background start must never raise a polkit prompt.
+                .args(["--no-ask-password", "enable-linger", &user_id])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
