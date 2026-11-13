@@ -195,7 +195,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.15",
+      "version": "0.0.16",
       "dependencies": {
         "@noble/ciphers": "^1.3.0",
         "@noble/hashes": "^1.8.0",
@@ -208,9 +208,9 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.23",
+      "version": "0.0.24",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.15",
+        "@inline-chat/protocol": "0.0.16",
         "ws": "^8.18.3",
       },
       "devDependencies": {
@@ -262,7 +262,7 @@
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.23",
+        "@inline-chat/realtime-sdk": "0.0.24",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -276,7 +276,7 @@
       "name": "@inline-openclaw/inline",
       "version": "1.0.0-alpha.2",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.23",
+        "@inline-chat/realtime-sdk": "0.0.24",
         "zod": "4.6.7",
       },
       "devDependencies": {
