@@ -257,6 +257,17 @@ describe("ProgressRenderer", () => {
     expect(doc.text).not.toContain("sk-proj-")
   })
 
+  test("credentials in an edit's diff never reach the message", () => {
+    const ops = run([
+      [0, { type: "turn.start" }],
+      [100, { type: "item", id: "e1", body: { kind: "edit", files: [{ path: "/repo/.env.example", diff: "@@ -1 +1 @@\n-API_TOKEN=oldsecretvalue123\n+API_TOKEN=newsecretvalue456" }] }, state: "done" }],
+    ])
+    const sent = JSON.stringify(ops, (_key, value) => (typeof value === "bigint" ? value.toString() : value))
+    expect(sent).toContain("API_TOKEN=")
+    expect(sent).not.toContain("oldsecretvalue123")
+    expect(sent).not.toContain("newsecretvalue456")
+  })
+
   test("a message near the size limit ends and continues in a new one", () => {
     const renderer = new ProgressRenderer()
     const big = "x".repeat(1_900)
