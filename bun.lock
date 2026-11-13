@@ -208,9 +208,9 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.22",
+      "version": "0.0.23",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.14",
+        "@inline-chat/protocol": "0.0.15",
         "ws": "^8.18.3",
       },
       "devDependencies": {
@@ -262,7 +262,7 @@
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.22",
+        "@inline-chat/realtime-sdk": "0.0.23",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -276,7 +276,7 @@
       "name": "@inline-openclaw/inline",
       "version": "1.0.0-alpha.2",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.22",
+        "@inline-chat/realtime-sdk": "0.0.23",
         "zod": "4.6.7",
       },
       "devDependencies": {
