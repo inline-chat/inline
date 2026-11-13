@@ -17,6 +17,8 @@ if (!script) throw new Error("Missing qualified image publication command")
 const sha = "a".repeat(40)
 const runtime = `ghcr.io/inline-chat/inline-server@sha256:${"1".repeat(64)}`
 const standby = `ghcr.io/inline-chat/inline-server@sha256:${"2".repeat(64)}`
+const runtimePlatform = `ghcr.io/inline-chat/inline-server@sha256:${"3".repeat(64)}`
+const standbyPlatform = `ghcr.io/inline-chat/inline-server@sha256:${"4".repeat(64)}`
 
 // This executable replaces Docker entirely. The test executes the workflow's
 // real shell and jq parsing without starting a daemon or contacting a registry.
@@ -52,7 +54,13 @@ case "$1" in
     test "$2" = inspect
     test ! -f "$DOCKER_CONFIG/config.json"
     if [[ "$STUB_PRIVATE" = 1 || ( "$STUB_PRIVATE" = arm64 && "$3" = "$STUB_STANDBY" ) ]]; then exit 1; fi
-    printf '{"schemaVersion":2}'
+    if [[ "$STUB_INDEX" != 0 && ( "$3" = "$STUB_RUNTIME" || "$3" = "$STUB_STANDBY" ) ]]; then
+      if [[ "$3" = "$STUB_RUNTIME" ]]; then arch=amd64 digest="$STUB_RUNTIME_PLATFORM"; else arch=arm64 digest="$STUB_STANDBY_PLATFORM"; fi
+      if [[ "$STUB_INDEX" = ambiguous ]]; then arch=unknown; fi
+      printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"%s","platform":{"os":"linux","architecture":"%s"}},{"digest":"sha256:%s","platform":{"os":"unknown","architecture":"unknown"}}]}' "\${digest##*@}" "$arch" "$(printf '9%.0s' {1..64})"
+    else
+      printf '{"schemaVersion":2}'
+    fi
     ;;
   *) exit 92 ;;
 esac
@@ -78,6 +86,7 @@ function execute(overrides: Record<string, string | undefined> = {}) {
         PATH: `${directory}:${process.env.PATH}`, RUNNER_TEMP: directory, GITHUB_OUTPUT: output,
         GITHUB_SHA: sha, GITHUB_ACTOR: "release-fixture", GITHUB_RUN_ID: "42", GITHUB_RUN_ATTEMPT: "2",
         GHCR_TOKEN: "synthetic-token", STUB_CALLS: calls, STUB_RUNTIME: runtime, STUB_STANDBY: standby,
+        STUB_RUNTIME_PLATFORM: runtimePlatform, STUB_STANDBY_PLATFORM: standbyPlatform, STUB_INDEX: "0",
         STUB_BAD_ARCH: "0", STUB_BAD_SOURCE: "0", STUB_BAD_DIGEST: "0", STUB_PRIVATE: "0", ...overrides,
       },
     })
@@ -103,6 +112,20 @@ describe("qualified server image publication", () => {
     expect(result.calls).not.toContain(" run ")
     expect(result.calls).not.toContain("synthetic-token")
     expect(result.stdout + result.stderr).not.toContain("synthetic-token")
+  })
+
+  it("emits the platform manifest digest when the push produced an image index", () => {
+    const result = execute({ STUB_INDEX: "1" })
+    expect(result.code, result.stderr).toBe(0)
+    expect(result.output).toBe(`runtime_image=${runtimePlatform}\nstandby_image=${standbyPlatform}\n`)
+    expect(result.calls).toContain(`manifest inspect ${runtimePlatform}`)
+    expect(result.calls).toContain(`manifest inspect ${standbyPlatform}`)
+  })
+
+  it("withholds release outputs when an index has no single matching platform", () => {
+    const result = execute({ STUB_INDEX: "ambiguous" })
+    expect(result.code).not.toBe(0)
+    expect(result.output).toBe("")
   })
 
   it("rejects an archive with the wrong source or architecture before any push", () => {
