@@ -51,8 +51,6 @@ describe("public user encoding", () => {
       pendingSetup: false,
       online: false,
       lastOnline: null,
-      focused: null,
-      focusUpdatedAt: null,
       timeZone: "UTC",
       date: 1_786_963_740,
     })
@@ -60,6 +58,9 @@ describe("public user encoding", () => {
     expect(encoded).not.toHaveProperty("phoneVerified")
     expect(encoded).not.toHaveProperty("deleted")
     expect(encoded).not.toHaveProperty("photoFileId")
+    // Focus status reaches only the people a user allows, never this payload.
+    expect(encoded).not.toHaveProperty("focused")
+    expect(encoded).not.toHaveProperty("focusUpdatedAt")
   })
 
   test("normalizes nullable historical photo metadata", () => {
