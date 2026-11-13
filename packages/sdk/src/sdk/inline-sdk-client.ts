@@ -19,7 +19,6 @@ import {
   type Message,
   type Peer,
   RpcError_Code,
-  type RpcCall,
   type RpcResult,
   SyncSkippedSequence_Reason,
   type Update,
@@ -41,6 +40,7 @@ import {
   type RpcCallOptions,
   type RpcReconnectPolicy,
 } from "../realtime/protocol-client.js"
+import type { RpcInput } from "../realtime/rpc-input.js"
 import { WebSocketTransport } from "../realtime/ws-transport.js"
 import { InlineProtocolV3Transport } from "../realtime/v3-transport.js"
 import { INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS } from "../realtime/production-trust-roots.js"
@@ -194,7 +194,7 @@ const replaySafeRpcMethods = new Set<Method>([
 
 const reconnectPolicyForRpc = (
   method: Method,
-  input: RpcCall["input"],
+  input: RpcInput,
 ): RpcReconnectPolicy => {
   if (method === Method.SEND_MESSAGE && input.oneofKind === "sendMessage" &&
       input.sendMessage.randomId !== undefined && input.sendMessage.randomId !== 0n) {
@@ -935,7 +935,7 @@ export class InlineSdkClient {
   // has a mapping for the method; otherwise behaves like unchecked raw.
   async invokeRaw(
     method: Method,
-    input: RpcCall["input"] = { oneofKind: undefined },
+    input: RpcInput = { oneofKind: undefined },
     options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     if (hasMethodMapping(method)) {
@@ -952,7 +952,7 @@ export class InlineSdkClient {
   // before the SDK updates its method<->oneof mappings.
   async invokeUncheckedRaw(
     method: Method,
-    input: RpcCall["input"] = { oneofKind: undefined },
+    input: RpcInput = { oneofKind: undefined },
     options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     return await this.callRpcWithSemanticPolicy(method, input, options)
@@ -971,7 +971,7 @@ export class InlineSdkClient {
 
   private async callRpcWithSemanticPolicy(
     method: Method,
-    input: RpcCall["input"],
+    input: RpcInput,
     options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     if (this.closed) throw new Error("SDK client is closed; create a new InlineSdkClient to reconnect")
@@ -984,7 +984,7 @@ export class InlineSdkClient {
     })
   }
 
-  private assertMethodInputMatch(method: MappedMethod, input: RpcCall["input"]) {
+  private assertMethodInputMatch(method: MappedMethod, input: RpcInput) {
     const expected = rpcInputKindByMethod[method]
     if (expected == null) {
       if (input.oneofKind !== undefined) {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { ConnectionError_Reason, Method, RpcError_Code, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
+import { ChatListOrder, ChatListScope, ConnectionError_Reason, Method, RpcError_Code, ServerProtocolMessage, Update } from "@inline-chat/protocol/core"
 import { ProtocolClient, ProtocolClientError } from "./protocol-client.js"
 import { InlineSdkAuthenticationError } from "../sdk/errors.js"
 import { MockTransport } from "./mock-transport.js"
@@ -67,6 +67,31 @@ describe("ProtocolClient", () => {
     }
 
     throw new Error("Timed out waiting for open")
+  })
+
+  it("fills proto defaults into partial rpc inputs before sending", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(
+      ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }),
+    )
+    await waitForOpen(client)
+
+    await client.sendRpc(Method.GET_CHATS, { oneofKind: "getChats", getChats: {} })
+    const sent = transport.sent.find((m) => m.body.oneofKind === "rpcCall")
+    if (!sent) throw new Error("missing rpc")
+
+    const decoded = ClientMessage.fromBinary(ClientMessage.toBinary(sent))
+    if (decoded.body.oneofKind !== "rpcCall" || decoded.body.rpcCall.input.oneofKind !== "getChats") {
+      throw new Error("expected getChats rpc")
+    }
+    expect(decoded.body.rpcCall.input.getChats).toMatchObject({ order: ChatListOrder.RECENT, scope: ChatListScope.DIALOGS })
   })
 
   it("callRpc resolves on rpcResult and rejects on rpcError", async () => {

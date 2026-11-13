@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { gunzipSync } from "node:zlib"
 import { WebSocket } from "ws"
+import { normalizeRpcInput, type RpcInput } from "./rpc-input.js"
 import { installNodeAesBackend } from "@inline-chat/protocol/secure/node"
 import {
   AuthenticatedServerClock,
@@ -433,7 +434,8 @@ export class InlineProtocolV3Connection {
     return response.body.authComplete
   }
 
-  async callRpc(rpc: RpcCall, signal?: AbortSignal): Promise<RpcResult["result"]> {
+  async callRpc(call: { method: Method; input: RpcInput }, signal?: AbortSignal): Promise<RpcResult["result"]> {
+    const rpc: RpcCall = { method: call.method, input: normalizeRpcInput(call.method, call.input) }
     const request = { body: { oneofKind: "rpc" as const, rpc } }
     const response = readOnlyRpcMethods.has(rpc.method)
       ? await this.#invoke(request, undefined, signal)

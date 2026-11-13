@@ -73,6 +73,7 @@ export {
   InlineProtocolV3Transport,
   type InlineProtocolV3TransportOptions,
 } from "./realtime/v3-transport.js"
+export type { RpcInput } from "./realtime/rpc-input.js"
 export {
   ProtocolClientError,
   type RpcCallOptions,

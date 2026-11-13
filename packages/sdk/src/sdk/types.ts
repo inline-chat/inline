@@ -25,6 +25,7 @@ import type { Transport } from "../realtime/transport.js"
 import type { InlineSdkAuthenticationError } from "./errors.js"
 import type { InlineProtocolPublicKey } from "../realtime/v3-connection.js"
 import type { InlineProtocolV3Credentials } from "../realtime/v3-client.js"
+import type { RpcInput } from "../realtime/rpc-input.js"
 
 type InlineSdkClientCommonOptions = {
   baseUrl?: string // e.g. https://api.inline.chat
@@ -555,9 +556,10 @@ type RpcResultKindByMethod = typeof rpcResultKindByMethod
 
 export type MappedMethod = keyof RpcInputKindByMethod & keyof RpcResultKindByMethod
 
+// Fields left out of the input message take their proto defaults.
 export type RpcInputForMethod<M extends MappedMethod> = RpcInputKindByMethod[M] extends RpcInputKind
-  ? Extract<RpcCall["input"], { oneofKind: RpcInputKindByMethod[M] }>
-  : Extract<RpcCall["input"], { oneofKind: undefined }>
+  ? Extract<RpcInput, { oneofKind: RpcInputKindByMethod[M] }>
+  : Extract<RpcInput, { oneofKind: undefined }>
 
 export type RpcResultForMethod<M extends MappedMethod> = RpcResultKindByMethod[M] extends RpcResultKind
   ? Extract<RpcResult["result"], { oneofKind: RpcResultKindByMethod[M] }>
