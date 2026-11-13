@@ -139,6 +139,7 @@ struct MentionCompletionCandidatesTests {
     let database = AppDatabase.empty()
     let (home, space, thread, otherUser) = try await database.dbWriter.write { db in
       try Self.seed(db)
+      try Self.joinSpace(as: .admin, in: db)
       try Self.makeOwnedBot(904, owner: Self.me, in: db)
       return try (
         roster(db, .newThread(spaceId: nil)),
@@ -162,21 +163,65 @@ struct MentionCompletionCandidatesTests {
     #expect(!otherUser.users.contains { $0.userInfo.id == 904 })
   }
 
-  @Test("an existing space chat offers the user's bots once they are space members")
-  func ownedBotInSpaceChat() async throws {
+  @Test(
+    "a space offers the user's bots outside it only to people who can add members",
+    arguments: [nil, MemberRole.member, .admin] as [MemberRole?]
+  )
+  func ownedBotInSpaceChat(role: MemberRole?) async throws {
     let database = AppDatabase.empty()
-    let (outside, member) = try await database.dbWriter.write { db in
+    let (thread, newThread, afterJoining) = try await database.dbWriter.write { db in
       try Self.seed(db)
+      if let role { try Self.joinSpace(as: role, in: db) }
       try Self.makeOwnedBot(904, owner: Self.me, in: db)
       try Chat(id: 1_001, date: Date(), type: .thread, title: "Space Thread", spaceId: 900).insert(db)
       let scope = MentionCandidatesSource.Scope.chat(chatId: 1_001, peer: .thread(id: 1_001))
-      let outside = try roster(db, scope)
-      try Member(id: 990, date: Date(), userId: 904, spaceId: 900).insert(db)
-      return try (outside, roster(db, scope))
+      let thread = try roster(db, scope)
+      let newThread = try roster(db, .newThread(spaceId: 900))
+      try Member(id: 990, date: Date(), userId: 904, spaceId: 900, role: .member).insert(db)
+      return try (thread, newThread, roster(db, scope))
     }
-    // The server adds only space members to a space thread.
-    #expect(!outside.users.contains { $0.userInfo.id == 904 })
-    #expect(member.users.first { $0.userInfo.id == 904 }?.source == .ownedBot)
+    let offered = role == .admin
+    #expect(thread.users.contains { $0.userInfo.id == 904 } == offered)
+    #expect(newThread.users.contains { $0.userInfo.id == 904 } == offered)
+    // Once the bot is a member, anyone can add it to a thread.
+    #expect(afterJoining.users.first { $0.userInfo.id == 904 }?.source == .ownedBot)
+  }
+
+  @Test("mentioning the user's bot outside the space asks it to join, with public access only in public threads")
+  func ownedBotAdmissionNeed() async throws {
+    let database = AppDatabase.empty()
+    let (privateNeed, publicNeed, childNeed, memberNeed, otherBots) = try await database.dbWriter.write { db in
+      try Self.seed(db)
+      try Self.joinSpace(as: .member, in: db)
+      try Self.makeOwnedBot(904, owner: Self.me, in: db)
+      try User(id: 905, email: nil, firstName: "Not Mine").insert(db)
+      try Self.makeOwnedBot(905, owner: 2, in: db)
+      let date = Date()
+      let privateThread = Chat(id: 1_001, date: date, type: .thread, title: "Private", spaceId: 900, isPublic: false)
+      let publicThread = Chat(id: 1_002, date: date, type: .thread, title: "Public", spaceId: 900, isPublic: true)
+      var child = Chat(id: 1_003, date: date, type: .thread, title: "Child", spaceId: 900, isPublic: true)
+      child.parentChatId = 1_002
+      for chat in [privateThread, publicThread, child] { try chat.insert(db) }
+      func need(_ chat: InlineKit.Chat, _ ids: Set<Int64> = [904, 901]) throws -> OwnedBotSpaceAdmission.Need? {
+        try OwnedBotSpaceAdmission.need(db, chat: chat, mentionedUserIds: ids, currentUserId: Self.me)
+      }
+      let privateNeed = try need(privateThread)
+      let publicNeed = try need(publicThread)
+      let childNeed = try need(child)
+      let otherBots = try need(privateThread, [905])
+      try Member(id: 990, date: date, userId: 904, spaceId: 900, role: .member).insert(db)
+      return try (privateNeed, publicNeed, childNeed, need(privateThread), otherBots)
+    }
+    let need = try #require(privateNeed)
+    #expect(need.botIds == [904])
+    #expect(need.spaceName == "Space")
+    #expect(!need.grantsPublicAccess)
+    #expect(!need.canAddMembers)
+    #expect(publicNeed?.grantsPublicAccess == true)
+    // A subthread of a public thread grants access on the child, not the space's public threads.
+    #expect(childNeed?.grantsPublicAccess == false)
+    #expect(memberNeed == nil)
+    #expect(otherBots == nil)
   }
 
   @Test("recent senders in the chat are ranked by who spoke last")
@@ -416,6 +461,11 @@ struct MentionCompletionCandidatesTests {
       try await Task.sleep(for: .milliseconds(10))
     }
     #expect(condition(), "Candidate observation did not refresh")
+  }
+
+  private nonisolated static func joinSpace(as role: MemberRole, in db: Database) throws {
+    try User(id: me, email: nil, firstName: "Me").insert(db)
+    try Member(id: me, date: Date(), userId: me, spaceId: 900, role: role).insert(db)
   }
 
   private nonisolated static func makeOwnedBot(_ id: Int64, owner: Int64, in db: Database) throws {

@@ -185,7 +185,7 @@ public final class MentionCandidatesSource {
     guard let roster else { return }
     var next = roster.candidates
     let ownedBots = services.ownedBots?.snapshot ?? .empty
-    if roster.offersAllOwnedBots {
+    if roster.offersOwnedBotsOutsideSpace {
       // Bots listed but not saved locally yet. Saved rows are fresher.
       let observed = Set(next.users.map(\.userInfo.id))
       next = next.addingOwnedBots(ownedBots.bots.filter { !observed.contains($0.id) })
@@ -251,9 +251,9 @@ struct MentionRoster: Equatable, Sendable {
   var candidates: MentionCompletionCandidates
   /// What to fetch so the local roster is complete.
   var refreshKeys: [MentionRosterRefresher.Key]
-  /// False in an existing space chat: the server adds only space members to
-  /// it, so the user's bots are offered there once they are members.
-  var offersAllOwnedBots: Bool
+  /// The server adds only space members to space threads. A bot outside the
+  /// space is offered only where the user can add it to the space first.
+  var offersOwnedBotsOutsideSpace: Bool
 }
 
 extension MentionCandidatesSource {
@@ -270,7 +270,6 @@ extension MentionCandidatesSource {
     var spaceId: Int64?
     var recentSenderChatId: Int64?
     var refreshKeys: [MentionRosterRefresher.Key] = []
-    var offersAllOwnedBots = true
 
     switch scope {
       case let .chat(chatId, peer):
@@ -279,7 +278,6 @@ extension MentionCandidatesSource {
           accessIds = access.userIds
           groupIdsWithAccess = access.groupIds
           spaceId = access.sourceChat.spaceId
-          offersAllOwnedBots = spaceId == nil
           if access.sourceChat.type != .privateChat {
             refreshKeys.append(.chatParticipants(access.sourceChat.id))
           }
@@ -319,7 +317,12 @@ extension MentionCandidatesSource {
     } else {
       []
     }
-    if !offersAllOwnedBots {
+    let offersOwnedBotsOutsideSpace = if let spaceId, let currentUserId {
+      try OwnedBotSpaceAdmission.canAddMembers(db, spaceId: spaceId, userId: currentUserId)
+    } else {
+      true
+    }
+    if !offersOwnedBotsOutsideSpace {
       ownedBotIds.formIntersection(memberIds.union(accessIds))
     }
 
@@ -410,7 +413,7 @@ extension MentionCandidatesSource {
         groupIdsWithAccess: groupIdsWithAccess
       ),
       refreshKeys: refreshKeys,
-      offersAllOwnedBots: offersAllOwnedBots
+      offersOwnedBotsOutsideSpace: offersOwnedBotsOutsideSpace
     )
   }
 }
