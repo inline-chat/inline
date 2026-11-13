@@ -423,7 +423,8 @@ public actor FileUploader {
     let fileName = localPath.components(separatedBy: "/").last ?? "" + ext
     let mimeType = format.toMimeType()
 
-    let uploadId = getUploadId(photoId: photoInfo.photo.id!)
+    guard let localPhotoId = photoInfo.photo.id else { throw FileUploadError.invalidPhotoId }
+    let uploadId = getUploadId(photoId: localPhotoId)
 
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
 
@@ -572,7 +573,10 @@ public actor FileUploader {
 
     switch media {
       case let .photo(photoInfo):
-        uploadId = getUploadId(photoId: photoInfo.photo.id!)
+        guard let localPhotoId = photoInfo.photo.id else {
+          throw FileUploadError.invalidPhotoId
+        }
+        uploadId = getUploadId(photoId: localPhotoId)
         type = .photo
       case let .video(videoInfo):
         guard let localVideoId = videoInfo.video.id else {
@@ -582,7 +586,10 @@ public actor FileUploader {
         uploadId = getUploadId(videoId: localVideoId)
         type = .video
       case let .document(documentInfo):
-        uploadId = getUploadId(documentId: documentInfo.document.id!)
+        guard let localDocumentId = documentInfo.document.id else {
+          throw FileUploadError.invalidDocumentId
+        }
+        uploadId = getUploadId(documentId: localDocumentId)
         type = .document
       case let .voice(voiceContent):
         uploadId = getUploadId(voiceId: voiceContent.voiceID)

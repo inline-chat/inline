@@ -3,7 +3,6 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-import MultipartFormDataKit
 import RealtimeV2
 
 #if os(iOS)
@@ -287,6 +286,31 @@ public struct TransactionSendMessage: Transaction {
     }
   }
 
+  /// Rebuilds the send for an outgoing row left in `.sending` by a terminated process.
+  /// Reuses the row's identity (transaction id, random id, temporary id) so the
+  /// server's per-sender random-id dedupe makes the resend idempotent and the
+  /// existing optimistic row is reconciled instead of duplicated.
+  init?(recovering message: Message, mediaItems: [FileMediaItem]) {
+    guard message.messageId < 0, let randomId = message.randomId,
+          let transactionId = message.transactionId, !transactionId.isEmpty else { return nil }
+    self.init(
+      text: message.text,
+      peerId: message.peerId,
+      chatId: message.chatId,
+      mediaItems: mediaItems,
+      replyToMsgId: message.repliedToMessageId,
+      isSticker: message.isSticker,
+      entities: message.entities
+    )
+    id = transactionId
+    date = message.date
+    self.randomId = randomId
+    temporaryMessageId = message.messageId
+    if !attachments.isEmpty {
+      attachments[0].randomId = randomId
+    }
+  }
+
   private static func sendConfiguration(_ config: TransactionConfig, hasAttachments: Bool) -> TransactionConfig {
     guard hasAttachments else { return config }
     // Upload parts have bounded RPC stall timeouts, and final send has its own
@@ -491,6 +515,14 @@ public struct TransactionSendMessage: Transaction {
       }
     }
 
+    // Never turn an attachment send into a text-only (or empty) message when the
+    // upload finished without a server id; fail so the user can retry.
+    if !attachments.isEmpty, inputMedia == nil {
+      throw FileUploadError.failedToUpload
+    }
+
+    // Uploads overlap; the final sends in a chat go out in admission order.
+    await OutgoingSendOrder.shared.waitForTurn(transactionId: id)
     try Task.checkCancellation()
 
     // input for send message
@@ -521,6 +553,17 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
+    if let error = error as? FileUploadError {
+      switch error {
+      case .failedToUpload, .invalidPhoto, .invalidVideo, .invalidDocument, .invalidVoice,
+           .invalidPhotoId, .invalidDocumentId, .invalidVideoId, .invalidVoiceId, .invalidVideoMetadata:
+        // Deterministic: retrying returns the same cached result and blocks the chat's later sends.
+        return false
+      default:
+        break
+      }
+    }
+
     if let error = error as? NativeMediaUploadError {
       switch error {
       case .emptySource, .fileTooLarge, .invalidGeometry, .sourceChanged, .canceled, .expired, .processingTimedOut:
@@ -586,6 +629,8 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
+    // The server already ordered this send; release the next one before the local apply.
+    OutgoingSendOrder.shared.finish(transactionId: id)
     await Api.realtime.applyUpdates(result)
 
     #if os(iOS)
@@ -596,6 +641,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func didFail(error: Error?) async {
+    OutgoingSendOrder.shared.finish(transactionId: id)
     Log.shared.error("Failed to send message", error: error)
 
     if !attachments.isEmpty {
@@ -638,6 +684,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func rollback() async {
+    OutgoingSendOrder.shared.finish(transactionId: id)
     do {
       // Remove from database and update chat state
       let _ = try await AppDatabase.shared.dbWriter.write { db in

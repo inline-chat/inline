@@ -46,6 +46,13 @@ public class Transactions: @unchecked Sendable {
   private var generation: UInt64 = 0
   private var submissions: [UUID: OwnedSubmission] = [:]
   private var initializationTask: Task<Void, Never>?
+  /// Last admission handed to the actor. Each admission waits for the previous one so the
+  /// actor queue is strictly FIFO in admission order; `OutgoingSendOrder` relies on this so
+  /// the earliest send of a chat is always dequeued before the later sends that wait on it.
+  private var admissionTail: Task<Void, Never>?
+  /// Every transaction id admitted by this process. Never cleared: launch recovery must not
+  /// mistake a send this process owns (live, just finished, or just failed) for an orphan.
+  private var admittedInProcess: Set<String> = []
   private var clearTask: Task<Void, Never>?
   private let beforeActorSubmission: (@Sendable () async throws -> Void)?
 
@@ -145,17 +152,37 @@ public class Transactions: @unchecked Sendable {
   /// Start a transaction
   @discardableResult
   public func mutate(transaction transaction_: TransactionType) -> Bool {
+    admit(transaction_, runOptimistic: true)
+  }
+
+  /// Re-admits a transaction whose optimistic projection already exists on disk,
+  /// for example an outgoing message recovered after the app was terminated.
+  @discardableResult
+  func resumeRecovered(transaction: TransactionType) -> Bool {
+    admit(transaction, runOptimistic: false)
+  }
+
+  private func admit(_ transaction_: TransactionType, runOptimistic: Bool) -> Bool {
     let transaction = transaction_
     var admitted = false
     lifecycleLock.withLock {
       guard clearTask == nil else { return }
 
       log.debug("Mutating transaction: \(transaction.id)")
-      transaction.transaction.optimistic()
+      if runOptimistic {
+        transaction.transaction.optimistic()
+      }
 
       do {
         try cache.add(transaction: transaction)
         admitted = true
+        admittedInProcess.insert(transaction.id)
+        if case let .sendMessage(send) = transaction {
+          OutgoingSendOrder.shared.register(
+            transactionId: send.id,
+            lane: OutgoingSendOrder.laneKey(chatId: send.chatId, peerId: send.peerId)
+          )
+        }
       } catch {
         let submissionId = UUID()
         let task = Task { [weak self] in
@@ -169,9 +196,11 @@ public class Transactions: @unchecked Sendable {
       let submissionId = UUID()
       let expectedGeneration = generation
       let initializationTask = self.initializationTask
+      let previousAdmission = admissionTail
       let actor = self.actor
       let beforeActorSubmission = self.beforeActorSubmission
       let task = Task(priority: .userInitiated) { [weak self] in
+        await previousAdmission?.value
         guard let self else { return }
         defer { self.submissionFinished(submissionId) }
 
@@ -195,8 +224,13 @@ public class Transactions: @unchecked Sendable {
         await actor.queue(transaction: transaction.transaction)
       }
       submissions[submissionId] = OwnedSubmission(task: task)
+      admissionTail = task
     }
     return admitted
+  }
+
+  func wasAdmittedInThisProcess(transactionId: String) -> Bool {
+    lifecycleLock.withLock { admittedInProcess.contains(transactionId) }
   }
 
   /// Immediately triggers rollback and removes transaction from cache
@@ -244,6 +278,7 @@ public class Transactions: @unchecked Sendable {
   private func finishClear() {
     lifecycleLock.withLock {
       initializationTask = nil
+      admissionTail = nil
       clearTask = nil
     }
   }
