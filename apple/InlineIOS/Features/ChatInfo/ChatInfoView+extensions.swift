@@ -229,7 +229,10 @@ extension ChatInfoView {
           Text(userInfo.user.firstName ?? "User")
             .font(.title2)
             .fontWeight(.semibold)
-          if let username = userInfo.user.username {
+          if userInfo.user.bot {
+            // Bot usernames are mostly noise; the status says more.
+            BotInfoStatusLine(user: userInfo.user)
+          } else if let username = userInfo.user.username {
             Text("@\(username)")
               .font(.callout)
               .foregroundColor(.secondary)

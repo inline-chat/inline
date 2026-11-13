@@ -249,15 +249,13 @@ struct ChatInfoView: View {
         VStack {
           switch selectedTab {
             case .info:
-              if isDM {
+              if isDM, let bot = chatItem.userInfo, bot.user.bot {
+                BotChatInfoOverview(bot: bot, notificationSelection: notificationSelectionBinding)
+              } else if isDM {
                 DirectMessageInfoTabView(
                   username: directMessageUsername,
-                  notificationSelection: notificationSelectionBinding,
-                  botUserID: chatItem.userInfo?.user.bot == true ? chatItem.userInfo?.user.id : nil
+                  notificationSelection: notificationSelectionBinding
                 )
-                if let userInfo = chatItem.userInfo, userInfo.user.bot == true {
-                  OwnedBotManageCard(bot: userInfo)
-                }
               } else {
                 InfoTabView()
                   .environmentObject(ChatInfoViewEnvironment(
@@ -865,8 +863,6 @@ private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
 private struct DirectMessageInfoTabView: View {
   let username: String?
   @Binding var notificationSelection: DialogNotificationSettingSelection
-  /// Set in a direct chat with a bot, for its Output row.
-  let botUserID: Int64?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -886,36 +882,10 @@ private struct DirectMessageInfoTabView: View {
       }
 
       DialogNotificationSettingsRows(selection: $notificationSelection)
-
-      if let botUserID {
-        ChatInfoOutputModeRows(botUserID: botUserID)
-      }
     }
     .background(Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     .padding(.horizontal, 16)
-  }
-}
-
-/// How the bot replies in this direct chat, with its default as a submenu.
-/// Shown for bots that report a runtime or declare the Output setting; the
-/// same choice as the chat's Agent Settings.
-private struct ChatInfoOutputModeRows: View {
-  let botUserID: Int64
-  @ObservedObject private var store = AgentWorkStateStore.shared
-
-  var body: some View {
-    Group {
-      if store.offersOutputMode(botUserID: botUserID) {
-        Divider()
-          .padding(.horizontal, 16)
-
-        AgentOutputModeSection(peer: .user(id: botUserID), botUserID: botUserID, style: .card)
-      }
-    }
-    .task(id: botUserID) {
-      await store.loadDirectChatOutputModes(botUserID: botUserID)
-    }
   }
 }
 
@@ -976,6 +946,8 @@ struct InfoTabView: View {
   /// The owned bot whose access the avatar badges show, when several are here.
   @State private var preferredBadgeBotID: Int64?
   @State private var managedBot: UserInfo?
+  /// A bot's own chat info, opened from its avatar.
+  @State private var botInfoItem: SpaceChatItem?
 
   private var cardBackgroundColor: Color {
     Color(uiColor: .secondarySystemGroupedBackground)
@@ -1021,6 +993,22 @@ struct InfoTabView: View {
     }
     .sheet(item: $managedBot) { bot in
       OwnedBotAccessSheet(bot: bot, participants: chatInfoView.participants)
+    }
+    .sheet(item: $botInfoItem) { item in
+      NavigationStack {
+        ChatInfoView(chatItem: item, isPresentedModally: true)
+      }
+    }
+  }
+
+  /// A bot's avatar opens its chat info: status, access and settings. Without a
+  /// local chat with the bot yet, opening the chat creates one.
+  private func openBotInfo(_ userInfo: UserInfo) {
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    if let item = FullChatViewModel.cachedChatItem(peer: .user(id: userInfo.user.id)) {
+      botInfoItem = item
+    } else {
+      chatInfoView.openParticipantChat(userInfo)
     }
   }
 
@@ -1208,7 +1196,7 @@ struct InfoTabView: View {
           ParticipantAvatarView(
             userInfo: userInfo,
             size: 68,
-            onTap: ownedBots.contains(userInfo.user.id) ? { managedBot = userInfo } : nil
+            onTap: userInfo.user.bot ? { openBotInfo(userInfo) } : nil
           )
           .frame(width: 68, height: 68)
           .overlay(alignment: .bottomTrailing) {
@@ -1237,6 +1225,13 @@ struct InfoTabView: View {
               showRemoveAlert = true
             }) {
               Label("Remove Participant", systemImage: "minus.circle")
+            }
+          }
+          if userInfo.user.bot {
+            Button {
+              openBotInfo(userInfo)
+            } label: {
+              Label("Bot Info", systemImage: "info.circle")
             }
           }
           if ownedBots.contains(userInfo.user.id) {

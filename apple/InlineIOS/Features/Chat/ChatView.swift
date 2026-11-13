@@ -398,7 +398,7 @@ struct ChatView: View {
     ) { notification in
       guard canHandleGlobalNavigation else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
-        router.openPrimaryDestination(.chat(peer: Peer.user(id: userId)))
+        openUserFromAvatar(userId)
       }
     }
     .onReceive(
@@ -498,6 +498,18 @@ struct ChatView: View {
       type: .error,
       systemImage: "exclamationmark.triangle.fill"
     )
+  }
+
+  /// A bot's avatar opens its chat info, where its status, access and
+  /// settings are. People's avatars, and bots without a local chat, open the chat.
+  private func openUserFromAvatar(_ userId: Int64) {
+    if let item = FullChatViewModel.cachedChatItem(peer: .user(id: userId)),
+       item.userInfo?.user.bot == true
+    {
+      presentedChatInfo = item
+      return
+    }
+    router.openPrimaryDestination(.chat(peer: Peer.user(id: userId)))
   }
 
   private func handleUserGroupMention(_ notification: Notification) {

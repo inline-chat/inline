@@ -11,6 +11,8 @@ struct AgentOutputModeSection: View {
     case formSection
     /// Rows inside a chat info card, like Notifications.
     case card
+    /// One row with a symbol tile, in a bot's chat info overview.
+    case tile
   }
 
   let peer: Peer
@@ -45,6 +47,8 @@ struct AgentOutputModeSection: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal, 16)
           .padding(.bottom, 12)
+      case .tile:
+        menu
       }
     }
     .task(id: botUserID) {
@@ -69,23 +73,59 @@ struct AgentOutputModeSection: View {
         }
       }
     } label: {
-      LabeledContent("Output") {
-        HStack(spacing: 6) {
-          if isUpdating { ProgressView() }
-          Text(threadMode?.title ?? defaultTitle)
-            .foregroundStyle(style == .card ? .secondary : .primary)
-          if canConfigure {
-            Image(systemName: "chevron.up.chevron.down")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(style == .card ? .tertiary : .primary)
-          }
-        }
+      if style == .tile {
+        tileLabel(value: threadMode?.title ?? defaultTitle)
+      } else {
+        cardLabel(value: threadMode?.title ?? defaultTitle)
       }
-      .foregroundStyle(.primary)
     }
     .disabled(!canConfigure || isUpdating)
     .accessibilityLabel("Output")
     .accessibilityValue(threadMode?.title ?? defaultTitle)
+  }
+
+  private func tileLabel(value: String) -> some View {
+    BotInfoRow(
+      systemImage: store.outputMode(peer: peer, botUserID: botUserID) == .friendly ? "text.bubble.fill" : "list.bullet.rectangle.fill",
+      tint: .purple,
+      title: "Output"
+    ) {
+      HStack(spacing: 6) {
+        if isUpdating { ProgressView() }
+        Text(value)
+        if canConfigure {
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+        }
+      }
+      .foregroundStyle(.secondary)
+    } detail: {
+      if canConfigure {
+        Text(store.outputMode(peer: peer, botUserID: botUserID).summary)
+          .foregroundStyle(.secondary)
+      } else {
+        Label("Only the owner can change this", systemImage: "lock")
+          .foregroundStyle(.secondary)
+      }
+    }
+    .foregroundStyle(.primary)
+  }
+
+  private func cardLabel(value: String) -> some View {
+    LabeledContent("Output") {
+      HStack(spacing: 6) {
+        if isUpdating { ProgressView() }
+        Text(value)
+          .foregroundStyle(style == .card ? .secondary : .primary)
+        if canConfigure {
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(style == .card ? .tertiary : .primary)
+        }
+      }
+    }
+    .foregroundStyle(.primary)
   }
 
   @ViewBuilder

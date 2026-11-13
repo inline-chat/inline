@@ -1,59 +1,30 @@
 import Auth
 import InlineKit
-import InlineProtocol
 import InlineUI
 import Logger
 import RealtimeV2
 import SwiftUI
 
-/// Manages a bot the viewer owns from a chat's info: its photo, name, settings
-/// and who may use it.
-struct OwnedBotAccessSheet: View {
+/// Who may use a bot the viewer owns, from its chat info or a thread's
+/// participants. The owner adds people by search and removes them in place.
+struct BotAccessView: View {
   let bot: UserInfo
-  /// The chat's direct participants, offered for access in place.
-  let participants: [UserInfo]
+  /// A thread's direct participants, offered as toggles. Empty in the bot's own chat.
+  var participants: [UserInfo] = []
 
-  @Environment(\.realtimeV2) private var realtimeV2
-  @Environment(\.dismiss) private var dismiss
   @ObservedObject private var grants = AgentGrantStore.shared
-  /// The owner's bot record, for photo and settings edits.
-  @State private var model = IOSBotsSettingsModel()
-  @State private var showsImagePicker = false
-  @State private var showsCropper = false
-  @State private var pickedImage: UIImage?
-
-  @State private var name: String
-  @State private var savedName: String
-  @State private var isSavingName = false
-  /// Optimistic toggle values while a grant change is in flight.
+  /// Optimistic values while a grant change is in flight.
   @State private var pendingAccess: [Int64: Bool] = [:]
   @State private var errorMessage: String?
-  /// Bumped when people outside the chat finish loading, to re-read the cache.
+  @State private var isAddingPeople = false
+  /// Bumped when people with access finish loading, to re-read the cache.
   @State private var loadedUsersGeneration = 0
 
-  private let log = Log.scoped("OwnedBotAccessSheet")
-
-  init(bot: UserInfo, participants: [UserInfo]) {
-    self.bot = bot
-    self.participants = participants
-    let name = bot.user.displayName
-    _name = State(initialValue: name)
-    _savedName = State(initialValue: name)
-  }
+  private let log = Log.scoped("BotAccessView")
 
   private var botUserID: Int64 { bot.user.id }
-
-  private var owned: OwnedAgentGrants? {
-    grants.ownedGrants(botUserID: botUserID)
-  }
-
-  private var trimmedName: String {
-    name.trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  private var displayName: String {
-    savedName.isEmpty ? "Bot" : savedName
-  }
+  private var owned: OwnedAgentGrants? { grants.ownedGrants(botUserID: botUserID) }
+  private var botName: String { bot.user.shortDisplayName }
 
   /// People in this chat who can be given access: not the owner, this bot or other bots.
   private var chatPeople: [UserInfo] {
@@ -63,143 +34,120 @@ struct OwnedBotAccessSheet: View {
     }
   }
 
-  /// People with access who are not listed under this chat.
-  private var otherGrantedUserIDs: [Int64] {
+  /// People with access, minus those already listed under this chat.
+  private var grantedUserIDs: [Int64] {
     let inChat = Set(chatPeople.map(\.user.id))
-    return (owned?.userIDs ?? []).subtracting(inChat).sorted()
+    let ids = (owned?.userIDs ?? []).subtracting(inChat)
+    return ids.sorted { displayName($0).localizedCaseInsensitiveCompare(displayName($1)) == .orderedAscending }
   }
 
   var body: some View {
-    NavigationStack {
-      List {
+    List {
+      if let errorMessage {
         Section {
-          VStack(spacing: 6) {
-            if let managed = model.bot(botUserID) {
-              IOSManagedBotPhotoEditor(
-                bot: managed,
-                isBusy: model.busyBotIDs.contains(botUserID),
-                choosePhoto: { showsImagePicker = true },
-                removePhoto: {
-                  Task { await model.removePhoto(botUserID, realtimeV2: realtimeV2) }
-                }
-              )
-            } else {
-              UserAvatar(userInfo: bot, size: 96)
-            }
-            if let username = model.bot(botUserID)?.username ?? bot.user.username, !username.isEmpty {
-              Text("@\(username)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-          }
-          .frame(maxWidth: .infinity)
-          .listRowBackground(Color.clear)
-        }
-
-        Section("Name") {
-          TextField("Bot Name", text: $name)
-            .textContentType(.name)
-            .submitLabel(.done)
-            .onSubmit { Task { await saveName() } }
-            .disabled(isSavingName)
-        }
-
-        if let errorMessage = errorMessage ?? model.errorMessage {
-          Section {
-            Text(errorMessage)
-              .font(.footnote)
-              .foregroundStyle(.red)
-          }
-        }
-
-        // No participants means the bot's own chat, where only existing access applies.
-        if !participants.isEmpty {
-          Section {
-            if chatPeople.isEmpty {
-              Text("No one else is in this chat.")
-                .foregroundStyle(.secondary)
-            }
-            ForEach(chatPeople) { person in
-              accessRow(userID: person.user.id, userInfo: person)
-            }
-          } header: {
-            Text("In This Chat")
-          } footer: {
-            Text("People with access can start and steer \(displayName). You always have access.")
-          }
-        }
-
-        if !otherGrantedUserIDs.isEmpty {
-          Section(participants.isEmpty ? "People With Access" : "Others With Access") {
-            ForEach(otherGrantedUserIDs, id: \.self) { userID in
-              accessRow(userID: userID, userInfo: cachedUser(userID))
-            }
-          }
-        }
-
-        Section {
-          NavigationLink {
-            IOSManagedBotSettingsView(
-              botID: botUserID,
-              model: model,
-              showsOpenChat: false,
-              onDeleted: { dismiss() },
-              copyToken: { BotsSettingsView.copyToken($0) }
-            )
-          } label: {
-            Label("Bot Settings", systemImage: "gearshape")
-          }
-          .disabled(model.bot(botUserID) == nil)
-        } footer: {
-          Text("Username, output, token, skills, and more.")
+          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
         }
       }
-      .listStyle(.insetGrouped)
-      .scrollDismissesKeyboard(.interactively)
-      .navigationTitle(displayName)
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .confirmationAction) {
-          if isSavingName {
+
+      Section {
+        if let viewer = Auth.shared.getCurrentUserId().flatMap(cachedUser) {
+          personLabel(viewer, subtitle: String(localized: "Owner"))
+        }
+      }
+
+      if owned == nil {
+        Section {
+          HStack(spacing: 10) {
             ProgressView()
-          } else {
-            Button("Done") {
-              Task {
-                if await saveName() { dismiss() }
+            Text("Loading access…")
+              .foregroundStyle(.secondary)
+          }
+        }
+      } else {
+        if !chatPeople.isEmpty {
+          Section("In This Chat") {
+            ForEach(chatPeople) { person in
+              Toggle(isOn: accessBinding(person.user.id)) {
+                personLabel(person, subtitle: person.user.username.map { "@\($0)" })
               }
+              .disabled(pendingAccess[person.user.id] != nil)
             }
           }
         }
-      }
-      .task(id: botUserID) {
-        // The cached list renders first; this only picks up missed changes.
-        grants.refresh(botUserID: botUserID)
-        await model.load(realtimeV2, failure: "Couldn’t load this bot. Close and reopen to try again.")
-      }
-      .onChange(of: model.bot(botUserID).map { User(from: $0).displayName }) { _, newName in
-        // Picks up a rename from Bot Settings unless a local edit is pending.
-        guard let newName, !isSavingName, name == savedName else { return }
-        name = newName
-        savedName = newName
-      }
-      .sheet(isPresented: $showsImagePicker) {
-        ImagePicker(sourceType: .photoLibrary) { image in
-          pickedImage = image
-          showsCropper = true
-        }
-      }
-      .sheet(isPresented: $showsCropper, onDismiss: { pickedImage = nil }) {
-        if let pickedImage {
-          CircularCropView(image: pickedImage) { croppedImage in
-            Task { await model.uploadPhoto(botUserID, image: croppedImage, realtimeV2: realtimeV2) }
+
+        Section {
+          ForEach(grantedUserIDs, id: \.self) { userID in
+            grantedRow(userID)
           }
+
+          Button {
+            isAddingPeople = true
+          } label: {
+            Label("Add People", systemImage: "person.badge.plus")
+          }
+        } header: {
+          Text(participants.isEmpty ? "People With Access" : "Others With Access")
+        } footer: {
+          Text("People with access can start and steer \(botName) in chats they share with it. Swipe to remove someone.")
         }
       }
-      .task(id: otherGrantedUserIDs) {
-        let missing = otherGrantedUserIDs.filter { ObjectCache.shared.getCachedUser(id: $0) == nil }
-        guard !missing.isEmpty else { return }
-        await ObjectCache.shared.ensure(missing.map { .user($0) })
-        loadedUsersGeneration &+= 1
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle("Shared With")
+    .navigationBarTitleDisplayMode(.inline)
+    .animation(.default, value: owned?.userIDs)
+    .task(id: botUserID) {
+      // The cached list renders first; this only picks up missed changes.
+      grants.refresh(botUserID: botUserID)
+    }
+    .task(id: grantedUserIDs) {
+      let missing = grantedUserIDs.filter { ObjectCache.shared.getCachedUser(id: $0) == nil }
+      guard !missing.isEmpty else { return }
+      await ObjectCache.shared.ensure(missing.map { .user($0) })
+      loadedUsersGeneration &+= 1
+    }
+    .sheet(isPresented: $isAddingPeople) {
+      BotAccessAddPeopleSheet(bot: bot)
+    }
+  }
+
+  private func grantedRow(_ userID: Int64) -> some View {
+    Group {
+      if let userInfo = cachedUser(userID) {
+        personLabel(userInfo, subtitle: userInfo.user.username.map { "@\($0)" })
+      } else {
+        HStack(spacing: 12) {
+          Circle().fill(Color(uiColor: .systemGray4)).frame(width: 36, height: 36)
+          Text("Loading…").foregroundStyle(.secondary)
+        }
+      }
+    }
+    .opacity(pendingAccess[userID] == false ? 0.4 : 1)
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      Button("Remove", role: .destructive) { setAccess(false, userID: userID) }
+    }
+    .contextMenu {
+      Button(role: .destructive) {
+        setAccess(false, userID: userID)
+      } label: {
+        Label("Remove Access", systemImage: "person.badge.minus")
+      }
+    }
+  }
+
+  private func personLabel(_ userInfo: UserInfo, subtitle: String?) -> some View {
+    HStack(spacing: 12) {
+      UserAvatar(userInfo: userInfo, size: 36)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(userInfo.user.displayName)
+          .lineLimit(1)
+        if let subtitle {
+          Text(subtitle)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
       }
     }
   }
@@ -209,30 +157,8 @@ struct OwnedBotAccessSheet: View {
     return ObjectCache.shared.getCachedUser(id: userID)
   }
 
-  private func accessRow(userID: Int64, userInfo: UserInfo?) -> some View {
-    Toggle(isOn: accessBinding(userID)) {
-      HStack(spacing: 12) {
-        if let userInfo {
-          UserAvatar(userInfo: userInfo, size: 32)
-        } else {
-          Image(systemName: "person.crop.circle.fill")
-            .font(.system(size: 32))
-            .foregroundStyle(.secondary)
-        }
-
-        VStack(alignment: .leading, spacing: 1) {
-          Text(userInfo?.user.displayName ?? "Unknown User")
-            .lineLimit(1)
-          if let username = userInfo?.user.username, !username.isEmpty {
-            Text("@\(username)")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
-        }
-      }
-    }
-    .disabled(owned == nil || pendingAccess[userID] != nil)
+  private func displayName(_ userID: Int64) -> String {
+    ObjectCache.shared.getCachedUser(id: userID)?.user.displayName ?? ""
   }
 
   private func accessBinding(_ userID: Int64) -> Binding<Bool> {
@@ -260,83 +186,145 @@ struct OwnedBotAccessSheet: View {
       }
     }
   }
+}
 
-  /// Saves a changed name. Returns false when saving failed.
-  @discardableResult
-  private func saveName() async -> Bool {
-    let newName = trimmedName
-    guard !isSavingName, !newName.isEmpty, newName != savedName else {
-      if newName.isEmpty { name = savedName }
-      return true
+/// Searches people and gives each one tapped access to the bot.
+private struct BotAccessAddPeopleSheet: View {
+  let bot: UserInfo
+
+  @Environment(\.realtimeV2) private var realtimeV2
+  @Environment(\.dismiss) private var dismiss
+  @ObservedObject private var grants = AgentGrantStore.shared
+  @State private var search: BotAccessPeopleSearch?
+  @State private var adding: Set<Int64> = []
+  @State private var errorMessage: String?
+
+  private let log = Log.scoped("BotAccessAddPeople")
+
+  private var granted: Set<Int64> {
+    grants.ownedGrants(botUserID: bot.user.id)?.userIDs ?? []
+  }
+
+  var body: some View {
+    NavigationStack {
+      List {
+        if let errorMessage {
+          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+        }
+
+        if let search {
+          if search.query.trimmingCharacters(in: .whitespaces).isEmpty {
+            Text("Search by name or username.")
+              .foregroundStyle(.secondary)
+          } else if search.results.isEmpty, !search.isSearching {
+            Text("No people found.")
+              .foregroundStyle(.secondary)
+          }
+          ForEach(search.results) { person in
+            resultRow(person)
+          }
+          if search.isSearching {
+            HStack {
+              Spacer()
+              ProgressView()
+              Spacer()
+            }
+          }
+        }
+      }
+      .listStyle(.insetGrouped)
+      .searchable(
+        text: Binding(get: { search?.query ?? "" }, set: { search?.query = $0 }),
+        placement: .navigationBarDrawer(displayMode: .always),
+        prompt: "Name or username"
+      )
+      .navigationTitle("Add People")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") { dismiss() }
+        }
+      }
     }
-    isSavingName = true
-    errorMessage = nil
-    defer { isSavingName = false }
+    .onAppear {
+      if search == nil {
+        search = BotAccessPeopleSearch(botUserID: bot.user.id, realtime: realtimeV2)
+      }
+    }
+    .onDisappear { search?.cancel() }
+  }
 
-    do {
-      let result = try await realtimeV2.send(.updateBotProfile(botUserId: botUserID, name: newName))
-      guard case let .updateBotProfile(response) = result else {
-        throw TransactionExecutionError.invalid
+  private func resultRow(_ person: UserInfo) -> some View {
+    let hasAccess = granted.contains(person.user.id)
+    return Button {
+      add(person)
+    } label: {
+      HStack(spacing: 12) {
+        UserAvatar(userInfo: person, size: 36)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(person.user.displayName)
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+          if let username = person.user.username, !username.isEmpty {
+            Text("@\(username)")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        if adding.contains(person.user.id) {
+          ProgressView()
+        } else if hasAccess {
+          Image(systemName: "checkmark.circle.fill")
+            .foregroundStyle(Color.green)
+            .font(.title3)
+        } else {
+          Image(systemName: "plus.circle")
+            .foregroundStyle(Color.accentColor)
+            .font(.title3)
+        }
       }
-      try await AppDatabase.shared.dbWriter.write { db in
-        _ = try User.save(db, user: response.bot)
+    }
+    .buttonStyle(.plain)
+    .disabled(hasAccess || adding.contains(person.user.id))
+    .accessibilityLabel(hasAccess ? "\(person.user.displayName), has access" : "Give \(person.user.displayName) access")
+  }
+
+  private func add(_ person: UserInfo) {
+    let userID = person.user.id
+    guard !adding.contains(userID) else { return }
+    adding.insert(userID)
+    errorMessage = nil
+    Task {
+      defer { adding.remove(userID) }
+      do {
+        try await grants.setGrant(botUserID: bot.user.id, userID: userID)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+      } catch {
+        log.error("Failed to give user \(userID) access to bot \(bot.user.id)", error: error)
+        errorMessage = "Couldn’t give \(person.user.shortDisplayName) access. Try again."
       }
-      model.upsert(response.bot)
-      savedName = User(from: response.bot).displayName
-      name = savedName
-      return true
-    } catch {
-      log.error("Failed to rename bot \(botUserID)", error: error)
-      errorMessage = "Couldn’t rename the bot. Try again."
-      return false
     }
   }
 }
 
-/// Opens bot management from a direct chat with a bot the viewer owns.
-/// Renders nothing for other people's bots.
-struct OwnedBotManageCard: View {
+/// A bot's access list from a thread's participants, as its own sheet.
+struct OwnedBotAccessSheet: View {
   let bot: UserInfo
-  @ObservedObject private var grants = AgentGrantStore.shared
-  @State private var isPresented = false
+  let participants: [UserInfo]
+  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
-    VStack(spacing: 0) {
-      if grants.ownedGrants(botUserID: bot.user.id) != nil {
-        Button {
-          isPresented = true
-        } label: {
-          HStack(spacing: 12) {
-            Image(systemName: "slider.horizontal.3")
-              .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 2) {
-              Text("Manage Bot")
-                .foregroundStyle(.primary)
-              Text("Photo, name, access, and settings")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right")
-              .font(.footnote.weight(.semibold))
-              .foregroundStyle(.tertiary)
+    NavigationStack {
+      BotAccessView(bot: bot, participants: participants)
+        .toolbar {
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { dismiss() }
           }
-          .padding(.horizontal, 16)
-          .padding(.vertical, 12)
-          .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-      }
-    }
-    .task(id: bot.user.id) {
-      grants.ensureLoaded(botUserID: bot.user.id)
-    }
-    .sheet(isPresented: $isPresented) {
-      OwnedBotAccessSheet(bot: bot, participants: [])
     }
   }
 }
