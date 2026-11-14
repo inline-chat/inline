@@ -574,6 +574,8 @@ struct RecordingInline {
     next: Mutex<i64>,
     posts: Mutex<Vec<(i64, InlinePost)>>,
     edits: Mutex<Vec<(i64, String)>>,
+    guest_posts: Mutex<Vec<(i64, i64, InlinePost)>>,
+    guest_edits: Mutex<Vec<(i64, i64, String)>>,
     reactions: Mutex<Vec<(i64, String, bool)>>,
     typing: Mutex<Vec<bool>>,
     reads: Mutex<Vec<i64>>,
@@ -581,6 +583,36 @@ struct RecordingInline {
 }
 
 impl InlineSide for RecordingInline {
+    fn post_in<'a>(
+        &'a self,
+        chat_id: i64,
+        post: &'a InlinePost,
+    ) -> BoxFuture<'a, InlineResult<i64>> {
+        Box::pin(async move {
+            let mut next = self.next.lock().unwrap();
+            *next += 1;
+            let id = 5000 + *next;
+            self.guest_posts
+                .lock()
+                .unwrap()
+                .push((chat_id, id, post.clone()));
+            Ok(id)
+        })
+    }
+    fn edit_in<'a>(
+        &'a self,
+        chat_id: i64,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            self.guest_edits
+                .lock()
+                .unwrap()
+                .push((chat_id, message_id, text.to_owned()));
+            Ok(())
+        })
+    }
     fn mark_read(&self, message_id: i64) -> BoxFuture<'_, InlineResult<()>> {
         Box::pin(async move {
             self.reads.lock().unwrap().push(message_id);

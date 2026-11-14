@@ -263,7 +263,10 @@ impl Relay {
                     };
                     log::warn!(target: "inline::bridge::relay", "connector stopped: {}", error.message);
                     self.set_connector_health(health);
-                    if matches!(error.kind, FailureKind::NeedsLogin | FailureKind::Unavailable) {
+                    if matches!(
+                        error.kind,
+                        FailureKind::NeedsLogin | FailureKind::Unavailable
+                    ) {
                         Duration::from_secs(60)
                     } else {
                         backoff
@@ -1221,7 +1224,10 @@ impl Relay {
     ) -> RelayResult<()> {
         // Waiting on the owner (sign-in) or on the network coming back to
         // this location never gives up; the message stays queued.
-        let waits = matches!(error.kind, FailureKind::NeedsLogin | FailureKind::Unavailable);
+        let waits = matches!(
+            error.kind,
+            FailureKind::NeedsLogin | FailureKind::Unavailable
+        );
         if attempts >= MAX_SEND_ATTEMPTS && !waits {
             self.store.settle_send(&pending.request_id, None)?;
             self.publish_pending_count()?;
