@@ -26,14 +26,17 @@ public struct PushContentKeyStore: Sendable {
   }
 
   public static let service = "chat.inline.push-content"
-  public static let account = "private-key-v1"
+  /// Per install: each build registers its own key with its own server session.
+  public static let account = InlineInstallNamespace.scoped("private-key-v1")
   public static let sharedAccessGroup = "2487AN8AL4.keychainGroup"
   public static let keyIDPrefix = "x25519:"
 
   private let accessGroup: String
+  private let account: String
 
-  public init(accessGroup: String = Self.sharedAccessGroup) {
+  public init(accessGroup: String = Self.sharedAccessGroup, account: String = Self.account) {
     self.accessGroup = accessGroup
+    self.account = account
   }
 
   /// Identifies a key by its public half, so the extension can tell a payload encrypted to an
@@ -47,7 +50,7 @@ public struct PushContentKeyStore: Sendable {
     [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: Self.service,
-      kSecAttrAccount as String: Self.account,
+      kSecAttrAccount as String: account,
       kSecAttrAccessGroup as String: accessGroup,
     ]
   }
