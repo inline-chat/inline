@@ -2,7 +2,7 @@
 use super::tests::{read_test_client_message, rpc_result_message, send_test_server_message};
 use super::*;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
 };
 use tokio_tungstenite::accept_async;
@@ -476,8 +476,26 @@ async fn logout_discards_a_delayed_dialog_snapshot_and_does_not_repopulate_sqlit
     let api_addr = api.local_addr().unwrap();
     let logout_server = tokio::spawn(async move {
         let (mut stream, _) = api.accept().await.unwrap();
-        let mut bytes = [0; 4096];
-        stream.read(&mut bytes).await.unwrap();
+        let mut request = BufReader::new(&mut stream);
+        let mut line = String::new();
+        assert!(request.read_line(&mut line).await.unwrap() > 0);
+        assert_eq!(line, "POST /v1/logout HTTP/1.1\r\n");
+        let mut content_length = None;
+        loop {
+            line.clear();
+            assert!(request.read_line(&mut line).await.unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':')
+                && name.eq_ignore_ascii_case("content-length")
+            {
+                content_length = Some(value.trim().parse::<usize>().unwrap());
+            }
+        }
+        let mut request_body = vec![0; content_length.expect("logout request content length")];
+        request.read_exact(&mut request_body).await.unwrap();
+        drop(request);
         let body = r#"{"ok":true,"result":null}"#;
         stream.write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
     });
