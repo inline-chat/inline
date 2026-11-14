@@ -200,7 +200,7 @@ public enum PerformanceTrace {
       "decrypted", "placeholder", "unsupported_payload", "key_missing", "key_unavailable", "stale_key",
       "decrypt_failed", "withheld", "plaintext", "sync",
     ],
-    "placeholder_reason": ["no_device_key", "encryption_failed", "too_large", "unknown"],
+    "placeholder_reason": ["no_device_key", "encryption_failed", "too_large", "generic_alert", "unknown"],
     "withheld_reason": ["missingRecipient", "missingFence", "fenceUnavailable", "signedOut", "otherAccount"],
     // `superseded`, `expired` and `published`/`redacted` can all follow one received request.
     "delivery_stage": ["received"],
