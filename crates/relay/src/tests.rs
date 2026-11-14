@@ -1891,7 +1891,7 @@ fn guest(chat_id: i64, message_id: i64, text: &str) -> InlineEvent {
     InlineEvent::Guest {
         chat_id,
         message_id,
-        sender_name: "Alice".into(),
+        sender_name: Some("Alice".into()),
         chat_title: Some("Pricing".into()),
         text: text.into(),
     }

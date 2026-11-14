@@ -532,8 +532,9 @@ pub enum InlineEvent {
         chat_id: i64,
         /// Inline message id (unique within the chat).
         message_id: i64,
-        /// Sender's display name, shown to the agent.
-        sender_name: String,
+        /// Sender's display name, shown to the agent; `None` is the owner
+        /// writing outside their DM.
+        sender_name: Option<String>,
         /// Chat title, when it isn't a DM.
         chat_title: Option<String>,
         /// Text.

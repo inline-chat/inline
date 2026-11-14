@@ -26,17 +26,21 @@ pub fn agent_text(text: &str) -> String {
 
 /// A message from someone the owner shared the agent with. It reaches the
 /// agent as the owner's own message, so the first line says who it is from.
-pub fn guest_request(sender: &str, chat_title: Option<&str>, text: &str) -> String {
-    let sender = one_line(sender);
+/// `sender: None` is the owner writing in a chat other than their DM.
+pub fn guest_request(sender: Option<&str>, chat_title: Option<&str>, text: &str) -> String {
     let place = chat_title
         .map(one_line)
         .filter(|title| !title.is_empty())
         .map(|title| format!(" in “{title}”"))
         .unwrap_or_default();
-    format!(
-        "💬 From {sender} via Inline{place}, not from me. Reply to this message to answer them.\n\n{}",
-        clip(text, "…")
-    )
+    let header = match sender {
+        Some(sender) => format!(
+            "💬 From {} via Inline{place}, not from me. Reply to this message to answer them.",
+            one_line(sender)
+        ),
+        None => format!("💬 From me via Inline{place}. Reply to this message to answer there."),
+    };
+    format!("{header}\n\n{}", clip(text, "…"))
 }
 
 fn one_line(text: &str) -> String {

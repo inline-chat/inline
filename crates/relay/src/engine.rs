@@ -910,7 +910,7 @@ impl Relay {
                 self.guest_message(
                     chat_id,
                     message_id,
-                    &sender_name,
+                    sender_name.as_deref(),
                     chat_title.as_deref(),
                     &text,
                 )
@@ -1507,7 +1507,7 @@ impl Relay {
         &self,
         chat_id: i64,
         message_id: i64,
-        sender_name: &str,
+        sender_name: Option<&str>,
         chat_title: Option<&str>,
         text: &str,
     ) -> RelayResult<()> {
