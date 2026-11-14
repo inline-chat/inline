@@ -14039,7 +14039,8 @@ class AgentSettings$Type extends import_runtime4.MessageType {
       { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
       { no: 2, name: "default_output_mode", kind: "enum", T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] },
       { no: 3, name: "revision", kind: "scalar", T: 3, L: 0 },
-      { no: 4, name: "date", kind: "scalar", opt: true, T: 3, L: 0 }
+      { no: 4, name: "date", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 5, name: "open_to_everyone", kind: "scalar", T: 8 }
     ]);
   }
   create(value) {
@@ -14047,6 +14048,7 @@ class AgentSettings$Type extends import_runtime4.MessageType {
     message.botUserId = 0n;
     message.defaultOutputMode = 0;
     message.revision = 0n;
+    message.openToEveryone = false;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -14068,6 +14070,9 @@ class AgentSettings$Type extends import_runtime4.MessageType {
         case 4:
           message.date = reader.int64().toBigInt();
           break;
+        case 5:
+          message.openToEveryone = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -14088,6 +14093,8 @@ class AgentSettings$Type extends import_runtime4.MessageType {
       writer.tag(3, import_runtime.WireType.Varint).int64(message.revision);
     if (message.date !== undefined)
       writer.tag(4, import_runtime.WireType.Varint).int64(message.date);
+    if (message.openToEveryone !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.openToEveryone);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15036,13 +15043,15 @@ class GetAgentAccessInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetAgentAccessInput", [
       { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 }
+      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "bot_user_ids", kind: "scalar", repeat: 1, T: 3, L: 0 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.botUserId = 0n;
     message.userId = 0n;
+    message.botUserIds = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -15057,6 +15066,13 @@ class GetAgentAccessInput$Type extends import_runtime4.MessageType {
           break;
         case 2:
           message.userId = reader.int64().toBigInt();
+          break;
+        case 3:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.botUserIds.push(reader.int64().toBigInt());
+          else
+            message.botUserIds.push(reader.int64().toBigInt());
           break;
         default:
           let u = options.readUnknownField;
@@ -15074,6 +15090,12 @@ class GetAgentAccessInput$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
     if (message.userId !== 0n)
       writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.botUserIds.length) {
+      writer.tag(3, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.botUserIds.length; i++)
+        writer.int64(message.botUserIds[i]);
+      writer.join();
+    }
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15086,13 +15108,15 @@ class GetAgentAccessResult$Type extends import_runtime4.MessageType {
   constructor() {
     super("GetAgentAccessResult", [
       { no: 1, name: "is_owner", kind: "scalar", T: 8 },
-      { no: 2, name: "operations", kind: "enum", repeat: 1, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] }
+      { no: 2, name: "operations", kind: "enum", repeat: 1, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+      { no: 3, name: "access", kind: "message", repeat: 1, T: () => AgentAccess }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.isOwner = false;
     message.operations = [];
+    message.access = [];
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -15111,6 +15135,9 @@ class GetAgentAccessResult$Type extends import_runtime4.MessageType {
               message.operations.push(reader.int32());
           else
             message.operations.push(reader.int32());
+          break;
+        case 3:
+          message.access.push(AgentAccess.internalBinaryRead(reader, reader.uint32(), options));
           break;
         default:
           let u = options.readUnknownField;
@@ -15132,6 +15159,8 @@ class GetAgentAccessResult$Type extends import_runtime4.MessageType {
         writer.int32(message.operations[i]);
       writer.join();
     }
+    for (let i = 0;i < message.access.length; i++)
+      AgentAccess.internalBinaryWrite(message.access[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -15139,6 +15168,92 @@ class GetAgentAccessResult$Type extends import_runtime4.MessageType {
   }
 }
 var GetAgentAccessResult = new GetAgentAccessResult$Type;
+
+class AgentAccess$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("AgentAccess", [
+      { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "is_owner", kind: "scalar", T: 8 },
+      { no: 3, name: "operations", kind: "enum", repeat: 1, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+      { no: 4, name: "owner_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 5, name: "can_message", kind: "scalar", T: 8 },
+      { no: 6, name: "can_reply", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.botUserId = 0n;
+    message.isOwner = false;
+    message.operations = [];
+    message.ownerUserId = 0n;
+    message.canMessage = false;
+    message.canReply = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.botUserId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.isOwner = reader.bool();
+          break;
+        case 3:
+          if (wireType === import_runtime.WireType.LengthDelimited)
+            for (let e = reader.int32() + reader.pos;reader.pos < e; )
+              message.operations.push(reader.int32());
+          else
+            message.operations.push(reader.int32());
+          break;
+        case 4:
+          message.ownerUserId = reader.int64().toBigInt();
+          break;
+        case 5:
+          message.canMessage = reader.bool();
+          break;
+        case 6:
+          message.canReply = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.botUserId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
+    if (message.isOwner !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.isOwner);
+    if (message.operations.length) {
+      writer.tag(3, import_runtime.WireType.LengthDelimited).fork();
+      for (let i = 0;i < message.operations.length; i++)
+        writer.int32(message.operations[i]);
+      writer.join();
+    }
+    if (message.ownerUserId !== 0n)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.ownerUserId);
+    if (message.canMessage !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.canMessage);
+    if (message.canReply !== false)
+      writer.tag(6, import_runtime.WireType.Varint).bool(message.canReply);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var AgentAccess = new AgentAccess$Type;
 
 class DeleteAgentGrantResult$Type extends import_runtime4.MessageType {
   constructor() {
@@ -15441,7 +15556,8 @@ class UpdateAgentSettingsInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("UpdateAgentSettingsInput", [
       { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
-      { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
+      { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] },
+      { no: 3, name: "open_to_everyone", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -15462,6 +15578,9 @@ class UpdateAgentSettingsInput$Type extends import_runtime4.MessageType {
         case 2:
           message.defaultOutputMode = reader.int32();
           break;
+        case 3:
+          message.openToEveryone = reader.bool();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -15478,6 +15597,8 @@ class UpdateAgentSettingsInput$Type extends import_runtime4.MessageType {
       writer.tag(1, import_runtime.WireType.Varint).int64(message.botUserId);
     if (message.defaultOutputMode !== undefined)
       writer.tag(2, import_runtime.WireType.Varint).int32(message.defaultOutputMode);
+    if (message.openToEveryone !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.openToEveryone);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -17238,6 +17359,7 @@ class DeleteReactionResult$Type extends import_runtime4.MessageType {
   }
 }
 var DeleteReactionResult = new DeleteReactionResult$Type;
+
 class MessageAttachments$Type extends import_runtime4.MessageType {
   constructor() {
     super("MessageAttachments", [
@@ -27556,7 +27678,9 @@ var DeleteBotAgentResult = new DeleteBotAgentResult$Type;
 
 class ListBotsInput$Type extends import_runtime4.MessageType {
   constructor() {
-    super("ListBotsInput", []);
+    super("ListBotsInput", [
+      { no: 1, name: "include_managed", kind: "scalar", opt: true, T: 8 }
+    ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
@@ -27565,9 +27689,27 @@ class ListBotsInput$Type extends import_runtime4.MessageType {
     return message;
   }
   internalBinaryRead(reader, length, options, target) {
-    return target ?? this.create();
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.includeManaged = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
   }
   internalBinaryWrite(message, writer, options) {
+    if (message.includeManaged !== undefined)
+      writer.tag(1, import_runtime.WireType.Varint).bool(message.includeManaged);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
