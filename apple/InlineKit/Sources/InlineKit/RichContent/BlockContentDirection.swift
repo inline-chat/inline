@@ -77,16 +77,24 @@ public enum BlockContentDirection {
   /// `content` with every text block's direction derived on this device from `text`, which
   /// the block ranges index in UTF-16.
   ///
-  /// Prose leaves carry their own direction everywhere, list items included. A container
-  /// (list, quote, table, disclosure, callout, agent blocks) takes the majority of the text
-  /// inside it. Stored and older messages carry the server's first-letter flags; this replaces
-  /// them so both read the same.
+  /// Prose leaves carry their own direction everywhere, list items included. A leaf that leads
+  /// by fewer than `decisiveWordLead` words is ambiguous ("Sources:", a reply streaming in as
+  /// "Claude Code حداقل") and follows the whole message instead, so a Persian reply doesn't
+  /// start left to right and jump once enough words arrive. A container (list, quote, table,
+  /// disclosure, callout, agent blocks) takes the majority of the text inside it. Stored and
+  /// older messages carry the server's first-letter flags; this replaces them so both read the
+  /// same.
   public static func resolved(_ content: InlineProtocol.BlockContent, text: String) -> InlineProtocol.BlockContent {
     var resolver = Resolver(text: text as NSString)
+    var probe = content
+    resolver.messageIsRTL = resolver.resolve(&probe.blocks).isRTL
     var content = content
     _ = resolver.resolve(&content.blocks)
     return content
   }
+
+  /// Words one direction must lead by for a leaf to keep its own direction within a message.
+  static let decisiveWordLead = 3
 
   /// Direction a block declares after `resolved(_:text:)`, nil for blocks without text.
   public static func declaredDirection(of block: InlineProtocol.Block) -> Bool? {
@@ -123,6 +131,8 @@ public enum BlockContentDirection {
 
   private struct Resolver {
     let text: NSString
+    /// The whole message's direction, for leaves too short to decide; nil on the first pass.
+    var messageIsRTL: Bool?
 
     func tally(_ range: InlineProtocol.BlockText) -> Tally {
       let location = Int(range.offset)
@@ -140,7 +150,12 @@ public enum BlockContentDirection {
     /// Resolves `range` in place and returns its tally.
     func leaf(_ range: inout InlineProtocol.BlockText) -> Tally {
       let tally = tally(range)
-      range.setDirection(tally.isRTL)
+      let lead = abs(tally.rightToLeftWords - tally.leftToRightWords)
+      if let messageIsRTL, tally.isRTL != nil, lead < BlockContentDirection.decisiveWordLead {
+        range.setDirection(messageIsRTL)
+      } else {
+        range.setDirection(tally.isRTL)
+      }
       return tally
     }
 

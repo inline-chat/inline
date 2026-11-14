@@ -27,8 +27,8 @@ struct BlockContentDirectionTests {
 
   @Test("Every block gets its own direction, list items included, replacing stored flags")
   func resolves() throws {
-    let text = "Sources:\nClaude Code حداقل این نسخه لازم دارد\nModels overview\nسلام دنیا"
-    var stale = range(text, of: "Sources:")
+    let text = "Sources: the release notes\nClaude Code حداقل این نسخه لازم دارد\nModels overview and pricing\nسلام دنیا"
+    var stale = range(text, of: "Sources: the release notes")
     stale.isRtl = true
     let content = BlockContent.with {
       $0.blocks = [
@@ -40,7 +40,7 @@ struct BlockContentDirectionTests {
             $0.isRtl = false
             $0.items = [
               .with { $0.children = [paragraph(range(text, of: "Claude Code حداقل این نسخه لازم دارد"))] },
-              .with { $0.children = [paragraph(range(text, of: "Models overview"))] },
+              .with { $0.children = [paragraph(range(text, of: "Models overview and pricing"))] },
             ]
           }
         },
@@ -53,9 +53,41 @@ struct BlockContentDirectionTests {
     let list = resolved.blocks[1].list
     #expect(BlockContentDirection.direction(of: list.items[0]) == true)
     #expect(BlockContentDirection.direction(of: list.items[1]) == false)
-    // Five Persian words against four Latin ones across the list.
-    #expect(list.isRtl == true)
+    // Five Persian words against six Latin ones across the list.
+    #expect(list.isRtl == false)
     #expect(resolved.blocks[2].quote.isRtl == true)
+  }
+
+  @Test("A leaf without a clear lead follows the message, so a streamed reply doesn't flip")
+  func ambiguousLeavesFollowMessage() {
+    let persian = "خلاصه بررسی\nClaude Code حداقل\nSources:"
+    let resolved = BlockContentDirection.resolved(BlockContent.with {
+      $0.blocks = [
+        paragraph(range(persian, of: "خلاصه بررسی")),
+        paragraph(range(persian, of: "Claude Code حداقل")),
+        paragraph(range(persian, of: "Sources:")),
+      ]
+    }, text: persian)
+    #expect(resolved.blocks.map(\.paragraph.isRtl) == [true, true, true])
+
+    let english = "Review summary for the update\nسلام دنیا"
+    let mixed = BlockContentDirection.resolved(BlockContent.with {
+      $0.blocks = [
+        paragraph(range(english, of: "Review summary for the update")),
+        paragraph(range(english, of: "سلام دنیا")),
+      ]
+    }, text: english)
+    #expect(mixed.blocks.map(\.paragraph.isRtl) == [false, false])
+
+    // A clear lead keeps its own direction inside a message of the other one.
+    let clear = "سلام دنیا خوبی امروز\nThis sentence stays left to right"
+    let own = BlockContentDirection.resolved(BlockContent.with {
+      $0.blocks = [
+        paragraph(range(clear, of: "سلام دنیا خوبی امروز")),
+        paragraph(range(clear, of: "This sentence stays left to right")),
+      ]
+    }, text: clear)
+    #expect(own.blocks.map(\.paragraph.isRtl) == [true, false])
   }
 
   @Test("Code and text without letters carry no direction")
