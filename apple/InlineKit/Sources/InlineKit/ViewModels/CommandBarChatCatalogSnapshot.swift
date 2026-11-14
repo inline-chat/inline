@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 
@@ -15,11 +16,21 @@ public struct CommandBarCatalogSnapshot: Sendable {
 
 public extension AppDatabase {
   /// Fetches every local destination needed by CMD+K in one consistent database read.
-  func fetchCommandBarCatalogSnapshot() async throws -> CommandBarCatalogSnapshot {
+  ///
+  /// Bots follow who can reach them: one the viewer isn't known to reach is
+  /// not offered as a person to message, and a chat with a bot the server
+  /// said they can't reach is left out.
+  func fetchCommandBarCatalogSnapshot(viewerUserId: Int64? = Auth.shared.getCurrentUserId()) async throws
+    -> CommandBarCatalogSnapshot
+  {
     try await reader.read { db in
-      CommandBarCatalogSnapshot(
-        chats: try ChatDestinationCatalogSnapshotQuery.fetchAll(db),
-        knownUsers: try ChatDestinationUserQuery.fetchAll(db),
+      let bots = try BotVisibility.fetch(db, viewerUserId: viewerUserId)
+      return CommandBarCatalogSnapshot(
+        chats: try ChatDestinationCatalogSnapshotQuery.fetchAll(db).filter { snapshot in
+          guard case let .user(id) = snapshot.peerId else { return true }
+          return !bots.unreachable.contains(id)
+        },
+        knownUsers: try ChatDestinationUserQuery.fetchAll(db).filter { !bots.notOffered.contains($0.id) },
         spaces: try Space.catalogActive().fetchAll(db)
       )
     }

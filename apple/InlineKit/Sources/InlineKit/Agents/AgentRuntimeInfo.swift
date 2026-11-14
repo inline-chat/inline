@@ -183,6 +183,8 @@ public extension AgentGrantAccess {
   var viewerAccessSummary: String {
     if isOwner { return String(localized: "Owner") }
     let ops = operations.subtracting([.unspecified])
+    // Not on the access list, but the owner opened the bot to everyone.
+    if ops.isEmpty, canMessage == true { return String(localized: "Can message") }
     if ops.isEmpty { return String(localized: "No access") }
     if ops.contains(.configure) { return String(localized: "Can use and configure") }
     if ops.contains(.invoke), ops.contains(.steer) { return String(localized: "Can start and steer") }

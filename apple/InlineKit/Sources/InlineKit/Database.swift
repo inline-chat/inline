@@ -1498,6 +1498,21 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("bot access") { db in
+      // Whether the current user can reach each bot (its owner, its access
+      // list, or everyone), as the server resolved it. Kept so a bot the user
+      // can't reach has no composer and no mention on the first frame. No row
+      // means the server hasn't been asked yet.
+      try db.create(table: "botAccess") { table in
+        table.column("botUserId", .integer)
+          .primaryKey()
+          .references("user", column: "id", onDelete: .cascade)
+        table.column("canMessage", .boolean).notNull()
+        table.column("canReply", .boolean).notNull().defaults(to: false)
+        table.column("operations", .integer).notNull().defaults(to: 0)
+      }
+    }
+
     return migrator
   }
 }

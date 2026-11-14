@@ -372,6 +372,9 @@ extension MentionCandidatesSource {
     if let currentUserId {
       candidateIds.remove(currentUserId)
     }
+    // A bot is offered only to people who can reach it: its owner, its access
+    // list, or everyone when it is open. Being in the same chat isn't enough.
+    candidateIds.subtract(try BotVisibility.fetch(db, viewerUserId: currentUserId).notOffered)
 
     let userInfos = candidateIds.isEmpty ? [] : try User
       .filter(candidateIds.contains(User.Columns.id))

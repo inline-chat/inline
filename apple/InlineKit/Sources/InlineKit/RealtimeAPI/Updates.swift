@@ -78,6 +78,11 @@ public actor UpdatesEngine: Sendable {
               materializeMissingReferences: true
             )
           }
+          // Someone wrote to this person in a DM. If it is a bot whose chat
+          // had no composer, the store asks again whether they can answer.
+          if !newMessageUpdate.message.out, case .user = newMessageUpdate.message.peerID.toPeer() {
+            deferredEffects.append(.incomingDirectMessage(fromUserID: newMessageUpdate.message.fromID))
+          }
 
         case let .updateMessageID(updateMessageId):
           log.trace("apply update message id")
@@ -339,9 +344,12 @@ public actor UpdatesEngine: Sendable {
           // Addressed to the session's bot; the app has nothing to project.
           break
 
-        case .agentSettings:
-          // Agent Settings still read the mode from the runtime's mirror.
-          break
+        case let .agentSettings(agentSettings):
+          // Agent Settings still read the mode from the runtime's mirror; who
+          // can reach the bot lives with its access list.
+          if agentSettings.hasSettings {
+            deferredEffects.append(.agentSettings(agentSettings.settings))
+          }
 
         default:
           break
@@ -2191,6 +2199,8 @@ enum DeferredUpdateEffect: Sendable {
   /// Agent rows changed in the committed transaction.
   case agentStateCommitted
   case agentGrant(InlineProtocol.UpdateAgentGrant)
+  case agentSettings(InlineProtocol.AgentSettings)
+  case incomingDirectMessage(fromUserID: Int64)
 
   nonisolated func perform() {
     switch self {
@@ -2204,6 +2214,10 @@ enum DeferredUpdateEffect: Sendable {
         Task { @MainActor in AgentWorkStateStore.shared.reloadCommitted() }
       case let .agentGrant(update):
         Task { @MainActor in AgentGrantStore.shared.apply(update) }
+      case let .agentSettings(settings):
+        Task { @MainActor in AgentGrantStore.shared.apply(settings: settings) }
+      case let .incomingDirectMessage(fromUserID):
+        Task { @MainActor in AgentGrantStore.shared.noteIncomingDirectMessage(fromUserID: fromUserID) }
     }
   }
 }

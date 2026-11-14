@@ -139,7 +139,13 @@ actor InlineSearchEngine {
     try await appDatabase.reader.read { db in
       let items = try HomeChatItem.all().fetchAll(db)
       let snapshots = try HomeChatListItemSnapshot.snapshots(from: items, db: db)
+      // A chat with a bot the server said this person can't reach isn't a
+      // place to go: it takes no messages. Only a known "no" hides it.
+      let unreachableBots = try BotVisibility.fetch(db, viewerUserId: nil).unreachable
       let scoped = snapshots.filter { snapshot in
+        if case let .user(id) = snapshot.peerId, unreachableBots.contains(id) {
+          return false
+        }
         if scope.includeArchived == false, snapshot.archived {
           return false
         }
