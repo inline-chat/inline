@@ -25,6 +25,10 @@ export type DbChatAccess = typeof chatAccess.$inferSelect
 export const chatAccessState = pgTable("chat_access_state", {
   id: smallint("id").primaryKey().default(1),
   backfilledAt: timestamp("backfilled_at", { mode: "date", withTimezone: true, precision: 3 }).notNull(),
+  /** Last chat ID the current shared verification pass covered; null between passes. */
+  verifyCursor: integer("verify_cursor"),
+  /** When the last complete shared verification pass finished. */
+  verifiedAt: timestamp("verified_at", { mode: "date", withTimezone: true, precision: 3 }),
 }, (table) => [
   check("chat_access_state_singleton", sql`${table.id} = 1`),
 ])
