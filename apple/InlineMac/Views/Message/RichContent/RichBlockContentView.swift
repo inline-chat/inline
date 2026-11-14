@@ -89,6 +89,11 @@ final class RichBlockContentView: NSView {
     // Only an update of an already shown message animates nodes in and out; a
     // first bind or a different message appears as a whole.
     let isUpdate = previousContent != nil
+    // Text direction by node, to snap a node that changes reading direction instead of
+    // sliding it across the row.
+    let previousDirections: [BlockContentPath: Bool] = (currentPlan?.nodes ?? []).reduce(into: [:]) {
+      if case let .text(text) = $1.kind { $0[$1.path] = text.isRTL }
+    }
     previousSource = relatedMessage.text
     previousContent = content
     currentPlan = plan
@@ -181,7 +186,15 @@ final class RichBlockContentView: NSView {
         } : nil)
       }
       view.setContentVisible(isContentVisible)
-      if shouldAnimate, view.frame != .zero, view.frame != node.frame {
+      let flipsDirection: Bool = if case let .text(text) = node.kind,
+        let oldPath = reconciliation.previousPathByCurrentPath[node.path],
+        let previous = previousDirections[oldPath]
+      {
+        previous != text.isRTL
+      } else {
+        false
+      }
+      if shouldAnimate, !flipsDirection, view.frame != .zero, view.frame != node.frame {
         frameChanges.append((view, node.frame))
       } else {
         view.frame = node.frame
