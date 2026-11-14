@@ -20,6 +20,10 @@ final class EngineDemoView: UIView {
   private let bar = UIStackView()
   private let status = UILabel()
   private var insetRaised = false
+  private let composer = UIView()
+  private let field = UITextField()
+  private var keyboard: KeyboardCoordinator!
+  private let composerHeight: CGFloat = 96
   private let rowCost = Double(Lab.arg("rowcost") ?? "0") ?? 0
 
   init() {
@@ -52,7 +56,30 @@ final class EngineDemoView: UIView {
       button.addTarget(self, action: action, for: .touchUpInside)
       bar.addArrangedSubview(button)
     }
-    addSubview(bar)
+    composer.backgroundColor = .secondarySystemBackground
+    addSubview(composer)
+    // The composer's background continues below it, so a keyboard drawn late shows no gap.
+    let skirt = UIView(frame: CGRect(x: 0, y: composerHeight, width: 2000, height: 700))
+    skirt.backgroundColor = .secondarySystemBackground
+    composer.addSubview(skirt)
+    composer.addSubview(bar)
+    field.borderStyle = .roundedRect
+    field.placeholder = "Message"
+    field.accessibilityIdentifier = "e1.field"
+    composer.addSubview(field)
+    let tap = UITapGestureRecognizer(target: self, action: #selector(endTyping))
+    tap.cancelsTouchesInView = false
+    timeline.addGestureRecognizer(tap)
+
+    keyboard = KeyboardCoordinator(view: self)
+    keyboard.ridingHeight = { [unowned self] in composerHeight }
+    keyboard.onChange = { [weak self] change in
+      Lab.log(String(format: "E1 keyboard height=%.1f interactive=%d timing=%@", change.height, change.isInteractive ? 1 : 0, "\(change.timing)"))
+      self?.layoutBottom(timing: change.timing)
+      if !change.isInteractive || change.timing.isAnimated { Lab.flushEvents() }
+    }
+    keyboard.onDebug = { Lab.log("E1 keyboard: " + $0); Lab.flushEvents() }
+    timeline.releaseVelocityFilter = { [weak self] velocity in self?.keyboard.isInteractive == true ? 0 : velocity }
     status.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
     status.textColor = .secondaryLabel
     status.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
@@ -204,13 +231,30 @@ final class EngineDemoView: UIView {
   /// The lab pretends older history exists until 600 more rows were loaded.
   private var coverage: TimelineCoverage { TimelineCoverage(reachesOldest: oldestID <= -600, reachesNewest: true) }
 
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    keyboard.attach(to: window)
+  }
+
+  @objc private func endTyping() { field.resignFirstResponder() }
+
   override func layoutSubviews() {
     super.layoutSubviews()
-    let barHeight: CGFloat = 44 + safeAreaInsets.bottom
     timeline.frame = bounds
-    bar.frame = CGRect(x: 0, y: bounds.height - barHeight, width: bounds.width, height: 44)
     status.frame = CGRect(x: 0, y: safeAreaInsets.top, width: bounds.width, height: 14)
-    timeline.setInsets(top: safeAreaInsets.top + 14, bottom: barHeight + (insetRaised ? 300 : 0))
+    bar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 44)
+    field.frame = CGRect(x: 8, y: 50, width: bounds.width - 16, height: 38)
+    layoutBottom(timing: .none)
+  }
+
+  /// The one place the composer and the list's bottom inset are set: same call, same timing.
+  private func layoutBottom(timing: TimelineTiming) {
+    let covered = max(keyboard.height, safeAreaInsets.bottom) + (insetRaised ? 300 : 0)
+    let y = bounds.height - covered - composerHeight
+    let previous = composer.frame.minY
+    composer.frame = CGRect(x: 0, y: y, width: bounds.width, height: composerHeight)
+    if composer.frame.width > 0, previous != 0 { composer.layer.addTrack(timing, keyPath: "position.y", from: previous - y) }
+    timeline.setInsets(top: safeAreaInsets.top + 14, bottom: covered + composerHeight, timing: timing)
   }
 
   private func nextHeight() -> CGFloat {
@@ -282,8 +326,7 @@ final class EngineDemoView: UIView {
 
   @objc private func toggleInset() {
     insetRaised.toggle()
-    let barHeight: CGFloat = 44 + safeAreaInsets.bottom
-    timeline.setInsets(bottom: barHeight + (insetRaised ? 300 : 0), timing: .keyboard)
+    layoutBottom(timing: .keyboard)
   }
 
   @objc private func jumpTop() {

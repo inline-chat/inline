@@ -31,6 +31,9 @@ extension TimelineTiming {
         spring.damping = damping
         spring.initialVelocity = 0
         spring.duration = CFTimeInterval(duration)
+        // As the system keyboard's own animation is set up (read on device, iOS 27.2).
+        spring.timingFunction = CAMediaTimingFunction(name: .linear)
+        spring.allowsOverdamping = false
         animation = spring
       case let .curve(duration, c1x, c1y, c2x, c2y):
         animation = CABasicAnimation(keyPath: keyPath)
@@ -40,13 +43,16 @@ extension TimelineTiming {
     animation.fromValue = delta
     animation.toValue = 0
     animation.isAdditive = true
+    animation.fillMode = .backwards
     animation.isRemovedOnCompletion = true
     return animation
   }
 }
 
 extension CALayer {
-  func addTrack(_ timing: TimelineTiming, keyPath: String, from delta: CGFloat) {
+  /// Adds an additive track from `delta` to zero with this timing; nothing when the timing is
+  /// `.none` or the distance is negligible. For views that move with the list (the composer).
+  public func addTrack(_ timing: TimelineTiming, keyPath: String, from delta: CGFloat) {
     guard abs(delta) > 0.01, let track = timing.track(keyPath: keyPath, from: delta) else { return }
     add(track, forKey: nil)
   }
