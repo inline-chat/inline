@@ -50,9 +50,12 @@ The CLI Alpha workflow cuts alphas on its own, the way macOS Tip and iOS Early
 Testers ship Apple builds. Each CI or CLI Update Qualification completion on
 main, plus a three-hourly sweep, selects the newest main commit that changed CLI
 inputs and passed both the **Rust workspace all targets** / **Workflow and
-release contracts** jobs and the updater qualification jobs. It waits while a
-newer CLI change is still in CI and while any CLI release is running, and cuts at
-most one alpha every three hours (a manual run skips the interval).
+release contracts** jobs and the updater qualification jobs. Newer pending CI
+does not delay an already-green candidate. Main CI and updater runs survive
+later pushes, while superseded PR runs are cancelled. It waits while any CLI
+release is running, and cuts at most one alpha every three hours (a manual run
+skips the interval). An unpublished alpha tag is retried with the same version
+and source before another alpha is allocated.
 
 It tags that commit with the next alpha above every CLI tag and the committed
 workspace version (`0.7.22-alpha.4` → `0.7.22-alpha.5`; after stable `0.7.22`,
@@ -68,9 +71,11 @@ out-of-band alpha.
 gh workflow run cli-alpha.yml --repo inline-chat/inline --ref main
 ```
 
-Creating `cli-v*` tags is limited to repository admins by the "Release tags:
-admin creation" ruleset; the workflow needs GitHub Actions on that ruleset's
-bypass list. The immutability ruleset (no tag updates or deletion) still applies.
+The "Release tags: admin creation" ruleset excludes `refs/tags/cli-v*-alpha.*`
+so the workflow's `contents: write` token can create automatic alpha tags.
+GitHub rejects its built-in Actions app as a ruleset bypass actor. Stable, beta,
+and package tag creation remains admin-only. The immutability ruleset applies
+to every release tag, including alphas (no tag updates or deletion).
 
 Credentials-only and build diagnostics can use an exact green main commit
 without creating a tag. They never publish. Target overrides and signed-only

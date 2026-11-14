@@ -6,7 +6,8 @@ name: CLI Alpha
 # the tag and stamps the alpha version at build time, so no version commit is
 # needed. The 3-hourly sweep catches anything the interval deferred. The summary
 # states whether the run tagged a release, was already current, deferred, blocked
-# or failed.
+# or failed. Newer pending CI does not delay an already-green candidate; an
+# unpublished alpha tag is resumed before another version is allocated.
 on:
   workflow_run:
     workflows: [CI, CLI Update Qualification]
