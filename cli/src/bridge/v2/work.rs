@@ -465,6 +465,7 @@ pub(crate) fn spawn(
         offers: HashMap::new(),
         slots: HashMap::new(),
         edits: HashMap::new(),
+        resend: HashSet::new(),
         reported: None,
         working_due: None,
         phase: phase_tx,
@@ -602,6 +603,10 @@ struct Actor {
     offers: HashMap<InputId, i64>,
     slots: HashMap<u32, i64>,
     edits: HashMap<u32, PendingEdit>,
+    /// Slots whose message refused an edit. Their next progress goes out as a
+    /// new message on the edit cadence, so a refusal that also hits sends
+    /// cannot turn every event into a request.
+    resend: HashSet<u32>,
     /// The state last published, without its revision and time, so any
     /// published change (queue count, attention) is sent again.
     reported: Option<proto::AgentSessionState>,
@@ -3082,8 +3087,8 @@ impl Actor {
         for op in ops {
             log::debug!(target: "inline::bridge::v2", "chat={} render={}", self.chat_id, render_kind(&op));
             match op {
-                RenderOp::Progress { slot, doc } => match self.slots.get(&slot) {
-                    Some(_) => {
+                RenderOp::Progress { slot, doc } => {
+                    if self.slots.contains_key(&slot) || self.resend.contains(&slot) {
                         let due = tokio::time::Instant::now() + EDIT_INTERVAL;
                         self.edits
                             .entry(slot)
@@ -3094,15 +3099,13 @@ impl Actor {
                                 actions: None,
                                 closing: false,
                             });
+                    } else if let Some(id) = self.send(&doc, None, Notify::Silent).await {
+                        self.slots.insert(slot, id);
                     }
-                    None => {
-                        if let Some(id) = self.send(&doc, None, Notify::Silent).await {
-                            self.slots.insert(slot, id);
-                        }
-                    }
-                },
+                }
                 RenderOp::EndProgress { slot, doc } => {
                     self.edits.remove(&slot);
+                    self.resend.remove(&slot);
                     match self.slots.get(&slot).copied() {
                         Some(message_id) => {
                             match self.try_edit(self.chat_id, message_id, &doc, None).await {
@@ -3119,7 +3122,11 @@ impl Actor {
                                         },
                                     );
                                 }
-                                _ => {
+                                Err(Failure::Refused | Failure::Gone) => {
+                                    self.slots.remove(&slot);
+                                    self.send(&doc, None, Notify::Silent).await;
+                                }
+                                Ok(()) => {
                                     self.slots.remove(&slot);
                                 }
                             }
@@ -3258,9 +3265,16 @@ impl Actor {
             .map(|(slot, _)| *slot)
             .collect();
         for slot in due {
-            let (Some(edit), Some(message_id)) =
-                (self.edits.remove(&slot), self.slots.get(&slot).copied())
-            else {
+            let Some(edit) = self.edits.remove(&slot) else {
+                continue;
+            };
+            let Some(message_id) = self.slots.get(&slot).copied() else {
+                if self.resend.contains(&slot)
+                    && let Some(id) = self.send(&edit.doc, None, Notify::Silent).await
+                {
+                    self.resend.remove(&slot);
+                    self.slots.insert(slot, id);
+                }
                 continue;
             };
             match self
@@ -3279,12 +3293,15 @@ impl Actor {
                         ..edit
                     });
                 }
-                // Never retried as it is: the renderer keeps messages within
-                // Inline's limits, so this is rare and reported. The next
-                // edit of an open message may still land.
+                // This message can no longer be edited (for example after
+                // deletion or becoming a subthread parent). The next update
+                // starts a fresh progress message instead of freezing here.
                 Err(Failure::Refused | Failure::Gone) => {
+                    self.slots.remove(&slot);
                     if edit.closing {
-                        self.slots.remove(&slot);
+                        self.send(&edit.doc, None, Notify::Silent).await;
+                    } else {
+                        self.resend.insert(slot);
                     }
                 }
             }
@@ -3367,7 +3384,7 @@ impl Actor {
             Err(error) => {
                 let failure = error.failure();
                 if failure == Failure::Refused {
-                    log::error!(target: "inline::bridge::v2", "chat={chat_id} edit refused: {error} ({:?})", limits::Size::of(doc));
+                    log::error!(target: "inline::bridge::v2", "chat={chat_id} message={message_id} edit refused: {error} ({:?})", limits::Size::of(doc));
                     crate::telemetry::report_bridge_output_refused("edit");
                 } else {
                     log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
@@ -4354,6 +4371,7 @@ pub(crate) mod recovery_tests {
             offers: HashMap::new(),
             slots: HashMap::new(),
             edits: HashMap::new(),
+            resend: HashSet::new(),
             reported: None,
             working_due: None,
             phase: phase_tx,

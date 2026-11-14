@@ -134,9 +134,12 @@ longer on the machine. For a bridge installed before the new updater, wait until
 your agents are idle before the first upgrade, then run `inline bridge restart`
 once using the newly installed executable.
 
-Once enrolled, managed updates wait for active work to finish. Automatic runtime
-activations are spaced at least six hours apart, so the terminal and background
-bridge can temporarily report different versions. Homebrew-owned CLI executables
+Once enrolled, managed updates wait for active work and pending replies to
+finish; idle sessions don't hold them back. Automatic runtime activations are
+spaced at least six hours apart, so the terminal and background bridge can
+temporarily report different versions; running `inline update` yourself switches
+the bridge at its next idle moment. `inline bridge status` shows the version the
+background bridge runs. Homebrew-owned CLI executables
 stay managed by Homebrew; the enrolled background bridge can update independently.
 Check the installed binary and provider paths with `inline bridge doctor --json`.
 If another CLI installation shadows it on PATH, use the updated executable’s

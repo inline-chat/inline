@@ -130,8 +130,8 @@ native sessions and folders. Codex and Claude may replace an unavailable v1
 session with a fresh one. OpenCode and Amp preserve an unavailable saved
 binding and ask the user to retry or explicitly start a new conversation with
 `/new`; old Amp adapter sessions cannot resume across processes. Turns v1 had
-queued or was running get a "send it again" reply, and v1 approval and question
-cards expire. Settings may reset to v2 defaults; migration
+queued or was running get a "send it again" reply, and v1 approval, question,
+and session-picker cards expire. Settings may reset to v2 defaults; migration
 does not require preserving every old setting.
 When a legacy binding matches the registered native session, its saved folder
 is retained and persisted for subsequent restarts. Explicit thread folder
@@ -259,7 +259,7 @@ persisted policy and actual provider readiness after this new-binary restart.
 For an already supervised bridge, `inline bridge refresh --json` refreshes the
 retained parent from its committed, verified runtime. It never installs the
 invoking CLI. It returns `waiting_for_idle` while turns, queued inputs, questions,
-approvals or the two-minute quiet period remain; retry later. It refuses pending
+approvals or pending publication remain; retry later. It refuses pending
 activations and preserves configuration, authentication, receipt databases and
 runtime rollback history. An already current parent returns `up_to_date`.
 

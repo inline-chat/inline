@@ -148,9 +148,7 @@ impl CodexMapper {
 
     /// Restores turn facts from a `thread/resume` or `thread/fork` response.
     pub(crate) fn restore_turns(&mut self, active: Option<TurnId>, finished: Option<TurnId>) {
-        if active.is_some() {
-            self.active_turn = active;
-        }
+        self.active_turn = active;
         if finished.is_some() {
             self.last_finished_turn = finished;
         }

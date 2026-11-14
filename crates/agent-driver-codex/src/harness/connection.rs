@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
 
@@ -81,6 +82,26 @@ impl Connection {
             .request_with_timeout(request.method, request.params, REQUEST_TIMEOUT)
             .await
     }
+
+    async fn opening_request(&self, request: Request) -> Result<(Value, u64), PeerError> {
+        tokio::time::timeout(
+            REQUEST_TIMEOUT,
+            self.peer
+                .request_with_wire_sequence(request.method, request.params),
+        )
+        .await
+        .unwrap_or_else(|_| Err(PeerError::Timeout(request.method.to_owned())))
+    }
+
+    fn remove_session(&self, inner: &SessionInner) {
+        let mut sessions = self.sessions.lock().expect("session map poisoned");
+        if sessions
+            .get(&inner.thread)
+            .is_some_and(|known| std::ptr::eq(known.as_ptr(), inner))
+        {
+            sessions.remove(&inner.thread);
+        }
+    }
 }
 
 impl CodexHarness {
@@ -110,6 +131,82 @@ impl CodexHarness {
     /// Installs Inline's in-process tools, bound to the agent and its work.
     pub fn configure_host_tools(&self, configuration: HostToolConfiguration) {
         *self.host_tools.lock().expect("host tools poisoned") = Some(configuration);
+    }
+
+    async fn open_once(&self, spec: &OpenSpec) -> Result<Arc<dyn Session>, OpenError> {
+        let connection = self.connection().await?;
+        let Request { method, params } = super::delivery::open_request(spec, self.dynamic_tools());
+        // A resume can run input persisted in the native queue and ask for
+        // approval right away, so the session listens before it loads, and
+        // the queue it may run is published first.
+        let early = match &spec.mode {
+            OpenMode::Resume { session } => {
+                let inner = SessionInner::new(&connection, session.as_str().to_owned())?;
+                connection
+                    .sessions
+                    .lock()
+                    .expect("session map poisoned")
+                    .insert(inner.thread.clone(), Arc::downgrade(&inner));
+                let _ = inner.refresh_queue().await;
+                Some(inner)
+            }
+            _ => None,
+        };
+        let (response, response_sequence) =
+            match connection.opening_request(Request { method, params }).await {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(inner) = &early {
+                        connection.remove_session(inner);
+                    }
+                    return Err(open_error(error));
+                }
+            };
+        let thread = response
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                OpenError::Driver(DriverError::Protocol(format!(
+                    "{method} response has no thread id"
+                )))
+            })?
+            .to_owned();
+        let settings = EffectiveSettings {
+            model: text(response.get("model")).map(|model| DriverSettingOption {
+                value: model.clone(),
+                label: model,
+                description: None,
+                disabled: false,
+            }),
+            effort: text(response.get("reasoningEffort")),
+            speed: text(response.get("serviceTier")),
+            permission_mode: text(response.pointer("/activePermissionProfile/id")),
+            mode: None,
+            folder: text(response.get("cwd")).map(PathBuf::from),
+        };
+        let inner = match early {
+            Some(inner) if inner.thread == thread => inner,
+            _ => {
+                let inner = SessionInner::new(&connection, thread.clone())?;
+                connection
+                    .sessions
+                    .lock()
+                    .expect("session map poisoned")
+                    .insert(thread, Arc::downgrade(&inner));
+                inner
+            }
+        };
+        *inner.model.lock().expect("model poisoned") =
+            settings.model.as_ref().map(|model| model.value.clone());
+        inner.hub.emit(Event::Settings {
+            effective: settings,
+        });
+        // The initial state comes from the thread's own turns: a resumed
+        // thread may already be running one.
+        inner.restore_open_snapshot(&response, response_sequence);
+        inner.finish_open(response_sequence);
+        let session: Arc<dyn Session> = Arc::new(CodexSession { inner, connection });
+        Ok(session)
     }
 
     fn set_health(&self, health: RuntimeHealth) {
@@ -544,102 +641,34 @@ impl HarnessDriver for CodexHarness {
 
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
         Box::pin(async move {
-            let connection = self.connection().await?;
-            let Request { method, params } =
-                super::delivery::open_request(&spec, self.dynamic_tools());
-            // A resume can run input persisted in the native queue and ask for
-            // approval right away, so the session listens before it loads, and
-            // the queue it may run is published first.
-            let early = match &spec.mode {
-                OpenMode::Resume { session } => {
-                    let inner = SessionInner::new(&connection, session.as_str().to_owned())?;
-                    connection
-                        .sessions
-                        .lock()
-                        .expect("session map poisoned")
-                        .insert(inner.thread.clone(), Arc::downgrade(&inner));
-                    let _ = inner.refresh_queue().await;
-                    Some(inner)
+            // Unsubscribe can enter Codex's native shutdown just as the next
+            // message arrives. Only its explicit "closing" refusal is safe
+            // to retry: no resume or input was accepted. Every attempt gets
+            // a fresh early listener, since thread/closed ends the old one.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            let mut delay = Duration::from_millis(100);
+            loop {
+                let result = self.open_once(&spec).await;
+                if !resume_is_closing(&spec.mode, &result)
+                    || tokio::time::Instant::now() + delay > deadline
+                {
+                    return result;
                 }
-                _ => None,
-            };
-            let response = match connection.request(Request { method, params }).await {
-                Ok(response) => response,
-                Err(error) => {
-                    if let Some(inner) = &early {
-                        connection
-                            .sessions
-                            .lock()
-                            .expect("session map poisoned")
-                            .remove(&inner.thread);
-                    }
-                    return Err(open_error(error));
-                }
-            };
-            let thread = response
-                .pointer("/thread/id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    OpenError::Driver(DriverError::Protocol(format!(
-                        "{method} response has no thread id"
-                    )))
-                })?
-                .to_owned();
-            let settings = EffectiveSettings {
-                model: text(response.get("model")).map(|model| DriverSettingOption {
-                    value: model.clone(),
-                    label: model,
-                    description: None,
-                    disabled: false,
-                }),
-                effort: text(response.get("reasoningEffort")),
-                speed: text(response.get("serviceTier")),
-                permission_mode: text(response.pointer("/activePermissionProfile/id")),
-                mode: None,
-                folder: text(response.get("cwd")).map(PathBuf::from),
-            };
-            let inner = match early {
-                Some(inner) if inner.thread == thread => inner,
-                _ => {
-                    let inner = SessionInner::new(&connection, thread.clone())?;
-                    connection
-                        .sessions
-                        .lock()
-                        .expect("session map poisoned")
-                        .insert(thread, Arc::downgrade(&inner));
-                    inner
-                }
-            };
-            *inner.model.lock().expect("model poisoned") =
-                settings.model.as_ref().map(|model| model.value.clone());
-            inner.hub.emit(Event::Settings {
-                effective: settings,
-            });
-            // The initial state comes from the thread's own turns: a resumed
-            // thread may already be running one.
-            let (active, finished) = thread_turns(&response);
-            let (running, consumed) = {
-                let mut mapper = inner.mapper.lock().expect("mapper poisoned");
-                mapper.restore_turns(active.clone(), finished);
-                (
-                    mapper.active_turn().is_some(),
-                    mapper.restore_inputs(&response),
-                )
-            };
-            for event in consumed {
-                inner.hub.emit(event);
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(1));
             }
-            inner.hub.emit(Event::State {
-                state: if running {
-                    RunState::Working
-                } else {
-                    RunState::Idle
-                },
-            });
-            let session: Arc<dyn Session> = Arc::new(CodexSession { inner, connection });
-            Ok(session)
         })
     }
+}
+
+fn resume_is_closing<T>(mode: &OpenMode, result: &Result<T, OpenError>) -> bool {
+    let (OpenMode::Resume { session }, Err(OpenError::Driver(DriverError::Rejected(message)))) =
+        (mode, result)
+    else {
+        return false;
+    };
+    message
+        == &format!("thread {session} is closing; retry thread/resume after the thread is closed")
 }
 
 /// The running and latest finished turn a `thread/*` response reports.
@@ -673,11 +702,19 @@ struct SessionInner {
     thread: String,
     hub: EventHub,
     mapper: StdMutex<CodexMapper>,
+    turn_sequence: AtomicU64,
+    open_boundary: StdMutex<OpenBoundary>,
     model: StdMutex<Option<String>>,
     queue: StdMutex<Vec<QueuedInput>>,
     /// Background terminals still running, from `thread/backgroundTerminals/list`.
     terminals: StdMutex<Vec<inline_agent_bridge::harness::ChildRef>>,
     connection: Weak<Connection>,
+}
+
+#[derive(Default)]
+struct OpenBoundary {
+    response: Option<u64>,
+    closed: Option<u64>,
 }
 
 impl SessionInner {
@@ -691,12 +728,59 @@ impl SessionInner {
             hub: EventHub::new(key.clone(), DEFAULT_HUB_CAPACITY),
             key,
             mapper: StdMutex::new(CodexMapper::new(thread.clone())),
+            turn_sequence: AtomicU64::new(0),
+            open_boundary: StdMutex::new(OpenBoundary::default()),
             thread,
             model: StdMutex::new(None),
             queue: StdMutex::new(Vec::new()),
             terminals: StdMutex::new(Vec::new()),
             connection: Arc::downgrade(connection),
         }))
+    }
+
+    fn restore_open_snapshot(&self, response: &Value, response_sequence: u64) {
+        let (active, finished) = thread_turns(response);
+        let mut mapper = self.mapper.lock().expect("mapper poisoned");
+        // Snapshot restoration and notification versions share the mapper
+        // lock, so a completion newer than the response cannot be undone.
+        if self.turn_sequence.load(Ordering::Acquire) <= response_sequence {
+            mapper.restore_turns(active, finished);
+        }
+        for event in mapper.restore_inputs(response) {
+            self.hub.emit(event);
+        }
+        self.hub.emit(Event::State {
+            state: if mapper.active_turn().is_some() {
+                RunState::Working
+            } else {
+                RunState::Idle
+            },
+        });
+    }
+
+    fn defer_close(&self, sequence: u64) -> bool {
+        let mut boundary = self.open_boundary.lock().expect("open boundary poisoned");
+        if let Some(response) = boundary.response {
+            return sequence <= response;
+        }
+        boundary.closed = Some(sequence);
+        true
+    }
+
+    fn finish_open(&self, sequence: u64) {
+        let closed = {
+            let mut boundary = self.open_boundary.lock().expect("open boundary poisoned");
+            boundary.response = Some(sequence);
+            boundary
+                .closed
+                .take()
+                .is_some_and(|closed| closed > sequence)
+        };
+        if closed {
+            self.emit_all(vec![Event::State {
+                state: RunState::Released,
+            }]);
+        }
     }
 
     fn emit_all(&self, events: Vec<Event>) {
@@ -718,11 +802,7 @@ impl SessionInner {
             self.hub.emit(event);
             // Stop routing only once Codex confirms the thread unloaded.
             if released && let Some(connection) = self.connection.upgrade() {
-                connection
-                    .sessions
-                    .lock()
-                    .expect("session map poisoned")
-                    .remove(&self.thread);
+                connection.remove_session(self);
             }
         }
     }
@@ -907,13 +987,33 @@ async fn dispatch(
             .filter_map(Weak::upgrade)
             .collect();
         match message {
-            IncomingMessage::Notification { method, params, .. } => {
+            IncomingMessage::Notification {
+                method,
+                params,
+                wire_sequence,
+            } => {
                 for session in &sessions {
-                    let mapped = session
-                        .mapper
-                        .lock()
-                        .expect("mapper poisoned")
-                        .notification(&method, &params);
+                    if method == "thread/closed"
+                        && params.get("threadId").and_then(Value::as_str)
+                            == Some(session.thread.as_str())
+                        && session.defer_close(wire_sequence)
+                    {
+                        continue;
+                    }
+                    let mapped = {
+                        let mut mapper = session.mapper.lock().expect("mapper poisoned");
+                        let mapped = mapper.notification(&method, &params);
+                        if mapped
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, Event::Turn { .. }))
+                        {
+                            session
+                                .turn_sequence
+                                .store(wire_sequence, Ordering::Release);
+                        }
+                        mapped
+                    };
                     session.emit_all(mapped.events);
                     if mapped.refresh_queue {
                         let session = session.clone();
@@ -1403,6 +1503,193 @@ fn op_error(error: PeerError) -> OpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn scripted_harness(closing: bool) -> (tempfile::TempDir, CodexHarness) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("codex");
+        let script = r#"#!/bin/bash
+[[ "$*" == "app-server" ]] || exit 1
+attempt=0
+while IFS= read -r request; do
+  [[ "$request" == *'"id":'* ]] || continue
+  printf '%s\n' "$request" >> "$0.requests"
+  id=${request#*'"id":'}
+  id=${id%%[!0-9]*}
+  case "$request" in
+    *'"method":"initialize"'*)
+      printf '{"id":%s,"result":{"userAgent":"codex_app_server/0.166.0"}}\n' "$id" ;;
+    *'"method":"thread/resume"'*)
+      attempt=$((attempt+1))
+      if [[ $attempt == 1 ]]; then
+        printf '{"id":%s,"error":{"code":-32600,"message":"REJECTION"}}\n' "$id"
+        printf '%s\n' '{"method":"thread/closed","params":{"threadId":"thread-1"}}'
+      else
+        printf '{"id":%s,"result":{"thread":{"id":"thread-1","turns":[]},"model":"test-model","cwd":"/work"}}\n' "$id"
+      fi ;;
+    *'"method":"test/event"'*)
+      printf '{"id":%s,"result":{}}\n' "$id"
+      printf '%s\n' '{"method":"thread/name/updated","params":{"threadId":"thread-1","threadName":"still routed"}}' ;;
+    *'"method":"test/complete"'*)
+      printf '%s\n' '{"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-live","status":"inProgress"}}}'
+      printf '%s\n' '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-live","status":"completed"}}}'
+      printf '{"id":%s,"result":{}}\n' "$id" ;;
+    *) printf '{"id":%s,"result":{"data":[]}}\n' "$id" ;;
+  esac
+done
+"#;
+        let message = if closing {
+            "thread thread-1 is closing; retry thread/resume after the thread is closed"
+        } else {
+            "model is unavailable"
+        };
+        std::fs::write(&executable, script.replace("REJECTION", message)).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let harness = CodexHarness::new(CodexHarnessConfig {
+            launch: CodexLaunchConfig {
+                executable,
+                ..Default::default()
+            },
+            source: ExecutableSource::User,
+            pinned_sha256: None,
+            bridge_version: "test".into(),
+            cache_root: dir.path().join("cache"),
+        });
+        (dir, harness)
+    }
+
+    fn resume_spec() -> OpenSpec {
+        OpenSpec {
+            mode: OpenMode::Resume {
+                session: ProviderSessionId::new("thread-1").unwrap(),
+            },
+            folder: "/work".into(),
+            settings: Default::default(),
+            instructions: None,
+            title: None,
+            after: None,
+            output_mode: Default::default(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn closing_resume_retries_without_sending_input_and_keeps_event_routing() {
+        use futures_util::StreamExt;
+        for late_close in [false, true] {
+            let (dir, harness) = scripted_harness(true);
+            if late_close {
+                let executable = &harness.config.launch.executable;
+                let script = std::fs::read_to_string(executable).unwrap();
+                let close = "        printf '%s\\n' '{\"method\":\"thread/closed\",\"params\":{\"threadId\":\"thread-1\"}}'\n";
+                let script = script
+                    .replace(close, "")
+                    .replace("      else\n", &format!("      else\n{close}"));
+                std::fs::write(executable, script).unwrap();
+            }
+            let session = tokio::time::timeout(Duration::from_secs(3), harness.open(resume_spec()))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut events = session.events();
+            let connection = harness.connection().await.unwrap();
+            connection
+                .request(Request {
+                    method: "test/event",
+                    params: json!({}),
+                })
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while let Some(envelope) = events.next().await {
+                    let event = envelope.event;
+                    assert!(!matches!(
+                        event,
+                        Event::State {
+                            state: RunState::Released
+                        }
+                    ));
+                    if matches!(event, Event::Renamed { title } if title == "still routed") {
+                        return;
+                    }
+                }
+                panic!("resumed event stream ended");
+            })
+            .await
+            .unwrap();
+            let requests = std::fs::read_to_string(dir.path().join("codex.requests")).unwrap();
+            assert_eq!(requests.matches("\"method\":\"thread/resume\"").count(), 2);
+            assert!(!requests.contains("\"method\":\"turn/start\""));
+            connection.control.shutdown().await.unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_completion_newer_than_the_resume_snapshot_is_not_undone() {
+        use futures_util::StreamExt;
+        let (_dir, harness) = scripted_harness(true);
+        let session = harness.open(resume_spec()).await.unwrap();
+        let connection = harness.connection().await.unwrap();
+        let inner = connection
+            .sessions
+            .lock()
+            .unwrap()
+            .get("thread-1")
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let response_sequence = inner.open_boundary.lock().unwrap().response.unwrap();
+        let mut events = session.events();
+        connection
+            .request(Request {
+                method: "test/complete",
+                params: json!({}),
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while let Some(event) = events.next().await {
+                if matches!(
+                    event.event,
+                    Event::Turn {
+                        phase: inline_agent_bridge::harness::TurnPhase::Completed { .. },
+                        ..
+                    }
+                ) {
+                    return;
+                }
+            }
+            panic!("completion missing");
+        })
+        .await
+        .unwrap();
+        inner.restore_open_snapshot(
+            &json!({"thread":{"turns":[{"id":"turn-live","status":"inProgress"}]}}),
+            response_sequence,
+        );
+        assert!(inner.mapper.lock().unwrap().active_turn().is_none());
+        connection.control.shutdown().await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn permanent_resume_rejection_is_not_retried() {
+        let (dir, harness) = scripted_harness(false);
+        assert!(matches!(harness.open(resume_spec()).await,
+            Err(OpenError::Driver(DriverError::Rejected(message))) if message == "model is unavailable"));
+        let requests = std::fs::read_to_string(dir.path().join("codex.requests")).unwrap();
+        assert_eq!(requests.matches("\"method\":\"thread/resume\"").count(), 1);
+        harness
+            .connection()
+            .await
+            .unwrap()
+            .control
+            .shutdown()
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn skill_options_keep_enabled_skills_once() {
