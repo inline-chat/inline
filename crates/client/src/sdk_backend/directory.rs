@@ -28,10 +28,9 @@ impl SdkBackend {
                 .space(space.space_id)
                 .await
                 .map_err(store_error_to_backend)?
+                && cached.seq.unwrap_or_default() >= space.seq.unwrap_or_default()
             {
-                if cached.seq.unwrap_or_default() >= space.seq.unwrap_or_default() {
-                    *space = cached;
-                }
+                *space = cached;
             }
         }
         Ok(snapshot)
@@ -137,10 +136,10 @@ impl SdkBackend {
             .map(|space| (InlineId::new(space.id), space_record_from_proto(space)))
             .collect();
         for existing in &directory.snapshot.spaces {
-            if let Some(listed) = spaces.get_mut(&existing.space_id) {
-                if existing.seq.unwrap_or_default() > listed.seq.unwrap_or_default() {
-                    *listed = existing.clone();
-                }
+            if let Some(listed) = spaces.get_mut(&existing.space_id)
+                && existing.seq.unwrap_or_default() > listed.seq.unwrap_or_default()
+            {
+                *listed = existing.clone();
             }
         }
         let cursor = directory
