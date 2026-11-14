@@ -27,8 +27,10 @@ export type ApnFailureSummary = {
   errorMessage?: string
 }
 
-// These are common per-device failures that are expected in production (uninstalls, expired tokens, app swaps).
-const suppressedReasons = new Set(["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic", "TopicDisallowed"])
+// Per-device rejections that are expected in production (uninstalls, expired tokens, a debug build's
+// token registered with this server). They prove the token is dead. Provider-wide failures such as
+// TopicDisallowed or InvalidProviderToken are configuration errors and never release a token.
+const suppressedReasons = new Set(["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"])
 
 export const summarizeApnFailure = (failure: unknown): ApnFailureSummary => {
   if (typeof failure === "string") {

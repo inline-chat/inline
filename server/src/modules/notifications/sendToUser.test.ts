@@ -1,8 +1,16 @@
 import { describe, expect, it } from "bun:test"
 import { generateKeyPairSync } from "node:crypto"
-import { decryptSendMessagePushContentForTests, encryptSendMessagePushContent, PUSH_CONTENT_ALGORITHM, PUSH_CONTENT_VERSION } from "./pushContentEncryption"
+import {
+  decryptSendMessagePushContentForTests,
+  encryptSendMessagePushContent,
+  PUSH_CONTENT_ALERT_VERSION,
+  PUSH_CONTENT_ALGORITHM,
+  PUSH_CONTENT_VERSION,
+  type EncryptedAlertPushContent,
+} from "./pushContentEncryption"
 import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "./messagePreview"
 import {
+  ApnTokenRejectionGuard,
   buildApnNotification,
   buildExpoPushMessage,
   shouldClearApplePushTokenForFailures,
@@ -50,6 +58,28 @@ describe("sendToUser invalid APN tokens", () => {
         { status: 500, response: { reason: "InternalServerError" } },
       ]),
     ).toBe(false)
+  })
+})
+
+describe("APNs token rejection guard", () => {
+  it("pauses token release when APNs rejects every token, as a misconfigured provider does", () => {
+    let now = 0
+    const guard = new ApnTokenRejectionGuard(60_000, 3, () => now)
+    expect(guard.record("rejected")).toBe(true)
+    expect(guard.record("rejected")).toBe(true)
+    expect(guard.record("rejected")).toBe(false)
+    // Any delivery in the window proves the provider works; rejections are per device again.
+    expect(guard.record("delivered")).toBe(true)
+    expect(guard.record("rejected")).toBe(true)
+    now = 120_000
+    expect(guard.record("rejected")).toBe(true)
+  })
+
+  it("never treats provider configuration errors as dead tokens", () => {
+    expect(shouldClearApplePushTokenForFailures([{ status: 400, response: { reason: "TopicDisallowed" } }])).toBe(false)
+    expect(shouldClearApplePushTokenForFailures([{ status: 403, response: { reason: "InvalidProviderToken" } }])).toBe(
+      false,
+    )
   })
 })
 
@@ -178,6 +208,63 @@ describe("notification provider privacy", () => {
       }
     })
   }
+})
+
+describe("sendToUser alert payloads", () => {
+  const alert = {
+    kind: "alert" as const, senderUserId: 12, chatId: 34, threadId: "chat_34",
+    title: "Mo created a Linear issue", subtitle: "Fix pushes", body: "the burst test", isThread: true,
+  }
+
+  it("encrypts real alert text for clients that render alerts and routes it through the extension", () => {
+    const recipient = generateKeyPairSync("x25519")
+    const notification = buildApnNotification({
+      recipientUserId: 99,
+      session: {
+        pushContentKeyPublic: recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32),
+        pushContentKeyId: "ios-x25519-v1", pushContentVersion: PUSH_CONTENT_ALERT_VERSION,
+        pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM,
+      },
+      payload: alert, silent: false, topic: "chat.inline.Inline", nowSeconds: 500,
+    })!
+    const compiled = JSON.parse(JSON.stringify(notification)) as Record<string, unknown> & { aps: Record<string, unknown> }
+    expect(compiled.aps["mutable-content"]).toBe(1)
+    expect(compiled["recipientUserId"]).toBe("99")
+    expect(JSON.stringify(compiled)).not.toContain("Linear issue")
+    expect(notification.expiry).toBe(500 + 24 * 60 * 60)
+    const decrypted = decryptSendMessagePushContentForTests<EncryptedAlertPushContent>({
+      privateKey: recipient.privateKey, envelope: notification.payload.encryptedContent,
+    })
+    expect(decrypted).toMatchObject({ kind: "alert", title: alert.title, body: alert.body, subtitle: alert.subtitle,
+      threadId: "chat_34", isThread: true })
+  })
+
+  it("keeps the generic alert for clients that cannot render encrypted alerts, still through the extension", () => {
+    const recipient = generateKeyPairSync("x25519")
+    const notification = buildApnNotification({
+      recipientUserId: 99,
+      session: {
+        pushContentKeyPublic: recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32),
+        pushContentKeyId: "ios-x25519-v1", pushContentVersion: PUSH_CONTENT_VERSION,
+        pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM,
+      },
+      payload: alert, silent: false, topic: "chat.inline.Inline", nowSeconds: 500,
+    })!
+    const compiled = JSON.parse(JSON.stringify(notification)) as Record<string, unknown> & { aps: Record<string, unknown> }
+    expect(compiled["encryptedContent"]).toBeUndefined()
+    expect(compiled.aps["mutable-content"]).toBe(1)
+    expect(compiled["recipientUserId"]).toBe("99")
+  })
+
+  it("collapses repeated pushes of one message and expires visible pushes after a day", () => {
+    const notification = buildApnNotification({
+      recipientUserId: 99, session: unencryptedSession,
+      payload: { kind: "send_message", senderUserId: 1, threadId: "chat_7", messageId: "19", title: "A", body: "b" },
+      silent: false, topic: "chat.inline.Inline", nowSeconds: 1_000,
+    })!
+    expect(notification.collapseId).toBe("chat_7:19")
+    expect(notification.expiry).toBe(1_000 + 24 * 60 * 60)
+  })
 })
 
 describe("sendToUser APN payloads", () => {

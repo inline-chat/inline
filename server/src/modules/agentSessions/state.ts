@@ -313,6 +313,7 @@ async function pushAttention(row: DbAgentSession, chat: DbChat): Promise<void> {
         payload: {
           kind: "alert",
           senderUserId: row.botUserId,
+          chatId: chat.id,
           threadId: `chat_${chat.id}`,
           title: name,
           body: attention.text ?? `${name} ${attentionFallback[attention.kind] ?? "needs you"}`,

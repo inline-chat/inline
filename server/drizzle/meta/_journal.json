@@ -1198,6 +1198,13 @@
       "when": 1794555576163,
       "tag": "0170_chat-last-message-date",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1794653081971,
+      "tag": "0171_push-token-fingerprint",
+      "breakpoints": true
     }
   ]
 }

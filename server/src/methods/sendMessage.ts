@@ -3,7 +3,7 @@ import { ensureBotCanReachDmPeer } from "@in/server/modules/contacts/contacts"
 import { canonicalMediaForFile } from "@in/server/modules/message/canonicalMediaForFile"
 import { db } from "@in/server/db"
 import { eq, and } from "drizzle-orm"
-import { chats, users, type DbFile, type DbMessage, type DbUser } from "@in/server/db/schema"
+import { chats, users, type DbFile, type DbMessage } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -17,14 +17,9 @@ import {
   Optional,
 } from "@in/server/api-types"
 import { getUpdateGroup } from "@in/server/modules/updates"
-import * as APN from "apn"
 import type { HandlerContext } from "../controllers/helpers"
-import { getApnProvider } from "../libs/apn"
-import { summarizeApnFailure } from "../libs/apnFailures"
-import { SessionsModel } from "@in/server/db/models/sessions"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { TInputId } from "@in/server/types/methods"
-import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { debugDelay } from "@in/server/utils/helpers/time"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -32,11 +27,7 @@ import { MessageEntities, Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
-import {
-  maxNotificationNameBytes,
-  notificationBodyText,
-  notificationText,
-} from "@in/server/modules/notifications/messagePreview"
+import { sendProjectedMessageNotification } from "@in/server/functions/messages.sendMessage"
 import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -105,7 +96,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
   // Get or validate chat ID from peer info
   const chatId = await getChatIdFromPeer(peerId, context)
-  await getAuthorizedChat(chatId, context.currentUserId)
+  const chat = await getAuthorizedChat(chatId, context.currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chatId, context.currentUserId)
 
   const outgoingText = input.text
@@ -209,33 +200,10 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     currentUserId: context.currentUserId,
   })
 
-  const currentUser = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, context.currentUserId))
-    .then(([user]) => user)
-
-  if (!currentUser) {
-    // Should not happen
-    throw new InlineError(InlineError.ApiError.INTERNAL)
-  }
-
-  if (
-    input.peerUserId &&
-    // Don't send push notifications to self
-    input.peerUserId !== context.currentUserId
-  ) {
-    const title =
-      notificationText(currentUser.firstName ?? currentUser.username, maxNotificationNameBytes) || "New Message"
-    sendPushNotificationToUser({
-      userId: Number(input.peerUserId),
-      title,
-      chatId,
-      message: notificationBodyText(text) || (file ? "🖼️ Photo" : "New message"),
-      currentUserId: context.currentUserId,
-      currentUser,
-    })
-  }
+  // Same notification policy, payload and encryption as the realtime send path.
+  void sendProjectedMessageNotification({ chat, message: newMessage, text, entities }).catch((error) => {
+    Log.shared.error("Failed to send legacy message notification", { error, chatId })
+  })
 
   const updateMessageId: TUpdateInfo = {
     updateMessageId: {
@@ -409,113 +377,6 @@ const sendMessageUpdate = async ({
         // other users get the message only
         RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
       }
-    })
-  }
-}
-
-const sendPushNotificationToUser = async ({
-  userId,
-  title,
-  message,
-  currentUserId,
-  chatId,
-  currentUser,
-}: {
-  userId: number
-  title: string
-  message: string
-  chatId: number
-  currentUserId: number
-  currentUser: DbUser
-}) => {
-  try {
-    // Get all sessions for the user
-    const userSessions = await SessionsModel.getValidSessionsByUserId(userId)
-
-    if (!userSessions.length) {
-      return
-    }
-
-    const projectedTitle = notificationText(title, maxNotificationNameBytes) || "New Message"
-    const projectedBody = notificationBodyText(message) || "New message"
-    const projectedFirstName = notificationText(currentUser.firstName, maxNotificationNameBytes) || undefined
-    const projectedLastName = notificationText(currentUser.lastName, maxNotificationNameBytes) || undefined
-
-    for (const session of userSessions) {
-      if (!session.applePushToken) continue
-
-      let topic =
-        session.clientType === "macos"
-          ? isProd
-            ? "chat.inline.InlineMac"
-            : "chat.inline.InlineMac.debug"
-          : isProd
-          ? "chat.inline.InlineIOS"
-          : "chat.inline.InlineIOS.debug"
-
-      // Configure notification
-      const notification = new APN.Notification()
-      notification.payload = {
-        userId: currentUserId,
-        // The iOS notification extension shows content only to the signed-in recipient.
-        recipientUserId: String(userId),
-
-        from: {
-          firstName: projectedFirstName,
-          lastName: projectedLastName,
-        },
-      }
-      notification.contentAvailable = true
-      notification.mutableContent = true
-      notification.topic = topic
-      notification.threadId = `chat_${chatId}`
-      notification.sound = "default"
-      notification.alert = {
-        title: projectedTitle,
-        body: projectedBody,
-      }
-
-      const payloadBytes = Buffer.byteLength(JSON.stringify(notification), "utf8")
-      if (payloadBytes > 4_096) {
-        Log.shared.warn("Legacy notification payload exceeded APNs byte budget", { payloadBytes, userId })
-        continue
-      }
-
-      let apnProvider = getApnProvider()
-      if (!apnProvider) {
-        Log.shared.error("APN provider not found", { userId })
-        continue
-      }
-
-      const sendPush = async () => {
-        if (!session.applePushToken) return
-        try {
-          const result = await apnProvider.send(notification, session.applePushToken)
-          if (result.failed.length > 0) {
-            const summaries = result.failed.map((failure) => summarizeApnFailure(failure))
-            Log.shared.debug("Failed to send push notification", {
-              errors: summaries,
-              userId,
-            })
-          } else {
-            Log.shared.debug("Push notification sent successfully", {
-              userId,
-            })
-          }
-        } catch (error) {
-          Log.shared.debug("Error sending push notification", {
-            error,
-            userId,
-          })
-        }
-      }
-
-      sendPush()
-    }
-  } catch (error) {
-    Log.shared.debug("Error sending push notification", {
-      error,
-      userId,
     })
   }
 }

@@ -14,7 +14,10 @@ const X25519_RAW_PUBLIC_KEY_LENGTH = 32
 const X25519_SPKI_DER_PREFIX = Buffer.from("302a300506032b656e032100", "hex")
 const PUSH_CONTENT_HKDF_INFO = Buffer.from("inline.push-content.v1", "utf8")
 
+/** Envelope format; also the minimum registration version that can decrypt message content. */
 export const PUSH_CONTENT_VERSION = 1
+/** Registration version from which the notification extension also decrypts `alert` content. */
+export const PUSH_CONTENT_ALERT_VERSION = 2
 export const PUSH_CONTENT_ALGORITHM = "X25519_HKDF_SHA256_AES256_GCM"
 
 export type EncryptedPushContentEnvelope = {
@@ -49,6 +52,19 @@ export type EncryptedSendMessagePushContent = {
   sync?: NotificationSyncOps
 }
 
+/** Non-message activity (invites, integrations, agent attention). Rendered as plain text, no sender styling. */
+export type EncryptedAlertPushContent = {
+  kind: "alert"
+  title: string
+  body: string
+  subtitle?: string
+  threadId: string
+  isThread: boolean
+  isReplyThread?: boolean
+}
+
+export type EncryptedPushContent = EncryptedSendMessagePushContent | EncryptedAlertPushContent
+
 const encodeBase64Url = (value: Buffer): string => value.toString("base64url")
 
 const decodeBase64Url = (value: string): Buffer => Buffer.from(value, "base64url")
@@ -81,7 +97,7 @@ const extractRawX25519PublicKey = (publicKey: KeyObject): Buffer => {
 export const encryptSendMessagePushContent = (input: {
   recipientPublicKey: Uint8Array
   recipientKeyId?: string
-  content: EncryptedSendMessagePushContent
+  content: EncryptedPushContent
 }): EncryptedPushContentEnvelope => {
   const recipientPublicKey = ensureX25519PublicKey(input.recipientPublicKey)
   const ephemeral = generateKeyPairSync("x25519")
@@ -112,10 +128,10 @@ export const encryptSendMessagePushContent = (input: {
 }
 
 // Test helper used to validate envelope compatibility.
-export const decryptSendMessagePushContentForTests = (input: {
+export const decryptSendMessagePushContentForTests = <Content extends EncryptedPushContent = EncryptedSendMessagePushContent>(input: {
   privateKey: KeyObject
   envelope: EncryptedPushContentEnvelope
-}): EncryptedSendMessagePushContent => {
+}): Content => {
   const envelope = input.envelope
   const ephemeralPublicKey = ensureX25519PublicKey(decodeBase64Url(envelope.ephemeralPublicKey))
   const sharedSecret = diffieHellman({
@@ -128,5 +144,5 @@ export const decryptSendMessagePushContentForTests = (input: {
   decipher.setAuthTag(decodeBase64Url(envelope.tag))
 
   const decrypted = Buffer.concat([decipher.update(decodeBase64Url(envelope.ciphertext)), decipher.final()])
-  return JSON.parse(decrypted.toString("utf8")) as EncryptedSendMessagePushContent
+  return JSON.parse(decrypted.toString("utf8")) as Content
 }
