@@ -12,7 +12,7 @@ enum Lab {
     return args[i + 1]
   }
 
-  static let allModes = ["S1", "S2pub", "S2priv", "S4", "S3U", "S3C", "S3R"]
+  static let allModes = ["S1", "S2pub", "S2priv", "S4", "S3U", "S3C", "S3R", "S3L"]
   static func modeTitle(_ m: String) -> String {
     switch m {
     case "S1": return "S1 keyboard open/close"
@@ -22,6 +22,7 @@ enum Lab {
     case "S3U": return "S3 engine U (scroll view driver)"
     case "S3C": return "S3 engine C (custom physics)"
     case "S3R": return "S3 reference UIScrollView"
+    case "S3L": return "S3 2000-row list (realisation)"
     default: return m
     }
   }

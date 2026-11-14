@@ -1,2 +1,3 @@
 .build-xcode/
 TimelineLab.xcodeproj/
+.build-sim/

@@ -60,6 +60,16 @@ final class LabView: UIView, UITextViewDelegate, UIScrollViewDelegate, UIGesture
   let s4InstanceID = Int(CACurrentMediaTime() * 1000) % 100000
   var s3ResetWork: DispatchWorkItem?
   var s3Buttons: [UIButton] = []
+  var lastVelocityEstimates: [String: Double] = [:]
+  var s3FlingCPU0: Double = 0
+  var s3FlingWall0: Double = 0
+  var s3TickWork: Double = 0
+  var s3TickCount = 0
+  var s3PrependArmed = false
+  var s3PrependArmedOverride = false
+  var virtualList: VirtualList?
+  var s4IgnoreKB = false
+  var synth: SynthFinger?
   var popObserver: NSObjectProtocol?
   var layoutPasses = 0
 
@@ -73,6 +83,7 @@ final class LabView: UIView, UITextViewDelegate, UIScrollViewDelegate, UIGesture
     addSubview(clip)
     clip.addSubview(content)
     buildRows()
+    if mode == "S3L" { setupVirtualList() }
 
     if mode.hasPrefix("S2") || mode == "S1" || mode == "S4" {
       dragScroll.backgroundColor = .clear
@@ -234,7 +245,10 @@ final class LabView: UIView, UITextViewDelegate, UIScrollViewDelegate, UIGesture
       Task { @MainActor in
         await Lab.sleep(1.0)
         switch mode {
+        case "S1" where Lab.arg("swapfx") == "1": await runSwapFX()
         case "S1": await runS1()
+        case "S2priv" where Lab.arg("synth") == "1": await runSynthFinger()
+        case "S3L" where Lab.arg("autofling") == "1": await runAutoFling()
         case "S3U", "S3C", "S3R": break
         default: break
         }
@@ -318,13 +332,14 @@ final class LabView: UIView, UITextViewDelegate, UIScrollViewDelegate, UIGesture
       if k.pres.isFinite { applyKeyboardTop(screenY: k.pres, source: "link") }
     }
     engine?.tick(l)
+    if mode.hasPrefix("S3") { s3Tick(l) }
     if mode == "S4" { s4Tick() }
+    synth?.tick(self)
     guard probe.recording else { return }
     let k = keyboardTops()
     let cP = KB.screenRect(composer.layer, presentation: true).maxY
     let cM = KB.screenRect(composer.layer, presentation: false).maxY
-    let newest = rows.last!
-    let rP = KB.screenRect(newest.layer, presentation: true).maxY
+    let rP = rows.last.map { KB.screenRect($0.layer, presentation: true).maxY } ?? .nan
     var cy = Double(content.bounds.origin.y)
     var cyP = Double((content.layer.presentation() ?? content.layer).bounds.origin.y)
     if let e = engine { (cy, cyP) = e.offsets() }
@@ -367,6 +382,7 @@ final class LabView: UIView, UITextViewDelegate, UIScrollViewDelegate, UIGesture
     DispatchQueue.main.async { self.captureSystemSpring() }
 
     let target = keyboardHeight(forEndFrame: end, screen: n.object as? UIScreen)
+    if s4IgnoreKB { s4Note("keepignore: ignored \(name) target=\(target)"); return }
     if freezeKeyboardLayout { s4PendingKB = target; return }
     if privActive { return }
     switch mode {
@@ -491,6 +507,8 @@ final class LabView: UIView, UITextViewDelegate, UIScrollViewDelegate, UIGesture
     Lab.log("S1 start variants=\(variants) reps=\(reps) \(KB.describeOOP())")
     let gt = await startGT()
     await Lab.sleep(1.0)
+    // let the frame counter and the video sync settle before the first open after launch
+    await Lab.sleep(Double(Lab.arg("s1delay") ?? "0") ?? 0)
     // Warm-up: create the keyboard, dump the hierarchy.
     Lab.log("HWKB before: \(HWKB.describe())")
     Lab.log("UIKeyboardImpl hw methods: \(HWKB.methods("UIKeyboardImpl", filter: "hardware"))")

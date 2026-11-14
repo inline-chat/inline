@@ -262,6 +262,47 @@ final class LabUITests: XCTestCase {
     drag(200, 520, v: 4000, hold: 0)
     Thread.sleep(forTimeInterval: 3.0)
   }
+
+  /// S2 private route driven by the in-app synthetic finger (-synth 1). Presses home during the held-offset scenario.
+  func testS2Synth() {
+    app = XCUIApplication()
+    app.launchArguments = labArgs
+    app.launch()
+    Thread.sleep(forTimeInterval: 7.0)
+    shot("synth-held-before-home")
+    XCUIDevice.shared.press(.home)
+    Thread.sleep(forTimeInterval: 3.0)
+    app.activate()
+    Thread.sleep(forTimeInterval: 1.0)
+    shot("synth-after-foreground")
+    let wait = Double(ProcessInfo.processInfo.environment["LAB_WAIT"] ?? "40") ?? 40
+    Thread.sleep(forTimeInterval: wait)
+  }
+
+  /// S3 v2: from the newest end, flings at 2000 and 4000 pt/s (×3 each), plus 800 (×2); Bottom button before each.
+  func testS3c() {
+    launch(labArgs)
+    sleep(1)
+    let bottom = app.buttons["toBottom"]
+    for v in [800.0, 800, 2000, 2000, 2000, 4000, 4000, 4000] {
+      bottom.tap(); Thread.sleep(forTimeInterval: 0.5)
+      drag(200, 520, v: CGFloat(v), hold: 0)
+      Thread.sleep(forTimeInterval: 4.0)
+    }
+    let top = app.buttons["toTop"]
+    // ends: pull past both ends, fling into the top
+    top.tap(); Thread.sleep(forTimeInterval: 0.5)
+    drag(200, 450, v: 400, hold: 0.3)
+    Thread.sleep(forTimeInterval: 2.0)
+    top.tap(); Thread.sleep(forTimeInterval: 0.5)
+    drag(500, 300, v: 1500, hold: 0)
+    Thread.sleep(forTimeInterval: 3.0)
+    drag(200, 520, v: 4000, hold: 0)
+    Thread.sleep(forTimeInterval: 3.0)
+    bottom.tap(); Thread.sleep(forTimeInterval: 0.5)
+    drag(500, 250, v: 400, hold: 0.3)
+    Thread.sleep(forTimeInterval: 2.0)
+  }
 }
 
 final class UncheckedBox<T>: @unchecked Sendable {

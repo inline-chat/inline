@@ -20,6 +20,10 @@ extension LabView {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
       guard let self, Lab.arg("s4kb") != "0" else { return }
       self.textView.becomeFirstResponder()
+      if Lab.arg("s4closed") == "1" {
+        // inputView-swap "closed" state: still first responder, keyboard swapped out
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.kbClose(); self.s4Note("s4closed: keyboard swapped out (first responder kept)") }
+      }
     }
     if let nc = navController {
       s4Note("nav=\(Priv.cls(nc)) edgePop=\(Priv.cls(nc.interactivePopGestureRecognizer))")
@@ -48,6 +52,9 @@ extension LabView {
       s4Note("resigned at gesture begin")
     case "translate":
       s4Translating = true
+    case "keepignore":
+      s4IgnoreKB = true
+      s4Note("keepignore: ignoring keyboard notifications until the transition completes")
     default: break
     }
     if let tc = navController?.transitionCoordinator {
@@ -59,6 +66,21 @@ extension LabView {
         guard let self else { return }
         self.s4Note("transition completion cancelled=\(ctx.isCancelled)")
         self.s4Transitioning = false
+        if self.s4IgnoreKB {
+          if ctx.isCancelled {
+            // UIKit re-shows the keyboard with 0-duration notifications around this point and the host is still
+            // parked off screen: keep the composer where it is and stop ignoring shortly after.
+            self.s4Note("keepignore: cancelled; composer untouched, ignoring for 0.3 s more")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+              self.s4IgnoreKB = false
+              let k = self.keyboardTops()
+              self.s4Note("keepignore: resumed; keyboard model top=\(f2(k.model)) kbHeight=\(self.kbHeight) firstResponder=\(self.textView.isFirstResponder)")
+            }
+          } else {
+            self.s4IgnoreKB = false
+            self.s4Note("keepignore: committed; firstResponder=\(self.textView.isFirstResponder)")
+          }
+        }
         if self.s4Translating { self.s4FinishTranslate(cancelled: ctx.isCancelled) }
         self.s4Flush()
       }

@@ -210,7 +210,9 @@ extension LabView {
 
   func privFinishDismiss() {
     probe.mark("priv dismiss end (resign without animation)", frame: frameIndex)
-    UIView.performWithoutAnimation { _ = textView.resignFirstResponder() }
+    UIView.performWithoutAnimation {
+      if Lab.arg("prewarm") == "swap" { kbClose() } else { _ = textView.resignFirstResponder() }
+    }
     if let kw = hostView()?.window {
       func endAnims(_ v: UIView) { v.layer.removeAllAnimations(); v.subviews.forEach(endAnims) }
       kw.subviews.forEach(endAnims)
