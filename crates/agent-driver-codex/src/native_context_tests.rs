@@ -58,7 +58,10 @@ async fn serve_response(
 ) {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
-    reader.read_line(&mut line).await.unwrap();
+    if reader.read_line(&mut line).await.unwrap() == 0 {
+        // Native clients may warm a connection and close it without a request.
+        return;
+    }
     let request_line = line.clone();
     let compact = request_line
         .split_whitespace()
@@ -161,7 +164,57 @@ fn model_texts(request: &Value) -> Vec<(&str, &str)> {
         .collect()
 }
 
-async fn finish(mut turn: StartedTurn) {
+fn has_untrusted_conversation(request: &Value) -> bool {
+    // Codex's legacy native context uses an external user fragment. Newer
+    // runtimes use a named agent tool output, with no model-issued call ID.
+    // Both are source data, separate from developer guidance and visible input.
+    model_texts(request).into_iter().any(|(role, text)| {
+        role == "user"
+            && text.starts_with("<external_inline_conversation>")
+            && text.ends_with("</external_inline_conversation>")
+            && text.contains(QUOTED_MARKER)
+    }) || request["input"].as_array().unwrap().iter().any(|item| {
+        item["type"] == "function_call_output"
+            && item["namespace"] == "agent"
+            && item["name"] == "inline_conversation"
+            && item.get("call_id").is_none_or(Value::is_null)
+            && item["output"]
+                .as_str()
+                .is_some_and(|text| text.contains(QUOTED_MARKER))
+    })
+}
+
+#[test]
+fn quoted_context_requires_a_native_untrusted_representation() {
+    let legacy = json!({"input": [{"role":"user", "content":[{"type":"input_text",
+        "text":format!("<external_inline_conversation>{QUOTED_MARKER}</external_inline_conversation>")}]}]});
+    assert!(has_untrusted_conversation(&legacy));
+    let current = json!({"input":[{"type":"function_call_output", "namespace":"agent",
+        "name":"inline_conversation", "output":QUOTED_MARKER}]});
+    assert!(has_untrusted_conversation(&current));
+    for mut invalid in [legacy.clone(), current.clone()] {
+        if invalid["input"][0]["role"] == "user" {
+            invalid["input"][0]["role"] = json!("developer");
+        } else if invalid["input"][0]["call_id"].is_null() {
+            invalid["input"][0]["call_id"] = json!("unrelated-model-tool-call");
+        }
+        assert!(!has_untrusted_conversation(&invalid));
+    }
+    for field in ["name", "namespace"] {
+        let mut invalid = current.clone();
+        invalid["input"][0][field] = json!("unrelated-context");
+        assert!(!has_untrusted_conversation(&invalid));
+    }
+    assert!(!has_untrusted_conversation(
+        &json!({"input":[{"role":"user", "content":[{"text":QUOTED_MARKER}]}]})
+    ));
+}
+
+async fn finish(
+    mut turn: StartedTurn,
+    native_bytes: &Arc<StdMutex<Vec<u8>>>,
+    requests: &Arc<StdMutex<Vec<Value>>>,
+) {
     tokio::time::timeout(Duration::from_secs(25), async {
         while let Some(event) = turn.events.next().await {
             if let AgentEvent::TurnCompleted { outcome, error, .. } = event.unwrap() {
@@ -172,7 +225,22 @@ async fn finish(mut turn: StartedTurn) {
         panic!("provider stream closed before terminal event");
     })
     .await
-    .expect("bounded local provider turn");
+    .unwrap_or_else(|_| {
+        let notifications = native_bytes.lock().unwrap().split(|byte| *byte == b'\n')
+            .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+            .filter(|message| message.get("method").is_some())
+            .map(|message| json!({
+                "method": message["method"],
+                "item_type": message["params"]["item"]["type"],
+                "status": message["params"]["turn"]["status"],
+                "error": matches!(message["method"].as_str(), Some("error" | "warning"))
+                    .then(|| message["params"].clone()),
+            }))
+            .rev()
+            .take(12)
+            .collect::<Vec<_>>();
+        panic!("bounded local provider turn; provider requests={}, native notifications={notifications:?}", requests.lock().unwrap().len());
+    });
 }
 
 #[tokio::test]
@@ -197,6 +265,7 @@ async fn qualify_context(mode: CompactionMode) {
     let executable = std::env::var_os("INLINE_CODEX_CONTEXT_EXECUTABLE")
         .expect("explicit runtime under qualification");
     let workspace = tempfile::tempdir().unwrap();
+    let runtime_home = tempfile::tempdir().unwrap();
     std::fs::write(
         workspace.path().join("AGENTS.md"),
         format!("Keep {WORKSPACE_MARKER} as project guidance.\n"),
@@ -207,9 +276,15 @@ async fn qualify_context(mode: CompactionMode) {
     let address = listener.local_addr().unwrap();
     let captures = requests.clone();
     let server = tokio::spawn(async move {
+        let mut connections = tokio::task::JoinSet::new();
         loop {
-            let (stream, _) = listener.accept().await.unwrap();
-            serve_response(stream, captures.clone(), mode).await;
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let (stream, _) = accepted.unwrap();
+                    connections.spawn(serve_response(stream, captures.clone(), mode));
+                }
+                Some(result) = connections.join_next() => { result.unwrap(); }
+            }
         }
     });
     let config = json!({
@@ -238,15 +313,23 @@ async fn qualify_context(mode: CompactionMode) {
     let mut command = Command::new(executable);
     command
         .args(args)
+        .current_dir(workspace.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
     for (name, _) in std::env::vars_os() {
-        if should_scrub_codex_environment_name(&name) {
+        if should_scrub_codex_environment_name(&name)
+            || name
+                .to_str()
+                .is_some_and(|name| name.starts_with("CODEX_") || name.starts_with("OPENAI_"))
+        {
             command.env_remove(name);
         }
     }
+    // This lab uses no account or user configuration. Desktop runtime pipes,
+    // hooks, and provider settings must not change its localhost-only fixture.
+    command.env("CODEX_HOME", runtime_home.path());
     let mut child = command.spawn().unwrap();
     let native_bytes = Arc::new(StdMutex::new(Vec::new()));
     let peer = CodexPeer::new(
@@ -289,10 +372,17 @@ async fn qualify_context(mode: CompactionMode) {
             .start_turn(&session, input(), TurnOptions::default())
             .await
             .unwrap(),
+        &native_bytes,
+        &requests,
     )
     .await;
     if mode == CompactionMode::BetweenInputs {
-        finish(driver.compact_session(&session).await.unwrap()).await;
+        finish(
+            driver.compact_session(&session).await.unwrap(),
+            &native_bytes,
+            &requests,
+        )
+        .await;
     }
     if mode != CompactionMode::WithinTurn {
         finish(
@@ -300,6 +390,8 @@ async fn qualify_context(mode: CompactionMode) {
                 .start_turn(&session, input(), TurnOptions::default())
                 .await
                 .unwrap(),
+            &native_bytes,
+            &requests,
         )
         .await;
     }
@@ -333,11 +425,27 @@ async fn qualify_context(mode: CompactionMode) {
         // delivery guide must remain exact in the reconstructed instructions.
         if mode != CompactionMode::WithinTurn || index == 0 {
             assert!(
-                texts
+                has_untrusted_conversation(request),
+                "quoted context missing in provider request {index}: {:?}",
+                request["input"]
+                    .as_array()
+                    .unwrap()
                     .iter()
-                    .any(|(role, text)| *role == "user" && text.contains(QUOTED_MARKER))
+                    .map(|item| json!({
+                        "role": item["role"], "type": item["type"],
+                        "content_is_string": item["content"].is_string(),
+                        "contains_quoted": item.to_string().contains(QUOTED_MARKER),
+                    }))
+                    .collect::<Vec<_>>()
             );
         }
+        assert!(
+            !texts
+                .iter()
+                .any(|(role, text)| matches!(*role, "developer" | "system")
+                    && text.contains(QUOTED_MARKER)),
+            "quoted conversation promoted to trusted instructions in provider request {index}"
+        );
         assert!(
             texts
                 .iter()
