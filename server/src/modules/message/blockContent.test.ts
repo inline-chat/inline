@@ -121,6 +121,15 @@ describe("block content parser", () => {
     }
   })
 
+  test("a streamed list marker without text yet keeps the rich projection", () => {
+    const ordered = parseBlockContent("Steps:\n\n1. Open a terminal.\n2.")!.blockContent.blocks
+    expect(ordered.map(kind)).toEqual(["paragraph", "list"])
+    const list = ordered[1]
+    expect(list?.kind.oneofKind === "list" ? list.kind.list.items : []).toHaveLength(1)
+    expect(parseBlockContent("Done.\n\n-")!.blockContent.blocks.map(kind)).toEqual(["paragraph"])
+    expect(parseBlockContent("- a\n- ")!.blockContent.blocks.map(kind)).toEqual(["list"])
+  })
+
   test("adds structure without changing the legacy projection", () => {
     const markdown = "# Hello **world**\n\nParagraph with `code`.\n\n---\n\n```swift\nlet x = 1\n```"
     const parsed = parseBlockContent(markdown)

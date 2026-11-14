@@ -473,22 +473,28 @@ function convertNode(
         },
       }]
     }
-    case "list":
+    case "list": {
+      const items = node.children.map((item) => ({
+        children: coalesceImages(
+          item.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, context)),
+        ),
+        checked: item.checked ?? undefined,
+      }))
+      // A streamed reply sends the next marker ("2.", "-") before its text. Leave the empty
+      // trailing item out rather than failing the whole projection back to flat text.
+      while (items.length > 0 && items[items.length - 1]!.children.length === 0) items.pop()
+      if (items.length === 0) return []
       return [{
         kind: {
           oneofKind: "list",
           list: {
             kind: node.ordered ? BlockList_Kind.ORDERED : BlockList_Kind.UNORDERED,
             start: node.ordered ? BigInt(node.start ?? 1) : undefined,
-            items: node.children.map((item) => ({
-              children: coalesceImages(
-                item.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, context)),
-              ),
-              checked: item.checked ?? undefined,
-            })),
+            items,
           },
         },
       }]
+    }
     case "blockquote": {
       const children = coalesceImages(
         node.children.flatMap((child) => convertNode(markdown, legacy, child, baseOffset, context)),
