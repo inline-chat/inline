@@ -26,7 +26,8 @@ pub(super) async fn handle_allowlist_command(
     let Ok(Some(command)) = parse_command(&record.direction.text, &route.bot_username) else {
         return Ok(false);
     };
-    if command.name != "allowlist" {
+    // `/share` is the same command.
+    if !matches!(command.name.as_str(), "allowlist" | "share") {
         return Ok(false);
     }
     if !ensure_command_inbound_started(&route.store, record)? {
@@ -68,7 +69,7 @@ async fn handle_allowlist_command_inner(
         _ => None,
     };
     let Some(target_user_id) = target_user_id else {
-        return send_allowlist_reply(bot, record, "Usage: /allowlist <userid>", "usage").await;
+        return send_allowlist_reply(bot, record, "Usage: /share <userid>", "usage").await;
     };
     if route.allows(target_user_id) {
         return send_allowlist_reply(

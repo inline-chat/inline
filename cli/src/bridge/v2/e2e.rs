@@ -1965,7 +1965,7 @@ async fn codex_round_trip_through_inline() {
         |texts| {
             texts
                 .iter()
-                .any(|(_, text)| text.contains("/allowlist") && text.contains("/review"))
+                .any(|(_, text)| text.contains("/share") && text.contains("/review"))
         },
     )
     .await;

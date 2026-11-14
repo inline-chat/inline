@@ -24,7 +24,7 @@ pub(super) fn static_command_help(provider_id: &ProviderId) -> String {
         _ => "",
     };
     format!(
-        "Agent commands: /status{provider_commands}, /new, /clear, /compact, /projects, /folder, /queue, /stop, /model, /reasoning, /permissions, /verbose, /threads, /follow, /unfollow, /allowlist <userid>."
+        "Agent commands: /status{provider_commands}, /new, /clear, /compact, /projects, /folder, /queue, /stop, /model, /reasoning, /permissions, /verbose, /threads, /follow, /unfollow, /share <userid>."
     )
 }
 
@@ -176,6 +176,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                     | "follow"
                     | "unfollow"
                     | "allowlist"
+                    | "share"
             )) {
         if !session_active {
             match store.get_binding(binding) {
@@ -477,7 +478,7 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
         "follow" | "unfollow" => {
             handled("Follow controls will be available when this bot is added to shared chats.")
         }
-        "allowlist" => handled("Use /allowlist <userid> to choose a user to allow."),
+        "allowlist" | "share" => handled("Use /share <userid> to choose a user to allow."),
         "" => handled("I couldn’t parse that command. Try /help."),
         _ if needs_resume => {
             handled("Use /resume to sync recent history before sending provider commands.")

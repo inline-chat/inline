@@ -1989,7 +1989,11 @@ impl Runtime {
                     Err(error) => format!("Could not change that: {error}"),
                 }
             }
-            "allowlist" => self.allowlist(actor, arguments, mentions).await,
+            "allowlist" | "share" => self.allowlist(actor, arguments, mentions).await,
+            "unshare" => {
+                self.allowlist(actor, &format!("remove {arguments}"), mentions)
+                    .await
+            }
             other => format!(
                 "/{other} isn't available with {}. Send /help for what is.",
                 self.config.agent_name
@@ -2011,7 +2015,7 @@ impl Runtime {
         if mentions.is_empty() {
             return match api::list_grants(&self.agent.bot).await {
                 Ok(result) if result.grants.is_empty() => {
-                    "Only you can use me. Add someone with /allowlist @name.".to_owned()
+                    "Only you can use me. Add someone with /share @name.".to_owned()
                 }
                 Ok(result) => {
                     let mut names = Vec::new();
@@ -2019,7 +2023,7 @@ impl Runtime {
                         names.push(self.agent.names.of(grant.user_id).await);
                     }
                     format!(
-                        "People who can use me: {}. Remove someone with /allowlist remove @name.",
+                        "People who can use me: {}. Remove someone with /unshare @name.",
                         names.join(", ")
                     )
                 }
@@ -4230,6 +4234,8 @@ pub(super) const INLINE_COMMANDS: &[&str] = &[
     "follow",
     "unfollow",
     "allowlist",
+    "share",
+    "unshare",
     "plan",
     "review",
     "undo",
@@ -4284,7 +4290,7 @@ fn harness_command_text(text: &str, bot_username: &str) -> String {
 fn help_text(agent_name: &str, vocabulary: Vocabulary, acp: bool) -> String {
     if acp || vocabulary == Vocabulary::Amp {
         return format!(
-            "{agent_name} commands:\n/status · current model and folder\n/model, /reasoning, /permissions · settings for this thread\n/stop · stop the current turn; /pause and /resume\n/new <task> · a new thread with a fresh session\n/follow, /unfollow · choose which messages to answer\n/allowlist · who may use me (owner)\n/release · close this session while preserving its history\nThe agent's advertised commands and installed skills work as you type them."
+            "{agent_name} commands:\n/status · current model and folder\n/model, /reasoning, /permissions · settings for this thread\n/stop · stop the current turn; /pause and /resume\n/new <task> · a new thread with a fresh session\n/follow, /unfollow · choose which messages to answer\n/share @name, /unshare @name · who may use me (owner)\n/release · close this session while preserving its history\nThe agent's advertised commands and installed skills work as you type them."
         );
     }
     let native = match vocabulary {
@@ -4308,7 +4314,7 @@ fn help_text(agent_name: &str, vocabulary: Vocabulary, acp: bool) -> String {
          /compact, /clear · shrink or reset the session's context\n\
          /new <task> · a new thread with a fresh session\n\
          /follow, /unfollow · answer every message in this thread, or only mentions and replies\n\
-         /allowlist · who may use me (owner)\n\
+         /share @name, /unshare @name · who may use me (owner)\n\
          /release · let the session go; /terminal · continue it in a terminal\n\
          {native}"
     )
@@ -4409,6 +4415,8 @@ mod tests {
             "help",
             "follow",
             "allowlist",
+            "share",
+            "unshare",
             "plan",
             "review",
             "undo",
@@ -4424,7 +4432,7 @@ mod tests {
         assert!(codex.contains("/review") && !codex.contains("/undo"));
         let claude = help_text("Claude", Vocabulary::Claude, false);
         assert!(claude.contains("/undo") && claude.contains("skills"));
-        assert!(claude.contains("/allowlist") && claude.contains("/follow"));
+        assert!(claude.contains("/share") && claude.contains("/follow"));
     }
 
     #[test]

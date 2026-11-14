@@ -705,7 +705,7 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
         ("permissions", "Show or choose permission mode"),
         ("verbose", "Toggle detailed agent activity"),
         ("threads", "Configure Inline reply-thread routing"),
-        ("allowlist", "Allow another user to drive this agent"),
+        ("share", "Let someone else use this agent"),
     ];
     if provider_id == "codex" {
         commands.splice(
