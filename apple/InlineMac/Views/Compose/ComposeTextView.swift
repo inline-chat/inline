@@ -469,6 +469,19 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
+    // Text copied from messages pastes as its Markdown, keeping mentions and thread links live.
+    if let text = MessageClipboard.composerText(configuration: .init(
+      font: ComposeTextEditor.font,
+      primaryColor: ComposeTextEditor.textColor,
+      linkColor: ComposeTextEditor.linkColor,
+      convertMentionsToLink: false
+    )) {
+      // No link-title replacement: it would rewrite the URL inside Markdown link syntax.
+      insertText(text, replacementRange: selectedRange())
+      resetTypingAttributesToDefault()
+      return
+    }
+
     if let text = ComposeTextPasteboard.attributedText(configuration: .init(
       font: ComposeTextEditor.font,
       primaryColor: ComposeTextEditor.textColor,

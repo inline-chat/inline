@@ -69,13 +69,6 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.messageWidgets)
-      Toggle(isOn: $settings.richTextMultiSurfaceSelectionEnabled) {
-        SettingsRowLabel(
-          .richMessageMultiBlockSelection,
-          description: "Select and copy across text blocks within one rich message."
-        )
-      }
-      .settingsSearchAnchor(.richMessageMultiBlockSelection)
     } header: {
       SettingsSectionHeader("Agents", subtitle: "Prompt workflows, agent controls, and rich responses.")
     }

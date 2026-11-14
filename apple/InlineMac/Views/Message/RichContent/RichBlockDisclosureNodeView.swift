@@ -308,16 +308,11 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
 
   /// Message gesture routing already supplies a point in this node's coordinates.
   func interactiveHitTest(_ point: NSPoint) -> NSView? {
-    MessageGestureTrace.trace("Disclosure.hitTest local=\(MessageGestureTrace.point(point)) node=\(MessageGestureTrace.view(self)) selection=\(AppSettings.shared.richTextMultiSurfaceSelectionEnabled)")
+    MessageGestureTrace.trace("Disclosure.hitTest local=\(MessageGestureTrace.point(point)) node=\(MessageGestureTrace.view(self))")
     guard !isHidden, bounds.contains(point) else { return nil }
     let surfacePoint = surface.convert(point, from: self)
     if surface.hasInteractiveEntity(at: surfacePoint) {
       return surface.hitTest(surfacePoint) ?? toggleButton
-    }
-    if AppSettings.shared.richTextMultiSurfaceSelectionEnabled,
-       let hit = surface.hitTest(surfacePoint)
-    {
-      return hit
     }
     return toggleButton
   }

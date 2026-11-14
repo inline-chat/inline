@@ -106,7 +106,7 @@ final class MessageSelectionMenu {
     let visibleInWindow = textView.convert(textView.visibleRect, to: nil)
 
     var anchor = NSRect(x: windowPoint.x, y: windowPoint.y - 9, width: 0, height: 18)
-    let selection = textView.selectedRange()
+    let selection = (textView as? MessageTextView)?.listSelectionRange ?? textView.selectedRange()
     if selection.length > 0 {
       let firstLine = window.convertFromScreen(textView.firstRect(forCharacterRange: selection, actualRange: nil))
       if !firstLine.isEmpty, firstLine.maxY <= visibleInWindow.maxY, firstLine.minY >= visibleInWindow.minY {

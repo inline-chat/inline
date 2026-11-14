@@ -2,6 +2,7 @@ import AppKit
 import Auth
 import InlineKit
 import InlineUI
+import TextProcessing
 
 /// Keeps both list implementations, the composer, and modal actions in one selection session.
 @MainActor
@@ -294,29 +295,30 @@ final class MessageSelectionCoordinator {
 
   // MARK: Copy
 
-  /// Copies the selected messages as plain text in chat order, naming the sender whenever it changes.
+  /// Copies the selected messages in chat order in every clipboard flavor (plain text, Markdown,
+  /// HTML, RTF), naming the sender whenever it changes when several people wrote them.
   private func copySelection() {
     guard let list else { return }
     let messages = list.selectedMessagesInLoadedOrder
     let showsSenders = Set(messages.map(\.message.fromId)).count > 1
-    var blocks: [String] = []
+    var blocks: [MessageClipboardDocument.Block] = []
+    var copied = 0
     var lastSender: Int64?
     for message in messages {
-      guard let text = message.displayText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+      let content = list.clipboardBlocks(for: message)
+      guard !content.isEmpty else { continue }
       if showsSenders, message.message.fromId != lastSender {
-        blocks.append("\(message.from?.displayName ?? "Unknown"):\n\(text)")
-      } else {
-        blocks.append(text)
+        blocks.append(.sender(message.from?.displayName ?? "Unknown"))
       }
       lastSender = message.message.fromId
+      blocks += content
+      copied += 1
     }
-    guard !blocks.isEmpty else {
+    guard copied > 0, MessageClipboard.write(MessageClipboardDocument(blocks: blocks)) else {
       NSSound.beep()
       return
     }
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(blocks.joined(separator: "\n\n"), forType: .string)
-    ToastCenter.shared.showSuccess(blocks.count == 1 ? "Copied message" : "Copied \(blocks.count) messages")
+    ToastCenter.shared.showSuccess(copied == 1 ? "Copied message" : "Copied \(copied) messages")
   }
 
   private func removeMonitor() {

@@ -2,6 +2,7 @@ import AppKit
 import Auth
 import Combine
 import InlineKit
+import TextProcessing
 import InlineMacUI
 import InlineUI
 import Logger
@@ -477,6 +478,7 @@ class MessageListAppKit: NSViewController {
   @discardableResult
   func beginMessageSelection(atRow row: Int) -> Bool {
     guard let stableId = selectableStableId(forRow: row) else { return false }
+    textSelection.clear()
     let changed = messageSelection.begin(with: stableId)
     emitMessageSelectionChange(changedStableIds: changed)
     return true
@@ -847,8 +849,11 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  private lazy var textSelection = MessageListTextSelection(host: self)
+
   private lazy var tableView: NSTableView = {
-    let table = NSTableView()
+    let table = MessageListTableView()
+    table.textSelection = textSelection
     table.style = .plain
     table.backgroundColor = .clear
     table.headerView = nil
@@ -977,6 +982,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+    textSelection.install()
     setupMessageHoverTracking()
     observeReplyThreadPane()
     hideScrollbars() // until initial scroll is done
@@ -2048,6 +2054,7 @@ class MessageListAppKit: NSViewController {
   }
 
   @objc private func richBlockLayoutStateDidChange(_ notification: Notification) {
+    textSelection.setNeedsRefresh()
     guard !isDisposed,
           AppSettings.shared.richContentRendererEnabled,
           let stableID = notification.userInfo?["messageStableID"] as? Int64,
@@ -3084,6 +3091,7 @@ class MessageListAppKit: NSViewController {
     removeLiveResizeObserver()
     clearHoveredMessage()
     activityNavigator?.clearVisible()
+    textSelection.clear()
   }
 
   override func viewWillLayout() {
@@ -4541,6 +4549,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     cell.configure(with: message, props: props, animate: animateUpdates && NSAnimationContext.current.duration > 0)
     configureForwardSelection(cell, row: row)
     configureReplyThreadSourceHighlight(cell, row: row)
+    textSelection.cellDidConfigure(cell, row: row)
     let shouldHover = shouldHoverMessageCell(cell, stableId: stableId)
     cell.setMessageHoverState(shouldHover)
     if shouldHover {
@@ -5099,6 +5108,7 @@ extension MessageListAppKit {
     // before anything is torn down, while the rows and scroll geometry are still the user's.
     captureReadingPlace()
     isDisposed = true
+    textSelection.uninstall()
     cancellables.removeAll()
     clearReplyThreadSourceAnchor()
 
@@ -5187,5 +5197,28 @@ private extension MessagesProgressiveViewModel.MessagesChangeSet {
       case .reload:
         "reload"
     }
+  }
+}
+
+// MARK: - Text selection across blocks and messages
+
+extension MessageListAppKit: MessageListTextSelectionHost {
+  var textSelectionTableView: NSTableView { tableView }
+  var textSelectionRootView: NSView { view }
+
+  func textSelectionStableId(atRow row: Int) -> Int64? {
+    messageStableId(forRow: row)
+  }
+
+  func textSelectionRow(forStableId stableId: Int64) -> Int? {
+    chatRows.rowIndex(forMessageStableId: stableId)
+  }
+
+  func textSelectionMessage(atRow row: Int) -> FullMessage? {
+    message(forRow: row)
+  }
+
+  func clipboardBlocks(for message: FullMessage) -> [MessageClipboardDocument.Block] {
+    textSelection.wholeMessageBlocks(message)
   }
 }

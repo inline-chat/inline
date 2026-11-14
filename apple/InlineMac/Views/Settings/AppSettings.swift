@@ -155,7 +155,6 @@ final class AppSettings: ObservableObject {
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
   static let messageWidgetsEnabledKey = "experimental.messageWidgetsEnabled"
-  static let richTextMultiSurfaceSelectionEnabledKey = "experimental.richTextMultiSurfaceSelectionEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -454,15 +453,6 @@ final class AppSettings: ObservableObject {
     }
   }
 
-  @Published var richTextMultiSurfaceSelectionEnabled: Bool {
-    didSet {
-      UserDefaults.standard.set(
-        richTextMultiSurfaceSelectionEnabled,
-        forKey: Self.richTextMultiSurfaceSelectionEnabledKey
-      )
-    }
-  }
-
   private init() {
     let persistentDefaults = Bundle.main.bundleIdentifier.flatMap {
       UserDefaults.standard.persistentDomain(forName: $0)
@@ -549,9 +539,6 @@ final class AppSettings: ObservableObject {
     messageWidgetsEnabled = UserDefaults.standard.object(forKey: Self.messageWidgetsEnabledKey) as? Bool ?? false
     richTextInlineMathEnabled = UserDefaults.standard.object(
       forKey: Self.richTextInlineMathEnabledKey
-    ) as? Bool ?? false
-    richTextMultiSurfaceSelectionEnabled = UserDefaults.standard.object(
-      forKey: Self.richTextMultiSurfaceSelectionEnabledKey
     ) as? Bool ?? false
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))

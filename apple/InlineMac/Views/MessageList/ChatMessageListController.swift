@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import TextProcessing
 
 /// The compose/route boundary of the message list.
 @MainActor
@@ -29,6 +30,8 @@ protocol ChatMessageListController: NSViewController {
   @discardableResult func selectAllMessages() -> Bool
   @discardableResult func clearMessageSelection() -> Bool
   func updateInsetForCompose(_ height: CGFloat, animate: Bool)
+  /// A whole message as copy blocks, keeping rich structure when it is on screen.
+  func clipboardBlocks(for message: FullMessage) -> [MessageClipboardDocument.Block]
   func collapseHistory(maxID: Int64?) async throws
   func setCollapsedMaxId(_ collapsedMaxId: Int64?)
   func dispose()

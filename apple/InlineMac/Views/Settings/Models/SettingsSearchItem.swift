@@ -90,7 +90,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case richContentRenderer
   case inlineMathAttachments
   case messageWidgets
-  case richMessageMultiBlockSelection
   case richCopyMarkdownEditing
   case quickForward
   case fileBrowser
@@ -143,7 +142,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .quickForward,
+         .messageWidgets, .richCopyMarkdownEditing, .quickForward,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -216,7 +215,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
     case .messageWidgets: "Message Widgets"
-    case .richMessageMultiBlockSelection: "Rich Message Multi-Block Selection"
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .quickForward: "Quick Forward"
     case .fileBrowser: "File Browser"
@@ -275,7 +273,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .automaticUpdates, .updateChannel: "Automatic Updates"
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richMessageMultiBlockSelection:
+         .messageWidgets:
       "Agents"
     case .richCopyMarkdownEditing, .quickForward: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
@@ -351,7 +349,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
     case .messageWidgets: ["html", "widget", "visualization", "chart"]
-    case .richMessageMultiBlockSelection: ["select", "copy"]
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .quickForward: ["forward"]
     case .fileBrowser: ["files window", "browse"]

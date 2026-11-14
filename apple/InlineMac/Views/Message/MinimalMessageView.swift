@@ -3490,8 +3490,8 @@ class MinimalMessageViewAppKit: NSView {
   /// rich blocks wins; otherwise the focused text view's own selection is used.
   private func selectedTextForQuote() -> String? {
     let selected: String?
-    if let text = richBlockContentView?.multiSurfaceSelectedText {
-      selected = text.string
+    if let text = MessageListTextSelection.owner(of: self)?.selectedText(onlyIn: self) {
+      selected = text
     } else if let textView = window?.firstResponder as? NSTextView, textView.isDescendant(of: self),
               textView.selectedRange().length > 0 {
       selected = (textView.string as NSString).substring(with: textView.selectedRange())
@@ -4934,12 +4934,12 @@ extension MinimalMessageViewAppKit: NSTextViewDelegate, RichBlockTextMenuProvidi
   ) -> NSMenu? {
     let linkURL = linkURL(at: characterIndex, in: attributedText)
     let menu = createMenu(context: .textView, nativeMenu: nativeMenu, linkURL: linkURL)
-    return richBlockContentView?.retargetMultiSurfaceCopy(in: menu) ?? menu
+    return menu
   }
 
   func richBlockMessageMenu() -> NSMenu {
     let menu = createMenu(context: .message)
-    return richBlockContentView?.retargetMultiSurfaceCopy(in: menu) ?? menu
+    return menu
   }
 
   // func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -4969,6 +4969,13 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
   }
 
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil, linkURL: URL? = nil) -> NSMenu {
+    MessageListTextSelection.retargetCopy(
+      in: createMessageMenu(context: context, nativeMenu: nativeMenu, linkURL: linkURL),
+      from: self
+    )
+  }
+
+  private func createMessageMenu(context: MenuContext, nativeMenu: NSMenu?, linkURL: URL?) -> NSMenu {
     let menu = NSMenu()
 
     let regularMessage = quickActionsCanReact
@@ -5329,5 +5336,39 @@ extension MinimalMessageViewAppKit: NSTextViewportLayoutControllerDelegate {
     let textViewRect = textView.convert(expandedRect, from: enclosingScrollView?.contentView)
 
     return textViewRect
+  }
+}
+
+// MARK: - Text selection across blocks and messages
+
+extension MinimalMessageViewAppKit: MessageTextSelectionSource {
+  func textSelectionProjection() -> MessageTextSelectionProjection? {
+    if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
+      return richBlockContentView.textSelectionProjection()
+    }
+    guard let textView = textView as? MessageTextView, !textView.isHiddenOrHasHiddenAncestor,
+          (textView.textStorage?.length ?? 0) > 0
+    else { return nil }
+    return .single(textView)
+  }
+
+  func textSelectionPressRegion() -> CGRect? {
+    let container: NSView = if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
+      richBlockContentView
+    } else {
+      textView
+    }
+    guard container.window != nil, !container.isHiddenOrHasHiddenAncestor else { return nil }
+    // The text with a margin for imprecise presses, and the whole bubble around it.
+    var region = convert(container.bounds, from: container).insetBy(dx: -10, dy: -10)
+    if bubbleView.superview != nil, !bubbleView.isHidden, !bubbleView.frame.isEmpty {
+      region = region.union(convert(bubbleView.bounds, from: bubbleView).insetBy(dx: -6, dy: -6))
+    }
+    return region
+  }
+
+  func isInteractiveForTextSelection(at point: NSPoint) -> Bool {
+    guard let result = interactiveHitTestResult(point) else { return false }
+    return !(result.view is NSTextView)
   }
 }

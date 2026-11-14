@@ -126,13 +126,20 @@ class MessageTextView: NSTextView {
   // when the click should not continue into AppKit text selection.
   var onEntityClick: ((NSPoint, NSEvent) -> Bool)?
   var onTextLongPress: ((NSPoint, NSEvent) -> Void)?
-  var onSelectionMouseDown: ((NSPoint, NSEvent) -> Void)?
-  var onSelectionMouseDragged: ((NSPoint, NSEvent) -> Bool)?
-  var onSelectionMouseUp: ((NSPoint, NSEvent) -> Bool)?
-  var onSelectionTrackingEnded: ((NSPoint) -> Bool)?
-  var shouldSuppressPlainSingleClick: (() -> Bool)?
   var onPlainSingleClick: ((NSPoint, NSEvent) -> Void)?
-  var preservesSelectionOnResign = false
+
+  /// The message list's selection in this view. Inside the list, the list owns all text
+  /// selection (drags, double and triple clicks, across blocks and messages) and NSTextView's
+  /// own tracking never runs; the range is drawn beneath the text whatever the first responder.
+  var listSelectionRange: NSRange? {
+    didSet {
+      guard listSelectionRange != oldValue else { return }
+      needsDisplay = true
+    }
+  }
+
+  /// A press inside the list that may still end as a plain click on mouse-up.
+  private var pendingPlainClick: (windowPoint: NSPoint, location: NSPoint, event: NSEvent)?
 
   private var textHoldTimer: Timer?
   private var textHoldMonitor: Any?
@@ -186,13 +193,18 @@ class MessageTextView: NSTextView {
   }
 
   override func resignFirstResponder() -> Bool {
-    if !preservesSelectionOnResign {
-      // The experimental multi-surface owner keeps native ranges visible while
-      // it receives Copy. Every other message text view retains existing behavior.
-      selectedRanges = [NSValue(range: NSRange(location: 0, length: 0))]
-    }
-
+    selectedRanges = [NSValue(range: NSRange(location: 0, length: 0))]
     return super.resignFirstResponder()
+  }
+
+  private var listOwnsSelection: Bool {
+    MessageListTextSelection.owner(of: self) != nil
+  }
+
+  /// The list started a selection drag from this press, so it is no longer a hold.
+  func cancelPendingTextHold() {
+    cancelTextHold(reason: "listSelection")
+    pendingPlainClick = nil
   }
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -239,6 +251,8 @@ class MessageTextView: NSTextView {
       return
     }
 
+    pendingPlainClick = nil
+    let ownsSelection = listOwnsSelection
     var plainClickOrigin: NSPoint?
     if event.type == .leftMouseDown, event.clickCount == 1 {
       let handled = onEntityClick?(location, event) ?? false
@@ -246,11 +260,19 @@ class MessageTextView: NSTextView {
         "MessageTextView.mouseDown entityClickAttempt point=\(MessageGestureTrace.point(location)) handled=\(handled)"
       )
       if handled { return }
-      onSelectionMouseDown?(location, event)
       if onPlainSingleClick != nil {
         plainClickOrigin = event.locationInWindow
       }
       startTextHold(at: location, event: event)
+    }
+
+    if ownsSelection {
+      // The message list tracks this press; the mouse-up arrives in mouseUp(with:).
+      if let plainClickOrigin {
+        pendingPlainClick = (plainClickOrigin, location, event)
+      }
+      MessageGestureTrace.trace("MessageTextView.mouseDown listOwnsSelection")
+      return
     }
 
     MessageGestureTrace.trace("MessageTextView.mouseDown forwardingToSuper")
@@ -267,20 +289,8 @@ class MessageTextView: NSTextView {
       return candidate
     }
     let finalWindowPoint = mouseUp?.locationInWindow ?? event.locationInWindow
-    MessageGestureTrace.trace(
-      "MessageTextView.trackingEnded native=\(trackingEvent.map(MessageGestureTrace.eventDescription) ?? "nil") origin=\(MessageGestureTrace.point(event.locationInWindow)) final=\(MessageGestureTrace.point(finalWindowPoint)) cursor=\(MessageGestureTrace.point(window.convertPoint(fromScreen: NSEvent.mouseLocation)))"
-    )
-    let coordinatedSelection: Bool
-    if let onSelectionTrackingEnded {
-      let finalLocalPoint = convert(finalWindowPoint, from: nil)
-      coordinatedSelection = onSelectionTrackingEnded(finalLocalPoint)
-    } else {
-      coordinatedSelection = false
-    }
     if let plainClickOrigin,
        mouseUp != nil,
-       !coordinatedSelection,
-       !(shouldSuppressPlainSingleClick?() ?? false),
        !selectedRanges.contains(where: { $0.rangeValue.length > 0 })
     {
       let dx = finalWindowPoint.x - plainClickOrigin.x
@@ -296,33 +306,26 @@ class MessageTextView: NSTextView {
   }
 
   override func mouseDragged(with event: NSEvent) {
-    MessageGestureTrace.trace("MessageTextView.mouseDragged \(MessageGestureTrace.eventDescription(event)) coordinated=\(onSelectionMouseDragged != nil)")
-    guard let onSelectionMouseDragged else {
-      super.mouseDragged(with: event)
-      return
-    }
-    let location = convert(event.locationInWindow, from: nil)
-    if onSelectionMouseDragged(location, event) {
-      MessageGestureTrace.debug("MessageTextView.mouseDragged consumed=multiSurfaceSelection")
-      cancelTextHold(reason: "multiSurfaceDrag")
-      return
-    }
+    MessageGestureTrace.trace("MessageTextView.mouseDragged \(MessageGestureTrace.eventDescription(event))")
+    // Inside the list, NSTextView never began tracking; the list owns the drag.
+    guard !listOwnsSelection else { return }
     super.mouseDragged(with: event)
   }
 
   override func mouseUp(with event: NSEvent) {
-    MessageGestureTrace.trace("MessageTextView.mouseUp \(MessageGestureTrace.eventDescription(event)) coordinated=\(onSelectionMouseUp != nil)")
-    guard let onSelectionMouseUp else {
+    MessageGestureTrace.trace("MessageTextView.mouseUp \(MessageGestureTrace.eventDescription(event))")
+    guard listOwnsSelection else {
       super.mouseUp(with: event)
       return
     }
-    let location = convert(event.locationInWindow, from: nil)
-    if onSelectionMouseUp(location, event) {
-      MessageGestureTrace.debug("MessageTextView.mouseUp consumed=multiSurfaceSelection")
-      cancelTextHold(reason: "multiSurfaceMouseUp")
-      return
+    cancelTextHold(reason: "mouseUp")
+    guard let press = pendingPlainClick else { return }
+    pendingPlainClick = nil
+    let dx = event.locationInWindow.x - press.windowPoint.x
+    let dy = event.locationInWindow.y - press.windowPoint.y
+    if dx * dx + dy * dy < 9 {
+      onPlainSingleClick?(press.location, press.event)
     }
-    super.mouseUp(with: event)
   }
 
   private func startTextHold(at location: NSPoint, event: NSEvent) {
@@ -456,7 +459,52 @@ class MessageTextView: NSTextView {
   override func draw(_ dirtyRect: NSRect) {
     drawCodeBlocks(in: dirtyRect)
     drawInlineCode(in: dirtyRect)
+    drawListSelection(in: dirtyRect)
     super.draw(dirtyRect)
+  }
+
+  private func drawListSelection(in dirtyRect: NSRect) {
+    guard let selection = listSelectionRange, selection.length > 0,
+          let textStorage, selection.location >= 0,
+          selection.location < textStorage.length
+    else { return }
+    let range = NSRange(
+      location: selection.location,
+      length: min(selection.length, textStorage.length - selection.location)
+    )
+    NSColor.selectedTextBackgroundColor.setFill()
+    for rect in selectionRects(for: range) where rect.intersects(dirtyRect) {
+      rect.fill()
+    }
+  }
+
+  /// Line-by-line selection rectangles in view coordinates, like the native highlight.
+  func selectionRects(for range: NSRange) -> [NSRect] {
+    var rects: [NSRect] = []
+    let inset = textContainerInset
+    if let textLayoutManager, let textContentManager = textLayoutManager.textContentManager {
+      guard let textRange = textRange(for: range, in: textContentManager) else { return [] }
+      textLayoutManager.enumerateTextSegments(
+        in: textRange,
+        type: .selection,
+        options: [.rangeNotRequired]
+      ) { _, segmentRect, _, _ in
+        rects.append(segmentRect.offsetBy(dx: inset.width, dy: inset.height))
+        return true
+      }
+      return rects
+    }
+    guard let layoutManager, let textContainer else { return [] }
+    let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+    guard glyphRange.length > 0 else { return [] }
+    layoutManager.enumerateEnclosingRects(
+      forGlyphRange: glyphRange,
+      withinSelectedGlyphRange: glyphRange,
+      in: textContainer
+    ) { rect, _ in
+      rects.append(rect.offsetBy(dx: inset.width, dy: inset.height))
+    }
+    return rects
   }
 
   func codeBlockRange(at point: NSPoint) -> NSRange? {
