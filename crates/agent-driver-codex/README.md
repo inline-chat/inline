@@ -16,6 +16,8 @@ kind `untrusted`. Each input refreshes that entry because Codex can retain its
 value-deduplication cache after compaction removes the history item. Quoted
 history is summarized by ordinary mid-turn compaction. The same separation
 applies to `turn/start` and `turn/steer`, keeping visible user messages clean.
+Codex may render this context as an external user fragment or as a named
+`agent` tool output; both remain untrusted context in the native provider input.
 Standalone callers without a configured stable guide use kind `application`
 for per-input instructions; those entries alone do not survive mid-turn
 compaction. Qualify native context with the opt-in `native_context_tests` on
