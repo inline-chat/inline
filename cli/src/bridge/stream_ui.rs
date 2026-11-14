@@ -285,6 +285,7 @@ async fn update_progress_with_transport<T: StreamMessageTransport>(
     let message_id = message_id
         .ok_or_else(|| io::Error::other("Inline progress message identity is unavailable"))?;
     let request = EditMessageRequest {
+        entities: Vec::new(),
         chat_id: InlineId::new(chat_id),
         message_id,
         text: text.to_string(),
@@ -642,6 +643,7 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
 ) -> Result<inline_client::MessageMutation, Box<dyn std::error::Error>> {
     if let Some(message_id) = progress_message_id {
         let request = EditMessageRequest {
+            entities: Vec::new(),
             chat_id: InlineId::new(chat_id),
             message_id,
             text: progress_status.to_string(),
@@ -667,6 +669,7 @@ pub(super) async fn deliver_pending_final_with_attachments_transport<T: StreamMe
         let bytes = verified_output_attachment_bytes(attachment)?;
         let external_key = format!("{event_id}-asset-{index}");
         let request = UploadRequest {
+            entities: Vec::new(),
             peer: PeerRef::Chat {
                 chat_id: InlineId::new(chat_id),
             },

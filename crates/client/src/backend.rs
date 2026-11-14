@@ -16,6 +16,7 @@ use std::{
 use futures_util::future::BoxFuture;
 use inline_sdk::proto;
 
+use crate::entities::validate_entities;
 use crate::store::select_history_window;
 use crate::{
     AccountStateSnapshot, AddChatParticipantRequest, AgentThreadContext,
@@ -235,6 +236,55 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
 
     /// Loads account-level durable state used for consumer reconciliation.
     fn account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>>;
+
+    /// Refreshes the account's accessible workspace snapshot from the source.
+    fn refresh_account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "workspace refresh is unsupported",
+            ))
+        })
+    }
+
+    /// Fetches public source profiles by a bounded set of known IDs.
+    fn users(
+        &self,
+        _request: crate::UsersRequest,
+    ) -> BoxFuture<'static, BackendResult<crate::UsersPage>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "source user lookup is unsupported",
+            ))
+        })
+    }
+
+    /// Searches profiles using the source account's discovery rules.
+    fn search_users(
+        &self,
+        _request: crate::SearchUsersRequest,
+    ) -> BoxFuture<'static, BackendResult<crate::UsersPage>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "source user search is unsupported",
+            ))
+        })
+    }
+
+    /// Fetches a bounded member page for one source-accessible workspace.
+    fn space_members(
+        &self,
+        _request: crate::SpaceMembersRequest,
+    ) -> BoxFuture<'static, BackendResult<crate::SpaceMembersPage>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "workspace members are unsupported",
+            ))
+        })
+    }
 
     /// Loads durable state for one chat used for consumer reconciliation.
     fn chat_state(&self, chat_id: InlineId)
@@ -766,6 +816,7 @@ impl InMemoryBackend {
     }
 
     fn send_text_now(&self, request: SendTextRequest) -> BackendResult<SendTextOutcome> {
+        validate_entities(&request.text, &request.entities, request.parse_markdown)?;
         self.require_connected()?;
         if request.text.trim().is_empty() {
             return Err(BackendError::new(
@@ -797,7 +848,10 @@ impl InMemoryBackend {
             is_outgoing: true,
             content: MessageContent::Text { text: request.text },
             reply_to_message_id: request.reply_to_message_id,
-            metadata: crate::MessageMetadata::default(),
+            metadata: crate::MessageMetadata {
+                entities: request.entities.clone(),
+                ..Default::default()
+            },
             transaction: Some(transaction.clone()),
         };
         state
@@ -864,6 +918,11 @@ impl InMemoryBackend {
         bytes: Vec<u8>,
         _thumbnail: Option<UploadThumbnail>,
     ) -> BackendResult<SendTextOutcome> {
+        validate_entities(
+            request.caption.as_deref().unwrap_or_default(),
+            &request.entities,
+            false,
+        )?;
         self.require_connected()?;
         if bytes.is_empty() {
             return Err(BackendError::new(
@@ -908,7 +967,10 @@ impl InMemoryBackend {
                 duration_ms: request.duration_ms,
             },
             reply_to_message_id: request.reply_to_message_id,
-            metadata: crate::MessageMetadata::default(),
+            metadata: crate::MessageMetadata {
+                entities: request.entities.clone(),
+                ..Default::default()
+            },
             transaction: Some(transaction.clone()),
         };
         state
@@ -1297,20 +1359,27 @@ impl ClientBackend for InMemoryBackend {
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
         let backend = self.clone();
         Box::pin(async move {
+            validate_entities(&request.text, &request.entities, request.parse_markdown)?;
             backend.require_connected()?;
-            if request.text.trim().is_empty() {
-                return Err(BackendError::new(
-                    ClientErrorCategory::InvalidInput,
-                    "message text must not be empty",
-                ));
-            }
             let mut state = backend.state.lock().expect("in-memory backend poisoned");
             let messages = state.messages.entry(request.chat_id.get()).or_default();
             if let Some(message) = messages
                 .iter_mut()
                 .find(|message| message.message_id == request.message_id)
             {
-                message.content = MessageContent::Text { text: request.text };
+                if request.text.trim().is_empty()
+                    && !matches!(message.content, MessageContent::Media { .. })
+                {
+                    return Err(BackendError::new(
+                        ClientErrorCategory::InvalidInput,
+                        "message text must not be empty",
+                    ));
+                }
+                message.metadata.entities = request.entities;
+                match &mut message.content {
+                    MessageContent::Media { caption, .. } => *caption = Some(request.text),
+                    content => *content = MessageContent::Text { text: request.text },
+                }
                 return Ok(OperationOutcome::with_events(vec![
                     ClientEvent::MessageStored {
                         message: message.clone(),

@@ -465,6 +465,7 @@ async fn repair_failed_session_action(
                 bot,
                 EditInteractiveMessageRequest {
                     message: EditMessageRequest {
+                        entities: Vec::new(),
                         chat_id,
                         message_id,
                         text,
@@ -562,6 +563,7 @@ where
                 bot,
                 EditInteractiveMessageRequest {
                     message: EditMessageRequest {
+                        entities: Vec::new(),
                         chat_id: *chat_id,
                         message_id: *message_id,
                         text,
@@ -580,6 +582,7 @@ where
                 bot,
                 EditInteractiveMessageRequest {
                     message: EditMessageRequest {
+                        entities: Vec::new(),
                         chat_id: *chat_id,
                         message_id: *message_id,
                         text,
@@ -809,6 +812,7 @@ where
                     bot,
                     EditInteractiveMessageRequest {
                         message: EditMessageRequest {
+                            entities: Vec::new(),
                             chat_id: *chat_id,
                             message_id: *message_id,
                             text,
@@ -1079,6 +1083,7 @@ where
             edit_message_with_retry(
                 bot,
                 EditMessageRequest {
+                    entities: Vec::new(),
                     chat_id: InlineId::new(thread_id),
                     message_id: InlineId::new(status_message_id),
                     text: agent_session_status_text(
@@ -1765,6 +1770,7 @@ async fn publish_session_picker(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(record.binding.chat_id),
                 message_id,
                 text: reconcile_text,
@@ -1858,6 +1864,7 @@ async fn repair_recovered_session_picker_card(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(picker.chat_id),
                 message_id: InlineId::new(message_id),
                 text,
@@ -3216,6 +3223,7 @@ async fn edit_session_opened(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(chat_id),
                 message_id: InlineId::new(message_id),
                 text: format!(

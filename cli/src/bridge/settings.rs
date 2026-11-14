@@ -1028,6 +1028,7 @@ async fn edit_command_choice_page(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(request.origin_chat_id),
                 message_id: InlineId::new(message_id),
                 text: command_choice_page_text(

@@ -29,9 +29,10 @@ use crate::{
     DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
     InMemoryBackend, InlineId, InvokeBotChatSettingsItemRequest, MessageMutation, OperationOutcome,
     PinMessageRequest, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
-    RequestBotChatSettingsRequest, SendInteractiveTextRequest, SendTextOutcome, SendTextRequest,
-    SetMarkedUnreadRequest, TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
-    UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail,
+    RequestBotChatSettingsRequest, SearchUsersRequest, SendInteractiveTextRequest, SendTextOutcome,
+    SendTextRequest, SetMarkedUnreadRequest, SpaceMembersPage, SpaceMembersRequest, TypingRequest,
+    UpdateChatInfoRequest, UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest,
+    UploadRequest, UploadThumbnail, UsersPage, UsersRequest,
 };
 
 /// Default bounded command queue capacity.
@@ -435,6 +436,44 @@ impl InlineClient {
         match self.request(ClientRequest::AccountState).await? {
             ClientResponse::AccountState(snapshot) => Ok(snapshot),
             other => unreachable!("account_state returned {other:?}"),
+        }
+    }
+
+    /// Refreshes source-confirmed accessible workspace navigation.
+    pub async fn refresh_account_state(&self) -> Result<AccountStateSnapshot, ClientRequestError> {
+        match self.request(ClientRequest::RefreshAccountState).await? {
+            ClientResponse::AccountState(snapshot) => Ok(snapshot),
+            other => unreachable!("refresh_account_state returned {other:?}"),
+        }
+    }
+
+    /// Looks up at most 50 known public IDs through the source service.
+    pub async fn users(&self, request: UsersRequest) -> Result<UsersPage, ClientRequestError> {
+        match self.request(ClientRequest::Users(request)).await? {
+            ClientResponse::Users(page) => Ok(page),
+            other => unreachable!("users returned {other:?}"),
+        }
+    }
+
+    /// Searches profiles visible under the authenticated source discovery rules.
+    pub async fn search_users(
+        &self,
+        request: SearchUsersRequest,
+    ) -> Result<UsersPage, ClientRequestError> {
+        match self.request(ClientRequest::SearchUsers(request)).await? {
+            ClientResponse::Users(page) => Ok(page),
+            other => unreachable!("search_users returned {other:?}"),
+        }
+    }
+
+    /// Returns a bounded page of workspace membership facts.
+    pub async fn space_members(
+        &self,
+        request: SpaceMembersRequest,
+    ) -> Result<SpaceMembersPage, ClientRequestError> {
+        match self.request(ClientRequest::SpaceMembers(request)).await? {
+            ClientResponse::SpaceMembers(page) => Ok(page),
+            other => unreachable!("space_members returned {other:?}"),
         }
     }
 
@@ -1194,6 +1233,24 @@ impl ClientRunner {
                 .account_state()
                 .await
                 .map(ClientResponse::AccountState),
+            ClientRequest::RefreshAccountState => self
+                .backend
+                .refresh_account_state()
+                .await
+                .map(ClientResponse::AccountState),
+            ClientRequest::Users(request) => {
+                self.backend.users(request).await.map(ClientResponse::Users)
+            }
+            ClientRequest::SearchUsers(request) => self
+                .backend
+                .search_users(request)
+                .await
+                .map(ClientResponse::Users),
+            ClientRequest::SpaceMembers(request) => self
+                .backend
+                .space_members(request)
+                .await
+                .map(ClientResponse::SpaceMembers),
             ClientRequest::ChatState(chat_id) => self
                 .backend
                 .chat_state(chat_id)
@@ -1487,6 +1544,19 @@ async fn handle_concurrent_request(
             .account_state()
             .await
             .map(ClientResponse::AccountState),
+        ClientRequest::RefreshAccountState => backend
+            .refresh_account_state()
+            .await
+            .map(ClientResponse::AccountState),
+        ClientRequest::Users(request) => backend.users(request).await.map(ClientResponse::Users),
+        ClientRequest::SearchUsers(request) => backend
+            .search_users(request)
+            .await
+            .map(ClientResponse::Users),
+        ClientRequest::SpaceMembers(request) => backend
+            .space_members(request)
+            .await
+            .map(ClientResponse::SpaceMembers),
         ClientRequest::ChatState(chat_id) => backend
             .chat_state(chat_id)
             .await
@@ -1767,6 +1837,10 @@ enum ClientRequest {
     Dialogs(DialogsRequest),
     CachedDialogs(DialogsRequest),
     AccountState,
+    RefreshAccountState,
+    Users(UsersRequest),
+    SearchUsers(SearchUsersRequest),
+    SpaceMembers(SpaceMembersRequest),
     ChatState(InlineId),
     History(HistoryRequest),
     CachedHistory(HistoryRequest),
@@ -1833,6 +1907,10 @@ impl ClientRequest {
             Self::Dialogs(_) => "dialogs",
             Self::CachedDialogs(_) => "cached_dialogs",
             Self::AccountState => "account_state",
+            Self::RefreshAccountState => "refresh_account_state",
+            Self::Users(_) => "users",
+            Self::SearchUsers(_) => "search_users",
+            Self::SpaceMembers(_) => "space_members",
             Self::ChatState(_) => "chat_state",
             Self::History(_) => "history",
             Self::CachedHistory(_) => "cached_history",
@@ -1932,6 +2010,8 @@ enum ClientResponse {
     AuthVerify(AuthVerifyResult),
     Dialogs(DialogsPage),
     AccountState(AccountStateSnapshot),
+    Users(UsersPage),
+    SpaceMembers(SpaceMembersPage),
     ChatState(Box<ChatStateSnapshot>),
     History(HistoryPage),
     ChatParticipants(ChatParticipantsPage),
@@ -2614,6 +2694,7 @@ mod tests {
 
         client
             .edit_message(EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(7),
                 message_id: InlineId::new(1),
                 text: "edited".to_owned(),
@@ -2667,6 +2748,7 @@ mod tests {
         let mutation = client
             .send_media(
                 UploadRequest {
+                    entities: Vec::new(),
                     peer: PeerRef::Chat {
                         chat_id: InlineId::new(7),
                     },
