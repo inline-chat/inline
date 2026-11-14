@@ -185,6 +185,18 @@ class MemoryMultipartStore implements MultipartObjectStore {
   }
 }
 
+/** A store that also writes whole objects in one request, like R2's PutObject. */
+class PuttingMultipartStore extends MemoryMultipartStore {
+  putCount = 0
+
+  async put(input: { key: string; bytes: Uint8Array }): Promise<{ etag: string }> {
+    this.putCount += 1
+    const etag = createHash("md5").update(input.bytes).digest("hex")
+    this.objects.set(input.key, { bytes: input.bytes.slice(), etag })
+    return { etag }
+  }
+}
+
 class LostInstallResponseRepository extends InlineUploadRepository {
   #loseResponse = true
 
@@ -850,10 +862,11 @@ describe("native upload multipart worker", () => {
     finalizerFor: (body: Uint8Array) => MediaUploadFinalizer
     body: Uint8Array
     inline?: boolean
+    multipart?: MemoryMultipartStore
   }) => {
     const repository = new InlineUploadRepository()
     const staging = options.staging ?? new BatchingPartStore()
-    const multipart = new MemoryMultipartStore()
+    const multipart = options.multipart ?? new MemoryMultipartStore()
     const buffer = options.buffer ?? new UploadGroupBuffer()
     const finalizer = options.finalizerFor(options.body)
     const worker = createWorker(repository, staging, multipart, finalizer, {
@@ -909,6 +922,75 @@ describe("native upload multipart worker", () => {
     const ops = storageOps(staging, multipart, created.partCount)
     console.log("UPLOAD_STORAGE_OPS inline 3-part", JSON.stringify(ops))
     expect(ops.perGroup).toBeLessThanOrEqual(2)
+  })
+
+  test("writes a single-group upload with one PUT instead of a multipart session", async () => {
+    const user = await testUtils.createUser("native-upload-single-put@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 2 + 99)
+    for (let index = 0; index < body.length; index += 1) body[index] = index % 253
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 140)
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+    expect(multipart.putCount).toBe(1)
+    expect(multipart.createCount).toBe(0)
+    expect(multipart.completeCount).toBe(0)
+    const [stored] = [...multipart.objects.values()]
+    expect(Buffer.from(stored!.bytes).equals(Buffer.from(body))).toBe(true)
+  })
+
+  test("fails a single-group upload whose bytes do not match the declared digest, storing nothing", async () => {
+    const user = await testUtils.createUser("native-upload-single-put-digest@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE + 7).fill(3)
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations, repository } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(142),
+      fileName: "mismatch.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      // The declared digest is for different bytes.
+      sha256: createHash("sha256").update(new Uint8Array(body.byteLength).fill(4)).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    for (let partIndex = 0; partIndex < created.partCount; partIndex += 1) {
+      const offset = partIndex * created.partSize
+      await operations.savePart({
+        uploadId: created.uploadId,
+        partIndex,
+        data: body.subarray(offset, Math.min(offset + created.partSize, body.byteLength)),
+      }, requestContext)
+    }
+    await operations.finish({ uploadId: created.uploadId }, requestContext)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "failed")
+    expect((await repository.get(created.uploadId, owner))?.failureCode).toBe("integrity")
+    expect(multipart.putCount).toBe(0)
+    expect(multipart.objects.size).toBe(0)
+  })
+
+  test("keeps multipart for uploads larger than one storage group", async () => {
+    const user = await testUtils.createUser("native-upload-two-groups@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 11).fill(9)
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations, repository } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 141)
+    await operations.finish({ uploadId: created.uploadId }, requestContext)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    expect(multipart.putCount).toBe(0)
+    expect(multipart.createCount).toBe(1)
   })
 
   test("completes a 25-part upload whose buffer was evicted from staging reads and the running digest", async () => {

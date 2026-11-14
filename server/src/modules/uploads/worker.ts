@@ -293,8 +293,16 @@ export class NativeUploadWorker {
   }
 
   async discardStorage(upload: InlineUploadRecord, signal?: AbortSignal): Promise<void> {
-    if (!upload.storageUploadId || !upload.resultFileUniqueId) return
-    await this.multipartStore.abort(storageKeyFor(upload), upload.storageUploadId, signal)
+    if (!upload.resultFileUniqueId) return
+    const key = storageKeyFor(upload)
+    if (upload.storageUploadId) await this.multipartStore.abort(key, upload.storageUploadId, signal)
+    // A single-group upload is stored with one PUT before it publishes, and a crash can leave that
+    // object behind with no session to abort. Nothing references an unpublished object.
+    if (upload.resultMediaId === null) {
+      await this.multipartStore.remove(key, signal).catch((error) => {
+        log.warn("Native upload unpublished object cleanup failed", { error, uploadDbId: upload.id })
+      })
+    }
   }
 
   #pump(): void {
@@ -663,10 +671,23 @@ export class NativeUploadWorker {
       if (claim.upload.thumbnailFileUniqueId && !thumbnailPhotoId) throw new UploadInvalidMediaError()
 
       let publication
+      const singleGroupFrames = claim.upload.storageFormat
+        ? await this.#putSingleGroup(claim, controller.signal, assertOwnership)
+        : undefined
       if (!claim.upload.storageFormat) {
         publication = await this.finalizer.preparePublication({
           upload: claim.upload,
           parts: claim.parts,
+          thumbnailPhotoId,
+          assertOwnership,
+          signal: controller.signal,
+        })
+      } else if (singleGroupFrames) {
+        // Verified and stored above; the digest and frames are already proven.
+        this.#digests.delete(claim.upload.id)
+        publication = await this.finalizer.prepareBufferedPublication({
+          upload: claim.upload,
+          frames: bufferedPublicationNeedsBytes(claim.upload.kind) ? singleGroupFrames : undefined,
           thumbnailPhotoId,
           assertOwnership,
           signal: controller.signal,
@@ -953,6 +974,70 @@ export class NativeUploadWorker {
     const refreshed = await this.repository.getStorageWork(initialWork.upload.id)
     if (!refreshed || refreshed.upload.storageUploadId !== storageUploadId) throw new UploadOwnershipLostError()
     return refreshed
+  }
+
+  /**
+   * An upload that fits in one storage group is written with a single PutObject. A multipart
+   * session (create, upload part, complete and two HEAD checks, plus their manifest statements)
+   * proves the same thing with five object-store calls, which dominated small-photo finish time.
+   * Every frame is checked against its manifest digest, the whole body against the declared
+   * file digest, and the PUT's MD5 ETag proves what was stored. Returns the verified frames, or
+   * undefined to use multipart.
+   */
+  async #putSingleGroup(
+    work: InlineUploadStorageWork,
+    signal: AbortSignal,
+    assertOwnership: () => Promise<void>,
+  ): Promise<Uint8Array[] | undefined> {
+    const upload = work.upload
+    if (!this.multipartStore.put || upload.storageFormat !== IDENTITY_STORAGE_FORMAT ||
+        upload.partCount > STORAGE_FRAMES_PER_PART || upload.storageUploadId ||
+        work.storageParts.length > 0) return undefined
+    const frames = await this.#readFrames(work, signal)
+    if (!frames) return undefined
+    const bytes = Buffer.concat(frames)
+    if (bytes.byteLength !== Number(upload.byteCount) ||
+        !sameBytes(createHash("sha256").update(bytes).digest(), upload.sha256)) {
+      throw new UploadIntegrityError()
+    }
+    await assertOwnership()
+    await this.multipartStore.put({
+      key: storageKeyFor(upload),
+      bytes,
+      contentType: upload.mimeType,
+      signal,
+    })
+    return frames
+  }
+
+  /**
+   * Every frame of an upload in index order, from the group buffer or staging, each verified
+   * against its manifest. Undefined when the manifest does not list every frame exactly once.
+   */
+  async #readFrames(work: InlineUploadStorageWork, signal: AbortSignal): Promise<Uint8Array[] | undefined> {
+    const upload = work.upload
+    const parts = [...work.parts].sort((left, right) => left.partIndex - right.partIndex)
+    if (parts.length !== upload.partCount || parts.some((part, index) => part.partIndex !== index)) return undefined
+    const buffered = this.#groupBuffer.peekGroup(upload.id, 0, parts.length)
+    const frames: Uint8Array[] = buffered ?? Array.from({ length: parts.length })
+    if (!buffered) {
+      await mapConcurrent(parts.map((part, index) => ({ part, index })), STAGING_READ_CONCURRENCY,
+        async ({ part, index }, readSignal) => {
+          frames[index] = await this.partStore.read(part.objectKey, part.storedByteCount, readSignal)
+            .catch((error) => {
+              if (error instanceof FileByteLengthError) throw new UploadIntegrityError()
+              throw error
+            })
+        }, signal)
+    }
+    parts.forEach((part, index) => {
+      const frame = frames[index]!
+      if (frame.byteLength !== part.storedByteCount ||
+          !sameBytes(createHash("sha256").update(frame).digest(), part.storedSha256)) {
+        throw new UploadIntegrityError()
+      }
+    })
+    return frames
   }
 
   /** Completes the multipart object and proves it equals the recorded groups. */
