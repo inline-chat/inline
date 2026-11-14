@@ -17,6 +17,9 @@ struct ExperimentalView: View {
   @AppStorage(MessageContextMenuFeature.preferenceKey)
   private var customContextMenuEnabled = true
 
+  @AppStorage(TimelineFeature.preferenceKey)
+  private var timelineEnabled = false
+
   var body: some View {
     List {
       // Use the same purpose-based groups as macOS; see AGENTS.md when adding experiments.
@@ -67,6 +70,14 @@ struct ExperimentalView: View {
 
       if SettingsBuildAudience.showsDebugTools {
         Section {
+          SettingsItem(
+            icon: "list.bullet.rectangle.fill",
+            iconColor: .purple,
+            title: "New Message List"
+          ) {
+            Toggle("New Message List", isOn: $timelineEnabled)
+              .labelsHidden()
+          }
           SettingsItem(
             icon: "text.bubble.fill",
             iconColor: .orange,

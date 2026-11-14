@@ -20,7 +20,15 @@ struct InlineApp: App {
 
   var body: some Scene {
     WindowGroup {
+      #if DEBUG
+      if TimelineHarnessRootView.isRequested {
+        TimelineHarnessRootView()
+      } else {
+        InlineSceneRoot(appDelegate: appDelegate)
+      }
+      #else
       InlineSceneRoot(appDelegate: appDelegate)
+      #endif
     }
     .commands {
       if #available(iOS 26.0, *), IPadNavigationLane.isEnabled {

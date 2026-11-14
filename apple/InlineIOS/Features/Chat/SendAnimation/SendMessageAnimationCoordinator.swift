@@ -49,6 +49,7 @@ final class SendMessageAnimationCoordinator {
   }
 
   func canPrepareTextSendSource() -> Bool {
+    if let gate = sourceLayoutView as? SendMessageAnimationListGate { return gate.acceptsSendAnimation }
     guard let collectionView = sourceLayoutView as? MessagesCollectionView else {
       return true
     }
