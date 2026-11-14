@@ -247,6 +247,9 @@ actor CommandBarCatalogService {
       Table("dialogCatalogExclusion"),
       Table("chat"),
       Table("user"),
+      // Which bots are offered follows who can reach them.
+      Table("botAccess"),
+      Table("botOwner"),
       Table("space"),
       Table("spaceCatalogExclusion"),
       Table("message"),

@@ -66,6 +66,8 @@ final class AddHomeParticipantsViewModel: ObservableObject {
 
       let users = sorted.compactMap(\.user).filter { userInfo in
         guard !excludedUserIds.contains(userInfo.user.id) else { return false }
+        // A bot can be added only by someone who can reach it.
+        guard AgentGrantStore.shared.offers(userInfo.user) else { return false }
         if seen.contains(userInfo.user.id) { return false }
         seen.insert(userInfo.user.id)
         return true

@@ -21,6 +21,8 @@ struct BotsSettingsDetailView: View {
   @State private var botSettingsItem: BotSettingsItem?
   @State private var rotateConfirmBotId: Int64?
   @State private var deleteConfirmBot: BotDeleteItem?
+  @State private var botAccessItem: BotAccessItem?
+  @State private var createdBotToOpen: InlineProtocol.User?
 
   private let log = Log.scoped("BotsSettings")
 
@@ -141,8 +143,12 @@ struct BotsSettingsDetailView: View {
               isRotating: viewModel.rotatingBots.contains(bot.id),
               isDeleting: viewModel.deletingBots.contains(bot.id),
               isBusy: viewModel.isBusy(bot.id),
+              isOwned: bot.isOwned(by: auth.currentUserId),
               onOpen: {
                 Task { await openBot(bot) }
+              },
+              onAccess: {
+                botAccessItem = BotAccessItem(bot: bot, isNew: false)
               },
               onReveal: {
                 Task { await viewModel.revealToken(for: bot.id, realtimeV2: realtimeV2) }
@@ -205,6 +211,14 @@ struct BotsSettingsDetailView: View {
       BotProfileEditorSheet(bot: item.bot) { updatedBot in
         viewModel.upsertBot(updatedBot)
       }
+    }
+    .sheet(item: $botAccessItem, onDismiss: openCreatedBotIfNeeded) { item in
+      BotAccessSheet(
+        bot: UserInfo(user: User(from: item.bot)),
+        introduction: item.isNew
+          ? "\(User(from: item.bot).shortDisplayName) is private: only you can message it. Add the people or spaces who should reach it, or leave it as it is."
+          : nil
+      )
     }
     .sheet(item: $botToEditAvatar) { item in
       BotAvatarSettingsSheet(bot: item.bot) { updatedBot in
@@ -311,8 +325,17 @@ struct BotsSettingsDetailView: View {
       name = ""
       username = ""
       focusedField = .name
-      await openBot(createdBot)
+      // A new bot is private. Ask who should reach it before anything else,
+      // so nobody learns later that their team can't message it.
+      createdBotToOpen = createdBot
+      botAccessItem = BotAccessItem(bot: createdBot, isNew: true)
     }
+  }
+
+  private func openCreatedBotIfNeeded() {
+    guard let bot = createdBotToOpen else { return }
+    createdBotToOpen = nil
+    Task { await openBot(bot) }
   }
 
   private func openBot(_ bot: InlineProtocol.User) async {
@@ -341,6 +364,13 @@ struct BotsSettingsDetailView: View {
     pasteboard.clearContents()
     pasteboard.setString(token, forType: .string)
   }
+}
+
+private struct BotAccessItem: Identifiable {
+  let bot: InlineProtocol.User
+  /// Just created: the sheet opens as the "who can message it" step.
+  let isNew: Bool
+  var id: Int64 { bot.id }
 }
 
 private struct BotEditItem: Identifiable {
@@ -415,7 +445,8 @@ final class BotsSettingsViewModel: ObservableObject {
     lastLoadedUserId = currentUserId
 
     do {
-      let result = try await realtimeV2.send(.listBots())
+      // Own bots, then the ones this person manages as an admin.
+      let result = try await realtimeV2.send(.listBots(includeManaged: true))
       guard case let .listBots(response) = result else {
         throw TransactionExecutionError.invalid
       }
@@ -586,7 +617,10 @@ private struct BotRow: View {
   let isRotating: Bool
   let isDeleting: Bool
   let isBusy: Bool
+  /// False for a bot this person manages as an admin: everything but deleting it.
+  let isOwned: Bool
   let onOpen: () -> Void
+  let onAccess: () -> Void
   let onReveal: () -> Void
   let onHide: () -> Void
   let onRotateRequested: () -> Void
@@ -610,8 +644,13 @@ private struct BotRow: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+          BotAccessSummaryLabel(botUserID: bot.id, isOwned: isOwned)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        Button("Shared With…") { onAccess() }
+          .controlSize(.small)
+          .help("Choose who can message this bot")
 
         if isRevealing || isRotating || isDeleting {
           ProgressView()
@@ -638,6 +677,10 @@ private struct BotRow: View {
     Menu {
       Button("Open Chat") {
         onOpen()
+      }
+
+      Button("Who Can Message…") {
+        onAccess()
       }
 
       Divider()
@@ -672,12 +715,15 @@ private struct BotRow: View {
         onEditAvatar()
       }
 
-      Divider()
+      // Only the owner deletes a bot; an admin does everything else.
+      if isOwned {
+        Divider()
 
-      Button(isDeleting ? "Deleting..." : "Delete Bot...", role: .destructive) {
-        onDeleteRequested()
+        Button(isDeleting ? "Deleting..." : "Delete Bot...", role: .destructive) {
+          onDeleteRequested()
+        }
+        .disabled(isDeleting)
       }
-      .disabled(isDeleting)
     } label: {
       Image(systemName: "ellipsis.circle")
         .foregroundStyle(.secondary)
@@ -1362,4 +1408,32 @@ private struct TokenRow: View {
 
 #Preview {
   BotsSettingsDetailView()
+}
+
+/// "Only you", "Acme and 2 people" or "Everyone" under a bot in Settings, so
+/// who can message each bot is visible without opening anything.
+private struct BotAccessSummaryLabel: View {
+  let botUserID: Int64
+  let isOwned: Bool
+  @ObservedObject private var grants = AgentGrantStore.shared
+
+  var body: some View {
+    Group {
+      if let owned = grants.ownedGrants(botUserID: botUserID) {
+        let summary = owned.sharedWithSummary(
+          openToEveryone: grants.openToEveryoneByBotUserID[botUserID] == true
+        )
+        Label(
+          isOwned ? "Shared with: \(summary)" : "You’re an admin · Shared with: \(summary)",
+          systemImage: grants.openToEveryoneByBotUserID[botUserID] == true ? "globe" : "lock.fill"
+        )
+      } else if !isOwned {
+        Label("You’re an admin", systemImage: "lock.fill")
+      }
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+    .labelStyle(.titleAndIcon)
+    .task(id: botUserID) { grants.ensureLoaded(botUserID: botUserID) }
+  }
 }

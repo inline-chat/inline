@@ -15,6 +15,8 @@ final class SelectParticipantsViewModel: ObservableObject {
   private var cancellables = Set<AnyCancellable>()
 
   var filteredMembers: [FullMemberItem] {
+    // A bot can be added only by someone who can reach it.
+    let availableMembers = availableMembers.filter { AgentGrantStore.shared.offers($0.userInfo.user) }
     if searchText.isEmpty {
       return availableMembers
     }

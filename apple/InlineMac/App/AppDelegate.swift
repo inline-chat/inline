@@ -283,6 +283,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // Sidebar agent badges: reconcile the cached busy sessions across chats.
       await AgentWorkStateStore.shared.refresh()
     }
+    if accountOperationAdmissionIsOpen, Auth.shared.isLoggedIn {
+      // Which bots this person can reach: decides composers, mentions and search.
+      AgentGrantStore.shared.start()
+    }
 
     if !didHandleInitialActivation {
       didHandleInitialActivation = true

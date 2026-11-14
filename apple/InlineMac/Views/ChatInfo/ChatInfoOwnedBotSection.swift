@@ -4,8 +4,8 @@ import Logger
 import RealtimeV2
 import SwiftUI
 
-/// Profile and settings shortcuts for a bot the viewer owns, in its chat info.
-/// Renders nothing for other people's bots.
+/// Profile and settings shortcuts for a bot the viewer owns or is an admin
+/// of, in its chat info. Renders nothing for other people's bots.
 struct ChatInfoOwnedBotSection: View {
   let botUserID: Int64
 
@@ -16,8 +16,8 @@ struct ChatInfoOwnedBotSection: View {
 
   private let log = Log.scoped("ChatInfoOwnedBot")
 
-  /// The owner's grant list exists only for their own bots, and stays cached
-  /// across chat info openings.
+  /// The full access list exists only for bots this person owns or is an
+  /// admin of, and stays cached across chat info openings.
   private var isOwned: Bool {
     grants.ownedGrants(botUserID: botUserID) != nil
   }
@@ -87,17 +87,17 @@ struct ChatInfoOwnedBotSection: View {
       }
   }
 
-  /// The editors take the server's bot record, which only the owner's bot list returns.
+  /// The editors take the server's bot record, which the bot list returns to its owner and admins.
   private func open(_ kind: Presented.Kind) {
     guard opening == nil else { return }
     opening = kind
     Task { @MainActor in
       defer { opening = nil }
       do {
-        let result = try await realtimeV2.send(.listBots())
+        let result = try await realtimeV2.send(.listBots(includeManaged: true))
         guard case let .listBots(response) = result else { throw TransactionExecutionError.invalid }
         guard let bot = response.bots.first(where: { $0.id == botUserID }) else {
-          ToastCenter.shared.showError("Only the bot’s owner can edit it.")
+          ToastCenter.shared.showError("Only the bot’s owner and admins can edit it.")
           return
         }
         presented = Presented(kind: kind, bot: bot)

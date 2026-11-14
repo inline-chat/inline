@@ -233,6 +233,8 @@ struct SidebarView: View {
       }
     }
     .task(id: auth.currentUserId) {
+      // Which bots this person can reach, from the moment they are signed in.
+      if auth.currentUserId != nil { AgentGrantStore.shared.start() }
       guard let dependencies else { return }
       await agents.loadBots(using: dependencies)
     }
