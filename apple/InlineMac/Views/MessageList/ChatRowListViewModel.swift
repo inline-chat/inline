@@ -1,5 +1,6 @@
 import Foundation
 import InlineKit
+import Translation
 
 @MainActor
 final class ChatRowListViewModel {
@@ -47,6 +48,10 @@ final class ChatRowListViewModel {
   /// cached message, so it always sits at the real bottom.
   private(set) var statusNotice: String?
   private(set) var collapsedMaxId: Int64?
+  /// Render inputs from outside the messages, as of the last rows the table was given. A reload
+  /// that changes them can't be applied row by row.
+  private var renderedThreadAnchor: FullMessage?
+  private var renderedTranslationKey: String?
   var threadAnchor: FullMessage? {
     progressiveViewModel.threadAnchor
   }
@@ -319,6 +324,7 @@ final class ChatRowListViewModel {
     }
 
     indexMsgs()
+    renderedThreadAnchor = threadAnchor
     let rowsToReload = rowIdxs(forMsgIds: updated.map(\.id))
     return rowsToReload.isEmpty ? .none : .reloadRows(rowsToReload)
   }
@@ -404,10 +410,81 @@ final class ChatRowListViewModel {
     }
   }
 
+  /// A reload rereads the whole window; most return the rows already shown (a history refetch
+  /// on open, sync catch-up). Compare with what the table shows and touch only what changed.
   private func reloadFromProgressive() -> UpdateKind {
+    let oldMessages = messages
+    let oldRows = rows
+    let oldThreadAnchor = renderedThreadAnchor
+    let oldTranslationKey = renderedTranslationKey
     messages = visibleMessages
-    rebuildRows()
-    return .reloadAll
+
+    // Translation is toggled through a reload and lives outside the rows.
+    guard translationKey() == oldTranslationKey else {
+      rebuildRows()
+      return .reloadAll
+    }
+
+    let diff = MessageWindowDiff(from: oldMessages, to: messages)
+    switch diff {
+      case .unchanged, .updated:
+        let newRows = makeRows(for: messages)
+        guard newRows == oldRows else {
+          setRows(newRows)
+          return .reloadAll
+        }
+        var changedIDs = Set<Int64>()
+        if case let .updated(ids) = diff {
+          changedIDs = ids
+        }
+        if let anchor = threadAnchor, anchor != oldThreadAnchor {
+          changedIDs.insert(anchor.id)
+        }
+        renderedThreadAnchor = threadAnchor
+        indexMsgs()
+        guard !changedIDs.isEmpty else { return .none }
+        return .reloadRows(rowIdxsWithMessageNeighbors(forMsgIds: changedIDs))
+
+      case .inserted, .removed:
+        // Structural changes come back as row inserts or removals only when the thread anchor
+        // and every kept row are unchanged; anything else falls back to a full reload.
+        guard threadAnchor == oldThreadAnchor else {
+          rebuildRows()
+          return .reloadAll
+        }
+        if oldMessages.count < messages.count {
+          return applyMutationTransition(from: oldMessages, to: messages)
+        }
+        let newRows = makeRows(for: messages)
+        guard let removed = removalIdxs(from: oldRows, to: newRows) else {
+          setRows(newRows)
+          return .reloadAll
+        }
+        setRows(newRows)
+        return removed.isEmpty ? .none : .remove(removed)
+
+      case .replaced:
+        rebuildRows()
+        return .reloadAll
+    }
+  }
+
+  /// Rows of the given messages and of the messages right next to them, whose grouping (first
+  /// or last in a run) depends on their neighbours.
+  private func rowIdxsWithMessageNeighbors(forMsgIds ids: Set<Int64>) -> IndexSet {
+    var idxs = rowIdxs(forMsgIds: ids)
+    for row in idxs {
+      for neighbor in [row - 1, row + 1] where rows.indices.contains(neighbor) {
+        if case .message = rows[neighbor] { idxs.insert(neighbor) }
+      }
+    }
+    return idxs
+  }
+
+  private func translationKey() -> String {
+    let peer = progressiveViewModel.peer
+    guard TranslationState.shared.isTranslationEnabled(for: peer) else { return "off" }
+    return "on:\(UserLocale.getCurrentLanguage())"
   }
 
   // MARK: - Indexing
@@ -512,6 +589,8 @@ final class ChatRowListViewModel {
 
   private func setRows(_ newRows: [Row]) {
     rows = newRows
+    renderedThreadAnchor = threadAnchor
+    renderedTranslationKey = translationKey()
     reindex()
   }
 

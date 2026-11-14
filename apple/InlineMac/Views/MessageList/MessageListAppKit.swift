@@ -3503,6 +3503,49 @@ class MessageListAppKit: NSViewController {
       }
     }
 
+    /// Reconfigures rows whose content changed. Their cells take the in-place update path
+    /// (`MessageTableCell.configure`) instead of a full table reload.
+    func reloadRowsInPlace(_ rowsToReload: IndexSet, animated: Bool) {
+      if rowsToReload.isEmpty {
+        endTableUpdate()
+        return
+      }
+
+      let movesAnchor = updateAnchor?.hasChangesAbove(rowsToReload) == true
+      if animated, !movesAnchor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
+          context.duration = animationDuration
+          tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
+          tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+          updateHeightsForRows(at: rowsToReload)
+          tableView.layoutSubtreeIfNeeded()
+          if let updateAnchor {
+            viewport.restore(updateAnchor)
+          }
+          syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
+          if shouldScroll {
+            scrollToBottom(animated: true)
+          }
+        } completionHandler: { [weak self] in
+          self?.endTableUpdate()
+        }
+      } else {
+        tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
+        tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+        updateHeightsForRows(at: rowsToReload)
+        tableView.layoutSubtreeIfNeeded()
+        if let updateAnchor {
+          viewport.restore(updateAnchor)
+        }
+        syncUpdateAvatarOverlayAfterTableLayout(on: self)
+        if shouldScroll {
+          scrollToBottom(animated: false)
+        }
+        endTableUpdate()
+      }
+    }
+
     switch update {
       case let .added(newMessages, _):
         log.trace("applying add changes")
@@ -3549,44 +3592,7 @@ class MessageListAppKit: NSViewController {
 
         switch rowUpdate {
           case let .reloadRows(rowsToReload):
-            if rowsToReload.isEmpty {
-              endTableUpdate()
-              break
-            }
-
-            let movesAnchor = updateAnchor?.hasChangesAbove(rowsToReload) == true
-            if animated == true, !movesAnchor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-              NSAnimationContext.runAnimationGroup { [weak self] context in
-                guard let self else { return }
-                context.duration = animationDuration
-                tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
-                tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
-                updateHeightsForRows(at: rowsToReload)
-                tableView.layoutSubtreeIfNeeded()
-                if let updateAnchor {
-                  viewport.restore(updateAnchor)
-                }
-                syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
-                if shouldScroll {
-                  scrollToBottom(animated: true)
-                }
-              } completionHandler: { [weak self] in
-                self?.endTableUpdate()
-              }
-            } else {
-              tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
-              tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
-              updateHeightsForRows(at: rowsToReload)
-              tableView.layoutSubtreeIfNeeded()
-              if let updateAnchor {
-                viewport.restore(updateAnchor)
-              }
-              syncUpdateAvatarOverlayAfterTableLayout(on: self)
-              if shouldScroll {
-                scrollToBottom(animated: false)
-              }
-              endTableUpdate()
-            }
+            reloadRowsInPlace(rowsToReload, animated: animated == true)
 
           case .none:
             endTableUpdate()
@@ -3596,8 +3602,22 @@ class MessageListAppKit: NSViewController {
         }
 
       case .reload:
-        log.trace("reloading data")
-        reloadAll(animated: false, preserving: updateAnchor)
+        // Most reloads (the history refetch after open, sync catch-up) return the rows already
+        // shown. Only what changed is touched, so unchanged cells keep their views.
+        switch rowUpdate {
+          case .none:
+            log.trace("reload left the rows unchanged")
+            endTableUpdate()
+          case let .reloadRows(rowsToReload):
+            reloadRowsInPlace(rowsToReload, animated: false)
+          case let .insert(inserted):
+            applyStructuralInsert(animated: false, inserted: inserted)
+          case let .remove(removed):
+            applyStructuralRemove(animated: false, removed: removed)
+          case .reloadAll:
+            log.trace("reloading data")
+            reloadAll(animated: false, preserving: updateAnchor)
+        }
     }
   }
 
