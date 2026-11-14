@@ -12,9 +12,10 @@ enum Lab {
     return args[i + 1]
   }
 
-  static let allModes = ["S1", "S2pub", "S2priv", "S4", "S3U", "S3C", "S3R", "S3L"]
+  static let allModes = ["E1", "S1", "S2pub", "S2priv", "S4", "S3U", "S3C", "S3R", "S3L"]
   static func modeTitle(_ m: String) -> String {
     switch m {
+    case "E1": return "E1 timeline engine"
     case "S1": return "S1 keyboard open/close"
     case "S2pub": return "S2 interactive (system)"
     case "S2priv": return "S2 interactive (private pan)"

@@ -8,11 +8,19 @@ settings:
     SWIFT_VERSION: "6.0"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 2487AN8AL4
+packages:
+  InlineTimeline:
+    path: ../InlineTimeline
 targets:
   TimelineLab:
     type: application
     platform: iOS
     sources: [App]
+    dependencies:
+      - package: InlineTimeline
+        product: TimelineCore
+      - package: InlineTimeline
+        product: TimelineUIKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: research.inline.TimelineLab

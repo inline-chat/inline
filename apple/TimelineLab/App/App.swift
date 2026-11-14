@@ -80,7 +80,9 @@ struct RootView: View {
       }
       .navigationTitle("TimelineLab")
       .navigationDestination(for: String.self) { _ in
-        LabScreen()
+        Group {
+          if Lab.mode == "E1" { EngineScreen() } else { LabScreen() }
+        }
           .ignoresSafeArea(.container, edges: .bottom)
           .ignoresSafeArea(.keyboard)
           .navigationTitle(Lab.modeTitle(Lab.mode))
