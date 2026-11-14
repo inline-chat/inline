@@ -3535,10 +3535,19 @@ export interface AgentSettings {
      * @generated from protobuf field: optional int64 date = 4;
      */
     date?: bigint;
+    /**
+     * Anyone on Inline may message the bot, add it to chats and find it by its
+     * username; the bot's own software decides who it answers. Off by default:
+     * only the owner and the access list (AgentGrant) reach the bot.
+     *
+     * @generated from protobuf field: bool open_to_everyone = 5;
+     */
+    openToEveryone: boolean;
 }
 /**
- * Opt-in access to a bot for one person. No grants means owner-only. Any grant
- * lets its holder answer the agent's questions.
+ * One entry of a bot's access list. No grants means owner-only, unless the bot
+ * is open to everyone (AgentSettings). Any grant lets its holder message the
+ * bot, add it to chats and answer its questions.
  *
  * @generated from protobuf message AgentGrant
  */
@@ -3812,7 +3821,7 @@ export interface ListAgentGrantsInput {
  */
 export interface ListAgentGrantsResult {
     /**
-     * All grants for the owner and the bot; only the viewer's own otherwise.
+     * All grants for the owner, admins and the bot; only the viewer's own otherwise.
      *
      * @generated from protobuf field: repeated AgentGrant grants = 1;
      */
@@ -3827,8 +3836,9 @@ export interface ListAgentGrantsResult {
     ownerUserId: bigint;
 }
 /**
- * Creates or replaces one person's grant. Owner, or the bot itself for grants
- * without APPROVE and CONFIGURE (the bridge's /allowlist).
+ * Creates or replaces one access list entry. The owner; an admin, for grants
+ * without APPROVE; or the bot itself, for grants without APPROVE and
+ * CONFIGURE (the bridge's /allowlist).
  *
  * @generated from protobuf message SetAgentGrantInput
  */
@@ -3907,6 +3917,13 @@ export interface GetAgentAccessInput {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * Several bots at once, about the caller. When set, the fields above are
+     * ignored and the answers come back in `access`. At most 200.
+     *
+     * @generated from protobuf field: repeated int64 bot_user_ids = 3;
+     */
+    botUserIds: bigint[];
 }
 /**
  * @generated from protobuf message GetAgentAccessResult
@@ -3920,6 +3937,53 @@ export interface GetAgentAccessResult {
      * @generated from protobuf field: repeated AgentGrantOperation operations = 2;
      */
     operations: AgentGrantOperation[];
+    /**
+     * One entry per bot asked about with `bot_user_ids`. Deleted and unknown
+     * bots are left out.
+     *
+     * @generated from protobuf field: repeated AgentAccess access = 3;
+     */
+    access: AgentAccess[];
+}
+/**
+ * What the caller may do with one bot.
+ *
+ * @generated from protobuf message AgentAccess
+ */
+export interface AgentAccess {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: bool is_owner = 2;
+     */
+    isOwner: boolean;
+    /**
+     * From the access list. Empty for an open bot the caller has no grant on.
+     *
+     * @generated from protobuf field: repeated AgentGrantOperation operations = 3;
+     */
+    operations: AgentGrantOperation[];
+    /**
+     * @generated from protobuf field: int64 owner_user_id = 4;
+     */
+    ownerUserId: bigint;
+    /**
+     * Whether the caller may message the bot, add it to chats and find it: the
+     * owner, anyone on its access list, or anyone when the bot is open to
+     * everyone. Clients hide the composer and the bot's mention when false.
+     *
+     * @generated from protobuf field: bool can_message = 5;
+     */
+    canMessage: boolean;
+    /**
+     * The bot wrote to the caller in their direct chat in the last week, so
+     * they can answer it there even without access. Clients keep the composer.
+     *
+     * @generated from protobuf field: bool can_reply = 6;
+     */
+    canReply: boolean;
 }
 /**
  * @generated from protobuf message DeleteAgentGrantResult
@@ -4022,6 +4086,10 @@ export interface UpdateAgentSettingsInput {
      * @generated from protobuf field: optional AgentOutputMode default_output_mode = 2;
      */
     defaultOutputMode?: AgentOutputMode;
+    /**
+     * @generated from protobuf field: optional bool open_to_everyone = 3;
+     */
+    openToEveryone?: boolean;
 }
 /**
  * @generated from protobuf message UpdateAgentSettingsResult
@@ -9585,6 +9653,13 @@ export interface DeleteBotAgentResult {
  * @generated from protobuf message ListBotsInput
  */
 export interface ListBotsInput {
+    /**
+     * Also list the bots the caller manages as an admin, after their own. Each
+     * bot's `bot_info` says who owns it.
+     *
+     * @generated from protobuf field: optional bool include_managed = 1;
+     */
+    includeManaged?: boolean;
 }
 /**
  * @generated from protobuf message ListBotsResult
@@ -17335,7 +17410,8 @@ export enum AgentGrantOperation {
      */
     APPROVE = 3,
     /**
-     * Change the agent's settings.
+     * Manage the bot as an admin: its access list, who can message it, its
+     * profile, settings and token. Only the owner deletes the bot.
      *
      * @generated from protobuf enum value: AGENT_GRANT_OPERATION_CONFIGURE = 5;
      */
@@ -26497,7 +26573,8 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "default_output_mode", kind: "enum", T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] },
             { no: 3, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 4, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 4, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "open_to_everyone", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<AgentSettings>): AgentSettings {
@@ -26505,6 +26582,7 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
         message.botUserId = 0n;
         message.defaultOutputMode = 0;
         message.revision = 0n;
+        message.openToEveryone = false;
         if (value !== undefined)
             reflectionMergePartial<AgentSettings>(this, message, value);
         return message;
@@ -26525,6 +26603,9 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
                     break;
                 case /* optional int64 date */ 4:
                     message.date = reader.int64().toBigInt();
+                    break;
+                case /* bool open_to_everyone */ 5:
+                    message.openToEveryone = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -26550,6 +26631,9 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
         /* optional int64 date = 4; */
         if (message.date !== undefined)
             writer.tag(4, WireType.Varint).int64(message.date);
+        /* bool open_to_everyone = 5; */
+        if (message.openToEveryone !== false)
+            writer.tag(5, WireType.Varint).bool(message.openToEveryone);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27600,13 +27684,15 @@ class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
     constructor() {
         super("GetAgentAccessInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "bot_user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetAgentAccessInput>): GetAgentAccessInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.botUserId = 0n;
         message.userId = 0n;
+        message.botUserIds = [];
         if (value !== undefined)
             reflectionMergePartial<GetAgentAccessInput>(this, message, value);
         return message;
@@ -27621,6 +27707,13 @@ class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
                     break;
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* repeated int64 bot_user_ids */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.botUserIds.push(reader.int64().toBigInt());
+                    else
+                        message.botUserIds.push(reader.int64().toBigInt());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -27640,6 +27733,13 @@ class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* repeated int64 bot_user_ids = 3; */
+        if (message.botUserIds.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.botUserIds.length; i++)
+                writer.int64(message.botUserIds[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27655,13 +27755,15 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
     constructor() {
         super("GetAgentAccessResult", [
             { no: 1, name: "is_owner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] }
+            { no: 2, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+            { no: 3, name: "access", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentAccess }
         ]);
     }
     create(value?: PartialMessage<GetAgentAccessResult>): GetAgentAccessResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.isOwner = false;
         message.operations = [];
+        message.access = [];
         if (value !== undefined)
             reflectionMergePartial<GetAgentAccessResult>(this, message, value);
         return message;
@@ -27680,6 +27782,9 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
                             message.operations.push(reader.int32());
                     else
                         message.operations.push(reader.int32());
+                    break;
+                case /* repeated AgentAccess access */ 3:
+                    message.access.push(AgentAccess.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -27703,6 +27808,9 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
                 writer.int32(message.operations[i]);
             writer.join();
         }
+        /* repeated AgentAccess access = 3; */
+        for (let i = 0; i < message.access.length; i++)
+            AgentAccess.internalBinaryWrite(message.access[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27713,6 +27821,101 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
  * @generated MessageType for protobuf message GetAgentAccessResult
  */
 export const GetAgentAccessResult = new GetAgentAccessResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentAccess$Type extends MessageType<AgentAccess> {
+    constructor() {
+        super("AgentAccess", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "is_owner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+            { no: 4, name: "owner_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "can_message", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "can_reply", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentAccess>): AgentAccess {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.isOwner = false;
+        message.operations = [];
+        message.ownerUserId = 0n;
+        message.canMessage = false;
+        message.canReply = false;
+        if (value !== undefined)
+            reflectionMergePartial<AgentAccess>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentAccess): AgentAccess {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* bool is_owner */ 2:
+                    message.isOwner = reader.bool();
+                    break;
+                case /* repeated AgentGrantOperation operations */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.operations.push(reader.int32());
+                    else
+                        message.operations.push(reader.int32());
+                    break;
+                case /* int64 owner_user_id */ 4:
+                    message.ownerUserId = reader.int64().toBigInt();
+                    break;
+                case /* bool can_message */ 5:
+                    message.canMessage = reader.bool();
+                    break;
+                case /* bool can_reply */ 6:
+                    message.canReply = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentAccess, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* bool is_owner = 2; */
+        if (message.isOwner !== false)
+            writer.tag(2, WireType.Varint).bool(message.isOwner);
+        /* repeated AgentGrantOperation operations = 3; */
+        if (message.operations.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.operations.length; i++)
+                writer.int32(message.operations[i]);
+            writer.join();
+        }
+        /* int64 owner_user_id = 4; */
+        if (message.ownerUserId !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.ownerUserId);
+        /* bool can_message = 5; */
+        if (message.canMessage !== false)
+            writer.tag(5, WireType.Varint).bool(message.canMessage);
+        /* bool can_reply = 6; */
+        if (message.canReply !== false)
+            writer.tag(6, WireType.Varint).bool(message.canReply);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentAccess
+ */
+export const AgentAccess = new AgentAccess$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DeleteAgentGrantResult$Type extends MessageType<DeleteAgentGrantResult> {
     constructor() {
@@ -28044,7 +28247,8 @@ class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput
     constructor() {
         super("UpdateAgentSettingsInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
+            { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] },
+            { no: 3, name: "open_to_everyone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateAgentSettingsInput>): UpdateAgentSettingsInput {
@@ -28065,6 +28269,9 @@ class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput
                 case /* optional AgentOutputMode default_output_mode */ 2:
                     message.defaultOutputMode = reader.int32();
                     break;
+                case /* optional bool open_to_everyone */ 3:
+                    message.openToEveryone = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -28083,6 +28290,9 @@ class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput
         /* optional AgentOutputMode default_output_mode = 2; */
         if (message.defaultOutputMode !== undefined)
             writer.tag(2, WireType.Varint).int32(message.defaultOutputMode);
+        /* optional bool open_to_everyone = 3; */
+        if (message.openToEveryone !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.openToEveryone);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -41469,7 +41679,9 @@ export const DeleteBotAgentResult = new DeleteBotAgentResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListBotsInput$Type extends MessageType<ListBotsInput> {
     constructor() {
-        super("ListBotsInput", []);
+        super("ListBotsInput", [
+            { no: 1, name: "include_managed", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
     }
     create(value?: PartialMessage<ListBotsInput>): ListBotsInput {
         const message = globalThis.Object.create((this.messagePrototype!));
@@ -41478,9 +41690,28 @@ class ListBotsInput$Type extends MessageType<ListBotsInput> {
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListBotsInput): ListBotsInput {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional bool include_managed */ 1:
+                    message.includeManaged = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: ListBotsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional bool include_managed = 1; */
+        if (message.includeManaged !== undefined)
+            writer.tag(1, WireType.Varint).bool(message.includeManaged);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

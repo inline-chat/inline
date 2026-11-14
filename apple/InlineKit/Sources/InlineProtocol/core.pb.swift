@@ -810,7 +810,8 @@ public nonisolated enum AgentGrantOperation: SwiftProtobuf.Enum, Swift.CaseItera
   /// Answer approvals as a delegate of the owner.
   case approve // = 3
 
-  /// Change the agent's settings.
+  /// Manage the bot as an admin: its access list, who can message it, its
+  /// profile, settings and token. Only the owner deletes the bot.
   case configure // = 5
   case UNRECOGNIZED(Int)
 
@@ -8118,6 +8119,11 @@ public nonisolated struct AgentSettings: Sendable {
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {self._date = nil}
 
+  /// Anyone on Inline may message the bot, add it to chats and find it by its
+  /// username; the bot's own software decides who it answers. Off by default:
+  /// only the owner and the access list (AgentGrant) reach the bot.
+  public var openToEveryone: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8125,8 +8131,9 @@ public nonisolated struct AgentSettings: Sendable {
   fileprivate var _date: Int64? = nil
 }
 
-/// Opt-in access to a bot for one person. No grants means owner-only. Any grant
-/// lets its holder answer the agent's questions.
+/// One entry of a bot's access list. No grants means owner-only, unless the bot
+/// is open to everyone (AgentSettings). Any grant lets its holder message the
+/// bot, add it to chats and answer its questions.
 public nonisolated struct AgentGrant: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -8525,7 +8532,7 @@ public nonisolated struct ListAgentGrantsResult: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// All grants for the owner and the bot; only the viewer's own otherwise.
+  /// All grants for the owner, admins and the bot; only the viewer's own otherwise.
   public var grants: [AgentGrant] = []
 
   public var revision: Int64 = 0
@@ -8537,8 +8544,9 @@ public nonisolated struct ListAgentGrantsResult: Sendable {
   public init() {}
 }
 
-/// Creates or replaces one person's grant. Owner, or the bot itself for grants
-/// without APPROVE and CONFIGURE (the bridge's /allowlist).
+/// Creates or replaces one access list entry. The owner; an admin, for grants
+/// without APPROVE; or the bot itself, for grants without APPROVE and
+/// CONFIGURE (the bridge's /allowlist).
 public nonisolated struct SetAgentGrantInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -8632,6 +8640,10 @@ public nonisolated struct GetAgentAccessInput: Sendable {
 
   public var userID: Int64 = 0
 
+  /// Several bots at once, about the caller. When set, the fields above are
+  /// ignored and the answers come back in `access`. At most 200.
+  public var botUserIds: [Int64] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8645,6 +8657,39 @@ public nonisolated struct GetAgentAccessResult: Sendable {
   public var isOwner: Bool = false
 
   public var operations: [AgentGrantOperation] = []
+
+  /// One entry per bot asked about with `bot_user_ids`. Deleted and unknown
+  /// bots are left out.
+  public var access: [AgentAccess] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// What the caller may do with one bot.
+public nonisolated struct AgentAccess: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  public var isOwner: Bool = false
+
+  /// From the access list. Empty for an open bot the caller has no grant on.
+  public var operations: [AgentGrantOperation] = []
+
+  public var ownerUserID: Int64 = 0
+
+  /// Whether the caller may message the bot, add it to chats and find it: the
+  /// owner, anyone on its access list, or anyone when the bot is open to
+  /// everyone. Clients hide the composer and the bot's mention when false.
+  public var canMessage: Bool = false
+
+  /// The bot wrote to the caller in their direct chat in the last week, so
+  /// they can answer it there even without access. Clients keep the composer.
+  public var canReply: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -8792,11 +8837,21 @@ public nonisolated struct UpdateAgentSettingsInput: Sendable {
   /// Clears the value of `defaultOutputMode`. Subsequent reads from it will return its default value.
   public mutating func clearDefaultOutputMode() {self._defaultOutputMode = nil}
 
+  public var openToEveryone: Bool {
+    get {_openToEveryone ?? false}
+    set {_openToEveryone = newValue}
+  }
+  /// Returns true if `openToEveryone` has been explicitly set.
+  public var hasOpenToEveryone: Bool {self._openToEveryone != nil}
+  /// Clears the value of `openToEveryone`. Subsequent reads from it will return its default value.
+  public mutating func clearOpenToEveryone() {self._openToEveryone = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _defaultOutputMode: AgentOutputMode? = nil
+  fileprivate var _openToEveryone: Bool? = nil
 }
 
 public nonisolated struct UpdateAgentSettingsResult: @unchecked Sendable {
@@ -16918,9 +16973,22 @@ public nonisolated struct ListBotsInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Also list the bots the caller manages as an admin, after their own. Each
+  /// bot's `bot_info` says who owns it.
+  public var includeManaged: Bool {
+    get {_includeManaged ?? false}
+    set {_includeManaged = newValue}
+  }
+  /// Returns true if `includeManaged` has been explicitly set.
+  public var hasIncludeManaged: Bool {self._includeManaged != nil}
+  /// Clears the value of `includeManaged`. Subsequent reads from it will return its default value.
+  public mutating func clearIncludeManaged() {self._includeManaged = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _includeManaged: Bool? = nil
 }
 
 public nonisolated struct ListBotsResult: Sendable {
@@ -34949,7 +35017,7 @@ nonisolated extension AgentRuntime: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AgentSettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0\u{1}revision\0\u{1}date\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0\u{1}revision\0\u{1}date\0\u{3}open_to_everyone\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -34961,6 +35029,7 @@ nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._Messa
       case 2: try { try decoder.decodeSingularEnumField(value: &self.defaultOutputMode) }()
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.revision) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.openToEveryone) }()
       default: break
       }
     }
@@ -34983,6 +35052,9 @@ nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try { if let v = self._date {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
     } }()
+    if self.openToEveryone != false {
+      try visitor.visitSingularBoolField(value: self.openToEveryone, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -34991,6 +35063,7 @@ nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if lhs.defaultOutputMode != rhs.defaultOutputMode {return false}
     if lhs.revision != rhs.revision {return false}
     if lhs._date != rhs._date {return false}
+    if lhs.openToEveryone != rhs.openToEveryone {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35730,7 +35803,7 @@ nonisolated extension DeleteAgentGrantInput: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetAgentAccessInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}user_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}user_id\0\u{3}bot_user_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35740,6 +35813,7 @@ nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf.
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 3: try { try decoder.decodeRepeatedInt64Field(value: &self.botUserIds) }()
       default: break
       }
     }
@@ -35752,12 +35826,16 @@ nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf.
     if self.userID != 0 {
       try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
     }
+    if !self.botUserIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.botUserIds, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetAgentAccessInput, rhs: GetAgentAccessInput) -> Bool {
     if lhs.botUserID != rhs.botUserID {return false}
     if lhs.userID != rhs.userID {return false}
+    if lhs.botUserIds != rhs.botUserIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35765,7 +35843,7 @@ nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension GetAgentAccessResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetAgentAccessResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_owner\0\u{1}operations\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_owner\0\u{1}operations\0\u{1}access\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35775,6 +35853,7 @@ nonisolated extension GetAgentAccessResult: SwiftProtobuf.Message, SwiftProtobuf
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.isOwner) }()
       case 2: try { try decoder.decodeRepeatedEnumField(value: &self.operations) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.access) }()
       default: break
       }
     }
@@ -35787,12 +35866,71 @@ nonisolated extension GetAgentAccessResult: SwiftProtobuf.Message, SwiftProtobuf
     if !self.operations.isEmpty {
       try visitor.visitPackedEnumField(value: self.operations, fieldNumber: 2)
     }
+    if !self.access.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.access, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetAgentAccessResult, rhs: GetAgentAccessResult) -> Bool {
     if lhs.isOwner != rhs.isOwner {return false}
     if lhs.operations != rhs.operations {return false}
+    if lhs.access != rhs.access {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentAccess: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentAccess"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}is_owner\0\u{1}operations\0\u{3}owner_user_id\0\u{3}can_message\0\u{3}can_reply\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.isOwner) }()
+      case 3: try { try decoder.decodeRepeatedEnumField(value: &self.operations) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.ownerUserID) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.canMessage) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.canReply) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    if self.isOwner != false {
+      try visitor.visitSingularBoolField(value: self.isOwner, fieldNumber: 2)
+    }
+    if !self.operations.isEmpty {
+      try visitor.visitPackedEnumField(value: self.operations, fieldNumber: 3)
+    }
+    if self.ownerUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.ownerUserID, fieldNumber: 4)
+    }
+    if self.canMessage != false {
+      try visitor.visitSingularBoolField(value: self.canMessage, fieldNumber: 5)
+    }
+    if self.canReply != false {
+      try visitor.visitSingularBoolField(value: self.canReply, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentAccess, rhs: AgentAccess) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.isOwner != rhs.isOwner {return false}
+    if lhs.operations != rhs.operations {return false}
+    if lhs.ownerUserID != rhs.ownerUserID {return false}
+    if lhs.canMessage != rhs.canMessage {return false}
+    if lhs.canReply != rhs.canReply {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -36013,7 +36151,7 @@ nonisolated extension SetAgentParticipationInput: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension UpdateAgentSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateAgentSettingsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0\u{3}open_to_everyone\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36023,6 +36161,7 @@ nonisolated extension UpdateAgentSettingsInput: SwiftProtobuf.Message, SwiftProt
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self._defaultOutputMode) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._openToEveryone) }()
       default: break
       }
     }
@@ -36039,12 +36178,16 @@ nonisolated extension UpdateAgentSettingsInput: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._defaultOutputMode {
       try visitor.visitSingularEnumField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._openToEveryone {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateAgentSettingsInput, rhs: UpdateAgentSettingsInput) -> Bool {
     if lhs.botUserID != rhs.botUserID {return false}
     if lhs._defaultOutputMode != rhs._defaultOutputMode {return false}
+    if lhs._openToEveryone != rhs._openToEveryone {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -49276,18 +49419,33 @@ nonisolated extension DeleteBotAgentResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension ListBotsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ListBotsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_managed\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self._includeManaged) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._includeManaged {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ListBotsInput, rhs: ListBotsInput) -> Bool {
+    if lhs._includeManaged != rhs._includeManaged {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

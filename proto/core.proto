@@ -1427,6 +1427,10 @@ message AgentSettings {
   int64 revision = 3;
   // Last change, Unix seconds. Absent when never set.
   optional int64 date = 4;
+  // Anyone on Inline may message the bot, add it to chats and find it by its
+  // username; the bot's own software decides who it answers. Off by default:
+  // only the owner and the access list (AgentGrant) reach the bot.
+  bool open_to_everyone = 5;
 }
 
 // Work bar controls, relayed to the bot, which maps them to harness operations.
@@ -1447,12 +1451,14 @@ enum AgentGrantOperation {
   AGENT_GRANT_OPERATION_APPROVE = 3;
   reserved 4;
   reserved "AGENT_GRANT_OPERATION_VIEW";
-  // Change the agent's settings.
+  // Manage the bot as an admin: its access list, who can message it, its
+  // profile, settings and token. Only the owner deletes the bot.
   AGENT_GRANT_OPERATION_CONFIGURE = 5;
 }
 
-// Opt-in access to a bot for one person. No grants means owner-only. Any grant
-// lets its holder answer the agent's questions.
+// One entry of a bot's access list. No grants means owner-only, unless the bot
+// is open to everyone (AgentSettings). Any grant lets its holder message the
+// bot, add it to chats and answer its questions.
 message AgentGrant {
   int64 id = 1;
   int64 bot_user_id = 2;
@@ -1561,14 +1567,15 @@ message ListAgentGrantsInput {
 }
 
 message ListAgentGrantsResult {
-  // All grants for the owner and the bot; only the viewer's own otherwise.
+  // All grants for the owner, admins and the bot; only the viewer's own otherwise.
   repeated AgentGrant grants = 1;
   int64 revision = 2;
   int64 owner_user_id = 3;
 }
 
-// Creates or replaces one person's grant. Owner, or the bot itself for grants
-// without APPROVE and CONFIGURE (the bridge's /allowlist).
+// Creates or replaces one access list entry. The owner; an admin, for grants
+// without APPROVE; or the bot itself, for grants without APPROVE and
+// CONFIGURE (the bridge's /allowlist).
 message SetAgentGrantInput {
   int64 bot_user_id = 1;
   // The person; ignored when `subject` is set.
@@ -1599,11 +1606,33 @@ message GetAgentAccessInput {
   // Omitted or zero when the calling bot asks about itself.
   int64 bot_user_id = 1;
   int64 user_id = 2;
+  // Several bots at once, about the caller. When set, the fields above are
+  // ignored and the answers come back in `access`. At most 200.
+  repeated int64 bot_user_ids = 3;
 }
 
 message GetAgentAccessResult {
   bool is_owner = 1;
   repeated AgentGrantOperation operations = 2;
+  // One entry per bot asked about with `bot_user_ids`. Deleted and unknown
+  // bots are left out.
+  repeated AgentAccess access = 3;
+}
+
+// What the caller may do with one bot.
+message AgentAccess {
+  int64 bot_user_id = 1;
+  bool is_owner = 2;
+  // From the access list. Empty for an open bot the caller has no grant on.
+  repeated AgentGrantOperation operations = 3;
+  int64 owner_user_id = 4;
+  // Whether the caller may message the bot, add it to chats and find it: the
+  // owner, anyone on its access list, or anyone when the bot is open to
+  // everyone. Clients hide the composer and the bot's mention when false.
+  bool can_message = 5;
+  // The bot wrote to the caller in their direct chat in the last week, so
+  // they can answer it there even without access. Clients keep the composer.
+  bool can_reply = 6;
 }
 
 message DeleteAgentGrantResult { int64 revision = 1; }
@@ -1642,6 +1671,7 @@ message SetAgentParticipationInput {
 message UpdateAgentSettingsInput {
   int64 bot_user_id = 1;
   optional AgentOutputMode default_output_mode = 2;
+  optional bool open_to_everyone = 3;
 }
 
 message UpdateAgentSettingsResult {
@@ -3560,7 +3590,11 @@ message DeleteBotAgentInput { int64 agent_id = 1; }
 
 message DeleteBotAgentResult { int64 agent_id = 1; }
 
-message ListBotsInput {}
+message ListBotsInput {
+  // Also list the bots the caller manages as an admin, after their own. Each
+  // bot's `bot_info` says who owns it.
+  optional bool include_managed = 1;
+}
 
 message ListBotsResult { repeated User bots = 1; }
 
