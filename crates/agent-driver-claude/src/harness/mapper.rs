@@ -1566,6 +1566,8 @@ fn needs_sign_in(result: &ResultMessage) -> bool {
         || text.contains("authentication_error")
         || text.contains("invalid api key")
         || text.contains("oauth token has expired")
+        || text.contains("oauth session expired")
+        || text.contains("failed to authenticate")
         || text.contains("not logged in")
 }
 
@@ -1902,9 +1904,18 @@ mod tests {
 
     #[test]
     fn an_expired_sign_in_is_a_setup_state() {
-        let mut mapper = ClaudeMapper::new(None);
-        let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
-            "is_error": true, "result": "Invalid API key · Please run /login", "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000001"]})));
+        for text in [
+            "Invalid API key · Please run /login",
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+        ] {
+            let mut mapper = ClaudeMapper::new(None);
+            let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
+                "is_error": true, "result": text, "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000001"]})));
+            assert_sign_in_required(&events);
+        }
+    }
+
+    fn assert_sign_in_required(events: &[Event]) {
         assert!(events.iter().any(|event| matches!(
             event,
             Event::State {
