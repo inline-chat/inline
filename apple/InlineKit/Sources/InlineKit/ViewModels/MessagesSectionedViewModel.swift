@@ -192,6 +192,16 @@ public class MessagesSectionedViewModel {
     return true
   }
 
+  /// Replaces the window with the one around the unread line once its history is cached.
+  /// False, leaving the rows alone, when the cache still can't show the line.
+  @discardableResult
+  public func loadUnreadOpeningWindowAsync(boundary: Int64) async throws -> Bool {
+    guard try await progressiveViewModel.loadUnreadOpeningWindowAsync(boundary: boundary) else { return false }
+    rebuildSections()
+    callback?(.reload(animated: false))
+    return true
+  }
+
   @discardableResult
   public func loadLatestWindowAsync() async throws -> Bool {
     guard try await progressiveViewModel.loadLatestWindowAsync() else { return false }
