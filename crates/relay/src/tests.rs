@@ -25,6 +25,8 @@ struct FakeInline {
     profiles: Mutex<Vec<(Option<String>, Option<usize>)>>,
     owner_edits: Mutex<Vec<(i64, String)>>,
     owner_reactions: Mutex<Vec<(i64, String, bool)>>,
+    guest_posts: Mutex<Vec<(i64, i64, InlinePost)>>,
+    guest_edits: Mutex<Vec<(i64, i64, String)>>,
 }
 
 impl FakeInline {
@@ -176,6 +178,43 @@ impl InlineSide for FakeInline {
                 bytes: vec![1, 2, 3],
             })
         })
+    }
+    fn post_in<'a>(
+        &'a self,
+        chat_id: i64,
+        post: &'a InlinePost,
+    ) -> BoxFuture<'a, InlineResult<i64>> {
+        Box::pin(async move {
+            let mut next = self.next_id.lock().unwrap();
+            *next += 1;
+            let id = 1000 + *next;
+            self.guest_posts
+                .lock()
+                .unwrap()
+                .push((chat_id, id, post.clone()));
+            Ok(id)
+        })
+    }
+    fn edit_in<'a>(
+        &'a self,
+        chat_id: i64,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            self.guest_edits
+                .lock()
+                .unwrap()
+                .push((chat_id, message_id, text.to_owned()));
+            Ok(())
+        })
+    }
+    fn command<'a>(
+        &'a self,
+        name: &'a str,
+        arguments: &'a str,
+    ) -> BoxFuture<'a, InlineResult<Option<String>>> {
+        Box::pin(async move { Ok((name == "share").then(|| format!("shared with {arguments}"))) })
     }
 }
 
@@ -804,7 +843,10 @@ async fn task_card_is_posted_once_and_edited_in_place() {
     let posts = h.inline.posts();
     assert_eq!(posts.len(), 2);
     assert_eq!(posts[1].1.reply_to, Some(anchor));
-    assert_eq!(posts[1].1.text, "🗂 **Task**\nStarting…", "posted with its message");
+    assert_eq!(
+        posts[1].1.text, "🗂 **Task**\nStarting…",
+        "posted with its message"
+    );
     let edits = h.inline.edits.lock().unwrap().clone();
     let card = posts[1].0;
     assert_eq!(
@@ -1818,11 +1860,19 @@ async fn unavailable_network_keeps_the_message_queued_past_the_retry_limit() {
             "not offered in this region",
         ))
     };
-    h.connector.send_results.lock().unwrap().push_back(unavailable());
+    h.connector
+        .send_results
+        .lock()
+        .unwrap()
+        .push_back(unavailable());
     h.relay.handle_inline(owner_text(9, "hi")).await.unwrap();
     let request = correlation_id("bot-1", 9);
     // Far past MAX_SEND_ATTEMPTS: still queued, one notice, no failure.
-    h.connector.send_results.lock().unwrap().push_back(unavailable());
+    h.connector
+        .send_results
+        .lock()
+        .unwrap()
+        .push_back(unavailable());
     h.store.defer_send(&request, 20, 0).unwrap();
     h.relay.retry_pending().await.unwrap();
     assert_eq!(h.store.pending_sends().unwrap().len(), 1);
@@ -1835,4 +1885,147 @@ async fn unavailable_network_keeps_the_message_queued_past_the_retry_limit() {
     h.relay.retry_pending().await.unwrap();
     assert!(h.store.pending_sends().unwrap().is_empty());
     assert_eq!(h.connector.sends.lock().unwrap().len(), 3);
+}
+
+fn guest(chat_id: i64, message_id: i64, text: &str) -> InlineEvent {
+    InlineEvent::Guest {
+        chat_id,
+        message_id,
+        sender_name: "Alice".into(),
+        chat_title: Some("Pricing".into()),
+        text: text.into(),
+    }
+}
+
+/// Sends a guest message and applies its echo; returns the remote id.
+async fn send_guest(h: &Harness, chat_id: i64, message_id: i64, text: &str) -> String {
+    h.relay
+        .handle_inline(guest(chat_id, message_id, text))
+        .await
+        .unwrap();
+    let sent = h.connector.sends.lock().unwrap().last().cloned().unwrap();
+    let remote_id = format!("remote-sent-{}", h.connector.sends.lock().unwrap().len());
+    let echo = RemoteMessage {
+        speaker: Speaker::Owner,
+        client_request_id: Some(sent.request_id),
+        ..agent(&remote_id, &sent.text, "e1")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(echo))
+        .await
+        .unwrap();
+    remote_id
+}
+
+#[tokio::test]
+async fn guest_request_is_labelled_and_the_answer_goes_back_to_them() {
+    let h = harness();
+    send_guest(&h, 77, 5, "signup numbers?").await;
+    let sent = h.connector.sends.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert!(
+        sent[0]
+            .text
+            .starts_with("💬 From Alice via Inline in “Pricing”")
+    );
+    assert!(sent[0].text.ends_with("signup numbers?"));
+    // Redelivery doesn't send again; the echo never reaches the owner DM.
+    h.relay
+        .handle_inline(guest(77, 5, "signup numbers?"))
+        .await
+        .unwrap();
+    assert_eq!(h.connector.sends.lock().unwrap().len(), 1);
+    assert!(h.inline.posts().is_empty());
+
+    let answer = agent("a1", "About 420.", "r1");
+    h.relay
+        .handle_remote(ConnectorEvent::Message(answer.clone()))
+        .await
+        .unwrap();
+    let posts = h.inline.guest_posts.lock().unwrap().clone();
+    assert_eq!(posts.len(), 1);
+    assert_eq!((posts[0].0, posts[0].2.reply_to), (77, Some(5)));
+    assert_eq!(posts[0].2.text, "About 420.");
+    assert!(h.inline.posts().is_empty());
+
+    let edited = RemoteMessage {
+        text: "About 430.".into(),
+        revision: "r2".into(),
+        ..answer
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(edited))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline.guest_edits.lock().unwrap().clone(),
+        vec![(77, posts[0].1, "About 430.".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn owner_takes_answers_back_but_replies_still_reach_the_guest() {
+    let h = harness();
+    let request = send_guest(&h, 77, 5, "hi").await;
+    h.relay
+        .handle_inline(owner_text(10, "my turn"))
+        .await
+        .unwrap();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(agent("a1", "for the owner", "r1")))
+        .await
+        .unwrap();
+    assert_eq!(h.inline.texts(), vec!["for the owner"]);
+    let threaded = RemoteMessage {
+        reply_to: Some(request),
+        ..agent("a2", "for Alice", "r1")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(threaded))
+        .await
+        .unwrap();
+    let posts = h.inline.guest_posts.lock().unwrap().clone();
+    assert_eq!(posts.len(), 1);
+    assert_eq!((posts[0].0, posts[0].2.text.as_str()), (77, "for Alice"));
+}
+
+#[tokio::test]
+async fn confirmations_and_tasks_stay_with_the_owner() {
+    let h = harness();
+    send_guest(&h, 77, 5, "book it").await;
+    let task = RemoteMessage {
+        task_id: Some("t1".into()),
+        ..agent("a1", "Working on it", "r1")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(task))
+        .await
+        .unwrap();
+    assert!(h.inline.guest_posts.lock().unwrap().is_empty());
+    assert!(!h.inline.posts().is_empty());
+}
+
+#[tokio::test]
+async fn failed_guest_send_tells_the_guest() {
+    let h = harness();
+    h.connector
+        .send_results
+        .lock()
+        .unwrap()
+        .push_back(Err(ConnectorError::new(FailureKind::Transient, "503")));
+    h.relay.handle_inline(guest(77, 5, "hi")).await.unwrap();
+    let posts = h.inline.guest_posts.lock().unwrap().clone();
+    assert_eq!(posts.len(), 1);
+    assert!(posts[0].2.text.starts_with("Couldn't send this to Dot"));
+}
+
+#[tokio::test]
+async fn unknown_owner_commands_go_to_the_inline_side() {
+    let h = harness();
+    h.relay
+        .handle_inline(owner_text(10, "/share @alice"))
+        .await
+        .unwrap();
+    assert_eq!(h.inline.texts(), vec!["shared with @alice"]);
+    assert!(h.connector.sends.lock().unwrap().is_empty());
 }

@@ -449,6 +449,29 @@ pub trait InlineSide: Send + Sync + 'static {
         media: &'a InlineMedia,
         limit: usize,
     ) -> BoxFuture<'a, InlineResult<FileData>>;
+    /// Posts as the bot in another chat, to answer someone the owner shared
+    /// the agent with.
+    fn post_in<'a>(
+        &'a self,
+        chat_id: i64,
+        post: &'a InlinePost,
+    ) -> BoxFuture<'a, InlineResult<i64>>;
+    /// Replaces the text of a bot message posted with [`InlineSide::post_in`].
+    fn edit_in<'a>(
+        &'a self,
+        chat_id: i64,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>>;
+    /// Handles an owner command the relay doesn't know (for example
+    /// `/share`). `None` sends the text to the agent as typed.
+    fn command<'a>(
+        &'a self,
+        _name: &'a str,
+        _arguments: &'a str,
+    ) -> BoxFuture<'a, InlineResult<Option<String>>> {
+        Box::pin(async { Ok(None) })
+    }
 }
 
 /// Something that happened in the owner DM.
@@ -500,6 +523,21 @@ pub enum InlineEvent {
         emoji: String,
         /// Removed instead of added.
         removed: bool,
+    },
+    /// A message to the agent from someone the owner shared it with, in their
+    /// DM with the bot or a chat where they mentioned it. The caller has
+    /// already checked that they may use it. Text only.
+    Guest {
+        /// Chat the message is in.
+        chat_id: i64,
+        /// Inline message id (unique within the chat).
+        message_id: i64,
+        /// Sender's display name, shown to the agent.
+        sender_name: String,
+        /// Chat title, when it isn't a DM.
+        chat_title: Option<String>,
+        /// Text.
+        text: String,
     },
     /// Button click.
     Action {

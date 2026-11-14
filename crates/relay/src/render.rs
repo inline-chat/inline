@@ -24,6 +24,30 @@ pub fn agent_text(text: &str) -> String {
     )
 }
 
+/// A message from someone the owner shared the agent with. It reaches the
+/// agent as the owner's own message, so the first line says who it is from.
+pub fn guest_request(sender: &str, chat_title: Option<&str>, text: &str) -> String {
+    let sender = one_line(sender);
+    let place = chat_title
+        .map(one_line)
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" in “{title}”"))
+        .unwrap_or_default();
+    format!(
+        "💬 From {sender} via Inline{place}, not from me. Reply to this message to answer them.\n\n{}",
+        clip(text, "…")
+    )
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(80)
+        .collect()
+}
+
 /// A message the owner typed in the remote app.
 pub fn owner_mirror(network: &str, text: &str) -> String {
     let quoted = clip(text, "…")
@@ -108,6 +132,7 @@ pub fn help(agent: &str, network: &str) -> String {
         "This chat is a bridge to your {network} {agent}. Messages, replies, reactions, and files go both ways.\n\n\
          `/status` — bridge and {network} connection\n\
          `/mirror on|off` — show messages you type in {network} here\n\
+         `/share @name` · `/unshare @name` — let someone else use your {agent} in their DM with this bot or by mentioning it\n\
          `/help` — this message\n\n\
          {network} has no way to take edits or deletions from Inline, so those stay here; the bridge tells you when it happens."
     )

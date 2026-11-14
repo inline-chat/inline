@@ -31,6 +31,27 @@ const OWNER_TYPING_INTERVAL: Duration = Duration::from_secs(4);
 const MAX_SEND_ATTEMPTS: u32 = 8;
 const CONFIRMATION_CALLBACK_VERSION: u32 = 1;
 const MAX_APPLY_ATTEMPTS: u32 = 5;
+/// The guest whose request went to the agent last.
+const GUEST_ROUTE_KEY: &str = "guest.route";
+/// How long agent messages that don't reply to anything still go to the last
+/// guest. Later ones (reminders, scheduled updates) stay with the owner.
+const GUEST_ROUTE_SECONDS: i64 = 15 * 60;
+
+/// Where an agent answer for a guest goes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct GuestTarget {
+    chat_id: i64,
+    message_id: i64,
+    at: i64,
+}
+
+/// An agent message already posted for a guest.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct GuestReply {
+    chat_id: i64,
+    inline_id: i64,
+    rendered: String,
+}
 
 /// Relay failure (store or Inline side). Connector failures are handled and
 /// reported through health instead.
@@ -414,6 +435,9 @@ impl Relay {
     }
 
     async fn apply_message(&self, message: RemoteMessage) -> RelayResult<()> {
+        if self.apply_guest(&message).await? {
+            return Ok(());
+        }
         // Echo of a message this relay sent.
         if message.speaker == Speaker::Owner
             && let Some(request_id) = message.client_request_id.as_deref()
@@ -876,6 +900,22 @@ impl Relay {
                 )
                 .await
             }
+            InlineEvent::Guest {
+                chat_id,
+                message_id,
+                sender_name,
+                chat_title,
+                text,
+            } => {
+                self.guest_message(
+                    chat_id,
+                    message_id,
+                    &sender_name,
+                    chat_title.as_deref(),
+                    &text,
+                )
+                .await
+            }
             InlineEvent::Deleted { message_id } => self.owner_delete(message_id).await,
             InlineEvent::Typing { user_id, active } => {
                 if user_id != self.config.owner_user_id || !active {
@@ -1039,6 +1079,8 @@ impl Relay {
             self.store.mark_inbound(message_id, "empty", now())?;
             return Ok(());
         }
+        // The owner is talking now; the agent's next answers are theirs.
+        self.store.kv_delete(GUEST_ROUTE_KEY)?;
         let remote_reply_to = match reply_to {
             Some(parent) => self.remote_target(parent)?,
             None => None,
@@ -1457,6 +1499,184 @@ impl Relay {
         Ok(())
     }
 
+    // ---------------------------------------------------------------- guests
+
+    /// Sends a guest's message to the agent, labelled with who it is from.
+    /// Not queued: if it can't be sent, the guest is told to try again.
+    async fn guest_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        sender_name: &str,
+        chat_title: Option<&str>,
+        text: &str,
+    ) -> RelayResult<()> {
+        let seen = format!("guest.in:{chat_id}:{message_id}");
+        if text.trim().is_empty() || self.store.kv_get(&seen)?.is_some() {
+            return Ok(());
+        }
+        let request_id = correlation_id(
+            &format!("{}\0guest\0{chat_id}", self.config.request_salt),
+            message_id,
+        );
+        let target = serde_json::to_string(&GuestTarget {
+            chat_id,
+            message_id,
+            at: now(),
+        })
+        .expect("guest target serializes");
+        self.store
+            .kv_set(&format!("guest.request:{request_id}"), &target)?;
+        let outbound = OutboundMessage {
+            request_id,
+            text: render::guest_request(sender_name, chat_title, text),
+            file: None,
+            reply_to: None,
+        };
+        match self.connector.send(&outbound).await {
+            Ok(remote_id) => {
+                self.store
+                    .kv_set(&format!("guest.remote:{remote_id}"), &target)?;
+                self.store.kv_set(GUEST_ROUTE_KEY, &target)?;
+            }
+            Err(error) => {
+                log::warn!(
+                    target: "inline::bridge::relay",
+                    "guest message not sent: {}",
+                    error.message
+                );
+                self.inline
+                    .post_in(
+                        chat_id,
+                        &InlinePost {
+                            text: format!(
+                                "Couldn't send this to {} right now. Try again in a bit.",
+                                self.config.agent_name
+                            ),
+                            reply_to: Some(message_id),
+                            key: format!("guest-failed:{chat_id}:{message_id}"),
+                            file: None,
+                            buttons: Vec::new(),
+                            silent: true,
+                            as_owner: false,
+                        },
+                    )
+                    .await?;
+            }
+        }
+        self.store.kv_set(&seen, "1")?;
+        Ok(())
+    }
+
+    /// Handles remote messages that belong to a guest: the echo of a guest's
+    /// request (never mirrored to the owner) and the agent's answers to it.
+    /// Returns `true` when the message is fully handled.
+    async fn apply_guest(&self, message: &RemoteMessage) -> RelayResult<bool> {
+        let remote_key = format!("guest.remote:{}", message.id);
+        match message.speaker {
+            Speaker::Owner => {
+                if self.store.kv_get(&remote_key)?.is_some() {
+                    return Ok(true);
+                }
+                if let Some(request_id) = message.client_request_id.as_deref()
+                    && let Some(target) =
+                        self.store.kv_get(&format!("guest.request:{request_id}"))?
+                {
+                    self.store.kv_set(&remote_key, &target)?;
+                    return Ok(true);
+                }
+                // The owner wrote in the remote app; answers are theirs.
+                if self.store.link(&message.id, part::TEXT)?.is_none() {
+                    self.store.kv_delete(GUEST_ROUTE_KEY)?;
+                }
+                Ok(false)
+            }
+            Speaker::Agent => self.route_to_guest(message).await,
+            Speaker::System => Ok(false),
+        }
+    }
+
+    async fn route_to_guest(&self, message: &RemoteMessage) -> RelayResult<bool> {
+        let reply_key = format!("guest.reply:{}", message.id);
+        let text = if message.deleted {
+            render::deleted(&self.config.network_name)
+        } else {
+            let mut text = render::agent_text(&message.text);
+            if !message.files.is_empty() {
+                text.push_str(&format!(
+                    "\n\n_Files from {} aren't shared here._",
+                    self.config.agent_name
+                ));
+            }
+            text
+        };
+        if let Some(existing) = self.store.kv_get(&reply_key)? {
+            let Ok(mut reply) = serde_json::from_str::<GuestReply>(&existing) else {
+                return Ok(true);
+            };
+            let rendered = text_hash(&text);
+            if reply.rendered != rendered && !message.text.trim().is_empty() {
+                self.inline
+                    .edit_in(reply.chat_id, reply.inline_id, &text)
+                    .await?;
+                reply.rendered = rendered;
+                self.store.kv_set(
+                    &reply_key,
+                    &serde_json::to_string(&reply).expect("guest reply serializes"),
+                )?;
+            }
+            return Ok(true);
+        }
+        // Already shown to the owner, or something only the owner may see or
+        // answer.
+        if message.deleted
+            || message.text.trim().is_empty()
+            || message.confirmation.is_some()
+            || message.task_id.is_some()
+            || self.store.link(&message.id, part::TEXT)?.is_some()
+        {
+            return Ok(false);
+        }
+        let target = match message.reply_to.as_deref() {
+            // A reply goes where its parent came from: a guest, or the owner.
+            Some(parent) => self.store.kv_get(&format!("guest.remote:{parent}"))?,
+            None => self.store.kv_get(GUEST_ROUTE_KEY)?,
+        };
+        let Some(target) = target
+            .and_then(|value| serde_json::from_str::<GuestTarget>(&value).ok())
+            .filter(|target| {
+                message.reply_to.is_some() || now() - target.at <= GUEST_ROUTE_SECONDS
+            })
+        else {
+            return Ok(false);
+        };
+        let inline_id = self
+            .inline
+            .post_in(
+                target.chat_id,
+                &InlinePost {
+                    text: text.clone(),
+                    reply_to: Some(target.message_id),
+                    key: format!("guest:{}", message.id),
+                    file: None,
+                    buttons: Vec::new(),
+                    silent: false,
+                    as_owner: false,
+                },
+            )
+            .await?;
+        self.store.kv_set(
+            &reply_key,
+            &serde_json::to_string(&GuestReply {
+                chat_id: target.chat_id,
+                inline_id,
+                rendered: text_hash(&text),
+            })
+            .expect("guest reply serializes"),
+        )?;
+        Ok(true)
+    }
+
     async fn command(&self, text: &str) -> RelayResult<Option<String>> {
         let trimmed = text.trim();
         let Some(command) = trimmed.strip_prefix('/') else {
@@ -1499,8 +1719,14 @@ impl Relay {
                 }
                 _ => "Use `/mirror on` or `/mirror off`.".into(),
             },
-            // Unknown slash text goes to the agent as typed.
-            _ => return Ok(None),
+            _ => {
+                let arguments = words.collect::<Vec<_>>().join(" ");
+                match self.inline.command(&name, &arguments).await? {
+                    Some(reply) => reply,
+                    // Unknown slash text goes to the agent as typed.
+                    None => return Ok(None),
+                }
+            }
         }))
     }
 }
