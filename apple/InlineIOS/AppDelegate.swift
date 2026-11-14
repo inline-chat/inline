@@ -67,6 +67,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       Task {
         await Auth.shared.refreshFromStorage()
       }
+      Task.detached { await PendingServerLogouts.shared.drain() }
+      self?.removeNotificationsForOtherAccounts()
       MainActor.assumeIsolated { self?.retryPushRegistrationIfNeeded() }
     }
 
@@ -78,6 +80,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     )
 
     TimeZoneSyncCoordinator.shared.start()
+    Task.detached { await PendingServerLogouts.shared.drain() }
 
     return true
   }
@@ -282,6 +285,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             pushContentVersion: Self.pushContentVersion
           )
         )
+        ExtensionHealth.record(NotificationDeliveryHealth.registrationEvent, ["registration_outcome": "submitted"])
       }
     case let .unavailable(status):
       // A token-only registration would make the server drop this device's key and send every
@@ -310,6 +314,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {
     Log.shared.error("Failed to register for remote notifications", error: error)
+    ExtensionHealth.record(NotificationDeliveryHealth.registrationEvent, ["registration_outcome": "apns_failed"])
+  }
+
+  /// Pushes for an account that isn't signed in here are shown quietly (Inline can't drop them);
+  /// clear them, and anything addressed to another account, once the app is open.
+  private func removeNotificationsForOtherAccounts() {
+    let currentUserID = Auth.shared.getIsLoggedIn() ? Auth.shared.getCurrentUserId() : nil
+    let center = UNUserNotificationCenter.current()
+    center.getDeliveredNotifications { notifications in
+      let stale = notifications.filter { notification in
+        let content = notification.request.content
+        // Before auth is readable, only the quiet withheld group is known to be stale.
+        guard let currentUserID else {
+          return content.threadIdentifier == NotificationAccountRedaction.withheldThreadIdentifier
+        }
+        return NotificationAccountRedaction.isStale(content, currentUserID: currentUserID)
+      }
+      guard !stale.isEmpty else { return }
+      center.removeDeliveredNotifications(withIdentifiers: stale.map(\.request.identifier))
+    }
   }
 
   func application(
@@ -500,7 +524,8 @@ extension AppDelegate {
 }
 
 private extension AppDelegate {
-  static let pushContentVersion: UInt32 = 1
+  /// 2: the notification extension also decrypts `alert` content (invites, integrations, agents).
+  static let pushContentVersion: UInt32 = 2
   static let pushContentAlgorithmRawValue = 1
 }
 

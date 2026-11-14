@@ -34,18 +34,21 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       userInfo: request.content.userInfo,
       fence: accountFence.read()
     )
-    let redacted = NotificationAccountRedaction.content(from: request.content)
+    let original = request.content
     guard admission.isAdmitted,
           let content = request.content.mutableCopy() as? UNMutableNotificationContent
     else {
-      if case let .rejected(reason) = admission {
-        logger.info("notification content withheld: \(reason.rawValue, privacy: .public)")
-        ExtensionHealthOutbox.shared.record(Self.healthEvent, [
-          "notification_outcome": NotificationDeliveryHealth.Outcome.withheld.rawValue,
-          "withheld_reason": reason.rawValue,
-        ])
+      let reason: NotificationAccountAdmission.Rejection = if case let .rejected(reason) = admission {
+        reason
+      } else {
+        .missingRecipient
       }
-      contentHandler(redacted)
+      logger.info("notification content withheld: \(reason.rawValue, privacy: .public)")
+      ExtensionHealthOutbox.shared.record(Self.healthEvent, [
+        "notification_outcome": NotificationDeliveryHealth.Outcome.withheld.rawValue,
+        "withheld_reason": reason.rawValue,
+      ])
+      contentHandler(NotificationAccountRedaction.content(from: original, rejection: reason))
       return
     }
 
@@ -53,13 +56,25 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     // exit (expiry, a newer request reusing this instance, a deadline) shows the real text. The
     // request's own alert is only the server's generic placeholder.
     let hydration = hydrateFromEncryptedContentIfNeeded(content: content)
-    ExtensionHealthOutbox.shared.record(Self.healthEvent, hydration.healthFields)
 
     // Recheck on every publication path, including expiry: logout can land mid-processing.
+    // One record per request: what the extension could show, and whether it reached the screen.
     let publish: (UNNotificationContent) -> Void = { published in
-      let isCurrent = admission.isCurrent(accountFence.read())
-      ExtensionHealthOutbox.shared.record(Self.healthEvent, ["delivery_end": isCurrent ? "published" : "redacted"])
-      contentHandler(isCurrent ? published : redacted)
+      let fence = accountFence.read()
+      let isCurrent = admission.isCurrent(fence)
+      var fields = hydration.healthFields
+      fields["delivery_end"] = isCurrent ? "published" : "redacted"
+      ExtensionHealthOutbox.shared.record(Self.healthEvent, fields)
+      guard !isCurrent else { return contentHandler(published) }
+      let current = NotificationAccountAdmission.evaluate(userInfo: original.userInfo, fence: fence)
+      let reason: NotificationAccountAdmission.Rejection =
+        if case let .rejected(reason) = current {
+          reason
+        } else {
+          // Same account signed in again with a new generation: its own message, never quiet.
+          .fenceUnavailable
+        }
+      contentHandler(NotificationAccountRedaction.content(from: original, rejection: reason))
     }
     let delivery = InlineNotificationDelivery(content: content, handler: publish)
     let previous = deliveryLock.withLock {
@@ -261,6 +276,16 @@ private extension NotificationService {
     let threadEmoji: String?
   }
 
+  struct DecryptedAlertPayload: Decodable {
+    let kind: String
+    let title: String
+    let body: String
+    let subtitle: String?
+    let threadId: String
+    let isThread: Bool
+    let isReplyThread: Bool?
+  }
+
   /// Photo capabilities and sync ops are accepted only from authenticated encrypted content,
   /// never userInfo.
   func hydrateFromEncryptedContentIfNeeded(content: UNMutableNotificationContent) -> Hydration {
@@ -300,6 +325,18 @@ private extension NotificationService {
 
     do {
       let payloadData = try decryptEnvelope(envelope, privateKey: privateKey)
+      if let alert = try? JSONDecoder().decode(DecryptedAlertPayload.self, from: payloadData), alert.kind == "alert" {
+        // Invites, integrations and agent attention: plain text, no sender or communication styling.
+        content.title = alert.title
+        content.body = alert.body
+        content.subtitle = alert.subtitle ?? ""
+        var userInfo = content.userInfo
+        userInfo["threadId"] = alert.threadId
+        userInfo["isThread"] = alert.isThread
+        userInfo["isReplyThread"] = alert.isReplyThread ?? false
+        content.userInfo = userInfo
+        return Hydration(outcome: .decrypted)
+      }
       let payload = try JSONDecoder().decode(DecryptedSendMessagePayload.self, from: payloadData)
       guard payload.kind == "send_message" else {
         logger.error("unsupported decrypted payload kind")

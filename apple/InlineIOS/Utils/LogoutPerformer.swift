@@ -22,6 +22,9 @@ enum LogoutPerformer {
     defer { isRunning = false }
 
     let logoutAccountID = Auth.shared.getCurrentUserId()
+    // Captured before the fence: the server must revoke this session even when this logout cannot
+    // reach it now, or it keeps pushing this account's messages to the device.
+    let serverSessionToken = Auth.shared.getToken()
     let logoutFence: AuthLogoutFence
     do {
       // Exact first-suspension invariant shared with macOS.
@@ -65,8 +68,11 @@ enum LogoutPerformer {
     await Auth.shared.publishLogoutInProgress()
     await InlineProtocolNativeLogin.shared.cancel()
 
-    if notifyServer {
-      await notifyServerLogout()
+    let serverNotified = notifyServer ? await notifyServerLogout() : false
+    if !serverNotified, let serverSessionToken {
+      // Persisted now, sent in the background; retried on launch and activation until answered.
+      await PendingServerLogouts.shared.enqueue(token: serverSessionToken)
+      Task.detached { await PendingServerLogouts.shared.drain() }
     }
 
     Analytics.logout()
@@ -130,11 +136,13 @@ enum LogoutPerformer {
     mainRouter.setRoute(route: .onboarding)
   }
 
-  private static func notifyServerLogout() async {
+  private static func notifyServerLogout() async -> Bool {
     do {
       try await InlineRPCClient.shared.logout(timeout: .seconds(2))
+      return true
     } catch {
       Log.shared.error("Logout API call failed: \(error.localizedDescription)")
+      return false
     }
   }
 }
