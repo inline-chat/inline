@@ -1,3 +1,4 @@
+import Combine
 import InlineKit
 import InlineUI
 import os.signpost
@@ -16,7 +17,9 @@ struct ChatRouteView: View {
   @ObservedObject private var settings = AppSettings.shared
   @State private var chatToolbarState = ChatToolbarState()
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
-  @StateObject private var agentThreadToolbarModel: AgentThreadToolbarModel
+  @StateObject private var agentThreadToolbarHost: AgentThreadToolbarModelHost
+  /// The chat this route last showed, so a stable route can leave it when the peer changes.
+  @State private var shownPeer: Peer?
   @State private var toolbarDialog: InlineKit.Dialog?
   @State private var navigationTitle = ""
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
@@ -25,7 +28,11 @@ struct ChatRouteView: View {
   init(peer: InlineKit.Peer) {
     self.peer = peer
     _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
-    _agentThreadToolbarModel = StateObject(wrappedValue: AgentThreadToolbarModel(peer: peer))
+    _agentThreadToolbarHost = StateObject(wrappedValue: AgentThreadToolbarModelHost(peer: peer))
+  }
+
+  private var agentThreadToolbarModel: AgentThreadToolbarModel {
+    agentThreadToolbarHost.model(for: peer)
   }
 
   private var windowTitle: String {
@@ -53,50 +60,13 @@ struct ChatRouteView: View {
     if let dependencies {
       let dependencies = dependencies.with(nav3: nav)
 
-      AppKitRouteViewController<ChatViewAppKit>(
-        make: {
-          let signpostID = OSSignpostID(log: Self.signpostLog)
-          var payloadLabel = "cold"
-          os_signpost(
-            .begin,
-            log: Self.signpostLog,
-            name: "ChatRouteMakeAppKit",
-            signpostID: signpostID,
-            "%{public}s",
-            String(describing: peer)
-          )
-          defer {
-            os_signpost(
-              .end,
-              log: Self.signpostLog,
-              name: "ChatRouteMakeAppKit",
-              signpostID: signpostID,
-              "%{public}s",
-              payloadLabel
-            )
-          }
-
-          let preparedPayload = dependencies.nav3ChatOpenPreloader?.consumePreparedPayload(for: peer)
-          payloadLabel = preparedPayload == nil ? "cold" : "prepared"
-          return ChatViewAppKit(
-            peerId: peer,
-            preparedPayload: preparedPayload,
-            dependencies: dependencies,
-            toolbarState: chatToolbarState,
-            onDialogChange: { dialog in
-              toolbarDialog = dialog
-            }
-          )
-        },
-        dismantle: { controller in
-          controller.dispose()
-        }
-      )
+      chatHost(dependencies: dependencies)
       .ignoresSafeArea(.all, edges: .vertical)
       // MessageListAppKit captures its render style at construction. Replacing the
       // controller avoids mutating a live message renderer when the setting changes.
+      // The stable route keeps its host across chats and swaps the chat inside it.
       .id(
-        "chat-\(peer.toString())-\(settings.messageRenderStyle.rawValue)-rich:\(settings.richContentRendererEnabled)-inline-math:\(settings.richTextInlineMathEnabled)-widgets:\(settings.messageWidgetsEnabled)"
+        "chat-\(settings.stableChatRouteEnabled ? "route" : peer.toString())-\(settings.messageRenderStyle.rawValue)-rich:\(settings.richContentRendererEnabled)-inline-math:\(settings.richTextInlineMathEnabled)-widgets:\(settings.messageWidgetsEnabled)"
       )
       .frame(minWidth: Theme.chatViewMinWidth, maxWidth: .infinity, maxHeight: .infinity)
       .chatScrollEdgeEffect()
@@ -136,11 +106,18 @@ struct ChatRouteView: View {
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
         navigationTitle = fallbackTitle
         if oldPeer != newPeer {
+          // Only a stable route outlives its chat; a per-chat route is rebuilt instead.
+          if let shownPeer, shownPeer != peer {
+            leaveChat(shownPeer)
+          }
           toolbarDialog = nil
+          userGroupMentionTarget = nil
+          botAgentMentionTarget = nil
           chatToolbarState.dismissPresentation()
           botChatSettingsCoordinator.cancel()
           botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: peer)
         }
+        shownPeer = peer
         syncChatMenuContext(dependencies: dependencies)
       }
       .onChange(of: toolbarDialog) { _, _ in
@@ -165,12 +142,10 @@ struct ChatRouteView: View {
         await botChatSettingsCoordinator.warmUp()
       }
       .onDisappear {
-        BotPresenceController.shared.clearContext(peer: peer)
+        leaveChat(peer)
         agentThreadToolbarModel.cancel()
         botChatSettingsCoordinator.cancel()
-        if let mainWindowID {
-          MainWindowOpenCoordinator.shared.unregisterChatMenuContext(id: mainWindowID, peer: peer)
-        }
+        shownPeer = nil
       }
       .onReceive(
         NotificationCenter.default
@@ -214,7 +189,6 @@ struct ChatRouteView: View {
                 }
               )
               .macToolbarLayout(toolbarLayout)
-              .id(peer.toString())
               .modifier(ChatToolbarTranslationPresentations(
                 peer: peer,
                 toolbarState: chatToolbarState,
@@ -235,6 +209,8 @@ struct ChatRouteView: View {
                 toolbarState: chatToolbarState,
                 anchor: .title
               ))
+              // Outside the presentation modifiers so their state also starts over for each chat.
+              .id(peer.toString())
               .onDisappear {
                 chatToolbarState.handleTitleDisappear()
               }
@@ -300,6 +276,7 @@ struct ChatRouteView: View {
           if settings.translationUIEnabled, peer.isThread {
             ToolbarItem {
               ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
+                .id("translate-\(peer.toString())")
             }
 
             if #available(macOS 26.0, *) {
@@ -374,6 +351,7 @@ struct ChatRouteView: View {
           if settings.translationUIEnabled, !peer.isThread {
             ToolbarItem {
               ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
+                .id("translate-\(peer.toString())")
             }
           }
 
@@ -388,6 +366,71 @@ struct ChatRouteView: View {
         title: "Missing App Dependencies",
         systemImage: "exclamationmark.triangle"
       )
+    }
+  }
+
+  @ViewBuilder
+  private func chatHost(dependencies: AppDependencies) -> some View {
+    if settings.stableChatRouteEnabled {
+      AppKitRouteViewController<ChatRouteContainerController>(
+        make: { ChatRouteContainerController() },
+        update: { container in
+          container.show(peer: peer) { makeChatView(dependencies: dependencies) }
+        },
+        dismantle: { container in
+          container.dispose()
+        }
+      )
+    } else {
+      AppKitRouteViewController<ChatViewAppKit>(
+        make: { makeChatView(dependencies: dependencies) },
+        dismantle: { controller in
+          controller.dispose()
+        }
+      )
+    }
+  }
+
+  private func makeChatView(dependencies: AppDependencies) -> ChatViewAppKit {
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    var payloadLabel = "cold"
+    os_signpost(
+      .begin,
+      log: Self.signpostLog,
+      name: "ChatRouteMakeAppKit",
+      signpostID: signpostID,
+      "%{public}s",
+      String(describing: peer)
+    )
+    defer {
+      os_signpost(
+        .end,
+        log: Self.signpostLog,
+        name: "ChatRouteMakeAppKit",
+        signpostID: signpostID,
+        "%{public}s",
+        payloadLabel
+      )
+    }
+
+    let preparedPayload = dependencies.nav3ChatOpenPreloader?.consumePreparedPayload(for: peer)
+    payloadLabel = preparedPayload == nil ? "cold" : "prepared"
+    return ChatViewAppKit(
+      peerId: peer,
+      preparedPayload: preparedPayload,
+      dependencies: dependencies,
+      toolbarState: chatToolbarState,
+      onDialogChange: { dialog in
+        toolbarDialog = dialog
+      }
+    )
+  }
+
+  /// Ends the per-chat registrations for `chatPeer`: on disappear, and when a stable route moves on.
+  private func leaveChat(_ chatPeer: Peer) {
+    BotPresenceController.shared.clearContext(peer: chatPeer)
+    if let mainWindowID {
+      MainWindowOpenCoordinator.shared.unregisterChatMenuContext(id: mainWindowID, peer: chatPeer)
     }
   }
 
@@ -494,6 +537,38 @@ extension View {
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     } else {
       self
+    }
+  }
+}
+
+/// Owns the agent thread toolbar model for the route's current chat. A stable chat route outlives
+/// its chat, so the model (bound to one peer) is replaced when the peer changes.
+@MainActor
+final class AgentThreadToolbarModelHost: ObservableObject {
+  private var model: AgentThreadToolbarModel
+  private var forwarding: AnyCancellable?
+
+  init(peer: Peer) {
+    model = AgentThreadToolbarModel(peer: peer)
+    forwardChanges()
+  }
+
+  /// Read during view updates: swapping models publishes nothing, and the outgoing model is
+  /// cancelled on the next run loop turn so its own publishes stay out of this update.
+  func model(for peer: Peer) -> AgentThreadToolbarModel {
+    guard model.peer != peer else { return model }
+    let outgoing = model
+    model = AgentThreadToolbarModel(peer: peer)
+    forwardChanges()
+    DispatchQueue.main.async {
+      outgoing.cancel()
+    }
+    return model
+  }
+
+  private func forwardChanges() {
+    forwarding = model.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
     }
   }
 }

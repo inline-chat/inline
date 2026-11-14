@@ -90,6 +90,13 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.quickForward)
+      Toggle(isOn: $settings.stableChatRouteEnabled) {
+        SettingsRowLabel(
+          .stableChatRoute,
+          description: "Keep the chat view and its toolbar in place when switching chats instead of rebuilding them."
+        )
+      }
+      .settingsSearchAnchor(.stableChatRoute)
     } header: {
       SettingsSectionHeader("Messages")
     }
