@@ -5,14 +5,20 @@ import Logger
 import RealtimeV2
 import SwiftUI
 
-/// Who may use a bot the viewer owns, from its chat info or a thread's
-/// participants. The owner adds people by search and removes them in place.
+/// Who can reach a bot the viewer owns, from its chat info or a thread's
+/// participants: everyone, or the people and spaces the owner adds. Entries
+/// are removed in place.
 struct BotAccessView: View {
   let bot: UserInfo
   /// A thread's direct participants, offered as toggles. Empty in the bot's own chat.
   var participants: [UserInfo] = []
+  /// Shown above the list, e.g. right after the bot was created.
+  var introduction: String?
 
   @ObservedObject private var grants = AgentGrantStore.shared
+  @ObservedObject private var work = AgentWorkStateStore.shared
+  /// Spaces, groups and the open-to-everyone switch.
+  @State private var model: BotAccessListModel
   /// Optimistic values while a grant change is in flight.
   @State private var pendingAccess: [Int64: Bool] = [:]
   @State private var errorMessage: String?
@@ -22,9 +28,28 @@ struct BotAccessView: View {
 
   private let log = Log.scoped("BotAccessView")
 
+  init(bot: UserInfo, participants: [UserInfo] = [], introduction: String? = nil) {
+    self.bot = bot
+    self.participants = participants
+    self.introduction = introduction
+    _model = State(initialValue: BotAccessListModel(botUserID: bot.user.id))
+  }
+
+  private var viewerUserID: Int64? { Auth.shared.getCurrentUserId() }
+  /// The bot's real owner, which isn't the viewer when they manage it as an admin.
+  private var ownerUserID: Int64? {
+    guard let id = grants.access(botUserID: botUserID)?.ownerUserID, id > 0 else { return viewerUserID }
+    return id
+  }
+
   private var botUserID: Int64 { bot.user.id }
   private var owned: OwnedAgentGrants? { grants.ownedGrants(botUserID: botUserID) }
   private var botName: String { bot.user.shortDisplayName }
+  private var isOpen: Bool { grants.openToEveryoneByBotUserID[botUserID] == true }
+  /// A bridge answers only its owner and access list, so opening it would
+  /// show people a composer for an agent that refuses them.
+  private var offersOpenToEveryone: Bool { !work.runtimeBotUserIDs.contains(botUserID) }
+  private var shownError: String? { errorMessage ?? model.errorMessage }
 
   /// People in this chat who can be given access: not the owner, this bot or other bots.
   private var chatPeople: [UserInfo] {
@@ -43,20 +68,46 @@ struct BotAccessView: View {
 
   var body: some View {
     List {
-      if let errorMessage {
+      if let introduction {
         Section {
-          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+          Label(introduction, systemImage: "lock.fill")
+            .foregroundStyle(.secondary)
+        }
+      }
+
+      if let shownError {
+        Section {
+          Label(shownError, systemImage: "exclamationmark.triangle.fill")
             .foregroundStyle(.red)
         }
       }
 
-      Section {
-        if let viewer = Auth.shared.getCurrentUserId().flatMap(cachedUser) {
-          personLabel(viewer, subtitle: String(localized: "Owner"))
+      if offersOpenToEveryone, owned != nil {
+        Section {
+          Toggle("Anyone Can Message", isOn: Binding(get: { isOpen }, set: { model.setOpenToEveryone($0) }))
+            .disabled(model.isChangingOpen)
+        } footer: {
+          Text(isOpen
+            ? "Anyone on Inline can message \(botName) and add it to chats."
+            : "For bots meant for everyone, like a support or team bot.")
         }
       }
 
-      if owned == nil {
+      Section {
+        if let owner = ownerUserID.flatMap(cachedUser) {
+          personLabel(owner, subtitle: String(localized: "Owner"))
+        }
+      }
+
+      if owned == nil, grants.failedBotUserIDs.contains(botUserID) {
+        Section {
+          Button {
+            grants.refresh(botUserID: botUserID)
+          } label: {
+            Label("Couldn’t load who has access. Try Again", systemImage: "arrow.clockwise")
+          }
+        }
+      } else if owned == nil {
         Section {
           HStack(spacing: 10) {
             ProgressView()
@@ -77,6 +128,17 @@ struct BotAccessView: View {
         }
 
         Section {
+          ForEach((owned?.spaceIDs ?? []).sorted(), id: \.self) { spaceID in
+            let title = model.space(spaceID)?.displayName ?? String(localized: "A space")
+            subjectRow(
+              .space(spaceID), title: title, detail: "Everyone in this space", space: model.space(spaceID)
+            )
+          }
+          ForEach((owned?.groupIDs ?? []).sorted(), id: \.self) { groupID in
+            subjectRow(
+              .group(groupID), title: model.groupTitle(groupID), detail: "Everyone in this group", space: nil
+            )
+          }
           ForEach(grantedUserIDs, id: \.self) { userID in
             grantedRow(userID)
           }
@@ -86,23 +148,51 @@ struct BotAccessView: View {
           } label: {
             Label("Add People", systemImage: "person.badge.plus")
           }
+
+          let groups = model.groupsByID.values
+            .filter { owned?.groupIDs.contains($0.id) != true }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+          if !groups.isEmpty {
+            Menu {
+              ForEach(groups) { group in
+                let title = model.groupTitle(group.id)
+                Button(title) { model.setAccess(true, subject: .group(group.id), name: title) }
+              }
+            } label: {
+              Label("Add a Group", systemImage: "person.3")
+            }
+          }
+
+          let spaces = model.spaceMatches("", excluding: owned?.spaceIDs ?? [])
+          if !spaces.isEmpty {
+            Menu {
+              ForEach(spaces) { space in
+                Button(space.displayName) {
+                  model.setAccess(true, subject: .space(space.id), name: space.displayName)
+                }
+              }
+            } label: {
+              Label("Add a Space", systemImage: "building.2")
+            }
+          }
         } header: {
-          Text(participants.isEmpty ? "People With Access" : "Others With Access")
+          Text(participants.isEmpty ? "Shared With" : "Also Shared With")
         } footer: {
-          Text("People with access can start and steer \(botName) in chats they share with it. Swipe to remove someone.")
+          Text("Only you and the people here can message \(botName), mention it or add it to chats. Swipe to remove someone, or touch and hold to make them an admin. Admins manage the bot with its owner; only the owner can delete it.")
         }
       }
     }
     .listStyle(.insetGrouped)
-    .navigationTitle("Shared With")
+    .navigationTitle("Who Can Message")
     .navigationBarTitleDisplayMode(.inline)
-    .animation(.default, value: owned?.userIDs)
+    .animation(.default, value: owned)
     .task(id: botUserID) {
       // The cached list renders first; this only picks up missed changes.
-      grants.refresh(botUserID: botUserID)
+      await model.load()
     }
-    .task(id: grantedUserIDs) {
-      let missing = grantedUserIDs.filter { ObjectCache.shared.getCachedUser(id: $0) == nil }
+    .task(id: grantedUserIDs + [ownerUserID ?? 0]) {
+      let missing = (grantedUserIDs + [ownerUserID].compactMap(\.self))
+        .filter { ObjectCache.shared.getCachedUser(id: $0) == nil }
       guard !missing.isEmpty else { return }
       await ObjectCache.shared.ensure(missing.map { .user($0) })
       loadedUsersGeneration &+= 1
@@ -113,9 +203,19 @@ struct BotAccessView: View {
   }
 
   private func grantedRow(_ userID: Int64) -> some View {
-    Group {
+    let isAdmin = owned?.role(userID: userID) == .admin
+    let name = cachedUser(userID)?.user.shortDisplayName ?? String(localized: "this person")
+    return Group {
       if let userInfo = cachedUser(userID) {
-        personLabel(userInfo, subtitle: userInfo.user.username.map { "@\($0)" })
+        HStack {
+          personLabel(userInfo, subtitle: userInfo.user.username.map { "@\($0)" })
+          Spacer()
+          if isAdmin {
+            Text("Admin")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+          }
+        }
       } else {
         HStack(spacing: 12) {
           Circle().fill(Color(uiColor: .systemGray4)).frame(width: 36, height: 36)
@@ -128,10 +228,55 @@ struct BotAccessView: View {
       Button("Remove", role: .destructive) { setAccess(false, userID: userID) }
     }
     .contextMenu {
+      Button {
+        model.setRole(isAdmin ? .member : .admin, userID: userID, name: name)
+      } label: {
+        Label(
+          isAdmin ? "Remove as Admin" : "Make Admin",
+          systemImage: isAdmin ? "person.badge.minus" : "person.badge.key"
+        )
+      }
       Button(role: .destructive) {
         setAccess(false, userID: userID)
       } label: {
         Label("Remove Access", systemImage: "person.badge.minus")
+      }
+    }
+  }
+
+  /// A whole space or group on the list.
+  private func subjectRow(
+    _ subject: AgentGrantSubject,
+    title: String,
+    detail: LocalizedStringKey,
+    space: Space?
+  ) -> some View {
+    HStack(spacing: 12) {
+      if let space {
+        SpaceAvatar(space: space, size: 36)
+      } else {
+        Image(systemName: "person.3.fill")
+          .foregroundStyle(.secondary)
+          .frame(width: 36, height: 36)
+          .background(Color(uiColor: .systemGray5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      }
+      VStack(alignment: .leading, spacing: 1) {
+        Text(title).lineLimit(1)
+        Text(detail)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+    }
+    .opacity(model.pending.contains(subject) ? 0.4 : 1)
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+      Button("Remove", role: .destructive) { model.setAccess(false, subject: subject, name: title) }
+    }
+    .contextMenu {
+      Button(role: .destructive) {
+        model.setAccess(false, subject: subject, name: title)
+      } label: {
+        Label("Remove Access", systemImage: "minus.circle")
       }
     }
   }
@@ -315,11 +460,12 @@ private struct BotAccessAddPeopleSheet: View {
 struct OwnedBotAccessSheet: View {
   let bot: UserInfo
   let participants: [UserInfo]
+  var introduction: String?
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     NavigationStack {
-      BotAccessView(bot: bot, participants: participants)
+      BotAccessView(bot: bot, participants: participants, introduction: introduction)
         .toolbar {
           ToolbarItem(placement: .confirmationAction) {
             Button("Done") { dismiss() }

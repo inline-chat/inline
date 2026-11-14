@@ -35,7 +35,8 @@ extension ChatInfoView {
       searchResults = spaceFullMembersViewModel.filteredMembers
         .map(\.userInfo)
         .filter {
-          !excludedUserIDs.contains($0.user.id) &&
+          // A bot can be added only by someone who can reach it.
+          !excludedUserIDs.contains($0.user.id) && AgentGrantStore.shared.offers($0.user) &&
             InviteDirectory.localUserMatches($0, query: query, includeEmail: true)
         }
         .sorted { $0.user.displayName.localizedCaseInsensitiveCompare($1.user.displayName) == .orderedAscending }
@@ -48,11 +49,13 @@ extension ChatInfoView {
     searchResults = []
     participantSearchTask = Task {
       do {
+        // A locally known bot is offered only to someone who can reach it;
+        // the server applies the same rule to what it returns.
         let local = try await InviteDirectory.mergedUsers(
           local: InviteDirectory.localUsers(query: query, database: database),
           remote: [],
           excluding: excludedUserIDs
-        )
+        ).filter { AgentGrantStore.shared.offers($0.user) }
         try Task.checkCancellation()
         guard participantSearchIsCurrent(generation, query: query) else { return }
         searchResults = local

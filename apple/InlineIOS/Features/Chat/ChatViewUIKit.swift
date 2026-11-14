@@ -294,8 +294,53 @@ public class ChatContainerView: UIView {
     messagesCollectionView.setComposeBottomOffset(offset)
   }
 
-  func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
+  // MARK: - Bot access
+
+  private var noAccessBar: BotNoAccessBarView?
+  private(set) var isBlockedByBotAccess = false
+
+  /// Replaces the composer with a notice in a chat with a bot the viewer
+  /// can't message, and brings it back when that stops being true. Only a
+  /// known "no" arrives here; an unknown answer keeps the composer.
+  func setNoAccessNotice(_ notice: BotNoAccessNotice?, onMessageOwner: @escaping (Int64) -> Void) {
     guard !isPreview else { return }
+    guard let notice else {
+      guard isBlockedByBotAccess else { return }
+      isBlockedByBotAccess = false
+      noAccessBar?.isHidden = true
+      composeView.isHidden = false
+      composeView.isUserInteractionEnabled = true
+      return
+    }
+    let bar = noAccessBar ?? makeNoAccessBar()
+    bar.update(notice, onMessageOwner: onMessageOwner)
+    guard !isBlockedByBotAccess else { return }
+    isBlockedByBotAccess = true
+    // Typing must not land in a composer nobody can see.
+    composeView.textView.resignFirstResponder()
+    composeView.isHidden = true
+    composeView.isUserInteractionEnabled = false
+    bar.isHidden = false
+  }
+
+  private func makeNoAccessBar() -> BotNoAccessBarView {
+    let bar = BotNoAccessBarView()
+    bar.isHidden = true
+    insertSubview(bar, aboveSubview: composeView)
+    // The composer keeps its place in the layout, so the list, the keyboard
+    // guide and the floating buttons need no second set of rules.
+    NSLayoutConstraint.activate([
+      bar.leadingAnchor.constraint(equalTo: composeView.leadingAnchor),
+      bar.trailingAnchor.constraint(equalTo: composeView.trailingAnchor),
+      bar.bottomAnchor.constraint(equalTo: composeView.bottomAnchor),
+      bar.topAnchor.constraint(greaterThanOrEqualTo: composeView.topAnchor),
+    ])
+    noAccessBar = bar
+    return bar
+  }
+
+  func loadDraftIfNeeded(_ draftMessage: DraftMessage?) {
+    guard !isPreview, !isBlockedByBotAccess else { return }
     guard let draftMessage else {
       lastAppliedDraftSignature = nil
       return
@@ -1139,6 +1184,9 @@ struct ChatViewUIKit: UIViewRepresentable {
   let isPreview: Bool
   let theme: IOSThemeSnapshot
   var onRenameThread: (() -> Bool)? = nil
+  /// Set for a chat with a bot the viewer can't message.
+  var noAccessNotice: BotNoAccessNotice? = nil
+  var onMessageBotOwner: (Int64) -> Void = { _ in }
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(
@@ -1153,6 +1201,8 @@ struct ChatViewUIKit: UIViewRepresentable {
     view.onRenameThread = isPreview ? nil : onRenameThread
     configureVoicePlaybackNavigation(view)
     if !isPreview {
+      // Before the draft: a chat that takes no messages restores none.
+      view.setNoAccessNotice(noAccessNotice, onMessageOwner: onMessageBotOwner)
       view.loadDraftIfNeeded(draftMessage)
       view.focusMessage(
         focusMessageID, requestRevision: focusRequestRevision, requiresExactMessage: focusMessageExactly
@@ -1168,6 +1218,7 @@ struct ChatViewUIKit: UIViewRepresentable {
     view.applyTheme(theme)
     view.setCollapsedMaxId(collapsedMaxId)
     if !isPreview {
+      view.setNoAccessNotice(noAccessNotice, onMessageOwner: onMessageBotOwner)
       view.loadDraftIfNeeded(draftMessage)
       view.focusMessage(
         focusMessageID, requestRevision: focusRequestRevision, requiresExactMessage: focusMessageExactly

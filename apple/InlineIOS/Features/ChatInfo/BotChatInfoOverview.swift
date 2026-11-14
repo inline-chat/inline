@@ -15,6 +15,8 @@ struct BotChatInfoOverview: View {
   @State private var settingsModel = IOSBotsSettingsModel()
   /// Bumped when people this screen names finish loading, to re-read the cache.
   @State private var loadedUsersGeneration = 0
+  /// Names of the spaces the bot is shared with, for the summary.
+  @State private var spaceNames: [Int64: String] = [:]
 
   private var botUserID: Int64 { bot.user.id }
   private var owned: OwnedAgentGrants? { grants.ownedGrants(botUserID: botUserID) }
@@ -34,6 +36,8 @@ struct BotChatInfoOverview: View {
     .task(id: botUserID) {
       grants.ensureLoaded(botUserID: botUserID)
       BotOnlineStatus.refreshIfBot(bot.user)
+      let spaces = (try? await AppDatabase.shared.reader.read { db in try Space.fetchAll(db) }) ?? []
+      spaceNames = Dictionary(spaces.map { ($0.id, $0.displayName) }, uniquingKeysWith: { first, _ in first })
       await store.loadDirectChatOutputModes(botUserID: botUserID)
     }
     .task(id: peopleToLoad) {
@@ -89,23 +93,35 @@ struct BotChatInfoOverview: View {
     if let owned {
       BotInfoSection(
         "Access",
-        footer: "People with access can start and steer \(bot.user.shortDisplayName) in chats they share with it. You always have access."
+        footer: isOpenToEveryone
+          ? "Anyone on Inline can message \(bot.user.shortDisplayName) and add it to chats."
+          : "Only you and the people you share \(bot.user.shortDisplayName) with can message it, mention it or add it to chats."
       ) {
         NavigationLink {
           BotAccessView(bot: bot)
         } label: {
           BotInfoRow(systemImage: "person.2.fill", tint: .blue, title: "Shared With", showsChevron: true) {
             HStack(spacing: 8) {
-              BotAccessAvatarStack(userIDs: sharedUserIDs(owned), cachedUser: cachedUser)
-              Text(sharedSummary(owned.userIDs.count))
-                .foregroundStyle(.secondary)
+              if !isOpenToEveryone {
+                BotAccessAvatarStack(userIDs: sharedUserIDs(owned), cachedUser: cachedUser)
+              }
+              Text(owned.sharedWithSummary(
+                openToEveryone: isOpenToEveryone,
+                spaceNames: owned.spaceIDs.sorted().compactMap { spaceNames[$0] }
+              ))
+              .foregroundStyle(.secondary)
             }
           }
         }
         .buttonStyle(.plain)
       }
     } else if let access = grants.access(botUserID: botUserID), !access.isOwner {
-      BotInfoSection("Access") {
+      BotInfoSection(
+        "Access",
+        footer: access.canMessage == false
+          ? "Ask \(cachedUser(access.ownerUserID)?.user.shortDisplayName ?? "its owner") to share \(bot.user.shortDisplayName) with you to message it."
+          : nil
+      ) {
         BotInfoRow(systemImage: "person.crop.circle.fill", tint: .blue, title: "Owner") {
           HStack(spacing: 8) {
             if let owner = cachedUser(access.ownerUserID) {
@@ -117,6 +133,24 @@ struct BotChatInfoOverview: View {
         }
         BotInfoDivider()
         BotInfoValueRow(systemImage: "key.fill", tint: .green, title: "Your Access", value: access.viewerAccessSummary)
+      }
+    } else {
+      // Not known yet, or the owner's list is still loading.
+      BotInfoSection("Access") {
+        if grants.failedBotUserIDs.contains(botUserID) {
+          Button {
+            grants.refresh(botUserID: botUserID)
+          } label: {
+            BotInfoValueRow(
+              systemImage: "arrow.clockwise", tint: .gray, title: "Couldn’t Load", value: "Try Again"
+            )
+          }
+          .buttonStyle(.plain)
+        } else {
+          BotInfoRow(systemImage: "person.2.fill", tint: .blue, title: "Access") {
+            ProgressView()
+          }
+        }
       }
     }
   }
@@ -170,12 +204,8 @@ struct BotChatInfoOverview: View {
     Array(owned.userIDs.sorted().prefix(3))
   }
 
-  private func sharedSummary(_ count: Int) -> String {
-    switch count {
-    case 0: String(localized: "Only you")
-    case 1: String(localized: "1 person")
-    default: String(localized: "\(count) people")
-    }
+  private var isOpenToEveryone: Bool {
+    grants.openToEveryoneByBotUserID[botUserID] == true
   }
 
   private func cachedUser(_ userID: Int64) -> UserInfo? {

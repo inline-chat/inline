@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineProtocol
 import InlineUI
@@ -16,6 +17,8 @@ struct BotsSettingsView: View {
   @State private var username = ""
   @State private var botToDelete: InlineProtocol.User?
   @State private var copiedTokenPasteboardChangeCount: Int?
+  /// The bot that was just created, while its "who can message it" step shows.
+  @State private var newBot: UserInfo?
 
   var body: some View {
     List {
@@ -117,6 +120,13 @@ struct BotsSettingsView: View {
     .task {
       await model.load(realtimeV2)
     }
+    .sheet(item: $newBot) { bot in
+      OwnedBotAccessSheet(
+        bot: bot,
+        participants: [],
+        introduction: "\(bot.user.shortDisplayName) is private: only you can message it. Add the people or spaces who should reach it, or leave it as it is."
+      )
+    }
     .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
       clearSensitiveState()
     }
@@ -138,9 +148,12 @@ struct BotsSettingsView: View {
     guard canCreate else { return }
 
     Task {
-      if await model.create(name: trimmedName, username: candidate, realtimeV2: realtimeV2) {
+      if let bot = await model.create(name: trimmedName, username: candidate, realtimeV2: realtimeV2) {
         name = ""
         username = ""
+        // A new bot is private. Ask who should reach it right away, so
+        // nobody learns later that their team can't message it.
+        newBot = UserInfo(user: User(from: bot))
       }
     }
   }
@@ -216,7 +229,8 @@ final class IOSBotsSettingsModel {
     defer { isLoading = false }
 
     do {
-      let result = try await realtimeV2.send(.listBots())
+      // Own bots, and the ones this person manages as an admin.
+      let result = try await realtimeV2.send(.listBots(includeManaged: true))
       guard case let .listBots(response) = result else {
         throw TransactionExecutionError.invalid
       }
@@ -230,8 +244,9 @@ final class IOSBotsSettingsModel {
     }
   }
 
-  func create(name: String, username: String, realtimeV2: RealtimeV2) async -> Bool {
-    guard !isCreating else { return false }
+  /// The created bot, or nil when creation failed.
+  func create(name: String, username: String, realtimeV2: RealtimeV2) async -> InlineProtocol.User? {
+    guard !isCreating else { return nil }
     isCreating = true
     errorMessage = nil
     defer { isCreating = false }
@@ -246,11 +261,11 @@ final class IOSBotsSettingsModel {
         revealedTokens[response.bot.id] = response.token
       }
       await saveLocally([response.bot])
-      return true
+      return response.bot
     } catch {
       log.error("Failed to create bot", error: error)
       errorMessage = "Could not create the bot. Check the name and username, then try again."
-      return false
+      return nil
     }
   }
 
@@ -465,8 +480,11 @@ private struct IOSBotSettingsRow: View {
               }
             }
 
-            Divider()
-            Button("Delete Bot", role: .destructive, action: requestDelete)
+            // Only the owner deletes a bot; an admin does everything else.
+            if bot.isOwned(by: Auth.shared.getCurrentUserId()) {
+              Divider()
+              Button("Delete Bot", role: .destructive, action: requestDelete)
+            }
           } label: {
             Image(systemName: "ellipsis.circle")
               .foregroundStyle(.secondary)
@@ -603,6 +621,8 @@ struct IOSManagedBotSettingsView: View {
         Text("Bot usernames must end with “bot”.")
       }
 
+      IOSManagedBotSharingSection(bot: bot)
+
       if bot.hasBotAvatar {
         IOSManagedBotAvatarSection(bot: bot, isBusy: isBusy) {
           Task { await model.clearBotAvatar(botID, realtimeV2: realtimeV2) }
@@ -635,11 +655,14 @@ struct IOSManagedBotSettingsView: View {
 
       IOSBotAgentsSection(botUserId: botID)
 
-      Section {
-        Button("Delete Bot…", role: .destructive) {
-          isConfirmingDelete = true
+      // Only the owner deletes a bot; an admin does everything else.
+      if bot.isOwned(by: Auth.shared.getCurrentUserId()) {
+        Section {
+          Button("Delete Bot…", role: .destructive) {
+            isConfirmingDelete = true
+          }
+          .disabled(isBusy)
         }
-        .disabled(isBusy)
       }
     }
     .listStyle(.insetGrouped)
@@ -1146,5 +1169,38 @@ private struct IOSManagedBotAccessSection: View {
     } footer: {
       Text("Keep this token private. Rotating it immediately revokes the previous token.")
     }
+  }
+}
+
+/// Who can message the bot, one tap from its settings.
+private struct IOSManagedBotSharingSection: View {
+  let bot: InlineProtocol.User
+  @ObservedObject private var grants = AgentGrantStore.shared
+
+  private var botInfo: UserInfo { UserInfo(user: User(from: bot)) }
+  private var isOpen: Bool { grants.openToEveryoneByBotUserID[bot.id] == true }
+
+  var body: some View {
+    Section {
+      NavigationLink {
+        BotAccessView(bot: botInfo)
+      } label: {
+        HStack {
+          Label("Shared With", systemImage: isOpen ? "globe" : "lock.fill")
+          Spacer()
+          if let owned = grants.ownedGrants(botUserID: bot.id) {
+            Text(owned.sharedWithSummary(openToEveryone: isOpen))
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+    } header: {
+      Text("Who Can Message")
+    } footer: {
+      Text(isOpen
+        ? "Anyone on Inline can message this bot and add it to chats."
+        : "Only you and the people you share this bot with can message it, mention it or add it to chats.")
+    }
+    .task(id: bot.id) { grants.ensureLoaded(botUserID: bot.id) }
   }
 }
