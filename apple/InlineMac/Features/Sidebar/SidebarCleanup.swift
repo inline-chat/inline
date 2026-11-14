@@ -1,3 +1,4 @@
+import AppKit
 import Auth
 import Foundation
 import GRDB
@@ -11,6 +12,8 @@ final class SidebarCleanup {
   static let shared = SidebarCleanup()
 
   private static let checkIntervalSeconds: Int64 = 15 * 60
+  /// Long enough for a chat switch to settle; short against cleanup timeouts (hours).
+  private static let openedDateFlushDelay: Duration = .seconds(3)
 
   private let log = Log.scoped("SidebarCleanup")
   private var owners = Set<UUID>()
@@ -19,8 +22,21 @@ final class SidebarCleanup {
   private var runTask: Task<Void, Never>?
   private var loopID: UUID?
   private var runID: UUID?
+  private var pendingOpenedDates: [Peer: Date] = [:]
+  private var openedDateFlushTask: Task<Void, Never>?
+  private var terminationObserver: NSObjectProtocol?
 
-  private init() {}
+  private init() {
+    terminationObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification,
+      object: nil,
+      queue: .main
+    ) { _ in
+      MainActor.assumeIsolated {
+        SidebarCleanup.shared.flushPendingOpenedDatesBeforeExit()
+      }
+    }
+  }
 
   enum ManualResult {
     case cleaned(chats: Int, folders: Int)
@@ -61,13 +77,51 @@ final class SidebarCleanup {
     }
   }
 
+  /// Records when a chat was opened for cleanup timeouts. The write is kept in
+  /// memory and flushed a few seconds later in one transaction, so a chat switch
+  /// does not write the database while the new chat is loading.
   func markOpened(_ peer: Peer, date: Date = Date()) {
-    Task(priority: .utility) {
-      do {
-        try await Self.markOpened(peer, date: date)
-      } catch {
-        Log.shared.error("Failed to mark sidebar chat opened", error: error)
+    pendingOpenedDates[peer] = max(date, pendingOpenedDates[peer] ?? date)
+    guard openedDateFlushTask == nil else { return }
+    openedDateFlushTask = Task(priority: .utility) { [weak self] in
+      try? await Task.sleep(for: Self.openedDateFlushDelay)
+      await self?.flushPendingOpenedDates()
+    }
+  }
+
+  private func flushPendingOpenedDates() async {
+    // Not cancelled: this also runs inside that task, and a cancelled task's
+    // async write would throw before writing. A later run finds nothing pending.
+    openedDateFlushTask = nil
+    let pending = pendingOpenedDates
+    pendingOpenedDates.removeAll()
+    guard pending.isEmpty == false else { return }
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        try Self.writeOpenedDates(pending, db: db)
       }
+    } catch is CancellationError {
+      // A cancelled cleanup run must not drop them; the next flush writes them.
+      for (peer, date) in pending {
+        markOpened(peer, date: date)
+      }
+    } catch {
+      Log.shared.error("Failed to mark sidebar chats opened", error: error)
+    }
+  }
+
+  private func flushPendingOpenedDatesBeforeExit() {
+    openedDateFlushTask?.cancel()
+    openedDateFlushTask = nil
+    let pending = pendingOpenedDates
+    pendingOpenedDates.removeAll()
+    guard pending.isEmpty == false else { return }
+    do {
+      try AppDatabase.shared.dbWriter.write { db in
+        try Self.writeOpenedDates(pending, db: db)
+      }
+    } catch {
+      Log.shared.error("Failed to mark sidebar chats opened before exit", error: error)
     }
   }
 
@@ -177,6 +231,8 @@ final class SidebarCleanup {
       return .unavailable
     }
 
+    // Opened dates still in memory must count before choosing what is stale.
+    await flushPendingOpenedDates()
     let now = Date()
 
     do {
@@ -259,18 +315,15 @@ final class SidebarCleanup {
     log.trace("Queued \(folderIDs.count) empty sidebar folder deletions")
   }
 
-  nonisolated private static func markOpened(_ peer: Peer, date: Date) async throws {
-    try await AppDatabase.shared.dbWriter.write { db in
-      var arguments = StatementArguments([date])
-      arguments += StatementArguments([Dialog.getDialogId(peerId: peer)])
-
+  nonisolated private static func writeOpenedDates(_ dates: [Peer: Date], db: Database) throws {
+    for (peer, date) in dates {
       try db.execute(
         sql: """
         UPDATE "dialog"
         SET "openedDate" = ?
         WHERE "id" = ?
         """,
-        arguments: arguments
+        arguments: [date, Dialog.getDialogId(peerId: peer)]
       )
     }
   }
