@@ -1,3 +1,4 @@
+import { ensureCanAddBots, ensureCanWriteUnderBotDm } from "@in/server/modules/agents/access"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { ensureBotReachesParticipants } from "@in/server/modules/contacts/contacts"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
@@ -81,6 +82,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   }
 
   await AccessGuards.ensureChatAccess(parentChat, context.currentUserId)
+  await ensureCanWriteUnderBotDm(parentChat, context.currentUserId)
 
   const anchorMessage =
     parentMessageId !== undefined
@@ -100,6 +102,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   }
   await ensureUsersExist(directParticipantUserIds)
   await ensureBotReachesParticipants(context.currentUserId, directParticipantUserIds, "create_subthread")
+  await ensureCanAddBots(context.currentUserId, directParticipantUserIds)
 
   const agentContext = input.agentContext
     ? await validateAgentThreadContext(input.agentContext, {

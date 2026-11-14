@@ -1,3 +1,4 @@
+import { canManageBot } from "@in/server/modules/agents/access"
 import { db } from "@in/server/db"
 import { userNotDeleted, users, type DbUser } from "@in/server/db/schema/users"
 import { and, eq } from "drizzle-orm"
@@ -7,6 +8,7 @@ import type { BotCommand } from "@inline-chat/protocol/core"
 const BOT_COMMAND_RE = /^[a-z0-9_]+$/
 const BOT_COMMAND_LIMIT = 100
 
+/** The bot, for its owner or one of its admins. */
 export async function getOwnedBotOrThrow(botUserId: number, currentUserId: number): Promise<DbUser> {
   if (!Number.isFinite(botUserId) || botUserId <= 0) {
     throw RealtimeRpcError.BadRequest()
@@ -18,7 +20,7 @@ export async function getOwnedBotOrThrow(botUserId: number, currentUserId: numbe
     .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
-  if (!bot || bot.botCreatorId !== currentUserId) {
+  if (!bot || !(await canManageBot(bot, currentUserId))) {
     throw RealtimeRpcError.UserIdInvalid()
   }
 

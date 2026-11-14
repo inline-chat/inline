@@ -235,6 +235,15 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.AgentGrantRequired,
     )
   }
+  /** The caller isn't the bot's owner, on its access list, or the bot isn't open to everyone. */
+  public static BotAccessRequired() {
+    return RealtimeRpcError.create(
+      RpcError_Code.AGENT_GRANT_REQUIRED,
+      "You don't have access to this bot",
+      403,
+      RealtimeRpcError.BotAccessRequired,
+    )
+  }
   /** Same response for missing and not-owned media, so ids can't be probed. */
   public static MediaNotOwned() {
     const [, status, description] = InlineError.ApiError.MEDIA_NOT_OWNED

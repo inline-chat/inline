@@ -1,3 +1,4 @@
+import { reachableUsers } from "@in/server/modules/agents/access"
 import { encodeMinUserInfo, TMinUserInfo } from "@in/server/api-types"
 import { Type, type Static } from "@sinclair/typebox"
 import { UsersModel } from "@in/server/db/models/users"
@@ -48,5 +49,6 @@ export const handler = async (
     includeBotCreatorId: currentUserId,
   })
 
-  return { users: users.map((u) => encodeMinUserInfo(u.user, { photoFile: u.photoFile ?? undefined })) }
+  const reachable = await reachableUsers(users, currentUserId)
+  return { users: reachable.map((u) => encodeMinUserInfo(u.user, { photoFile: u.photoFile ?? undefined })) }
 }

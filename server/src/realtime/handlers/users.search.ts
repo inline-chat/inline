@@ -1,5 +1,6 @@
 import type { SearchUsersInput, SearchUsersResult } from "@inline-chat/protocol/core"
 import { UsersModel } from "@in/server/db/models/users"
+import { reachableUsers } from "@in/server/modules/agents/access"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -35,7 +36,9 @@ export async function searchUsersHandler(
     includeBotCreatorId: context.userId,
   })
 
+  // A bot shows up only for people who can reach it, even by its exact username.
+  const reachable = await reachableUsers(matches, context.userId)
   return {
-    users: matches.map(({ user, photoFile }) => encodePublicUser({ user, photoFile })),
+    users: reachable.map(({ user, photoFile }) => encodePublicUser({ user, photoFile })),
   }
 }

@@ -1,9 +1,9 @@
 import { controlAgentSession } from "@in/server/modules/agentSessions/control"
 import { moveAgentSession } from "@in/server/modules/agentSessions/move"
 import { getAgentSessionStates, updateAgentSessionState } from "@in/server/modules/agentSessions/state"
+import { getAgentAccess } from "@in/server/modules/agents/access"
 import {
   deleteAgentGrant,
-  getAgentAccess,
   importAgentGrants,
   listAgentGrants,
   setAgentGrant,

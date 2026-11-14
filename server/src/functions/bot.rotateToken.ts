@@ -1,3 +1,4 @@
+import { canManageBot } from "@in/server/modules/agents/access"
 import { db } from "@in/server/db"
 import { botTokens } from "@in/server/db/schema/botTokens"
 import { userNotDeleted, users } from "@in/server/db/schema/users"
@@ -25,7 +26,8 @@ export const rotateBotToken = async (
     .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
-  if (!bot || bot.botCreatorId !== context.currentUserId) {
+  // The owner or an admin. Deleting the bot stays with the owner.
+  if (!bot || !(await canManageBot(bot, context.currentUserId))) {
     throw RealtimeRpcError.UserIdInvalid()
   }
 

@@ -1,3 +1,4 @@
+import { ensureCanAddBots } from "@in/server/modules/agents/access"
 import { UsersModel } from "@in/server/db/models/users"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { ensureBotCanReach } from "@in/server/modules/contacts/contacts"
@@ -101,6 +102,7 @@ export async function addChatParticipant(
       await ensureCanAddChatParticipants(chat, context.currentUserId, tx)
       await ensureUserCanParticipateInChat(chat, userId)
       await ensureActorCanReach(context.currentUserId, userId, "add_participant")
+      await ensureCanAddBots(context.currentUserId, [userId])
 
       // Check if user exists
       const user = await tx

@@ -1,5 +1,6 @@
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ensureBotCanReachDmPeer } from "@in/server/modules/contacts/contacts"
+import { ensureCanWriteInBotDm } from "@in/server/modules/agents/access"
 import { canonicalMediaForFile } from "@in/server/modules/message/canonicalMediaForFile"
 import { db } from "@in/server/db"
 import { eq, and } from "drizzle-orm"
@@ -226,11 +227,12 @@ async function ensurePrivatePeerCanReceiveMessages(chatId: number, currentUserId
     return
   }
 
-  const [peerUser] = await db.select({ deleted: users.deleted }).from(users).where(eq(users.id, peerUserId)).limit(1)
+  const [peerUser] = await db.select().from(users).where(eq(users.id, peerUserId)).limit(1)
   if (!peerUser || peerUser.deleted === true) {
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
   try {
+    if (peerUser.bot === true) await ensureCanWriteInBotDm(chat.id, peerUser, currentUserId)
     await ensureBotCanReachDmPeer(chat, currentUserId)
   } catch (error) {
     if (error instanceof RealtimeRpcError) throw new InlineError(InlineError.ApiError.PEER_INVALID)

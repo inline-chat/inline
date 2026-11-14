@@ -1,3 +1,4 @@
+import { dropUnreachableBotMentions } from "@in/server/modules/agents/access"
 import type { BlockContent } from "@inline-chat/protocol/core"
 import { MessageEntity_Type, type InputPeer, type MessageActions, type MessageEntities, type Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -123,6 +124,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
       chat,
       currentUserId,
     })
+    entities = await dropUnreachableBotMentions(entities, currentUserId)
     entities = await validateGroupMentions({ text: outgoingText.text, entities, chat, currentUserId })
   }
 

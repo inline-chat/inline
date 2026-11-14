@@ -1212,6 +1212,13 @@
       "when": 1794671060008,
       "tag": "0172_chat-access-verify-cursor",
       "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 1794684962209,
+      "tag": "0173_bot-open-to-everyone",
+      "breakpoints": true
     }
   ]
 }

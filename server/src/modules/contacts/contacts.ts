@@ -20,6 +20,7 @@ import {
   users,
   type DbUser,
 } from "@in/server/db/schema"
+import { resolveBotReach } from "@in/server/modules/agents/access"
 import { actingForUserId, maskToOperations, resolveAgentAccess } from "@in/server/modules/agents/grants"
 import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
@@ -100,17 +101,22 @@ export async function getContacts(input: GetContactsInput, actor: DbUser): Promi
   const page = visible.slice(0, limit)
 
   const contacts: Contact[] = []
-  for (const { user } of page) {
+  const listed: typeof page = []
+  for (const entry of page) {
+    const { user } = entry
     const candidate = candidates.map.get(user.id)!
     let botOperations: AgentGrantOperation[] = []
     let managesBot = false
     if (user.bot === true) {
       managesBot = user.botCreatorId != null && principals.ids.includes(user.botCreatorId)
-      const access = await resolveAgentAccess(user, actor.id, actor)
+      const { access, canMessage } = await resolveBotReach(user, actor.id, actor)
+      // Sharing a thread or a space with a bot doesn't make it yours to use.
+      if (!managesBot && !canMessage) continue
       botOperations = access.isOwner
         ? [AgentGrantOperation.INVOKE, AgentGrantOperation.STEER, AgentGrantOperation.APPROVE, AgentGrantOperation.CONFIGURE]
         : maskToOperations(access.operations)
     }
+    listed.push(entry)
     contacts.push({
       userId: BigInt(user.id),
       relations: [...candidate.relations].sort((a, b) => a - b),
@@ -126,7 +132,7 @@ export async function getContacts(input: GetContactsInput, actor: DbUser): Promi
 
   return {
     contacts,
-    users: page.map(({ user, photoFile }) => encodePublicUser({ user, photoFile }, { includeBotStatus: true })),
+    users: listed.map(({ user, photoFile }) => encodePublicUser({ user, photoFile }, { includeBotStatus: true })),
   }
 }
 

@@ -6,6 +6,7 @@ import { userGroups } from "@in/server/db/schema/userGroups"
 import {
   bigint,
   bigserial,
+  boolean,
   check,
   index,
   integer,
@@ -51,6 +52,10 @@ export const agentSettings = pgTable("agent_settings", {
     .references(() => users.id, { onDelete: "cascade" }),
   // AgentOutputMode; 0 means Detailed.
   defaultOutputMode: smallint("default_output_mode").default(0).notNull(),
+  // Anyone may message the bot, add it to chats and find it. Off means only
+  // the owner and the access list (agent_grants). Bots never see this as a
+  // grant, so a bridge keeps answering only the people on its list.
+  openToEveryone: boolean("open_to_everyone").default(false).notNull(),
   revision: bigint("revision", { mode: "bigint" }).default(sql`1`).notNull(),
   updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),

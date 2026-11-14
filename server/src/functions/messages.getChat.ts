@@ -20,6 +20,7 @@ import {
   isLinkedSubthread,
 } from "@in/server/modules/subthreads"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { ensureCanMessageBot } from "@in/server/modules/agents/access"
 
 type Input = {
   peerId: InputPeer
@@ -110,6 +111,8 @@ async function getChatAndDialogForDM(
   if (!user || UsersModel.isDeleted(user)) {
     throw RealtimeRpcError.UserIdInvalid()
   }
+  // An existing DM stays readable; a new one with a bot needs access to it.
+  await ensureCanMessageBot(user, currentUserId)
 
   log.info("Auto-creating private chat and dialogs for both users", {
     currentUserId,
