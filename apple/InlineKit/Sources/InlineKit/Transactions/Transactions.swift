@@ -432,6 +432,13 @@ public protocol Transaction: Codable, Sendable, Identifiable {
 
   func retryLimit(for error: Error) -> Int
 
+  /// True when `error` means the device is offline or reconnecting. The runner then waits for the
+  /// realtime connection instead of spending an attempt, so being offline never fails a send.
+  func waitsForConnection(after error: Error) -> Bool
+
+  /// Seconds to wait before attempt `attempt + 1`, after attempt `attempt` failed with `error`.
+  func retryDelay(afterAttempt attempt: Int, error: Error) -> TimeInterval
+
   /// If execute fails, apply appropriate logic. By default it calls `rollback()` method
   func didFail(error: Error?) async
 
@@ -441,6 +448,8 @@ public protocol Transaction: Codable, Sendable, Identifiable {
 
 extension Transaction {
   public func retryLimit(for error: Error) -> Int { config.maxRetries }
+  public func waitsForConnection(after error: Error) -> Bool { false }
+  public func retryDelay(afterAttempt attempt: Int, error: Error) -> TimeInterval { config.retryDelay }
   // TODO: Figure out a way to provide a default impl
   //  func didFail() async {
   //    await rollback()

@@ -220,6 +220,12 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     self.copyRequiresFullAllocation = copyRequiresFullAllocation
   }
 
+  /// True when an earlier attempt already staged this upload's body, which `stage` reuses.
+  public func hasStagedBody(logicalID: String) -> Bool {
+    let body = root.appendingPathComponent("\(Self.fileName(for: logicalID)).body")
+    return FileManager.default.fileExists(atPath: body.path)
+  }
+
   public func stage(logicalID: String, sourceURL: URL) throws -> URL {
     let fileManager = FileManager.default
     try fileManager.createDirectory(
@@ -1110,6 +1116,18 @@ public actor DurableUploadCoordinator: MediaUploading {
         if state.acceptedParts.contains(partIndex) {
           accepted = true
           break
+        }
+        // The server's verdict is final for this upload: surface it so the caller rotates
+        // the identity instead of retrying a dead upload with the raw transport error.
+        switch state.status {
+          case .expired: throw NativeMediaUploadError.expired
+          case .canceled: throw NativeMediaUploadError.canceled
+          case .failed:
+            throw NativeMediaUploadError.rejected(
+              code: state.failure.code,
+              retryable: state.hasFailure && state.failure.retryable
+            )
+          default: break
         }
         guard state.status == .uploading,
               attempt + 1 < Self.maximumPartAttempts

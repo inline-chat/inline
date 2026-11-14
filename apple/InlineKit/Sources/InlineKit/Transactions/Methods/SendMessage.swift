@@ -33,7 +33,10 @@ public enum FailedMessageResender {
   }
 
   public static func resend(_ fullMessage: FullMessage) async throws {
-    try await resend(fullMessage, database: .shared, auth: Auth.shared.handle) {
+    try await resend(
+      fullMessage, database: .shared, auth: Auth.shared.handle,
+      resume: { Transactions.shared.resumeRecovered(transaction: .sendMessage($0)) }
+    ) {
       Transactions.shared.mutate(transaction: .sendMessage($0))
     }
   }
@@ -41,6 +44,7 @@ public enum FailedMessageResender {
   static func resend(
     _ fullMessage: FullMessage, database: AppDatabase, auth: AuthHandle,
     beforeAdmission: (@MainActor () async throws -> Void)? = nil,
+    resume: (@MainActor (TransactionSendMessage) -> Bool)? = nil,
     admit: @MainActor (TransactionSendMessage) -> Bool
   ) async throws {
     let message = fullMessage.message
@@ -58,6 +62,22 @@ public enum FailedMessageResender {
     guard stillFailed else { return }
     try await beforeAdmission?()
     try auth.validateAccountMutation(account)
+
+    // Resend under the original identity when the row has one. If the last attempt's send
+    // actually reached the server (a timeout or lost response), the server's random-id dedupe
+    // returns that message instead of creating a second copy.
+    if let resume,
+       let recovered = TransactionSendMessage(recovering: message, mediaItems: mediaItems(for: fullMessage))
+    {
+      guard try await setStatus(of: message, from: .failed, to: .sending, database: database, auth: auth, account: account)
+      else { return }
+      if !resume(recovered) {
+        // Rejected admission (logout or reset): leave the row failed so Retry stays available.
+        _ = try? await setStatus(of: message, from: .sending, to: .failed, database: database, auth: auth, account: account)
+      }
+      return
+    }
+
     // Admit before deleting. An account transition or rejected admission leaves
     // the recoverable failed row and its original media untouched.
     guard admit(.init(
@@ -75,6 +95,25 @@ public enum FailedMessageResender {
     }
     try auth.validateAccountMutation(account)
     if deleted { MessagesPublisher.shared.messagesDeleted(messageIds: [message.messageId], peer: message.peerId) }
+  }
+
+  private static func setStatus(
+    of message: Message, from: MessageSendingStatus, to: MessageSendingStatus,
+    database: AppDatabase, auth: AuthHandle, account: AuthAccountMutationToken
+  ) async throws -> Bool {
+    let updated = try await database.dbWriter.write { db -> Message? in
+      try auth.validateAccountMutation(account)
+      let changed = try Message
+        .filter(Column("messageId") == message.messageId && Column("chatId") == message.chatId)
+        .filter(Column("status") == from.rawValue)
+        .filter(Column("fromId") == account.userID)
+        .updateAll(db, Column("status").set(to: to.rawValue))
+      guard changed > 0 else { return nil }
+      return try Message.fetchOne(db, key: ["messageId": message.messageId, "chatId": message.chatId])
+    }
+    guard let updated else { return false }
+    MessagesPublisher.shared.messageUpdatedSync(message: updated, peer: updated.peerId, animated: false)
+    return true
   }
 }
 
@@ -620,12 +659,45 @@ public struct TransactionSendMessage: Transaction {
       }
     }
 
+    // Deterministic local failures: a missing or unreadable file, or a cancellation, fails the
+    // same way every time and would hold the chat's later sends behind 30 retries.
+    if error is CancellationError || error is CocoaError { return false }
+    if let urlError = error as? URLError { return urlError.code != .cancelled }
+
     return true
   }
 
   public func retryLimit(for error: Error) -> Int {
     if case .unexpectedResponse = error as? NativeMediaUploadError { return 2 }
     return config.maxRetries
+  }
+
+  /// Offline is not a failure: the send waits for the connection and keeps its attempts.
+  public func waitsForConnection(after error: Error) -> Bool {
+    Self.isConnectivityError(error)
+  }
+
+  static func isConnectivityError(_ error: Error) -> Bool {
+    if case .notConnected? = error as? RealtimeDirectRpcError { return true }
+    if let urlError = error as? URLError {
+      switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+          return true
+        default:
+          return false
+      }
+    }
+    return false
+  }
+
+  /// 2, 4, 8 … 60 seconds with ±20% jitter. A fixed 4 s ran a send's 30 attempts out in about
+  /// two minutes; this spreads them over roughly 25, long enough to ride out a server incident.
+  public func retryDelay(afterAttempt attempt: Int, error: Error) -> TimeInterval {
+    Self.backoff(afterAttempt: attempt) * Double.random(in: 0.8 ... 1.2)
+  }
+
+  static func backoff(afterAttempt attempt: Int) -> TimeInterval {
+    min(60, 2 * pow(2, Double(max(0, attempt - 1))))
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {

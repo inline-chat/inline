@@ -1,4 +1,5 @@
 import Foundation
+import RealtimeV2
 
 /// Runs transactions, retry, etc
 actor TransactionsActor {
@@ -41,10 +42,43 @@ actor TransactionsActor {
 
   // MARK: - Lifecycle
 
-  init() {
+  typealias ConnectionWaiter = @Sendable () async throws -> Void
+
+  /// Waits for the realtime connection. Injected so tests never touch the shared realtime client.
+  private let waitForConnection: ConnectionWaiter
+  /// A send whose connection wait keeps returning without the error clearing is bounded, so a
+  /// misclassified error cannot spin forever.
+  static let maxConnectionWaits = 1_000
+
+  init(waitForConnection: @escaping ConnectionWaiter = TransactionsActor.waitForRealtimeConnection) {
     let stream = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
     workSignals = stream.stream
     workContinuation = stream.continuation
+    self.waitForConnection = waitForConnection
+  }
+
+  static let waitForRealtimeConnection: ConnectionWaiter = {
+    try await waitUntilConnected(states: await Api.realtime.connectionStates())
+  }
+
+  /// Returns once the connection is usable. If it was already usable, the error came from
+  /// something else (for example a transfer socket), so wait `settle` before retrying.
+  static func waitUntilConnected(
+    states: AsyncStream<RealtimeConnectionState>,
+    settle: Duration = .seconds(2)
+  ) async throws {
+    var sawDisconnect = false
+    for await state in states {
+      switch state {
+        case .connecting:
+          sawDisconnect = true
+        case .connected, .updating:
+          if !sawDisconnect { try await Task.sleep(for: settle) }
+          return
+      }
+    }
+    // The stream ends when the task is cancelled.
+    throw CancellationError()
   }
 
   deinit {
@@ -152,6 +186,7 @@ actor TransactionsActor {
 
   private func executeWithRetry<T: Transaction>(_ transaction: T) async throws -> T.R {
     var attempts = 0
+    var connectionWaits = 0
     // Always allow at least one attempt even if maxRetries == 0
     let maxAttempts = max(transaction.config.maxRetries, 0) + 1
 
@@ -198,11 +233,19 @@ actor TransactionsActor {
           throw error
         }
 
+        // Offline or reconnecting: wait for the connection without spending an attempt.
+        if transaction.waitsForConnection(after: error), connectionWaits < Self.maxConnectionWaits {
+          connectionWaits += 1
+          try await waitForConnection()
+          continue
+        }
+
         // Decide if we should retry
         if transaction.shouldRetryOnFail(error: error),
            attempts + 1 < min(maxAttempts, max(0, transaction.retryLimit(for: error)) + 1) {
           attempts += 1
-          try await Task.sleep(nanoseconds: UInt64(transaction.config.retryDelay * 1_000_000_000))
+          let delay = max(0, transaction.retryDelay(afterAttempt: attempts, error: error))
+          try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
           continue
         } else {
           throw error
