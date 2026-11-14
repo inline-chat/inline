@@ -87,6 +87,11 @@ inline agents setup --target codex
 Targets are `codex`, `claude` (Claude Code), `opencode`, `amp`, `hermes`, and
 `openclaw`.
 
+The agent's bot is private: only you can message it, and nobody else sees a
+composer for it or can mention it. Share it during setup with `--share-user ID`,
+`--share-space ID` or `--admin ID`, or later from the bot's chat info under
+**Shared With**. See [Who Can Message a Bot](/docs/creating-a-bot#who-can-message-a-bot).
+
 Support status:
 
 - Codex: stable.
