@@ -87,7 +87,21 @@ Everything that can sync goes both ways by default.
   short placeholders, never silently dropped.
 - Confirmations that need more than a yes or no say so and point you to
   ChatGPT.
-- Only you can use the bot. Other people, and group chats, are ignored.
+- Only you can use the bot unless you share it (below).
+
+## Share your Dot
+
+`/share @name` lets someone else use your Dot. They can message the bot
+directly, or mention it in any chat the bot is in. `/unshare @name` stops it,
+and `/share` alone lists who has access. `/allowlist` does the same thing.
+
+- Their message reaches your Dot labelled with their name and chat. Because
+  your Dot sees it in your own ChatGPT conversation, it acts with your account,
+  so only share it with people you trust with that.
+- Answers go back to them when your Dot replies to their message, or answers
+  within 15 minutes and before you write to it again. Anything else stays in
+  your DM.
+- Confirmations, tasks, and files stay with you. Guests send text only.
 
 ## Commands
 
@@ -95,6 +109,7 @@ Everything that can sync goes both ways by default.
 | --- | --- |
 | `/status` | Connection, your Dot's name, and any messages waiting to deliver |
 | `/mirror on` or `/mirror off` | Show messages you type in ChatGPT as yours |
+| `/share @name`, `/unshare @name` | Let someone else use your Dot, or stop |
 | `/help` | What the bridge does |
 
 Any other text, including other `/` commands, goes to your Dot as typed.
