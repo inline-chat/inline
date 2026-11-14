@@ -147,6 +147,7 @@ pub(super) async fn try_update_question_message(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(chat_id),
                 message_id,
                 text: text.to_string(),

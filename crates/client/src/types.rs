@@ -462,6 +462,9 @@ pub struct SendTextRequest {
     pub peer: PeerRef,
     /// Message text.
     pub text: String,
+    /// Explicit message entities using UTF-16 offsets in text or caption.
+    #[serde(default, deserialize_with = "deserialize_entities")]
+    pub entities: Vec<MessageEntityRecord>,
     /// Optional host-provided idempotency key.
     pub external_id: Option<ExternalId>,
     /// Optional deterministic random ID supplied by the host.
@@ -482,6 +485,7 @@ impl SendTextRequest {
         Self {
             peer,
             text: text.into(),
+            entities: Vec::new(),
             external_id: None,
             random_id: None,
             reply_to_message_id: None,
@@ -496,6 +500,7 @@ impl fmt::Debug for SendTextRequest {
         f.debug_struct("SendTextRequest")
             .field("peer", &self.peer)
             .field("text_len", &self.text.len())
+            .field("entity_count", &self.entities.len())
             .field("external_id", &self.external_id)
             .field("random_id", &self.random_id)
             .field("reply_to_message_id", &self.reply_to_message_id)
@@ -514,6 +519,9 @@ pub struct EditMessageRequest {
     pub message_id: InlineId,
     /// Replacement message text.
     pub text: String,
+    /// Explicit message entities using UTF-16 offsets in text or caption.
+    #[serde(default, deserialize_with = "deserialize_entities")]
+    pub entities: Vec<MessageEntityRecord>,
     /// Optional host-provided idempotency key.
     pub external_id: Option<ExternalId>,
     /// Whether the server should parse supported Markdown into message entities.
@@ -586,6 +594,7 @@ impl fmt::Debug for EditMessageRequest {
             .field("chat_id", &self.chat_id)
             .field("message_id", &self.message_id)
             .field("text_len", &self.text.len())
+            .field("entity_count", &self.entities.len())
             .field("external_id", &self.external_id)
             .field("parse_markdown", &self.parse_markdown)
             .finish()
@@ -707,6 +716,9 @@ pub struct UploadRequest {
     pub size_bytes: Option<u64>,
     /// Optional caption.
     pub caption: Option<String>,
+    /// Explicit message entities using UTF-16 offsets in text or caption.
+    #[serde(default, deserialize_with = "deserialize_entities")]
+    pub entities: Vec<MessageEntityRecord>,
     /// Optional media width in pixels.
     pub width: Option<u32>,
     /// Optional media height in pixels.
@@ -730,6 +742,7 @@ impl fmt::Debug for UploadRequest {
             .field("mime_type", &self.mime_type)
             .field("size_bytes", &self.size_bytes)
             .field("caption_len", &self.caption.as_ref().map(String::len))
+            .field("entity_count", &self.entities.len())
             .field("width", &self.width)
             .field("height", &self.height)
             .field("duration_ms", &self.duration_ms)
@@ -780,11 +793,36 @@ impl ClientStatusSnapshot {
     }
 }
 
+/// Authoritative source conversation identity, independent of its audience.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationKind {
+    /// Older cache records or partial data have not established a source peer.
+    #[default]
+    Unknown,
+    /// Source peer addresses one other user.
+    DirectMessage,
+    /// Source peer addresses an ordinary chat, including child threads.
+    Chat,
+}
+
 /// Dialog item returned by the client.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DialogRecord {
     /// Inline chat ID.
     pub chat_id: InlineId,
+    /// Source conversation identity; never inferred from participant count.
+    #[serde(default)]
+    pub kind: ConversationKind,
+    /// Whether nullable structural fields came from a complete source snapshot.
+    #[serde(default)]
+    pub structure_known: bool,
+    /// Chat bucket sequence covered by the structural snapshot, when supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structure_seq: Option<i32>,
+    /// Source description; absent in a known snapshot means explicitly cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Other user ID when this dialog is a direct message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_user_id: Option<InlineId>,
@@ -848,6 +886,10 @@ impl DialogRecord {
     pub fn new(chat_id: InlineId) -> Self {
         Self {
             chat_id,
+            kind: ConversationKind::Unknown,
+            structure_known: false,
+            structure_seq: None,
+            description: None,
             peer_user_id: None,
             title: None,
             emoji: None,
@@ -1150,6 +1192,68 @@ pub struct MessageEntityRecord {
     pub value: Option<String>,
 }
 
+// Accept omitted and JSON-null entity lists from older durable requests and
+// language bindings. Serialization always emits an explicit array.
+fn deserialize_entities<'de, D>(deserializer: D) -> Result<Vec<MessageEntityRecord>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Vec<MessageEntityRecord>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// Bounded source profile lookup by known public IDs. This proves only profile
+/// visibility; mutation permissions remain the source service's responsibility.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsersRequest {
+    /// At most 50 positive source IDs.
+    pub user_ids: Vec<InlineId>,
+}
+
+/// Bounded source search using the authenticated viewer's discovery policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchUsersRequest {
+    /// Name or username query, without email/phone enumeration.
+    pub query: String,
+    /// Result cap, clamped to 1–20.
+    pub limit: Option<u32>,
+}
+
+/// Source profile results. Search results never imply an exhaustive directory.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsersPage {
+    /// Public user profiles returned for this request.
+    pub users: Vec<UserRecord>,
+    /// Whether all explicitly requested IDs were returned; always false for search.
+    pub complete: bool,
+}
+
+/// Bounded member view for one accessible workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpaceMembersRequest {
+    /// Workspace to inspect; the source checks access when refreshing.
+    pub space_id: InlineId,
+    /// Maximum returned records, clamped to 1–100.
+    pub limit: Option<u32>,
+    /// Stable user-ID pagination cursor.
+    pub cursor: Option<String>,
+    /// Refresh from the source before reading the first page.
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+/// Account-scoped member page; cached roles never grant mutation authority.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpaceMembersPage {
+    /// Workspace members in ascending user-ID order.
+    pub members: Vec<SpaceMemberRecord>,
+    /// Public profiles for members on this page.
+    pub users: Vec<UserRecord>,
+    /// Whether this is the end of a successfully refreshed complete roster.
+    pub complete: bool,
+    /// Next stable user-ID cursor, if more cached records remain.
+    pub next_cursor: Option<String>,
+}
+
 /// A bounded, provider-neutral summary of one structured message attachment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageAttachmentRecord {
@@ -1221,6 +1325,9 @@ pub struct MessageMetadata {
     /// Present when this row was imported from or linked to an agent session.
     #[serde(default)]
     pub agent_session: Option<AgentSessionMessageMetadata>,
+    /// Future JSON metadata retained across persistence and adapter replay.
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// Message record returned by history/detail commands.
@@ -1442,6 +1549,7 @@ mod tests {
     #[test]
     fn edit_markdown_is_backward_compatible_and_debug_safe() {
         let request = EditMessageRequest {
+            entities: Vec::new(),
             chat_id: InlineId::new(7),
             message_id: InlineId::new(8),
             text: "private terminal result".to_string(),
@@ -1459,6 +1567,99 @@ mod tests {
             .remove("parse_markdown");
         let decoded: EditMessageRequest = serde_json::from_value(legacy).expect("legacy request");
         assert!(!decoded.parse_markdown);
+    }
+
+    #[test]
+    fn persisted_send_edit_upload_requests_default_entities_and_retain_explicit_ranges() {
+        let send = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(7),
+            },
+            "😀 hello",
+        );
+        let edit = EditMessageRequest {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(8),
+            text: "😀 hello".into(),
+            entities: Vec::new(),
+            external_id: None,
+            parse_markdown: false,
+        };
+        let upload = UploadRequest {
+            peer: send.peer,
+            kind: MediaKind::Document,
+            file_name: None,
+            mime_type: None,
+            size_bytes: None,
+            caption: Some("😀 hello".into()),
+            entities: Vec::new(),
+            width: None,
+            height: None,
+            duration_ms: None,
+            external_id: None,
+            random_id: None,
+            reply_to_message_id: None,
+        };
+        let entity = serde_json::json!({"kind":"TYPE_BOLD", "offset":3,"length":5,"user_id":null,"agent_id":null,"group_id":null,"chat_id":null,"value":null});
+        for (kind, mut json) in [
+            ("send", serde_json::to_value(send).unwrap()),
+            ("edit", serde_json::to_value(edit).unwrap()),
+            ("upload", serde_json::to_value(upload).unwrap()),
+        ] {
+            assert_eq!(json["entities"], serde_json::json!([]));
+            json.as_object_mut().unwrap().remove("entities");
+            let decode = |json: serde_json::Value| -> Vec<MessageEntityRecord> {
+                match kind {
+                    "send" => {
+                        serde_json::from_value::<SendTextRequest>(json)
+                            .unwrap()
+                            .entities
+                    }
+                    "edit" => {
+                        serde_json::from_value::<EditMessageRequest>(json)
+                            .unwrap()
+                            .entities
+                    }
+                    _ => {
+                        serde_json::from_value::<UploadRequest>(json)
+                            .unwrap()
+                            .entities
+                    }
+                }
+            };
+            assert!(decode(json.clone()).is_empty());
+            json["entities"] = serde_json::Value::Null;
+            assert!(decode(json.clone()).is_empty());
+            json["entities"] = serde_json::json!([entity.clone()]);
+            let entities = decode(json);
+            assert_eq!((entities[0].offset, entities[0].length), (3, 5));
+        }
+    }
+
+    #[test]
+    fn incoming_metadata_retains_future_fields_and_unknown_entity_kinds() {
+        let json = serde_json::json!({
+            "entities": [{"kind": "TYPE_UNKNOWN_910", "offset": 0, "length": 2,
+                "user_id": null, "agent_id": null, "group_id": null, "chat_id": null, "value": "opaque"}],
+            "future_metadata": {"enabled": true, "nested": [1, "value", null]},
+            "future_null": null
+        });
+        let metadata: MessageMetadata = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(metadata.entities[0].kind, "TYPE_UNKNOWN_910");
+        assert_eq!(metadata.extra["future_metadata"], json["future_metadata"]);
+        let encoded = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(encoded["future_metadata"], json["future_metadata"]);
+        assert!(encoded.as_object().unwrap().contains_key("future_null"));
+        assert_eq!(
+            serde_json::from_value::<MessageMetadata>(encoded).unwrap(),
+            metadata
+        );
+        assert!(
+            serde_json::from_str::<MessageMetadata>("{}")
+                .unwrap()
+                .extra
+                .is_empty()
+        );
     }
 
     #[test]

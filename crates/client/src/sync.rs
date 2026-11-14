@@ -61,6 +61,12 @@ impl Default for SyncConfig {
 }
 
 pub(crate) trait SyncHost: Clone + Send + Sync + 'static {
+    /// Pins the source account only while committing local snapshots/cursors.
+    /// Hosts without account switching need no lease.
+    fn local_write_lease(&self) -> BoxFuture<'static, BackendResult<Box<dyn Send>>> {
+        Box::pin(async { Ok(Box::new(()) as Box<dyn Send>) })
+    }
+
     fn get_updates_state(
         &self,
         date: Option<i64>,
@@ -209,6 +215,11 @@ impl SyncManager {
         }
     }
 
+    pub(crate) async fn clear_account_state(&self) {
+        *self.discovery_round.lock().await = None;
+        self.state_preceding_updates.lock().await.clear();
+    }
+
     pub(crate) async fn discover<H: SyncHost>(
         &self,
         host: &H,
@@ -242,6 +253,7 @@ impl SyncManager {
         if !preceding.is_empty() {
             events.extend(self.process_realtime_inner(host, preceding).await?);
         }
+        let _write = host.local_write_lease().await?;
         self.satisfy_discovery_target(SyncBucketKey::User, true)
             .await?;
         self.settle_discovery_round().await?;
@@ -352,6 +364,7 @@ impl SyncManager {
         self.observe_discovery_targets(&targets).await;
 
         if !direct.is_empty() {
+            let _write = host.local_write_lease().await?;
             let max_date = max_update_date(&direct);
             let applied = host.apply_sync_batch(direct, None).await?;
             let applied = self
@@ -391,6 +404,7 @@ impl SyncManager {
                 self.process_bucket(host, key, updates, target, force_fetch)
                     .await?,
             );
+            let _write = host.local_write_lease().await?;
             self.satisfy_discovery_target(key, force_fetch).await?;
         }
 
@@ -410,6 +424,7 @@ impl SyncManager {
         results.sort_by_key(|(key, _, _)| bucket_sort_key(*key));
         for (key, force_fetch, result) in results {
             events.extend(result?);
+            let _write = host.local_write_lease().await?;
             self.satisfy_discovery_target(key, force_fetch).await?;
         }
         self.maybe_commit_discovery_round().await?;
@@ -727,6 +742,7 @@ impl SyncManager {
         target_date: i64,
     ) -> BackendResult<CommittedSyncBatch> {
         let repair = host.repair_bucket(key, target_seq).await?;
+        let _write = host.local_write_lease().await?;
         let state = repair.checkpoint.unwrap_or(SyncBucketState {
             seq: target_seq,
             date: target_date,
@@ -771,6 +787,7 @@ impl SyncManager {
         updates: Vec<proto::Update>,
         sidecars: Option<proto::UpdateSidecars>,
     ) -> BackendResult<CommittedSyncBatch> {
+        let write = host.local_write_lease().await?;
         validate_journal_updates(&updates)?;
         let payload = encode_pending_payload(&redact_form_text(&updates), sidecars.as_ref())?;
         self.store
@@ -794,6 +811,7 @@ impl SyncManager {
                         bucket_kind(key),
                         committed_state.seq
                     );
+                    drop(write);
                     return self
                         .repair_cold_bucket(host, key, committed_state.seq, committed_state.date)
                         .await;
@@ -825,6 +843,7 @@ impl SyncManager {
         let mut events = Vec::new();
         let mut refetch = BTreeMap::<(u8, i64), (SyncBucketKey, i64)>::new();
         for batch in batches {
+            let _write = host.local_write_lease().await?;
             let decoded = decode_pending_payload(&batch.payload).and_then(|(updates, sidecars)| {
                 validate_journal_updates(&updates)?;
                 Ok((updates, sidecars))
