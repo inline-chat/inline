@@ -2166,6 +2166,7 @@ async fn run_provider_installation(
             owner_user_id: account.owner_user_id,
             dm_chat_id,
             bot,
+            bot_store: bot_store.clone(),
             inline_events,
             connection_lease: &connection_lease,
             readiness: shared_provider_readiness.as_ref(),

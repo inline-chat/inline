@@ -11,11 +11,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inline_client::{
-    AnswerMessageActionRequest, ClientEvent, EditInteractiveMessageRequest, EditMessageRequest,
-    ExternalId, InlineClient, InlineId, LosslessEventReceiver, MediaKind, MessageActionButton,
-    MessageActionKind, MessageActionRow, MessageActions, MessageContent, PeerRef, ReactRequest,
-    SendInteractiveTextRequest, SendNotificationMode, SendTextRequest, TypingRequest,
-    UploadRequest,
+    AnswerMessageActionRequest, ClientEvent, ClientStore, EditInteractiveMessageRequest,
+    EditMessageRequest, ExternalId, InlineClient, InlineId, LosslessEventReceiver, MediaKind,
+    MessageActionButton, MessageActionKind, MessageActionRow, MessageActions, MessageContent,
+    PeerRef, ReactRequest, SendInteractiveTextRequest, SendNotificationMode, SendTextRequest,
+    SqliteStore, TypingRequest, UploadRequest,
 };
 use inline_dots::{
     CodexAppServerTokenSource, ConnectorSettings, DotsClient, DotsConfig, DotsConnector,
@@ -39,6 +39,7 @@ const EXTERNAL_SOURCE: &str = "dots-bridge";
 /// The bot's side of the owner DM, on the bridge's `InlineClient`.
 pub(crate) struct BotDm {
     bot: InlineClient,
+    store: SqliteStore,
     chat_id: InlineId,
     http: reqwest::Client,
     profile: Option<ProfileSync>,
@@ -158,6 +159,7 @@ impl ProfileSync {
 impl BotDm {
     pub(crate) fn new(
         bot: InlineClient,
+        store: SqliteStore,
         chat_id: InlineId,
         profile: Option<ProfileSync>,
         owner: Option<Arc<super::owner_control::OwnerControl>>,
@@ -169,6 +171,7 @@ impl BotDm {
             .map_err(io::Error::other)?;
         Ok(Self {
             bot,
+            store,
             chat_id,
             http,
             profile,
@@ -254,6 +257,14 @@ pub(crate) fn entities_to_markdown(
                 Some(url) => ("[".to_owned(), format!("]({url})")),
                 None => continue,
             },
+            // Commands keep who they name, for `/share @name`.
+            "TYPE_MENTION" if text.trim_start().starts_with('/') => match entity.user_id {
+                Some(user) => (
+                    "[".to_owned(),
+                    format!("](inline://user?id={})", user.get()),
+                ),
+                None => continue,
+            },
             // Mentions, plain URLs, and emails are already in the text.
             _ => continue,
         };
@@ -282,9 +293,9 @@ pub(crate) fn entities_to_markdown(
     out
 }
 
-impl InlineSide for BotDm {
-    fn post<'a>(&'a self, post: &'a InlinePost) -> BoxFuture<'a, InlineResult<i64>> {
-        Box::pin(async move {
+impl BotDm {
+    async fn send_post(&self, chat_id: InlineId, post: &InlinePost) -> InlineResult<i64> {
+        {
             let external_id = Self::external(&post.key)?;
             let random_id = interaction_random_id("dots", &post.key);
             let owner = post
@@ -305,9 +316,7 @@ impl InlineSide for BotDm {
             } else {
                 SendNotificationMode::Normal
             };
-            let peer = PeerRef::Chat {
-                chat_id: self.chat_id,
-            };
+            let peer = PeerRef::Chat { chat_id };
             let reply_to_message_id = post.reply_to.map(InlineId::new);
             let mutation = if let Some(file) = &post.file {
                 let request = UploadRequest {
@@ -351,7 +360,166 @@ impl InlineSide for BotDm {
                 .message_id
                 .map(InlineId::get)
                 .ok_or_else(|| InlineError("Inline accepted the message without an id".into()))
+        }
+    }
+
+    async fn edit_text(
+        &self,
+        chat_id: InlineId,
+        message_id: i64,
+        text: &str,
+        buttons: Option<&[Vec<Button>]>,
+    ) -> InlineResult<()> {
+        let message = EditMessageRequest {
+            chat_id,
+            message_id: InlineId::new(message_id),
+            text: text.to_owned(),
+            external_id: None,
+            parse_markdown: true,
+        };
+        match buttons {
+            None => self.bot.edit_message(message).await.map_err(inline_error),
+            // Sending the action set lets an edit clear buttons.
+            Some(rows) => self
+                .bot
+                .edit_interactive_message(EditInteractiveMessageRequest {
+                    message,
+                    actions: Self::actions(rows),
+                })
+                .await
+                .map_err(inline_error),
+        }
+    }
+
+    /// `/share`, `/unshare`, `/allowlist`: who else may use this Dot, kept as
+    /// agent grants in Inline like the other bridges.
+    async fn share_command(&self, name: &str, arguments: &str) -> InlineResult<Option<String>> {
+        let remove = match name {
+            "share" => false,
+            "unshare" => true,
+            "allowlist" => arguments
+                .split_whitespace()
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case("remove")),
+            _ => return Ok(None),
+        };
+        let users = command_user_ids(arguments);
+        if users.is_empty() {
+            let grants = super::v2::api::list_grants(&self.bot)
+                .await
+                .map_err(inline_error)?
+                .grants;
+            if grants.is_empty() {
+                return Ok(Some(
+                    "Only you can use this Dot. Add someone with /share @name.".into(),
+                ));
+            }
+            let mut names = Vec::new();
+            for grant in grants {
+                names.push(self.user_name(grant.user_id).await);
+            }
+            return Ok(Some(format!(
+                "People who can use this Dot: {}. Remove someone with /unshare @name.",
+                names.join(", ")
+            )));
+        }
+        let mut done = Vec::new();
+        for user in users {
+            if remove {
+                super::v2::api::delete_grant(&self.bot, user).await
+            } else {
+                super::v2::api::grant_use(&self.bot, user).await
+            }
+            .map_err(inline_error)?;
+            done.push(self.user_name(user).await);
+        }
+        Ok(Some(if remove {
+            format!("{} can no longer use this Dot.", done.join(", "))
+        } else {
+            format!(
+                "{} can now use this Dot: in a DM with this bot, or by mentioning it in a chat. Their messages reach your Dot labelled with their name, and its answers go back to them.",
+                done.join(", ")
+            )
+        }))
+    }
+
+    async fn user_name(&self, user_id: i64) -> String {
+        user_display_name(&self.store, user_id).await
+    }
+}
+
+/// A user's name as the bot knows it, falling back to their id.
+async fn user_display_name(store: &SqliteStore, user_id: i64) -> String {
+    let user = store.user(InlineId::new(user_id)).await.ok().flatten();
+    user.and_then(|user| {
+        let full = [user.first_name.as_deref(), user.last_name.as_deref()]
+            .into_iter()
+            .flatten()
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        (!full.is_empty())
+            .then_some(full)
+            .or_else(|| user.username.map(|name| format!("@{name}")))
+    })
+    .unwrap_or_else(|| format!("user {user_id}"))
+}
+
+/// User ids in command arguments: mention links (`inline://user?id=N`) and
+/// bare numbers.
+pub(crate) fn command_user_ids(arguments: &str) -> Vec<i64> {
+    let mut ids = Vec::new();
+    for (index, _) in arguments.match_indices("inline://user?id=") {
+        let digits: String = arguments[index + "inline://user?id=".len()..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        ids.extend(digits.parse::<i64>().ok());
+    }
+    for word in arguments.split_whitespace() {
+        ids.extend(word.parse::<i64>().ok().filter(|id| *id > 0));
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+impl InlineSide for BotDm {
+    fn post<'a>(&'a self, post: &'a InlinePost) -> BoxFuture<'a, InlineResult<i64>> {
+        Box::pin(self.send_post(self.chat_id, post))
+    }
+
+    fn post_in<'a>(
+        &'a self,
+        chat_id: i64,
+        post: &'a InlinePost,
+    ) -> BoxFuture<'a, InlineResult<i64>> {
+        Box::pin(async move {
+            // Guests only ever get bot posts.
+            let post = InlinePost {
+                as_owner: false,
+                ..post.clone()
+            };
+            self.send_post(InlineId::new(chat_id), &post).await
         })
+    }
+
+    fn edit_in<'a>(
+        &'a self,
+        chat_id: i64,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(self.edit_text(InlineId::new(chat_id), message_id, text, None))
+    }
+
+    fn command<'a>(
+        &'a self,
+        name: &'a str,
+        arguments: &'a str,
+    ) -> BoxFuture<'a, InlineResult<Option<String>>> {
+        Box::pin(self.share_command(name, arguments))
     }
 
     fn edit_as_owner<'a>(
@@ -408,27 +576,7 @@ impl InlineSide for BotDm {
         text: &'a str,
         buttons: Option<&'a [Vec<Button>]>,
     ) -> BoxFuture<'a, InlineResult<()>> {
-        Box::pin(async move {
-            let message = EditMessageRequest {
-                chat_id: self.chat_id,
-                message_id: InlineId::new(message_id),
-                text: text.to_owned(),
-                external_id: None,
-                parse_markdown: true,
-            };
-            match buttons {
-                None => self.bot.edit_message(message).await.map_err(inline_error),
-                // Sending the action set lets an edit clear buttons.
-                Some(rows) => self
-                    .bot
-                    .edit_interactive_message(EditInteractiveMessageRequest {
-                        message,
-                        actions: Self::actions(rows),
-                    })
-                    .await
-                    .map_err(inline_error),
-            }
-        })
+        Box::pin(self.edit_text(self.chat_id, message_id, text, buttons))
     }
 
     fn react<'a>(
@@ -566,6 +714,109 @@ impl InlineSide for BotDm {
     }
 }
 
+/// A text message to the Dot from someone other than the owner: in their DM
+/// with the bot, or a chat where they mentioned it. Whether they may use it
+/// is checked separately.
+pub(crate) struct GuestCandidate {
+    pub(crate) chat_id: i64,
+    pub(crate) message_id: i64,
+    pub(crate) sender_id: i64,
+    pub(crate) mentioned: bool,
+    pub(crate) text: String,
+}
+
+pub(crate) fn guest_candidate(
+    event: &ClientEvent,
+    dm_chat_id: InlineId,
+    owner_user_id: i64,
+) -> Option<GuestCandidate> {
+    let ClientEvent::MessageStored { message } = event else {
+        return None;
+    };
+    if message.chat_id == dm_chat_id
+        || message.is_outgoing
+        || message.metadata.is_service
+        || message.sender_id.get() == owner_user_id
+    {
+        return None;
+    }
+    let MessageContent::Text { text } = &message.content else {
+        return None;
+    };
+    Some(GuestCandidate {
+        chat_id: message.chat_id.get(),
+        message_id: message.message_id.get(),
+        sender_id: message.sender_id.get(),
+        mentioned: message.metadata.mentioned == Some(true),
+        text: entities_to_markdown(text, &message.metadata.entities),
+    })
+}
+
+/// Turns a candidate into a relay event when the sender may use the Dot.
+/// People need it shared with them; any chat but their own DM with the bot
+/// also needs a mention. The owner's own messages elsewhere are ignored.
+async fn admit_guest(
+    bot: &InlineClient,
+    store: &SqliteStore,
+    candidate: GuestCandidate,
+) -> Option<InlineEvent> {
+    let dialog = store
+        .dialog(InlineId::new(candidate.chat_id))
+        .await
+        .ok()
+        .flatten();
+    let direct = dialog
+        .as_ref()
+        .and_then(|dialog| dialog.peer_user_id)
+        .is_some_and(|peer| peer.get() == candidate.sender_id);
+    if !direct && !candidate.mentioned {
+        return None;
+    }
+    let allowed = match super::v2::api::get_agent_access(bot, 0, candidate.sender_id).await {
+        Ok(access) => {
+            access.is_owner
+                || access
+                    .operations
+                    .contains(&(inline_protocol::proto::AgentGrantOperation::Invoke as i32))
+        }
+        Err(error) => {
+            log::warn!(target: "inline::bridge::dots", "access check failed: {error}");
+            false
+        }
+    };
+    if !allowed {
+        if direct {
+            let mut reply = SendTextRequest::new(
+                PeerRef::Chat {
+                    chat_id: InlineId::new(candidate.chat_id),
+                },
+                "This Dot hasn't been shared with you. Its owner can share it with /share.",
+            );
+            reply.reply_to_message_id = Some(InlineId::new(candidate.message_id));
+            if let Ok(external_id) = BotDm::external(&format!(
+                "guest-denied:{}:{}",
+                candidate.chat_id, candidate.message_id
+            )) {
+                reply.external_id = Some(external_id);
+            }
+            if let Err(error) = bot.send_text(reply).await {
+                log::warn!(target: "inline::bridge::dots", "denial not sent: {error}");
+            }
+        }
+        return None;
+    }
+    let chat_title = (!direct)
+        .then(|| dialog.and_then(|dialog| dialog.title))
+        .flatten();
+    Some(InlineEvent::Guest {
+        chat_id: candidate.chat_id,
+        message_id: candidate.message_id,
+        sender_name: user_display_name(store, candidate.sender_id).await,
+        chat_title,
+        text: candidate.text,
+    })
+}
+
 /// Maps a bot client event to a relay event for the owner DM. Events from
 /// other chats, from the bot itself, and service rows are dropped.
 pub(crate) fn relay_event(event: &ClientEvent, dm_chat_id: InlineId) -> Option<InlineEvent> {
@@ -682,6 +933,7 @@ pub(crate) struct DotsLaunch<'a> {
     pub(crate) owner_user_id: i64,
     pub(crate) dm_chat_id: InlineId,
     pub(crate) bot: InlineClient,
+    pub(crate) bot_store: SqliteStore,
     pub(crate) inline_events: LosslessEventReceiver,
     pub(crate) connection_lease: &'a ProviderConnectionLease,
     pub(crate) readiness: Option<&'a ProviderReadiness>,
@@ -700,6 +952,7 @@ pub(crate) async fn run_dots_relay(
         owner_user_id,
         dm_chat_id,
         bot,
+        bot_store,
         mut inline_events,
         connection_lease,
         readiness,
@@ -715,7 +968,13 @@ pub(crate) async fn run_dots_relay(
     let store = Arc::new(RelayStore::open(
         &installation.state_dir.join("dots-relay.sqlite"),
     )?);
-    let side = Arc::new(BotDm::new(bot.clone(), dm_chat_id, profile, owner_control)?);
+    let side = Arc::new(BotDm::new(
+        bot.clone(),
+        bot_store.clone(),
+        dm_chat_id,
+        profile,
+        owner_control,
+    )?);
     let relay = Arc::new(Relay::new(
         connector,
         side,
@@ -802,7 +1061,11 @@ pub(crate) async fn run_dots_relay(
                     break Err(io::Error::other("Inline event stream ended").into());
                 };
                 connection_lease.observe(delivery.event(), &bot);
-                if let Some(event) = relay_event(delivery.event(), dm_chat_id)
+                let event = match guest_candidate(delivery.event(), dm_chat_id, owner_user_id) {
+                    Some(candidate) => admit_guest(&bot, &bot_store, candidate).await,
+                    None => relay_event(delivery.event(), dm_chat_id),
+                };
+                if let Some(event) = event
                     && let Err(error) = relay.handle_inline(event).await
                 {
                     // Unacknowledged deliveries come back; a store or Inline
@@ -933,7 +1196,7 @@ mod tests {
             .into_iter()
             .map(|command| command.command)
             .collect();
-        assert_eq!(commands, ["help", "status", "mirror"]);
+        assert_eq!(commands, ["help", "status", "mirror", "share"]);
     }
 
     #[test]
@@ -991,6 +1254,47 @@ mod tests {
             chat_id: None,
             value: value.map(str::to_owned),
         }
+    }
+
+    #[test]
+    fn guests_are_other_people_writing_outside_the_owner_dm() {
+        let dm = InlineId::new(42);
+        let text = MessageContent::Text { text: "hi".into() };
+        let candidate = guest_candidate(&stored(43, false, text.clone(), false), dm, 1).unwrap();
+        assert_eq!(
+            (
+                candidate.chat_id,
+                candidate.message_id,
+                candidate.sender_id,
+                candidate.mentioned,
+                candidate.text.as_str()
+            ),
+            (43, 9, 100, false, "hi")
+        );
+        assert!(guest_candidate(&stored(42, false, text.clone(), false), dm, 1).is_none());
+        assert!(guest_candidate(&stored(43, true, text.clone(), false), dm, 1).is_none());
+        // The owner's own messages elsewhere are not guest requests.
+        assert!(guest_candidate(&stored(43, false, text, false), dm, 100).is_none());
+    }
+
+    #[test]
+    fn share_commands_name_users_by_mention_or_id() {
+        let mention = inline_client::MessageEntityRecord {
+            user_id: Some(InlineId::new(12)),
+            ..entity("TYPE_MENTION", 7, 6, None)
+        };
+        let text = entities_to_markdown("/share @alice", std::slice::from_ref(&mention));
+        assert_eq!(text, "/share [@alice](inline://user?id=12)");
+        assert_eq!(
+            command_user_ids("[@alice](inline://user?id=12) 7"),
+            vec![7, 12]
+        );
+        assert!(command_user_ids("remove").is_empty());
+        // Ordinary messages keep mentions as plain text.
+        assert_eq!(
+            entities_to_markdown("hi @alice", &[entity("TYPE_MENTION", 3, 6, None)]),
+            "hi @alice"
+        );
     }
 
     #[test]

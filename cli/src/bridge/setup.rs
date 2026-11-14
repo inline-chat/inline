@@ -671,6 +671,7 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
             ("help", "What this bridge does"),
             ("status", "Show the ChatGPT connection"),
             ("mirror", "Show messages you type in ChatGPT here (on/off)"),
+            ("share", "Let someone else use your Dot (/unshare to stop)"),
         ]
         .into_iter()
         .enumerate()
