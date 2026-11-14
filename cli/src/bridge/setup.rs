@@ -355,7 +355,12 @@ pub(super) async fn provision_dev_bot(
         .unwrap_or_else(|| {
             provider_bot_username(provider.provider_id, me.id, &account.host_installation_id)
         });
-    let bots = owner.call(proto::ListBotsInput {}).await?.bots;
+    let bots = owner
+        .call(proto::ListBotsInput {
+            include_managed: None,
+        })
+        .await?
+        .bots;
     let (bot, replaces_saved_bot) = select_bridge_bot(
         &bots,
         saved.as_ref().map(|saved| saved.bot_user_id),

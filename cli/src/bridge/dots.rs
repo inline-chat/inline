@@ -63,6 +63,8 @@ pub(crate) struct ProfileSync {
 /// chose a name at setup).
 pub(crate) const MANAGED_NAME_FILE: &str = "dots-managed-name";
 const MANAGED_AVATAR_FILE: &str = "dots-managed-avatar";
+/// Present once this Dot's bot was made private in Inline.
+const PRIVATE_ACCESS_FILE: &str = "dots-private-access";
 
 impl ProfileSync {
     fn marker(&self, file: &str) -> Option<String> {
@@ -83,7 +85,9 @@ impl ProfileSync {
                 .await
                 .map_err(|error| error.to_string())?;
         let bots = owner
-            .call(proto::ListBotsInput {})
+            .call(proto::ListBotsInput {
+                include_managed: None,
+            })
             .await
             .map_err(|error| error.to_string())?
             .bots;
@@ -91,6 +95,22 @@ impl ProfileSync {
             .into_iter()
             .find(|bot| bot.id == self.bot_user_id)
             .ok_or_else(|| "the bridge bot no longer exists".to_owned())?;
+        // A Dot answers only its owner and the people it is shared with. Dots
+        // made before Inline enforced access lists stayed open to everyone, so
+        // others saw a composer for a Dot that refused them. Make this one
+        // private once; the owner can open it again in the bot's chat info.
+        if self.marker(PRIVATE_ACCESS_FILE).is_none()
+            && owner
+                .call(proto::UpdateAgentSettingsInput {
+                    bot_user_id: self.bot_user_id,
+                    default_output_mode: None,
+                    open_to_everyone: Some(false),
+                })
+                .await
+                .is_ok()
+        {
+            let _ = self.set_marker(PRIVATE_ACCESS_FILE, "1");
+        }
         if let Some(name) = name {
             let current = bot.first_name.as_deref().unwrap_or("").trim().to_owned();
             if current != name {

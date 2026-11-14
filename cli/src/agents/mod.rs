@@ -191,6 +191,9 @@ pub(crate) struct AgentsSetupArgs {
     /// Additional Inline user ID to allow; may be repeated.
     #[arg(long = "allow-user", value_name = "ID")]
     pub(crate) allow_users: Vec<i64>,
+    /// Who can message the bot in Inline besides you.
+    #[command(flatten)]
+    pub(crate) sharing: crate::bot_sharing::BotSharingArgs,
     /// Refuse to install or upgrade required external integrations.
     #[arg(long)]
     pub(crate) no_install: bool,
@@ -569,6 +572,7 @@ pub(crate) async fn setup(
                     allow_adapter_install: !resolved.args.no_install,
                     manage_service: !resolved.args.no_restart,
                     operator_user_ids: Some(resolved.args.allow_users),
+                    sharing: resolved.args.sharing.clone(),
                 },
                 |event| match event {
                     bridge::ProviderSetupProgress::Started(phase) => progress.started(phase),

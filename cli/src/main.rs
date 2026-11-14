@@ -3,6 +3,7 @@ mod agents;
 mod attachments;
 mod auth;
 mod auth_flow;
+mod bot_sharing;
 mod bots;
 mod bridge;
 mod chat_output;
@@ -762,6 +763,8 @@ struct SetupDotsArgs {
         help = "Configure without installing a launchd/systemd service (containers run `inline bridge run` themselves)"
     )]
     no_service: bool,
+    #[command(flatten)]
+    sharing: bot_sharing::BotSharingArgs,
 }
 
 #[derive(Args)]
@@ -770,6 +773,8 @@ struct SetupAgentArgs {
     folder: Option<PathBuf>,
     #[arg(long, value_name = "NAME")]
     name: Option<String>,
+    #[command(flatten)]
+    sharing: bot_sharing::BotSharingArgs,
 }
 
 #[derive(Subcommand)]
@@ -1154,15 +1159,22 @@ enum BotsCommand {
 
 #[derive(Subcommand)]
 enum BotsAccessCommand {
-    #[command(about = "List people with access to a bot", visible_alias = "ls")]
+    #[command(about = "List who can message a bot", visible_alias = "ls")]
     List(BotsBotArgs),
     #[command(
         about = "Grant or replace one person's access to a bot",
-        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n\nReplaces the person's existing operations. Defaults to invoke,steer."
+        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --space-id 3\n  inline bots access grant --bot-user-id 42 --user-id 7 --admin\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n\nReplaces the person's existing operations. Defaults to invoke,steer. An admin manages the bot with you; only you can delete it."
     )]
     Grant(BotsAccessGrantArgs),
     #[command(about = "Revoke one person's access to a bot")]
     Revoke(BotsAccessUserArgs),
+    #[command(
+        about = "Let anyone on Inline message a bot",
+        after_help = "For bots meant for everyone, like a support or team bot. The bot's own software still decides who it answers; an Inline agent bridge keeps answering only its owner and access list."
+    )]
+    Open(BotsBotArgs),
+    #[command(about = "Limit a bot to its owner and access list again")]
+    Close(BotsBotArgs),
 }
 
 #[derive(Subcommand)]
@@ -1512,6 +1524,15 @@ struct BotsCreateArgs {
 
     #[arg(long, help = "Optional space id to add the bot to")]
     add_to_space: Option<i64>,
+
+    #[command(flatten)]
+    sharing: bot_sharing::BotSharingArgs,
+
+    #[arg(
+        long,
+        help = "Let anyone on Inline message the bot (a new bot is private otherwise)"
+    )]
+    open: bool,
 }
 
 #[derive(Args)]
@@ -1580,9 +1601,16 @@ struct BotsAccessGrantArgs {
         value_enum,
         value_delimiter = ',',
         num_args = 1..,
+        conflicts_with = "admin",
         help = "Allowed operations (comma-separated; default invoke,steer)"
     )]
     operations: Vec<bots::BotGrantOperation>,
+
+    #[arg(
+        long,
+        help = "Make them an admin: they manage access, profile, settings and token with you (invoke,steer,configure)"
+    )]
+    admin: bool,
 }
 
 #[derive(Args)]
@@ -3315,6 +3343,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                 SetupAgentArgs {
                                     folder: None,
                                     name: args.name,
+                                    sharing: args.sharing,
                                 },
                             ),
                             SetupCommand::Hermes(_) | SetupCommand::Openclaw(_) => unreachable!(),
@@ -3353,6 +3382,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             provider_id,
                             args.folder,
                             args.name,
+                            args.sharing,
                             manage_service,
                             cli.json,
                             json_format,
@@ -3642,7 +3672,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let mut payload = realtime.call(proto::ListBotsInput {}).await?;
+                    let mut payload = realtime.call(proto::ListBotsInput { include_managed: None }).await?;
                     if cli.json {
                         filter_bots_payload(&mut payload, args.filter.as_deref());
                         output::print_json(&payload, json_format)?;
@@ -3691,10 +3721,28 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         add_to_space,
                     };
                     let payload = realtime.call(input).await?;
+                    // A new bot is private. Share it in the same step when asked.
+                    if let Some(bot) = payload.bot.as_ref() {
+                        for grant in args.sharing.grants(bot.id)? {
+                            realtime.call(grant).await?;
+                        }
+                        if args.open {
+                            realtime
+                                .call(proto::UpdateAgentSettingsInput {
+                                    bot_user_id: bot.id,
+                                    default_output_mode: None,
+                                    open_to_everyone: Some(true),
+                                })
+                                .await?;
+                        }
+                    }
                     if cli.json {
                         output::print_json(&payload, json_format)?;
                     } else if let Some(bot) = payload.bot.as_ref() {
                         println!("Created bot {} (id {}).", output::terminal_text(&user_display_name(bot)), bot.id);
+                        for line in bot_sharing::access_summary_lines(bot.id, &args.sharing, args.open) {
+                            println!("{line}");
+                        }
                         println!(
                             "To reveal token: inline bots reveal-token --bot-user-id {}",
                             bot.id

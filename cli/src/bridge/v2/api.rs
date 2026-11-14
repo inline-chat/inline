@@ -236,6 +236,7 @@ pub(crate) async fn get_agent_access(
         proto::GetAgentAccessInput {
             bot_user_id,
             user_id,
+            bot_user_ids: Vec::new(),
         }
     )
 }

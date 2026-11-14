@@ -229,6 +229,8 @@ pub(crate) struct ProviderSetupOptions {
     pub(crate) allow_adapter_install: bool,
     pub(crate) manage_service: bool,
     pub(crate) operator_user_ids: Option<Vec<i64>>,
+    /// People, spaces and admins to share the bot with as part of setup.
+    pub(crate) sharing: crate::bot_sharing::BotSharingArgs,
 }
 
 pub(crate) enum ProviderSetupProgress {
@@ -243,6 +245,7 @@ pub async fn setup_provider(
     provider_id: &str,
     folder: Option<PathBuf>,
     name: Option<String>,
+    sharing: crate::bot_sharing::BotSharingArgs,
     manage_service: bool,
     json: bool,
     json_format: JsonFormat,
@@ -258,6 +261,7 @@ pub async fn setup_provider(
             allow_adapter_install: true,
             manage_service,
             operator_user_ids: None,
+            sharing: sharing.clone(),
         },
     )
     .await?;
@@ -274,6 +278,10 @@ pub async fn setup_provider(
         output::print_json(&result, json_format)?;
     } else {
         println!("{} is ready in Inline.", result.display_name);
+        // People new to agents often assume their team can reach the bot. Say who can.
+        for line in crate::bot_sharing::access_summary_lines(outcome.bot_user_id, &sharing, false) {
+            println!("{line}");
+        }
         println!(
             "Provider: {} ({})",
             result.provider, result.provider_version
@@ -395,6 +403,23 @@ where
     validate_account(&provisioned.account, &provisioned.secrets)?;
     if let Some(operator_user_ids) = options.operator_user_ids.as_deref() {
         set_provider_operator_ids(&provisioned.account, provider_id, operator_user_ids)?;
+    }
+    let bot_user_id = provisioned.installation.bot_user_id;
+    for grant in options.sharing.grants(bot_user_id)? {
+        owner.call(grant).await?;
+    }
+    if provider_id == dots::DOTS_PROVIDER_ID {
+        // A Dot answers only its owner and the people it is shared with, so
+        // nobody else should see a composer for it. Other bridges report a
+        // runtime, which makes them private on its own; the Dots relay doesn't.
+        // Best effort: an older server has no such setting.
+        let _ = owner
+            .call(proto::UpdateAgentSettingsInput {
+                bot_user_id,
+                default_output_mode: None,
+                open_to_everyone: Some(false),
+            })
+            .await;
     }
     progress(ProviderSetupProgress::Completed("access", "configured"));
 
