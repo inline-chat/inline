@@ -123,8 +123,9 @@ struct MessageContextMenuStyle {
 
 /// Timing of the menu. Defaults are Telegram iOS's context controller.
 struct MessageContextMenuMotion {
-  /// Hold before the source starts shrinking, then the shrink before the menu opens.
-  var pressDelay: Double = 0.12
+  /// Hold before the source starts shrinking, then the shrink before the menu opens. Longer
+  /// than Telegram's 0.12 s: a finger resting before a slow scroll shouldn't shrink the bubble.
+  var pressDelay: Double = 0.2
   var pressDuration: Double = 0.2
   /// The opening spring: Core Animation's mass 5, stiffness 900 spring with `springDamping`,
   /// its settling time compressed into `springDuration`.

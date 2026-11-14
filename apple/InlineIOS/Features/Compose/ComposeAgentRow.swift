@@ -130,7 +130,7 @@ struct ComposeAgentRow: View {
 
 /// A quiet label that opens a native pull-down menu: "Default — X" when the
 /// harness has a default, then the options with a checkmark on the choice.
-private struct ComposeAgentOptionMenu: View {
+struct ComposeAgentOptionMenu: View {
   let title: String
   let systemImage: String?
   let automaticTitle: String?

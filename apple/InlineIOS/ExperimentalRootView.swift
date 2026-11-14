@@ -635,6 +635,18 @@ private struct ExperimentalAuthedRootView: View {
       }
     }
     .background(Color(.systemBackground))
+    .background {
+      // New Thread opens the composer without UIKit first switching to its empty page.
+      NewThreadTabInterceptor(title: String(localized: "New Thread"), action: newThreadTabTapped)
+    }
+  }
+
+  private func newThreadTabTapped() {
+    if RootTab(appTab: router.selectedTab) == .search {
+      requestSearchExit(to: lastContentRootTab, createsThread: true)
+    } else {
+      startNewThread(spaceId: nav.activeSpaceId)
+    }
   }
 
   private var openChatsTabSystemImage: String {
@@ -649,11 +661,7 @@ private struct ExperimentalAuthedRootView: View {
       get: { RootTab(appTab: router.selectedTab) },
       set: { newValue in
         if newValue == .newChat {
-          if RootTab(appTab: router.selectedTab) == .search {
-            requestSearchExit(to: lastContentRootTab, createsThread: true)
-          } else {
-            startNewThread(spaceId: nav.activeSpaceId)
-          }
+          newThreadTabTapped()
           return
         }
 

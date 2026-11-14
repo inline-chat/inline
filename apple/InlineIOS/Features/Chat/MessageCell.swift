@@ -724,6 +724,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   override func prepareForReuse() {
     super.prepareForReuse()
     isContextMenuSourceHidden = false
+    // A press can end without the gesture easing the bubble back (an insert or a
+    // programmatic scroll reusing the cell mid-press).
+    if let bubble = nextMessageView?.bubbleContentView {
+      bubble.layer.removeAnimation(forKey: "contextMenu.press")
+      bubble.layer.sublayerTransform = CATransform3DIdentity
+    }
+    messageView?.bubbleView.transform = .identity
 
     alpha = 1
     contentView.alpha = 1

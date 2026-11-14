@@ -56,6 +56,7 @@ public class ChatContainerView: UIView {
       sendAnimationCoordinator: sendAnimationCoordinator,
       theme: theme,
       openAnchor: initialMessages?.openAnchor ?? .latest,
+      unreadFetchBoundary: initialMessages?.uncachedUnreadBoundary,
       viewModel: MessagesSectionedViewModel(
         peer: peerId,
         chatId: chatId,

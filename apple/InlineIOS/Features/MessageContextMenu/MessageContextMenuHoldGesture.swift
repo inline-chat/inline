@@ -17,6 +17,9 @@ final class MessageContextMenuHoldGesture: UIGestureRecognizer, UIGestureRecogni
   var acceptsTouch: ((CGPoint) -> Bool)?
   /// Movement that cancels the press before it opens the menu.
   var allowableMovement: CGFloat = 10
+  /// Movement that cancels the hold before the shrink starts. A scroll starts with a few points
+  /// of drift, so this fails before anything on screen reacts.
+  var allowableMovementBeforePress: CGFloat = 4
 
   /// The press starts at a location in the gesture's view. Return false to fail, for example
   /// when nothing under the finger has a menu.
@@ -80,7 +83,8 @@ final class MessageContextMenuHoldGesture: UIGestureRecognizer, UIGestureRecogni
     }
     guard let startLocation else { return }
     let location = touch.location(in: view)
-    if hypot(location.x - startLocation.x, location.y - startLocation.y) > allowableMovement {
+    let limit = isPressing ? allowableMovement : allowableMovementBeforePress
+    if hypot(location.x - startLocation.x, location.y - startLocation.y) > limit {
       fail()
     }
   }
