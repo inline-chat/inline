@@ -154,7 +154,7 @@ pub(crate) enum AgentsCommand {
     #[command(about = "Discover supported local agent harnesses without making changes")]
     Discover,
     #[command(about = "Set up an installed local agent as an Inline bot")]
-    Setup(AgentsSetupArgs),
+    Setup(Box<AgentsSetupArgs>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

@@ -340,6 +340,7 @@ impl BotDm {
             let reply_to_message_id = post.reply_to.map(InlineId::new);
             let mutation = if let Some(file) = &post.file {
                 let request = UploadRequest {
+                    entities: Vec::new(),
                     peer,
                     kind: media_kind(&file.mime),
                     file_name: Some(file.name.clone()),
@@ -391,6 +392,7 @@ impl BotDm {
         buttons: Option<&[Vec<Button>]>,
     ) -> InlineResult<()> {
         let message = EditMessageRequest {
+            entities: Vec::new(),
             chat_id,
             message_id: InlineId::new(message_id),
             text: text.to_owned(),
@@ -560,6 +562,7 @@ impl InlineSide for BotDm {
             owner
                 .client()
                 .edit_message(EditMessageRequest {
+                    entities: Vec::new(),
                     chat_id: self.chat_id,
                     message_id: InlineId::new(message_id),
                     text: text.to_owned(),
