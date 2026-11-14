@@ -444,14 +444,14 @@ impl BotDm {
     }
 
     async fn user_name(&self, user_id: i64) -> String {
-        user_display_name(&self.store, user_id).await
+        user_display_name(&self.bot, &self.store, user_id).await
     }
 }
 
-/// A user's name as the bot knows it, falling back to their id.
-async fn user_display_name(store: &SqliteStore, user_id: i64) -> String {
-    let user = store.user(InlineId::new(user_id)).await.ok().flatten();
-    user.and_then(|user| {
+/// A user's name: the bot's local copy, else Inline, else their id.
+async fn user_display_name(bot: &InlineClient, store: &SqliteStore, user_id: i64) -> String {
+    let local = store.user(InlineId::new(user_id)).await.ok().flatten();
+    let local = local.and_then(|user| {
         let full = [user.first_name.as_deref(), user.last_name.as_deref()]
             .into_iter()
             .flatten()
@@ -459,11 +459,17 @@ async fn user_display_name(store: &SqliteStore, user_id: i64) -> String {
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
             .join(" ");
-        (!full.is_empty())
-            .then_some(full)
-            .or_else(|| user.username.map(|name| format!("@{name}")))
-    })
-    .unwrap_or_else(|| format!("user {user_id}"))
+        (!full.is_empty()).then_some(full).or(user.username)
+    });
+    if let Some(name) = local {
+        return name;
+    }
+    super::v2::api::get_users(bot, vec![user_id])
+        .await
+        .ok()
+        .and_then(|users| users.into_iter().find(|user| user.id == user_id))
+        .and_then(|user| super::v2::api::display_name(&user))
+        .unwrap_or_else(|| format!("user {user_id}"))
 }
 
 /// User ids in command arguments: mention links (`inline://user?id=N`) and
@@ -721,6 +727,7 @@ pub(crate) struct GuestCandidate {
     pub(crate) chat_id: i64,
     pub(crate) message_id: i64,
     pub(crate) sender_id: i64,
+    pub(crate) from_owner: bool,
     pub(crate) mentioned: bool,
     pub(crate) text: String,
 }
@@ -733,11 +740,7 @@ pub(crate) fn guest_candidate(
     let ClientEvent::MessageStored { message } = event else {
         return None;
     };
-    if message.chat_id == dm_chat_id
-        || message.is_outgoing
-        || message.metadata.is_service
-        || message.sender_id.get() == owner_user_id
-    {
+    if message.chat_id == dm_chat_id || message.is_outgoing || message.metadata.is_service {
         return None;
     }
     let MessageContent::Text { text } = &message.content else {
@@ -747,6 +750,7 @@ pub(crate) fn guest_candidate(
         chat_id: message.chat_id.get(),
         message_id: message.message_id.get(),
         sender_id: message.sender_id.get(),
+        from_owner: message.sender_id.get() == owner_user_id,
         mentioned: message.metadata.mentioned == Some(true),
         text: entities_to_markdown(text, &message.metadata.entities),
     })
@@ -754,7 +758,7 @@ pub(crate) fn guest_candidate(
 
 /// Turns a candidate into a relay event when the sender may use the Dot.
 /// People need it shared with them; any chat but their own DM with the bot
-/// also needs a mention. The owner's own messages elsewhere are ignored.
+/// also needs a mention. The owner can mention it anywhere.
 async fn admit_guest(
     bot: &InlineClient,
     store: &SqliteStore,
@@ -771,6 +775,18 @@ async fn admit_guest(
         .is_some_and(|peer| peer.get() == candidate.sender_id);
     if !direct && !candidate.mentioned {
         return None;
+    }
+    let chat_title = (!direct)
+        .then(|| dialog.and_then(|dialog| dialog.title))
+        .flatten();
+    if candidate.from_owner {
+        return Some(InlineEvent::Guest {
+            chat_id: candidate.chat_id,
+            message_id: candidate.message_id,
+            sender_name: None,
+            chat_title,
+            text: candidate.text,
+        });
     }
     let allowed = match super::v2::api::get_agent_access(bot, 0, candidate.sender_id).await {
         Ok(access) => {
@@ -805,13 +821,10 @@ async fn admit_guest(
         }
         return None;
     }
-    let chat_title = (!direct)
-        .then(|| dialog.and_then(|dialog| dialog.title))
-        .flatten();
     Some(InlineEvent::Guest {
         chat_id: candidate.chat_id,
         message_id: candidate.message_id,
-        sender_name: user_display_name(store, candidate.sender_id).await,
+        sender_name: Some(user_display_name(bot, store, candidate.sender_id).await),
         chat_title,
         text: candidate.text,
     })
@@ -1273,8 +1286,12 @@ mod tests {
         );
         assert!(guest_candidate(&stored(42, false, text.clone(), false), dm, 1).is_none());
         assert!(guest_candidate(&stored(43, true, text.clone(), false), dm, 1).is_none());
-        // The owner's own messages elsewhere are not guest requests.
-        assert!(guest_candidate(&stored(43, false, text, false), dm, 100).is_none());
+        // The owner can use their Dot outside the DM too.
+        assert!(
+            guest_candidate(&stored(43, false, text, false), dm, 100)
+                .unwrap()
+                .from_owner
+        );
     }
 
     #[test]
