@@ -52,7 +52,7 @@ struct RenameChatSheet: View {
     .onAppear {
       isTitleFocused = true
     }
-    .onReceive(fullChat.$chatItem) { item in
+    .onReceive(fullChat.chatItemPublisher) { item in
       guard !didLoad else { return }
       guard let chat = item?.chat else { return }
       title = chat.humanReadableTitle ?? "Untitled"
