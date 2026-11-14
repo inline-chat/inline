@@ -6,6 +6,8 @@ import PackageDescription
 let baseDependencies: [Target.Dependency] = [
   "InlineKit",
   "InlineUI",
+  .product(name: "TimelineCore", package: "InlineTimeline"),
+  .product(name: "TimelineUIKit", package: "InlineTimeline"),
 ]
 
 let package = Package(
@@ -27,6 +29,7 @@ let package = Package(
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
     .package(name: "InlineUI", path: "../InlineUI"),
+    .package(name: "InlineTimeline", path: "../InlineTimeline"),
   ],
 
   targets: [
