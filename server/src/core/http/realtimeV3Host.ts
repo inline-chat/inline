@@ -23,7 +23,7 @@ import productionTrustRoots from "@inline-chat/protocol/trust-roots/inline-proto
 import { gunzipSync, gzipSync } from "node:zlib"
 import { isIP } from "node:net"
 import { randomBytes } from "node:crypto"
-import { installNodeAesBackend } from "@inline-chat/protocol/secure/node"
+import { installServerAesBackend } from "@in/server/modules/inlineProtocol/nativeAes"
 import { InlineProtocolReplayRepository, PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import { InlineProtocolAuthorizationKeys } from "@in/server/modules/inlineProtocol/authorizationKeys"
@@ -55,9 +55,9 @@ import type { TrustedClientIpHeader } from "./middleware"
 import { Log } from "@in/server/utils/log"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
 
-// Record and carrier AES through node:crypto; the portable backend costs one key
-// schedule per 16-byte block and dominated transfer CPU on the event loop.
-installNodeAesBackend()
+// Record and carrier AES through node:crypto, with IGE decryption in OpenSSL when it loads and
+// passes its self-test: the JS IGE decrypt costs ~16 ms of event loop per 512 KiB file part.
+const aesBackendStatus = installServerAesBackend()
 
 const REALTIME_V3_PATH = "/realtime/v3"
 const INLINE_PROTOCOL_VERIFICATION_PATH = "/.well-known/inline-protocol"
@@ -102,6 +102,11 @@ const MAX_CONCURRENT_APPLICATIONS_PER_AUTHORITY = 64
 const MAX_BUFFERED_APPLICATION_UPDATE_BYTES = 256 * 1024 * 1024
 const OVERLOAD_LOG_WINDOW_MS = 60_000
 export const realtimeV3Log = new Log("InlineProtocol.V3")
+if (aesBackendStatus.kind === "native") {
+  realtimeV3Log.info("Native AES-IGE decryption enabled", { library: aesBackendStatus.library })
+} else {
+  realtimeV3Log.warn("Native AES-IGE decryption unavailable; using JS", { reason: aesBackendStatus.reason })
+}
 
 export type InlineProtocolRuntime = {
   rsaKeys: readonly HandshakeRsaServerKey[]

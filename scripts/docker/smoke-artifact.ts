@@ -52,6 +52,16 @@ if (target === "server") {
   // so this works with both isolated local installs and hoisted image installs.
   const { pack, unpack } = createRequire(require.resolve("effect"))("msgpackr")
   if (unpack(pack({ smoke: true })).smoke !== true) throw new Error("MessagePack smoke failed")
+  // V3 record decryption loads OpenSSL's AES-IGE (server/src/modules/inlineProtocol/nativeAes.ts).
+  // Without it the server still runs, at ~10x the event-loop cost per file part, so fail the image.
+  const { dlopen, FFIType } = await import("bun:ffi")
+  dlopen("libcrypto.so.3", {
+    AES_set_decrypt_key: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+    AES_ige_encrypt: {
+      args: [FFIType.ptr, FFIType.ptr, FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.i32],
+      returns: FFIType.void,
+    },
+  }).close()
   console.info("Server image packaging and native dependencies passed.")
 } else {
   const reservation = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() })
