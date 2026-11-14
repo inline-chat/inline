@@ -1298,6 +1298,21 @@ macro_rules! rpc_requests {
 rpc_requests!(
     (GetMeInput, GetMe, GetMe, GetMeResult, GetMe),
     (
+        GetSpacesInput,
+        GetSpaces,
+        GetSpaces,
+        GetSpacesResult,
+        GetSpaces
+    ),
+    (GetUsersInput, GetUsers, GetUsers, GetUsersResult, GetUsers),
+    (
+        SearchUsersInput,
+        SearchUsers,
+        SearchUsers,
+        SearchUsersResult,
+        SearchUsers
+    ),
+    (
         GetPeerPhotoInput,
         GetPeerPhoto,
         GetPeerPhoto,
