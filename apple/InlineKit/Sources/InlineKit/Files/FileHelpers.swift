@@ -1,8 +1,9 @@
 import Foundation
+import InlineConfig
 import Logger
 import UniformTypeIdentifiers
 
-public enum FileLocalCacheDirectory {
+public enum FileLocalCacheDirectory: Sendable {
   case photos
   case videos
   case documents
@@ -121,25 +122,57 @@ public enum FileHelpers {
     FileManager.default.temporaryDirectory
   }
 
-  /// Documents directory with media type specific folders appended
+  static func cacheFolderName(for directory: FileLocalCacheDirectory) -> String {
+    switch directory {
+      case .photos: "Photos"
+      case .videos: "Videos"
+      case .documents: "Documents"
+      case .voices: "Voices"
+    }
+  }
+
+  /// Root that holds the media cache folders.
+  ///
+  /// macOS scopes it by bundle and profile. The Direct build is not sandboxed, so an
+  /// unscoped `Application Support/Photos` is shared with every other app and with
+  /// other Inline profiles, and clearing the cache would delete their files.
+  /// iOS keeps the original location: its container is private and single-profile.
+  static func mediaCacheRoot(
+    applicationSupportDirectory: URL,
+    bundleIdentifier: String?,
+    userProfile: String?
+  ) -> URL {
+    #if os(macOS)
+    let profile = userProfile.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
+    return applicationSupportDirectory
+      .appendingPathComponent(bundleIdentifier ?? "chat.inline", isDirectory: true)
+      .appendingPathComponent("Media", isDirectory: true)
+      .appendingPathComponent(profile, isDirectory: true)
+    #else
+    return applicationSupportDirectory
+    #endif
+  }
+
+  static func mediaCacheRoot() -> URL {
+    mediaCacheRoot(
+      applicationSupportDirectory: getApplicationSupportDirectory(),
+      bundleIdentifier: Bundle.main.bundleIdentifier,
+      userProfile: ProjectConfig.userProfile
+    )
+  }
+
+  /// Media type folder inside the media cache root.
   public static func getLocalCacheDirectory(
     for directory: FileLocalCacheDirectory,
     createIfNeeded: Bool = true
   ) -> URL {
-    let documentsDirectory = getApplicationSupportDirectory()
+    let documentsDirectory = mediaCacheRoot()
     let fileManager = FileManager.default
 
-    // Create a subdirectory based on the specified type
-    let subdirectoryPath: URL = switch directory {
-    case .photos:
-      documentsDirectory.appendingPathComponent("Photos", isDirectory: true)
-    case .videos:
-      documentsDirectory.appendingPathComponent("Videos", isDirectory: true)
-    case .documents:
-      documentsDirectory.appendingPathComponent("Documents", isDirectory: true)
-    case .voices:
-      documentsDirectory.appendingPathComponent("Voices", isDirectory: true)
-    }
+    let subdirectoryPath = documentsDirectory.appendingPathComponent(
+      cacheFolderName(for: directory),
+      isDirectory: true
+    )
 
     guard createIfNeeded else { return subdirectoryPath }
 

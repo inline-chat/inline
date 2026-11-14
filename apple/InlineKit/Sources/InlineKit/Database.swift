@@ -2152,6 +2152,10 @@ public extension AppDatabase {
 
     func admit(_ database: AppDatabase) -> AppDatabase {
       finalAdmission = database.persistentStoreAdmission
+      // Before any view resolves a cached media path under the scoped root.
+      if database.isPersistent {
+        LegacyMediaCacheMigration.runIfNeeded(database: database)
+      }
       return database
     }
 
