@@ -1594,6 +1594,40 @@ describe("session-tier replay and authority expiry", () => {
     expect(fixture.replay.completions).toBe(1)
   })
 
+  test("disconnect aborts running session-tier applications and leaves durable ones running", async () => {
+    const signals: AbortSignal[] = []
+    const gate = deferred()
+    const fixture = boundSessionFixture({
+      sessionOptions: {
+        application: {
+          dispatch: async ({ payload, signal }) => {
+            signals.push(signal)
+            await gate.promise
+            return { kind: "result", payload: Uint8Array.of(payload[0]! + 1) }
+          },
+        },
+      },
+    })
+    const sessionTier = await fixture.server.receiveConcurrent(
+      fixture.record(encodeInlineInvoke(Uint8Array.of(SESSION_TIER_PAYLOAD))).bytes,
+    )
+    const durable = await fixture.server.receiveConcurrent(fixture.record(encodeInlineInvoke(Uint8Array.of(1))).bytes)
+    const sessionRun = sessionTier.applicationTasks[0]!.dispatch()
+    const durableRun = durable.applicationTasks[0]!.dispatch()
+    expect(signals).toHaveLength(2)
+
+    fixture.server.disconnect()
+    // Session-tier work has no durable result and nobody can receive its answer.
+    expect(signals[0]!.aborted).toBeTrue()
+    // Durable work still settles its replay outcome for the reconnecting client.
+    expect(signals[1]!.aborted).toBeFalse()
+
+    gate.resolve()
+    await (await sessionRun).finalize()
+    await (await durableRun).finalize()
+    expect(fixture.replay.completions).toBe(1)
+  })
+
   test("a session-tier duplicate inside the receive window is dropped silently", async () => {
     const fixture = boundSessionFixture()
     const invoke = fixture.record(encodeInlineInvoke(Uint8Array.of(SESSION_TIER_PAYLOAD)))
