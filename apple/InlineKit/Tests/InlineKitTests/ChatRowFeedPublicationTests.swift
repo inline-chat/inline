@@ -162,6 +162,33 @@ struct ChatRowFeedPublicationTests {
     #expect(await !small.trimWindow(keeping: .older, maximum: 600, step: 200))
   }
 
+  /// A live arrival while the trim reads the trimmed window's coverage must not publish the
+  /// trimmed rows with the untrimmed coverage (which says the newer side has nothing to load).
+  @Test @MainActor
+  func noPublicationShowsTrimmedRowsWithStaleCoverage() async throws {
+    let fixture = try await RowFixture(messageCount: 1_000)
+    let model = fixture.model(rows: Array(fixture.messages.suffix(100)))
+    defer { model.dispose() }
+    while model.messages.count < 900, await model.loadBatchAsync(at: .older) {}
+    let untrimmedCount = model.messages.count
+    let recorder = Recorder(model)
+    let trim = Task { @MainActor in await model.trimWindow(keeping: .older, maximum: 600, step: 200) }
+    // Let the trim cut the rows and start its read, then deliver a live edit of a kept row.
+    await Task.yield()
+    var edited = try #require(model.messages.first)
+    edited.message.text = "edited during the trim"
+    fixture.publisher.publisher.send(.update(.init(message: edited, animated: true, peer: fixture.peer)))
+    #expect(await trim.value)
+    #expect(!recorder.updates.isEmpty)
+    for update in recorder.updates where update.snapshot.rows.count < untrimmedCount {
+      #expect(update.snapshot.coverage.canLoadNewerFromLocal)
+      #expect(!update.snapshot.coverage.reachesNewest)
+    }
+    // The held edit lands with the trim's publication.
+    #expect(recorder.last?.snapshot.reason == .trim)
+    #expect(recorder.last?.snapshot.rows.contains { $0.content.message?.message.text == "edited during the trim" } == true)
+  }
+
   @Test @MainActor
   func trimmingNeverRemovesTheHistoryAnchor() async throws {
     let fixture = try await RowFixture(messageCount: 1_000)

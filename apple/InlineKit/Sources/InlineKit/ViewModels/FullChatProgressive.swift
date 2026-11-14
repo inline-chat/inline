@@ -206,6 +206,10 @@ public class MessagesProgressiveViewModel {
   }
 
   private var isReplacingRowInPlace = false
+  /// The window `trimWindow` is reading coverage for; its row publications wait for that read.
+  /// A replacement window (a jump, a reload into another place) publishes as usual.
+  private var trimmingEpoch: UInt64?
+  var isTrimmingWindow: Bool { trimmingEpoch == windowEpoch }
   /// Ordered, revisioned row snapshots of this window (`ChatRowFeed.swift`).
   public let rowFeed = ChatRowFeed()
 
@@ -612,6 +616,10 @@ public class MessagesProgressiveViewModel {
     if let anchor = historyAnchorID, removed.contains(where: { $0.message.messageId == anchor }) { return false }
     if removed.contains(where: { $0.message.messageId <= 0 }) { return false }
     let epoch = windowEpoch
+    // Row publications wait for the metadata read, so none shows the trimmed rows with the
+    // coverage of the untrimmed window (it would claim the trimmed side has nothing to load).
+    trimmingEpoch = epoch
+    defer { trimmingEpoch = nil }
     messages = reversed ? Array(kept.reversed()) : Array(kept)
     updateRange()
     if side == .older {
@@ -619,6 +627,8 @@ public class MessagesProgressiveViewModel {
       atBottom = false
     }
     await updateLoadedWindowMetadataAsync(retainingMessageIDs: Set(messages.map(\.id)))
+    trimmingEpoch = nil
+    // A replacement window meanwhile published itself.
     guard epoch == windowEpoch else { return true }
     publishRows(.trim)
     log.debug("Trimmed \(removing) messages from the \(side == .older ? "newer" : "older") side")

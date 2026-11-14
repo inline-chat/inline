@@ -208,12 +208,15 @@ extension MessagesProgressiveViewModel {
   }
 
   func publishRows(_ reason: ChatRowReason) {
+    guard !isTrimmingWindow else { return }
     rowFeed.publish(rowFeedSource, reason: reason)
   }
 
   /// After a publisher update was applied. Publishes when rows changed, or when
   /// only the window's coverage did.
   func publishRows(after update: MessagesPublisher.UpdateType, previous: [FullMessage], changed: Bool) {
+    // A trim's coverage is being read again: its publication carries this change too.
+    guard !isTrimmingWindow else { return }
     let source = rowFeedSource
     guard changed || source.coverage != rowFeed.publishedCoverage else { return }
     rowFeed.publish(
