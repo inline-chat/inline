@@ -7,6 +7,8 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod entities;
+
 /// Backend/store boundary for client runtime operations.
 pub mod backend;
 
@@ -68,16 +70,16 @@ pub use types::{
     ChatCreateParticipant, ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest,
     ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
     CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogFollowMode,
-    DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage, DialogsRequest,
-    EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
+    DialogKind, DialogNotificationMode, DialogRecord, DialogStructure, DialogsOrder, DialogsPage,
+    DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
     InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind, MessageActionRecord,
     MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent, MessageEntityRecord,
     MessageMetadata, MessageMutation, MessageRecord, NotificationMode, PeerRef, PinMessageRequest,
     ReactRequest, ReadRequest, RemoveChatParticipantRequest, SendInteractiveTextRequest,
-    SendNotificationMode, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord,
-    SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
-    UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadHandle, UploadRequest,
-    UploadThumbnail, UserRecord, UserSettingsRecord,
+    SendNotificationMode, SendTextRequest, SetMarkedUnreadRequest, SpaceAccessRecord,
+    SpaceAccessStatus, SpaceMemberRecord, SpaceMemberRole, SpaceRecord, TypingRequest,
+    UpdateChatInfoRequest, UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest,
+    UploadHandle, UploadRequest, UploadThumbnail, UserRecord, UserSettingsRecord,
 };
 
 /// Published package version.

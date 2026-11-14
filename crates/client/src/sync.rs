@@ -75,6 +75,7 @@ pub(crate) trait SyncHost: Clone + Send + Sync + 'static {
         &self,
         updates: Vec<proto::Update>,
         sidecars: Option<proto::UpdateSidecars>,
+        bucket: Option<SyncBucketKey>,
     ) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>>;
 
     /// Rebuilds authoritative current state for a bucket before a cold cursor
@@ -89,6 +90,8 @@ pub(crate) trait SyncHost: Clone + Send + Sync + 'static {
 #[derive(Debug)]
 pub(crate) struct SyncBucketRepair {
     pub(crate) events: Vec<ClientEvent>,
+    /// Keeps account clear serialized after the final writes and cursor commit.
+    pub(crate) account_guard: Option<crate::store::SourceAccountGuard>,
     /// A separately captured cursor that precedes the replacement snapshot.
     /// When present, the sync loop commits it and probes once from that point.
     pub(crate) checkpoint: Option<SyncBucketState>,
@@ -353,7 +356,7 @@ impl SyncManager {
 
         if !direct.is_empty() {
             let max_date = max_update_date(&direct);
-            let applied = host.apply_sync_batch(direct, None).await?;
+            let applied = host.apply_sync_batch(direct, None, None).await?;
             let applied = self
                 .store
                 .append_client_events(applied)
@@ -727,6 +730,7 @@ impl SyncManager {
         target_date: i64,
     ) -> BackendResult<CommittedSyncBatch> {
         let repair = host.repair_bucket(key, target_seq).await?;
+        let _account_guard = repair.account_guard;
         let state = repair.checkpoint.unwrap_or(SyncBucketState {
             seq: target_seq,
             date: target_date,
@@ -781,7 +785,7 @@ impl SyncManager {
             })
             .await
             .map_err(store_error_to_backend)?;
-        let events = match host.apply_sync_batch(updates, sidecars).await {
+        let events = match host.apply_sync_batch(updates, sidecars, Some(key)).await {
             Ok(events) => events,
             Err(error) => {
                 if is_permanent_sync_error(&error) {
@@ -849,7 +853,10 @@ impl SyncManager {
                 }
                 Err(error) => return Err(error),
             };
-            let applied = match host.apply_sync_batch(updates, sidecars).await {
+            let applied = match host
+                .apply_sync_batch(updates, sidecars, Some(batch.key))
+                .await
+            {
                 Ok(applied) => applied,
                 Err(error) if is_permanent_sync_error(&error) => {
                     log::warn!(
@@ -1719,6 +1726,7 @@ mod tests {
             &self,
             updates: Vec<proto::Update>,
             _sidecars: Option<proto::UpdateSidecars>,
+            _bucket: Option<SyncBucketKey>,
         ) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
             let host = self.clone();
             Box::pin(async move {
@@ -1762,6 +1770,7 @@ mod tests {
                 Ok(SyncBucketRepair {
                     events: Vec::new(),
                     checkpoint: host.repair_checkpoint,
+                    account_guard: None,
                 })
             })
         }

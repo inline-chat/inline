@@ -766,6 +766,7 @@ impl InMemoryBackend {
     }
 
     fn send_text_now(&self, request: SendTextRequest) -> BackendResult<SendTextOutcome> {
+        crate::entities::to_proto(&request.text, &request.entities)?;
         self.require_connected()?;
         if request.text.trim().is_empty() {
             return Err(BackendError::new(
@@ -797,7 +798,10 @@ impl InMemoryBackend {
             is_outgoing: true,
             content: MessageContent::Text { text: request.text },
             reply_to_message_id: request.reply_to_message_id,
-            metadata: crate::MessageMetadata::default(),
+            metadata: crate::MessageMetadata {
+                entities: request.entities,
+                ..Default::default()
+            },
             transaction: Some(transaction.clone()),
         };
         state
@@ -864,6 +868,7 @@ impl InMemoryBackend {
         bytes: Vec<u8>,
         _thumbnail: Option<UploadThumbnail>,
     ) -> BackendResult<SendTextOutcome> {
+        crate::entities::to_proto(request.caption.as_deref().unwrap_or(""), &request.entities)?;
         self.require_connected()?;
         if bytes.is_empty() {
             return Err(BackendError::new(
@@ -908,7 +913,10 @@ impl InMemoryBackend {
                 duration_ms: request.duration_ms,
             },
             reply_to_message_id: request.reply_to_message_id,
-            metadata: crate::MessageMetadata::default(),
+            metadata: crate::MessageMetadata {
+                entities: request.entities,
+                ..Default::default()
+            },
             transaction: Some(transaction.clone()),
         };
         state
@@ -1297,6 +1305,7 @@ impl ClientBackend for InMemoryBackend {
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
         let backend = self.clone();
         Box::pin(async move {
+            crate::entities::to_proto(&request.text, &request.entities)?;
             backend.require_connected()?;
             if request.text.trim().is_empty() {
                 return Err(BackendError::new(
@@ -1310,7 +1319,11 @@ impl ClientBackend for InMemoryBackend {
                 .iter_mut()
                 .find(|message| message.message_id == request.message_id)
             {
-                message.content = MessageContent::Text { text: request.text };
+                match &mut message.content {
+                    MessageContent::Media { caption, .. } => *caption = Some(request.text),
+                    content => *content = MessageContent::Text { text: request.text },
+                }
+                message.metadata.entities = request.entities;
                 return Ok(OperationOutcome::with_events(vec![
                     ClientEvent::MessageStored {
                         message: message.clone(),
