@@ -1,6 +1,7 @@
 import Auth
 import Combine
 import Foundation
+import GRDB
 import InlineProtocol
 import Logger
 import Nuke
@@ -227,6 +228,13 @@ public final class FileDownloader: NSObject, Sendable {
   private var activeDownloadTokens: [String: UUID] = [:]
   private var finalizationTasks: [String: FinalizationTask] = [:]
   private var session: URLSession!
+  /// Where each CDN task's file goes, readable from the URLSession delegate queue.
+  nonisolated let cdnPlacements = CDNPlacements()
+  /// Test hook for stubbing HTTP; nil uses the system protocols.
+  private let urlProtocolClasses: [AnyClass]?
+  /// Per transfer: fetches a fresher link after the stored one expired or was rejected.
+  private var linkRefreshes: [UUID: CDNLinkRefresh] = [:]
+  private var refreshedLinkTokens: Set<UUID> = []
   private let auth: AuthHandle
   private let log = Log.scoped("FileDownloader")
   private let progressThrottler = DownloadProgressThrottler()
@@ -244,8 +252,10 @@ public final class FileDownloader: NSObject, Sendable {
   }
 
   init(auth: AuthHandle, nativeManager: NativeDownloadManager = .shared,
-       nativeCacheDirectories: [URL] = FileDownloader.nativeTransferDirectories) {
+       nativeCacheDirectories: [URL] = FileDownloader.nativeTransferDirectories,
+       urlProtocolClasses: [AnyClass]? = nil) {
     self.auth = auth
+    self.urlProtocolClasses = urlProtocolClasses
     self.nativeManager = nativeManager
     self.nativeCacheDirectories = nativeCacheDirectories
     if let id = auth.userId() { knownAccountIDs.insert(id) }
@@ -283,6 +293,7 @@ public final class FileDownloader: NSObject, Sendable {
 
   private func makeSession() {
     let config = URLSessionConfiguration.default
+    if let urlProtocolClasses { config.protocolClasses = urlProtocolClasses }
     session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
   }
 
@@ -378,6 +389,12 @@ public final class FileDownloader: NSObject, Sendable {
       accountToken: accountToken,
       messageLocation: message.map(Self.location(for:)),
       nativeDownload: nativeDownload,
+      refreshLink: message.map { message in
+        let documentID = document.document.documentId
+        return Self.linkRefresh(peer: message.peerId, messageId: message.messageId) { db in
+          try Document.filter(Document.Columns.documentId == documentID).fetchOne(db)?.cdnUrl
+        }
+      },
       completion: { [weak self] token, result in
         guard let self else { return }
 
@@ -460,6 +477,12 @@ public final class FileDownloader: NSObject, Sendable {
       accountToken: accountToken,
       messageLocation: Self.location(for: message),
       nativeDownload: nativeDownload,
+      refreshLink: {
+        let videoID = video.video.videoId
+        return Self.linkRefresh(peer: message.peerId, messageId: message.messageId) { db in
+          try Video.filter(Video.Columns.videoId == videoID).fetchOne(db)?.cdnUrl
+        }
+      }(),
       completion: { [weak self] token, result in
         guard let self else { return }
 
@@ -553,6 +576,13 @@ public final class FileDownloader: NSObject, Sendable {
       localUrl: localUrl,
       expectedBytes: voice.size,
       accountToken: accountToken,
+      refreshLink: {
+        let messageID = message.messageId
+        let chatID = message.chatId
+        return Self.linkRefresh(peer: message.peerId, messageId: messageID) { db in
+          try Message.fetchOne(db, key: ["messageId": messageID, "chatId": chatID])?.voiceContent?.cdnURL
+        }
+      }(),
       completion: { [weak self] token, result in
         guard let self else { return }
 
@@ -862,6 +892,7 @@ public final class FileDownloader: NSObject, Sendable {
     activeDownloadTokens[id] = nil
     accountTokens[token] = nil
     downloadLocations[token] = nil
+    releaseLinkRefresh(token)
     native?.cancel()
     // Install the barrier before notifying observers: a start triggered by the
     // cancellation completion must wait for native I/O to relinquish ownership.
@@ -883,6 +914,24 @@ public final class FileDownloader: NSObject, Sendable {
     URL, @escaping @Sendable (Int64, Int64) -> Void
   ) async throws -> URL
 
+  /// Refreshes the parent message and returns a link newer than `stale`, or nil.
+  typealias CDNLinkRefresh = @Sendable (_ stale: URL) async -> URL?
+
+  /// Builds a refresh that re-fetches the owning message, then reads the media's link again.
+  nonisolated static func linkRefresh(
+    peer: Peer,
+    messageId: Int64,
+    readLink: @escaping @Sendable (Database) throws -> String?
+  ) -> CDNLinkRefresh {
+    { stale in
+      guard await MediaLinkRefresher.shared.refresh(peer: peer, messageId: messageId),
+            let link = try? await AppDatabase.shared.dbWriter.read(readLink),
+            let url = URL(string: link), url != stale
+      else { return nil }
+      return url
+    }
+  }
+
   func downloadFile(
     id: String,
     url: URL?,
@@ -891,6 +940,7 @@ public final class FileDownloader: NSObject, Sendable {
     accountToken: AuthAccountMutationToken? = nil,
     messageLocation: FileMessageLocation? = nil,
     nativeDownload: NativeDownloadOperation? = nil,
+    refreshLink: CDNLinkRefresh? = nil,
     completion: @escaping (UUID, Result<URL, Error>) -> Void
   ) {
     let token = UUID()
@@ -913,7 +963,7 @@ public final class FileDownloader: NSObject, Sendable {
         }
         self.downloadFile(id: id, url: url, localUrl: localUrl, expectedBytes: expectedBytes,
                           accountToken: accountToken, messageLocation: messageLocation,
-                          nativeDownload: nativeDownload, completion: completion)
+                          nativeDownload: nativeDownload, refreshLink: refreshLink, completion: completion)
       }
       return
     }
@@ -925,6 +975,7 @@ public final class FileDownloader: NSObject, Sendable {
     activeDownloadTokens[id] = token
     accountTokens[token] = accountToken
     downloadLocations[token] = messageLocation
+    linkRefreshes[token] = refreshLink
     if let accountToken { knownAccountIDs.insert(accountToken.userID) }
     downloadCompletions[id] = DownloadCompletion(token: token) { result in completion(token, result) }
     if let nativeDownload {
@@ -948,13 +999,42 @@ public final class FileDownloader: NSObject, Sendable {
       finishTransfer(id: id, token: token, result: .failure(URLError(.cancelled)))
       return
     }
-    let task = session.downloadTask(with: url)
-    task.taskDescription = id
-    activeTasks[id] = task
     cdnSources[token] = CDNSource(
       localURL: localUrl, expectedBytes: expectedBytes, startedAt: Date(), afterFallback: afterFallback
     )
+    // An expired link cannot succeed; fetch a fresher one before spending a request on it.
+    if MediaLinkExpiry.isExpired(url), let refresh = takeLinkRefresh(token) {
+      Task { [weak self] in
+        let fresh = await refresh(url)
+        self?.launchCDNTask(id: id, token: token, url: fresh ?? url, localUrl: localUrl, expectedBytes: expectedBytes)
+      }
+      return
+    }
+    launchCDNTask(id: id, token: token, url: url, localUrl: localUrl, expectedBytes: expectedBytes)
+  }
+
+  private func launchCDNTask(id: String, token: UUID, url: URL, localUrl: URL, expectedBytes: Int64) {
+    guard isActiveDownload(id: id, token: token) else {
+      finishTransfer(id: id, token: token, result: .failure(URLError(.cancelled)))
+      return
+    }
+    let task = session.downloadTask(with: url)
+    task.taskDescription = id
+    activeTasks[id] = task
+    cdnPlacements.register(task, .init(localURL: localUrl, expectedBytes: expectedBytes))
     task.resume()
+  }
+
+  /// One link refresh per transfer, so a link the server keeps rejecting cannot loop.
+  private func takeLinkRefresh(_ token: UUID) -> CDNLinkRefresh? {
+    guard !refreshedLinkTokens.contains(token), let refresh = linkRefreshes[token] else { return nil }
+    refreshedLinkTokens.insert(token)
+    return refresh
+  }
+
+  private func releaseLinkRefresh(_ token: UUID) {
+    linkRefreshes[token] = nil
+    refreshedLinkTokens.remove(token)
   }
 
   private struct CDNSource {
@@ -1071,6 +1151,7 @@ public final class FileDownloader: NSObject, Sendable {
       activeDownloadTokens[id] = nil
       accountTokens[token] = nil
       downloadLocations[token] = nil
+      releaseLinkRefresh(token)
     }
   }
 
@@ -1091,7 +1172,8 @@ public final class FileDownloader: NSObject, Sendable {
     task: URLSessionTask,
     location: URL?,
     error: Error?,
-    sourceSession: URLSession
+    sourceSession: URLSession,
+    alreadyPlaced: Bool = false
   ) {
     guard sourceSession === session else {
       if let location { try? FileManager.default.removeItem(at: location) }
@@ -1109,7 +1191,31 @@ public final class FileDownloader: NSObject, Sendable {
       return
     }
     if let error {
+      if case let .httpStatus(status)? = error as? FileDownloadValidationError,
+         MediaLinkExpiry.isLinkRejection(statusCode: status),
+         let stale = task.originalRequest?.url,
+         let refresh = takeLinkRefresh(token)
+      {
+        // The stored link expired or was revoked: refresh it through the message once.
+        activeTasks[id] = nil
+        Task { [weak self] in
+          let fresh = await refresh(stale)
+          guard let self else { return }
+          guard let fresh else {
+            self.finishTransfer(id: id, token: token, result: .failure(error))
+            return
+          }
+          self.log.debug("Retrying \(id) with a refreshed link after HTTP \(status)")
+          self.launchCDNTask(
+            id: id, token: token, url: fresh, localUrl: source.localURL, expectedBytes: source.expectedBytes
+          )
+        }
+        return
+      }
       finishTransfer(id: id, token: token, result: .failure(error))
+    } else if let location, alreadyPlaced {
+      // Validated and moved into place on the delegate queue.
+      finishTransfer(id: id, token: token, result: .success(location))
     } else if let location {
       do {
         if let mismatch = try DownloadedFileValidation.validateCDNFile(
@@ -1192,6 +1298,7 @@ public final class FileDownloader: NSObject, Sendable {
       activeDownloadTokens[id] = nil
       accountTokens[token] = nil
       downloadLocations[token] = nil
+      releaseLinkRefresh(token)
     }
   }
 
@@ -1249,22 +1356,39 @@ extension FileDownloader: URLSessionDownloadDelegate {
     // Create a copy of the file in a more persistent temporary location
     do {
       try DownloadedFileValidation.validateHTTPResponse(downloadTask.response)
-      let tempDirectory = FileManager.default.temporaryDirectory
-      let tempFilename = UUID().uuidString
-      let persistentTempURL = tempDirectory.appendingPathComponent(tempFilename)
-
-      try FileManager.default.copyItem(at: location, to: persistentTempURL)
+      let placedURL: URL
+      let alreadyPlaced: Bool
+      if let placement = cdnPlacements.take(downloadTask) {
+        // Validate and move here, off the main thread: a large file costs a rename, not a copy.
+        if let mismatch = try DownloadedFileValidation.validateCDNFile(
+          at: location, expectedByteCount: placement.expectedBytes
+        ) {
+          log.warning("CDN file size mismatch for \(taskId): \(mismatch); accepting legacy object")
+        }
+        try FileManager.default.createDirectory(
+          at: placement.localURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: location, to: placement.localURL)
+        placedURL = placement.localURL
+        alreadyPlaced = true
+      } else {
+        placedURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.copyItem(at: location, to: placedURL)
+        alreadyPlaced = false
+      }
 
       DispatchQueue.main.async {
         self.completeDownload(
           id: taskId,
           task: downloadTask,
-          location: persistentTempURL,
+          location: placedURL,
           error: nil,
-          sourceSession: session
+          sourceSession: session,
+          alreadyPlaced: alreadyPlaced
         )
       }
     } catch {
+      _ = cdnPlacements.take(downloadTask)
       let downloadError = error
       DispatchQueue.main.async {
         self.log.error("Error validating or copying downloaded file", error: downloadError)
@@ -1281,6 +1405,8 @@ extension FileDownloader: URLSessionDownloadDelegate {
 
   public nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     guard let taskId = task.taskDescription else { return }
+    // Runs after didFinishDownloadingTo; only failed tasks still hold a placement.
+    _ = cdnPlacements.take(task)
 
     Task { @MainActor in
       completeDownload(id: taskId, task: task, location: nil, error: error, sourceSession: session)
@@ -1306,5 +1432,25 @@ extension FileDownloader: URLSessionDownloadDelegate {
         totalBytes: totalBytesExpectedToWrite
       )
     }
+  }
+}
+
+
+/// Destination of each CDN task, shared between the main actor and the URLSession delegate queue.
+final class CDNPlacements: @unchecked Sendable {
+  struct Placement: Sendable {
+    let localURL: URL
+    let expectedBytes: Int64
+  }
+
+  private let lock = NSLock()
+  private var byTask: [ObjectIdentifier: Placement] = [:]
+
+  func register(_ task: URLSessionTask, _ placement: Placement) {
+    lock.withLock { byTask[ObjectIdentifier(task)] = placement }
+  }
+
+  func take(_ task: URLSessionTask) -> Placement? {
+    lock.withLock { byTask.removeValue(forKey: ObjectIdentifier(task)) }
   }
 }
