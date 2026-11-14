@@ -360,7 +360,23 @@ public extension FullMessage {
 }
 
 public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
-  @Published public private(set) var chatItem: SpaceChatItem?
+  /// The chat, its dialog and peer user, always the latest the database has.
+  ///
+  /// Observers (`objectWillChange`, `chatItemPublisher`) hear only about changes a chat screen
+  /// shows (`notifies(from:to:)`). Read progress, the read markers and unread counts moving while
+  /// the chat stays read or unread, updates the value without notifying: a read reply lands each
+  /// time the user scrolls through unread messages, and re-rendering the chat screen and its
+  /// toolbar for it hitches the list. Live counts come from `ChatActivityNavigator`.
+  public private(set) var chatItem: SpaceChatItem?
+  private let chatItemChanges = PassthroughSubject<SpaceChatItem?, Never>()
+
+  /// The current item on subscription, then each change `notifies(from:to:)` lets through.
+  public var chatItemPublisher: AnyPublisher<SpaceChatItem?, Never> {
+    Deferred { [weak self, chatItemChanges] in
+      Just(self?.chatItem).append(chatItemChanges)
+    }
+    .eraseToAnyPublisher()
+  }
 
   public var messageIdToGlobalId: [Int64: Int64] = [:]
 
@@ -409,6 +425,34 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     fetchChat()
   }
 
+  /// Stores `item`, notifying observers only for a change a chat screen shows.
+  private func setChatItem(_ item: SpaceChatItem) {
+    guard Self.notifies(from: chatItem, to: item) else {
+      chatItem = item
+      return
+    }
+    objectWillChange.send()
+    chatItem = item
+    chatItemChanges.send(item)
+  }
+
+  /// Whether going from `old` to `new` changes what a chat screen shows: its dialog (with read
+  /// progress reduced to read or unread), the chat's identity and header fields, or the peer user.
+  /// The chat's last message and other list-only fields never count.
+  static func notifies(from old: SpaceChatItem?, to new: SpaceChatItem) -> Bool {
+    guard let old else { return true }
+    return old.dialog.withReadProgressAsUnreadFlags != new.dialog.withReadProgressAsUnreadFlags
+      || old.chat?.id != new.chat?.id
+      || old.chat?.title != new.chat?.title
+      || old.chat?.emoji != new.chat?.emoji
+      || old.chat?.parentChatId != new.chat?.parentChatId
+      || old.chat?.parentMessageId != new.chat?.parentMessageId
+      || old.chat?.isPublic != new.chat?.isPublic
+      || old.chat?.canUpdateInfo != new.chat?.canUpdateInfo
+      || old.user != new.user
+      || old.userInfo?.focus != new.userInfo?.focus
+  }
+
   func fetchChat() {
     let peerId = peer
     db.warnIfInMemoryDatabaseForObservation("FullChatViewModel.chatItem")
@@ -421,23 +465,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         .sink(
           receiveCompletion: { [log] in log.error("Failed to get full chat \($0)") },
           receiveValue: { [weak self] (fullChat: SpaceChatItem?) in
-            if let self,
-               let fullChat,
-
-               fullChat.dialog != self.chatItem?.dialog ||
-               fullChat.chat?.title != self.chatItem?.chat?.title ||
-               fullChat.chat?.emoji != self.chatItem?.chat?.emoji ||
-               fullChat.chat?.parentChatId != self.chatItem?.chat?.parentChatId ||
-               fullChat.chat?.parentMessageId != self.chatItem?.chat?.parentMessageId ||
-               fullChat.chat?.isPublic != self.chatItem?.chat?.isPublic ||
-               fullChat.chat?.canUpdateInfo != self.chatItem?.chat?.canUpdateInfo ||
-               fullChat.user != self.chatItem?.user ||
-               fullChat.userInfo?.focus != self.chatItem?.userInfo?.focus
-            {
-              // Important Note
-              // Only update if the dialog is different, ignore chat and message for performance reasons
-              chatItem = fullChat
-            }
+            guard let self, let fullChat else { return }
+            setChatItem(fullChat)
           }
         )
   }
@@ -577,7 +606,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     if let cachedChatItem {
       await MainActor.run {
-        self.chatItem = cachedChatItem
+        self.setChatItem(cachedChatItem)
       }
 
       if let chat = cachedChatItem.chat {
@@ -593,7 +622,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
       if let loadedChatItem = try await queryChatItemFromDatabase() {
         await MainActor.run {
-          self.chatItem = loadedChatItem
+          self.setChatItem(loadedChatItem)
         }
         return loadedChatItem.chat
       }
@@ -638,5 +667,19 @@ public extension FullMessage {
         .filter(Column("chatId") == chatId)
         .fetchOne(db)
     }
+  }
+}
+
+extension Dialog {
+  /// The dialog with its read markers dropped and each unread count reduced to whether it is
+  /// above zero, so read progress compares equal until a kind flips between read and unread.
+  var withReadProgressAsUnreadFlags: Dialog {
+    var dialog = self
+    dialog.readInboxMaxId = nil
+    dialog.readOutboxMaxId = nil
+    dialog.unreadCount = (unreadCount ?? 0) > 0 ? 1 : 0
+    dialog.unreadMentionsCount = (unreadMentionsCount ?? 0) > 0 ? 1 : 0
+    dialog.unreadReactionsCount = (unreadReactionsCount ?? 0) > 0 ? 1 : 0
+    return dialog
   }
 }
