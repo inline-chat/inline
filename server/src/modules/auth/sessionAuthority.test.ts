@@ -36,6 +36,71 @@ describe("SessionAuthorityReconciler", () => {
     })
   })
 
+  test("a holder keeps a session's authority through forget and reconciliation", async () => {
+    let now = 0
+    const transferOnly = identity(30, 3)
+    const lookup = mock(async (sessionIds: readonly number[]) => sessionIds.map(() => transferOnly))
+    const reconciler = new SessionAuthorityReconciler({ now: () => now, findActiveSessions: lookup })
+    // No main connection lists this session.
+    reconciler.start({ connectedSessions: () => [], closeSession: mock() }, configuration)
+    let holding = true
+    const stopHolding = reconciler.addHolder({
+      has: (candidate) => holding && candidate.sessionId === transferOnly.sessionId,
+      list: () => holding ? [transferOnly] : [],
+    })
+    reconciler.admit(transferOnly)
+
+    reconciler.forget(transferOnly)
+    expect(reconciler.allows(transferOnly)).toBe(true)
+
+    now = 10
+    await reconciler.reconcileNow()
+    expect(lookup).toHaveBeenCalledWith([3])
+    expect(reconciler.allows(transferOnly)).toBe(true)
+
+    holding = false
+    reconciler.forget(transferOnly)
+    expect(reconciler.allows(transferOnly)).toBe(false)
+    stopHolding()
+    reconciler.stop()
+  })
+
+  test("verifyAndAdmit admits only an active session for the same user", async () => {
+    const active = identity(40, 4)
+    const lookup = mock(async (sessionIds: readonly number[]) =>
+      sessionIds.includes(4) ? [active] : [])
+    const reconciler = new SessionAuthorityReconciler({ now: () => 0, findActiveSessions: lookup })
+    reconciler.start({ connectedSessions: () => [], closeSession: mock() }, configuration)
+
+    expect(await reconciler.verifyAndAdmit(identity(99, 4))).toBe(false)
+    expect(await reconciler.verifyAndAdmit(identity(41, 5))).toBe(false)
+    expect(await reconciler.verifyAndAdmit(active)).toBe(true)
+    expect(reconciler.allows(active)).toBe(true)
+    // Already authorized: no further lookup.
+    const calls = lookup.mock.calls.length
+    expect(await reconciler.verifyAndAdmit(active)).toBe(true)
+    expect(lookup.mock.calls.length).toBe(calls)
+
+    reconciler.invalidate(active)
+    expect(await reconciler.verifyAndAdmit(active)).toBe(false)
+    reconciler.stop()
+  })
+
+  test("a revocation that lands during the lookup wins", async () => {
+    const racing = identity(50, 6)
+    let reconciler: SessionAuthorityReconciler | undefined
+    const lookup = mock(async () => {
+      // The revocation commits while the session row is being read.
+      reconciler!.invalidate(racing)
+      return [racing]
+    })
+    reconciler = new SessionAuthorityReconciler({ now: () => 0, findActiveSessions: lookup })
+    reconciler.start({ connectedSessions: () => [], closeSession: mock() }, configuration)
+    expect(await reconciler.verifyAndAdmit(racing)).toBe(false)
+    expect(reconciler.allows(racing)).toBe(false)
+    reconciler.stop()
+  })
+
   test("revalidates unique connected session IDs in one batch", async () => {
     let now = 0
     const one = identity(10, 1)

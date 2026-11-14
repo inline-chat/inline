@@ -282,6 +282,7 @@ export const makeInlineProtocolRealtimeTransport = (
         authorization: ServerApplicationAuthorization,
         options?: { transferOnly: boolean },
       ) => boolean
+      prepareTransferAuthority?: (authorization: ServerApplicationAuthorization) => Promise<boolean>
     }) => ServerApplicationDispatcher
   } = {},
 ): InlineProtocolRealtimeTransport => {
@@ -703,8 +704,8 @@ export const makeInlineProtocolRealtimeTransport = (
       }
       return false
     }
-    // No fresh session lookup happens here, so the authority must already be
-    // verified for a live main connection of this account session.
+    // Connection init verified the session (or a live main connection did); registration is
+    // the synchronous gate that a revocation arriving in between still wins.
     if (!sessionAuthority.allows(identity)) return false
     state.registered = true
     state.transfer = { userId, accountSessionId, activeApplications: 0 }
@@ -720,6 +721,16 @@ export const makeInlineProtocolRealtimeTransport = (
     scheduleTransferIdle(socket, state.transfer)
     return true
   }
+
+  // Transfer sockets keep their session's authority alive and reconciled, even with no main socket.
+  const stopTransferAuthorityHolder = sessionAuthority.addHolder({
+    has: ({ userId, sessionId }) => (transferSockets.get(transferKey(userId, sessionId))?.size ?? 0) > 0,
+    list: () => Array.from(transferSockets.entries()).flatMap(([key, sockets]) => {
+      if (sockets.size === 0) return []
+      const [userId, sessionId] = key.split(":").map(Number)
+      return [{ userId: userId!, sessionId: sessionId! }]
+    }),
+  })
 
   const stopTransferInvalidation = sessionAuthority.onInvalidate((identity) => {
     const sockets = transferSockets.get(transferKey(identity.userId, identity.sessionId))
@@ -843,6 +854,13 @@ export const makeInlineProtocolRealtimeTransport = (
           return registerAuthenticatedConnection(
             socket, authorization.userId, authorization.accountSessionId, options?.transferOnly === true,
           )
+        },
+        prepareTransferAuthority: async (authorization) => {
+          if (authorization.userId === undefined || authorization.accountSessionId === undefined) return false
+          return await sessionAuthority.verifyAndAdmit({
+            userId: authorization.userId,
+            sessionId: authorization.accountSessionId,
+          })
         },
       }),
       randomBytes: (length) => Uint8Array.from(randomBytes(length)),
@@ -975,7 +993,13 @@ export const makeInlineProtocolRealtimeTransport = (
         const key = transferKey(transfer.userId, transfer.accountSessionId)
         const sockets = transferSockets.get(key)
         sockets?.delete(socket)
-        if (sockets?.size === 0) transferSockets.delete(key)
+        if (sockets?.size === 0) {
+          transferSockets.delete(key)
+          // The last transfer socket kept this authority alive only if no main socket does.
+          if (!connectionManager.getConnectionBySession(transfer.userId, transfer.accountSessionId)) {
+            sessionAuthority.forget({ userId: transfer.userId, sessionId: transfer.accountSessionId })
+          }
+        }
       } else if (socket.data.state.registered) {
         connectionManager.removeConnection(socket.data.id)
       }
@@ -1068,6 +1092,7 @@ export const makeInlineProtocolRealtimeTransport = (
     shutdown: async () => {
       accepting = false
       stopTransferInvalidation()
+      stopTransferAuthorityHolder()
       const active = [...sockets]
       const activeStates = active.flatMap((socket) => socket.data.state ? [socket.data.state] : [])
       for (const socket of active) {

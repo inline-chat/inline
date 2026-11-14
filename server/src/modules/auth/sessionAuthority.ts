@@ -17,6 +17,15 @@ export type SessionAuthorityBindings = {
   closeSession: (identity: SessionAuthorityIdentity, reason: "revoked" | "unverified") => void
 }
 
+/**
+ * Something besides the main connection manager that keeps a session's authority alive on this
+ * process, such as a dedicated transfer socket.
+ */
+export type SessionAuthorityHolder = {
+  has: (identity: SessionAuthorityIdentity) => boolean
+  list: () => readonly SessionAuthorityIdentity[]
+}
+
 type AuthorityRecord = SessionAuthorityIdentity & {
   key: string
   verifiedAtMs: number
@@ -106,6 +115,7 @@ export class SessionAuthorityReconciler {
   private readonly authorities = new Map<string, AuthorityRecord>()
   private readonly invalidatedUntil = new Map<string, number>()
   private readonly invalidationListeners = new Set<(identity: SessionAuthorityIdentity) => void>()
+  private readonly holders = new Set<SessionAuthorityHolder>()
   private bindings: SessionAuthorityBindings | undefined
   private configuration: SessionAuthorityConfiguration = sessionAuthorityConfigurationFromEnvironment()
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -181,8 +191,29 @@ export class SessionAuthorityReconciler {
     return () => { this.invalidationListeners.delete(listener) }
   }
 
+  /** Registers a holder whose sessions stay authorized and reconciled. Returns an unsubscribe. */
+  addHolder(holder: SessionAuthorityHolder): () => void {
+    this.holders.add(holder)
+    return () => { this.holders.delete(holder) }
+  }
+
+  /**
+   * Admits a session that has no live main connection on this process, after the same fresh
+   * session lookup reconciliation uses. A transfer socket may land on a process (or outlive the
+   * main socket) where the authority was never established; it must not borrow one it lacks.
+   */
+  async verifyAndAdmit(identity: SessionAuthorityIdentity): Promise<boolean> {
+    if (this.allows(identity)) return true
+    if (this.isKnownInvalidated(identity)) return false
+    const active = await this.findActiveSessions([identity.sessionId])
+    if (!active.some((row) => row.sessionId === identity.sessionId && row.userId === identity.userId)) return false
+    return this.admit(identity)
+  }
+
   /** Forget a disconnected local session without treating it as revoked. */
   forget(identity: SessionAuthorityIdentity): void {
+    // Another holder (a transfer socket) still relies on this authority.
+    for (const holder of this.holders) if (holder.has(identity)) return
     this.authorities.delete(keyFor(identity))
     // As with invalidation, a timer for a forgotten authority can only wake
     // early; the next reconciliation prunes it without delaying others.
@@ -326,6 +357,7 @@ export class SessionAuthorityReconciler {
     const now = this.now()
     this.pruneInvalidations(now)
     const connected = new Set((this.bindings?.connectedSessions() ?? []).map(keyFor))
+    for (const holder of this.holders) for (const identity of holder.list()) connected.add(keyFor(identity))
     const due: AuthorityRecord[] = []
     for (const authority of this.authorities.values()) {
       if (!connected.has(authority.key)) {
