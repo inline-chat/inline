@@ -756,7 +756,11 @@ enum PluginCommand {
 
 #[derive(Args)]
 struct SetupDotsArgs {
-    #[arg(long, value_name = "NAME", help = "Bot name (defaults to your Dot's name)")]
+    #[arg(
+        long,
+        value_name = "NAME",
+        help = "Bot name (defaults to your Dot's name)"
+    )]
     name: Option<String>,
     #[arg(
         long,
@@ -3401,7 +3405,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         &auth_store,
                         &api,
                         &local_db,
-                        args,
+                        *args,
                         cli.json,
                         json_format,
                     )
@@ -7645,18 +7649,22 @@ mod cli_parsing_tests {
             "--dry-run",
         ])
         .expect("gateway setup parses");
+        let Command::Agents {
+            command: agents::AgentsCommand::Setup(args),
+        } = cli.command
+        else {
+            panic!("expected agents setup command");
+        };
         assert!(matches!(
-            cli.command,
-            Command::Agents {
-                command: agents::AgentsCommand::Setup(agents::AgentsSetupArgs {
-                    target: Some(agents::AgentTarget::Hermes),
-                    profile: Some(profile),
-                    bot_id: Some(42),
-                    bot_username: Some(username),
-                    replace: true,
-                    dry_run: true,
-                    ..
-                })
+            *args,
+            agents::AgentsSetupArgs {
+                target: Some(agents::AgentTarget::Hermes),
+                profile: Some(profile),
+                bot_id: Some(42),
+                bot_username: Some(username),
+                replace: true,
+                dry_run: true,
+                ..
             } if profile == "work" && username == "@work_helper_bot"
         ));
     }
@@ -9027,7 +9035,12 @@ mod cli_parsing_tests {
         let cli = Cli::try_parse_from(["inline", "setup", "dots", "--no-service"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Setup { command: SetupCommand::Dots(SetupDotsArgs { no_service: true, .. }) }
+            Command::Setup {
+                command: SetupCommand::Dots(SetupDotsArgs {
+                    no_service: true,
+                    ..
+                })
+            }
         ));
     }
 

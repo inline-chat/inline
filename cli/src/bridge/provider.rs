@@ -711,7 +711,9 @@ pub(super) async fn probe_configured_provider_async_with_runtime(
         })
         .await
         .map_err(|error| {
-            format!("the configured Codex runtime failed validation: {error}; rerun `inline setup dots`")
+            format!(
+                "the configured Codex runtime failed validation: {error}; rerun `inline setup dots`"
+            )
         })?;
         return Ok(ProviderProbe {
             provider_id: super::dots::DOTS_PROVIDER_ID,
