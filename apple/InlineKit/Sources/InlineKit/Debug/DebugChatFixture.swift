@@ -195,12 +195,12 @@ public final class DebugChatFixture {
 
   private func insert(
     text: String, from: Int64, messageId: Int64, status: MessageSendingStatus? = nil,
-    replyToMessageId: Int64? = nil
+    replyToMessageId: Int64? = nil, randomId: Int64? = nil
   ) throws -> FullMessage? {
     let chatId = chatId
     let saved = try database.dbWriter.write { db -> Message in
       var message = Message(
-        messageId: messageId, randomId: messageId < 0 ? Int64.random(in: 1 ... .max) : nil, fromId: from,
+        messageId: messageId, randomId: randomId ?? (messageId < 0 ? Int64.random(in: 1 ... .max) : nil), fromId: from,
         date: Date(), text: text, peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == currentUserId,
         status: status, repliedToMessageId: replyToMessageId
       )
@@ -210,8 +210,14 @@ public final class DebugChatFixture {
   }
 
   /// The production composer's send, into this chat: a pending row, then the ack.
-  public func sendFromComposer(text: String, replyToMessageId: Int64?) async throws {
-    try await sendAndAcknowledge(text: text, replyToMessageId: replyToMessageId)
+  /// `randomId` and `temporaryMessageId` are the composer transaction's, so the composer's send
+  /// animation finds the pending row as it would a real send.
+  public func sendFromComposer(
+    text: String, replyToMessageId: Int64?, randomId: Int64? = nil, temporaryMessageId: Int64? = nil
+  ) async throws {
+    try await sendAndAcknowledge(
+      text: text, replyToMessageId: replyToMessageId, randomId: randomId, temporaryMessageId: temporaryMessageId
+    )
   }
 
   /// The production composer's edit of a message (server id).
@@ -234,12 +240,13 @@ public final class DebugChatFixture {
   /// The current user sends; the server acknowledges after `delay`.
   public func sendAndAcknowledge(
     text: String = "Sent from the harness", replyToMessageId: Int64? = nil,
-    after delay: Duration = .milliseconds(700)
+    after delay: Duration = .milliseconds(700), randomId: Int64? = nil, temporaryMessageId: Int64? = nil
   ) async throws {
-    let temporary = nextTemporaryId
-    nextTemporaryId -= 1
+    let temporary = temporaryMessageId ?? nextTemporaryId
+    if temporaryMessageId == nil { nextTemporaryId -= 1 }
     guard let pending = try insert(text: text, from: currentUserId, messageId: temporary,
-                                   status: .sending, replyToMessageId: replyToMessageId) else { return }
+                                   status: .sending, replyToMessageId: replyToMessageId, randomId: randomId)
+    else { return }
     publisher.publisher.send(.add(.init(messages: [pending], peer: peer)))
     try await Task.sleep(for: delay)
     let serverId = nextMessageId
@@ -302,8 +309,9 @@ public final class DebugChatFixture {
   /// The newest message is deleted.
   public func deleteNewest() throws {
     guard let message = try newest() else { return }
+    let (chatId, messageId) = (chatId, message.message.messageId)
     _ = try database.dbWriter.write { db in
-      try Message.filter(Column("globalId") == message.id).deleteAll(db)
+      try Message.filter(Column("chatId") == chatId && Column("messageId") == messageId).deleteAll(db)
     }
     publisher.messagesDeleted(messageIds: [message.message.messageId], peer: peer)
   }
