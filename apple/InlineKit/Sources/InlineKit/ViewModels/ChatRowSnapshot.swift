@@ -139,6 +139,8 @@ public enum ChatRowReason: Equatable, Sendable {
   /// Presentation input changed without the messages changing: collapsed
   /// history, the status notice, or the unread boundary.
   case presentation
+  /// Rows far from the reader left a long window (`trimWindow`).
+  case trim
 }
 
 public struct ChatRowSnapshot: Equatable, Sendable {

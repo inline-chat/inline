@@ -136,6 +136,49 @@ struct ChatRowFeedPublicationTests {
   }
 
   @Test @MainActor
+  func trimmingKeepsTheWindowBoundedOnTheFarSide() async throws {
+    let fixture = try await RowFixture(messageCount: 1_000)
+    let model = fixture.model(rows: Array(fixture.messages.suffix(100)))
+    defer { model.dispose() }
+    let recorder = Recorder(model)
+    // Page up to 900 messages, then trim back from the newer side.
+    while model.messages.count < 900, await model.loadBatchAsync(at: .older) {}
+    #expect(model.messages.count >= 900)
+    let oldest = model.oldestLoadedMessageId
+    #expect(await model.trimWindow(keeping: .older, maximum: 600, step: 200))
+    let trim = try #require(recorder.last)
+    #expect(trim.snapshot.reason == .trim)
+    #expect(trim.diff.insertions.isEmpty && !trim.diff.removals.isEmpty)
+    #expect(model.messages.count <= 600 && model.messages.count > 400)
+    // The reader's side is untouched; the trimmed side pages back in from the cache.
+    #expect(model.oldestLoadedMessageId == oldest)
+    #expect(model.canLoadNewerFromLocal)
+    #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
+    #expect(await model.loadBatchAsync(at: .newer))
+    #expect(recorder.last?.snapshot.reason == .newerPage)
+    // A window inside the limit is left alone.
+    let small = fixture.model(rows: Array(fixture.messages.suffix(100)))
+    defer { small.dispose() }
+    #expect(await !small.trimWindow(keeping: .older, maximum: 600, step: 200))
+  }
+
+  @Test @MainActor
+  func trimmingNeverRemovesTheHistoryAnchor() async throws {
+    let fixture = try await RowFixture(messageCount: 1_000)
+    let model = fixture.model(rows: Array(fixture.messages.suffix(100)))
+    defer { model.dispose() }
+    while model.messages.count < 900, await model.loadBatchAsync(at: .older) {}
+    // The reader sits near the newest rows, so trimming those must not happen.
+    model.setHistoryAnchor(990)
+    #expect(await !model.trimWindow(keeping: .older, maximum: 600, step: 200))
+    #expect(model.messages.contains { $0.message.messageId == 990 })
+    // Trimming the older side instead keeps the anchor.
+    #expect(await model.trimWindow(keeping: .newer, maximum: 600, step: 200))
+    #expect(model.messages.contains { $0.message.messageId == 990 })
+    #expect(model.canLoadOlderFromLocal)
+  }
+
+  @Test @MainActor
   func jumpsPublishTheirTargets() async throws {
     let fixture = try await RowFixture()
     let model = fixture.model(rows: Array(fixture.messages[89 ... 99]))

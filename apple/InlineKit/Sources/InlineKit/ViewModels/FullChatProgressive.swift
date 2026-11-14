@@ -584,6 +584,47 @@ public class MessagesProgressiveViewModel {
     return didLoad
   }
 
+  /// The most messages a window keeps after paging; `trimWindow` cuts back to it.
+  public static let maximumWindowMessages = 600
+  /// Messages removed at a time: one large page.
+  public static let windowTrimStep = 200
+
+  /// Keeps a long window bounded: when it holds more than `maximum` messages,
+  /// whole steps of `step` messages leave the side away from `keeping` (the
+  /// side the reader pages into), then the window's metadata is read again so
+  /// that side can page back. Never removes the history anchor or unsent
+  /// messages. Publishes `.trim`; true when rows left.
+  @discardableResult
+  public func trimWindow(
+    keeping side: MessagesLoadDirection, maximum: Int = maximumWindowMessages, step: Int = windowTrimStep
+  ) async -> Bool {
+    let count = messages.count
+    guard count > maximum, step > 0 else { return false }
+    // Whole steps, so a long window is cut back once per few pages rather than on every page.
+    let removing = ((count - maximum + step - 1) / step) * step
+    guard removing > 0, removing < count else { return false }
+    // Chronological order; `reversed` windows keep the newest first.
+    let chronological = reversed ? Array(messages.reversed()) : messages
+    let kept: ArraySlice<FullMessage> = side == .older
+      ? chronological.dropLast(removing)
+      : chronological.dropFirst(removing)
+    let removed = side == .older ? chronological.suffix(removing) : chronological.prefix(removing)
+    if let anchor = historyAnchorID, removed.contains(where: { $0.message.messageId == anchor }) { return false }
+    if removed.contains(where: { $0.message.messageId <= 0 }) { return false }
+    let epoch = windowEpoch
+    messages = reversed ? Array(kept.reversed()) : Array(kept)
+    updateRange()
+    if side == .older {
+      // The newest rows left: the window no longer reaches the live end.
+      atBottom = false
+    }
+    await updateLoadedWindowMetadataAsync(retainingMessageIDs: Set(messages.map(\.id)))
+    guard epoch == windowEpoch else { return true }
+    publishRows(.trim)
+    log.debug("Trimmed \(removing) messages from the \(side == .older ? "newer" : "older") side")
+    return true
+  }
+
   public func setAtBottom(_ atBottom: Bool) {
     self.atBottom = atBottom && historyCoverage.isAtCertifiedLiveEnd
     // Back at the end of the cached rows, a reload follows the tail even if it
