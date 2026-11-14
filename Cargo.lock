@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "inline-dots"
-version = "0.7.22-alpha.3"
+version = "0.7.25"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1634,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "inline-relay"
-version = "0.7.22-alpha.3"
+version = "0.7.25"
 dependencies = [
  "log",
  "rusqlite",
