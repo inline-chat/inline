@@ -185,6 +185,7 @@ class MessageListAppKit: NSViewController {
     self.additionalTopContentInset = additionalTopContentInset
     chatRows = ChatRowListViewModel(
       peer: peerId,
+      chatId: chat.id,
       initialState: initialState,
       collapsedMaxId: collapsedMaxId
     )

@@ -86,11 +86,14 @@ final class ChatRowListViewModel {
 
   init(
     peer: Peer,
+    chatId: Int64?,
     initialState: MessagesProgressiveViewModel.InitialState?,
     collapsedMaxId: Int64? = nil
   ) {
     self.collapsedMaxId = collapsedMaxId
-    progressiveViewModel = MessagesProgressiveViewModel(peer: peer, initialState: initialState)
+    // A direct message's chat is only known from here; without it the transcript queries filter
+    // on the peer column, which SQLite has to sort or scan instead of seeking (chatId, messageId).
+    progressiveViewModel = MessagesProgressiveViewModel(peer: peer, chatId: chatId, initialState: initialState)
     messages = visibleMessages
     rebuildRows()
   }
