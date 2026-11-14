@@ -294,8 +294,11 @@ private final class FloatingButtonCountBadge: UIView {
     static let hiddenScale: CGFloat = 0.5
   }
 
+  private static let textFadeDuration: CFTimeInterval = 0.15
+
   private let label = UILabel()
   private var count = 0
+  private var lastTextChangeAt: CFTimeInterval = 0
 
   init(tint: UIColor) {
     super.init(frame: .zero)
@@ -338,8 +341,17 @@ private final class FloatingButtonCountBadge: UIView {
     let animated = animated && !UIAccessibility.isReduceMotionEnabled
     if isVisible {
       let text = ChatUnreadBadgeCount.format(newCount)
-      if animated, wasVisible, label.text != text {
-        UIView.transition(with: label, duration: 0.15, options: [.transitionCrossDissolve, .beginFromCurrentState]) {
+      // Scrolling through unread lowers the count every few frames; a cross-fade each time
+      // stacks transitions, so changes that come faster than the fade simply swap the digits.
+      let now = CACurrentMediaTime()
+      let fades = now - lastTextChangeAt >= Self.textFadeDuration
+      lastTextChangeAt = now
+      if animated, wasVisible, fades, label.text != text {
+        UIView.transition(
+          with: label,
+          duration: Self.textFadeDuration,
+          options: [.transitionCrossDissolve, .beginFromCurrentState]
+        ) {
           self.label.text = text
         }
       } else {

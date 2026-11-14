@@ -4633,9 +4633,11 @@ private extension MessagesCollectionView {
       return list
     }
 
-    /// While the user scrolls, lowers the unread count as incoming rows come into view and
-    /// reports them read, at most every 300 ms. The full pass (read all at the live end,
-    /// mention and reaction dwell) still runs when the scroll stops.
+    /// While the user scrolls, lowers the unread count as incoming rows come into view. Only the
+    /// local count moves: the read itself is sent when the scroll stops (`updateUnreadIfNeeded`).
+    /// Each server read rewrites the dialog, and every dialog observer (the chat screen's SwiftUI
+    /// body and toolbar, the chat list, the tab badge) re-renders on it, which hitched scrolling
+    /// when reads went out mid-gesture.
     func updateUnreadWhileScrolling() {
       guard let list = readableList(),
             let candidate = highestVisibleIncomingMessageID(in: list),
@@ -4643,20 +4645,7 @@ private extension MessagesCollectionView {
       else { return }
       unreadCountReadFrontier = candidate
       updateScrollToBottomCount()
-
-      let now = CACurrentMediaTime()
-      guard now - lastScrollReadReport >= 0.3 else { return }
-      if viewModel.historyCoverage != lastVisibleReadCoverage {
-        lastVisibleReadCoverage = viewModel.historyCoverage
-        lastVisibleReadCandidateID = nil
-      }
-      guard candidate > (lastVisibleReadCandidateID ?? 0) else { return }
-      lastScrollReadReport = now
-      lastVisibleReadCandidateID = candidate
-      UnreadManager.shared.readVisible(peerId: peerId, chatId: chatId, highestVisibleIncomingID: candidate)
     }
-
-    private var lastScrollReadReport: CFTimeInterval = 0
 
     func updateUnreadIfNeeded() {
       // Only mark as read when the chat is actually on-screen and app is in foreground.
