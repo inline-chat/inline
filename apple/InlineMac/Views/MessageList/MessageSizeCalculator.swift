@@ -1821,7 +1821,10 @@ class MessageSizeCalculator {
         secondaryColor: secondaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
         inlineMathAttachmentsEnabled: AppSettings.shared.richTextInlineMathEnabled,
         disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message),
-        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message)
+        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message),
+        // The text view spans the column for right-to-left messages; the plan
+        // matches so their prose sits at the trailing edge, not in a block on the left.
+        fillsAvailableWidth: props.isRtl
       )
       if let richBlockPlan {
         textSize = richBlockPlan.size

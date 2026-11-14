@@ -4445,39 +4445,11 @@ extension MessageListAppKit: NSTableViewDelegate {
     return false
   }
 
+  /// Word majority, the rule rich blocks use (`BlockContentDirection`), so a Persian reply
+  /// that opens with a Latin name or an agent's "Working" summary still reads right to left.
   private func isRTLMessage(_ message: FullMessage?) -> Bool {
     guard let text = message?.displayText else { return false }
-    for scalar in text.unicodeScalars {
-      if CharacterSet.whitespacesAndNewlines.contains(scalar)
-        || CharacterSet.punctuationCharacters.contains(scalar)
-        || CharacterSet.symbols.contains(scalar)
-        || CharacterSet.decimalDigits.contains(scalar)
-      {
-        continue
-      }
-
-      if isRTLScalar(scalar) {
-        return true
-      }
-
-      if scalar.properties.isAlphabetic {
-        return false
-      }
-    }
-
-    return false
-  }
-
-  private func isRTLScalar(_ scalar: Unicode.Scalar) -> Bool {
-    switch scalar.value {
-      case 0x0590 ... 0x08FF,
-           0xFB1D ... 0xFDFF,
-           0xFE70 ... 0xFEFF,
-           0x1_0800 ... 0x1_0FFF:
-        true
-      default:
-        false
-    }
+    return BlockContentDirection.isRTL(text) ?? false
   }
 
   private func makeMessageCell(

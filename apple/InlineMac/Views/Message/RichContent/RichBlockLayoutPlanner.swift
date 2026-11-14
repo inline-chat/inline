@@ -25,6 +25,7 @@ final class RichBlockLayoutPlanner {
     let disclosureOverrides: [BlockContentPath: Bool]
     let widgetLayout: RichBlockWidgetLayout?
     let mathSignature: Int
+    let fillsAvailableWidth: Bool
     private let precomputedHash: Int
 
     init(
@@ -37,7 +38,8 @@ final class RichBlockLayoutPlanner {
       inlineMathAttachmentsEnabled: Bool,
       disclosureOverrides: [BlockContentPath: Bool],
       widgetLayout: RichBlockWidgetLayout?,
-      mathSignature: Int
+      mathSignature: Int,
+      fillsAvailableWidth: Bool
     ) {
       self.contentCacheSignature = contentCacheSignature
       self.contentByteCount = contentByteCount
@@ -52,6 +54,7 @@ final class RichBlockLayoutPlanner {
       self.disclosureOverrides = disclosureOverrides
       self.widgetLayout = widgetLayout
       self.mathSignature = mathSignature
+      self.fillsAvailableWidth = fillsAvailableWidth
       var hasher = Hasher()
       hasher.combine(contentCacheSignature)
       hasher.combine(contentByteCount)
@@ -64,6 +67,7 @@ final class RichBlockLayoutPlanner {
       hasher.combine(disclosureOverrides)
       hasher.combine(widgetLayout)
       hasher.combine(mathSignature)
+      hasher.combine(fillsAvailableWidth)
       precomputedHash = hasher.finalize()
     }
 
@@ -84,6 +88,7 @@ final class RichBlockLayoutPlanner {
           && mathSignature == other.mathSignature
           && disclosureOverrides == other.disclosureOverrides
           && widgetLayout == other.widgetLayout
+          && fillsAvailableWidth == other.fillsAvailableWidth
       )
     }
   }
@@ -138,7 +143,8 @@ final class RichBlockLayoutPlanner {
     secondaryColor: NSColor = .secondaryLabelColor,
     inlineMathAttachmentsEnabled: Bool,
     disclosureOverrides: [BlockContentPath: Bool] = [:],
-    widgetLayout: RichBlockWidgetLayout? = nil
+    widgetLayout: RichBlockWidgetLayout? = nil,
+    fillsAvailableWidth: Bool = false
   ) -> RichBlockLayoutPlan? {
     guard availableWidth.isFinite, availableWidth >= 1,
           !content.blocks.isEmpty,
@@ -174,7 +180,8 @@ final class RichBlockLayoutPlanner {
       inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
       disclosureOverrides: disclosureOverrides,
       widgetLayout: widgetLayout,
-      mathSignature: math.signature
+      mathSignature: math.signature,
+      fillsAvailableWidth: fillsAvailableWidth
     )
     if let cached = cache.object(forKey: key),
        cached.matches(content: content, attributedText: attributedText)
@@ -205,6 +212,11 @@ final class RichBlockLayoutPlanner {
       fullBleedContainer: (x: 0, width: availableWidth)
     ) else {
       return nil
+    }
+    if fillsAvailableWidth {
+      // Right-to-left messages keep the full width, so trailing-anchored prose
+      // lines up with the column's trailing edge like plain right-to-left text.
+      builder.claimMaximumWidth()
     }
     let resolvedWidth = builder.resolvedPlanWidth(maximumWidth: availableWidth)
     builder.normalizeFlexibleFrames(
