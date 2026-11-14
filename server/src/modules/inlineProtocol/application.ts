@@ -77,7 +77,10 @@ const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
 
 const errorResponse = (error: unknown): Uint8Array => {
   const rpc = toRealtimeRpcError(error)
-  if (rpc.codeNumber >= 500) {
+  if (rpc.codeNumber === 503) {
+    // A dependency outage the client retries; one error per request would flood reporting.
+    log.warn("Inline Protocol application request unavailable", { reason: rpc.message })
+  } else if (rpc.codeNumber >= 500) {
     log.error("Inline Protocol application request failed", error)
   }
   return RealtimeV3Response.toBinary({

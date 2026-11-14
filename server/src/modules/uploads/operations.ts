@@ -36,6 +36,7 @@ import { UploadMediaFinalizer, type MediaUploadFinalizer } from "./finalizer"
 import {
   MAX_STORED_FRAME_BYTES,
   R2UploadPartStore,
+  UploadPartStorageUnavailableError,
   type UploadPartStore,
 } from "./partStore"
 import { R2MultipartObjectStore } from "./multipartStore"
@@ -53,6 +54,8 @@ import { countTransferWork, transferTraces } from "@in/server/modules/transfers/
 
 const log = new Log("modules/uploads", uploadTraceLogLevel())
 const RETRY_AFTER_SECONDS = 1
+/** Clients back off this long when part storage is down, instead of failing the send. */
+const STORAGE_RETRY_AFTER_SECONDS = 5
 const MAX_WAVEFORM_BYTES = 2_048
 // Deletes carry no file buffers; allow a wider bounded window so successful
 // finalization does not serialize hundreds of cleanup round trips.
@@ -241,7 +244,13 @@ export class NativeUploadOperations {
     if (input.uploadId.length !== 16 || !Number.isInteger(input.partIndex) || input.partIndex < 0) return badRequest()
     const startedAt = Date.now()
     const owner = contextOwner(context)
-    const geometry = await this.#partGeometry(input.uploadId, owner)
+    const resolved = await this.#partGeometry(input.uploadId, owner)
+    if ("finishedAcceptedParts" in resolved) {
+      // A part re-sent after finish (its reply was lost) is already in the file.
+      if (resolved.finishedAcceptedParts.includes(input.partIndex)) return { alreadyPresent: true }
+      return badRequest()
+    }
+    const geometry = resolved
     throwIfAborted(context.signal)
     const geometryDoneAt = Date.now()
     if (input.partIndex >= geometry.partCount ||
@@ -305,7 +314,15 @@ export class NativeUploadOperations {
       partIndex: input.partIndex,
       sha256: storedSha256,
       data: encoded.bytes,
-    }, signal)
+    }, signal).catch((error: unknown) => {
+      // A storage outage is temporary: tell the client to back off and resend, not that the
+      // server is broken. The part is not acknowledged, so a resend is always correct.
+      if (error instanceof UploadPartStorageUnavailableError) {
+        log.warn("Upload part storage unavailable", { error })
+        throw RealtimeRpcError.ServiceUnavailable(STORAGE_RETRY_AFTER_SECONDS)
+      }
+      throw error
+    })
     const objectStoreDoneAt = Date.now()
     let accepted
     try {
@@ -359,12 +376,21 @@ export class NativeUploadOperations {
     }
   }
 
-  /** Cached geometry, or one statement on a miss; rejects foreign and non-uploading uploads. */
-  async #partGeometry(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<UploadGeometry> {
+  /**
+   * Cached geometry, or one statement on a miss; rejects foreign, expired and canceled uploads.
+   * A finished upload returns its accepted parts so a late duplicate part can be acknowledged.
+   */
+  async #partGeometry(
+    uploadId: Uint8Array,
+    owner: InlineUploadOwner,
+  ): Promise<UploadGeometry | { finishedAcceptedParts: number[] }> {
     const cached = this.#geometry.get(uploadId, owner)
     if (cached === "owner_mismatch") return badRequest()
     if (cached) return cached
     const upload = requireValue(await this.repository.getPartGeometry(uploadId, owner))
+    if (upload.status === "processing" || upload.status === "complete") {
+      return { finishedAcceptedParts: upload.acceptedParts }
+    }
     if (upload.status !== "uploading" || upload.expired) return badRequest()
     return this.#geometry.put({
       uploadId,
