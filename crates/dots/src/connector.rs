@@ -170,7 +170,12 @@ impl DotsConnector {
     /// served here" (a region or VPN location without Dots). A linked room
     /// that also 404s means the second, so messages wait instead of failing.
     async fn discover_known(&self, known_room: Option<&str>) -> Result<DotRoom, DotsError> {
-        let cached = self.room.lock().await.as_ref().map(|room| room.room_id.clone());
+        let cached = self
+            .room
+            .lock()
+            .await
+            .as_ref()
+            .map(|room| room.room_id.clone());
         match discover(&self.client).await {
             Ok(room) => {
                 *self.room.lock().await = Some(room.clone());
