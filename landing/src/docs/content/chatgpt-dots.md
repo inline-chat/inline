@@ -102,6 +102,8 @@ and `/share` alone lists who has access. `/allowlist` does the same thing.
   within 15 minutes and before you write to it again. Anything else stays in
   your DM.
 - Confirmations, tasks, and files stay with you. Guests send text only.
+- Add the bot to a thread and mention it yourself to bring your Dot in there
+  too; its answer goes to the thread.
 
 ## Commands
 
