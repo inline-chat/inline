@@ -5,13 +5,18 @@
 //! native client API.
 
 mod bot_settings;
+#[cfg(test)]
+mod contract_tests;
+mod directory;
+#[cfg(test)]
+mod review_tests;
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::{
         Arc, Mutex as StdMutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -26,11 +31,12 @@ use inline_sdk::{
 };
 use prost::Message as _;
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, OwnedRwLockReadGuard, RwLock};
 
 use crate::backend::{
     retry_after_seconds_from_message, validate_action_toast, validate_message_actions,
 };
+use crate::entities::{entities_to_proto, validate_entities};
 use crate::sync::{SyncBucketRepair, SyncHost, SyncManager};
 use crate::{
     AccountStateSnapshot, AddChatParticipantRequest, AgentThreadConfiguration, AgentThreadContext,
@@ -39,8 +45,8 @@ use crate::{
     BackendError, BackendResult, BotCapability, BotChatSettingsResponse, BotInteractionEvent,
     BotSettingsValue, ChatCreateParticipant, ChatParticipantRecord, ChatParticipantsPage,
     ChatParticipantsRequest, ChatStateSnapshot, ClientBackend, ClientErrorCategory, ClientEvent,
-    ClientEventDelivery, ClientStatusSnapshot, ClientStore, ConnectRequest, CreateDmRequest,
-    CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    ClientEventDelivery, ClientStatusSnapshot, ClientStore, ConnectRequest, ConversationKind,
+    CreateDmRequest, CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
     DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
     DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, FormFieldValue,
     FormValue, HistoryPage, HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId,
@@ -206,6 +212,9 @@ impl SdkBackendBuilder {
             queued_realtime_events: Arc::new(Mutex::new(VecDeque::new())),
             in_flight_deliveries: Arc::new(StdMutex::new(HashSet::new())),
             client_event_notify: Arc::new(Notify::new()),
+            account_generation: Arc::new(AtomicU64::new(0)),
+            account_writes: Arc::new(RwLock::new(())),
+            required_generation: None,
         })
     }
 }
@@ -227,6 +236,9 @@ pub struct SdkBackend {
     queued_realtime_events: Arc<Mutex<VecDeque<RealtimeEvent>>>,
     in_flight_deliveries: Arc<StdMutex<HashSet<u64>>>,
     client_event_notify: Arc<Notify>,
+    account_generation: Arc<AtomicU64>,
+    account_writes: Arc<RwLock<()>>,
+    required_generation: Option<u64>,
 }
 
 impl fmt::Debug for SdkBackend {
@@ -280,7 +292,110 @@ impl SdkBackend {
         self.realtime_handshake
     }
 
+    fn source_generation(&self) -> u64 {
+        self.required_generation
+            .unwrap_or_else(|| self.account_generation.load(Ordering::Acquire))
+    }
+
+    fn source_scope(&self) -> Self {
+        let mut scope = self.clone();
+        scope.required_generation = Some(self.source_generation());
+        scope
+    }
+
+    /// Takes a lease only for local mutation, never across a source RPC.
+    async fn account_write_lease(&self, expected: u64) -> BackendResult<OwnedRwLockReadGuard<()>> {
+        let lease = self.account_writes.clone().read_owned().await;
+        if self.account_generation.load(Ordering::Acquire) != expected {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "account changed before local snapshot write",
+            ));
+        }
+        Ok(lease)
+    }
+
+    async fn invalidate_account(&self, expected: u64) -> BackendResult<()> {
+        let _exclusive = self.account_writes.write().await;
+        if self.account_generation.load(Ordering::Acquire) != expected
+            || self
+                .store
+                .logout_pending()
+                .await
+                .map_err(store_error_to_backend)?
+        {
+            return Ok(());
+        }
+        self.account_generation.fetch_add(1, Ordering::AcqRel);
+        self.store
+            .clear_session()
+            .await
+            .map_err(store_error_to_backend)?;
+        self.sync.clear_account_state().await;
+        self.store
+            .clear_account_data()
+            .await
+            .map_err(store_error_to_backend)
+    }
+
+    async fn validate_edit_text(&self, request: &EditMessageRequest) -> BackendResult<()> {
+        if !request.text.trim().is_empty() {
+            return Ok(());
+        }
+        let media = match self
+            .store
+            .message(request.chat_id, request.message_id)
+            .await
+            .map_err(store_error_to_backend)?
+        {
+            Some(message) => matches!(message.content, MessageContent::Media { .. }),
+            None => {
+                // A media caption may be cleared before this message has
+                // been paged into the durable cache.
+                let session = self.require_session().await?;
+                let result = self
+                    .call_realtime(
+                        &session,
+                        proto::GetMessagesInput {
+                            peer_id: Some(input_peer_for_chat(request.chat_id)),
+                            message_ids: vec![request.message_id.get()],
+                        },
+                    )
+                    .await?;
+                if result.messages.len() != 1
+                    || result.messages[0].id != request.message_id.get()
+                    || result.messages[0].chat_id != request.chat_id.get()
+                {
+                    return Err(BackendError::new(
+                        ClientErrorCategory::ProtocolMismatch,
+                        "caption lookup omitted or mismatched the edited message",
+                    ));
+                }
+                matches!(
+                    content_from_proto_message(&result.messages[0]),
+                    MessageContent::Media { .. }
+                )
+            }
+        };
+        if !media {
+            return Err(BackendError::new(
+                ClientErrorCategory::InvalidInput,
+                "message text must not be empty",
+            ));
+        }
+        Ok(())
+    }
+
     async fn require_session(&self) -> BackendResult<StoredSession> {
+        if self
+            .required_generation
+            .is_some_and(|generation| generation != self.account_generation.load(Ordering::Acquire))
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "source account changed",
+            ));
+        }
         self.store
             .load_session()
             .await
@@ -359,11 +474,14 @@ impl SdkBackend {
                 "message text must not be empty",
             ));
         }
+        validate_entities(&request.text, &request.entities, request.parse_markdown)?;
         if let Some(actions) = &actions {
             validate_message_actions(actions)?;
         }
 
+        let generation = self.source_generation();
         let session = self.require_session().await?;
+        let write = self.account_write_lease(generation).await?;
         let initial_chat_id = chat_id_for_peer(request.peer);
         let random_id = match request.random_id {
             Some(random_id) => random_id,
@@ -425,7 +543,7 @@ impl SdkBackend {
             temporary_send_date: Some(now_seconds()),
             is_sticker: None,
             has_link: None,
-            entities: None,
+            entities: Some(entities_to_proto(&request.entities)),
             parse_markdown: Some(request.parse_markdown),
             send_mode: proto_send_mode(request.notification_mode),
             actions: actions.map(message_actions_to_proto),
@@ -433,6 +551,7 @@ impl SdkBackend {
             source_chat_id: None,
             ..Default::default()
         };
+        drop(write);
         let send_result = match self.call_realtime(&session, input).await {
             Ok(result) => result,
             Err(backend_error) => {
@@ -447,6 +566,7 @@ impl SdkBackend {
             }
         };
 
+        let _write = self.account_write_lease(generation).await?;
         let applied = apply_send_message_updates(&request, identity, initial_chat_id, send_result);
         if let Some(message) = &applied.message {
             self.store
@@ -496,8 +616,29 @@ impl SdkBackend {
         method: proto::Method,
         input: proto::rpc_call::Input,
     ) -> BackendResult<proto::rpc_result::Result> {
+        let generation = self.source_generation();
+        if generation != self.account_generation.load(Ordering::Acquire) {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "source account changed",
+            ));
+        }
         let realtime = self.ensure_realtime(session).await?;
-        match realtime.invoke(method, input).await {
+        let response = realtime.invoke(method, input).await;
+        if self.account_generation.load(Ordering::Acquire) != generation
+            || self
+                .store
+                .load_session()
+                .await
+                .map_err(store_error_to_backend)?
+                .is_none()
+        {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "account changed while request was in flight",
+            ));
+        }
+        match response {
             Ok(response) => Ok(response),
             Err(error) => {
                 if realtime_error_closes_session(&error) {
@@ -508,14 +649,7 @@ impl SdkBackend {
                     // not let a rejected logout RPC clear that marker before
                     // the caller has completed its ordered cleanup.
                     if !matches!(self.store.logout_pending().await, Ok(true)) {
-                        self.store
-                            .clear_session()
-                            .await
-                            .map_err(store_error_to_backend)?;
-                        self.store
-                            .clear_account_data()
-                            .await
-                            .map_err(store_error_to_backend)?;
+                        self.invalidate_account(generation).await?;
                     }
                 }
                 Err(realtime_error_to_backend(error))
@@ -618,7 +752,14 @@ impl SdkBackend {
     }
 
     async fn ensure_realtime(&self, session: &StoredSession) -> BackendResult<RealtimeSession> {
+        let generation = self.source_generation();
         let mut realtime = self.realtime.lock().await;
+        if generation != self.account_generation.load(Ordering::Acquire) {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "source account changed",
+            ));
+        }
         if let Some(existing) = realtime.as_ref()
             && !existing.is_closed()
         {
@@ -631,19 +772,13 @@ impl SdkBackend {
             Err(error) if error.category == ClientErrorCategory::AuthExpired => {
                 drop(realtime);
                 if !matches!(self.store.logout_pending().await, Ok(true)) {
-                    self.store
-                        .clear_session()
-                        .await
-                        .map_err(store_error_to_backend)?;
-                    self.store
-                        .clear_account_data()
-                        .await
-                        .map_err(store_error_to_backend)?;
+                    self.invalidate_account(generation).await?;
                 }
                 return Err(error);
             }
             Err(error) => return Err(error),
         };
+        let _write = self.account_write_lease(generation).await?;
         if self
             .store
             .logout_pending()
@@ -697,6 +832,17 @@ impl SdkBackend {
         }
 
         self.clear_realtime().await;
+        let _exclusive = self.account_writes.write().await;
+        if !self
+            .store
+            .logout_pending()
+            .await
+            .map_err(store_error_to_backend)?
+        {
+            return Ok(false);
+        }
+        self.account_generation.fetch_add(1, Ordering::AcqRel);
+        self.sync.clear_account_state().await;
         self.store
             .clear_account_data()
             .await
@@ -832,6 +978,7 @@ impl SdkBackend {
         &self,
         mut request: ConnectRequest,
     ) -> BackendResult<ClientStatusSnapshot> {
+        let generation = self.account_generation.fetch_add(1, Ordering::AcqRel) + 1;
         if self.finish_interrupted_logout().await? {
             return Ok(ClientStatusSnapshot::current(
                 crate::ClientStatus::AuthRequired,
@@ -875,7 +1022,15 @@ impl SdkBackend {
             None
         };
         self.clear_realtime().await;
+        let exclusive = self.account_writes.write().await;
+        if self.account_generation.load(Ordering::Acquire) != generation {
+            return Err(BackendError::new(
+                ClientErrorCategory::AuthRequired,
+                "account changed while connect was in flight",
+            ));
+        }
         if account_changed {
+            self.sync.clear_account_state().await;
             self.store
                 .clear_account_data()
                 .await
@@ -895,6 +1050,7 @@ impl SdkBackend {
         if let Some(connected) = connected {
             self.install_realtime(connected).await;
         }
+        drop(exclusive);
         if initial_event_policy == InitialEventPolicy::StartAfterCurrent {
             self.seed_initial_event_cursor().await?;
         }
@@ -910,7 +1066,7 @@ impl SdkBackend {
                 .await
                 .map_err(store_error_to_backend)?,
         );
-        let deliveries = self.sync.discover(self).await?;
+        let deliveries = self.sync.discover(&self.source_scope()).await?;
         if suppress_history {
             self.acknowledge_initial_deliveries(deliveries).await?;
         }
@@ -968,6 +1124,7 @@ impl SdkBackend {
     }
 
     async fn resume_stored_session(&self) -> BackendResult<ClientStatusSnapshot> {
+        let generation = self.source_generation();
         if self.finish_interrupted_logout().await? {
             return Ok(ClientStatusSnapshot::current(
                 crate::ClientStatus::AuthRequired,
@@ -1006,18 +1163,12 @@ impl SdkBackend {
                     match self.connect_realtime_session(&session.auth).await {
                         Ok(result) => result,
                         Err(error) if error.category == ClientErrorCategory::AuthExpired => {
-                            self.store
-                                .clear_session()
-                                .await
-                                .map_err(store_error_to_backend)?;
-                            self.store
-                                .clear_account_data()
-                                .await
-                                .map_err(store_error_to_backend)?;
+                            self.invalidate_account(generation).await?;
                             return Err(error);
                         }
                         Err(error) => return Err(error),
                     };
+                let _write = self.account_write_lease(generation).await?;
                 if let Some(auth) = replacement_auth {
                     self.store
                         .save_session(StoredSession {
@@ -1030,12 +1181,14 @@ impl SdkBackend {
                 self.install_realtime(connected).await;
             }
         }
+        let _write = self.account_write_lease(generation).await?;
         Ok(ClientStatusSnapshot::current(
             crate::ClientStatus::Connected,
         ))
     }
 
     async fn claim_pending_client_events(&self) -> BackendResult<Vec<ClientEventDelivery>> {
+        let _lease = self.account_write_lease(self.source_generation()).await?;
         let pending = self
             .store
             .pending_client_events_page(
@@ -1071,6 +1224,7 @@ impl SdkBackend {
     }
 
     async fn receive_next_event_deliveries(&self) -> BackendResult<Vec<ClientEventDelivery>> {
+        let generation = self.source_generation();
         let pending = self.claim_pending_client_events().await?;
         if !pending.is_empty() {
             return Ok(pending);
@@ -1078,7 +1232,7 @@ impl SdkBackend {
 
         let session = self.require_session().await?;
         if self.sync_required.load(Ordering::Acquire) {
-            let deliveries = self.sync.discover(self).await?;
+            let deliveries = self.sync.discover(&self.source_scope()).await?;
             self.sync_required.store(false, Ordering::Release);
             let recovered = self.event_reconnect_pending.swap(false, Ordering::AcqRel);
             self.mark_deliveries_in_flight(&deliveries);
@@ -1110,7 +1264,11 @@ impl SdkBackend {
             };
             match realtime_event {
                 RealtimeEvent::Updates(updates) => {
-                    let deliveries = match self.sync.process_realtime(self, updates).await {
+                    let deliveries = match self
+                        .sync
+                        .process_realtime(&self.source_scope(), updates)
+                        .await
+                    {
                         Ok(deliveries) => deliveries,
                         Err(error) => {
                             self.sync_required.store(true, Ordering::Release);
@@ -1125,14 +1283,7 @@ impl SdkBackend {
                 RealtimeEvent::Bot(event) => return Ok(vec![bot_event_delivery(event)?]),
                 RealtimeEvent::AuthenticationInvalidated => {
                     self.clear_realtime().await;
-                    self.store
-                        .clear_session()
-                        .await
-                        .map_err(store_error_to_backend)?;
-                    self.store
-                        .clear_account_data()
-                        .await
-                        .map_err(store_error_to_backend)?;
+                    self.invalidate_account(generation).await?;
                     return Err(BackendError::new(
                         ClientErrorCategory::AuthExpired,
                         "Inline Protocol session was revoked",
@@ -1263,6 +1414,7 @@ impl ClientBackend for SdkBackend {
     fn logout(&self) -> BoxFuture<'static, BackendResult<()>> {
         let backend = self.clone();
         Box::pin(async move {
+            backend.account_generation.fetch_add(1, Ordering::AcqRel);
             let session = backend
                 .store
                 .load_session()
@@ -1302,6 +1454,8 @@ impl ClientBackend for SdkBackend {
                     .map_err(store_error_to_backend)?;
             }
             backend.clear_realtime().await;
+            let _exclusive = backend.account_writes.write().await;
+            backend.sync.clear_account_state().await;
             backend
                 .store
                 .clear_account_data()
@@ -1322,12 +1476,14 @@ impl ClientBackend for SdkBackend {
     }
 
     fn dialogs(&self, request: DialogsRequest) -> BoxFuture<'static, BackendResult<DialogsPage>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(&session, proto::GetChatsInput::default())
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             backend.apply_get_chats_snapshot(result).await?;
             backend
                 .store
@@ -1341,8 +1497,11 @@ impl ClientBackend for SdkBackend {
         &self,
         request: DialogsRequest,
     ) -> BoxFuture<'static, BackendResult<DialogsPage>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let _lease = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             backend
                 .store
                 .dialogs(request)
@@ -1352,23 +1511,48 @@ impl ClientBackend for SdkBackend {
     }
 
     fn account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>> {
-        let backend = self.clone();
-        Box::pin(async move {
-            let deleted_chat_ids = backend
-                .store
-                .deleted_chat_ids()
-                .await
-                .map_err(store_error_to_backend)?;
-            Ok(AccountStateSnapshot { deleted_chat_ids })
-        })
+        let backend = self.source_scope();
+        Box::pin(async move { backend.cached_account_directory().await })
+    }
+
+    fn refresh_account_state(&self) -> BoxFuture<'static, BackendResult<AccountStateSnapshot>> {
+        let backend = self.source_scope();
+        Box::pin(async move { backend.refresh_account_directory().await })
+    }
+
+    fn users(
+        &self,
+        request: crate::UsersRequest,
+    ) -> BoxFuture<'static, BackendResult<crate::UsersPage>> {
+        let backend = self.source_scope();
+        Box::pin(async move { backend.lookup_source_users(request).await })
+    }
+
+    fn search_users(
+        &self,
+        request: crate::SearchUsersRequest,
+    ) -> BoxFuture<'static, BackendResult<crate::UsersPage>> {
+        let backend = self.source_scope();
+        Box::pin(async move { backend.search_source_users(request).await })
+    }
+
+    fn space_members(
+        &self,
+        request: crate::SpaceMembersRequest,
+    ) -> BoxFuture<'static, BackendResult<crate::SpaceMembersPage>> {
+        let backend = self.source_scope();
+        Box::pin(async move { backend.source_space_members(request).await })
     }
 
     fn chat_state(
         &self,
         chat_id: InlineId,
     ) -> BoxFuture<'static, BackendResult<ChatStateSnapshot>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let _lease = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             let dialog = backend
                 .store
                 .dialog(chat_id)
@@ -1425,8 +1609,9 @@ impl ClientBackend for SdkBackend {
     }
 
     fn history(&self, request: HistoryRequest) -> BoxFuture<'static, BackendResult<HistoryPage>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             if request.before_message_id.is_some() && request.after_message_id.is_some() {
                 return Err(BackendError::new(
@@ -1439,6 +1624,7 @@ impl ClientBackend for SdkBackend {
             let result = backend
                 .call_realtime(&session, history_input_for_request(&request, fetch_limit))
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let mut records = Vec::with_capacity(result.messages.len());
             for message in result.messages {
                 records.push(
@@ -1466,8 +1652,11 @@ impl ClientBackend for SdkBackend {
         &self,
         request: HistoryRequest,
     ) -> BoxFuture<'static, BackendResult<HistoryPage>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let _lease = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             backend
                 .store
                 .history(request)
@@ -1480,8 +1669,9 @@ impl ClientBackend for SdkBackend {
         &self,
         request: ChatParticipantsRequest,
     ) -> BoxFuture<'static, BackendResult<ChatParticipantsPage>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -1491,6 +1681,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let page = chat_participants_page_from_proto(result);
             backend
                 .store
@@ -1510,9 +1701,10 @@ impl ClientBackend for SdkBackend {
         &self,
         request: AddChatParticipantRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             validate_chat_and_user_ids(request.chat_id, request.user_id)?;
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -1524,6 +1716,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let participant = result.participant.ok_or_else(|| {
                 BackendError::new(
                     ClientErrorCategory::ProtocolMismatch,
@@ -1553,9 +1746,10 @@ impl ClientBackend for SdkBackend {
         &self,
         request: RemoveChatParticipantRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             validate_chat_and_user_ids(request.chat_id, request.user_id)?;
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             backend
                 .call_realtime(
@@ -1567,6 +1761,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             backend
                 .store
                 .remove_chat_participant(request.chat_id, request.user_id)
@@ -1584,7 +1779,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: UpdateChatInfoRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if request.chat_id.get() <= 0 {
                 return Err(BackendError::new(
@@ -1606,6 +1801,7 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             let emoji = request.emoji.map(|emoji| emoji.trim().to_owned());
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -1618,6 +1814,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let chat = result.chat.ok_or_else(|| {
                 BackendError::new(
                     ClientErrorCategory::ProtocolMismatch,
@@ -1634,7 +1831,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: DeleteChatRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if request.chat_id.get() <= 0 {
                 return Err(BackendError::new(
@@ -1642,6 +1839,7 @@ impl ClientBackend for SdkBackend {
                     "chat_id must be positive",
                 ));
             }
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             backend
                 .call_realtime(
@@ -1651,6 +1849,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             backend
                 .store
                 .remove_dialog(request.chat_id)
@@ -1668,7 +1867,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: CreateDmRequest,
     ) -> BoxFuture<'static, BackendResult<CreatedChat>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if request.user_id.get() <= 0 {
                 return Err(BackendError::new(
@@ -1676,8 +1875,9 @@ impl ClientBackend for SdkBackend {
                     "user_id must be positive",
                 ));
             }
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
-            let result = backend
+            let mut result = backend
                 .call_realtime(
                     &session,
                     proto::GetChatInput {
@@ -1688,12 +1888,45 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
-            let created = created_dm_from_proto(result, request.user_id)?;
+            // GetChat reads existing dialogs without making a hidden DM
+            // visible. Explicitly reopening that DM uses source-owned placement.
+            if result
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.chat_list_hidden == Some(true))
+            {
+                let reopened = backend
+                    .call_realtime(
+                        &session,
+                        proto::UpdateDialogOrderInput {
+                            peer_id: Some(input_peer_for_client_peer(PeerRef::User {
+                                user_id: request.user_id,
+                            })),
+                            destination: Some(proto::DialogFolderDestination {
+                                destination: Some(
+                                    proto::dialog_folder_destination::Destination::Root(true),
+                                ),
+                            }),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                result = proto::GetChatResult {
+                    chat: reopened.chat,
+                    dialog: reopened.dialog,
+                    user: reopened.user,
+                    ..Default::default()
+                };
+            }
+            let _write = backend.account_write_lease(generation).await?;
+            let created = created_dm_from_proto(result.clone(), request.user_id)?;
             backend
-                .store
-                .record_dialog(created_dialog_record(&created, Some(request.user_id)))
-                .await
-                .map_err(store_error_to_backend)?;
+                .record_chat_update(
+                    result.chat.expect("validated DM chat"),
+                    result.dialog,
+                    result.user,
+                )
+                .await?;
             Ok(created)
         })
     }
@@ -1702,9 +1935,10 @@ impl ClientBackend for SdkBackend {
         &self,
         request: CreateThreadRequest,
     ) -> BoxFuture<'static, BackendResult<CreatedChat>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             validate_create_participants(&request.participants)?;
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -1729,12 +1963,21 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
-            let created = created_chat_from_proto(result.chat, result.dialog, None, None, None)?;
+            let _write = backend.account_write_lease(generation).await?;
+            let created = created_chat_from_proto(
+                result.chat.clone(),
+                result.dialog.clone(),
+                None,
+                None,
+                None,
+            )?;
             backend
-                .store
-                .record_dialog(created_dialog_record(&created, None))
-                .await
-                .map_err(store_error_to_backend)?;
+                .record_chat_update(
+                    result.chat.expect("validated created chat"),
+                    result.dialog,
+                    None,
+                )
+                .await?;
             Ok(created)
         })
     }
@@ -1743,7 +1986,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: CreateReplyThreadRequest,
     ) -> BoxFuture<'static, BackendResult<CreatedChat>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if request.parent_chat_id.get() <= 0 {
                 return Err(BackendError::new(
@@ -1753,6 +1996,7 @@ impl ClientBackend for SdkBackend {
             }
             validate_create_participants(&request.participants)?;
             let requested_agent_context = request.agent_context.clone();
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -1778,6 +2022,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let returned_agent_context = result
                 .chat
                 .as_ref()
@@ -1790,19 +2035,19 @@ impl ClientBackend for SdkBackend {
                 ));
             }
             let created = created_chat_from_proto(
-                result.chat,
-                result.dialog,
+                result.chat.clone(),
+                result.dialog.clone(),
                 result.anchor_message,
                 Some(request.parent_chat_id),
                 request.parent_message_id,
             )?;
-            let mut dialog = created_dialog_record(&created, None);
-            dialog.agent_context = returned_agent_context;
             backend
-                .store
-                .record_dialog(dialog)
-                .await
-                .map_err(store_error_to_backend)?;
+                .record_chat_update(
+                    result.chat.expect("validated created reply chat"),
+                    result.dialog,
+                    None,
+                )
+                .await?;
             Ok(created)
         })
     }
@@ -1811,7 +2056,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: SendTextRequest,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move { backend.send_text_with_actions(request, None).await })
     }
 
@@ -1819,7 +2064,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: SendInteractiveTextRequest,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             backend
                 .send_text_with_actions(request.message, Some(request.actions))
@@ -1833,8 +2078,13 @@ impl ClientBackend for SdkBackend {
         bytes: Vec<u8>,
         thumbnail: Option<UploadThumbnail>,
     ) -> BoxFuture<'static, BackendResult<SendTextOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            validate_entities(
+                request.caption.as_deref().unwrap_or_default(),
+                &request.entities,
+                false,
+            )?;
             if bytes.is_empty() {
                 return Err(BackendError::new(
                     ClientErrorCategory::InvalidInput,
@@ -1842,7 +2092,9 @@ impl ClientBackend for SdkBackend {
                 ));
             }
 
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
+            let write = backend.account_write_lease(generation).await?;
             let initial_chat_id = chat_id_for_peer(request.peer);
             let random_id = match request.random_id {
                 Some(random_id) => random_id,
@@ -1888,6 +2140,7 @@ impl ClientBackend for SdkBackend {
                     .map_err(store_error_to_backend)?;
             }
 
+            drop(write);
             let realtime = backend.ensure_realtime(&session).await?;
             let upload =
                 match upload_native_media(&realtime, &request, bytes, thumbnail, random_id).await {
@@ -1920,6 +2173,7 @@ impl ClientBackend for SdkBackend {
                 }
             };
 
+            let write = backend.account_write_lease(generation).await?;
             backend
                 .store
                 .record_transaction(
@@ -1938,7 +2192,7 @@ impl ClientBackend for SdkBackend {
                 temporary_send_date: Some(now_seconds()),
                 is_sticker: None,
                 has_link: None,
-                entities: None,
+                entities: Some(entities_to_proto(&request.entities)),
                 parse_markdown: Some(false),
                 send_mode: None,
                 actions: None,
@@ -1946,6 +2200,7 @@ impl ClientBackend for SdkBackend {
                 source_chat_id: None,
                 ..Default::default()
             };
+            drop(write);
             let send_result = match backend.call_realtime(&session, input).await {
                 Ok(result) => result,
                 Err(backend_error) => {
@@ -1961,6 +2216,7 @@ impl ClientBackend for SdkBackend {
                 }
             };
 
+            let _write = backend.account_write_lease(generation).await?;
             let applied =
                 apply_upload_message_updates(&request, identity, initial_chat_id, send_result);
             if let Some(message) = &applied.message {
@@ -1996,19 +2252,17 @@ impl ClientBackend for SdkBackend {
         &self,
         request: EditMessageRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
-            if request.text.trim().is_empty() {
-                return Err(BackendError::new(
-                    ClientErrorCategory::InvalidInput,
-                    "message text must not be empty",
-                ));
-            }
+            validate_entities(&request.text, &request.entities, request.parse_markdown)?;
+            let generation = backend.source_generation();
+            backend.validate_edit_text(&request).await?;
             let session = backend.require_session().await?;
             let chat_id = request.chat_id;
             let result = backend
                 .call_realtime(&session, edit_message_input(request, None))
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let events = backend
                 .apply_updates(result.updates, Some(chat_id), None)
                 .await?;
@@ -2020,15 +2274,16 @@ impl ClientBackend for SdkBackend {
         &self,
         request: EditInteractiveMessageRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
-            if request.message.text.trim().is_empty() {
-                return Err(BackendError::new(
-                    ClientErrorCategory::InvalidInput,
-                    "message text must not be empty",
-                ));
-            }
+            validate_entities(
+                &request.message.text,
+                &request.message.entities,
+                request.message.parse_markdown,
+            )?;
             validate_message_actions(&request.actions)?;
+            let generation = backend.source_generation();
+            backend.validate_edit_text(&request.message).await?;
             let session = backend.require_session().await?;
             let chat_id = request.message.chat_id;
             let result = backend
@@ -2037,6 +2292,7 @@ impl ClientBackend for SdkBackend {
                     edit_message_input(request.message, Some(request.actions)),
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let events = backend
                 .apply_updates(result.updates, Some(chat_id), None)
                 .await?;
@@ -2048,8 +2304,9 @@ impl ClientBackend for SdkBackend {
         &self,
         request: DeleteMessageRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -2060,6 +2317,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let mut events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -2082,7 +2340,7 @@ impl ClientBackend for SdkBackend {
     }
 
     fn react(&self, request: ReactRequest) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let reaction = request.reaction.trim().to_owned();
             if reaction.is_empty() {
@@ -2091,6 +2349,7 @@ impl ClientBackend for SdkBackend {
                     "reaction must not be empty",
                 ));
             }
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let updates = if request.remove {
                 backend
@@ -2117,6 +2376,7 @@ impl ClientBackend for SdkBackend {
                     .await?
                     .updates
             };
+            let _write = backend.account_write_lease(generation).await?;
             let mut events = backend
                 .apply_updates(updates, Some(request.chat_id), None)
                 .await?;
@@ -2143,8 +2403,9 @@ impl ClientBackend for SdkBackend {
     }
 
     fn read(&self, request: ReadRequest) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -2156,6 +2417,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let mut events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -2174,8 +2436,9 @@ impl ClientBackend for SdkBackend {
         &self,
         request: PinMessageRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -2187,6 +2450,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -2198,8 +2462,9 @@ impl ClientBackend for SdkBackend {
         &self,
         request: SetMarkedUnreadRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let updates = if request.unread {
                 backend
@@ -2224,6 +2489,7 @@ impl ClientBackend for SdkBackend {
                     .await?
                     .updates
             };
+            let _write = backend.account_write_lease(generation).await?;
             let mut events = backend
                 .apply_updates(updates, Some(request.chat_id), None)
                 .await?;
@@ -2242,8 +2508,9 @@ impl ClientBackend for SdkBackend {
         &self,
         request: UpdateDialogNotificationsRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -2258,6 +2525,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let mut events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -2281,8 +2549,9 @@ impl ClientBackend for SdkBackend {
         &self,
         request: UpdateDialogFollowModeRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let generation = backend.source_generation();
             let session = backend.require_session().await?;
             let result = backend
                 .call_realtime(
@@ -2300,6 +2569,7 @@ impl ClientBackend for SdkBackend {
                     },
                 )
                 .await?;
+            let _write = backend.account_write_lease(generation).await?;
             let mut events = backend
                 .apply_updates(result.updates, Some(request.chat_id), None)
                 .await?;
@@ -2323,7 +2593,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: TypingRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend
@@ -2345,7 +2615,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: AnswerMessageActionRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if request.interaction_id.get() <= 0 {
                 return Err(BackendError::new(
@@ -2376,7 +2646,7 @@ impl ClientBackend for SdkBackend {
     }
 
     fn get_bot_capabilities(&self) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend
@@ -2393,7 +2663,7 @@ impl ClientBackend for SdkBackend {
         &self,
         capabilities: Vec<BotCapability>,
     ) -> BoxFuture<'static, BackendResult<Vec<BotCapability>>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if capabilities
                 .iter()
@@ -2424,7 +2694,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: RequestBotChatSettingsRequest,
     ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             validate_bot_settings_target(request.bot_user_id, request.version)?;
             let session = backend.require_session().await?;
@@ -2446,7 +2716,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: InvokeBotChatSettingsItemRequest,
     ) -> BoxFuture<'static, BackendResult<BotChatSettingsResponse>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             validate_bot_settings_target(request.bot_user_id, request.version)?;
             if request.item_id.trim().is_empty() || request.document_revision.trim().is_empty() {
@@ -2477,7 +2747,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: AnswerBotChatSettingsRequest,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             if request.request_id == 0 {
                 return Err(BackendError::new(
@@ -2503,7 +2773,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: proto::AnswerBotFilesystemInput,
     ) -> BoxFuture<'static, BackendResult<OperationOutcome>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend.call_realtime(&session, request).await?;
@@ -2515,7 +2785,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: proto::ConnectAgentSessionInput,
     ) -> BoxFuture<'static, BackendResult<proto::ConnectAgentSessionResult>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             let mut result = backend.call_realtime(&session, request).await?;
@@ -2532,7 +2802,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: proto::GetAgentSessionInput,
     ) -> BoxFuture<'static, BackendResult<proto::GetAgentSessionResult>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             let mut result = backend.call_realtime(&session, request).await?;
@@ -2553,7 +2823,7 @@ impl ClientBackend for SdkBackend {
         &self,
         request: proto::SyncAgentSessionMessagesInput,
     ) -> BoxFuture<'static, BackendResult<proto::SyncAgentSessionMessagesResult>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend.call_realtime(&session, request).await
@@ -2565,7 +2835,7 @@ impl ClientBackend for SdkBackend {
         method: proto::Method,
         input: proto::rpc_call::Input,
     ) -> BoxFuture<'static, BackendResult<proto::rpc_result::Result>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let session = backend.require_session().await?;
             backend.invoke_realtime(&session, method, input).await
@@ -2573,9 +2843,12 @@ impl ClientBackend for SdkBackend {
     }
 
     fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
             let deliveries = backend.receive_next_event_deliveries().await?;
+            let _lease = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             let mut events = Vec::with_capacity(deliveries.len());
             for delivery in deliveries {
                 if let Some(delivery_id) = delivery.delivery_id {
@@ -2605,7 +2878,7 @@ impl ClientBackend for SdkBackend {
     fn receive_event_deliveries(
         &self,
     ) -> BoxFuture<'static, BackendResult<Vec<ClientEventDelivery>>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move { backend.receive_next_event_deliveries().await })
     }
 
@@ -2613,8 +2886,11 @@ impl ClientBackend for SdkBackend {
         &self,
         events: Vec<ClientEvent>,
     ) -> BoxFuture<'static, BackendResult<Vec<ClientEventDelivery>>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let _write = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             let deliveries = backend
                 .store
                 .append_client_events(events)
@@ -2629,8 +2905,11 @@ impl ClientBackend for SdkBackend {
         &self,
         delivery_id: u64,
     ) -> BoxFuture<'static, BackendResult<()>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let _write = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             let acknowledgement = backend
                 .store
                 .acknowledge_client_event(delivery_id)
@@ -2655,8 +2934,11 @@ impl ClientBackend for SdkBackend {
     }
 
     fn reset_event_delivery_claims(&self) -> BoxFuture<'static, BackendResult<()>> {
-        let backend = self.clone();
+        let backend = self.source_scope();
         Box::pin(async move {
+            let _write = backend
+                .account_write_lease(backend.source_generation())
+                .await?;
             backend
                 .in_flight_deliveries
                 .lock()
@@ -2669,6 +2951,17 @@ impl ClientBackend for SdkBackend {
 }
 
 impl SyncHost for SdkBackend {
+    fn local_write_lease(&self) -> BoxFuture<'static, BackendResult<Box<dyn Send>>> {
+        let backend = self.clone();
+        let generation = self.source_generation();
+        Box::pin(async move {
+            backend
+                .account_write_lease(generation)
+                .await
+                .map(|lease| Box::new(lease) as Box<dyn Send>)
+        })
+    }
+
     fn get_updates_state(
         &self,
         date: Option<i64>,
@@ -2702,6 +2995,15 @@ impl SyncHost for SdkBackend {
     ) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
         let backend = self.clone();
         Box::pin(async move {
+            let _write = if backend.required_generation.is_none() {
+                Some(
+                    backend
+                        .account_write_lease(backend.source_generation())
+                        .await?,
+                )
+            } else {
+                None
+            };
             let mut events = if let Some(sidecars) = sidecars {
                 backend.apply_sidecars(sidecars).await?
             } else {
@@ -2742,6 +3044,7 @@ impl SyncHost for SdkBackend {
 
 impl SdkBackend {
     async fn repair_user_bucket(&self, target_seq: i64) -> BackendResult<SyncBucketRepair> {
+        let generation = self.source_generation();
         let session = self.require_session().await?;
         let checkpoint = self
             .call_realtime(&session, proto::GetUpdatesStateInput { date: None })
@@ -2778,6 +3081,9 @@ impl SdkBackend {
             )
         })?;
 
+        let _write = self.account_write_lease(generation).await?;
+        self.remember_directory_account(InlineId::new(user.id))
+            .await?;
         let mut events = self.apply_get_chats_snapshot(chats).await?;
         let user = user_record_from_proto(&user);
         self.store
@@ -2806,6 +3112,7 @@ impl SdkBackend {
         space_id: InlineId,
         target_seq: i64,
     ) -> BackendResult<Vec<ClientEvent>> {
+        let generation = self.source_generation();
         let session = self.require_session().await?;
         let result = self
             .call_realtime(
@@ -2851,11 +3158,18 @@ impl SdkBackend {
         {
             record.grid_enabled = existing.grid_enabled;
         }
+        let _write = self.account_write_lease(generation).await?;
         self.store
             .record_space(record)
             .await
             .map_err(store_error_to_backend)?;
         let membership = space_member_record_from_proto(&membership);
+        self.update_directory_membership(
+            Some(membership.clone()),
+            membership.space_id,
+            membership.user_id,
+        )
+        .await?;
         self.store
             .record_space_member(membership.clone())
             .await
@@ -2876,6 +3190,7 @@ impl SdkBackend {
         peer: crate::SyncBucketPeer,
         target_seq: i64,
     ) -> BackendResult<Vec<ClientEvent>> {
+        let generation = self.source_generation();
         let session = self.require_session().await?;
         let peer_id = input_peer_for_sync_bucket_peer(peer);
         let expected_peer = peer_for_sync_bucket_peer(peer);
@@ -2891,6 +3206,7 @@ impl SdkBackend {
         {
             Ok(result) => result,
             Err(error) if error.category == ClientErrorCategory::NotFound => {
+                let _write = self.account_write_lease(generation).await?;
                 let Some(chat_id) = self.stored_chat_id_for_sync_peer(peer).await? else {
                     return Ok(Vec::new());
                 };
@@ -2933,6 +3249,7 @@ impl SdkBackend {
         let chat_id = InlineId::new(chat.id);
         validate_chat_repair_messages(&chat, &expected_peer, &chat_result.messages)?;
 
+        let _write = self.account_write_lease(generation).await?;
         let existing_dialog = self
             .store
             .dialog(chat_id)
@@ -3159,8 +3476,12 @@ impl SdkBackend {
             self.store
                 .record_dialog(DialogRecord {
                     chat_id: InlineId::new(chat.id),
-                    peer_user_id: dialog_peer_user_id(dialog, chat)
-                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.peer_user_id)),
+                    kind: conversation_kind(dialog, chat),
+                    structure_known: chat.seq.is_some()
+                        && conversation_kind(dialog, chat) != ConversationKind::Unknown,
+                    structure_seq: chat.seq,
+                    description: chat.description.clone(),
+                    peer_user_id: dialog_peer_user_id(dialog, chat),
                     title: Some(chat_title_from_proto(chat, &users_by_id)),
                     emoji: chat_emoji_from_proto(chat)
                         .or_else(|| existing.as_ref().and_then(|dialog| dialog.emoji.clone())),
@@ -3178,8 +3499,7 @@ impl SdkBackend {
                     space_id: dialog
                         .and_then(|dialog| dialog.space_id)
                         .or(chat.space_id)
-                        .map(InlineId::new)
-                        .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
+                        .map(InlineId::new),
                     parent_chat_id: chat.parent_chat_id.map(InlineId::new),
                     parent_message_id: chat.parent_message_id.map(InlineId::new),
                     agent_context: chat
@@ -3292,8 +3612,11 @@ impl SdkBackend {
             .unwrap_or_default();
         let record = DialogRecord {
             chat_id: InlineId::new(chat.id),
-            peer_user_id: dialog_peer_user_id(dialog.as_ref(), &chat)
-                .or_else(|| existing.as_ref().and_then(|dialog| dialog.peer_user_id)),
+            kind: conversation_kind(dialog.as_ref(), &chat),
+            structure_known: conversation_kind(dialog.as_ref(), &chat) != ConversationKind::Unknown,
+            structure_seq: chat.seq,
+            description: chat.description.clone(),
+            peer_user_id: dialog_peer_user_id(dialog.as_ref(), &chat),
             title: Some(chat_title_from_proto(&chat, &users_by_id)),
             emoji: chat_emoji_from_proto(&chat),
             last_message_id: chat
@@ -3312,8 +3635,7 @@ impl SdkBackend {
                 .as_ref()
                 .and_then(|dialog| dialog.space_id)
                 .or(chat.space_id)
-                .map(InlineId::new)
-                .or_else(|| existing.as_ref().and_then(|dialog| dialog.space_id)),
+                .map(InlineId::new),
             parent_chat_id: chat.parent_chat_id.map(InlineId::new),
             parent_message_id: chat.parent_message_id.map(InlineId::new),
             agent_context: chat
@@ -3486,6 +3808,7 @@ impl SdkBackend {
         } else {
             TransactionState::Failed
         };
+        let _write = self.account_write_lease(self.source_generation()).await?;
         self.store
             .record_transaction(
                 StoredTransaction::new(identity, state)
@@ -3919,6 +4242,12 @@ impl SdkBackend {
                         });
                     }
                     let member = space_member_record_from_proto(&member);
+                    self.update_directory_membership(
+                        Some(member.clone()),
+                        member.space_id,
+                        member.user_id,
+                    )
+                    .await?;
                     self.store
                         .record_space_member(member.clone())
                         .await
@@ -3932,6 +4261,8 @@ impl SdkBackend {
                 Some(proto::update::Update::SpaceMemberDelete(update)) => {
                     let space_id = InlineId::new(update.space_id);
                     let user_id = InlineId::new(update.user_id);
+                    self.update_directory_membership(None, space_id, user_id)
+                        .await?;
                     self.store
                         .remove_space_member(space_id, user_id)
                         .await
@@ -3950,6 +4281,12 @@ impl SdkBackend {
                         )
                     })?;
                     let member = space_member_record_from_proto(&member);
+                    self.update_directory_membership(
+                        Some(member.clone()),
+                        member.space_id,
+                        member.user_id,
+                    )
+                    .await?;
                     self.store
                         .record_space_member(member.clone())
                         .await
@@ -4438,6 +4775,19 @@ fn dialogs_page_from_get_chats(
     })
 }
 
+fn conversation_kind(dialog: Option<&proto::Dialog>, chat: &proto::Chat) -> ConversationKind {
+    match chat
+        .peer_id
+        .as_ref()
+        .or_else(|| dialog.and_then(|dialog| dialog.peer.as_ref()))
+        .and_then(|peer| peer.r#type.as_ref())
+    {
+        Some(proto::peer::Type::User(_)) => ConversationKind::DirectMessage,
+        Some(proto::peer::Type::Chat(_)) => ConversationKind::Chat,
+        None => ConversationKind::Unknown,
+    }
+}
+
 fn dialog_records_from_get_chats(result: &proto::GetChatsResult) -> Vec<DialogRecord> {
     let users_by_id = result
         .users
@@ -4451,6 +4801,10 @@ fn dialog_records_from_get_chats(result: &proto::GetChatsResult) -> Vec<DialogRe
             let dialog = dialog_for_chat(result, chat);
             DialogRecord {
                 chat_id: InlineId::new(chat.id),
+                kind: conversation_kind(dialog, chat),
+                structure_known: conversation_kind(dialog, chat) != ConversationKind::Unknown,
+                structure_seq: chat.seq,
+                description: chat.description.clone(),
                 peer_user_id: dialog_peer_user_id(dialog, chat),
                 title: Some(chat_title_from_proto(chat, &users_by_id)),
                 emoji: chat_emoji_from_proto(chat),
@@ -4915,8 +5269,15 @@ fn created_dm_from_proto(
     created_chat_from_proto(result.chat, result.dialog, None, None, None)
 }
 
+#[cfg(test)]
 fn created_dialog_record(created: &CreatedChat, peer_user_id: Option<InlineId>) -> DialogRecord {
     DialogRecord {
+        kind: if peer_user_id.is_some() {
+            ConversationKind::DirectMessage
+        } else {
+            ConversationKind::Chat
+        },
+        structure_known: true,
         chat_id: created.chat_id,
         peer_user_id,
         title: created.title.clone(),
@@ -6025,6 +6386,7 @@ fn message_record_from_proto_message(
 
 fn message_metadata_from_proto(message: &proto::Message) -> crate::MessageMetadata {
     crate::MessageMetadata {
+        extra: Default::default(),
         mentioned: message.mentioned,
         edit_timestamp: message.edit_date,
         revision: message.rev,
@@ -6453,7 +6815,7 @@ fn edit_message_input(
         message_id: request.message_id.get(),
         peer_id: Some(input_peer_for_chat(request.chat_id)),
         text: request.text,
-        entities: None,
+        entities: Some(entities_to_proto(&request.entities)),
         parse_markdown: Some(request.parse_markdown),
         actions: actions.map(message_actions_to_proto),
         ..Default::default()
@@ -6593,6 +6955,7 @@ mod tests {
     #[test]
     fn fallback_upload_random_ids_are_distinct_for_different_peers() {
         let first = UploadRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::User {
                 user_id: InlineId::new(7),
             },
@@ -6609,6 +6972,7 @@ mod tests {
             reply_to_message_id: None,
         };
         let second = UploadRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::User {
                 user_id: InlineId::new(8),
             },
@@ -6625,6 +6989,7 @@ mod tests {
     fn ordinary_and_interactive_edits_map_markdown_and_actions() {
         let ordinary = edit_message_input(
             EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(7),
                 message_id: InlineId::new(8),
                 text: "progress".to_string(),
@@ -6637,6 +7002,7 @@ mod tests {
 
         let terminal = edit_message_input(
             EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(7),
                 message_id: InlineId::new(8),
                 text: "done".to_string(),
@@ -9400,6 +9766,7 @@ mod tests {
         let store = InMemoryStore::new();
         let external_id = ExternalId::try_new("host-event", "event-1").unwrap();
         let request = SendTextRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::Chat {
                 chat_id: InlineId::new(7),
             },
@@ -9506,6 +9873,7 @@ mod tests {
         let store = InMemoryStore::new();
         store.save_session(connect_session()).await.unwrap();
         let request = SendTextRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::Chat {
                 chat_id: InlineId::new(7),
             },
@@ -9669,6 +10037,7 @@ mod tests {
     #[test]
     fn upload_input_for_video_without_complete_metadata_falls_back_to_document() {
         let request = UploadRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::Chat {
                 chat_id: InlineId::new(7),
             },
@@ -9696,6 +10065,7 @@ mod tests {
     #[test]
     fn upload_input_for_video_with_complete_metadata_uses_video() {
         let request = UploadRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::Chat {
                 chat_id: InlineId::new(7),
             },
@@ -9883,6 +10253,7 @@ mod tests {
     #[test]
     fn apply_send_message_updates_extracts_final_message() {
         let request = SendTextRequest {
+            entities: Vec::new(),
             peer: crate::PeerRef::Chat {
                 chat_id: InlineId::new(7),
             },
@@ -10664,7 +11035,7 @@ mod tests {
         }
     }
 
-    async fn read_test_client_message(
+    pub(super) async fn read_test_client_message(
         ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     ) -> proto::ClientMessage {
         match ws.next().await.unwrap().unwrap() {
@@ -10673,7 +11044,7 @@ mod tests {
         }
     }
 
-    async fn send_test_server_message(
+    pub(super) async fn send_test_server_message(
         ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
         message: proto::ServerProtocolMessage,
     ) {
@@ -10682,7 +11053,7 @@ mod tests {
             .unwrap();
     }
 
-    fn rpc_result_message(
+    pub(super) fn rpc_result_message(
         id: u64,
         request_id: u64,
         result: proto::rpc_result::Result,
