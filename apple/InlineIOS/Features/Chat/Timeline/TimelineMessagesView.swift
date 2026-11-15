@@ -342,7 +342,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func configure(_ view: TimelineRowView, id: ChatRowID, width: CGFloat, timing: TimelineTiming) {
     guard let row = row(id) else { return }
-    defer { view.isMenuSourceHidden = menu.isSource(id) }
+    defer {
+      view.isMenuSourceHidden = menu.isSource(id)
+      // A swipe replies to a message that can take a reply; never to the thread's parent.
+      if case let .message(message, _) = row.content, message.canReply {
+        view.replyMessage = message
+      } else {
+        view.replyMessage = nil
+      }
+    }
     switch row.content {
       case let .message(message, grouping):
         configureMessage(view, row, message, grouping, isThreadAnchor: false, width: width, timing: timing)

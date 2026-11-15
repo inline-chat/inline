@@ -24,6 +24,28 @@ final class TimelineRowView: UIView {
   private var rules: [UIView] = []
   private var style = LabelStyle.plain
 
+  // Swipe to reply
+  /// The message a horizontal swipe on this row replies to; nil when the row can't be replied to.
+  var replyMessage: FullMessage? {
+    didSet {
+      if replyMessage != nil { installSwipe() }
+      swipe?.isEnabled = replyMessage != nil
+      if replyMessage == nil { resetSwipe() }
+    }
+  }
+  private var swipe: UIPanGestureRecognizer?
+  private var swipeDirection = INUserSettings.current.messageGestures.swipeToReplyDirection
+  private var swipeStart: CGFloat = 0
+  private var swipeArmed = false
+  private lazy var replyIndicator: ReplyIndicatorView = {
+    let view = ReplyIndicatorView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+    view.isHidden = true
+    addSubview(view)
+    return view
+  }()
+  private static let swipeDistance: CGFloat = 80
+  private static let replyIndicatorInset: CGFloat = 37
+
   /// The message view this row shows, when it shows one.
   var shownMessageView: MessageView? { messageView.flatMap { $0.isHidden ? nil : $0 } }
   /// The older message view this row shows for a kind the production view does not support.
@@ -190,6 +212,7 @@ final class TimelineRowView: UIView {
 
   func prepareForReuse() {
     isMenuSourceHidden = false
+    replyMessage = nil
     removeLegacy()
     messageView?.onAvatarTap = nil
     messageView?.onPhotoTap = nil
@@ -204,5 +227,116 @@ final class TimelineRowView: UIView {
     legacyConstraints = []
     legacyView?.removeFromSuperview()
     legacyView = nil
+  }
+
+  // MARK: - Swipe to reply
+
+  private func installSwipe() {
+    guard swipe == nil else { return }
+    let pan = UIPanGestureRecognizer(target: self, action: #selector(handleSwipe(_:)))
+    pan.delegate = self
+    addGestureRecognizer(pan)
+    swipe = pan
+  }
+
+  /// The views that slide with the finger.
+  private var swipedViews: [UIView] {
+    [messageView.flatMap { $0.isHidden ? nil : $0 }, legacyView].compactMap(\.self)
+  }
+
+  @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {
+    guard let message = replyMessage else {
+      resetSwipe()
+      return
+    }
+    let translation = pan.translation(in: self)
+    switch pan.state {
+      case .began:
+        swipeDirection = INUserSettings.current.messageGestures.swipeToReplyDirection
+        swipeStart = translation.x
+        replyIndicator.center = CGPoint(
+          x: swipeDirection.revealsLeftEdge ? Self.replyIndicatorInset : bounds.width - Self.replyIndicatorInset,
+          y: bounds.midY
+        )
+        replyIndicator.isHidden = false
+        replyIndicator.alpha = 1
+        replyIndicator.reset()
+      case .changed:
+        let offset = translation.x - swipeStart
+        guard swipeDirection.accepts(offset) else {
+          for view in swipedViews { view.transform = .identity }
+          replyIndicator.updateProgress(0)
+          swipeArmed = false
+          return
+        }
+        let progress = min(abs(offset) / Self.swipeDistance, 1)
+        let shift = swipeDirection.horizontalSign * Self.swipeDistance * progress
+        for view in swipedViews { view.transform = CGAffineTransform(translationX: shift, y: 0) }
+        replyIndicator.updateProgress(progress)
+        let armed = progress > 0.7
+        if armed, !swipeArmed {
+          let feedback = UIImpactFeedbackGenerator(style: .medium)
+          feedback.prepare()
+          feedback.impactOccurred()
+        }
+        swipeArmed = armed
+      case .ended, .cancelled:
+        let offset = translation.x - swipeStart
+        let velocity = pan.velocity(in: self).x
+        let progress = min(abs(offset) / Self.swipeDistance, 1)
+        let replies = pan.state == .ended && swipeDirection.accepts(offset)
+          && (progress > 0.7 || (abs(velocity) > 600 && swipeDirection.accepts(velocity)))
+        if replies {
+          ChatState.shared.setReplyingMessageId(peer: message.message.peerId, id: message.message.messageId)
+        }
+        let views = swipedViews
+        UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5) {
+          for view in views { view.transform = .identity }
+          self.replyIndicator.alpha = 0
+        } completion: { [weak self] _ in
+          self?.resetSwipe()
+        }
+      default:
+        resetSwipe()
+    }
+  }
+
+  private func resetSwipe() {
+    guard swipe != nil else { return }
+    for view in swipedViews { view.transform = .identity }
+    replyIndicator.isHidden = true
+    replyIndicator.alpha = 1
+    replyIndicator.reset()
+    swipeStart = 0
+    swipeArmed = false
+  }
+}
+
+extension TimelineRowView: UIGestureRecognizerDelegate {
+  override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+    guard gesture === swipe else { return super.gestureRecognizerShouldBegin(gesture) }
+    guard replyMessage != nil else { return false }
+    // Code blocks and tables scroll sideways under the finger.
+    if let messageView = shownMessageView, messageView.scrollsHorizontally(at: gesture.location(in: messageView)) {
+      return false
+    }
+    let velocity = (gesture as? UIPanGestureRecognizer)?.velocity(in: self) ?? .zero
+    // Nearly horizontal only (within 24°), in the direction the user picked.
+    guard abs(velocity.x) > abs(velocity.y), abs(velocity.y) <= abs(velocity.x) * 0.4452286853 else { return false }
+    return INUserSettings.current.messageGestures.swipeToReplyDirection.accepts(velocity.x)
+  }
+
+  func gestureRecognizer(
+    _ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
+  ) -> Bool {
+    false
+  }
+
+  // A reply swipe on a message that can be replied to owns the touch; the back swipe proceeds only
+  // when it is rejected.
+  func gestureRecognizer(
+    _ gesture: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer
+  ) -> Bool {
+    gesture === swipe && other is UIScreenEdgePanGestureRecognizer
   }
 }
