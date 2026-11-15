@@ -6138,6 +6138,11 @@ message CreateUploadInput {
     UploadVideoMetadata video = 8;
     UploadVoiceMetadata voice = 9;
   }
+  // The whole file, when it fits in one part (byte_count <= part size). The server saves it as
+  // part 0 and finishes the upload in this call, returning `complete` when it finalizes. Servers
+  // that predate this field ignore it; part 0 is then missing from accepted_parts and the client
+  // uploads it as usual.
+  optional bytes inline_data = 10;
 }
 
 message CreateUploadResult {
@@ -6146,6 +6151,8 @@ message CreateUploadResult {
   uint32 part_count = 3;
   int64 expires_at = 4;
   repeated uint32 accepted_parts = 5;
+  // Set when inline_data finalized the upload in this call.
+  optional UploadComplete complete = 6;
 }
 
 message SaveUploadPartInput {

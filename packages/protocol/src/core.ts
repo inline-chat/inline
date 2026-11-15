@@ -16291,6 +16291,15 @@ export interface CreateUploadInput {
     } | {
         oneofKind: undefined;
     };
+    /**
+     * The whole file, when it fits in one part (byte_count <= part size). The server saves it as
+     * part 0 and finishes the upload in this call, returning `complete` when it finalizes. Servers
+     * that predate this field ignore it; part 0 is then missing from accepted_parts and the client
+     * uploads it as usual.
+     *
+     * @generated from protobuf field: optional bytes inline_data = 10;
+     */
+    inlineData?: Uint8Array;
 }
 /**
  * @generated from protobuf message CreateUploadResult
@@ -16316,6 +16325,12 @@ export interface CreateUploadResult {
      * @generated from protobuf field: repeated uint32 accepted_parts = 5;
      */
     acceptedParts: number[];
+    /**
+     * Set when inline_data finalized the upload in this call.
+     *
+     * @generated from protobuf field: optional UploadComplete complete = 6;
+     */
+    complete?: UploadComplete;
 }
 /**
  * @generated from protobuf message SaveUploadPartInput
@@ -61552,7 +61567,8 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
             { no: 6, name: "kind", kind: "enum", T: () => ["UploadKind", UploadKind, "UPLOAD_KIND_"] },
             { no: 7, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "video", kind: "message", oneof: "metadata", T: () => UploadVideoMetadata },
-            { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata }
+            { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata },
+            { no: 10, name: "inline_data", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ }
         ]);
     }
     create(value?: PartialMessage<CreateUploadInput>): CreateUploadInput {
@@ -61606,6 +61622,9 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
                         voice: UploadVoiceMetadata.internalBinaryRead(reader, reader.uint32(), options, (message.metadata as any).voice)
                     };
                     break;
+                case /* optional bytes inline_data */ 10:
+                    message.inlineData = reader.bytes();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -61645,6 +61664,9 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
         /* UploadVoiceMetadata voice = 9; */
         if (message.metadata.oneofKind === "voice")
             UploadVoiceMetadata.internalBinaryWrite(message.metadata.voice, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        /* optional bytes inline_data = 10; */
+        if (message.inlineData !== undefined)
+            writer.tag(10, WireType.LengthDelimited).bytes(message.inlineData);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -61663,7 +61685,8 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
             { no: 2, name: "part_size", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 3, name: "part_count", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ }
+            { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
+            { no: 6, name: "complete", kind: "message", T: () => UploadComplete }
         ]);
     }
     create(value?: PartialMessage<CreateUploadResult>): CreateUploadResult {
@@ -61701,6 +61724,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
                     else
                         message.acceptedParts.push(reader.uint32());
                     break;
+                case /* optional UploadComplete complete */ 6:
+                    message.complete = UploadComplete.internalBinaryRead(reader, reader.uint32(), options, message.complete);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -61732,6 +61758,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
                 writer.uint32(message.acceptedParts[i]);
             writer.join();
         }
+        /* optional UploadComplete complete = 6; */
+        if (message.complete)
+            UploadComplete.internalBinaryWrite(message.complete, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
