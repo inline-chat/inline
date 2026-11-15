@@ -220,6 +220,10 @@ struct RichBlockFormNode: Codable, Hashable {
     var label: RichBlockTextRange
     var description: RichBlockTextRange?
     var frame: CGRect
+    /// Monospaced, shown in the field's preview pane while this option is chosen.
+    var preview: RichBlockTextRange? = nil
+    /// Where the "Recommended" tag sits, in the option's coordinates; nil when not recommended.
+    var tagFrame: CGRect? = nil
   }
 
   enum Control: Codable, Hashable {
@@ -241,6 +245,13 @@ struct RichBlockFormNode: Codable, Hashable {
     var required: Bool
     var control: Control
     var controlFrame: CGRect
+    /// A short topic above the question, such as "Auth method", drawn as a chip.
+    var header: RichBlockTextRange? = nil
+    /// The header's text; the chip pads around it.
+    var headerFrame: CGRect? = nil
+    /// The box under the choices that shows the chosen option's preview, sized for the
+    /// tallest one so choosing never moves the message.
+    var previewFrame: CGRect? = nil
   }
 
   var formID: String

@@ -32,6 +32,11 @@ enum RichBlockAgentMetrics {
   static let formTextFieldMaximumWidth: CGFloat = 360
   /// Single choices beyond this many options use a pop-up menu.
   static let formChoiceListLimit = 6
+  static let formChipHorizontalPadding: CGFloat = 7
+  static let formChipVerticalPadding: CGFloat = 2
+  static let formPreviewInset: CGFloat = 8
+  static let formPreviewMaximumHeight: CGFloat = 240
+  static let formTagFont = NSFont.systemFont(ofSize: 10, weight: .semibold)
 
   static var diffFont: NSFont { RichBlockCodeMetrics.bodyFont }
 
@@ -508,6 +513,18 @@ extension RichBlockLayoutPlanner.Builder {
             let label = styled(labelRange, role: .paragraph, isRTL: isRTL, maximumWidth: width)
       else { return false }
       if index > 0 { y += RichBlockAgentMetrics.formFieldSpacing }
+      var headerRange: RichBlockTextRange?
+      var headerFrame: CGRect?
+      if field.hasHeader, let range = validRange(field.header), range.length > 0,
+         let header = styled(range, role: .footer, isRTL: isRTL, maximumWidth: width)
+      {
+        let padX = RichBlockAgentMetrics.formChipHorizontalPadding
+        let padY = RichBlockAgentMetrics.formChipVerticalPadding
+        let size = measure(header, width: max(1, width - padX * 2))
+        headerRange = range
+        headerFrame = CGRect(x: isRTL ? width - padX - size.width : padX, y: y + padY, width: size.width, height: size.height)
+        y += size.height + padY * 2 + 4
+      }
       let labelSize = measure(label, width: width - 12)
       let labelFrame = CGRect(x: isRTL ? width - labelSize.width : 0, y: y, width: labelSize.width + 12, height: labelSize.height)
       y += labelSize.height
@@ -529,6 +546,19 @@ extension RichBlockLayoutPlanner.Builder {
       case .toggle: 52
       default: fieldWidth
       }
+      let controlFrame = CGRect(
+        x: isRTL ? width - controlFrameWidth : 0,
+        y: y,
+        width: controlFrameWidth,
+        height: controlHeight
+      )
+      y += controlHeight
+      var previewFrame: CGRect?
+      if let height = previewHeight(control, width: width) {
+        y += 8
+        previewFrame = CGRect(x: 0, y: y, width: width, height: height)
+        y += height
+      }
       fields.append(.init(
         id: fieldID,
         label: labelRange,
@@ -537,14 +567,11 @@ extension RichBlockLayoutPlanner.Builder {
         descriptionFrame: descriptionFrame,
         required: field.required,
         control: control,
-        controlFrame: CGRect(
-          x: isRTL ? width - controlFrameWidth : 0,
-          y: y,
-          width: controlFrameWidth,
-          height: controlHeight
-        )
+        controlFrame: controlFrame,
+        header: headerRange,
+        headerFrame: headerFrame,
+        previewFrame: previewFrame
       ))
-      y += controlHeight
     }
     y += RichBlockAgentMetrics.formFieldSpacing
     let submitLabel = form.hasSubmitLabel && !form.submitLabel.trimmingCharacters(in: .whitespaces).isEmpty
@@ -592,8 +619,9 @@ extension RichBlockLayoutPlanner.Builder {
               let label = styled(labelRange, role: .paragraph, isRTL: isRTL, maximumWidth: optionWidth)
         else { return nil }
         let description = option.hasDescription_p ? validRange(option.description_p) : nil
+        let preview = option.hasPreview ? validRange(option.preview).flatMap { $0.length > 0 ? $0 : nil } : nil
         if usesMenu {
-          options.append(.init(id: optionID, label: labelRange, description: description, frame: .zero))
+          options.append(.init(id: optionID, label: labelRange, description: description, frame: .zero, preview: preview))
           continue
         }
         if index > 0 { y += RichBlockAgentMetrics.formChoiceSpacing }
@@ -603,11 +631,23 @@ extension RichBlockLayoutPlanner.Builder {
         {
           optionHeight += measure(text, width: optionWidth).height
         }
+        var tagFrame: CGRect?
+        if option.recommended {
+          let tag = ceil(Self.recommendedTag.size(withAttributes: [.font: RichBlockAgentMetrics.formTagFont]).width) + 10
+          let titleWidth = ceil(measure(label, width: optionWidth).width)
+          let room = optionWidth - tag - 6
+          if room > 40 {
+            let x = RichBlockAgentMetrics.formChoiceIndent + min(titleWidth, room) + 6
+            tagFrame = CGRect(x: isRTL ? width - x - tag : x, y: 1, width: tag, height: 16)
+          }
+        }
         options.append(.init(
           id: optionID,
           label: labelRange,
           description: description,
-          frame: CGRect(x: 0, y: y, width: width, height: optionHeight)
+          frame: CGRect(x: 0, y: y, width: width, height: optionHeight),
+          preview: preview,
+          tagFrame: tagFrame
         ))
         y += optionHeight
       }
@@ -661,5 +701,25 @@ extension RichBlockLayoutPlanner.Builder {
     case nil:
       return nil
     }
+  }
+
+  static let recommendedTag = String(localized: "Recommended")
+
+  /// The preview pane's height for a choice field: the tallest option preview, capped. Nil
+  /// when no option has one.
+  private func previewHeight(_ control: RichBlockFormNode.Control, width: CGFloat) -> CGFloat? {
+    let options: [RichBlockFormNode.Option] = switch control {
+    case let .choices(options, _, _, _), let .menu(options, _, _): options
+    default: []
+    }
+    let inset = RichBlockAgentMetrics.formPreviewInset
+    let heights = options.compactMap { option -> CGFloat? in
+      guard let range = option.preview,
+            let text = RichBlockLayoutPlanner.monospaceText(attributedText, range: range)
+      else { return nil }
+      return measure(text, width: max(1, width - inset * 2)).height
+    }
+    guard let tallest = heights.max() else { return nil }
+    return ceil(min(tallest, RichBlockAgentMetrics.formPreviewMaximumHeight) + inset * 2)
   }
 }
