@@ -20,7 +20,8 @@ final class TimelineRowView: UIView {
   private var legacyView: UIMessageView?
   private var legacyConstraints: [NSLayoutConstraint] = []
   private var label: UILabel?
-  private var pill: UIView?
+  /// A day row: the plain style of the list's date badge.
+  private var pill: TimelineDatePill?
   private var rules: [UIView] = []
   private var style = LabelStyle.plain
 
@@ -146,7 +147,7 @@ final class TimelineRowView: UIView {
       self.label = label
       return label
     }()
-    label.isHidden = false
+    label.isHidden = style == .pill
     label.text = text
     switch style {
       case .pill: label.font = .preferredFont(forTextStyle: .footnote)
@@ -166,13 +167,13 @@ final class TimelineRowView: UIView {
     for rule in rules { rule.isHidden = style != .line }
     if style == .pill {
       let pill = pill ?? {
-        let pill = UIView()
-        insertSubview(pill, belowSubview: label)
+        let pill = TimelineDatePill(floating: false)
+        addSubview(pill)
         self.pill = pill
         return pill
       }()
       pill.isHidden = false
-      pill.backgroundColor = theme.chatCanvas.uiColor.withAlphaComponent(0.85)
+      pill.configure(title: text)
     } else {
       pill?.isHidden = true
     }
@@ -181,15 +182,12 @@ final class TimelineRowView: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    if let pill, !pill.isHidden { pill.frame = bounds }
     guard let label, !label.isHidden else { return }
     let size = label.sizeThatFits(CGSize(width: bounds.width - 32, height: bounds.height))
     label.frame = CGRect(
       x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height
     )
-    if let pill, !pill.isHidden {
-      pill.frame = label.frame.insetBy(dx: -10, dy: -5)
-      pill.layer.cornerRadius = pill.bounds.height / 2
-    }
     if rules.count == 2, !rules[0].isHidden {
       let hairline = 1 / max(1, traitCollection.displayScale)
       let y = label.frame.midY - hairline / 2

@@ -52,6 +52,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// Rows of sent messages whose bubble is still flying in from the composer.
   private var flightTargets: Set<ChatRowID> = []
 
+  // Floating date
+  private let datePill = TimelineDatePill(floating: true)
+  /// Where each day starts in the rows, oldest first.
+  private var dayRows: [(index: Int, day: Date)] = []
+  private var datePillDay: Date?
+  private var datePillHide: DispatchWorkItem?
+
   // Message menu
   private let menuActions: MessageMenuActions
   private var menu: TimelineMessageMenu!
@@ -135,6 +142,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     list.onLayout = { [weak self] _ in self?.layoutChanged() }
     list.onScrollEnded = { [weak self] in self?.scrollEnded() }
     addSubview(list)
+    datePill.alpha = 0
+    datePill.onTap = { [weak self] in self?.jumpToDatePillDay() }
+    addSubview(datePill)
 
     viewModel.rowFeed.isPublishing = true
     viewModel.rowFeed.updates.sink { [weak self] update in self?.apply(update) }.store(in: &cancellables)
@@ -194,6 +204,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     list.frame = bounds
     applyInsets(.none)
     openIfNeeded()
+    updateDatePill()
   }
 
   override func didMoveToWindow() {
@@ -492,6 +503,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
           let snapshot = viewModel.rowFeed.snapshot else { return }
     hasOpened = true
     self.snapshot = snapshot
+    rebuildDayRows()
     var scroll = TimelineScroll<ChatRowID>.latest
     switch openAnchor {
       case .latest:
@@ -516,6 +528,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard hasOpened else { return }
     let snapshot = update.snapshot
     self.snapshot = snapshot
+    rebuildDayRows()
     let diff = update.diff
     for change in diff.removals {
       plans[change.id] = nil
@@ -749,11 +762,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func layoutChanged() {
     updateAffordance(force: false)
+    updateDatePill()
     // While the list moves, read marking runs a few times a second at most.
     readPass(force: false)
   }
 
   private func scrollEnded() {
+    scheduleDatePillHide()
     saveReadingPlace()
     readPass(force: true)
   }
@@ -826,6 +841,62 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard next != affordance else { return }
     affordance = next
     onScrollAffordanceChanged?(next)
+  }
+
+  // MARK: - Floating date
+
+  private func rebuildDayRows() {
+    dayRows = snapshot?.rows.enumerated().compactMap { index, row in
+      if case let .daySeparator(day) = row.content { (index, day) } else { nil }
+    } ?? []
+  }
+
+  /// The day of the topmost row floats at the top edge while the reader scrolls. The next day's row
+  /// pushes it up; when the day's own row is on screen, that row shows the date instead.
+  private func updateDatePill() {
+    let layout = list.layout
+    let top = layout.viewport.usableTop
+    datePill.frame = CGRect(x: 0, y: datePill.frame.minY, width: bounds.width, height: TimelineDatePill.height)
+    guard hasOpened, !dayRows.isEmpty,
+          let topRow = layout.placements.first(where: { $0.maxY > top + 1 }),
+          let current = dayRows.last(where: { $0.index <= topRow.index })
+    else {
+      datePill.setVisible(false, animated: false)
+      return
+    }
+    if let own = layout.placements.first(where: { $0.index == current.index }), own.y >= top - 0.5 {
+      datePill.setVisible(false, animated: false)
+      return
+    }
+    var y = top
+    if let next = dayRows.first(where: { $0.index > topRow.index }),
+       let row = layout.placements.first(where: { $0.index == next.index })
+    {
+      y = min(top, row.y - TimelineDatePill.height)
+    }
+    datePill.frame.origin.y = y
+    datePillDay = current.day
+    datePill.configure(title: Self.dayTitle(current.day))
+    if list.isTracking || list.isDecelerating {
+      datePillHide?.cancel()
+      datePill.setVisible(true, animated: datePill.alpha == 0)
+    }
+  }
+
+  private func scheduleDatePillHide() {
+    datePillHide?.cancel()
+    let hide = DispatchWorkItem { [weak self] in self?.datePill.setVisible(false, animated: true) }
+    datePillHide = hide
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: hide)
+  }
+
+  /// The day's first message at the top, as the collection view's badge does.
+  private func jumpToDatePillDay() {
+    guard let day = datePillDay else { return }
+    let id = ChatRowID.daySeparator(day)
+    let near = list.layout.placement(for: id) != nil
+    list.apply(TimelineTransaction(scroll: .to(id, .top(0)), timing: near ? Self.rowTiming : .none))
+    scheduleDatePillHide()
   }
 
   // MARK: - The rest of the container's contract
