@@ -723,6 +723,13 @@ private func downloadDestination() -> URL {
   }
 }
 
+private final class ProgressReports: @unchecked Sendable {
+  private let lock = NSLock()
+  private var reports: [[Int64]] = []
+  var values: [[Int64]] { lock.withLock { reports } }
+  func record(_ received: Int64, _ total: Int64) { lock.withLock { reports.append([received, total]) } }
+}
+
 private final class DownloadAdmissionProbe: @unchecked Sendable {
   private let lock = NSLock()
   private var seen: Set<String> = []
@@ -1064,6 +1071,27 @@ private struct NativeDownloadManagerTests {
       .init(chatID: 7, messageID: 8, bytesReceived: 524_288 * 2, totalBytes: Int64(total)),
       .init(chatID: 7, messageID: 9, bytesReceived: 524_288, totalBytes: Int64(total)),
     ])
+  }
+
+  @Test func resumedDownloadReportsItsSavedBytesBeforeAnyRoundTrip() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var message = FileMessageLocation(); message.chatID = 7; message.messageID = 8
+    let total = 524_288 * 3
+    try Data(repeating: 1, count: 524_288).write(to: nativePartial(directory, file: "INP_resumed"))
+    try nativeRecord(directory: directory, file: "INP_resumed", total: total, message: message)
+    let manager = NativeDownloadManager()
+    let reports = ProgressReports()
+
+    await NativeMessageFileDownload.reportSavedProgress(
+      manager: manager, accountID: 1, location: message, directory: directory, progress: reports.record
+    )
+    var fresh = message; fresh.messageID = 9
+    await NativeMessageFileDownload.reportSavedProgress(
+      manager: manager, accountID: 1, location: fresh, directory: directory, progress: reports.record
+    )
+
+    #expect(reports.values == [[524_288, Int64(total)]])
   }
 
   @Test func windowGrowsOnFastPartsAndHalvesOnSlowOrFailingOnes() async {

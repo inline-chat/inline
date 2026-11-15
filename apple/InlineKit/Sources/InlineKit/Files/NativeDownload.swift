@@ -947,6 +947,12 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
     var location = FileMessageLocation()
     location.chatID = message.chatId
     location.messageID = message.messageId
+    // Like Telegram, a stopped file looks like any remote file until it is asked for again;
+    // then its progress starts at what it already holds, not at zero until the first round trip.
+    await Self.reportSavedProgress(
+      manager: .shared, accountID: accountToken.userID, location: location,
+      directory: destination.deletingLastPathComponent(), progress: progress
+    )
     let response = try await Api.realtime.withUserInitiatedConnection(
       accountToken: accountToken, timeout: .seconds(60)
     ) { realtime in
@@ -974,6 +980,17 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
         priority: priority, stallBudget: stallBudget, transport: transport
       )
     }
+  }
+
+  /// Reports the bytes a stopped download of this message already holds, so a resumed file's
+  /// progress starts where it left off. Reports nothing for a fresh, finished or running file.
+  static func reportSavedProgress(
+    manager: NativeDownloadManager, accountID: Int64, location: FileMessageLocation, directory: URL,
+    progress: @Sendable (Int64, Int64) -> Void
+  ) async {
+    let saved = await manager.savedPartials(accountID: accountID, in: [directory])
+      .first { $0.chatID == location.chatID && $0.messageID == location.messageID }
+    if let saved { progress(saved.bytesReceived, saved.totalBytes) }
   }
 
   /// Downloads a file whose identity the caller already holds, such as a stored photo size,
