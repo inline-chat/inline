@@ -39,10 +39,15 @@ public struct TimelineTransaction<ID: Hashable & Sendable> {
   /// Rows whose content (and maybe height) changed.
   public var changed: Set<ID>
   public var timing: TimelineTiming
+  /// For a jump whose destination shares no placed row with what is on screen: the side it lies on.
+  /// Such a jump slides the screen out and the destination in next to it, on one track. When the rows
+  /// on screen are still in the list, their order decides and this is not read; nil means newer.
+  public var towards: TimelineEdge?
 
   public init(
     rows: [ID]? = nil, coverage: TimelineCoverage? = nil, scroll: TimelineScroll<ID> = .preserve,
-    topInset: CGFloat? = nil, bottomInset: CGFloat? = nil, changed: Set<ID> = [], timing: TimelineTiming = .none
+    topInset: CGFloat? = nil, bottomInset: CGFloat? = nil, changed: Set<ID> = [], timing: TimelineTiming = .none,
+    towards: TimelineEdge? = nil
   ) {
     self.rows = rows
     self.coverage = coverage
@@ -51,6 +56,7 @@ public struct TimelineTransaction<ID: Hashable & Sendable> {
     self.bottomInset = bottomInset
     self.changed = changed
     self.timing = timing
+    self.towards = towards
   }
 }
 
@@ -120,6 +126,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   private var beforeFirstLayout: [TimelineTransaction<ID>] = []
   private var topInset: CGFloat = 0
   private var bottomInset: CGFloat = 0
+  /// The screen a far jump left, sliding out while the destination slides in ("carousel"). In
+  /// viewport space, under the content, so a finger on the new rows does not drag it.
+  private var carouselExit: UIView?
 
   private final class Slot {
     let view: UIView
@@ -193,7 +202,12 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       update.allowsOverscroll = true
     }
     if transaction.scroll != .preserve, flight != nil, !isTracking { endFlight(settle: false) }
-    perform(update, timing: transaction.timing, changed: transaction.changed)
+    var jump: TimelineEdge??
+    switch transaction.scroll {
+      case .latest, .to: jump = .some(transaction.towards)
+      case .preserve, .by: jump = nil
+    }
+    perform(update, timing: transaction.timing, changed: transaction.changed, jump: jump)
   }
 
   public func setInsets(top: CGFloat? = nil, bottom: CGFloat? = nil, timing: TimelineTiming = .none) {
@@ -274,10 +288,13 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     TimelineViewport(width: bounds.width, height: bounds.height, topInset: topInset, bottomInset: bottomInset)
   }
 
-  private func perform(_ update: TimelineUpdate<ID>, timing: TimelineTiming, changed: Set<ID>) {
+  /// `jump` is set for a change that scrolls to a target, with the side its destination lies on.
+  private func perform(
+    _ update: TimelineUpdate<ID>, timing: TimelineTiming, changed: Set<ID>, jump: TimelineEdge?? = nil
+  ) {
     guard !isApplying else {
       // A change made while another is being applied (a row callback) runs right after it.
-      queued.append { [weak self] in self?.perform(update, timing: timing, changed: changed) }
+      queued.append { [weak self] in self?.perform(update, timing: timing, changed: changed, jump: jump) }
       return
     }
     isApplying = true
@@ -285,7 +302,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     let change = state.apply(update) { rows.height($0, width) }
     var scrolled: CGFloat = 0
     if case let .by(delta) = update.scroll { scrolled = delta }
-    commit(change, timing: timing, changed: changed, scrolled: scrolled)
+    commit(change, timing: timing, changed: changed, scrolled: scrolled, jump: jump)
     isApplying = false
     if !queued.isEmpty {
       let next = queued.removeFirst()
@@ -293,10 +310,15 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
   }
 
-  private func commit(_ change: TimelineChange<ID>, timing: TimelineTiming, changed: Set<ID>, scrolled: CGFloat) {
+  private func commit(
+    _ change: TimelineChange<ID>, timing: TimelineTiming, changed: Set<ID>, scrolled: CGFloat, jump: TimelineEdge??
+  ) {
     let layout = change.layout
     let width = layout.viewport.width
     let animates = timing.isAnimated && window != nil
+    // A jump that keeps no placed row: the screen slides out and the destination in next to it.
+    let carousel: CGFloat? = animates && change.isDisjoint ? jump.flatMap { carouselTravel(change, towards: $0) } : nil
+    if let carousel { parkScreenForCarousel(travel: carousel, timing: timing) }
 
     // Keep one surviving row's content coordinate, so a scroll moves `content` and nothing else.
     var previousY: [ID: CGFloat] = [:]
@@ -330,12 +352,15 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         if resized || changed.contains(placement.id) {
           rows.update(placement.id, slot.row, width, animates ? timing : .none)
         }
-        if animates { slot.view.layer.addTrack(timing, keyPath: "position.y", from: moved) }
+        if animates, carousel == nil { slot.view.layer.addTrack(timing, keyPath: "position.y", from: moved) }
       } else {
         let slot = self.slot(for: rows.make(placement.id, width))
         slots[placement.id] = slot
         place(slot, y: y, width: width, height: placement.height)
-        if animates {
+        // A new row's first layout is its starting state: done now, outside any animation block the
+        // caller (or a system transition running a layout pass) happens to be in.
+        UIView.performWithoutAnimation { slot.row.layoutIfNeeded() }
+        if animates, carousel == nil {
           // A row placed for the first time travels with its neighbours; one new to the data fades in.
           slot.view.layer.addTrack(timing, keyPath: "position.y", from: (change.offsets[placement.id] ?? 0) + originDelta)
           if change.inserted.contains(placement.id) {
@@ -347,7 +372,11 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
     // Rows that fell out of the placed window during an animated change are still on screen until
     // the motion ends: they stay, stacked beyond the window's ends, and travel with it.
-    if animates, let first = layout.placements.first, let last = layout.placements.last {
+    if carousel != nil {
+      // The parked screen shows them.
+      for (id, entry) in lingering { retire(id, entry.slot) }
+      lingering = [:]
+    } else if animates, let first = layout.placements.first, let last = layout.placements.last {
       var top = first.y + origin
       var bottom = last.maxY + origin
       let expiry = now + timing.duration
@@ -374,7 +403,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     for id in leaving { if let entry = lingering.removeValue(forKey: id) { slots[id] = entry.slot } }
     for (id, slot) in slots where !placed.contains(id) {
       slots[id] = nil
-      if animates, leaving.contains(id) {
+      if animates, carousel == nil, leaving.contains(id) {
         // A deleted row fades where it was while its neighbours close the gap.
         slot.view.layer.opacity = 0
         slot.view.layer.addTrack(timing, keyPath: "opacity", from: 1)
@@ -391,11 +420,66 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
 
     syncOrigin()
-    if animates { content.layer.addTrack(timing, keyPath: "bounds.origin.y", from: originDelta) }
+    if let carousel {
+      content.layer.addTrack(timing, keyPath: "bounds.origin.y", from: -carousel)
+    } else if animates {
+      content.layer.addTrack(timing, keyPath: "bounds.origin.y", from: originDelta)
+    }
     CATransaction.commit()
 
     if !change.demands.isEmpty { onDemand?(change.demands) }
     onLayout?(layout)
+  }
+
+  // MARK: - Carousel
+
+  /// How far the destination starts from where it settles, positive below: its strip of placed rows
+  /// starts against the edge of what was on screen, on the side it lies on. Nil when there is nothing
+  /// to slide.
+  private func carouselTravel(_ change: TimelineChange<ID>, towards hint: TimelineEdge?) -> CGFloat? {
+    let old = change.previous
+    guard let oldFirst = old.placements.first, let oldLast = old.placements.last,
+          let newFirst = change.layout.placements.first, let newLast = change.layout.placements.last
+    else { return nil }
+    let towards: TimelineEdge = state.index[oldFirst.id].map { $0 < newFirst.index ? .newer : .older } ?? hint ?? .newer
+    let height = old.viewport.height
+    let travel: CGFloat = switch towards {
+      // Newer rows are below: the destination's top starts at the bottom of what was on screen.
+      case .newer: min(height, oldLast.maxY) - newFirst.y
+      // Older rows are above: the destination's bottom starts at the top of what was on screen.
+      case .older: max(0, oldFirst.y) - newLast.maxY
+    }
+    // A strip already past the edge would overlap the screen: start a screen away instead.
+    switch towards {
+      case .newer: return travel > 0 ? travel : height
+      case .older: return travel < 0 ? travel : -height
+    }
+  }
+
+  /// Puts a picture of the screen under the content, to move by `-travel` with the same timing as
+  /// the content's track, so the two strips stay joined.
+  private func parkScreenForCarousel(travel: CGFloat, timing: TimelineTiming) {
+    // What is on screen now, a carousel still running included; the new one starts from it.
+    let picture = snapshotView(afterScreenUpdates: false)
+    carouselExit?.removeFromSuperview()
+    carouselExit = nil
+    content.layer.removeAllAnimations()
+    guard let picture else { return }
+    picture.frame = bounds
+    picture.isUserInteractionEnabled = false
+    insertSubview(picture, belowSubview: content)
+    carouselExit = picture
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    picture.layer.position.y -= travel
+    picture.layer.addTrack(timing, keyPath: "position.y", from: travel)
+    CATransaction.commit()
+    Task { @MainActor [weak self, weak picture] in
+      try? await Task.sleep(for: .seconds(timing.duration + 0.05))
+      guard let picture else { return }
+      picture.removeFromSuperview()
+      if self?.carouselExit === picture { self?.carouselExit = nil }
+    }
   }
 
   private func scheduleLingerSweep(after delay: CFTimeInterval) {
