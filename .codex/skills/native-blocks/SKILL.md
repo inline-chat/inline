@@ -33,7 +33,7 @@ Inline draws agent surfaces (plans, approvals, review notes, task suggestions, n
    - Layout in `RichBlockLayoutPlanner+AgentCards.swift` (or `+Agent.swift`) with manual measured layout. Card-shaped blocks reuse `beginCard`/`appendActions`/`endCard`.
    - A node view in `RichBlockAgentCardNodeViews.swift`, registered in `RichBlockViewFactory`.
    - Text parts are `RichBlockTextSurface`s listed in `orderedTextSurfaces`, so selection and copy work.
-6. **iOS**: the builder in `apple/InlineIOS/Features/MessageView/MessageRichContent.swift`, the `RichBlock` node in `apple/InlineMessageLayout`, and the view in `MessageRichView.swift`. Match macOS: light and dark, RTL, Dynamic Type, VoiceOver.
+6. **iOS**: the builder in `apple/InlineIOS/Features/MessageView/MessageRichContent.swift`, the `RichBlock` node in `apple/InlineMessageLayout`, and the view in `MessageRichView.swift`. Match macOS: light and dark, RTL, Dynamic Type, VoiceOver. Interactive state that isn't in the message (expansion, form answers) lives in a store the builder reads; a tap updates the store and rebuilds the message (`onContentStateChange`). Forms work this way: card rows for choices, an editor sheet for typed answers (`MessageFormController`), answers in `MessageFormDraftStore` via `MessageFormAnswers`.
 7. **Bridge recipe**: `cli/src/bridge/v2/blocks/<surface>.rs` maps the native tool call or item to the block. Add a native sample in `blocks/fixtures/<surface>/` and a golden test of blocks plus fallback text. Register it in the table in `blocks/mod.rs`. If the surface is a host tool in Claude or ChatGPT desktop, add an Inline tool in `cli/src/bridge/v2/tools.rs`.
 8. **Check**:
    - `swift test` in InlineKit and InlineMessageLayout.
