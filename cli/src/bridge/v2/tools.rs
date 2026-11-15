@@ -921,7 +921,7 @@ impl Tools {
     async fn create_chat(&self, arguments: &Value, call: &HostToolCall) -> HostToolResult {
         let (Some(title), Some(initial_message)) = (
             string_arg(arguments, "title", 200),
-            string_arg(arguments, "initial_message", MAX_MESSAGE_UTF16),
+            message_arg(arguments, "initial_message"),
         ) else {
             return HostToolResult::failure("title and initial_message are required.");
         };
@@ -1575,6 +1575,13 @@ fn text_limit(tool: &str) -> Option<(&'static str, usize, bool)> {
     }
 }
 
+/// A message Inline posts, cut to `MAX_MESSAGE_UTF16` UTF-16 units (as the
+/// server counts) on a character boundary.
+fn message_arg(arguments: &Value, key: &str) -> Option<String> {
+    string_arg(arguments, key, MAX_MESSAGE_UTF16)
+        .map(|text| blocks::utf16_prefix(&text, MAX_MESSAGE_UTF16).to_owned())
+}
+
 /// An explicit error for a text over its tool's limit, never a silent cut.
 fn text_over_limit(tool: &str, arguments: &Value) -> Option<String> {
     let (key, maximum, utf16) = text_limit(tool)?;
@@ -2030,6 +2037,18 @@ mod tests {
         );
         let create = json!({"title": "T", "initial_message": text, "confirmed_intent": true});
         assert!(validate_tool_arguments(&create, &input_schema("create_chat")).is_ok());
+    }
+
+    #[test]
+    fn create_chat_message_is_cut_in_utf16_units() {
+        // Each crab is one character but two UTF-16 units.
+        let crabs = "🦀".repeat(MAX_MESSAGE_UTF16);
+        let cut = message_arg(&json!({"initial_message": crabs}), "initial_message")
+            .expect("message");
+        assert_eq!(cut.encode_utf16().count(), MAX_MESSAGE_UTF16);
+        assert_eq!(cut.chars().count(), MAX_MESSAGE_UTF16 / 2);
+        let short = message_arg(&json!({"initial_message": " Hi 🦀 "}), "initial_message");
+        assert_eq!(short.as_deref(), Some("Hi 🦀"));
     }
 
     #[test]
