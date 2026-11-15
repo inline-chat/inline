@@ -1007,6 +1007,8 @@ const toProtocolActions = (
               })
             case "open_url":
               return MessageAction.create({ ...options, action: { oneofKind: "openUrl", openUrl: { url: action.url } } })
+            case "compose":
+              return MessageAction.create({ ...options, action: { oneofKind: "compose", compose: { text: action.compose_text } } })
             case "open_link":
               return MessageAction.create({
                 ...options,

@@ -1,5 +1,6 @@
 import {
   BlockContent,
+  BlockDecisionState,
   InputPeer,
   Update,
   type Block,
@@ -161,11 +162,40 @@ export const snapshotForwardedBlockContent = (
         case "quote": blocks(block.kind.quote.children); break
         case "list": block.kind.list.items.forEach((item) => blocks(item.children)); break
         case "callout": blocks(block.kind.callout.children); break
+        // A copy carries no message actions, so blocks name none as their buttons, and an open
+        // decision can't be made from it: it reads as expired rather than waiting.
+        case "planProposal":
+          block.kind.planProposal.actionIds = []
+          block.kind.planProposal.state = closedDecision(block.kind.planProposal.state)
+          blocks(block.kind.planProposal.children)
+          break
+        case "approval":
+          block.kind.approval.actionIds = []
+          block.kind.approval.state = closedDecision(block.kind.approval.state)
+          blocks(block.kind.approval.children)
+          break
+        case "review": for (const finding of block.kind.review.findings) delete finding.actionId; break
+        case "taskSuggestion":
+          block.kind.taskSuggestion.actionIds = []
+          block.kind.taskSuggestion.state = closedDecision(block.kind.taskSuggestion.state)
+          // The started thread belongs to the source chat; the destination may not reach it.
+          delete block.kind.taskSuggestion.startedPeer
+          break
+        case "nextStep":
+          block.kind.nextStep.actionIds = []
+          block.kind.nextStep.blocking = false
+          break
       }
     }
   }
   blocks(snapshot.blocks)
   return snapshot
+}
+
+function closedDecision(state: BlockDecisionState): BlockDecisionState {
+  return state === BlockDecisionState.PENDING || state === BlockDecisionState.UNSPECIFIED
+    ? BlockDecisionState.EXPIRED
+    : state
 }
 
 export const forwardMessages = async (input: Input, context: FunctionContext): Promise<Output> => {

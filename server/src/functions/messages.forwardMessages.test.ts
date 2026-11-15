@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { BlockContent } from "@inline-chat/protocol/core"
+import { BlockDecisionState, type BlockContent } from "@inline-chat/protocol/core"
 import { snapshotForwardedBlockContent } from "./messages.forwardMessages"
 
 describe("forwarded structural content", () => {
@@ -59,5 +59,43 @@ describe("forwarded structural content", () => {
     expect(child(attributed)?.oneofKind).toBe("widget")
     expect(child(copied)).toEqual({ oneofKind: "paragraph", paragraph: title })
     expect(child(source)?.oneofKind).toBe("widget")
+  })
+
+  test("a copy carries no actions, so its blocks name none as buttons", () => {
+    const title = { offset: 0n, length: 4n }
+    const source: BlockContent = {
+      blocks: [
+        { kind: { oneofKind: "planProposal", planProposal: { title, children: [], state: 1, actionIds: ["approve"] } } },
+        { kind: { oneofKind: "nextStep", nextStep: { recap: title, actionIds: ["yes"], blocking: true } } },
+        { kind: { oneofKind: "review", review: { verdict: 0, findings: [{ title, priority: 1, confidence: 0, outcome: 0, actionId: "fix" }] } } },
+      ],
+    }
+
+    const forwarded = snapshotForwardedBlockContent(source)
+
+    expect(JSON.stringify(forwarded, (_, value) => typeof value === "bigint" ? Number(value) : value)).not.toMatch(/approve|"yes"|fix/)
+    expect(source.blocks[0]?.kind.oneofKind === "planProposal" && source.blocks[0].kind.planProposal.actionIds).toEqual(["approve"])
+  })
+
+  test("an open decision reads as expired in the copy; a made one is kept", () => {
+    const title = { offset: 0n, length: 4n }
+    const source: BlockContent = {
+      blocks: [
+        { kind: { oneofKind: "planProposal", planProposal: { title, children: [], state: BlockDecisionState.PENDING, actionIds: ["approve"] } } },
+        { kind: { oneofKind: "approval", approval: { subject: 1, title, children: [], state: BlockDecisionState.ACCEPTED, actionIds: [] } } },
+        { kind: { oneofKind: "taskSuggestion", taskSuggestion: {
+          title, state: BlockDecisionState.ACCEPTED, actionIds: [],
+          startedPeer: { type: { oneofKind: "chat", chat: { chatId: 9n } } },
+        } } },
+        { kind: { oneofKind: "nextStep", nextStep: { recap: title, actionIds: ["yes"], blocking: true } } },
+      ],
+    }
+
+    const kinds = snapshotForwardedBlockContent(source).blocks.map((block) => block.kind)
+
+    expect(kinds[0]?.oneofKind === "planProposal" && kinds[0].planProposal.state).toBe(BlockDecisionState.EXPIRED)
+    expect(kinds[1]?.oneofKind === "approval" && kinds[1].approval.state).toBe(BlockDecisionState.ACCEPTED)
+    expect(kinds[2]?.oneofKind === "taskSuggestion" && kinds[2].taskSuggestion.startedPeer).toBeUndefined()
+    expect(kinds[3]?.oneofKind === "nextStep" && kinds[3].nextStep.blocking).toBe(false)
   })
 })

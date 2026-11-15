@@ -1,10 +1,16 @@
 import {
+  BlockApproval_Subject,
   BlockCallout_Kind,
+  BlockDecisionState,
   BlockDiff_Change,
   BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockMeter_Tone,
+  BlockReview_Verdict,
+  BlockReviewFinding_Confidence,
+  BlockReviewFinding_Outcome,
+  BlockReviewFinding_Priority,
   BlockStatus,
   BlockTable_Alignment,
   MessageEntity_Type,
@@ -13,6 +19,7 @@ import {
   type BlockImage,
   type BlockText,
   type MessageEntities,
+  type Peer,
   type Photo,
 } from "@inline-chat/protocol/core"
 import type { Image, Paragraph, PhrasingContent, RootContent, Table, TableCell } from "mdast"
@@ -62,7 +69,19 @@ export const blockContentLimits = {
   maxStrippedThumbnailBytes: 8 * 1_024,
   maxFieldRows: 64,
   maxSteps: 256,
+  maxReviewFindings: 200,
+  maxPromptSuggestions: 8,
+  maxPromptTextLength: 4_000,
+  maxBlockActionIds: 8,
+  maxActionIdLength: 64,
+  maxCategoryLength: 40,
 } as const
+
+/** Same identifiers as MessageAction.action_id. */
+const blockActionIdPattern = /^[a-zA-Z0-9_.:-]+$/
+/** Lowercase slug such as "correctness" or "error-handling". */
+const reviewCategoryPattern = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
+
 
 function inEnum(value: number, min: number, max: number): boolean {
   return Number.isInteger(value) && value >= min && value <= max
@@ -801,6 +820,13 @@ export function validateBlockContent(
     }
   }
 
+  // Text an agent block can't be drawn without: clients treat an empty one as malformed and
+  // show the block as fallback text instead.
+  const validateRequiredText = (range: BlockText | undefined): void => {
+    validateText(range)
+    if (range!.length === 0n) throw new Error("Block text is required")
+  }
+
   const validateImage = (image: BlockImage | undefined): void => {
     if (!image) throw new Error("Missing block image")
     imageCount += 1
@@ -974,6 +1000,96 @@ export function validateBlockContent(
           formIds.add(block.kind.widget.widgetId)
           validateWidgetDefinition(block.kind.widget, validateText, validateImage)
           break
+        case "planProposal": {
+          const plan = block.kind.planProposal
+          if (plan.title) validateText(plan.title)
+          if (!plan.title && plan.children.length === 0) throw new Error("Empty plan proposal")
+          validateDecision(plan.state, plan.decidedByUserId)
+          validateBlockActionIds(plan.actionIds)
+          visit(plan.children, depth + 1, listDepth, suppressLeafDirection)
+          break
+        }
+        case "approval": {
+          const approval = block.kind.approval
+          if (!inEnum(approval.subject, BlockApproval_Subject.UNSPECIFIED, BlockApproval_Subject.NETWORK)) {
+            throw new Error("Invalid approval subject")
+          }
+          validateRequiredText(approval.title)
+          if (approval.command) validateText(approval.command)
+          if (approval.cwd) validateText(approval.cwd)
+          if (approval.reason) validateText(approval.reason)
+          validateDecision(approval.state, approval.decidedByUserId)
+          validateBlockActionIds(approval.actionIds)
+          visit(approval.children, depth + 1, listDepth, suppressLeafDirection)
+          break
+        }
+        case "review": {
+          const review = block.kind.review
+          if (!inEnum(review.verdict, BlockReview_Verdict.UNSPECIFIED, BlockReview_Verdict.NEEDS_ATTENTION)) {
+            throw new Error("Invalid review verdict")
+          }
+          if (review.title) validateText(review.title)
+          if (review.summary) validateText(review.summary)
+          if (review.findings.length > blockContentLimits.maxReviewFindings) throw new Error("Too many review findings")
+          if (!review.title && !review.summary && review.findings.length === 0) throw new Error("Empty review")
+          for (const finding of review.findings) {
+            validateRequiredText(finding.title)
+            if (finding.body) validateText(finding.body)
+            if (finding.path) validateText(finding.path)
+            if (!inEnum(finding.priority, BlockReviewFinding_Priority.UNSPECIFIED, BlockReviewFinding_Priority.P3)) {
+              throw new Error("Invalid review finding priority")
+            }
+            if (!inEnum(finding.confidence, BlockReviewFinding_Confidence.UNSPECIFIED, BlockReviewFinding_Confidence.PLAUSIBLE)) {
+              throw new Error("Invalid review finding confidence")
+            }
+            if (!inEnum(finding.outcome, BlockReviewFinding_Outcome.UNSPECIFIED, BlockReviewFinding_Outcome.NO_CHANGE_NEEDED)) {
+              throw new Error("Invalid review finding outcome")
+            }
+            // Lines are 1-based; an end needs a start at or before it.
+            if (finding.startLine !== undefined && finding.startLine < 1) throw new Error("Invalid review finding line")
+            if (finding.endLine !== undefined
+              && (finding.startLine === undefined || finding.endLine < finding.startLine)) {
+              throw new Error("Invalid review finding line")
+            }
+            if (finding.category !== undefined
+              && (finding.category.length > blockContentLimits.maxCategoryLength || !reviewCategoryPattern.test(finding.category))) {
+              throw new Error("Invalid review finding category")
+            }
+            if (finding.actionId !== undefined) validateBlockActionIds([finding.actionId])
+          }
+          break
+        }
+        case "taskSuggestion": {
+          const task = block.kind.taskSuggestion
+          validateRequiredText(task.title)
+          if (task.brief) validateText(task.brief)
+          validateDecision(task.state, undefined)
+          if (task.startedPeer && !validPeer(task.startedPeer)) throw new Error("Invalid task suggestion peer")
+          if (task.expiresAt !== undefined && (task.expiresAt < 0n || task.expiresAt >= 1_000_000_000_000n)) {
+            throw new Error("Invalid task suggestion expiry")
+          }
+          validateBlockActionIds(task.actionIds)
+          break
+        }
+        case "nextStep":
+          validateRequiredText(block.kind.nextStep.recap)
+          if (block.kind.nextStep.question) validateText(block.kind.nextStep.question)
+          validateBlockActionIds(block.kind.nextStep.actionIds)
+          break
+        case "promptSuggestions": {
+          const prompts = block.kind.promptSuggestions.prompts
+          if (prompts.length === 0 || prompts.length > blockContentLimits.maxPromptSuggestions) {
+            throw new Error("Invalid prompt suggestions")
+          }
+          for (const prompt of prompts) {
+            validateRequiredText(prompt.label)
+            if (prompt.text !== undefined
+              && (prompt.text.trim().length === 0 || prompt.text.length > blockContentLimits.maxPromptTextLength)) {
+              throw new Error("Invalid prompt suggestion text")
+            }
+          }
+          break
+        }
         case "quote":
           if (block.kind.quote.children.length === 0) throw new Error("Empty block quote")
           visit(block.kind.quote.children, depth + 1, listDepth, suppressLeafDirection)
@@ -1010,13 +1126,287 @@ export function validateBlockContent(
           }
           break
         }
+        case undefined:
+          throw new Error("Missing block kind")
         default:
+          // A new kind fails the typecheck here until it is validated.
+          block.kind satisfies never
           throw new Error("Missing block kind")
       }
     }
   }
 
   visit(content.blocks, 0, 0, false)
+}
+
+function validateDecision(state: BlockDecisionState, decidedByUserId: bigint | undefined): void {
+  if (!inEnum(state, BlockDecisionState.UNSPECIFIED, BlockDecisionState.SUPERSEDED)) throw new Error("Invalid decision state")
+  if (decidedByUserId !== undefined && decidedByUserId <= 0n) throw new Error("Invalid decision user")
+}
+
+/** Format and count only; that each ID names one of the message's actions is checked with the actions. */
+function validateBlockActionIds(actionIds: readonly string[]): void {
+  if (actionIds.length > blockContentLimits.maxBlockActionIds) throw new Error("Too many block action ids")
+  if (new Set(actionIds).size !== actionIds.length) throw new Error("Duplicate block action id")
+  for (const actionId of actionIds) {
+    if (actionId.length < 1 || actionId.length > blockContentLimits.maxActionIdLength || !blockActionIdPattern.test(actionId)) {
+      throw new Error("Invalid block action id")
+    }
+  }
+}
+
+function validPeer(peer: Peer): boolean {
+  switch (peer.type.oneofKind) {
+    case "chat":
+      return peer.type.chat.chatId > 0n
+    case "user":
+      return peer.type.user.userId > 0n
+    default:
+      return false
+  }
+}
+
+/** Child blocks a container holds, in order. Exhaustive so a new container kind is not skipped. */
+export function blockChildren(block: Block): readonly Block[] {
+  switch (block.kind.oneofKind) {
+    case "list":
+      return block.kind.list.items.flatMap((item) => item.children)
+    case "disclosure":
+      return block.kind.disclosure.children
+    case "quote":
+      return block.kind.quote.children
+    case "callout":
+      return block.kind.callout.children
+    case "planProposal":
+      return block.kind.planProposal.children
+    case "approval":
+      return block.kind.approval.children
+    case "paragraph":
+    case "heading":
+    case "math":
+    case "code":
+    case "separator":
+    case "image":
+    case "album":
+    case "footer":
+    case "table":
+    case "diff":
+    case "fields":
+    case "steps":
+    case "meter":
+    case "form":
+    case "widget":
+    case "review":
+    case "taskSuggestion":
+    case "nextStep":
+    case "promptSuggestions":
+    case undefined:
+      return []
+    default:
+      block.kind satisfies never
+      return []
+  }
+}
+
+/** Message action IDs the blocks draw as their own buttons, children included, in order. */
+export function collectBlockActionIds(blocks: readonly Block[]): string[] {
+  const ids: string[] = []
+  const visit = (values: readonly Block[]): void => {
+    for (const block of values) {
+      switch (block.kind.oneofKind) {
+        case "planProposal":
+          ids.push(...block.kind.planProposal.actionIds)
+          break
+        case "approval":
+          ids.push(...block.kind.approval.actionIds)
+          break
+        case "review":
+          for (const finding of block.kind.review.findings) if (finding.actionId !== undefined) ids.push(finding.actionId)
+          break
+        case "taskSuggestion":
+          ids.push(...block.kind.taskSuggestion.actionIds)
+          break
+        case "nextStep":
+          ids.push(...block.kind.nextStep.actionIds)
+          break
+      }
+      visit(blockChildren(block))
+    }
+  }
+  visit(blocks)
+  return ids
+}
+
+export type BlockTextSpan = { start: number; end: number }
+
+/**
+ * The UTF-16 range of the message text a block covers: the lowest offset to the highest end of
+ * all its non-empty ranges, children included. Undefined when it covers no text. Mirrors
+ * InlineKit's `BlockContentSpan.span(of:)`; prompt composer text is not part of it.
+ */
+export function blockTextSpan(block: Block): BlockTextSpan | undefined {
+  let span: BlockTextSpan | undefined
+  const add = (range: BlockText | undefined): void => {
+    if (!range || range.length <= 0n || range.offset < 0n) return
+    const start = Number(range.offset)
+    const end = start + Number(range.length)
+    span = span ? { start: Math.min(span.start, start), end: Math.max(span.end, end) } : { start, end }
+  }
+  const addBlocks = (children: readonly Block[]): void => {
+    for (const child of children) {
+      const childSpan = blockTextSpan(child)
+      if (!childSpan) continue
+      span = span
+        ? { start: Math.min(span.start, childSpan.start), end: Math.max(span.end, childSpan.end) }
+        : childSpan
+    }
+  }
+  switch (block.kind.oneofKind) {
+    case "paragraph":
+      add(block.kind.paragraph)
+      break
+    case "footer":
+      add(block.kind.footer)
+      break
+    case "math":
+      add(block.kind.math)
+      break
+    case "heading":
+      add(block.kind.heading.text)
+      break
+    case "code":
+      add(block.kind.code.text)
+      break
+    case "list":
+    case "quote":
+      addBlocks(blockChildren(block))
+      break
+    case "separator":
+      break
+    case "image":
+      add(block.kind.image.alt)
+      break
+    case "album":
+      for (const image of block.kind.album.images) add(image.alt)
+      break
+    case "disclosure":
+      add(block.kind.disclosure.summary)
+      add(block.kind.disclosure.meta)
+      addBlocks(block.kind.disclosure.children)
+      break
+    case "table":
+      for (const row of block.kind.table.rows) for (const cell of row.cells) add(cell)
+      break
+    case "diff":
+      add(block.kind.diff.path)
+      add(block.kind.diff.previousPath)
+      add(block.kind.diff.text)
+      break
+    case "fields":
+      for (const field of block.kind.fields.fields) {
+        add(field.label)
+        add(field.value)
+      }
+      break
+    case "steps":
+      for (const step of block.kind.steps.steps) {
+        add(step.text)
+        add(step.detail)
+      }
+      break
+    case "callout":
+      add(block.kind.callout.title)
+      addBlocks(block.kind.callout.children)
+      break
+    case "meter":
+      add(block.kind.meter.label)
+      add(block.kind.meter.meta)
+      break
+    case "form":
+      add(block.kind.form.title)
+      for (const field of block.kind.form.fields) {
+        add(field.header)
+        add(field.label)
+        add(field.description)
+        if (field.kind.oneofKind === "select") {
+          for (const option of field.kind.select.options) {
+            add(option.label)
+            add(option.description)
+            add(option.preview)
+          }
+        }
+      }
+      break
+    case "widget":
+      add(block.kind.widget.title)
+      for (const image of block.kind.widget.images) add(image.alt)
+      break
+    case "planProposal":
+      add(block.kind.planProposal.title)
+      addBlocks(block.kind.planProposal.children)
+      break
+    case "approval":
+      add(block.kind.approval.title)
+      add(block.kind.approval.command)
+      add(block.kind.approval.cwd)
+      add(block.kind.approval.reason)
+      addBlocks(block.kind.approval.children)
+      break
+    case "review":
+      add(block.kind.review.title)
+      add(block.kind.review.summary)
+      for (const finding of block.kind.review.findings) {
+        add(finding.title)
+        add(finding.body)
+        add(finding.path)
+      }
+      break
+    case "taskSuggestion":
+      add(block.kind.taskSuggestion.title)
+      add(block.kind.taskSuggestion.brief)
+      break
+    case "nextStep":
+      add(block.kind.nextStep.recap)
+      add(block.kind.nextStep.question)
+      break
+    case "promptSuggestions":
+      for (const prompt of block.kind.promptSuggestions.prompts) add(prompt.label)
+      break
+    case undefined:
+      break
+    default:
+      block.kind satisfies never
+  }
+  return span
+}
+
+/** Kinds added after clients learned to fall back per block. Newer kinds join this set. */
+const fallbackOrderedKinds = new Set<Block["kind"]["oneofKind"]>([
+  "planProposal",
+  "approval",
+  "review",
+  "taskSuggestion",
+  "nextStep",
+  "promptSuggestions",
+])
+
+/**
+ * Top-level blocks must cover ascending, non-overlapping text. A client that can't draw a kind
+ * newer than itself shows the text between that block's neighbours, which only works in order.
+ * Blocks without text (separators, images without alt) have no span and are skipped.
+ *
+ * Only content holding one of those newer kinds is checked, so bots that send older kinds in
+ * any order keep working.
+ */
+export function validateTopLevelSpanOrder(content: BlockContent): void {
+  if (!content.blocks.some((block) => fallbackOrderedKinds.has(block.kind.oneofKind))) return
+  let previousEnd = 0
+  for (const block of content.blocks) {
+    const span = blockTextSpan(block)
+    if (!span) continue
+    if (span.start < previousEnd) throw new Error("Block text spans overlap or are out of order")
+    previousEnd = span.end
+  }
 }
 
 function validDimensions(width: number, height: number): boolean {

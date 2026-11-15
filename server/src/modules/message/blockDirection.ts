@@ -178,9 +178,15 @@ function annotateBlock(
     }
     case "form": {
       const form = block.kind.form
+      for (const field of form.fields) {
+        if (field.kind.oneofKind !== "select") continue
+        // Previews render LTR and monospaced, like code.
+        for (const option of field.kind.select.options) clearTextDirection(option.preview)
+      }
       return aggregateTexts(text, form, [
         form.title,
         ...form.fields.flatMap((field) => [
+          field.header,
           field.label,
           field.description,
           ...(field.kind.oneofKind === "select"
@@ -189,7 +195,57 @@ function annotateBlock(
         ]),
       ])
     }
+    case "planProposal": {
+      const plan = block.kind.planProposal
+      let aggregate = directionForText(text, plan.title)
+      clearTextDirection(plan.title)
+      for (const child of plan.children) {
+        const childDirection = annotateBlock(text, child, emitLeafDirection)
+        aggregate ??= childDirection
+      }
+      setDirection(plan, aggregate)
+      return aggregate
+    }
+    case "approval": {
+      const approval = block.kind.approval
+      // Commands and working directories render LTR and monospaced.
+      clearTextDirection(approval.command)
+      clearTextDirection(approval.cwd)
+      let aggregate = directionForText(text, approval.title) ?? directionForText(text, approval.reason)
+      clearTextDirection(approval.title)
+      clearTextDirection(approval.reason)
+      for (const child of approval.children) {
+        const childDirection = annotateBlock(text, child, emitLeafDirection)
+        aggregate ??= childDirection
+      }
+      setDirection(approval, aggregate)
+      return aggregate
+    }
+    case "review": {
+      const review = block.kind.review
+      // Paths render LTR, like code.
+      for (const finding of review.findings) clearTextDirection(finding.path)
+      return aggregateTexts(text, review, [
+        review.title,
+        review.summary,
+        ...review.findings.flatMap((finding) => [finding.title, finding.body]),
+      ])
+    }
+    case "taskSuggestion":
+      return aggregateTexts(text, block.kind.taskSuggestion, [block.kind.taskSuggestion.title, block.kind.taskSuggestion.brief])
+    case "nextStep":
+      return aggregateTexts(text, block.kind.nextStep, [block.kind.nextStep.recap, block.kind.nextStep.question])
+    case "promptSuggestions":
+      return aggregateTexts(
+        text,
+        block.kind.promptSuggestions,
+        block.kind.promptSuggestions.prompts.map((prompt) => prompt.label),
+      )
+    case "widget":
+    case undefined:
+      return undefined
     default:
+      block.kind satisfies never
       return undefined
   }
 }

@@ -16,6 +16,7 @@ import {
   parseBlockContentResult,
   replaceBlockImageAtPath,
   validateBlockContent,
+  validateTopLevelSpanOrder,
 } from "./blockContent"
 import { encodeBlockContentToMarkdown } from "./blockContentMarkdown"
 import { detectIsRtl } from "./blockDirection"
@@ -559,6 +560,47 @@ describe("block content parser", () => {
         expect(() => validateBlockContent(parseMarkdown(prefix).text, first.blockContent)).not.toThrow()
       }
     }
+  })
+
+  test("parsed Markdown covers the text in order, as bot content must", () => {
+    // Clients show a kind they don't know as the text between its neighbours.
+    const markdown = [
+      "## Result",
+      "",
+      "Intro with $x^2$ inline and a [link](https://inline.chat).",
+      "",
+      "$$",
+      "E = mc^2",
+      "$$",
+      "",
+      "1. first",
+      "   - nested",
+      "2. second",
+      "",
+      "> quote",
+      "",
+      "| A | B |",
+      "| --- | ---: |",
+      "| one | two |",
+      "",
+      "---",
+      "",
+      "![alt text](https://example.com/a.png)",
+      "",
+      "<details>",
+      '<summary kind="progress">Working</summary>',
+      "```ts",
+      "const marker = 1",
+      "```",
+      "</details>",
+      "",
+      "<footer>Generated</footer>",
+    ].join("\n")
+    for (let length = 1; length <= markdown.length; length++) {
+      const parsed = parseBlockContent(markdown.slice(0, length))
+      if (parsed) expect(() => validateTopLevelSpanOrder(parsed.blockContent)).not.toThrow()
+    }
+    expect(parseBlockContent(markdown)!.blockContent.blocks.length).toBeGreaterThan(8)
   })
 
   test("falls back to the legacy projection when table budgets are exceeded", () => {

@@ -48,6 +48,7 @@ export function validateFormDefinition(form: BlockForm, validateText: (range: Bl
   for (const field of form.fields) {
     if (!validId(field.fieldId) || fieldIds.has(field.fieldId)) throw new Error("Invalid form field id")
     fieldIds.add(field.fieldId)
+    if (field.header) validateText(field.header)
     validateText(field.label)
     if (field.description) validateText(field.description)
 
@@ -62,6 +63,7 @@ export function validateFormDefinition(form: BlockForm, validateText: (range: Bl
           optionIds.add(option.optionId)
           validateText(option.label)
           if (option.description) validateText(option.description)
+          if (option.preview) validateText(option.preview)
         }
         const defaults = new Set(select.defaultOptionIds)
         if (defaults.size !== select.defaultOptionIds.length || [...defaults].some((id) => !optionIds.has(id))) {
@@ -126,6 +128,12 @@ function visitForms(blocks: readonly Block[], visit: (form: BlockForm) => void):
         break
       case "callout":
         visitForms(block.kind.callout.children, visit)
+        break
+      case "planProposal":
+        visitForms(block.kind.planProposal.children, visit)
+        break
+      case "approval":
+        visitForms(block.kind.approval.children, visit)
         break
       case "list":
         for (const item of block.kind.list.items) visitForms(item.children, visit)

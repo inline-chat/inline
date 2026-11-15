@@ -62,7 +62,7 @@ import { processOutgoingText } from "@in/server/modules/message/processOutgoingT
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { validateBotBlockContent } from "@in/server/modules/message/botBlockContent"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
-import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
+import { normalizeAndValidateMessageActions, validateBlockActionReferences } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
   emitMessageSubthreadUpdateIfNeeded,
@@ -393,6 +393,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const normalizedActions = normalizeAndValidateMessageActions(input.actions, botBlockContent)
+  validateBlockActionReferences(botBlockContent, normalizedActions)
   if (normalizedActions !== undefined && !(await senderIsBot())) {
     throw RealtimeRpcError.BadRequest()
   }

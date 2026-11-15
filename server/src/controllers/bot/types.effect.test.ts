@@ -114,6 +114,12 @@ describe("BotUpdate", () => {
 })
 
 describe("BotMessageAction", () => {
+  it("round-trips a compose action", () => {
+    const action = { action_id: "draft", text: "Draft", type: "compose", compose_text: "Summarize the thread", style: "primary" } as const
+    expect(Schema.encodeUnknownSync(BotMessageAction)(Schema.decodeUnknownSync(BotMessageAction)(action))).toEqual(action)
+    expect(() => Schema.decodeUnknownSync(BotMessageAction)({ action_id: "draft", text: "Draft", type: "compose" })).toThrow()
+  })
+
   it("rejects ambiguous callback payload encodings", () => {
     expect(() =>
       Schema.decodeUnknownSync(BotMessageAction)({
@@ -179,12 +185,78 @@ describe("BotRichMessage", () => {
     { type: "steps", steps: [{ text: "Build", status: "done", detail: "12s" }] },
     { type: "callout", kind: "info", title: "Note", blocks: [{ type: "paragraph", text: "Body" }] },
     { type: "widget", widget_id: "chart", title: "Revenue", html: "<b>x</b>", height: 320 },
+    {
+      type: "form",
+      form_id: "auth",
+      fields: [{
+        field_id: "method",
+        header: "Auth",
+        label: "Method?",
+        type: "select",
+        options: [{ option_id: "oauth", label: "OAuth", preview: "GET /authorize", is_recommended: true }],
+      }],
+    },
+    {
+      type: "plan_proposal",
+      title: "Plan",
+      blocks: [{ type: "paragraph", text: "Do it" }],
+      state: "pending",
+      action_ids: ["approve", "keep"],
+      decided_by_user_id: 7,
+    },
+    {
+      type: "approval",
+      subject: "command",
+      title: "Run?",
+      command: "cargo test",
+      cwd: "~/dev",
+      reason: "Verify",
+      blocks: [{ type: "diff", path: "a.rs", change: "modified" }],
+      state: "declined",
+      action_ids: ["allow", "deny"],
+    },
+    {
+      type: "review",
+      title: "Review",
+      verdict: "needs_attention",
+      summary: "One issue",
+      findings: [{
+        title: "Off by one",
+        body: "Skips the last page",
+        priority: "p1",
+        path: "src/page.ts",
+        start_line: 10,
+        end_line: 12,
+        category: "correctness",
+        confidence: "confirmed",
+        outcome: "fixed",
+        action_id: "fix",
+      }],
+    },
+    {
+      type: "task_suggestion",
+      title: "Upgrade Bun",
+      brief: "Bump and test",
+      state: "accepted",
+      started_peer_id: { chat_id: 42 },
+      expires_at: 1_800_000_000,
+      action_ids: ["start", "dismiss"],
+    },
+    { type: "next_step", recap: "Done", question: "Commit?", action_ids: ["yes"], is_blocking: true },
+    { type: "prompt_suggestions", prompts: [{ label: "Write tests" }, { label: "Explain", text: "Explain the change" }] },
   ] as const
 
   for (const block of blocks) {
     it(`round-trips ${block.type} blocks`, () => {
       const encoded = Schema.encodeUnknownSync(BotRichMessage)({ blocks: [block] })
       expect(encoded).toEqual({ blocks: [block] })
+      expect(Schema.decodeUnknownSync(BotRichMessage)(encoded)).toEqual({ blocks: [block] })
     })
   }
+
+  it("rejects unknown decision states and review enums", () => {
+    const decode = Schema.decodeUnknownSync(BotRichMessage)
+    expect(() => decode({ blocks: [{ type: "plan_proposal", blocks: [], state: "maybe" }] })).toThrow()
+    expect(() => decode({ blocks: [{ type: "review", findings: [{ title: "x", priority: "p9" }] }] })).toThrow()
+  })
 })

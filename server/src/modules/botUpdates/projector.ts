@@ -158,6 +158,8 @@ export const encodeBotActions = (actions: MessageActions | null | undefined): Bo
         return [{ ...base, type: "copy_text", copy_text: action.action.copyText.text }]
       case "openUrl":
         return [{ ...base, type: "open_url", url: action.action.openUrl.url }]
+      case "compose":
+        return [{ ...base, type: "compose", compose_text: action.action.compose.text }]
       case "openLink": {
         const { peerId, messageId } = action.action.openLink
         return [{
@@ -175,7 +177,10 @@ export const encodeBotActions = (actions: MessageActions | null | undefined): Bo
           ? { ...base, type: "callback", callback_data: text }
           : { ...base, type: "callback", callback_data_base64: bytes.toString("base64") }]
       }
+      case undefined:
+        return []
       default:
+        action.action satisfies never
         return []
     }
   }))

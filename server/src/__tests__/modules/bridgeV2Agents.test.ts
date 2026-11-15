@@ -22,6 +22,7 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { answerMessageAction } from "@in/server/functions/messages.answerMessageAction"
 import { invokeMessageAction } from "@in/server/functions/messages.invokeMessageAction"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
+import { editMessage } from "@in/server/functions/messages.editMessage"
 import { controlAgentSession } from "@in/server/modules/agentSessions/control"
 import { moveAgentSession } from "@in/server/modules/agentSessions/move"
 import { connectAgentSession, getAgentSession } from "@in/server/modules/agentSessions/service"
@@ -183,6 +184,58 @@ describe("bridge v2 agent server", () => {
     if (payload.oneofKind !== "userMessageActionInvoked") return
     expect(payload.userMessageActionInvoked.form?.values).toEqual([{ fieldId: "key", value: { oneofKind: undefined }, redacted: true }])
     expect(JSON.stringify(payload, (_, value) => typeof value === "bigint" ? value.toString() : value)).not.toContain("super-secret-key")
+  })
+
+  test("a block's buttons must be actions the message holds, on send and on edit", async () => {
+    const text = "Plan\nShip it?\n"
+    const plan = (actionIds: string[]) => ({
+      blocks: [{
+        kind: {
+          oneofKind: "planProposal" as const,
+          planProposal: { title: { offset: 0n, length: 4n }, children: [], state: 1, actionIds },
+        },
+      }, {
+        kind: { oneofKind: "nextStep" as const, nextStep: { recap: { offset: 5n, length: 8n }, actionIds: [], blocking: false } },
+      }],
+    })
+    const buttons = (...ids: string[]) => ({
+      rows: [{
+        actions: ids.map((actionId) => ({
+          actionId,
+          text: actionId,
+          action: { oneofKind: "callback" as const, callback: { data: new Uint8Array() } },
+          style: 0,
+          requiredGrant: AgentGrantRequirement.APPROVE,
+        })),
+      }],
+    })
+    const asBot = testUtils.functionContext({ userId: botId })
+
+    await rejects(sendMessage({ peerId: peer, message: text, botBlockContent: plan(["approve"]) }, asBot), RpcError_Code.BAD_REQUEST)
+    await rejects(
+      sendMessage({ peerId: peer, message: text, botBlockContent: plan(["approve"]), actions: buttons("keep") }, asBot),
+      RpcError_Code.BAD_REQUEST,
+    )
+    // Out-of-order top-level spans are rejected too.
+    await rejects(
+      sendMessage({ peerId: peer, message: text, botBlockContent: { blocks: [...plan([]).blocks].reverse() } }, asBot),
+      RpcError_Code.BAD_REQUEST,
+    )
+    const sent = await sendMessage({
+      peerId: peer,
+      message: text,
+      botBlockContent: plan(["approve", "keep"]),
+      actions: buttons("approve", "keep"),
+    }, asBot)
+    const update = sent.updates.find((candidate) => candidate.update.oneofKind === "newMessage")
+    const messageId = update?.update.oneofKind === "newMessage" ? update.update.newMessage.message!.id : 0n
+    expect(messageId).toBeGreaterThan(0n)
+
+    // Dropping a button the stored blocks still name is rejected; deciding clears both.
+    await rejects(editMessage({ messageId, peer, actions: buttons("approve") }, asBot), RpcError_Code.BAD_REQUEST)
+    await rejects(editMessage({ messageId, peer, text, botBlockContent: plan(["approve", "other"]) }, asBot), RpcError_Code.BAD_REQUEST)
+    await editMessage({ messageId, peer, text, botBlockContent: plan(["keep"]) }, asBot)
+    await editMessage({ messageId, peer, text, botBlockContent: plan([]), actions: { rows: [] } }, asBot)
   })
 
   test("run state is revisioned, filtered for attention, and listed for badges", async () => {
