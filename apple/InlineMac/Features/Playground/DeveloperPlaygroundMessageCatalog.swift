@@ -323,6 +323,14 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
           "Basic table",
           "Header styling, inline entities, column alignment, wrapping, and horizontal panning"
         ),
+        .init(.richAgentPlan, "Agent task list", "Steps pinned under progress, like the Claude task list"),
+        .init(.richPlanProposal, "Plan proposal", "A plan awaiting approval, with inline Approve and Keep planning"),
+        .init(.richApproval, "Command approval", "Subject icon, command box, folder, reason and decisions"),
+        .init(.richReview, "Review notes", "Verdict, P0-P3 findings with locations, bodies and outcomes"),
+        .init(.richTaskSuggestion, "Task suggestion", "A new-thread card with Start and Dismiss"),
+        .init(.richNextStep, "Next step", "Recap, the one question and its buttons, waiting on you"),
+        .init(.richPromptSuggestions, "Prompt suggestions", "Chips that put a prompt in the message box"),
+        .init(.richUnknownBlock, "Unknown block kind", "A kind newer than this build shows its text; the rest stays rich"),
       ]
     case .structure:
       [
@@ -421,6 +429,14 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case richQuote
   case richTable
   case richMath
+  case richAgentPlan
+  case richPlanProposal
+  case richApproval
+  case richReview
+  case richTaskSuggestion
+  case richNextStep
+  case richPromptSuggestions
+  case richUnknownBlock
   case groupStart
   case groupMiddle
   case groupEnd
@@ -520,6 +536,22 @@ private enum DeveloperMessageCatalogFactory {
       return richFixture(id: id, content: richQuote())
     case .richTable:
       return richFixture(id: id, content: richTable())
+    case .richAgentPlan:
+      return richFixture(id: id, content: richAgentPlan())
+    case .richPlanProposal:
+      return richFixture(id: id, content: richPlanProposal())
+    case .richApproval:
+      return richFixture(id: id, content: richApproval())
+    case .richReview:
+      return richFixture(id: id, content: richReview())
+    case .richTaskSuggestion:
+      return richFixture(id: id, content: richTaskSuggestion())
+    case .richNextStep:
+      return richFixture(id: id, content: richNextStep())
+    case .richPromptSuggestions:
+      return richFixture(id: id, content: richPromptSuggestions())
+    case .richUnknownBlock:
+      return richFixture(id: id, content: richUnknownBlock())
     case .groupStart:
       return fixture(id: id, text: "First message in this group.", groupPosition: .start)
     case .groupMiddle:
@@ -632,7 +664,8 @@ private enum DeveloperMessageCatalogFactory {
     video: VideoInfo? = nil,
     document: DocumentInfo? = nil,
     voice: Bool = false,
-    richContent: InlineProtocol.BlockContent? = nil
+    richContent: InlineProtocol.BlockContent? = nil,
+    actions: InlineProtocol.MessageActions? = nil
   ) -> DeveloperMessageFixture {
     let sender = outgoing ? outgoingUser : incomingUser
     var payload: Client_MessageContentPayload?
@@ -672,6 +705,9 @@ private enum DeveloperMessageCatalogFactory {
     if let richContent {
       message.blockContentPayload = BlockContentPayload(richContent)
     }
+    if let actions {
+      message.actions = actions
+    }
 
     var fullMessage = FullMessage(
       senderInfo: UserInfo(user: sender),
@@ -707,7 +743,8 @@ private enum DeveloperMessageCatalogFactory {
       entities: content.entities,
       reply: reply,
       reactions: reactions,
-      richContent: content.blockContent
+      richContent: content.blockContent,
+      actions: content.actions
     )
   }
 
@@ -964,6 +1001,192 @@ private enum DeveloperMessageCatalogFactory {
     // Started 2m 12s before the playground opens, so its live time is visible.
     progress.disclosure.startedAt = Int64(Date().timeIntervalSince1970) - 132
     return builder.finish(blocks: [progress])
+  }
+
+  // MARK: Agent cards
+
+  private static func callbackAction(_ id: String, _ text: String, style: MessageAction.Style = .default) -> MessageAction {
+    .with {
+      $0.actionID = id
+      $0.text = text
+      $0.style = style
+      $0.callback = .with { $0.data = Data(id.utf8) }
+    }
+  }
+
+  private static func actionRows(_ list: [MessageAction]) -> MessageActions {
+    .with { $0.rows = [.with { $0.actions = list }] }
+  }
+
+  private static func richAgentPlan() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let update = builder.segment("I found where unknown blocks drop the message. Fixing it now.")
+    let summary = builder.segment("Ran 4 commands")
+    let specs: [(String, BlockStatus)] = [
+      ("Map current rendering", .done),
+      ("Patch the reconciler", .running),
+      ("Run InlineKit tests", .pending),
+    ]
+    var steps: [BlockStep] = []
+    for (text, status) in specs {
+      let range = builder.segment(text)
+      steps.append(.with { $0.text = range; $0.status = status })
+    }
+    return builder.finish(blocks: [
+      paragraphBlock(update),
+      disclosureBlock(summary: summary, initiallyOpen: false, children: []),
+      .with { $0.steps = .with { $0.steps = steps } },
+    ])
+  }
+
+  private static func richPlanProposal() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let title = builder.segment("Per-block fallback for rich messages")
+    let intro = builder.segment("Keep every message rich when one block can't be drawn.")
+    var items: [[InlineProtocol.Block]] = []
+    for text in [
+      "Add BlockContentSpan to InlineKit for each block's covered text",
+      "Draw a paragraph of that text for undrawn and unknown kinds on iOS and macOS",
+      "Enforce ascending top-level spans on the server",
+      "Cover both platforms with corpus tests, including a synthetic unknown kind",
+      "Give plan proposals an identity so the open state survives edits",
+      "Claim drawn action ids in the plan; the rows show the rest",
+      "Draw review finding actions as row buttons",
+      "Reuse card part views across edits",
+      "Count plan and approval children in the structural budget",
+      "Align iOS caps with the server",
+      "Re-shoot macOS and iOS catalogs in light and dark",
+    ] {
+      items.append([paragraphBlock(builder.segment(text))])
+    }
+    let risks = builder.segment("Risks")
+    let risk = builder.segment("Nested unknown kinds without siblings show nothing; that case is rare.")
+    var plan = BlockPlanProposal()
+    plan.title = title
+    plan.state = .pending
+    plan.actionIds = ["approve-plan", "keep-planning"]
+    plan.children = [paragraphBlock(intro), listBlock(kind: .ordered, items: items), headingBlock(risks, level: 3), paragraphBlock(risk)]
+    var content = builder.finish(blocks: [.with { $0.planProposal = plan }])
+    content.actions = actionRows([
+      callbackAction("approve-plan", "Approve", style: .primary),
+      callbackAction("keep-planning", "Keep planning"),
+    ])
+    return content
+  }
+
+  private static func richApproval() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    var approval = BlockApproval()
+    approval.subject = .command
+    approval.title = builder.segment("Run a command?")
+    approval.command = builder.segment("swift test --filter BlockContentSpanTests")
+    approval.cwd = builder.segment("apple/InlineKit")
+    approval.reason = builder.segment("Runs the new span tests before the macOS build.")
+    approval.state = .pending
+    approval.actionIds = ["allow", "allow-session", "deny"]
+    var content = builder.finish(blocks: [.with { $0.approval = approval }])
+    content.actions = actionRows([
+      callbackAction("allow", "Approve", style: .primary),
+      callbackAction("allow-session", "Always for this session"),
+      callbackAction("deny", "Deny", style: .destructive),
+    ])
+    return content
+  }
+
+  private static func richReview() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let summary = builder.segment("Two issues block merging; one was fixed in this pass.")
+    let specs: [(String, String, UInt32, String, BlockReviewFinding.Priority, BlockReviewFinding.Outcome)] = [
+      (
+        "One undrawn block drops the whole message",
+        "apple/InlineIOS/Features/MessageView/MessageRichContent.swift", 246,
+        "A steps block in an agent reply sends the entire message to flat text on iOS.", .p0, .fixed
+      ),
+      (
+        "Unknown kinds lose their text on macOS",
+        "apple/InlineMac/Views/Message/RichContent/RichBlockLayoutPlanner.swift", 667,
+        "A kind newer than the build fails the layout and the message falls back.", .p1, .unspecified
+      ),
+      (
+        "Plan cache ignores action titles",
+        "RichBlockLayoutPlanner.swift", 173,
+        "Renaming a button without changing the blocks keeps the old title.", .p3, .unspecified
+      ),
+    ]
+    var findings: [BlockReviewFinding] = []
+    for (title, path, line, body, priority, outcome) in specs {
+      var finding = BlockReviewFinding()
+      finding.title = builder.segment(title)
+      finding.path = builder.segment(path)
+      finding.startLine = line
+      finding.body = builder.segment(body)
+      finding.priority = priority
+      finding.outcome = outcome
+      finding.category = "correctness"
+      findings.append(finding)
+    }
+    findings[1].actionID = "fix-p1"
+    var review = BlockReview()
+    review.verdict = .incorrect
+    review.summary = summary
+    review.findings = findings
+    var content = builder.finish(blocks: [.with { $0.review = review }])
+    content.actions = actionRows([callbackAction("fix-p1", "Fix it"), callbackAction("rerun", "Rerun review")])
+    return content
+  }
+
+  private static func richTaskSuggestion() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let intro = builder.segment("The fallback fix is in. One follow-up is worth its own thread:")
+    var task = BlockTaskSuggestion()
+    task.title = builder.segment("Port forms to iOS")
+    task.brief = builder.segment("Draw BlockForm on iOS with the macOS controls, option previews and the recommended tag, submitting through the existing form path.")
+    task.state = .pending
+    task.actionIds = ["start-task", "dismiss-task"]
+    var content = builder.finish(blocks: [paragraphBlock(intro), .with { $0.taskSuggestion = task }])
+    content.actions = actionRows([
+      callbackAction("start-task", "Start thread", style: .primary),
+      callbackAction("dismiss-task", "Dismiss"),
+    ])
+    return content
+  }
+
+  private static func richNextStep() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    var step = BlockNextStep()
+    step.recap = builder.segment("Per-block fallback is in on iOS and macOS, with tests passing. Nothing is committed.")
+    step.question = builder.segment("Commit the fallback fix now?")
+    step.blocking = true
+    step.actionIds = ["commit", "not-yet"]
+    var content = builder.finish(blocks: [.with { $0.nextStep = step }])
+    content.actions = actionRows([
+      callbackAction("commit", "Commit", style: .primary),
+      callbackAction("not-yet", "Not yet"),
+    ])
+    return content
+  }
+
+  private static func richPromptSuggestions() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let answer = builder.segment("The review found three issues. Pick a follow-up or ask your own.")
+    var prompts: [BlockPromptSuggestion] = []
+    for (label, text) in [("Fix the P0", "Fix the P0 finding and add a test for it."), ("Explain the span rule", nil), ("Add tier 2 blocks", nil)] as [(String, String?)] {
+      var prompt = BlockPromptSuggestion()
+      prompt.label = builder.segment(label)
+      if let text { prompt.text = text }
+      prompts.append(prompt)
+    }
+    return builder.finish(blocks: [paragraphBlock(answer), .with { $0.promptSuggestions = .with { $0.prompts = prompts } }])
+  }
+
+  private static func richUnknownBlock() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    let heading = builder.segment("Before the new block")
+    _ = builder.segment("This text belongs to a block kind this build doesn't know, so it shows as a paragraph.")
+    let after = builder.segment("After it, formatting continues normally.")
+    // Field 99, length-delimited and empty: a kind from a newer protocol.
+    let unknown = (try? InlineProtocol.Block(serializedBytes: [0x9A, 0x06, 0x00] as [UInt8])) ?? InlineProtocol.Block()
+    return builder.finish(blocks: [headingBlock(heading, level: 3), unknown, paragraphBlock(after)])
   }
 
   private static func richPendingImage() -> RichCatalogFixture {
@@ -1471,6 +1694,7 @@ private enum DeveloperMessageCatalogFactory {
     var text: String
     var entities: MessageEntities?
     var blockContent: InlineProtocol.BlockContent
+    var actions: InlineProtocol.MessageActions? = nil
   }
 
   private struct RichCatalogTextBuilder {
@@ -1670,6 +1894,8 @@ private enum DeveloperMessageCatalogFactory {
       .richDisclosures, .richProgressDisclosure, .richPendingImage, .richUnknownImage, .richReadyImage,
       .richUnavailableImage, .richAlbum, .richAgentAnswer,
       .richRTLBlocks, .richMixedRTL, .richQuote, .richTable,
+      .richAgentPlan, .richPlanProposal, .richApproval, .richReview, .richTaskSuggestion, .richNextStep,
+      .richPromptSuggestions, .richUnknownBlock,
       .groupStart, .groupMiddle, .groupEnd, .reply, .forwarded, .reactions, .sending, .failed,
       .compactUrlPreview, .largeUrlPreview, .multipleUrlPreviews,
       .photo, .photoCaption, .video, .pdf, .archive, .voice,
@@ -1752,3 +1978,4 @@ enum DeveloperRichMediaFixtureCache {
   }
 }
 #endif
+

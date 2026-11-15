@@ -1,4 +1,5 @@
 import AppKit
+import InlineKit
 import InlineProtocol
 
 /// Geometry for the agent and bot blocks (bridge v2, spec §6): disclosure
@@ -37,8 +38,9 @@ enum RichBlockStatus: String, Codable, Hashable {
 
   var symbolName: String {
     switch self {
-    case .pending: "circle.dotted"
-    case .running: "circle.dashed"
+    // The Claude task list: a dashed circle waits, a spinner runs (drawn by the steps view).
+    case .pending: "circle.dashed"
+    case .running: "circle.dotted"
     case .waiting: "hand.raised.fill"
     case .done: "checkmark.circle.fill"
     case .failed: "xmark.circle.fill"
@@ -110,6 +112,8 @@ struct RichBlockStepsNode: Codable, Hashable {
 
   var steps: [Step]
   var isRTL: Bool
+  /// A top-level plan draws as a rounded card, like the Claude task list.
+  var isCard: Bool = false
 }
 
 enum RichBlockCalloutTone: String, Codable, Hashable {
@@ -247,5 +251,132 @@ struct RichBlockFormNode: Codable, Hashable {
   var submitFrame: CGRect
   var requiredGrant: Int
   var closed: Bool
+  var isRTL: Bool
+}
+
+// MARK: - Agent cards (plan proposal, approval, task suggestion, next step)
+
+enum RichBlockAgentCardKind: String, Codable, Hashable {
+  case planProposal, approval, taskSuggestion, nextStep
+}
+
+enum RichBlockDecisionState: String, Codable, Hashable {
+  case pending, accepted, declined, expired, superseded
+
+  init(_ state: InlineProtocol.BlockDecisionState) {
+    switch state {
+    case .accepted: self = .accepted
+    case .declined: self = .declined
+    case .expired: self = .expired
+    case .superseded: self = .superseded
+    case .pending, .unspecified, .UNRECOGNIZED: self = .pending
+    }
+  }
+}
+
+enum RichBlockChipTone: String, Codable, Hashable {
+  case neutral, accent, success, warning, danger
+
+  var tint: NSColor {
+    switch self {
+    case .neutral: .secondaryLabelColor
+    case .accent: .controlAccentColor
+    case .success: .systemGreen
+    case .warning: .systemOrange
+    case .danger: .systemRed
+    }
+  }
+}
+
+/// A short tinted label: a card's state, a review's verdict, a finding's priority.
+struct RichBlockChip: Codable, Hashable {
+  var text: String
+  var tone: RichBlockChipTone
+  var frame: CGRect
+}
+
+/// A card's chrome: background, icon, header and chip. Its body blocks are ordinary nodes
+/// laid out inside its frame, then its buttons as a `RichBlockAgentActionsNode`.
+struct RichBlockAgentCardNode: Codable, Hashable {
+  var kind: RichBlockAgentCardKind
+  var symbolName: String?
+  var iconFrame: CGRect?
+  /// The block's own title, or a fixed one such as "Plan" in `titleLiteral`.
+  var title: RichBlockTextRange?
+  var titleLiteral: String?
+  var titleFrame: CGRect?
+  var chip: RichBlockChip?
+  /// An approval's command, drawn monospaced and left to right in a box.
+  var command: RichBlockTextRange?
+  var commandFrame: CGRect?
+  var commandBoxFrame: CGRect?
+  var isRTL: Bool
+}
+
+/// A row of buttons inside a block, or the line that replaced them once decided.
+struct RichBlockAgentActionsNode: Codable, Hashable {
+  enum Style: String, Codable, Hashable { case standard, primary, destructive, link }
+
+  enum Effect: Codable, Hashable {
+    /// Runs the message action with this ID through the message's action pipeline.
+    case action(String)
+    /// Toggles the disclosure state of the block at this path, such as a long plan.
+    case toggle(BlockContentPath, expanded: Bool)
+    /// Opens a chat the block points at, such as a started task's thread.
+    case open(chatID: Int64?, userID: Int64?)
+  }
+
+  struct Button: Codable, Hashable {
+    var title: String
+    var style: Style
+    var effect: Effect
+    var frame: CGRect
+  }
+
+  var buttons: [Button]
+  var note: String?
+  var noteFrame: CGRect?
+  /// A state such as "Waiting on you", trailing the buttons.
+  var chip: RichBlockChip?
+  var isRTL: Bool
+}
+
+struct RichBlockReviewNode: Codable, Hashable {
+  struct Finding: Codable, Hashable {
+    var priority: RichBlockChip?
+    var title: RichBlockTextRange
+    var titleFrame: CGRect
+    var location: String?
+    var locationFrame: CGRect?
+    var body: RichBlockTextRange?
+    var bodyFrame: CGRect?
+    var outcomeSymbol: String?
+    var outcomeFrame: CGRect?
+    var separatorY: CGFloat?
+    /// The finding's own action, such as "Fix".
+    var action: RichBlockAgentActionsNode.Button?
+  }
+
+  var iconFrame: CGRect
+  var title: RichBlockTextRange?
+  var titleLiteral: String?
+  var titleFrame: CGRect
+  var chip: RichBlockChip?
+  var summary: RichBlockTextRange?
+  var summaryFrame: CGRect?
+  var findings: [Finding]
+  var isRTL: Bool
+}
+
+struct RichBlockPromptChipsNode: Codable, Hashable {
+  struct Chip: Codable, Hashable {
+    var label: RichBlockTextRange
+    /// Composer text; the label's text when the sender gave none.
+    var text: String
+    var frame: CGRect
+    var labelFrame: CGRect
+  }
+
+  var chips: [Chip]
   var isRTL: Bool
 }

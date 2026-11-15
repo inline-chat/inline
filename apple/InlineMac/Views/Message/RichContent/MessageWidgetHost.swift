@@ -95,6 +95,8 @@ enum MessageWidgetKey {
           case let .disclosure(value): blocks = value.children
           case let .quote(value): blocks = value.children
           case let .callout(value): blocks = value.children
+          case let .planProposal(value): blocks = value.children
+          case let .approval(value): blocks = value.children
           default: break
           }
         }
@@ -104,7 +106,7 @@ enum MessageWidgetKey {
         guard case let .list(list)? = current?.kind, list.items.indices.contains(index) else { return nil }
         blocks = list.items[index].children
         current = nil
-      case .albumImage:
+      case .albumImage, .part:
         return nil
       }
     }

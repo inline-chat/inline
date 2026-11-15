@@ -494,20 +494,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private var renderableMessageActionRows: [MessageActionRow] {
-    guard let actions = message.actions else { return [] }
-
-    return actions.rows.compactMap { row in
-      let filtered = row.actions.filter { action in
-        !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-          !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-          action.action != nil
-      }
-      guard !filtered.isEmpty else { return nil }
-
-      var next = MessageActionRow()
-      next.actions = filtered
-      return next
-    }
+    BlockInlineActions.renderableRows(for: message, drawnInside: props.layout.richBlockContent?.claimedActionIDs ?? [])
   }
 
   private func loadingActionIdsForCurrentMessage() -> Set<String> {
@@ -522,13 +509,18 @@ class MinimalMessageViewAppKit: NSView {
     guard props.layout.hasActionsRows, !renderableMessageActionRows.isEmpty else {
       messageActionRowsView?.removeFromSuperview()
       messageActionRowsView = nil
+      clearMessageActionRowsConstraints()
+      // Buttons drawn inside blocks still need loading, answers (toasts, alerts) and grants.
+      if props.layout.richBlockContent?.claimedActionIDs.isEmpty == false {
+        ensureMessageActionStateObservation()
+        return
+      }
       messageActionLoadingCancellable?.cancel()
       messageActionLoadingCancellable = nil
       messageActionAnsweredCancellable?.cancel()
       messageActionAnsweredCancellable = nil
       messageActionGrantsCancellable?.cancel()
       messageActionGrantsCancellable = nil
-      clearMessageActionRowsConstraints()
       return
     }
 
@@ -595,6 +587,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func refreshMessageActionRowsView() {
+    richBlockContentView?.refreshInlineActionStates()
     guard let messageActionRowsView else { return }
     messageActionRowsView.configure(
       rows: renderableMessageActionRows,
@@ -616,11 +609,16 @@ class MinimalMessageViewAppKit: NSView {
       if presentation.intent == .callback {
         invokeMessageCallbackAction(action)
       } else {
-        MessageActionPerformer.performLocal(presentation.intent) { [weak self] peer in
+        MessageActionPerformer.performLocal(presentation.intent, compose: postCompose) { [weak self] peer in
           self?.openChat(peer: peer)
         }
       }
     }
+  }
+
+  /// Puts `text` in the composer of this message's chat, or of the thread it anchors.
+  private func postCompose(_ text: String) {
+    MessageComposeRequests.shared.post(text, from: message, isThreadAnchor: isAnchorMessage)
   }
 
   private func invokeMessageCallbackAction(_ action: MessageAction) {
@@ -3142,6 +3140,12 @@ class MinimalMessageViewAppKit: NSView {
       richView.onTextLongPress = { [weak self] event in
         guard let self else { return }
         handleTextLongPress(at: textView.convert(event.locationInWindow, from: nil), event: event)
+      }
+      richView.onMessageAction = { [weak self] action in
+        self?.handleMessageActionTap(action)
+      }
+      richView.onCompose = { [weak self] text in
+        self?.postCompose(text)
       }
       richView.onDisclosureToggle = { [weak self] path, expanded in
         guard let self else { return }

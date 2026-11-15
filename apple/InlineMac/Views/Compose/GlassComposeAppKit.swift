@@ -1182,6 +1182,14 @@ class GlassComposeAppKit: NSView {
         self?.insertPrompt(text)
       }.store(in: &cancellables)
 
+    // Compose actions and prompt suggestions in this chat's messages, or in the anchor of
+    // this thread. Only the composer in the window the viewer clicked takes them.
+    MessageComposeRequests.shared.requests
+      .sink { [weak self] request in
+        guard let self, request.targets(peer: peerId, chat: chat), window?.isKeyWindow == true else { return }
+        insertPrompt(request.text)
+      }.store(in: &cancellables)
+
     state.editingMsgIdPublisher
       .sink { [weak self] editingMsgId in
         guard let self else { return }

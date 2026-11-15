@@ -143,7 +143,11 @@ final class RichBlockFieldsNodeView: RichBlockRenderableView {
 final class RichBlockStepsNodeView: RichBlockRenderableView {
   private var pool = SurfacePool()
   private var markers: [NSImageView] = []
+  /// Running steps spin, as in the Claude task list.
+  private var spinners: [NSProgressIndicator] = []
   private var steps: [RichBlockStepsNode.Step] = []
+  private var palette: RichBlockPalette?
+  private var isCard = false
 
   override var orderedTextSurfaces: [RichBlockTextSurface] { pool.active }
 
@@ -160,20 +164,40 @@ final class RichBlockStepsNodeView: RichBlockRenderableView {
   override func apply(node: RichBlockLayoutPlan.Node, context: RichBlockRenderContext) {
     guard case let .steps(node) = node.kind else { return }
     steps = node.steps
+    isCard = node.isCard
+    wantsLayer = true
+    layer?.cornerRadius = node.isCard ? RichBlockAgentCardMetrics.cornerRadius : 0
+    layer?.cornerCurve = .continuous
+    layer?.borderWidth = node.isCard ? 1 : 0
+    updateCardColors(context.palette)
     while markers.count < steps.count {
       let marker = makeSymbolView(pointSize: 12, weight: .medium)
       addSubview(marker)
       markers.append(marker)
+      let spinner = NSProgressIndicator(frame: .zero)
+      spinner.style = .spinning
+      spinner.controlSize = .small
+      spinner.isDisplayedWhenStopped = false
+      addSubview(spinner)
+      spinners.append(spinner)
     }
     for (index, marker) in markers.enumerated() {
       guard index < steps.count else {
         marker.isHidden = true
+        spinners[index].stopAnimation(nil)
         continue
       }
       let status = steps[index].status ?? .pending
-      marker.isHidden = false
-      marker.image = NSImage(systemSymbolName: status.symbolName, accessibilityDescription: status.accessibilityName)
-      marker.contentTintColor = status.tint(context.palette)
+      if status == .running {
+        marker.isHidden = true
+        spinners[index].setAccessibilityLabel(status.accessibilityName)
+        spinners[index].startAnimation(nil)
+      } else {
+        spinners[index].stopAnimation(nil)
+        marker.isHidden = false
+        marker.image = NSImage(systemSymbolName: status.symbolName, accessibilityDescription: status.accessibilityName)
+        marker.contentTintColor = status.tint(context.palette)
+      }
     }
     pool.begin()
     for step in steps {
@@ -212,7 +236,10 @@ final class RichBlockStepsNodeView: RichBlockRenderableView {
     super.layout()
     var surfaces = pool.active.makeIterator()
     for (index, step) in steps.enumerated() {
-      if index < markers.count { markers[index].frame = step.markerFrame }
+      if index < markers.count {
+        markers[index].frame = step.markerFrame
+        spinners[index].frame = step.markerFrame.insetBy(dx: 1, dy: 1)
+      }
       surfaces.next()?.frame = step.textFrame
       if let detailFrame = step.detailFrame { surfaces.next()?.frame = detailFrame }
     }
@@ -223,7 +250,22 @@ final class RichBlockStepsNodeView: RichBlockRenderableView {
     pool.reset()
     markers.forEach { $0.removeFromSuperview() }
     markers = []
+    spinners.forEach { $0.removeFromSuperview() }
+    spinners = []
     steps = []
+  }
+
+  private func updateCardColors(_ palette: RichBlockPalette) {
+    self.palette = palette
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      layer?.backgroundColor = isCard ? palette.subtleFill.cgColor : nil
+      layer?.borderColor = isCard ? palette.separator.cgColor : nil
+    }
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    if let palette { updateCardColors(palette) }
   }
 }
 

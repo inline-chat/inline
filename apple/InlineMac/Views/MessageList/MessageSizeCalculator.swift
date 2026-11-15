@@ -650,20 +650,8 @@ class MessageSizeCalculator {
 
   // Use a more efficient cache key
   private func actionRows(for message: FullMessage) -> [InlineProtocol.MessageActionRow] {
-    guard let actions = message.message.actions else { return [] }
-
-    return actions.rows.compactMap { row in
-      let filtered = row.actions.filter { action in
-        !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-          !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-          action.action != nil
-      }
-      guard !filtered.isEmpty else { return nil }
-
-      var next = InlineProtocol.MessageActionRow()
-      next.actions = filtered
-      return next
-    }
+    // Before rich layout: every action. `claimRows` drops the ones the plan drew inside blocks.
+    BlockInlineActions.renderableRows(for: message.message, drawnInside: [])
   }
 
   private func actionRowsSignature(for rows: [InlineProtocol.MessageActionRow]) -> String {
@@ -794,8 +782,8 @@ class MessageSizeCalculator {
     let hasAttachments = !renderableAttachments.isEmpty
     let hasURLPreviewAttachment = renderableAttachments.contains { $0.urlPreview != nil }
     let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
-    let renderableActionRows = actionRows(for: message)
-    let hasActionRows = !renderableActionRows.isEmpty
+    var renderableActionRows = actionRows(for: message)
+    var hasActionRows = !renderableActionRows.isEmpty
     let hasAcknowledgement = props.interactionMode != .threadAnchor
       && !message.acknowledgementActors.isEmpty
       && !message.message.isServiceMessage
@@ -1002,9 +990,17 @@ class MessageSizeCalculator {
         secondaryColor: secondaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
         inlineMathAttachmentsEnabled: AppSettings.shared.richTextInlineMathEnabled,
         disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message),
-        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message)
+        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message),
+        actions: message.message.actions
       )
       if let richBlockPlan {
+        if !richBlockPlan.claimedActionIDs.isEmpty {
+          renderableActionRows = BlockInlineActions.renderableRows(
+            for: message.message,
+            drawnInside: richBlockPlan.claimedActionIDs
+          )
+          hasActionRows = !renderableActionRows.isEmpty
+        }
         textSize = richBlockPlan.size
         isSingleLine = false
       }
@@ -1756,8 +1752,8 @@ class MessageSizeCalculator {
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
     let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
-    let renderableActionRows = actionRows(for: message)
-    let hasActionRows = !renderableActionRows.isEmpty
+    var renderableActionRows = actionRows(for: message)
+    var hasActionRows = !renderableActionRows.isEmpty
     let hasAcknowledgement = props.interactionMode != .threadAnchor
       && !message.acknowledgementActors.isEmpty
       && !message.message.isServiceMessage
@@ -1824,9 +1820,17 @@ class MessageSizeCalculator {
         widgetLayout: MessageWidgetHeights.shared.layout(for: message.message),
         // The text view spans the column for right-to-left messages; the plan
         // matches so their prose sits at the trailing edge, not in a block on the left.
-        fillsAvailableWidth: props.isRtl
+        fillsAvailableWidth: props.isRtl,
+        actions: message.message.actions
       )
       if let richBlockPlan {
+        if !richBlockPlan.claimedActionIDs.isEmpty {
+          renderableActionRows = BlockInlineActions.renderableRows(
+            for: message.message,
+            drawnInside: richBlockPlan.claimedActionIDs
+          )
+          hasActionRows = !renderableActionRows.isEmpty
+        }
         textSize = richBlockPlan.size
       }
     }

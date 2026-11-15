@@ -8,6 +8,10 @@ final class RichBlockContentView: NSView {
   var onDisclosureToggle: ((BlockContentPath, Bool) -> Void)?
   var onTextEntityClick: ((MessageTextEntityHit, NSAttributedString) -> Bool)?
   var onTextLongPress: ((NSEvent) -> Void)?
+  /// Runs a message action that a block draws as its own button, such as a plan's Approve.
+  var onMessageAction: ((InlineProtocol.MessageAction) -> Void)?
+  /// Puts a prompt chip's text in the composer.
+  var onCompose: ((String) -> Void)?
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableView] = [:]
   /// Removed nodes still fading out. Never reused, hit-tested or selected.
@@ -16,6 +20,16 @@ final class RichBlockContentView: NSView {
   private var previousSource: String?
   private var previousContent: InlineProtocol.BlockContent?
   private var currentPlan: RichBlockLayoutPlan?
+  /// The last bind's inputs, to rebind when a width change alters which nodes exist.
+  private var lastBind: (
+    content: InlineProtocol.BlockContent,
+    attributedText: NSAttributedString,
+    baseFontSize: CGFloat,
+    palette: RichBlockPalette,
+    relatedMessage: InlineKit.Message,
+    codePresentation: RichBlockCodePresentation,
+    renderStyle: MessageRenderStyle
+  )?
   private var mathSnapshot: RichTextMath.Snapshot?
   private var mathLayoutSignature: Int = 0
   private var mathPreparationTask: Task<Void, Never>?
@@ -39,6 +53,14 @@ final class RichBlockContentView: NSView {
     clipsToBounds = true
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
+  }
+
+  /// Rereads loading state for buttons drawn inside blocks, after a tap or its answer.
+  func refreshInlineActionStates() {
+    for view in nodeViews.values {
+      (view as? RichBlockAgentActionsNodeView)?.refreshLoadingState()
+      (view as? RichBlockReviewNodeView)?.refreshLoadingState()
+    }
   }
 
   @available(*, unavailable)
@@ -97,6 +119,7 @@ final class RichBlockContentView: NSView {
     previousSource = relatedMessage.text
     previousContent = content
     currentPlan = plan
+    lastBind = (content, attributedText, baseFontSize, palette, relatedMessage, codePresentation, renderStyle)
     styleCache.begin(
       source: attributedText,
       environment: .init(baseFontSize: baseFontSize, math: math, palette: palette, appearance: effectiveAppearance)
@@ -116,6 +139,12 @@ final class RichBlockContentView: NSView {
         },
         onImageClick: { [weak self] image in
           self?.openImage(image)
+        },
+        onMessageAction: { [weak self] action in
+          self?.onMessageAction?(action)
+        },
+        onCompose: { [weak self] text in
+          self?.onCompose?(text)
         }
       ),
       isContentVisible: isContentVisible,
@@ -133,8 +162,16 @@ final class RichBlockContentView: NSView {
     // the view we still need for a later destination.
     var remainingViews = nodeViews
     nodeViews.removeAll(keepingCapacity: true)
+    // A block's own parts (a card's command, recap, buttons) aren't reconciled nodes; they
+    // follow their block.
+    func previousPath(of path: BlockContentPath) -> BlockContentPath? {
+      if let mapped = reconciliation.previousPathByCurrentPath[path] { return mapped }
+      guard case .part? = path.components.last else { return nil }
+      let owner = BlockContentPath(Array(path.components.dropLast()))
+      return reconciliation.previousPathByCurrentPath[owner].map { BlockContentPath($0.components + [path.components.last!]) }
+    }
     for node in plan.nodes {
-      guard let oldPath = reconciliation.previousPathByCurrentPath[node.path],
+      guard let oldPath = previousPath(of: node.path),
             let view = remainingViews[oldPath], view.reuseKind == node.reuseKind
       else { continue }
       nodeViews[node.path] = remainingViews.removeValue(forKey: oldPath)
@@ -214,6 +251,22 @@ final class RichBlockContentView: NSView {
   }
 
   func applyLayout(_ plan: RichBlockLayoutPlan, animated: Bool) {
+    // Some layouts depend on width (a long plan collapses to the blocks that fit), so a
+    // resize can add or drop nodes. That needs a full bind, not just new frames.
+    if let lastBind, let currentPlan, !Self.sameNodes(currentPlan, plan) {
+      update(
+        plan: plan,
+        content: lastBind.content,
+        attributedText: lastBind.attributedText,
+        baseFontSize: lastBind.baseFontSize,
+        palette: lastBind.palette,
+        relatedMessage: lastBind.relatedMessage,
+        codePresentation: lastBind.codePresentation,
+        renderStyle: lastBind.renderStyle,
+        animated: false
+      )
+      return
+    }
     currentPlan = plan
     let shouldAnimate = animated && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     let frameChanges = plan.nodes.compactMap { node -> (RichBlockRenderableView, CGRect)? in
@@ -226,6 +279,11 @@ final class RichBlockContentView: NSView {
       return nil
     }
     animate(frameChanges)
+  }
+
+  private static func sameNodes(_ lhs: RichBlockLayoutPlan, _ rhs: RichBlockLayoutPlan) -> Bool {
+    lhs.nodes.count == rhs.nodes.count
+      && zip(lhs.nodes, rhs.nodes).allSatisfy { $0.path == $1.path && $0.reuseKind == $1.reuseKind }
   }
 
   func setContentVisible(_ visible: Bool) {
@@ -281,6 +339,7 @@ final class RichBlockContentView: NSView {
     previousContent = nil
     previousSource = nil
     currentPlan = nil
+    lastBind = nil
     messageIdentity = nil
   }
 
@@ -520,11 +579,11 @@ final class RichBlockContentView: NSView {
           guard appendSurface(nodeSurfaces[index], role: role, separatorAfter: sameRow ? "\t" : "\n") else { return nil }
           column += 1
         }
-      case .fields, .steps, .callout, .meter, .form:
+      case .fields, .steps, .callout, .meter, .form, .agentCard, .review, .promptChips:
         for surface in nodeSurfaces {
           guard appendSurface(surface, role: .body, separatorAfter: "\n") else { return nil }
         }
-      case .separator, .image, .album, .quote, .diff, .widget:
+      case .separator, .image, .album, .quote, .diff, .widget, .agentActions:
         guard nodeSurfaces.isEmpty else { return nil }
       }
     }

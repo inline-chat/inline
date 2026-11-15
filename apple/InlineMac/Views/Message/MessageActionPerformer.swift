@@ -39,7 +39,12 @@ enum MessageActionPerformer {
   }
 
   /// Client-side intents. Callbacks stay with the caller.
-  static func performLocal(_ intent: MessageActionIntent, openChat: (InlineKit.Peer) -> Void) {
+  /// `peer` is the message's chat, where compose text goes.
+  static func performLocal(
+    _ intent: MessageActionIntent,
+    compose: (String) -> Void = { _ in },
+    openChat: (InlineKit.Peer) -> Void
+  ) {
     switch intent {
     case let .copyText(text):
       NSPasteboard.general.clearContents()
@@ -51,6 +56,8 @@ enum MessageActionPerformer {
       }
     case let .openLink(peer, _):
       openChat(peer)
+    case let .compose(text):
+      compose(text)
     case .callback, .unavailable:
       break
     }

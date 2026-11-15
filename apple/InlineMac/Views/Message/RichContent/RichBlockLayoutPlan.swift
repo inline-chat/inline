@@ -64,6 +64,10 @@ enum RichBlockRenderKind: String, Codable, Hashable {
   case diff
   case form
   case widget
+  case agentCard
+  case agentActions
+  case review
+  case promptChips
 }
 
 struct RichBlockLayoutPlan: Codable, Hashable {
@@ -152,6 +156,10 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     case diff(RichBlockDiffNode)
     case form(RichBlockFormNode)
     case widget(RichBlockWidgetNode)
+    case agentCard(RichBlockAgentCardNode)
+    case agentActions(RichBlockAgentActionsNode)
+    case review(RichBlockReviewNode)
+    case promptChips(RichBlockPromptChipsNode)
   }
 
   struct Node: Codable, Hashable {
@@ -192,6 +200,14 @@ struct RichBlockLayoutPlan: Codable, Hashable {
         return .form
       case .widget:
         return .widget
+      case .agentCard:
+        return .agentCard
+      case .agentActions:
+        return .agentActions
+      case .review:
+        return .review
+      case .promptChips:
+        return .promptChips
       }
     }
   }
@@ -204,9 +220,12 @@ struct RichBlockLayoutPlan: Codable, Hashable {
   var contentHorizontalInset: CGFloat
   var nodes: [Node]
   var trailingTextLine: TrailingTextLine?
+  /// Message actions that blocks drawn in this plan show as their own buttons, or replaced
+  /// with a decision. The rows under the message leave them out.
+  var claimedActionIDs: Set<String> = []
 
   private enum CodingKeys: String, CodingKey {
-    case size, mathSignature, contentHorizontalInset, nodes, trailingTextLine
+    case size, mathSignature, contentHorizontalInset, nodes, trailingTextLine, claimedActionIDs
   }
 
   // Snapshot ownership does not change geometric equality. Its render inputs
@@ -215,10 +234,11 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     lhs.size == rhs.size && lhs.mathSignature == rhs.mathSignature
       && lhs.contentHorizontalInset == rhs.contentHorizontalInset
       && lhs.nodes == rhs.nodes && lhs.trailingTextLine == rhs.trailingTextLine
+      && lhs.claimedActionIDs == rhs.claimedActionIDs
   }
 
   func hash(into hasher: inout Hasher) {
     hasher.combine(size); hasher.combine(mathSignature); hasher.combine(contentHorizontalInset)
-    hasher.combine(nodes); hasher.combine(trailingTextLine)
+    hasher.combine(nodes); hasher.combine(trailingTextLine); hasher.combine(claimedActionIDs)
   }
 }

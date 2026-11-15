@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineProtocol
 import TextProcessing
 
 /// Presentation only: both modes consume the same raw code text and layout plan.
@@ -41,6 +42,10 @@ struct RichBlockInteractions {
   let onTextEntityClick: (MessageTextEntityHit, NSAttributedString) -> Bool
   let onDisclosureToggle: (BlockContentPath, Bool) -> Void
   let onImageClick: (BlockImageOccurrence) -> Void
+  /// Runs a message action a block draws as its own button.
+  let onMessageAction: (InlineProtocol.MessageAction) -> Void
+  /// Puts text in the composer of the message's chat (or the thread it anchors). Never sends.
+  let onCompose: (String) -> Void
 }
 
 /// The styled text each node got on the previous bind of one content view, so a
@@ -196,7 +201,7 @@ struct RichBlockRenderContext {
   let attributedText: NSAttributedString
   let baseFontSize: CGFloat
   let palette: RichBlockPalette
-  let relatedMessage: Message
+  let relatedMessage: InlineKit.Message
   let interactions: RichBlockInteractions
   let isContentVisible: Bool
   let codePresentation: RichBlockCodePresentation
