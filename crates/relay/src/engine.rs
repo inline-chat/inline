@@ -22,6 +22,10 @@ use crate::store::{
 const CHECKPOINT_KEY: &str = "connector.checkpoint";
 const MIRROR_OWNER_KEY: &str = "settings.mirror_owner";
 const PENDING_RETRY_TICK: Duration = Duration::from_secs(15);
+/// A signed-out or unavailable connector waits this long before its first
+/// retry, doubling up to the max while the reason persists.
+const PARKED_RETRY_MIN: Duration = Duration::from_secs(60);
+const PARKED_RETRY_MAX: Duration = Duration::from_secs(10 * 60);
 const READ_MARK_KEY: &str = "sync.agent_read_inline_id";
 const PROFILE_NAME_KEY: &str = "profile.name";
 const PROFILE_AVATAR_KEY: &str = "profile.avatar";
@@ -192,6 +196,8 @@ impl Relay {
     /// connector with backoff after failures.
     pub async fn run_remote(&self, mut shutdown: watch::Receiver<bool>) -> RelayResult<()> {
         let mut backoff = Duration::from_secs(3);
+        let mut parked_delay = PARKED_RETRY_MIN;
+        let mut last_stop: Option<String> = None;
         let mut apply_failures = HashMap::new();
         let mut retry_event = None;
         loop {
@@ -252,6 +258,10 @@ impl Relay {
                     }
                 }
             };
+            if outcome.is_ok() || started.elapsed() > Duration::from_secs(120) {
+                parked_delay = PARKED_RETRY_MIN;
+                last_stop = None;
+            }
             let delay = match outcome {
                 Ok(()) => Duration::from_secs(3),
                 Err(error) => {
@@ -261,13 +271,22 @@ impl Relay {
                         }
                         _ => ConnectorHealth::Degraded(error.message.clone()),
                     };
-                    log::warn!(target: "inline::bridge::relay", "connector stopped: {}", error.message);
+                    // A connector that keeps stopping for the same reason
+                    // (signed out, region without the service) logs once.
+                    if last_stop.as_deref() == Some(error.message.as_str()) {
+                        log::debug!(target: "inline::bridge::relay", "connector still stopped: {}", error.message);
+                    } else {
+                        log::warn!(target: "inline::bridge::relay", "connector stopped: {}", error.message);
+                    }
+                    last_stop = Some(error.message.clone());
                     self.set_connector_health(health);
                     if matches!(
                         error.kind,
                         FailureKind::NeedsLogin | FailureKind::Unavailable
                     ) {
-                        Duration::from_secs(60)
+                        let delay = parked_delay;
+                        parked_delay = (parked_delay * 2).min(PARKED_RETRY_MAX);
+                        delay
                     } else {
                         backoff
                     }
