@@ -8,6 +8,8 @@ public enum MessageActionIntent: Equatable, Sendable {
   /// A web URL, or an app link such as `codex://threads/<id>`.
   case openURL(URL, isWeb: Bool)
   case openLink(peer: Peer, messageID: Int64?)
+  /// Text for the viewer's composer in the message's chat; never sent by itself.
+  case compose(String)
   case unavailable
 }
 
@@ -113,9 +115,19 @@ public struct MessageActionPresentation: Equatable, Sendable {
     case let .openLink(link):
       guard link.hasPeerID else { return .unavailable }
       return .openLink(peer: link.peerID.toPeer(), messageID: link.hasMessageID ? link.messageID : nil)
+    case let .compose(compose):
+      return composeIntent(compose.text)
     case nil:
       return .unavailable
     }
+  }
+
+  /// A compose action or prompt suggestion's text, trimmed; unavailable when empty or past
+  /// the 4,000-character cap the server enforces.
+  public static func composeIntent(_ text: String) -> MessageActionIntent {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.count <= 4_000 else { return .unavailable }
+    return .compose(trimmed)
   }
 
   /// Web URLs and app schemes only; local files and script URLs never open.

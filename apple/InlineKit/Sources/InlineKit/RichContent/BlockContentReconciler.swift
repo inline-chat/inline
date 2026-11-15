@@ -9,6 +9,9 @@ public struct BlockContentPath: Codable, Hashable, Sendable {
     case block(Int)
     case listItem(Int)
     case albumImage(Int)
+    /// A part of a block that isn't a child block, such as a card's command line or its
+    /// button row. Clients number parts per block.
+    case part(Int)
   }
 
   public var components: [Component]
@@ -44,6 +47,12 @@ public enum BlockContentNodeKind: Hashable, Sendable {
   case meter
   case form
   case widget
+  case planProposal
+  case approval
+  case review
+  case taskSuggestion
+  case nextStep
+  case promptSuggestions
 }
 
 public struct BlockContentReconciliation: Equatable, Sendable {
@@ -138,6 +147,8 @@ public enum BlockContentReconciler {
     case table(header: [String], alignments: [Int], isRTL: Bool)
     case album(firstPhotoID: Int64)
     case photo(Int64)
+    /// A plan proposal's title; its "Show full plan" state follows it across edits.
+    case planProposal(title: String)
   }
 
   fileprivate static func disclosureIdentities(
@@ -145,7 +156,8 @@ public enum BlockContentReconciler {
     source: String
   ) -> [BlockContentPath: Identity] {
     Dictionary(uniqueKeysWithValues: flatten(content.blocks, source: source as NSString).compactMap { node in
-      guard node.kind == .disclosure, let identity = node.identity else { return nil }
+      // Plan proposals collapse like disclosures, so their open state is kept the same way.
+      guard node.kind == .disclosure || node.kind == .planProposal, let identity = node.identity else { return nil }
       return (node.path, identity)
     })
   }
@@ -231,6 +243,20 @@ public enum BlockContentReconciler {
         return [Node(path: path, kind: .form)]
       case .widget:
         return [Node(path: path, kind: .widget)]
+      case let .planProposal(plan):
+        let title = plan.hasTitle ? text(plan.title, in: source) ?? "" : ""
+        return [Node(path: path, kind: .planProposal, identity: .planProposal(title: title))]
+          + flatten(plan.children, source: source, parent: path)
+      case let .approval(approval):
+        return [Node(path: path, kind: .approval)] + flatten(approval.children, source: source, parent: path)
+      case .review:
+        return [Node(path: path, kind: .review)]
+      case .taskSuggestion:
+        return [Node(path: path, kind: .taskSuggestion)]
+      case .nextStep:
+        return [Node(path: path, kind: .nextStep)]
+      case .promptSuggestions:
+        return [Node(path: path, kind: .promptSuggestions)]
       }
     }
   }

@@ -76,6 +76,7 @@ extension InlineProtocol.MessageAction.OneOf_Action: Codable {
     case copyText
     case openURL
     case openLink
+    case compose
   }
 
   public init(from decoder: Decoder) throws {
@@ -89,6 +90,8 @@ extension InlineProtocol.MessageAction.OneOf_Action: Codable {
       self = try .openURL(MessageActionOpenUrl(serializedBytes: data))
     } else if let data = try container.decodeIfPresent(Data.self, forKey: .openLink) {
       self = try .openLink(MessageActionOpenLink(serializedBytes: data))
+    } else if let data = try container.decodeIfPresent(Data.self, forKey: .compose) {
+      self = try .compose(MessageActionCompose(serializedBytes: data))
     } else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
@@ -111,6 +114,8 @@ extension InlineProtocol.MessageAction.OneOf_Action: Codable {
       try container.encode(openURL.serializedData(), forKey: .openURL)
     case let .openLink(openLink):
       try container.encode(openLink.serializedData(), forKey: .openLink)
+    case let .compose(compose):
+      try container.encode(compose.serializedData(), forKey: .compose)
     }
   }
 }

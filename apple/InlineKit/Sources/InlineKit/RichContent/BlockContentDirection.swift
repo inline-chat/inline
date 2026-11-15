@@ -119,6 +119,18 @@ public enum BlockContentDirection {
       steps.hasIsRtl ? steps.isRtl : nil
     case let .form(form)?:
       form.hasIsRtl ? form.isRtl : nil
+    case let .planProposal(plan)?:
+      plan.hasIsRtl ? plan.isRtl : nil
+    case let .approval(approval)?:
+      approval.hasIsRtl ? approval.isRtl : nil
+    case let .review(review)?:
+      review.hasIsRtl ? review.isRtl : nil
+    case let .taskSuggestion(task)?:
+      task.hasIsRtl ? task.isRtl : nil
+    case let .nextStep(step)?:
+      step.hasIsRtl ? step.isRtl : nil
+    case let .promptSuggestions(prompts)?:
+      prompts.hasIsRtl ? prompts.isRtl : nil
     default:
       nil
     }
@@ -230,6 +242,42 @@ public enum BlockContentDirection {
         form.setDirection(total.isRTL)
         block.kind = .form(form)
         return total
+      case var .planProposal(plan)?:
+        var total = plan.hasTitle ? tally(plan.title) : Tally()
+        total.add(resolve(&plan.children))
+        plan.setDirection(total.isRTL)
+        block.kind = .planProposal(plan)
+        return total
+      case var .approval(approval)?:
+        // The command and folder are code; the title and reason are prose.
+        var total = tally([approval.title] + (approval.hasReason ? [approval.reason] : []))
+        total.add(resolve(&approval.children))
+        approval.setDirection(total.isRTL)
+        block.kind = .approval(approval)
+        return total
+      case var .review(review)?:
+        var ranges = review.hasTitle ? [review.title] : []
+        if review.hasSummary { ranges.append(review.summary) }
+        ranges += review.findings.flatMap { [$0.title] + ($0.hasBody ? [$0.body] : []) }
+        let total = tally(ranges)
+        review.setDirection(total.isRTL)
+        block.kind = .review(review)
+        return total
+      case var .taskSuggestion(task)?:
+        let total = tally([task.title] + (task.hasBrief ? [task.brief] : []))
+        task.setDirection(total.isRTL)
+        block.kind = .taskSuggestion(task)
+        return total
+      case var .nextStep(step)?:
+        let total = tally([step.recap] + (step.hasQuestion ? [step.question] : []))
+        step.setDirection(total.isRTL)
+        block.kind = .nextStep(step)
+        return total
+      case var .promptSuggestions(prompts)?:
+        let total = tally(prompts.prompts.map(\.label))
+        prompts.setDirection(total.isRTL)
+        block.kind = .promptSuggestions(prompts)
+        return total
       default:
         // Code, math, diffs, meters, media and widgets render left to right and don't sway
         // the prose around them.
@@ -260,3 +308,9 @@ extension InlineProtocol.BlockCallout: BlockDirectionCarrying {}
 extension InlineProtocol.BlockFields: BlockDirectionCarrying {}
 extension InlineProtocol.BlockSteps: BlockDirectionCarrying {}
 extension InlineProtocol.BlockForm: BlockDirectionCarrying {}
+extension InlineProtocol.BlockPlanProposal: BlockDirectionCarrying {}
+extension InlineProtocol.BlockApproval: BlockDirectionCarrying {}
+extension InlineProtocol.BlockReview: BlockDirectionCarrying {}
+extension InlineProtocol.BlockTaskSuggestion: BlockDirectionCarrying {}
+extension InlineProtocol.BlockNextStep: BlockDirectionCarrying {}
+extension InlineProtocol.BlockPromptSuggestions: BlockDirectionCarrying {}
