@@ -39,10 +39,13 @@ class MessageTableCell: NSView {
   private let log = Log.scoped("MessageTableCell", enableTracing: false)
   private var dependencies: AppDependencies?
   private var avatarSwipeProvider: MessageAvatarSwipeProvider?
-  /// Leading room for the selection checkbox, which takes the avatar column's center like Telegram.
+  /// Trailing room for the selection checkbox; the message narrows so leading content and avatars stay put.
   static let forwardSelectionInset: CGFloat = 36
+  /// The checkbox keeps the message side padding from the trailing edge.
+  private static let forwardSelectionCheckmarkCenterInset =
+    Theme.messageSidePadding + ForwardMessageSelectionCheckmark.size / 2
   private var forwardSelectionCheckmark: ForwardMessageSelectionCheckmark?
-  private var messageLeadingConstraint: NSLayoutConstraint?
+  private var messageTrailingConstraint: NSLayoutConstraint?
   private var forwardSelectionActive = false
 
   /// The rendered message's text, for the list's selection across blocks and messages.
@@ -51,7 +54,7 @@ class MessageTableCell: NSView {
   }
 
   /// - Parameter animated: animates entering and leaving selection mode (checkbox slides in from the
-  ///   avatar column while the message slides aside) and per-row checkbox changes.
+  ///   trailing edge while trailing-aligned messages slide aside) and per-row checkbox changes.
   func setForwardSelection(
     active: Bool,
     selectable: Bool,
@@ -63,7 +66,7 @@ class MessageTableCell: NSView {
     let checkmarkWasVisible = forwardSelectionCheckmark.map { !$0.isHidden } ?? false
     let modeChanged = wasActive != active
     forwardSelectionActive = active
-    messageLeadingConstraint?.constant = active ? Self.forwardSelectionInset : 0
+    messageTrailingConstraint?.constant = active ? -Self.forwardSelectionInset : 0
 
     let showsCheckmark = active && selectable
     if showsCheckmark {
@@ -71,7 +74,7 @@ class MessageTableCell: NSView {
       checkmark.setSelected(selected, animated: animated && !modeChanged)
       checkmark.onToggle = onToggle
       if animated, modeChanged {
-        SelectionMotion.fade(checkmark, in: true, slideX: -Self.forwardSelectionInset)
+        SelectionMotion.fade(checkmark, in: true, slideX: Self.forwardSelectionInset)
       } else if !checkmarkWasVisible || !animated {
         checkmark.layer?.removeAllAnimations()
         checkmark.isHidden = false
@@ -79,7 +82,7 @@ class MessageTableCell: NSView {
     } else if let checkmark = forwardSelectionCheckmark {
       checkmark.onToggle = nil
       if animated, modeChanged, checkmarkWasVisible {
-        SelectionMotion.fade(checkmark, in: false, slideX: -Self.forwardSelectionInset) { [weak self] in
+        SelectionMotion.fade(checkmark, in: false, slideX: Self.forwardSelectionInset) { [weak self] in
           self?.forwardSelectionActive == false
         }
       } else {
@@ -89,17 +92,17 @@ class MessageTableCell: NSView {
     }
 
     if animated, modeChanged {
-      SelectionMotion.slide(messageView?.layer, fromX: active ? -selectionSlideDistance : selectionSlideDistance)
+      SelectionMotion.slide(messageView?.layer, fromX: active ? selectionSlideDistance : -selectionSlideDistance)
     }
   }
 
-  /// How far the visible message moves when the checkbox column opens: outgoing bubbles keep
-  /// their trailing edge and centered service rows move by half.
+  /// How far left the visible message moves when the checkbox column opens: leading-aligned
+  /// messages stay put, outgoing bubbles keep their gap to the checkbox, and centered service rows move by half.
   private var selectionSlideDistance: CGFloat {
-    guard let content = currentContent else { return Self.forwardSelectionInset }
+    guard let content = currentContent else { return 0 }
     if content.message.message.isServiceMessage { return Self.forwardSelectionInset / 2 }
-    if content.props.renderStyle == .bubble, content.message.message.out == true { return 0 }
-    return Self.forwardSelectionInset
+    if content.props.renderStyle == .bubble, content.message.message.out == true { return Self.forwardSelectionInset }
+    return 0
   }
 
   private func makeCheckmark() -> ForwardMessageSelectionCheckmark {
@@ -110,7 +113,7 @@ class MessageTableCell: NSView {
     NSLayoutConstraint.activate([
       checkmark.widthAnchor.constraint(equalToConstant: ForwardMessageSelectionCheckmark.size),
       checkmark.heightAnchor.constraint(equalToConstant: ForwardMessageSelectionCheckmark.size),
-      checkmark.centerXAnchor.constraint(equalTo: leadingAnchor, constant: ChatLayoutMetrics.leadingControlCenterX),
+      checkmark.centerXAnchor.constraint(equalTo: trailingAnchor, constant: -Self.forwardSelectionCheckmarkCenterInset),
       checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
     forwardSelectionCheckmark = checkmark
@@ -339,13 +342,13 @@ class MessageTableCell: NSView {
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(newMessageView)
 
-    let leading = newMessageView.leadingAnchor.constraint(
-      equalTo: leadingAnchor, constant: forwardSelectionActive ? Self.forwardSelectionInset : 0
+    let trailing = newMessageView.trailingAnchor.constraint(
+      equalTo: trailingAnchor, constant: forwardSelectionActive ? -Self.forwardSelectionInset : 0
     )
-    messageLeadingConstraint = leading
+    messageTrailingConstraint = trailing
     NSLayoutConstraint.activate([
-      leading,
-      newMessageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      newMessageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      trailing,
       newMessageView.topAnchor.constraint(equalTo: topAnchor),
       newMessageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
