@@ -322,6 +322,8 @@ struct RichBlockAgentCardNode: Codable, Hashable {
   var commandFrame: CGRect?
   var commandBoxFrame: CGRect?
   var isRTL: Bool
+  /// When an open task card lapses, in seconds since 1970. The view replans the row then.
+  var expiresAt: TimeInterval?
 }
 
 /// A row of buttons inside a block, or the line that replaced them once decided.

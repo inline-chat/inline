@@ -152,6 +152,8 @@ final class RichBlockAgentCardNodeView: RichBlockRenderableView {
     setAccessibilityLabel([card.titleLiteral, card.title.map(context.plainString), card.chip?.text]
       .compactMap { $0 }.joined(separator: ", "))
     updateColors(context.palette)
+    messageStableID = context.relatedMessage.stableId
+    scheduleExpiry()
     needsLayout = true
   }
 
@@ -159,6 +161,41 @@ final class RichBlockAgentCardNodeView: RichBlockRenderableView {
     guard case let .agentCard(card) = node.kind else { return }
     self.node = card
     needsLayout = true
+  }
+
+  // MARK: Expiry
+
+  private var messageStableID: Int64 = 0
+  /// Fires once when an open task card on screen lapses.
+  private var expiryTimer: Timer?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    scheduleExpiry()
+  }
+
+  /// Arms a one-shot timer while the card is in a window; the row then replans with the card
+  /// expired. One that lapsed off screen replans on the next turn of the run loop.
+  private func scheduleExpiry() {
+    expiryTimer?.invalidate()
+    expiryTimer = nil
+    guard window != nil, let expiresAt = node?.expiresAt, messageStableID != 0 else { return }
+    let stableID = messageStableID
+    // Just past the expiry, so the replan sees it lapsed.
+    let delay = max(0, expiresAt - Date().timeIntervalSince1970) + 0.05
+    let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.expiryTimer = nil
+        NotificationCenter.default.post(
+          name: .richBlockLayoutStateDidChange,
+          object: self,
+          userInfo: ["messageStableID": stableID]
+        )
+      }
+    }
+    timer.tolerance = 0.5
+    RunLoop.main.add(timer, forMode: .common)
+    expiryTimer = timer
   }
 
   override func layout() {
@@ -194,6 +231,8 @@ final class RichBlockAgentCardNodeView: RichBlockRenderableView {
   override func prepareForReuse() {
     super.prepareForReuse()
     node = nil
+    messageStableID = 0
+    scheduleExpiry()
   }
 }
 

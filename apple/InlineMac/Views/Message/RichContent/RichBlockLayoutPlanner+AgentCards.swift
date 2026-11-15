@@ -492,7 +492,8 @@ extension RichBlockLayoutPlanner.Builder {
     guard let title = validRange(task.title) else { return false }
     let isRTL = task.hasIsRtl ? task.isRtl : (inheritedDirection ?? false)
     var state = RichBlockDecisionState(task.state)
-    if state == .pending, task.hasExpiresAt, task.expiresAt > 0, Date().timeIntervalSince1970 > TimeInterval(task.expiresAt) {
+    let expiresAt = task.hasExpiresAt && task.expiresAt > 0 ? TimeInterval(task.expiresAt) : nil
+    if state == .pending, let expiresAt, Date().timeIntervalSince1970 > expiresAt {
       state = .expired
     }
     let chip: (String, RichBlockChipTone)? = switch state {
@@ -513,6 +514,11 @@ extension RichBlockLayoutPlanner.Builder {
       width: width,
       isRTL: isRTL
     )
+    // The card's view replans the row when it lapses; the plan cache drops it then too.
+    if state == .pending, let expiresAt, case var .agentCard(node) = nodes[card.decorationIndex].kind {
+      node.expiresAt = expiresAt
+      nodes[card.decorationIndex].kind = .agentCard(node)
+    }
     if task.hasBrief, !appendPart(task.brief, index: 0, role: .paragraph, path: path, card: card, isRTL: isRTL) { return false }
     var actions = state == .pending ? buttons(for: task.actionIds) : []
     if state == .accepted, task.hasStartedPeer {
