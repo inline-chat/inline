@@ -47,6 +47,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
   var phaseObserver: AnyCancellable?
   private var voicePhaseObserver: AnyCancellable?
+  /// Text messages ask to put in this chat's composer: compose actions and prompt suggestions.
+  var composeRequestObserver: AnyCancellable?
   /// Installed on the compose view, not the mic button, so the hold survives the
   /// button hiding when the recorder UI takes its place.
   private lazy var voiceHoldGesture: UILongPressGestureRecognizer = {
@@ -294,6 +296,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     setupChatStateObservers()
     setupStickerObserver()
     setupVoicePhaseObserver()
+    setupComposeRequestObserver()
   }
 
   @available(*, unavailable)

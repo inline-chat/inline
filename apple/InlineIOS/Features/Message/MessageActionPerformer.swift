@@ -38,7 +38,8 @@ enum MessageActionPerformer {
     confirm(confirmations[...], destructive: presentation.style == .destructive, from: view, then: perform)
   }
 
-  static func performLocal(_ intent: MessageActionIntent) {
+  /// `peer` is the message's chat, where compose text goes.
+  static func performLocal(_ intent: MessageActionIntent, peer: InlineKit.Peer? = nil) {
     switch intent {
     case let .copyText(text):
       UIPasteboard.general.string = text
@@ -52,6 +53,8 @@ enum MessageActionPerformer {
       }
     case let .openLink(peer, _):
       ThreadLinkNavigator.navigate(to: peer)
+    case let .compose(text):
+      if let peer { MessageComposeRequests.shared.post(text, for: peer) }
     case .callback, .unavailable:
       break
     }

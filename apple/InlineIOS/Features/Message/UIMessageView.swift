@@ -1092,11 +1092,12 @@ class UIMessageView: UIView {
     guard let action = sender.messageAction else { return }
 
     let presentation = MessageActionPerformer.presentation(for: action, message: message)
+    let peer = message.peerId
     MessageActionPerformer.run(presentation, from: self) { [weak self] in
       if presentation.intent == .callback {
         self?.invokeMessageCallbackAction(action)
       } else {
-        MessageActionPerformer.performLocal(presentation.intent)
+        MessageActionPerformer.performLocal(presentation.intent, peer: peer)
       }
     }
   }

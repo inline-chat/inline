@@ -27,11 +27,13 @@ struct MessageBlock {
   }
 
   let kind: Kind
-  let input: MessageLayoutInput.Block
+  var input: MessageLayoutInput.Block
   /// The forward header's typeset text.
   var text: TextLayout?
   /// The preview or task this block shows.
   var attachment: FullAttachment?
+  /// Actions the message's blocks draw themselves, left out of the action rows.
+  var hiddenActionIDs: Set<String> = []
 
   var id: String { input.id }
 }
@@ -161,6 +163,26 @@ extension MessageBlock {
       )))
     }
     return blocks
+  }
+
+  /// `blocks` with the action rows rebuilt without `ids`, which rich blocks draw as their own
+  /// buttons. Rows left empty go; with none left, so does the actions block.
+  @MainActor
+  static func excludingActions(
+    _ ids: Set<String>,
+    from blocks: [MessageBlock],
+    message: Message,
+    traits: UITraitCollection
+  ) -> [MessageBlock] {
+    blocks.compactMap { block in
+      guard block.kind == .actions else { return block }
+      let rows = MessageActionsView.rows(for: message, excluding: ids)
+      guard !rows.isEmpty else { return nil }
+      var updated = block
+      updated.input.height = MessageActionsView.height(rowCount: rows.count, traits: traits)
+      updated.hiddenActionIDs = ids
+      return updated
+    }
   }
 
   /// Attachments the next view can draw: link previews and task cards.
@@ -326,7 +348,7 @@ final class MessageBlockHostView: UIView {
 
     case .actions:
       let view = contentView as? MessageActionsView ?? install(MessageActionsView(), fills: true)
-      view.configure(message: message.message)
+      view.configure(message: message.message, excluding: block.hiddenActionIDs)
 
     case .voice:
       let root = VoiceMessageBubble(message: message.message, outgoing: outgoing)

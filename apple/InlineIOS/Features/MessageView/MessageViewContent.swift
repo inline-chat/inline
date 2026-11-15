@@ -112,7 +112,7 @@ struct MessageViewContent {
     let model = message.message
     let outgoing = model.out == true
     let grid = PixelGrid(scale: context.displayScale)
-    let blocks = MessageBlock.blocks(
+    var blocks = MessageBlock.blocks(
       for: message,
       context: context,
       maximumContentWidth: maximumContentWidth(context: context, outgoing: outgoing)
@@ -152,10 +152,15 @@ struct MessageViewContent {
         baseFont: ChatTypography.font(17, compatibleWith: traits),
         textColor: textColor,
         secondaryColor: richSecondary,
+        accentColor: outgoing ? .white : theme.primary.uiColor,
         traits: traits
       ),
       expanded: MessageRichState.shared.expanded(for: message.id)
     )
+    // Buttons drawn inside blocks leave the rows under the bubble.
+    if let inline = rich?.inlineActionIDs, !inline.isEmpty {
+      blocks = MessageBlock.excludingActions(inline, from: blocks, message: model, traits: traits)
+    }
     let time = MessageText(NSAttributedString(
       string: timeFormatter.string(from: model.date),
       attributes: [
