@@ -163,6 +163,8 @@ pub(crate) fn process_host_failure_code(error: &ProcessHostError) -> String {
 
 /// Usage mistakes and the user's own network or disk are not CLI defects; an
 /// HTTP failure with a status still reports, since the server answered.
+/// `missing_peer` stays reported (deduped daily): it is the offline failure
+/// the telemetry contract tests exercise end to end.
 fn command_failure_is_reportable(error: &JsonCliError) -> bool {
     let code = error.code.as_str();
     if matches!(
@@ -171,7 +173,6 @@ fn command_failure_is_reportable(error: &JsonCliError) -> bool {
             | "not_authenticated"
             | "setup_cancelled"
             | "confirmation_required"
-            | "missing_peer"
             | "websocket_error"
             | "realtime_connection_closed"
             | "realtime_timeout"
@@ -991,7 +992,6 @@ mod tests {
     #[test]
     fn user_environment_failures_are_not_reported() {
         for code in [
-            "missing_peer",
             "websocket_error",
             "realtime_connection_closed",
             "realtime_timeout",
