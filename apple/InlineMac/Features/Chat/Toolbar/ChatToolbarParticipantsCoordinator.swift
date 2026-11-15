@@ -7,26 +7,31 @@ struct ChatToolbarParticipantsButton: View {
   let dependencies: AppDependencies
   let toolbarState: ChatToolbarState
 
-  @StateObject private var participantsViewModel: ChatParticipantsWithMembersViewModel
+  @StateObject private var participantsHost: PeerBoundObject<ChatParticipantsWithMembersViewModel>
 
   init(peer: Peer, dependencies: AppDependencies, toolbarState: ChatToolbarState) {
     self.peer = peer
     self.dependencies = dependencies
     self.toolbarState = toolbarState
+    _participantsHost = StateObject(wrappedValue: PeerBoundObject(
+      peer: peer,
+      model: Self.makeViewModel(peer: peer, dependencies: dependencies)
+    ))
+  }
 
-    switch peer {
-      case let .thread(chatId):
-        _participantsViewModel = StateObject(
-          wrappedValue: ChatParticipantsWithMembersViewModel(db: dependencies.database, chatId: chatId)
-        )
-      default:
-        _participantsViewModel = StateObject(
-          wrappedValue: ChatParticipantsWithMembersViewModel(db: dependencies.database, chatId: -1)
-        )
-    }
+  private var participantsViewModel: ChatParticipantsWithMembersViewModel {
+    participantsHost.model(for: peer) { Self.makeViewModel(peer: $0, dependencies: dependencies) }
+  }
+
+  private static func makeViewModel(
+    peer: Peer,
+    dependencies: AppDependencies
+  ) -> ChatParticipantsWithMembersViewModel {
+    ChatParticipantsWithMembersViewModel(db: dependencies.database, chatId: peer.asThreadId() ?? -1)
   }
 
   var body: some View {
+    let participantsViewModel = participantsViewModel
     ParticipantsButton(participants: participantsViewModel.participants) {
       toolbarState.presentParticipantsPopover()
     }
@@ -249,6 +254,12 @@ private struct ChatToolbarParticipantsPresentations: ViewModifier {
       ))
       .onChange(of: toolbarState.presentation, initial: true) { _, presentation in
         handlePresentation(presentation)
+      }
+      .onChange(of: peer) { _, _ in
+        // A stable route keeps this button for the next chat; drop the last chat's loaded chat.
+        task?.cancel()
+        task = nil
+        chat = nil
       }
       .onDisappear {
         task?.cancel()

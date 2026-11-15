@@ -16,7 +16,11 @@ struct ChatRouteTitleBar: View {
   @Environment(\.macToolbarLayout) private var toolbarLayout
   @Environment(\.nav) private var nav
 
-  @State private var model: ChatRouteToolbarTitleModel
+  let db: AppDatabase
+
+  /// The title model reads its first snapshot synchronously, so the title is right on the chat's
+  /// first frame, including when a stable route swaps the model for another chat.
+  @State private var modelBox: PeerBoundBox<ChatRouteToolbarTitleModel>
   @State private var suppressClick = false
   @FocusState private var isTitleFocused: Bool
 
@@ -31,11 +35,14 @@ struct ChatRouteTitleBar: View {
     self.contextSpaceId = contextSpaceId
     self.agentThreadToolbarModel = agentThreadToolbarModel
     self.onTitleChange = onTitleChange
-    _model = State(initialValue: ChatRouteToolbarTitleModel(
-      peer: peer,
-      db: db,
-      contextSpaceId: contextSpaceId
-    ))
+    self.db = db
+    _modelBox = State(initialValue: PeerBoundBox())
+  }
+
+  private var model: ChatRouteToolbarTitleModel {
+    modelBox.model(for: peer) { peer in
+      ChatRouteToolbarTitleModel(peer: peer, db: db, contextSpaceId: contextSpaceId)
+    }
   }
 
   var body: some View {
@@ -73,6 +80,10 @@ struct ChatRouteTitleBar: View {
     }
     .onChange(of: model.windowTitle) { _, title in
       onTitleChange(title)
+    }
+    .onChange(of: peer) { _, _ in
+      // A stable route keeps this view for the next chat; its model was swapped while rendering.
+      onTitleChange(model.windowTitle)
     }
     .onChange(of: contextSpaceId) { _, spaceId in
       model.update(contextSpaceId: spaceId)
@@ -357,8 +368,11 @@ struct ChatRouteTitleBar: View {
 
   private func registerRenameCommand() {
     guard let mainWindowID else { return }
+    // Registered once and kept across chats, so it reads the box's current model rather than the
+    // model for the peer this closure captured.
+    let modelBox = modelBox
     MainWindowOpenCoordinator.shared.registerRenameThread(id: mainWindowID) {
-      guard model.canRenameTitle else { return false }
+      guard let model = modelBox.current, model.canRenameTitle else { return false }
       guard !model.isEditingTitle else { return true }
       model.startEditingTitle()
       return true
@@ -374,9 +388,10 @@ struct ChatRouteTitleBar: View {
     guard model.isEditingTitle else { return }
     isTitleFocused = true
 
+    let modelBox = modelBox
     Task { @MainActor in
       await Task.yield()
-      guard model.isEditingTitle else { return }
+      guard modelBox.current?.isEditingTitle == true else { return }
       isTitleFocused = true
       NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
     }

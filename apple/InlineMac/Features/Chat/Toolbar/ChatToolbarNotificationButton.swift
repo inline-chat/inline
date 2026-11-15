@@ -10,16 +10,24 @@ struct ChatToolbarNotificationButton: View {
   let db: AppDatabase
   let toolbarState: ChatToolbarState
 
-  @StateObject private var model: ChatToolbarNotificationModel
+  @StateObject private var modelHost: PeerBoundObject<ChatToolbarNotificationModel>
 
   init(peer: Peer, db: AppDatabase, toolbarState: ChatToolbarState) {
     self.peer = peer
     self.db = db
     self.toolbarState = toolbarState
-    _model = StateObject(wrappedValue: ChatToolbarNotificationModel(peer: peer, db: db))
+    _modelHost = StateObject(wrappedValue: PeerBoundObject(
+      peer: peer,
+      model: ChatToolbarNotificationModel(peer: peer, db: db)
+    ))
+  }
+
+  private var model: ChatToolbarNotificationModel {
+    modelHost.model(for: peer) { ChatToolbarNotificationModel(peer: $0, db: db) }
   }
 
   var body: some View {
+    let model = model
     Button {
       toolbarState.presentNotificationSettings()
     } label: {
@@ -59,7 +67,8 @@ struct ChatToolbarNotificationTitlePresentations: ViewModifier {
     content.modifier(ChatToolbarNotificationPresentations(
       toolbarState: toolbarState,
       anchor: .title,
-      model: model
+      // Kept across chats by a stable route; a model made for another chat is never shown.
+      model: model?.peer == peer ? model : nil
     ))
     .onChange(of: toolbarState.presentation, initial: true) { _, presentation in
       guard presentation == .notificationSettings(.title) else { return }
@@ -68,7 +77,7 @@ struct ChatToolbarNotificationTitlePresentations: ViewModifier {
   }
 
   private func ensureModel() {
-    guard model == nil else { return }
+    guard model?.peer != peer else { return }
     model = ChatToolbarNotificationModel(peer: peer, db: db)
   }
 }
@@ -270,7 +279,7 @@ private struct ChatToolbarNotificationPopover: View {
 private final class ChatToolbarNotificationModel: ObservableObject {
   @Published private(set) var selection: DialogNotificationSettingSelection = .global
 
-  private let peer: Peer
+  let peer: Peer
   private let db: AppDatabase
   private var dialogCancellable: AnyCancellable?
   private var mutationGeneration: UInt64 = 0

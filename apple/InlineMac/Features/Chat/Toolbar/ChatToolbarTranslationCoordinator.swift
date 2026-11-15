@@ -108,6 +108,10 @@ struct ChatToolbarTranslationPresentations: ViewModifier {
           guard !isTranslationEnabled else { return }
           toolbarState.presentTranslationPrompt()
         }
+        .onChange(of: peer) { _, peer in
+          // A stable route keeps the title for the next chat.
+          isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peer)
+        }
     } else {
       presentedContent
     }

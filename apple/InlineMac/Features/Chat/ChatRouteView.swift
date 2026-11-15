@@ -1,4 +1,3 @@
-import Combine
 import InlineKit
 import InlineUI
 import os.signpost
@@ -16,8 +15,9 @@ struct ChatRouteView: View {
   @ObservedObject private var botPresenceController = BotPresenceController.shared
   @ObservedObject private var settings = AppSettings.shared
   @State private var chatToolbarState = ChatToolbarState()
-  @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
-  @StateObject private var agentThreadToolbarHost: AgentThreadToolbarModelHost
+  /// Per-chat models, swapped when a stable route moves to another chat (see `PeerBoundModel`).
+  @State private var botChatSettingsBox: PeerBoundBox<BotChatSettingsCoordinator>
+  @StateObject private var agentThreadToolbarHost: PeerBoundObject<AgentThreadToolbarModel>
   /// The chat this route last showed, so a stable route can leave it when the peer changes.
   @State private var shownPeer: Peer?
   @State private var toolbarDialog: InlineKit.Dialog?
@@ -27,12 +27,20 @@ struct ChatRouteView: View {
 
   init(peer: InlineKit.Peer) {
     self.peer = peer
-    _botChatSettingsCoordinator = State(initialValue: BotChatSettingsCoordinator(peer: peer))
-    _agentThreadToolbarHost = StateObject(wrappedValue: AgentThreadToolbarModelHost(peer: peer))
+    _botChatSettingsBox = State(initialValue: PeerBoundBox(release: { $0.cancel() }))
+    _agentThreadToolbarHost = StateObject(wrappedValue: PeerBoundObject(
+      peer: peer,
+      model: AgentThreadToolbarModel(peer: peer),
+      release: { $0.cancel() }
+    ))
   }
 
   private var agentThreadToolbarModel: AgentThreadToolbarModel {
-    agentThreadToolbarHost.model(for: peer)
+    agentThreadToolbarHost.model(for: peer) { AgentThreadToolbarModel(peer: $0) }
+  }
+
+  private var botChatSettingsCoordinator: BotChatSettingsCoordinator {
+    botChatSettingsBox.model(for: peer) { BotChatSettingsCoordinator(peer: $0) }
   }
 
   private var windowTitle: String {
@@ -104,9 +112,12 @@ struct ChatRouteView: View {
         }
       }
       .onChange(of: peer.toString(), initial: true) { oldPeer, newPeer in
-        navigationTitle = fallbackTitle
-        if oldPeer != newPeer {
-          // Only a stable route outlives its chat; a per-chat route is rebuilt instead.
+        if oldPeer == newPeer {
+          navigationTitle = fallbackTitle
+        } else {
+          // Only a stable route outlives its chat; a per-chat route is rebuilt instead. The title
+          // bar reports the new chat's title itself, so the window title never falls back to
+          // "Chat" in between.
           if let shownPeer, shownPeer != peer {
             leaveChat(shownPeer)
           }
@@ -114,8 +125,6 @@ struct ChatRouteView: View {
           userGroupMentionTarget = nil
           botAgentMentionTarget = nil
           chatToolbarState.dismissPresentation()
-          botChatSettingsCoordinator.cancel()
-          botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: peer)
         }
         shownPeer = peer
         syncChatMenuContext(dependencies: dependencies)
@@ -177,7 +186,6 @@ struct ChatRouteView: View {
             if chatToolbarState.isContentUnavailable {
               ChatUnavailableTitleBar(peer: peer)
                 .macToolbarLayout(toolbarLayout)
-                .id("unavailable-\(peer.toString())")
             } else {
               ChatRouteTitleBar(
                 peer: peer,
@@ -209,8 +217,6 @@ struct ChatRouteView: View {
                 toolbarState: chatToolbarState,
                 anchor: .title
               ))
-              // Outside the presentation modifiers so their state also starts over for each chat.
-              .id(peer.toString())
               .onDisappear {
                 chatToolbarState.handleTitleDisappear()
               }
@@ -241,7 +247,6 @@ struct ChatRouteView: View {
                 controller: botPresenceController
               )
               .macToolbarLayout(toolbarLayout)
-              .id(peer.toString())
             }
 
             if #available(macOS 26.0, *) {
@@ -265,7 +270,6 @@ struct ChatRouteView: View {
                 }
               )
               .macToolbarLayout(toolbarLayout)
-              .id("bot-settings-\(peer.toString())")
             }
 
             if #available(macOS 26.0, *) {
@@ -276,7 +280,6 @@ struct ChatRouteView: View {
           if settings.translationUIEnabled, peer.isThread {
             ToolbarItem {
               ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
-                .id("translate-\(peer.toString())")
             }
 
             if #available(macOS 26.0, *) {
@@ -292,7 +295,6 @@ struct ChatRouteView: View {
                 toolbarState: chatToolbarState
               )
               .macToolbarLayout(toolbarLayout)
-              .id("participants-\(peer.toString())")
             }
 
             if #available(macOS 26.0, *) {
@@ -306,7 +308,6 @@ struct ChatRouteView: View {
                 toolbarState: chatToolbarState
               )
               .macToolbarLayout(toolbarLayout)
-              .id("share-\(peer.toString())")
             }
 
             if #available(macOS 26.0, *) {
@@ -320,7 +321,6 @@ struct ChatRouteView: View {
               db: dependencies.database,
               toolbarState: chatToolbarState
             )
-            .id(peer.id)
           }
 
           if let followPresentation {
@@ -329,7 +329,6 @@ struct ChatRouteView: View {
                 peer: peer,
                 isFollowing: followPresentation.isFollowing
               )
-              .id("follow-\(peer.toString())")
             }
           }
 
@@ -340,7 +339,6 @@ struct ChatRouteView: View {
           if case .user = peer {
             ToolbarItem {
               NudgeButton(peer: peer)
-                .id(peer.id)
             }
 
             if #available(macOS 26.0, *) {
@@ -351,13 +349,11 @@ struct ChatRouteView: View {
           if settings.translationUIEnabled, !peer.isThread {
             ToolbarItem {
               ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
-                .id("translate-\(peer.toString())")
             }
           }
 
           ToolbarItem {
             ChatToolbarMenuButton(peer: peer, dependencies: dependencies)
-              .id(peer.id)
           }
         }
       }
@@ -537,38 +533,6 @@ extension View {
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
     } else {
       self
-    }
-  }
-}
-
-/// Owns the agent thread toolbar model for the route's current chat. A stable chat route outlives
-/// its chat, so the model (bound to one peer) is replaced when the peer changes.
-@MainActor
-final class AgentThreadToolbarModelHost: ObservableObject {
-  private var model: AgentThreadToolbarModel
-  private var forwarding: AnyCancellable?
-
-  init(peer: Peer) {
-    model = AgentThreadToolbarModel(peer: peer)
-    forwardChanges()
-  }
-
-  /// Read during view updates: swapping models publishes nothing, and the outgoing model is
-  /// cancelled on the next run loop turn so its own publishes stay out of this update.
-  func model(for peer: Peer) -> AgentThreadToolbarModel {
-    guard model.peer != peer else { return model }
-    let outgoing = model
-    model = AgentThreadToolbarModel(peer: peer)
-    forwardChanges()
-    DispatchQueue.main.async {
-      outgoing.cancel()
-    }
-    return model
-  }
-
-  private func forwardChanges() {
-    forwarding = model.objectWillChange.sink { [weak self] _ in
-      self?.objectWillChange.send()
     }
   }
 }

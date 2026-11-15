@@ -13,7 +13,7 @@ struct ChatToolbarMenuButton: View {
   @Environment(\.realtimeV2) private var realtimeV2
 
   @ObservedObject private var settings = AppSettings.shared
-  @StateObject private var model: ChatToolbarMenuModel
+  @StateObject private var modelHost: PeerBoundObject<ChatToolbarMenuModel>
   @State private var showRenameSheet = false
   @State private var showMoveToSpaceSheet = false
   @State private var showMoveOutConfirm = false
@@ -27,10 +27,18 @@ struct ChatToolbarMenuButton: View {
   init(peer: Peer, dependencies: AppDependencies) {
     self.peer = peer
     self.dependencies = dependencies
-    _model = StateObject(wrappedValue: ChatToolbarMenuModel(peer: peer, db: dependencies.database))
+    _modelHost = StateObject(wrappedValue: PeerBoundObject(
+      peer: peer,
+      model: ChatToolbarMenuModel(peer: peer, db: dependencies.database)
+    ))
+  }
+
+  private var model: ChatToolbarMenuModel {
+    modelHost.model(for: peer) { ChatToolbarMenuModel(peer: $0, db: dependencies.database) }
   }
 
   var body: some View {
+    let model = model
     Menu {
       Button("Chat Info", systemImage: "info.circle") {
         openChatInfo()
@@ -192,6 +200,19 @@ struct ChatToolbarMenuButton: View {
       }
     } message: { action in
       Text(action.confirmationMessage(chatTitle: model.state.title))
+    }
+    .onChange(of: peer) { _, _ in
+      // A stable route keeps this menu for the next chat; nothing started here carries over.
+      cancelHistoryLoad()
+      transcriptTask?.cancel()
+      transcriptTask = nil
+      pendingTranscript = nil
+      showTranscriptScope = false
+      showRenameSheet = false
+      showMoveToSpaceSheet = false
+      showMoveOutConfirm = false
+      showClearHistorySheet = false
+      pendingDestructiveAction = nil
     }
     .onDisappear {
       cancelHistoryLoad()
