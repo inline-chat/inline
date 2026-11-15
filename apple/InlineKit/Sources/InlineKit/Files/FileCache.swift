@@ -14,12 +14,30 @@ import AppKit
 #endif
 
 public actor FileCache: Sendable {
-  public static let shared = FileCache()
+  public static let shared = FileCache(nativePhotoLoader: FileCache.nativePhotoDownload)
 
   typealias PhotoDataLoader = @Sendable (URL) async throws -> (Data, URLResponse)
+  /// Downloads one stored photo size natively into `destination`, authorized by its message.
+  /// Returns nil without trying when native downloads are off.
+  typealias NativePhotoLoader = @Sendable (
+    _ fileID: String, _ location: FileMessageLocation, _ destination: URL
+  ) async throws -> URL?
+
+  /// A photo falls back to its CDN link, which cannot resume a native partial, so native gets
+  /// less time to stall than documents and videos do.
+  static let nativePhotoStallBudget: Duration = .seconds(10)
+
+  static let nativePhotoDownload: NativePhotoLoader = { fileID, location, destination in
+    let auth = Auth.shared.handle
+    guard ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth) else { return nil }
+    return try await NativeMessageFileDownload(auth: auth).download(
+      fileID: fileID, location: location, to: destination, stallBudget: nativePhotoStallBudget
+    )
+  }
 
   private let database: AppDatabase
   private let photoDataLoader: PhotoDataLoader
+  private let nativePhotoLoader: NativePhotoLoader?
   private let log = Log.scoped("FileCache")
 
   private var downloadingPhotos: [Int64: Task<URL?, Never>] = [:]
@@ -36,11 +54,13 @@ public actor FileCache: Sendable {
     linkRefresher: MediaLinkRefresher = .shared,
     photoDataLoader: @escaping PhotoDataLoader = {
       try await URLSession.shared.data(from: $0)
-    }
+    },
+    nativePhotoLoader: NativePhotoLoader? = nil
   ) {
     self.database = database
     self.linkRefresher = linkRefresher
     self.photoDataLoader = photoDataLoader
+    self.nativePhotoLoader = nativePhotoLoader
   }
 
   /// A different variant of the photo always replaces the running transfer. For the same
@@ -407,6 +427,8 @@ public actor FileCache: Sendable {
     let startedAt = Date()
     var attempt = 0
     var outcome = DownloadTelemetry.Outcome.canceled
+    var transport = DownloadTelemetry.Transport.cdn
+    var afterFallback = false
     var current = photo
     var remoteURL = initialURL
     var refreshedLink = false
@@ -414,9 +436,46 @@ public actor FileCache: Sendable {
     defer {
       finishDownload(photoID, generation: generation)
       DownloadTelemetry.record(
-        outcome, transport: .cdn, downloadID: "photo_\(photoID)", expectedBytes: expectedBytes,
-        startedAt: startedAt, attempts: attempt
+        outcome, transport: transport, downloadID: "photo_\(photoID)", expectedBytes: expectedBytes,
+        startedAt: startedAt, attempts: transport == .cdn ? attempt : nil, afterFallback: afterFallback
       )
+    }
+
+    // Native first when this size has a server identity and the message that owns this photo
+    // can authorize it (a reply preview passes its parent message, which does not). It needs no
+    // link, so expiry and re-signing do not apply. Any failure falls back to the CDN below: the
+    // signed link is its own authority, so a native refusal never blocks the photo.
+    if let nativePhotoLoader, let size = current.bestPhotoSize(), let fileID = size.fileUniqueId,
+       let reloadMessage, reloadMessage.photoId == photoID, reloadMessage.messageId > 0, reloadMessage.chatId > 0
+    {
+      var location = FileMessageLocation()
+      location.chatID = reloadMessage.chatId
+      location.messageID = reloadMessage.messageId
+      let staging = FileCache.getUrl(for: .photos, localPath: ".native-\(UUID().uuidString)")
+      try? FileManager.default.createDirectory(at: staging.deletingLastPathComponent(), withIntermediateDirectories: true)
+      do {
+        if let file = try await nativePhotoLoader(fileID, location, staging) {
+          defer { try? FileManager.default.removeItem(at: file) }
+          let data = try Data(contentsOf: file)
+          guard !data.isEmpty else { throw AttemptFailure.empty }
+          transport = .native
+          guard let url = try await persistPhoto(data, photo: current, photoID: photoID, generation: generation) else { return nil }
+          outcome = .success
+          return url
+        }
+      } catch {
+        try? FileManager.default.removeItem(at: staging)
+        if Self.isCancellation(error) || Task.isCancelled || downloadGenerations[photoID] != generation {
+          transport = .native
+          return nil
+        }
+        log.warning("Native photo \(photoID) download failed; using the CDN")
+        DownloadTelemetry.record(
+          .fallback(DownloadTelemetry.errorClass(error)), transport: .native, downloadID: "photo_\(photoID)",
+          expectedBytes: expectedBytes, startedAt: startedAt
+        )
+        afterFallback = true
+      }
     }
 
     while true {
@@ -444,38 +503,9 @@ public actor FileCache: Sendable {
         }
         guard !data.isEmpty else { throw AttemptFailure.empty }
 
-        try Task.checkCancellation()
-        guard downloadGenerations[photoID] == generation else { return nil }
-
-        let localPath = Self.photoLocalPath(current)
-        let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
-        let createdLocalFile = !FileManager.default.fileExists(atPath: localUrl.path)
-        var shouldRemoveLocalFile = createdLocalFile
-        defer {
-          if shouldRemoveLocalFile {
-            try? FileManager.default.removeItem(at: localUrl)
-          }
+        guard let localUrl = try await persistPhoto(data, photo: current, photoID: photoID, generation: generation) else {
+          return nil
         }
-
-        let directory = localUrl.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try data.write(to: localUrl, options: .atomic)
-
-        try Task.checkCancellation()
-        guard downloadGenerations[photoID] == generation else { return nil }
-        let persisted = current
-        try await database.dbWriter.write { db in
-          try Self.persistDownloadedPhotoPath(localPath, for: persisted, in: db)
-        }
-        // Once persistence commits, the cache file is referenced state even if
-        // cancellation wins before the UI reload notification.
-        shouldRemoveLocalFile = false
-        recentFailures[photoID] = nil
-        guard downloadGenerations[photoID] == generation else { return nil }
-        log.debug("Saved downloaded photo \(photoID) (\(data.count) bytes)")
-
-        await reloadAllMessagesForPhoto(photoID, generation: generation)
-        guard !Task.isCancelled, downloadGenerations[photoID] == generation else { return nil }
         outcome = .success
         return localUrl
       } catch {
@@ -525,6 +555,44 @@ public actor FileCache: Sendable {
         }
       }
     }
+  }
+
+  /// Writes a downloaded photo to its cache file, records it, and reloads the messages showing
+  /// it. Nil when this transfer was superseded or canceled.
+  private func persistPhoto(_ data: Data, photo current: PhotoInfo, photoID: Int64, generation: UUID) async throws -> URL? {
+    try Task.checkCancellation()
+    guard downloadGenerations[photoID] == generation else { return nil }
+
+    let localPath = Self.photoLocalPath(current)
+    let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
+    let createdLocalFile = !FileManager.default.fileExists(atPath: localUrl.path)
+    var shouldRemoveLocalFile = createdLocalFile
+    defer {
+      if shouldRemoveLocalFile {
+        try? FileManager.default.removeItem(at: localUrl)
+      }
+    }
+
+    let directory = localUrl.deletingLastPathComponent()
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try data.write(to: localUrl, options: .atomic)
+
+    try Task.checkCancellation()
+    guard downloadGenerations[photoID] == generation else { return nil }
+    let persisted = current
+    try await database.dbWriter.write { db in
+      try Self.persistDownloadedPhotoPath(localPath, for: persisted, in: db)
+    }
+    // Once persistence commits, the cache file is referenced state even if
+    // cancellation wins before the UI reload notification.
+    shouldRemoveLocalFile = false
+    recentFailures[photoID] = nil
+    guard downloadGenerations[photoID] == generation else { return nil }
+    log.debug("Saved downloaded photo \(photoID) (\(data.count) bytes)")
+
+    await reloadAllMessagesForPhoto(photoID, generation: generation)
+    guard !Task.isCancelled, downloadGenerations[photoID] == generation else { return nil }
+    return localUrl
   }
 
   private static func telemetryClass(_ error: Error) -> DownloadTelemetry.ErrorClass {

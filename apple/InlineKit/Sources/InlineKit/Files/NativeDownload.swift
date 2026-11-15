@@ -821,6 +821,7 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
   enum Media: Sendable {
     case document(Int64)
     case video(Int64)
+    case voice(Int64)
   }
 
   let auth: AuthHandle
@@ -925,6 +926,22 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
     }
   }
 
+  /// Downloads a file whose identity the caller already holds, such as a stored photo size,
+  /// without re-fetching its message. The message location still authorizes every range.
+  func download(
+    fileID: String, location: FileMessageLocation, to destination: URL,
+    priority: NativeDownloadPriority = .visible, stallBudget: Duration? = fallbackStallBudget,
+    progress: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }
+  ) async throws -> URL {
+    let auth = auth
+    let accountToken = accountToken
+    return try await NativeDownloadManager.shared.download(.init(
+      accountID: accountToken.userID, fileUniqueID: fileID, message: location, destination: destination,
+      accountToken: accountToken, validateAccount: { try auth.validateAccountMutation(accountToken) },
+      priority: priority, stallBudget: stallBudget, transport: self
+    ), progress: progress)
+  }
+
   /// Downloads natively, and if that fails for a reason the CDN could get past, lets the CDN
   /// fill the same partial with range requests. Permission failures and cancellation never fall
   /// back, and a changed account stops both.
@@ -973,6 +990,8 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
       fileID = value.document.fileUniqueID
     case let (.video(id), .video(value)?) where id > 0 && value.video.id == id:
       fileID = value.video.fileUniqueID
+    case let (.voice(id), .voice(value)?) where id > 0 && value.voice.id == id:
+      fileID = value.voice.fileUniqueID
     default:
       throw NativeFileDownloadError.inaccessible
     }

@@ -484,6 +484,27 @@ private func downloadDestination() -> URL {
     }
   }
 
+  @Test func voiceLookupRequiresExactProvenanceAndRepresentation() throws {
+    var location = FileMessageLocation()
+    location.chatID = 10
+    location.messageID = 20
+    var message = InlineProtocol.Message()
+    message.chatID = 10
+    message.id = 20
+    message.media.voice.voice.id = 30
+    message.media.voice.voice.fileUniqueID = "INA_wire"
+    var result = GetMessagesResult()
+    result.messages = [message]
+    #expect(try NativeMessageFileDownload.fileID(in: result, media: .voice(30), location: location) == "INA_wire")
+    #expect(throws: NativeFileDownloadError.self) {
+      try NativeMessageFileDownload.fileID(in: result, media: .video(30), location: location)
+    }
+    result.messages[0].media.voice.voice.id = 31
+    #expect(throws: NativeFileDownloadError.self) {
+      try NativeMessageFileDownload.fileID(in: result, media: .voice(30), location: location)
+    }
+  }
+
   @Test func exactFreshRequestReplayTombstoneRetriesOnceAfterAccountValidation() async throws {
     let probe = FilePartReplayProbe(message: NativeMessageFileDownload.freshRequestReplayMessage)
     let result = try await NativeMessageFileDownload.callFilePartRPCWithReplay(
