@@ -273,6 +273,75 @@ export type BotRichBlock =
       height?: number
     }
   | ({ type: "widget" } & BotWidget)
+  | {
+      /** A plan the agent wants approved before it acts. */
+      type: "plan_proposal"
+      title?: BotRichText
+      /** The plan body: headings, lists, code. */
+      blocks: BotRichBlock[]
+      state?: BotDecisionState
+      /** IDs from the message's `actions` drawn as this block's buttons, in order. */
+      action_ids?: string[]
+      decided_by_user_id?: number
+      is_rtl?: true
+    }
+  | {
+      /** A request to run a command, change files, use a tool or widen permissions. */
+      type: "approval"
+      subject?: BotApprovalSubject
+      title: BotRichText
+      /** Rendered LTR and monospaced. */
+      command?: BotRichText
+      cwd?: BotRichText
+      reason?: BotRichText
+      /** Diffs or fields describing what is being approved. */
+      blocks: BotRichBlock[]
+      state?: BotDecisionState
+      /** IDs from the message's `actions` drawn as this block's buttons, in order. */
+      action_ids?: string[]
+      decided_by_user_id?: number
+      is_rtl?: true
+    }
+  | {
+      /** Code review notes with an overall verdict. */
+      type: "review"
+      title?: BotRichText
+      verdict?: BotReviewVerdict
+      summary?: BotRichText
+      findings: BotReviewFinding[]
+      is_rtl?: true
+    }
+  | {
+      /** Work the agent proposes to run separately, as a new thread. */
+      type: "task_suggestion"
+      title: BotRichText
+      brief?: BotRichText
+      state?: BotDecisionState
+      /** The thread the task started in, once accepted. */
+      started_peer_id?: BotPeerId
+      /** Unix seconds after which the suggestion reads as expired. */
+      expires_at?: number
+      /** IDs from the message's `actions` drawn as this block's buttons, in order. */
+      action_ids?: string[]
+      is_rtl?: true
+    }
+  | {
+      /** The agent's end-of-turn recap and the one decision it waits on. */
+      type: "next_step"
+      recap: BotRichText
+      question?: BotRichText
+      /** IDs from the message's `actions` drawn as this block's buttons, in order. */
+      action_ids?: string[]
+      /** The agent is stopped until someone answers. */
+      is_blocking?: true
+      is_rtl?: true
+    }
+  | {
+      /** Chips that put a prompt in the viewer's composer. */
+      type: "prompt_suggestions"
+      prompts: BotPromptSuggestion[]
+      is_rtl?: true
+    }
 
 /**
  * Sandboxed HTML rendered inside the message, with no network access. Bots only;
@@ -296,18 +365,58 @@ export type BotWidget = {
 
 export type BotBlockStatus = "pending" | "running" | "waiting" | "done" | "failed" | "cancelled"
 
+/** Where an agent's request to a person stands; the sender edits the message as it changes. */
+export type BotDecisionState = "pending" | "accepted" | "declined" | "expired" | "superseded"
+
+export type BotApprovalSubject = "command" | "file_change" | "tool" | "permissions" | "network"
+
+export type BotReviewVerdict = "correct" | "incorrect" | "needs_attention"
+
+export type BotReviewFinding = {
+  title: BotRichText
+  /** Explanation or failure scenario. */
+  body?: BotRichText
+  priority?: "p0" | "p1" | "p2" | "p3"
+  /** Rendered LTR and monospaced. */
+  path?: BotRichText
+  start_line?: number
+  end_line?: number
+  /** Lowercase slug such as "correctness"; at most 40 characters. */
+  category?: string
+  confidence?: "confirmed" | "plausible"
+  outcome?: "fixed" | "skipped" | "no_change_needed"
+  /** Message action run from the finding, such as "Fix". */
+  action_id?: string
+}
+
+export type BotPromptSuggestion = {
+  label: BotRichText
+  /** Composer text when it differs from the label; at most 4,000 characters. */
+  text?: string
+}
+
 /** What a viewer needs on the sending bot; the bot's owner always qualifies. */
 export type BotGrantRequirement = "access" | "invoke" | "steer" | "approve" | "configure" | "owner"
 
 export type BotFormField = {
   field_id: string
+  /** Short chip naming the question, such as "Auth method". */
+  header?: BotRichText
   label: BotRichText
   description?: BotRichText
   is_required?: true
 } & (
   | {
       type: "select"
-      options: Array<{ option_id: string; label: BotRichText; description?: BotRichText }>
+      options: Array<{
+        option_id: string
+        label: BotRichText
+        description?: BotRichText
+        /** Shown monospaced beside the options while this one is focused. */
+        preview?: BotRichText
+        /** The sender's recommended answer. */
+        is_recommended?: true
+      }>
       is_multiple?: true
       default_option_ids?: string[]
       allow_other?: true
@@ -453,6 +562,14 @@ export type BotMessageAction = BotMessageActionOptions & (
       text: string
       type: "copy_text"
       copy_text: string
+    }
+  | {
+      action_id: string
+      text: string
+      /** Puts text in the viewer's composer, client-side; the bot is not notified. */
+      type: "compose"
+      /** At most 4,000 characters. */
+      compose_text: string
     }
 )
 
