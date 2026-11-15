@@ -25,6 +25,7 @@ public indirect enum RichBlock: Hashable, Sendable {
   case taskSuggestion(RichTaskSuggestion)
   case nextStep(RichNextStep)
   case promptSuggestions(RichPromptSuggestions)
+  case form(RichForm)
 }
 
 public enum RichTextRole: Hashable, Sendable {
@@ -238,6 +239,10 @@ public struct RichLayoutMetrics: Hashable, Sendable {
   public var suggestionVerticalPadding: CGFloat = 7
   public var commandHorizontalInset: CGFloat = 9
   public var commandVerticalInset: CGFloat = 7
+  /// A form option's preview shows at most this many lines.
+  public var previewLineLimit = 16
+  /// A typed form answer shows at most this many lines.
+  public var answerLineLimit = 4
   public var meterBarHeight: CGFloat = 6
   public var meterBarGap: CGFloat = 6
   public var diffHeaderVerticalInset: CGFloat = 7

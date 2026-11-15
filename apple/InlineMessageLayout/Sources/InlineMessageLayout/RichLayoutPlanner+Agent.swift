@@ -836,4 +836,159 @@ extension RichBuilder {
     y = frame.maxY
     return true
   }
+
+  // MARK: - Form
+
+  mutating func appendForm(_ form: RichForm, path: RichPath, x: CGFloat, width: CGFloat) -> Bool {
+    guard !form.fields.isEmpty, form.fields.count <= RichForm.maximumFields else { return false }
+    let m = metrics
+    let rtl = form.isRightToLeft
+    let inner = max(1, width - m.cardHorizontalInset * 2)
+    let left = m.cardHorizontalInset
+    var parts = CardParts()
+    var cy = m.cardVerticalInset
+    if let title = form.title, !title.isEmpty {
+      cy += appendHeader(
+        symbol: .named("list.bullet.clipboard", tone: .accent),
+        title: title,
+        chip: nil,
+        to: &parts,
+        x: left,
+        top: cy,
+        width: inner,
+        isRightToLeft: rtl
+      )
+      cy += m.cardSectionSpacing
+    }
+    for (index, field) in form.fields.enumerated() {
+      if index > 0 { cy += m.cardSectionSpacing * 1.4 }
+      if let header = field.header {
+        let (text, size) = chipSize(header)
+        parts.add(.chip(text, tone: header.tone, symbol: header.symbol), CGRect(x: left, y: cy, width: min(size.width, inner), height: size.height))
+        cy += size.height + m.cardLineSpacing * 2
+      }
+      let label = wrapped(field.label, width: inner, isRightToLeft: rtl)
+      parts.add(.text(label), CGRect(x: left, y: cy, width: label.size.width, height: label.size.height))
+      cy += label.size.height
+      if let detail = field.detail, !detail.isEmpty {
+        cy += 2
+        let text = wrapped(detail, width: inner, isRightToLeft: rtl)
+        parts.add(.text(text), CGRect(x: left, y: cy, width: text.size.width, height: text.size.height))
+        cy += text.size.height
+      }
+      if !field.options.isEmpty { cy += m.cardLineSpacing }
+      for option in field.options {
+        cy += appendFormOption(option, isMultiple: field.isMultiple, to: &parts, x: left, top: cy, width: inner, isRightToLeft: rtl)
+      }
+      if let answer = field.answer {
+        cy += m.cardLineSpacing * 2
+        cy += appendFormAnswer(answer, to: &parts, x: left, top: cy, width: inner, isRightToLeft: rtl)
+      }
+      if let preview = field.preview, !preview.isEmpty {
+        cy += m.cardLineSpacing * 2
+        // Previews are mockups and code: left to right, kept as written.
+        let text = clamped(preview, width: inner - m.commandHorizontalInset * 2, lines: m.previewLineLimit, isRightToLeft: false)
+        let box = CGRect(x: left, y: cy, width: inner, height: text.size.height + m.commandVerticalInset * 2)
+        parts.add(.box, box)
+        parts.add(
+          .text(text),
+          CGRect(x: box.minX + m.commandHorizontalInset, y: box.minY + m.commandVerticalInset, width: text.size.width, height: text.size.height),
+          mirrors: false
+        )
+        cy = box.maxY
+      }
+    }
+    if let note = form.note, !note.isEmpty {
+      cy += m.cardSectionSpacing
+      let text = wrapped(note, width: inner, isRightToLeft: rtl)
+      parts.add(.text(text), CGRect(x: left, y: cy, width: text.size.width, height: text.size.height))
+      cy += text.size.height
+    }
+    if !form.buttons.isEmpty || form.status != nil {
+      cy += m.cardSectionSpacing
+      cy += appendActions(form.buttons, status: form.status, to: &parts, x: left, top: cy, width: inner, isRightToLeft: rtl)
+    }
+    return appendCard(.approval, parts: parts, path: path, x: x, top: y, width: width, height: cy + m.cardVerticalInset, isRightToLeft: rtl)
+  }
+
+  /// One choice: a radio or checkbox mark, the label with an optional tag on its first line,
+  /// and a secondary line. The whole row takes the tap. Returns the height used.
+  private func appendFormOption(
+    _ option: RichForm.Option,
+    isMultiple: Bool,
+    to parts: inout CardParts,
+    x: CGFloat,
+    top: CGFloat,
+    width: CGFloat,
+    isRightToLeft: Bool
+  ) -> CGFloat {
+    let m = metrics
+    let padding: CGFloat = 5
+    let side = grid.round(firstLineHeight(unbounded(option.label)) * 0.82)
+    let gap = m.symbolGap
+    let tag = option.tag.map(chipSize)
+    let tagRoom = tag.map { $0.1.width + m.symbolGap } ?? 0
+    let label = wrapped(option.label, width: width - side - gap - tagRoom, isRightToLeft: isRightToLeft)
+    let lineHeight = firstLineHeight(label)
+    let detail = option.detail.flatMap { $0.isEmpty ? nil : wrapped($0, width: width - side - gap, isRightToLeft: isRightToLeft) }
+    let height = max(label.size.height, side) + (detail.map { $0.size.height + 1 } ?? 0)
+    if option.tap != nil {
+      parts.add(.row, CGRect(x: x - 6, y: top, width: width + 12, height: height + padding * 2), tap: option.tap)
+    }
+    let y = top + padding
+    let mark = switch (isMultiple, option.isSelected) {
+    case (true, true): "checkmark.square.fill"
+    case (true, false): "square"
+    case (false, true): "largecircle.fill.circle"
+    case (false, false): "circle"
+    }
+    parts.add(
+      .symbol(.named(mark, tone: option.isSelected ? .accent : .neutral)),
+      CGRect(x: x, y: y + (lineHeight - side) / 2, width: side, height: side)
+    )
+    parts.add(.text(label), CGRect(x: x + side + gap, y: y, width: label.size.width, height: label.size.height))
+    if let chip = option.tag, let (text, size) = tag {
+      parts.add(
+        .chip(text, tone: chip.tone, symbol: chip.symbol),
+        CGRect(x: x + width - size.width, y: y + (lineHeight - size.height) / 2, width: size.width, height: size.height)
+      )
+    }
+    if let detail {
+      let detailTop = y + max(label.size.height, side) + 1
+      parts.add(.text(detail), CGRect(x: x + side + gap, y: detailTop, width: detail.size.width, height: detail.size.height))
+    }
+    return height + padding * 2
+  }
+
+  /// A typed answer in a filled box with a trailing glyph; the box opens its editor. Returns
+  /// the height used.
+  private func appendFormAnswer(
+    _ answer: RichForm.Answer,
+    to parts: inout CardParts,
+    x: CGFloat,
+    top: CGFloat,
+    width: CGFloat,
+    isRightToLeft: Bool
+  ) -> CGFloat {
+    let m = metrics
+    let probe = firstLineHeight(unbounded(answer.text))
+    let side = grid.round(probe * 0.7)
+    let text = clamped(
+      answer.text,
+      width: width - m.commandHorizontalInset * 2 - side - m.symbolGap,
+      lines: m.answerLineLimit,
+      isRightToLeft: isRightToLeft
+    )
+    let box = CGRect(x: x, y: top, width: width, height: text.size.height + m.commandVerticalInset * 2)
+    if answer.tap != nil {
+      parts.add(.row, box, tap: answer.tap)
+    }
+    parts.add(.box, box)
+    parts.add(.text(text), CGRect(x: box.minX + m.commandHorizontalInset, y: box.minY + m.commandVerticalInset, width: text.size.width, height: text.size.height))
+    parts.add(
+      .symbol(.named(answer.symbol, tone: .neutral)),
+      CGRect(x: box.maxX - m.commandHorizontalInset - side, y: box.minY + m.commandVerticalInset + (probe - side) / 2, width: side, height: side)
+    )
+    return box.height
+  }
 }

@@ -237,6 +237,8 @@ struct RichBuilder {
       return appendNextStep(step, path: path, x: x, width: width)
     case let .promptSuggestions(prompts):
       return appendPromptSuggestions(prompts, path: path, x: x, width: width)
+    case let .form(form):
+      return appendForm(form, path: path, x: x, width: width)
     }
   }
 
