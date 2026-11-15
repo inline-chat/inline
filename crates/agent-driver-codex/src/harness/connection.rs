@@ -261,21 +261,27 @@ impl CodexHarness {
     fn dynamic_tools(&self) -> Option<Value> {
         let tools = self.host_tools.lock().expect("host tools poisoned");
         let configuration = tools.as_ref()?;
-        Some(Value::Array(
-            configuration
-                .specs
-                .iter()
-                .map(|tool| {
-                    json!({
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.input_schema,
-                        "namespace": "inline",
-                        "deferLoading": false,
-                    })
+        let tools: Vec<Value> = configuration
+            .specs
+            .iter()
+            .map(|tool| {
+                json!({
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                    "deferLoading": false,
                 })
-                .collect(),
-        ))
+            })
+            .collect();
+        // The tagged shape Codex 0.146+ accepts; it normalizes the older flat
+        // `{name, namespace}` shape to exactly this.
+        Some(json!([{
+            "type": "namespace",
+            "name": "inline",
+            "description": "",
+            "tools": tools,
+        }]))
     }
 }
 

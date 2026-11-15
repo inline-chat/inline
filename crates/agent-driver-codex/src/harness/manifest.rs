@@ -57,17 +57,36 @@ pub(crate) fn read_schema_dir(dir: &Path) -> std::io::Result<SchemaSurface> {
         hasher.update(value.to_string().as_bytes());
         target.extend(method_names(&value));
     }
-    if let Ok(bundle) = read("codex_app_server_protocol.v2.schemas.json") {
+    // Definitions come from the v2 bundle first. Some, like
+    // `CommandExecutionApprovalDecision` (0.146 through 0.169), live only in
+    // the combined bundle, which is read (and hashed) when v2 lacks one.
+    let v2 = read("codex_app_server_protocol.v2.schemas.json").ok();
+    if let Some(bundle) = &v2 {
         hasher.update(bundle.to_string().as_bytes());
-        let definitions = bundle.get("definitions");
-        if let Some(item) = definitions.and_then(|definitions| definitions.get("ThreadItem")) {
-            surface.item_types.extend(tag_values(item, "type"));
-        }
-        if let Some(decision) =
-            definitions.and_then(|definitions| definitions.get("CommandExecutionApprovalDecision"))
+    }
+    let mut combined: Option<Option<Value>> = None;
+    let mut definition = |name: &str| -> Option<Value> {
+        if let Some(found) = v2
+            .as_ref()
+            .and_then(|bundle| bundle.pointer(&format!("/definitions/{name}")))
         {
-            surface.command_decisions.extend(decision_names(decision));
+            return Some(found.clone());
         }
+        combined
+            .get_or_insert_with(|| {
+                let bundle = read("codex_app_server_protocol.schemas.json").ok()?;
+                hasher.update(bundle.to_string().as_bytes());
+                Some(bundle)
+            })
+            .as_ref()?
+            .pointer(&format!("/definitions/{name}"))
+            .cloned()
+    };
+    if let Some(item) = definition("ThreadItem") {
+        surface.item_types.extend(tag_values(&item, "type"));
+    }
+    if let Some(decision) = definition("CommandExecutionApprovalDecision") {
+        surface.command_decisions.extend(decision_names(&decision));
     }
     surface.sha256 = hex(&hasher.finalize());
     Ok(surface)
@@ -373,5 +392,44 @@ mod tests {
                 .contains("acceptWithExecpolicyAmendment")
         );
         assert_eq!(surface.sha256.len(), 64);
+    }
+
+    #[test]
+    fn decisions_fall_back_to_the_combined_bundle() {
+        let dir = tempfile::tempdir().expect("dir");
+        let write = |name: &str, value: Value| {
+            std::fs::write(dir.path().join(name), value.to_string()).expect("write");
+        };
+        for name in [
+            "ClientRequest.json",
+            "ServerRequest.json",
+            "ServerNotification.json",
+        ] {
+            write(name, serde_json::json!({"oneOf": []}));
+        }
+        write(
+            "codex_app_server_protocol.v2.schemas.json",
+            serde_json::json!({"definitions": {
+                "ThreadItem": {"oneOf": [{"properties": {"type": {"enum": ["agentMessage"]}}}]}
+            }}),
+        );
+        let without_combined = read_schema_dir(dir.path()).expect("surface");
+        assert!(without_combined.command_decisions.is_empty());
+        write(
+            "codex_app_server_protocol.schemas.json",
+            serde_json::json!({"definitions": {
+                "CommandExecutionApprovalDecision": {"oneOf": [
+                    {"enum": ["accept"]},
+                    {"enum": ["decline"]}
+                ]}
+            }}),
+        );
+        let surface = read_schema_dir(dir.path()).expect("surface");
+        assert!(surface.item_types.contains("agentMessage"));
+        assert_eq!(
+            surface.command_decisions,
+            BTreeSet::from(["accept".to_owned(), "decline".to_owned()])
+        );
+        assert_ne!(surface.sha256, without_combined.sha256);
     }
 }
