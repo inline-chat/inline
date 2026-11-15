@@ -392,6 +392,8 @@ async fn upload_with_processing_timeout(
             kind: input.kind as i32,
             thumbnail_file_unique_id: input.thumbnail_file_unique_id,
             metadata,
+            // The CLI streams parts; it does not use the single-call inline path.
+            inline_data: None,
         })
         .await?;
     if !valid_upload_geometry(&created, byte_count) {
@@ -651,6 +653,7 @@ mod tests {
             part_count: 1,
             expires_at: 1_900_000_000,
             accepted_parts: vec![],
+            complete: None,
         };
         assert!(!valid_upload_geometry(&created, 1));
 
@@ -706,6 +709,7 @@ mod tests {
                 part_count: 1,
                 expires_at: 1_900_000_000,
                 accepted_parts: vec![],
+                complete: None,
             })
         }
 
@@ -854,6 +858,7 @@ mod tests {
                 part_count: input.byte_count.div_ceil(u64::from(NEGOTIATED_PART_SIZE)) as u32,
                 expires_at: 1_900_000_000,
                 accepted_parts: vec![],
+                complete: None,
             })
         }
 
