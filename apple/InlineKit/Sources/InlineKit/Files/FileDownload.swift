@@ -674,6 +674,52 @@ public final class FileDownloader: NSObject, Sendable {
     )
   }
 
+  /// Plays `video` while it downloads natively, from the same bytes the chat keeps, or nil when
+  /// native downloads are off (stream the CDN link then). It downloads at user priority. A
+  /// download the stream started stops when the stream closes before it finishes, keeping its
+  /// bytes; one already running when it opened keeps going.
+  public func videoStream(video: VideoInfo, for message: Message) -> NativeVideoStream? {
+    guard ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth),
+          let accountToken = try? auth.beginAccountMutation()
+    else { return nil }
+    let target = NativeDownloadManager.StreamTarget(
+      accountID: accountToken.userID, message: Self.location(for: message),
+      directory: FileCache.getUrl(for: .videos, localPath: "stream").deletingLastPathComponent()
+    )
+    let videoID = video.id
+    videoStreamCounts[videoID, default: 0] += 1
+    videoStreamCompletions[videoID, default: 0] += 1
+    let stream = NativeVideoStream(target: target, manager: nativeManager, onClose: { [weak self] in
+      Task { @MainActor in self?.videoStreamClosed(videoID) }
+    })
+    downloadVideo(video: video, for: message, priority: .userInitiated) { [weak self, weak stream] result in
+      self?.videoStreamCompleted(videoID)
+      stream?.finish(result)
+    }
+    return stream
+  }
+
+  /// Open video streams, and their completions still waiting on each video's download.
+  private var videoStreamCounts: [Int64: Int] = [:]
+  private var videoStreamCompletions: [Int64: Int] = [:]
+
+  private func videoStreamCompleted(_ videoID: Int64) {
+    let remaining = (videoStreamCompletions[videoID] ?? 1) - 1
+    videoStreamCompletions[videoID] = remaining > 0 ? remaining : nil
+  }
+
+  /// When a video's last stream closes, its download stops if only streams were waiting on it
+  /// (it keeps its bytes); a chat or a tap that joined it keeps it going, as does a stream
+  /// reopened in the meantime.
+  private func videoStreamClosed(_ videoID: Int64) {
+    let remaining = (videoStreamCounts[videoID] ?? 1) - 1
+    videoStreamCounts[videoID] = remaining > 0 ? remaining : nil
+    guard remaining <= 0, let waiting = requestCompletions["video_\(videoID)"]?.handlers.count,
+          waiting <= videoStreamCompletions[videoID] ?? 0
+    else { return }
+    cancelVideoDownload(videoId: videoID)
+  }
+
   /// Cancel a download by document ID
   public func cancelDocumentDownload(documentId: Int64) {
     cancelDownload(id: "doc_\(documentId)")

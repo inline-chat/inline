@@ -100,9 +100,12 @@ public actor NativeDownloadManager {
     var total: Int64 = 0
     var locations: [FileMessageLocation]
     var observers: [UUID: @Sendable (Int64, Int64) -> Void]
-    /// Missing parts in ascending order, handed out one per granted slot.
-    var pendingParts: [Int] = []
-    var nextPending = 0
+    /// Missing parts not yet handed out, one per granted slot: ascending, or from a player's
+    /// read position first.
+    var unassigned = IndexSet()
+    /// Parts written to `body`, readable by a player while the file downloads.
+    var present = IndexSet()
+    var body: URL?
   }
   private enum SlotGrant { case denied, granted(part: Int?) }
   private struct PartWaiter {
@@ -115,6 +118,10 @@ public actor NativeDownloadManager {
   }
   private var entries: [Key: Entry] = [:]
   private var partWaiters: [PartWaiter] = []
+  private var readers: [UUID: StreamReader] = [:]
+  private var byteWaiters: [ByteWaiter] = []
+  /// How each reader's download ended, kept until the reader ends.
+  private var finishedReads: [UUID: Result<(source: StreamSource, total: UInt64), any Error>] = [:]
   private var activeParts = 0
   private var nextTicket: UInt64 = 0
   /// When each file last got a slot; the least recent goes next among equal priorities.
@@ -132,6 +139,8 @@ public actor NativeDownloadManager {
   static let maximumQueuedParts = 16
   /// Ranges waiting for a slot (tests).
   var waitingParts: Int { partWaiters.count }
+  /// Player reads waiting for bytes (tests).
+  var waitingReads: Int { byteWaiters.count }
   public init() {
     retryBudget = .seconds(180); retryBaseDelay = .seconds(1); windowLimits = 2 ... 12; window = 4
   }
@@ -176,6 +185,7 @@ public actor NativeDownloadManager {
           try Task.checkCancellation()
           let result = try await Self.materialize(request, owner: self, id: id)
           let publication = self.publishDestinations(result, key: key, id: id)
+          self.completeStreams(key, id: id, file: result)
           self.finished(key, id: id)
           return publication
         } catch {
@@ -232,6 +242,145 @@ public actor NativeDownloadManager {
     for (key, entry) in entries where key.accountID == accountID && entry.locations.contains(message) {
       entries[key]?.priority = max(entry.priority, priority)
     }
+  }
+
+  // MARK: - Players reading while a file downloads
+
+  /// The file a player reads: the one this message keeps in `directory` (a message has at most
+  /// one video). The player does not need the file's id, which its download looks up.
+  public struct StreamTarget: Hashable, Sendable {
+    public let accountID: Int64
+    public let message: FileMessageLocation
+    public let directory: URL
+    public init(accountID: Int64, message: FileMessageLocation, directory: URL) {
+      self.accountID = accountID; self.message = message; self.directory = directory.standardizedFileURL
+    }
+  }
+
+  /// Where a player reads bytes it asked for.
+  public enum StreamSource: Equatable, Sendable {
+    /// The downloading body, which holds the requested bytes.
+    case partial(URL)
+    /// The finished file.
+    case complete(URL)
+  }
+
+  private struct StreamReader {
+    let target: StreamTarget
+    let offset: UInt64
+    let ticket: UInt64
+  }
+
+  private struct ByteWaiter {
+    let ticket: UInt64
+    let reader: UUID
+    let target: StreamTarget
+    let offset: UInt64
+    let length: UInt64
+    let continuation: CheckedContinuation<(source: StreamSource, total: UInt64), any Error>
+  }
+
+  /// Waits until `length` bytes at `offset` can be read, clamped to the file's end, and says
+  /// where. A `length` of 0 waits only for the file's size. The target's download then hands out
+  /// parts from this offset first, as for the latest read of any of its readers.
+  public func streamBytes(
+    _ target: StreamTarget, reader: UUID, offset: UInt64, length: UInt64
+  ) async throws -> (source: StreamSource, total: UInt64) {
+    try Task.checkCancellation()
+    if let finished = finishedReads[reader] { return try finished.get() }
+    nextTicket += 1
+    readers[reader] = StreamReader(target: target, offset: offset, ticket: nextTicket)
+    if let ready = availability(target, offset: offset, length: length) { return try ready.get() }
+    nextTicket += 1
+    let ticket = nextTicket
+    return try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { continuation in
+        guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
+        byteWaiters.append(ByteWaiter(
+          ticket: ticket, reader: reader, target: target, offset: offset, length: length, continuation: continuation
+        ))
+      }
+    } onCancel: { Task { await self.cancelByteWaiter(ticket: ticket) } }
+  }
+
+  /// Ends a player's reads: its file no longer prefers its read position.
+  public func endReading(_ reader: UUID) {
+    readers[reader] = nil
+    finishedReads[reader] = nil
+  }
+
+  /// Answers this reader's reads, now and later, with its download's outcome. A failure here is
+  /// final: a native failure that the CDN takes over never reaches it. Kept until `endReading`,
+  /// so a read that starts after the download ended still gets it.
+  public func finishReads(_ reader: UUID, result: Result<URL, any Error>) {
+    let outcome: Result<(source: StreamSource, total: UInt64), any Error> = result.flatMap { file in
+      Result { (.complete(file), try Self.fileSize(file)) }
+    }
+    finishedReads[reader] = outcome
+    byteWaiters.removeAll { waiter in
+      guard waiter.reader == reader else { return false }
+      waiter.continuation.resume(with: outcome)
+      return true
+    }
+  }
+
+  /// A finished download serves its players from the published file.
+  private func completeStreams(_ key: Key, id: UUID, file: URL) {
+    guard let entry = entries[key], entry.id == id else { return }
+    for (reader, state) in readers where Self.matches(entry, state.target) {
+      finishReads(reader, result: .success(file))
+    }
+  }
+
+  private func availability(
+    _ target: StreamTarget, offset: UInt64, length: UInt64
+  ) -> Result<(source: StreamSource, total: UInt64), any Error>? {
+    guard let entry = entries.values.first(where: { Self.matches($0, target) }), entry.total > 0,
+          let body = entry.body
+    else { return nil }
+    let total = UInt64(entry.total)
+    let end = min(offset.addingReportingOverflow(length).overflow ? total : offset + length, total)
+    guard offset < end else { return .success((.partial(body), total)) }
+    let parts = Int(offset / Self.partSize) ... Int((end - 1) / Self.partSize)
+    return entry.present.contains(integersIn: parts) ? .success((.partial(body), total)) : nil
+  }
+
+  private func resumeByteWaiters() {
+    byteWaiters.removeAll { waiter in
+      guard let ready = availability(waiter.target, offset: waiter.offset, length: waiter.length) else { return false }
+      waiter.continuation.resume(with: ready)
+      return true
+    }
+  }
+
+  private func cancelByteWaiter(ticket: UInt64) {
+    guard let index = byteWaiters.firstIndex(where: { $0.ticket == ticket }) else { return }
+    byteWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+  }
+
+  private static func matches(_ entry: Entry, _ target: StreamTarget) -> Bool {
+    entry.request.accountID == target.accountID && entry.locations.contains(target.message) &&
+      entry.request.destination.deletingLastPathComponent().standardizedFileURL.path == target.directory.path
+  }
+
+  /// The file's next part to hand out: the first missing one at or after the newest read still
+  /// waiting on it (a seek), else its newest read, wrapping to the start, so a player gets what
+  /// it needs next and the rest follows.
+  private func nextPart(_ entry: Entry) -> Int? {
+    if !readers.isEmpty {
+      let waiting = byteWaiters.filter { Self.matches(entry, $0.target) }.max { $0.ticket < $1.ticket }?.offset
+      let position = waiting ?? readers.values.filter { Self.matches(entry, $0.target) }
+        .max { $0.ticket < $1.ticket }?.offset
+      if let position, let part = entry.unassigned.integerGreaterThanOrEqualTo(Int(position / Self.partSize)) {
+        return part
+      }
+    }
+    return entry.unassigned.first
+  }
+
+  private static func fileSize(_ file: URL) throws -> UInt64 {
+    let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    return UInt64(max(0, size))
   }
 
   /// A stopped download's verified bytes, read from its sidecar.
@@ -423,8 +572,7 @@ public actor NativeDownloadManager {
 
   fileprivate func setPendingParts(_ parts: [Int], key: Key, id: UUID) {
     guard entries[key]?.id == id else { return }
-    entries[key]?.pendingParts = parts
-    entries[key]?.nextPending = 0
+    entries[key]?.unassigned = IndexSet(parts)
   }
 
   private func waitForSlot(_ key: Key, id: UUID, wantsPart: Bool, renewsBudget: Bool) async throws -> Int? {
@@ -469,10 +617,10 @@ public actor NativeDownloadManager {
   private func grant(_ key: Key, wantsPart: Bool, renewsBudget: Bool) -> Int? {
     var part: Int?
     if wantsPart {
-      guard var entry = entries[key], entry.nextPending < entry.pendingParts.count else { return nil }
-      part = entry.pendingParts[entry.nextPending]
-      entry.nextPending += 1
+      guard var entry = entries[key], let next = nextPart(entry) else { return nil }
+      entry.unassigned.remove(next)
       entries[key] = entry
+      part = next
     }
     activeParts += 1
     nextTicket += 1
@@ -526,12 +674,15 @@ public actor NativeDownloadManager {
     lastGrant.removeValue(forKey: key)
   }
 
-  private func received(_ count: Int64, total: Int64, key: Key, id: UUID) {
+  private func received(_ present: IndexSet, total: UInt64, body: URL?, key: Key, id: UUID) {
     guard var entry = entries[key], entry.id == id else { return }
+    let count = Int64(Self.presentBytes(present, total: total))
     if count > entry.received { entry.lastProgress = .now }
-    entry.received = count; entry.total = total
+    entry.received = count; entry.total = Int64(total)
+    entry.present = present; entry.body = body
     entries[key] = entry
-    for observer in entry.observers.values { observer(count, total) }
+    for observer in entry.observers.values { observer(count, Int64(total)) }
+    if !byteWaiters.isEmpty { resumeByteWaiters() }
   }
   private func remaining(_ key: Key, id: UUID) -> Duration {
     guard let entry = entries[key], entry.id == id else { return .zero }
@@ -667,7 +818,7 @@ public actor NativeDownloadManager {
         lastMapWrite = .now
       }
       try writeMap()
-      await owner.received(Int64(presentBytes(present, total: total)), total: Int64(total), key: request.key, id: id)
+      await owner.received(present, total: total, body: body, key: request.key, id: id)
       func write(_ part: GetFilePartResult) async throws {
         try Task.checkCancellation(); try request.validateAccount()
         guard part.totalSize == total, part.offset % partSize == 0, part.offset < total else {
@@ -683,7 +834,7 @@ public actor NativeDownloadManager {
           try fullSync(descriptor)
           try writeMap()
         }
-        await owner.received(Int64(presentBytes(present, total: total)), total: Int64(total), key: request.key, id: id)
+        await owner.received(present, total: total, body: body, key: request.key, id: id)
       }
       try await write(first)
       let missing = (0 ..< partCount(total: total)).filter { !present.contains($0) }
@@ -713,6 +864,8 @@ public actor NativeDownloadManager {
       }
       try handle.synchronize()
       try Task.checkCancellation(); try request.validateAccount()
+      // Players stop reading the body by path; they move to the published file.
+      await owner.received(present, total: total, body: nil, key: request.key, id: id)
       if persistent {
         // Retire our sidecar before rename frees the stable body pathname for a
         // successor. Only this owner writes it; duplicates track locations in memory.
@@ -829,7 +982,7 @@ public actor NativeDownloadManager {
 
 /// Transport facade; account-bound app downloads route through the shared owner.
 public struct NativeFileDownloader: Sendable {
-  fileprivate static let partSize: UInt32 = 524_288
+  static let partSize: UInt32 = 524_288
   private let transport: any NativeFilePartFetching
   private let manager: NativeDownloadManager
   public init(transport: any NativeFilePartFetching) { self.transport = transport; manager = .shared }
