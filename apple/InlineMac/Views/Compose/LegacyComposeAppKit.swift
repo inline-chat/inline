@@ -591,6 +591,8 @@ class LegacyComposeAppKit: NSView {
   }
 
   private var cancellables: Set<AnyCancellable> = []
+  /// The bot's suggested next message, shown as the placeholder (Tab inserts it).
+  private var suggestionController: ComposeSuggestionController?
   private var state: ChatState {
     ChatsManager.get(for: peerId, chatId: chatId ?? 0)
   }
@@ -622,9 +624,12 @@ class LegacyComposeAppKit: NSView {
         insertPrompt(request.text)
       }.store(in: &cancellables)
 
+    suggestionController = ComposeSuggestionController(peer: peerId, editor: textEditor)
+
     state.editingMsgIdPublisher
       .sink { [weak self] editingMsgId in
         guard let self else { return }
+        suggestionController?.isSuppressed = editingMsgId != nil
         if editingMsgId != nil, voiceViewModel.inputMode == .transcribe { voiceViewModel.cancel() }
         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
         updateVoiceAvailability()
@@ -2478,6 +2483,7 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
+    suggestionController?.textDidChange(isEmpty: textEditor.isAttributedTextEmpty)
 
     paragraphDirectionController.textDidChange()
 
@@ -2731,6 +2737,10 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       return true
     }
 
+    if suggestionController?.accept(isEmpty: isEmpty, insert: { insertPrompt($0) }) == true {
+      return true
+    }
+
     return false // not handled
   }
 
@@ -2748,6 +2758,10 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // If mention menu is visible, hide it
     if mentionCompletionMenu?.isVisible == true {
       hideMentionCompletion()
+      return true
+    }
+
+    if suggestionController?.dismiss(isEmpty: isEmpty) == true {
       return true
     }
 

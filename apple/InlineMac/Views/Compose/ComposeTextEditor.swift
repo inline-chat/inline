@@ -96,15 +96,31 @@ class ComposeTextEditor: NSView {
   var placeholderText: String = "Message" {
     didSet {
       guard placeholderText != oldValue else { return }
-      placeholder.text = placeholderText
+      updatePlaceholderContent()
     }
   }
 
   var placeholderSymbolName: String? {
     didSet {
       guard placeholderSymbolName != oldValue else { return }
-      placeholder.symbolName = placeholderSymbolName
+      updatePlaceholderContent()
     }
+  }
+
+  /// A suggested next message, shown in place of the placeholder with a Tab
+  /// key hint while the editor is empty.
+  var suggestionText: String? {
+    didSet {
+      guard suggestionText != oldValue else { return }
+      updatePlaceholderContent()
+    }
+  }
+
+  private func updatePlaceholderContent() {
+    placeholder.text = suggestionText ?? placeholderText
+    placeholder.symbolName = suggestionText == nil ? placeholderSymbolName : nil
+    placeholder.showsKeyHint = suggestionText != nil
+    textView.setAccessibilityPlaceholderValue(suggestionText.map { "\($0), press Tab to use" } ?? placeholderText)
   }
 
   private lazy var placeholder = ComposePlaceholderView(
@@ -426,8 +442,20 @@ class ComposeTextEditor: NSView {
 private final class ComposePlaceholderView: NSView {
   private let imageView = NSImageView()
   private let label: NonInteractiveTextField
+  private let keyHint = ComposeKeyHintView(key: "Tab")
   private var imageWidthConstraint: NSLayoutConstraint!
   private var labelLeadingConstraint: NSLayoutConstraint!
+  private var labelToEdge: NSLayoutConstraint!
+  private var labelToHint: NSLayoutConstraint!
+
+  var showsKeyHint = false {
+    didSet {
+      guard showsKeyHint != oldValue else { return }
+      keyHint.isHidden = !showsKeyHint
+      labelToEdge.isActive = !showsKeyHint
+      labelToHint.isActive = showsKeyHint
+    }
+  }
 
   var text: String {
     didSet {
@@ -469,18 +497,25 @@ private final class ComposePlaceholderView: NSView {
 
     addSubview(imageView)
     addSubview(label)
+    addSubview(keyHint)
+    keyHint.isHidden = true
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     imageWidthConstraint = imageView.widthAnchor.constraint(equalToConstant: 16)
     labelLeadingConstraint = label.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 5)
+    labelToEdge = label.trailingAnchor.constraint(equalTo: trailingAnchor)
+    labelToHint = keyHint.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6)
     NSLayoutConstraint.activate([
       imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
       imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
       imageWidthConstraint,
       imageView.heightAnchor.constraint(equalToConstant: 16),
       labelLeadingConstraint,
-      label.trailingAnchor.constraint(equalTo: trailingAnchor),
+      labelToEdge,
       label.topAnchor.constraint(equalTo: topAnchor),
       label.bottomAnchor.constraint(equalTo: bottomAnchor),
+      keyHint.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+      keyHint.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
     ])
 
     updateSymbol()
@@ -505,6 +540,48 @@ private final class ComposePlaceholderView: NSView {
     imageWidthConstraint.constant = hasSymbol ? 16 : 0
     labelLeadingConstraint.constant = hasSymbol ? 5 : 0
   }
+}
+
+/// A small keycap ("Tab") after a suggested message, like other apps' hints.
+private final class ComposeKeyHintView: NSView {
+  private let label: NonInteractiveTextField
+
+  init(key: String) {
+    label = NonInteractiveTextField(label: key)
+    super.init(frame: .zero)
+    translatesAutoresizingMaskIntoConstraints = false
+    wantsLayer = true
+    layer?.cornerRadius = 4
+    layer?.borderWidth = 1
+    setContentCompressionResistancePriority(.required, for: .horizontal)
+    setContentHuggingPriority(.required, for: .horizontal)
+
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: 10, weight: .medium)
+    label.textColor = .placeholderTextColor
+    label.isEditable = false
+    label.isSelectable = false
+    label.isEnabled = false
+    addSubview(label)
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+      label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+      label.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+      label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func updateLayer() {
+    super.updateLayer()
+    layer?.borderColor = NSColor.placeholderTextColor.withAlphaComponent(0.5).cgColor
+  }
+
+  override var wantsUpdateLayer: Bool { true }
 }
 
 // MARK: - NSTextView Extensions for Attributed String Helpers
