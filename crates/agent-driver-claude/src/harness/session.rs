@@ -20,12 +20,12 @@ use inline_agent_bridge::harness::{
     OpError, OpKind, OpOutcome, OpenError, OpenMode, OpenSpec, Origin, OutputMode, QueueEntryId,
     ReleaseOutcome, Released, RunState, RunStateTracker, RuntimeHealth, RuntimeInfo, SendError,
     Session, SessionKey, SessionPage, SessionQuery, SessionSummary, SettingsScope, SetupReason,
-    SteerPriority,
+    SteerPriority, TurnPhase,
 };
 use inline_agent_bridge::{
     DriverCommand, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
     DriverSettingOption, HostToolCall, HostToolConfiguration, ProviderId, ProviderSessionId,
-    SessionPageCursor, TurnId,
+    SessionPageCursor, TurnId, TurnOutcome,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -202,6 +202,9 @@ struct HarnessState {
 pub struct ClaudeHarness {
     config: ClaudeHarnessConfig,
     state: Mutex<HarnessState>,
+    /// The last turn ended because Claude Code's sign-in is gone. Health
+    /// reports sign-in until a later turn completes.
+    signed_out: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ClaudeHarness {
@@ -217,6 +220,7 @@ impl ClaudeHarness {
                 help: None,
                 sessions: HashMap::new(),
             }),
+            signed_out: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -462,7 +466,16 @@ impl HarnessDriver for ClaudeHarness {
                 other_installs: Vec::new(),
             },
             driver_version: self.config.driver_version.clone(),
-            health: state.health.clone(),
+            health: match &state.health {
+                RuntimeHealth::Ready
+                    if self.signed_out.load(std::sync::atomic::Ordering::Relaxed) =>
+                {
+                    RuntimeHealth::NeedsSetup {
+                        reason: SetupReason::SignIn,
+                    }
+                }
+                health => health.clone(),
+            },
             manifest: state.manifest.clone(),
         }
     }
@@ -677,6 +690,7 @@ impl HarnessDriver for ClaudeHarness {
                 &initialize,
                 servers,
                 version,
+                self.signed_out.clone(),
             )
             .await?;
             // Restore positive consumption facts from the available transcript;
@@ -839,6 +853,9 @@ struct SessionInner {
     /// A [`detach_for_steer`] task is running.
     detaching: std::sync::atomic::AtomicBool,
     version: ClaudeVersion,
+    /// Shared with the harness: set by a turn that needs sign-in, cleared by
+    /// one that completes.
+    signed_out: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SessionInner {
@@ -849,6 +866,21 @@ impl SessionInner {
     }
 
     fn emit(&self, event: Event) {
+        if let Event::Turn {
+            phase: TurnPhase::Completed { outcome, .. },
+            ..
+        } = &event
+        {
+            match outcome {
+                TurnOutcome::AuthenticationRequired => self
+                    .signed_out
+                    .store(true, std::sync::atomic::Ordering::Relaxed),
+                TurnOutcome::Completed => self
+                    .signed_out
+                    .store(false, std::sync::atomic::Ordering::Relaxed),
+                _ => {}
+            }
+        }
         let changed = self
             .tracker
             .lock()
@@ -934,6 +966,7 @@ impl ClaudeSession {
         initialize: &InitializeRequest,
         mcp_servers: Vec<(String, Arc<dyn SdkMcpServer>)>,
         version: ClaudeVersion,
+        signed_out: Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Self, OpenError> {
         let slot = Arc::new(Mutex::new(None));
         let config = ClientConfig {
@@ -974,6 +1007,7 @@ impl ClaudeSession {
             lifecycle_absent: std::sync::atomic::AtomicBool::new(false),
             detaching: std::sync::atomic::AtomicBool::new(false),
             version,
+            signed_out,
         });
         *slot.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(Arc::downgrade(&inner));
         let pump = Arc::downgrade(&inner);
