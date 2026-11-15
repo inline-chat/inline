@@ -50,6 +50,7 @@ struct MessageRichContent {
       let content = BlockContentDirection.resolved(stored, text: body.string)
       var builder = Builder(body: body, style: style, expanded: expanded, messageDate: message.message.date)
       builder.actions = BlockInlineActions.byID(message.message.actions)
+      builder.message = message.message
       guard builder.withinLimits(content),
             let blocks = builder.blocks(content.blocks, path: RichPath(), bounds: 0 ..< body.length),
             !blocks.isEmpty
@@ -112,6 +113,8 @@ struct MessageRichContent {
     var sources: [RichPath: Range<Int>] = [:]
     /// The message's actions by ID, for blocks that draw some as buttons.
     var actions: [String: MessageAction] = [:]
+    /// The message the blocks belong to, for forms' answers.
+    var message: InlineKit.Message?
     var inlineActionIDs: Set<String> = []
     /// For container blocks by path: the text their children may claim, so an unknown kind
     /// first or last inside still shows (`BlockContentSpan.childBounds`).
@@ -316,9 +319,11 @@ struct MessageRichContent {
         return self.nextStep(step, block: block, path: path)
       case let .promptSuggestions(prompts)?:
         return self.promptSuggestions(prompts, block: block, path: path)
-      case .form?, .widget?, nil:
-        // Forms and widgets aren't drawn natively here yet; they and kinds newer than this
-        // build show their fallback text in `blocks`.
+      case let .form(form)?:
+        return self.form(form, block: block, path: path)
+      case .widget?, nil:
+        // Widgets aren't drawn natively here yet; they and kinds newer than this build show
+        // their fallback text in `blocks`.
         return nil
       }
     }

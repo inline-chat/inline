@@ -32,6 +32,7 @@ final class MessageRichView: UIView {
   private(set) var leavingNodes: [UIView] = []
 
   var onDisclosureToggle: ((RichPath, Bool) -> Void)?
+  var onFormTap: ((RichFormTap, UIView) -> Void)?
   /// The message whose actions agent blocks draw as buttons. Set before `apply`.
   var actionContext: MessageRichActionContext?
 
@@ -319,6 +320,9 @@ final class MessageRichView: UIView {
       cardView?.configure(card, palette: palette, context: actionContext)
       cardView?.onToggle = { [weak self] path, isExpanded in
         self?.onDisclosureToggle?(path, isExpanded)
+      }
+      cardView?.onForm = { [weak self] tap, source in
+        self?.onFormTap?(tap, source)
       }
     case let .diff(diff):
       (view as? RichDiffView)?.configure(diff, palette: palette)

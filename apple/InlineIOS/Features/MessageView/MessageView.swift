@@ -605,6 +605,13 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       MessageRichState.shared.set(isExpanded, at: path, for: message.id)
       self?.onContentStateChange?(message)
     }
+    view.onFormTap = { [weak self] tap, source in
+      guard let message = self?.content?.message else { return }
+      // The rebuild goes by the message captured here, even if this view shows another by then.
+      MessageFormController.handle(tap, message: message.message, from: source) { [weak self] in
+        self?.onContentStateChange?(message)
+      }
+    }
     bubbleContentView.insertSubview(view, aboveSubview: textView)
     richView = view
     return view

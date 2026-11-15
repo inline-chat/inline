@@ -7,6 +7,9 @@ import struct InlineProtocol.BlockCallout
 import enum InlineProtocol.BlockDecisionState
 import struct InlineProtocol.BlockDiff
 import struct InlineProtocol.BlockFields
+import struct InlineProtocol.BlockForm
+import struct InlineProtocol.BlockFormField
+import struct InlineProtocol.BlockFormSelect
 import struct InlineProtocol.BlockMeter
 import struct InlineProtocol.BlockNextStep
 import struct InlineProtocol.BlockPlanProposal
@@ -518,5 +521,167 @@ extension MessageRichContent.Builder {
     guard !buttons.isEmpty else { return nil }
     recordSpan(of: block, at: path)
     return .promptSuggestions(RichPromptSuggestions(prompts: buttons, isRightToLeft: prompts.hasIsRtl && prompts.isRtl))
+  }
+
+  // MARK: Form
+
+  /// A bot form: the questions, the viewer's answers so far (or the defaults), and one submit.
+  /// Answers live in `MessageFormDraftStore`; taps go to `MessageFormController`.
+  mutating func form(_ form: BlockForm, block: Block, path: RichPath) -> RichBlock? {
+    let formID = form.formID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !formID.isEmpty, !form.fields.isEmpty, form.fields.count <= RichForm.maximumFields, let message else { return nil }
+    let key = MessageFormDraftStore.Key(message: message, formID: form.formID)
+    if form.closed { MessageFormDraftStore.shared.discard(key) }
+    let phase = MessageFormDraftStore.shared.phase(key)
+    let isOpen = !form.closed && phase == .editing
+    var fields: [RichForm.Field] = []
+    var fieldIDs = Set<String>()
+    for field in form.fields {
+      guard fieldIDs.insert(field.fieldID).inserted,
+            let built = formField(field, formID: form.formID, key: key, isOpen: isOpen)
+      else { return nil }
+      fields.append(built)
+    }
+    let title = present(form.title, when: form.hasTitle) ? slice(form.title, font: titleFont) : nil
+    let submitTitle = form.hasSubmitLabel && !form.submitLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? form.submitLabel
+      : "Submit"
+    let status: RichStatusLine? = if form.closed {
+      RichStatusLine(symbol: .named("checkmark.circle.fill", tone: .success), text: plain("Answered", font: secondaryFont, color: style.secondaryColor))
+    } else {
+      switch phase {
+      case .editing: nil
+      case .submitting: RichStatusLine(symbol: .status(.running), text: plain("Sending…", font: secondaryFont, color: style.secondaryColor))
+      case .submitted: RichStatusLine(symbol: .named("checkmark.circle.fill", tone: .success), text: plain("Sent", font: secondaryFont, color: style.secondaryColor))
+      }
+    }
+    let reason = isOpen ? MessageFormController.disabledReason(form, message: message) : nil
+    recordSpan(of: block, at: path)
+    return .form(RichForm(
+      title: title,
+      fields: fields,
+      buttons: isOpen
+        ? [RichButton(title: plain(submitTitle, font: buttonFont, color: .white), tap: .form(.submit(formID: form.formID)), style: .primary)]
+        : [],
+      status: status,
+      note: reason.map { plain($0, font: secondaryFont, color: style.secondaryColor) },
+      isRightToLeft: form.hasIsRtl && form.isRtl
+    ))
+  }
+
+  private func formField(_ field: BlockFormField, formID: String, key: MessageFormDraftStore.Key, isOpen: Bool) -> RichForm.Field? {
+    let fieldID = field.fieldID
+    guard !fieldID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          let labelText = slice(field.label, font: .systemFont(ofSize: size, weight: .medium)), labelText.length > 0
+    else { return nil }
+    var label = labelText
+    if field.required {
+      let marked = NSMutableAttributedString(attributedString: labelText.attributedString)
+      marked.append(NSAttributedString(string: " *", attributes: [.font: style.baseFont, .foregroundColor: style.secondaryColor]))
+      label = ready(marked)
+    }
+    let header = present(field.header, when: field.hasHeader) ? string(field.header).map { chip($0, tone: .neutral) } : nil
+    let detail = present(field.description_p, when: field.hasDescription_p)
+      ? slice(field.description_p, font: secondaryFont, color: style.secondaryColor)
+      : nil
+    let value = MessageFormAnswers.value(field, key: key)
+    let edit: RichTap? = isOpen ? .form(.edit(formID: formID, fieldID: fieldID)) : nil
+    var options: [RichForm.Option] = []
+    var isMultiple = false
+    var answer: RichForm.Answer?
+    var preview: MessageText?
+    switch field.kind {
+    case let .select(select)?:
+      guard !select.options.isEmpty, select.options.count <= 64 else { return nil }
+      var optionIDs = Set<String>()
+      for option in select.options {
+        guard !option.optionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              optionIDs.insert(option.optionID).inserted,
+              present(option.label, when: option.hasLabel)
+        else { return nil }
+      }
+      var selected: [String] = []
+      var other: String?
+      if case let .selection(ids, otherText)? = value {
+        selected = ids.filter(optionIDs.contains)
+        other = otherText
+      }
+      let chosen = select.options.first { selected.contains($0.optionID) }
+      if let chosen, present(chosen.preview, when: chosen.hasPreview), let text = string(chosen.preview) {
+        preview = monospaced(text)
+      }
+      isMultiple = select.multiple
+      if MessageFormAnswers.usesMenu(select) {
+        let current = other ?? chosen.flatMap { string($0.label) }
+        answer = RichForm.Answer(
+          text: current.map { plain($0, font: style.baseFont, color: style.textColor) }
+            ?? plain("Choose…", font: style.baseFont, color: style.secondaryColor),
+          symbol: "chevron.up.chevron.down",
+          tap: edit
+        )
+      } else {
+        for option in select.options {
+          guard let optionLabel = slice(option.label, font: style.baseFont) else { return nil }
+          options.append(RichForm.Option(
+            label: optionLabel,
+            detail: present(option.description_p, when: option.hasDescription_p)
+              ? slice(option.description_p, font: secondaryFont, color: style.secondaryColor)
+              : nil,
+            isSelected: selected.contains(option.optionID),
+            tag: option.recommended ? chip("Recommended", tone: .accent) : nil,
+            tap: isOpen ? .form(.select(formID: formID, fieldID: fieldID, optionID: option.optionID)) : nil
+          ))
+        }
+        if select.allowOther {
+          let otherLabel = NSMutableAttributedString(string: "Other", attributes: [.font: style.baseFont, .foregroundColor: style.textColor])
+          if let other {
+            otherLabel.append(NSAttributedString(string: ": " + other, attributes: [.font: style.baseFont, .foregroundColor: style.secondaryColor]))
+          }
+          options.append(RichForm.Option(label: ready(otherLabel), isSelected: other != nil, tap: edit))
+        }
+      }
+    case let .text(text)?:
+      let placeholder = text.hasPlaceholder && !text.placeholder.isEmpty ? text.placeholder : "Your answer"
+      var shown: String?
+      if case let .text(string)? = value, !string.isEmpty {
+        // A secret answer is never shown back.
+        shown = text.kind == .secret ? String(repeating: "•", count: 8) : string
+      }
+      answer = RichForm.Answer(
+        text: shown.map { plain($0, font: style.baseFont, color: style.textColor) }
+          ?? plain(placeholder, font: style.baseFont, color: style.secondaryColor),
+        symbol: text.kind == .secret ? "lock" : "pencil",
+        tap: edit
+      )
+    case .toggle?:
+      var isOn = false
+      if case let .toggle(value)? = value { isOn = value }
+      isMultiple = true
+      options = [RichForm.Option(
+        label: plain("Yes", font: style.baseFont, color: style.textColor),
+        isSelected: isOn,
+        tap: isOpen ? .form(.toggle(formID: formID, fieldID: fieldID)) : nil
+      )]
+    case let .number(number)?:
+      var shown: String?
+      if case let .number(value)? = value { shown = MessageFormController.format(value, integer: number.integer) }
+      answer = RichForm.Answer(
+        text: shown.map { plain($0, font: style.baseFont, color: style.textColor) }
+          ?? plain("Enter a number", font: style.baseFont, color: style.secondaryColor),
+        symbol: "number",
+        tap: edit
+      )
+    case nil:
+      return nil
+    }
+    return RichForm.Field(
+      header: header,
+      label: label,
+      detail: detail,
+      options: options,
+      isMultiple: isMultiple,
+      answer: answer,
+      preview: preview
+    )
   }
 }

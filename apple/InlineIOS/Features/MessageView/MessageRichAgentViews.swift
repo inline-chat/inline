@@ -32,6 +32,8 @@ final class RichCardView: UIView {
   private var answeredSubscription: AnyCancellable?
   private var grantsSubscription: AnyCancellable?
   var onToggle: ((RichPath, Bool) -> Void)?
+  /// A tap in a bot form, with the control tapped (for anchoring a menu).
+  var onForm: ((RichFormTap, UIView) -> Void)?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -220,14 +222,28 @@ final class RichCardView: UIView {
         }
       case .row:
         var label: [String] = []
-        for (other, candidate) in card.parts.enumerated() where other > index {
-          guard case let .text(text) = candidate.kind, part.frame.intersects(candidate.frame) else { continue }
-          label.append(text.text.string)
-          claimed.insert(other)
+        var isSelected = false
+        for (other, candidate) in card.parts.enumerated() where other > index && part.frame.intersects(candidate.frame) {
+          switch candidate.kind {
+          case let .text(text), let .chip(text, _, _):
+            label.append(text.text.string)
+            claimed.insert(other)
+          case let .symbol(.named(name, _)):
+            isSelected = isSelected || Self.selectedMarks.contains(name)
+          default:
+            break
+          }
         }
         view.accessibilityLabel = label.joined(separator: ", ")
-        if case let .toggle(_, expands)? = part.tap {
+        view.accessibilityValue = nil
+        view.accessibilityTraits = .button
+        switch part.tap {
+        case let .toggle(_, expands)?:
           view.accessibilityValue = expands ? String(localized: "Collapsed") : String(localized: "Expanded")
+        case .form(.select)?, .form(.toggle)?:
+          if isSelected { view.accessibilityTraits.insert(.selected) }
+        default:
+          break
         }
         elements.append(view)
       case .text, .button, .chip, .bar:
@@ -238,6 +254,9 @@ final class RichCardView: UIView {
     }
     accessibilityElements = elements
   }
+
+  /// Marks a form option shows while chosen.
+  private static let selectedMarks: Set<String> = ["largecircle.fill.circle", "checkmark.square.fill"]
 
   static func name(of status: RichStatus) -> String {
     switch status {
@@ -315,6 +334,8 @@ final class RichCardView: UIView {
       ThreadLinkNavigator.navigate(to: .thread(id: id))
     case let .openUser(id):
       ThreadLinkNavigator.navigate(to: .user(id: id))
+    case let .form(formTap):
+      onForm?(formTap, sender)
     }
   }
 }
