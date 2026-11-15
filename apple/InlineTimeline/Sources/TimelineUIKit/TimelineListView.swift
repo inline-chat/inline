@@ -20,6 +20,9 @@ public struct TimelineRows<ID: Hashable & Sendable> {
   public var pin: (ID, UIView) -> TimelinePin<ID>?
   /// Where a pin's span starting at this row begins, in the row's coordinates.
   public var spanTop: (ID, UIView) -> CGFloat
+  /// Where a placed row is on screen, for what in it follows the screen rather than the row. Called
+  /// for every placed row when that changes, and when a fling starts or stops. Nil costs nothing.
+  public var screen: ((ID, UIView, TimelineRowScreen) -> Void)?
 
   public init(
     height: @escaping (ID, CGFloat) -> CGFloat,
@@ -27,7 +30,8 @@ public struct TimelineRows<ID: Hashable & Sendable> {
     update: @escaping (ID, UIView, CGFloat, TimelineTiming) -> Void = { _, _, _, _ in },
     recycle: @escaping (ID, UIView) -> Void = { _, _ in },
     pin: @escaping (ID, UIView) -> TimelinePin<ID>? = { _, _ in nil },
-    spanTop: @escaping (ID, UIView) -> CGFloat = { _, _ in 0 }
+    spanTop: @escaping (ID, UIView) -> CGFloat = { _, _ in 0 },
+    screen: ((ID, UIView, TimelineRowScreen) -> Void)? = nil
   ) {
     self.height = height
     self.make = make
@@ -35,7 +39,55 @@ public struct TimelineRows<ID: Hashable & Sendable> {
     self.recycle = recycle
     self.pin = pin
     self.spanTop = spanTop
+    self.screen = screen
   }
+}
+
+/// Where a placed row is on screen, and how it is moving there, for content that follows the screen
+/// rather than the row: a gradient laid over the whole viewport and cut out by each bubble.
+@MainActor
+public struct TimelineRowScreen {
+  /// The row's top in the list's coordinates once the motion running now settles (a fling's end).
+  public let y: CGFloat
+  /// The list's height.
+  public let height: CGFloat
+  /// A running fling: the row is `path.end - position` above `y` at each of the path's samples.
+  let flight: (path: ScrollPath, start: CFTimeInterval, frameRate: CAFrameRateRange)?
+  /// An animated change: the row starts `from` away from `y` on screen and settles on this timing.
+  let transition: (timing: TimelineTiming, from: CGFloat)?
+
+  /// Moves a property of `layer` with the row while it moves on the render server. The caller sets
+  /// the property's value for `y`; `offset` gives what to add to it while the row is that many points
+  /// below `y` (negative: above). The property must take additive animations of those values.
+  public func follow(_ layer: CALayer, keyPath: String, offset: (CGFloat) -> Any) {
+    let key = "timeline.screen.\(keyPath)"
+    if let flight {
+      if (layer.animation(forKey: key)?.value(forKey: "timelineFlight") as? CFTimeInterval) != flight.start {
+        let path = flight.path
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = path.positions.map { offset(CGFloat($0 - path.end)) }
+        animation.duration = path.duration
+        animation.calculationMode = .linear
+        animation.isAdditive = true
+        animation.beginTime = layer.convertTime(flight.start, from: nil)
+        animation.isRemovedOnCompletion = true
+        animation.fillMode = .backwards
+        animation.preferredFrameRateRange = flight.frameRate
+        animation.setValue(flight.start, forKey: "timelineFlight")
+        layer.add(animation, forKey: key)
+      }
+    } else if layer.animation(forKey: key) != nil {
+      layer.removeAnimation(forKey: key)
+    }
+    if let transition, abs(transition.from) > 0.01,
+       let track = transition.timing.track(keyPath: keyPath, from: offset(transition.from), to: offset(0))
+    {
+      TimelineRowScreen.trackCount &+= 1
+      layer.add(track, forKey: "\(key).\(TimelineRowScreen.trackCount)")
+    }
+  }
+
+  private static var trackCount = 0
 }
 
 /// A view inside a row that stays in sight while its span does: the sender's avatar beside a group
@@ -171,6 +223,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     var height: CGFloat = 0
     var width: CGFloat = 0
     var pin: PinState?
+    /// The screen place last reported to the row; nil when it has to be reported again.
+    var screen: (y: CGFloat, height: CGFloat, flight: CFTimeInterval?)?
 
     init(row: UIView) {
       self.row = row
@@ -398,6 +452,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
     var placed: Set<ID> = []
     placed.reserveCapacity(layout.placements.count)
+    // How far each row starts from its new place on screen, for what follows the screen.
+    var screenFrom: [ID: CGFloat] = [:]
+    let tracksScreen = rows.screen != nil && animates
     for placement in layout.placements {
       placed.insert(placement.id)
       let y = placement.y + origin
@@ -408,8 +465,10 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         place(slot, y: y, width: width, height: placement.height)
         if resized || changed.contains(placement.id) {
           rows.update(placement.id, slot.row, width, animates ? timing : .none)
+          slot.screen = nil
         }
         if animates, carousel == nil { slot.view.layer.addTrack(timing, keyPath: "position.y", from: moved) }
+        if tracksScreen { screenFrom[placement.id] = carousel ?? (moved - originDelta) }
       } else {
         let slot = self.slot(for: rows.make(placement.id, width))
         slots[placement.id] = slot
@@ -424,6 +483,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
             slot.view.layer.addTrack(timing, keyPath: "opacity", from: -1)
           }
         }
+        if tracksScreen { screenFrom[placement.id] = carousel ?? (change.offsets[placement.id] ?? 0) }
       }
     }
 
@@ -483,10 +543,41 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       content.layer.addTrack(timing, keyPath: "bounds.origin.y", from: originDelta)
     }
     updatePins(timing: animates && carousel == nil ? timing : .none)
+    updateScreens(timing: animates ? timing : .none, from: screenFrom)
     CATransaction.commit()
 
     if !change.demands.isEmpty { onDemand?(change.demands) }
     onLayout?(layout)
+  }
+
+  // MARK: - Screen
+
+  /// Tells each placed row whose place on screen changed where it is now, how far it starts from
+  /// there (`from`, with `timing`), and the running fling's path.
+  private func updateScreens(timing: TimelineTiming, from: [ID: CGFloat]) {
+    guard let report = rows.screen else { return }
+    let layout = state.layout
+    let ahead = flight.map { CGFloat($0.path.end - $0.applied) } ?? 0
+    let height = layout.viewport.height
+    let frameRate = flightFrameRate
+    for placement in layout.placements {
+      guard let slot = slots[placement.id] else { continue }
+      let y = placement.y + ahead
+      let travel = from[placement.id] ?? 0
+      if abs(travel) <= 0.01, let last = slot.screen, abs(last.y - y) < 0.01, last.height == height,
+         last.flight == flight?.start { continue }
+      slot.screen = (y, height, flight?.start)
+      report(placement.id, slot.row, TimelineRowScreen(
+        y: y, height: height,
+        flight: flight.map { ($0.path, $0.start, frameRate) },
+        transition: abs(travel) > 0.01 && timing.isAnimated ? (timing, travel) : nil
+      ))
+    }
+  }
+
+  private var flightFrameRate: CAFrameRateRange {
+    let maximum = Float(window?.screen.maximumFramesPerSecond ?? 60)
+    return CAFrameRateRange(minimum: min(80, maximum), maximum: maximum, preferred: maximum)
   }
 
   // MARK: - Pins
@@ -691,6 +782,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// A slot leaves the list: its row goes back to the host, the slot is hidden for reuse.
   private func retire(_ id: ID, _ slot: Slot) {
     unpin(slot)
+    slot.screen = nil
     slot.view.layer.removeAllAnimations()
     rows.recycle(id, slot.row)
     guard slotPool.count < Self.slotPoolLimit else {
@@ -867,6 +959,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     syncOrigin()
     content.layer.add(animation, forKey: Self.flightKey)
     updatePins(timing: .none)
+    updateScreens(timing: .none, from: [:])
     CATransaction.commit()
     input.startTicking(maximumFramesPerSecond: window?.screen.maximumFramesPerSecond ?? 60)
   }
@@ -950,6 +1043,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     scroll(by: CGFloat(position - flight.applied))
     syncOrigin()
     updatePins(timing: .none)
+    updateScreens(timing: .none, from: [:])
   }
 
   private func endFlight(settle: Bool) {
@@ -968,6 +1062,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       syncOrigin()
     }
     updatePins(timing: .none)
+    updateScreens(timing: .none, from: [:])
   }
 
   /// Brings the content inside its limits and onto whole pixels, then reports the stop.

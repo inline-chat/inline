@@ -20,6 +20,11 @@ extension TimelineTiming {
   /// `beginTime` is left unset on purpose: the track starts in the commit it is added in, which is
   /// how it lands in the same frame as the system keyboard's own animation.
   func track(keyPath: String, from delta: CGFloat) -> CAAnimation? {
+    track(keyPath: keyPath, from: delta, to: CGFloat(0))
+  }
+
+  /// A track between values of any type the property animates additively; `to` is its zero.
+  func track(keyPath: String, from delta: Any, to zero: Any) -> CAAnimation? {
     let animation: CABasicAnimation
     switch self {
       case .none:
@@ -41,7 +46,7 @@ extension TimelineTiming {
         animation.timingFunction = CAMediaTimingFunction(controlPoints: c1x, c1y, c2x, c2y)
     }
     animation.fromValue = delta
-    animation.toValue = 0
+    animation.toValue = zero
     animation.isAdditive = true
     animation.fillMode = .backwards
     animation.isRemovedOnCompletion = true
