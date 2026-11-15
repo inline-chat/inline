@@ -87,6 +87,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   public var releaseVelocityFilter: ((CGFloat) -> CGFloat)?
 
   public private(set) var isTracking = false
+  /// When a finger last caught a fling. A touch that stops a moving list is not a press on a row.
+  public private(set) var lastFlightCatch: CFTimeInterval = 0
   public var isDecelerating: Bool { flight != nil }
   public var layout: TimelineLayout<ID> { state.layout }
   public var position: TimelinePosition<ID> { state.position }
@@ -673,6 +675,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// A finger landed: stop exactly where the content is on screen.
   private func catchFlight() {
     guard let flight else { return }
+    lastFlightCatch = CACurrentMediaTime()
     var position = flight.path.position(at: min(max(0, CACurrentMediaTime() - flight.start), flight.path.duration))
     if content.layer.animationKeys() == [Self.flightKey], let presented = content.layer.presentation() {
       // Nothing else is moving the content, so what is presented is the path's position exactly.
