@@ -207,6 +207,65 @@ class MessageTextView: NSTextView {
     pendingPlainClick = nil
   }
 
+  // MARK: Look Up
+
+  /// This press already looked up a word (force click), so a later Quick Look event skips it.
+  private var pressLookedUp = false
+
+  /// NSTextView's force-press recognizer expects its own mouse tracking, which never runs inside
+  /// the list. Turn it off there; force click and Quick Look are handled below instead.
+  private func syncNativeForcePress() {
+    let native = !listOwnsSelection
+    // AppKit's force press recognizer has no public type.
+    for recognizer in gestureRecognizers
+      where NSStringFromClass(type(of: recognizer)) == "NSImmediateActionGestureRecognizer"
+    {
+      if recognizer.isEnabled != native { recognizer.isEnabled = native }
+    }
+  }
+
+  /// Whether a force click means Look Up (the trackpad default) rather than a three-finger tap.
+  private static var forceClickLooksUp: Bool {
+    guard UserDefaults.standard.object(forKey: "com.apple.trackpad.forceClick") as? Bool ?? true else { return false }
+    let tapGesture = UserDefaults(suiteName: "com.apple.AppleMultitouchTrackpad")?
+      .integer(forKey: "TrackpadThreeFingerTapGesture") ?? 0
+    return tapGesture != 2
+  }
+
+  override func pressureChange(with event: NSEvent) {
+    super.pressureChange(with: event)
+    guard listOwnsSelection, event.stage >= 2, !pressLookedUp else { return }
+    pressLookedUp = true
+    MessageGestureTrace.debug("MessageTextView.forceClick point=\(MessageGestureTrace.point(convert(event.locationInWindow, from: nil)))")
+    takePressForLookUp()
+    guard Self.forceClickLooksUp else { return }
+    lookUp(at: convert(event.locationInWindow, from: nil))
+  }
+
+  override func quickLook(with event: NSEvent) {
+    guard listOwnsSelection else { return super.quickLook(with: event) }
+    guard !pressLookedUp else { return }
+    takePressForLookUp()
+    lookUp(at: convert(event.locationInWindow, from: nil))
+  }
+
+  /// Look Up owns the press: no hold action, plain click or selection drag follows it.
+  private func takePressForLookUp() {
+    cancelTextHold(reason: "lookUp")
+    pendingPlainClick = nil
+    MessageListTextSelection.owner(of: self)?.cancelPendingPress()
+  }
+
+  /// Shows the system definition popover for the word under the point.
+  private func lookUp(at point: NSPoint) {
+    guard let textStorage, let index = characterIndex(at: point) else { return }
+    let word = textStorage.doubleClick(at: index)
+    guard word.length > 0,
+          (textStorage.string as NSString).substring(with: word).contains(where: { $0.isLetter || $0.isNumber })
+    else { return }
+    showDefinition(for: nil, range: word)
+  }
+
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
     false
   }
@@ -227,6 +286,7 @@ class MessageTextView: NSTextView {
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     disableSystemTextChecking()
+    syncNativeForcePress()
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -252,7 +312,9 @@ class MessageTextView: NSTextView {
     }
 
     pendingPlainClick = nil
+    pressLookedUp = false
     let ownsSelection = listOwnsSelection
+    syncNativeForcePress()
     var plainClickOrigin: NSPoint?
     if event.type == .leftMouseDown, event.clickCount == 1 {
       let handled = onEntityClick?(location, event) ?? false

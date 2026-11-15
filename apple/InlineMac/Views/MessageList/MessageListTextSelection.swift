@@ -82,13 +82,16 @@ final class MessageListTextSelection {
   }
 
   private enum Gesture {
-    case text(anchor: Endpoint, origin: NSPoint, anchorView: MessageTextView?, active: Bool)
+    case text(anchor: Endpoint, origin: NSPoint, active: Bool)
     case messages(anchorStableId: Int64, origin: NSPoint, active: Bool)
   }
 
   private weak var host: MessageListTextSelectionHost?
   private var eventMonitor: Any?
   private var gesture: Gesture?
+  /// The view under the press that started the gesture. Its hold gestures (reactions and
+  /// other hold actions) never see the drags the list consumes, so the list cancels them.
+  private weak var pressedView: NSView?
   private var autoscrollTimer: Timer?
   /// Endpoints in drag order. Nil when nothing is selected.
   private(set) var selection: (anchor: Endpoint, head: Endpoint)?
@@ -110,6 +113,12 @@ final class MessageListTextSelection {
   /// A press that may become a selection drag. The table must not start its own mouse
   /// tracking for it, or the drag never reaches the list.
   var ownsPendingPress: Bool { gesture != nil }
+
+  /// Another gesture took the press (a hold action, Look Up), so it never becomes a selection.
+  func cancelPendingPress() {
+    guard gesture != nil else { return }
+    endGesture()
+  }
 
   // MARK: Lifecycle
 
@@ -214,7 +223,8 @@ final class MessageListTextSelection {
     else { return false }
     self.selection = (selection.anchor, head)
     refreshVisible()
-    gesture = .text(anchor: selection.anchor, origin: event.locationInWindow, anchorView: nil, active: true)
+    gesture = .text(anchor: selection.anchor, origin: event.locationInWindow, active: true)
+    pressedView = press.hit
     return true
   }
 
@@ -223,6 +233,7 @@ final class MessageListTextSelection {
           let press = textPress(event, host: host, window: window)
     else { return }
     let table = host.textSelectionTableView
+    pressedView = press.hit
 
     if let textView = press.hit as? MessageTextView {
       // Links and mentions act on press; they never start a selection.
@@ -238,7 +249,7 @@ final class MessageListTextSelection {
       else { return }
       switch event.clickCount {
       case 1:
-        gesture = .text(anchor: anchor, origin: event.locationInWindow, anchorView: textView, active: false)
+        gesture = .text(anchor: anchor, origin: event.locationInWindow, active: false)
       case 2:
         selectUnit(.word, around: anchor, in: projection)
       default:
@@ -247,7 +258,7 @@ final class MessageListTextSelection {
     } else if event.clickCount == 1, let anchor = paddedTextAnchor(for: event, press: press, table: table) {
       // Empty space in and around the bubble selects text from the nearest character, so
       // selections can start before the first word or after the last.
-      gesture = .text(anchor: anchor, origin: event.locationInWindow, anchorView: nil, active: false)
+      gesture = .text(anchor: anchor, origin: event.locationInWindow, active: false)
     } else if event.clickCount == 1, press.hit as? NSTextView == nil,
               startsMessageDrag(press.hit, in: press.cell ?? table),
               host.messageSelectionStableId(atRow: press.row) != nil
@@ -278,7 +289,7 @@ final class MessageListTextSelection {
       Endpoint(stableId: point.stableId, surface: point.surface, offset: NSMaxRange(range))
     )
     refreshVisible()
-    gesture = .text(anchor: selection!.anchor, origin: .zero, anchorView: nil, active: true)
+    gesture = .text(anchor: selection!.anchor, origin: .zero, active: true)
   }
 
   /// The nearest text position for a press in a message's padded text region, unless the
@@ -325,13 +336,12 @@ final class MessageListTextSelection {
   private func drag(to windowPoint: NSPoint) -> Bool {
     guard let gesture, let host else { return false }
     switch gesture {
-    case let .text(anchor, origin, anchorView, active):
+    case let .text(anchor, origin, active):
       if !active {
         guard moved(from: origin, to: windowPoint) else { return true }
-        // A drag, not a hold or a click.
-        anchorView?.cancelPendingTextHold()
-        self.gesture = .text(anchor: anchor, origin: origin, anchorView: anchorView, active: true)
+        self.gesture = .text(anchor: anchor, origin: origin, active: true)
       }
+      cancelPressHolds()
       if let head = headEndpoint(at: windowPoint, anchor: anchor) {
         selection = (anchor, head)
         refreshVisible()
@@ -360,6 +370,7 @@ final class MessageListTextSelection {
         endGesture()
         return true
       }
+      cancelPressHolds()
       if let row {
         let ids = (min(anchorRow, row) ... max(anchorRow, row)).compactMap { host.messageSelectionStableId(atRow: $0) }
         host.setSelectedMessageStableIds(Set(ids))
@@ -372,7 +383,7 @@ final class MessageListTextSelection {
   private func finishGesture(at windowPoint: NSPoint) {
     guard let gesture else { return }
     endGesture()
-    guard case .text(_, _, _, true) = gesture else { return }
+    guard case .text(_, _, true) = gesture else { return }
     guard !clipboardDocument().isEmpty, let host else { return clear() }
     // Copy, Escape and the Edit menu reach the list from here.
     let table = host.textSelectionTableView
@@ -382,8 +393,33 @@ final class MessageListTextSelection {
     }
   }
 
+  /// The press became a drag. From here the list consumes the drags, so the pressed message's
+  /// hold timer and press recognizers would see a still pointer and fire; cancel them.
+  private func cancelPressHolds() {
+    guard let host, let pressed = pressedView else { return }
+    pressedView = nil
+    let table = host.textSelectionTableView
+    var current: NSView? = pressed
+    while let view = current, view !== table {
+      current = view.superview
+      // Text views hold through a timer; their own recognizers are NSTextView internals.
+      if let textView = view as? NSTextView {
+        (textView as? MessageTextView)?.cancelPendingTextHold()
+        continue
+      }
+      for recognizer in view.gestureRecognizers
+        where recognizer.isEnabled && (recognizer is NSPressGestureRecognizer || recognizer is NSClickGestureRecognizer)
+      {
+        // Disabling resets a recognizer, which cancels a pending recognition.
+        recognizer.isEnabled = false
+        recognizer.isEnabled = true
+      }
+    }
+  }
+
   private func endGesture() {
     gesture = nil
+    pressedView = nil
     autoscrollTimer?.invalidate()
     autoscrollTimer = nil
   }

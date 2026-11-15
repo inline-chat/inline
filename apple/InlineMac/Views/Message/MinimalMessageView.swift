@@ -2007,6 +2007,9 @@ class MinimalMessageViewAppKit: NSView {
       return
     }
 
+    // The action took this press; it must not also become a list selection drag.
+    MessageListTextSelection.owner(of: self)?.cancelPendingPress()
+
     // Provide haptic feedback only for an action that can run.
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
