@@ -155,7 +155,8 @@ public enum BlockContentSpan {
     case let .disclosure(disclosure)?:
       own.add(disclosure.summary)
       own.add(disclosure.meta)
-    case .quote?:
+    case .quote?, .list?:
+      // A list's items take their bounds from it (`itemBounds`).
       break
     default:
       return nil
@@ -163,6 +164,24 @@ public enum BlockContentSpan {
     let previous = blocks[..<index].reversed().lazy.compactMap { span(of: $0) }.first
     let next = blocks[(index + 1)...].lazy.compactMap { span(of: $0) }.first
     let lowers = [own.range?.upperBound, previous?.upperBound, bounds?.lowerBound].compactMap { $0 }
+    guard let lower = lowers.max(), let upper = next?.lowerBound ?? bounds?.upperBound, lower < upper
+    else { return nil }
+    return lower ..< upper
+  }
+
+  /// The text the children of `list.items[index]` may claim, for an unknown kind first or
+  /// last among them: after the item before it, up to the item after it. `bounds` is the
+  /// list's own (`childBounds` of the list) and stands in for missing items.
+  public static func itemBounds(at index: Int, in list: BlockList, bounds: Range<Int>?) -> Range<Int>? {
+    guard list.items.indices.contains(index) else { return nil }
+    func span(_ item: BlockListItem) -> Range<Int>? {
+      var span = Accumulator()
+      span.add(item.children)
+      return span.range
+    }
+    let previous = list.items[..<index].reversed().lazy.compactMap(span).first
+    let next = list.items[(index + 1)...].lazy.compactMap(span).first
+    let lowers = [previous?.upperBound, bounds?.lowerBound].compactMap { $0 }
     guard let lower = lowers.max(), let upper = next?.lowerBound ?? bounds?.upperBound, lower < upper
     else { return nil }
     return lower ..< upper
