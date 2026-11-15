@@ -97,6 +97,10 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   private var slots: [ID: Slot] = [:]
   /// Rows no longer in the placed window that an animation still shows.
   private var lingering: [ID: (slot: Slot, expiry: CFTimeInterval)] = [:]
+  /// Retired slots, hidden but still in the hierarchy with the row view they last held. Adding a view
+  /// to a window walks its whole subtree, so a row the host hands back again comes back here.
+  private var slotPool: [Slot] = []
+  private static var slotPoolLimit: Int { 32 }
   /// The scroll position the state's layout is expressed against: content y = viewport y + origin.
   private var origin: CGFloat = 0
   private let input = TimelineInput()
@@ -326,10 +330,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         }
         if animates { slot.view.layer.addTrack(timing, keyPath: "position.y", from: moved) }
       } else {
-        let slot = Slot(row: rows.make(placement.id, width))
+        let slot = self.slot(for: rows.make(placement.id, width))
         slots[placement.id] = slot
         place(slot, y: y, width: width, height: placement.height)
-        content.addSubview(slot.view)
         if animates {
           // A row placed for the first time travels with its neighbours; one new to the data fades in.
           slot.view.layer.addTrack(timing, keyPath: "position.y", from: (change.offsets[placement.id] ?? 0) + originDelta)
@@ -374,17 +377,14 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         slot.view.layer.opacity = 0
         slot.view.layer.addTrack(timing, keyPath: "opacity", from: 1)
         content.sendSubviewToBack(slot.view)
-        let recycle = rows.recycle
         let duration = timing.duration
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
           try? await Task.sleep(for: .seconds(duration))
-          slot.view.removeFromSuperview()
           slot.view.layer.opacity = 1
-          recycle(id, slot.row)
+          if let self { retire(id, slot) } else { slot.view.removeFromSuperview() }
         }
       } else {
-        slot.view.removeFromSuperview()
-        rows.recycle(id, slot.row)
+        retire(id, slot)
       }
     }
 
@@ -407,12 +407,41 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     let now = CACurrentMediaTime()
     for (id, entry) in lingering where entry.expiry <= now {
       lingering[id] = nil
-      entry.slot.view.removeFromSuperview()
-      rows.recycle(id, entry.slot.row)
+      retire(id, entry.slot)
     }
   }
 
+  /// The slot for a row view the host made: the retired one still holding it, or a new one.
+  private func slot(for row: UIView) -> Slot {
+    if let index = slotPool.firstIndex(where: { $0.row === row }) {
+      let pooled = slotPool.remove(at: index)
+      if row.superview === pooled.view {
+        pooled.view.isHidden = false
+        return pooled
+      }
+      pooled.view.removeFromSuperview()
+    }
+    let slot = Slot(row: row)
+    content.addSubview(slot.view)
+    return slot
+  }
+
+  /// A slot leaves the list: its row goes back to the host, the slot is hidden for reuse.
+  private func retire(_ id: ID, _ slot: Slot) {
+    slot.view.layer.removeAllAnimations()
+    rows.recycle(id, slot.row)
+    guard slotPool.count < Self.slotPoolLimit else {
+      slot.view.removeFromSuperview()
+      return
+    }
+    slot.view.isHidden = true
+    slotPool.append(slot)
+  }
+
   private func place(_ slot: Slot, y: CGFloat, width: CGFloat, height: CGFloat) {
+    // While the list scrolls, rows keep their content coordinates: most frames change nothing here,
+    // and setting the same geometry still costs a layer update.
+    guard slot.y != y || slot.width != width || slot.height != height else { return }
     slot.y = y
     slot.width = width
     slot.height = height
