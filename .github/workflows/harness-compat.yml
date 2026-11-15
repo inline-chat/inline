@@ -1,9 +1,9 @@
 name: Harness compatibility
 
-# Bridge v2 runs the installed Codex and Claude Code. Their protocols change
-# weekly, so this checks the current, prerelease and floor versions against
-# local fake model servers (no accounts, no model usage) on a schedule, and on
-# changes to the drivers or the v2 runtime (spec §9).
+# Bridge v2 runs the installed Codex, Claude Code and OpenCode. Their
+# protocols change weekly, so this checks the current, prerelease and floor
+# versions against local fake model servers (no accounts, no model usage) on
+# a schedule, and on changes to the drivers or the v2 runtime (spec §9).
 
 on:
   schedule:
@@ -16,6 +16,8 @@ on:
       - crates/agent-bridge/**
       - crates/agent-driver-codex/**
       - crates/agent-driver-claude/**
+      - crates/agent-driver-opencode/**
+      - crates/agent-driver-acp/**
       - crates/client/**
       - crates/protocol/**
       - proto/**
@@ -119,6 +121,64 @@ jobs:
         with:
           name: claude-lab-${{ matrix.version }}
           path: ${{ runner.temp }}/claude-lab
+          if-no-files-found: ignore
+
+  opencode:
+    name: OpenCode ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # latest follows GitHub releases (the v2 line is not on npm); 2.2.0 is
+        # the native driver's floor (CORE_FLOOR).
+        version: [latest, 2.2.0]
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/ci/ensure-public-workspaces.sh
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install OpenCode ${{ matrix.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          if [ "$VERSION" = latest ]; then
+            tag="$(gh release list -R anomalyco/opencode --exclude-drafts --exclude-pre-releases --limit 50 \
+              --json tagName -q '[.[].tagName | select(test("^v2\\."))][0]')"
+          else
+            tag="v$VERSION"
+          fi
+          dir="$RUNNER_TEMP/opencode"
+          mkdir -p "$dir"
+          gh release download "$tag" -R anomalyco/opencode -D "$dir" \
+            -p opencode-linux-x64.tar.gz -p SHA256SUMS
+          (cd "$dir" && grep ' opencode-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c - && tar -xzf opencode-linux-x64.tar.gz)
+          "$dir/opencode" --version
+      - name: Driver tests against the fake service
+        run: cargo test --locked -p inline-agent-driver-opencode
+      # No model or credentials: the version gate, every route the driver
+      # calls in the service's OpenAPI document, and a session's open,
+      # settings and release handshake on an isolated service.
+      - name: Service surface and handshake
+        env:
+          INLINE_OPENCODE_SURFACE: "1"
+          INLINE_OPENCODE_EXECUTABLE: ${{ runner.temp }}/opencode/opencode
+          INLINE_OPENCODE_OPENAPI_OUT: ${{ runner.temp }}/opencode-openapi.json
+          XDG_STATE_HOME: ${{ runner.temp }}/opencode-home/state
+          XDG_DATA_HOME: ${{ runner.temp }}/opencode-home/data
+          XDG_CONFIG_HOME: ${{ runner.temp }}/opencode-home/config
+          XDG_CACHE_HOME: ${{ runner.temp }}/opencode-home/cache
+        run: >-
+          cargo test --locked -p inline-agent-driver-opencode --test service_surface
+          -- --ignored --nocapture
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opencode-openapi-${{ matrix.version }}
+          path: ${{ runner.temp }}/opencode-openapi.json
           if-no-files-found: ignore
 
   end-to-end:
