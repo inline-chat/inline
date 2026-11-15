@@ -211,4 +211,30 @@ final class HarnessUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 2.5)
     shot("rot-scrolled-portrait-back")
   }
+
+  /// The message menu and swipe to reply, with the keyboard down and up. Positions are for the
+  /// latest opening of the 420-message fixture on the SE.
+  func testMenuAndSwipe() {
+    launch()
+    shot("menu-start")
+    // Hold the outgoing "Agreed" bubble, then close the menu by tapping outside it.
+    coord(240, 448).press(forDuration: 1.2)
+    Thread.sleep(forTimeInterval: 0.8)
+    shot("menu-open")
+    coord(187, 70).tap()
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("menu-closed")
+    // Swipe the incoming "ok" bubble from right to left.
+    drag(280, 521, 150, 523, v: 700, hold: 0.1)
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("swiped-reply-up=\(keyboardUp)")
+    // With the keyboard up (the reply focused the composer), hold a bubble higher up.
+    if !keyboardUp { openKeyboard() }
+    coord(240, 200).press(forDuration: 1.2)
+    Thread.sleep(forTimeInterval: 0.8)
+    shot("menu-open-kb")
+    coord(187, 70).tap()
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("menu-closed-kb-up=\(keyboardUp)")
+  }
 }
