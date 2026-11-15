@@ -73,6 +73,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   #if DEBUG
   /// The harness's signed-out stand-in for the current user.
   static var debugCurrentUserId: Int64?
+  private var probe: TimelineProbe?
   #endif
 
   /// Rows changing in place move like `MessageMotion.standard` (a critically damped 0.27 s spring).
@@ -155,8 +156,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       returnToLatestTask?.cancel()
       saveReadingPlace()
       onVisibleMessagesChanged?(nil)
+      #if DEBUG
+      probe?.stop()
+      probe = nil
+      #endif
     } else {
       setNeedsLayout()
+      #if DEBUG
+      if TimelineProbe.isRequested, probe == nil { probe = TimelineProbe(list: list, host: self) }
+      #endif
     }
   }
 

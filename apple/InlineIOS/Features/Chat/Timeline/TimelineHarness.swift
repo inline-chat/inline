@@ -12,6 +12,7 @@ import UIKit
 /// - `--timeline-harness-open latest|unread|saved` picks the opening.
 /// - `--timeline-harness-count N` seeds N messages (420).
 /// - `--timeline-harness-collection` shows the collection view list instead, for comparison.
+/// - `--timeline-harness-push` pushes the chat onto a stack, so it can be swiped back.
 struct TimelineHarnessRootView: View {
   static var isRequested: Bool { CommandLine.arguments.contains("--chatlist-harness") }
 
@@ -25,49 +26,48 @@ struct TimelineHarnessRootView: View {
     argument("--timeline-harness-open").flatMap(DebugChatFixture.Opening.init(rawValue:)) ?? .latest
   }
 
-  @State private var fixture: DebugChatFixture?
-  @State private var initialState: MessagesProgressiveViewModel.InitialState?
-  @State private var failure: String?
-  @State private var box = TimelineHarnessBox()
-  @Environment(\.colorScheme) private var colorScheme
+  @State private var model = TimelineHarnessModel()
+  @State private var path: [String] = []
+
+  private static var pushes: Bool { CommandLine.arguments.contains("--timeline-harness-push") }
 
   var body: some View {
-    NavigationStack {
+    NavigationStack(path: $path) {
       Group {
-        if let fixture, let initialState {
-          TimelineHarnessChat(
-            fixture: fixture, initialState: initialState, box: box,
-            theme: ThemeManager.shared.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme))
-          )
-          .ignoresSafeArea()
-        } else if let failure {
-          Text(failure).padding()
-        } else {
-          ProgressView()
-        }
-      }
-      .navigationTitle("Timeline · \(Self.opening.rawValue)")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
-          Menu("Script") {
-            Button("Receive") { run { try $0.receive() } }
-            Button("Send and ack") { runAsync { try await $0.sendAndAcknowledge() } }
-            Button("Edit newest") { run { try $0.edit() } }
-            Button("Stream") { runAsync { try await $0.stream(steps: 120, every: .milliseconds(50)) } }
-            Button("Delete newest") { run { try $0.deleteNewest() } }
-            Button("Jump far up") { box.container?.focusMessage(40, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false) }
+        if Self.pushes {
+          List {
+            Button("Open chat") { path = ["chat"] }
+              .accessibilityIdentifier("harnessOpenChat")
           }
+          .navigationTitle("Harness")
+          // A pushed screen reads the model itself; it is not rebuilt when this view's state changes.
+          .navigationDestination(for: String.self) { _ in TimelineHarnessScreen(model: model, opening: Self.opening) }
+        } else {
+          TimelineHarnessScreen(model: model, opening: Self.opening)
         }
       }
     }
-    .task { await setUp() }
+    .task {
+      await model.setUp(
+        count: Self.argument("--timeline-harness-count").flatMap(Int.init) ?? 420, opening: Self.opening
+      )
+      if Self.pushes, path.isEmpty { path = ["chat"] }
+    }
   }
+}
 
-  private func setUp() async {
+/// The harness's fixture, observed by the chat screen wherever it is shown.
+@MainActor
+@Observable
+final class TimelineHarnessModel {
+  var fixture: DebugChatFixture?
+  var initialState: MessagesProgressiveViewModel.InitialState?
+  var failure: String?
+  @ObservationIgnored let box = TimelineHarnessBox()
+
+  func setUp(count: Int, opening: DebugChatFixture.Opening) async {
     guard fixture == nil else { return }
     do {
-      let count = Self.argument("--timeline-harness-count").flatMap(Int.init) ?? 420
       let fixture = try DebugChatFixture(messageCount: count, remoteFloor: nil, database: .shared, publisher: .shared)
       TimelineMessagesView.debugCurrentUserId = fixture.currentUserId
       ComposeDebugOverrides.send = { send in
@@ -79,21 +79,59 @@ struct TimelineHarnessRootView: View {
           }
         }
       }
-      initialState = try await fixture.initialState(for: Self.opening)
+      initialState = try await fixture.initialState(for: opening)
       self.fixture = fixture
     } catch {
       failure = "Harness failed: \(error)"
     }
   }
 
-  private func run(_ step: (DebugChatFixture) throws -> Void) {
+  func run(_ step: (DebugChatFixture) throws -> Void) {
     guard let fixture else { return }
     do { try step(fixture) } catch { failure = "\(error)" }
   }
 
-  private func runAsync(_ step: @escaping (DebugChatFixture) async throws -> Void) {
+  func runAsync(_ step: @escaping (DebugChatFixture) async throws -> Void) {
     guard let fixture else { return }
     Task { try? await step(fixture) }
+  }
+}
+
+private struct TimelineHarnessScreen: View {
+  let model: TimelineHarnessModel
+  let opening: DebugChatFixture.Opening
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    Group {
+      if let fixture = model.fixture, let initialState = model.initialState {
+        TimelineHarnessChat(
+          fixture: fixture, initialState: initialState, box: model.box,
+          theme: ThemeManager.shared.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme))
+        )
+        .ignoresSafeArea()
+      } else if let failure = model.failure {
+        Text(failure).padding()
+      } else {
+        ProgressView()
+      }
+    }
+    .navigationTitle("Timeline · \(opening.rawValue)")
+    .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Menu("Script") {
+          Button("Receive") { model.run { try $0.receive() } }
+          Button("Send and ack") { model.runAsync { try await $0.sendAndAcknowledge() } }
+          Button("Edit newest") { model.run { try $0.edit() } }
+          Button("Stream") { model.runAsync { try await $0.stream(steps: 120, every: .milliseconds(50)) } }
+          Button("Delete newest") { model.run { try $0.deleteNewest() } }
+          Button("Jump far up") {
+            model.box.container?.focusMessage(40, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
+          }
+        }
+      }
+    }
   }
 }
 
