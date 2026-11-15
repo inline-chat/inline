@@ -70,6 +70,15 @@ struct TimelineHarnessRootView: View {
       let count = Self.argument("--timeline-harness-count").flatMap(Int.init) ?? 420
       let fixture = try DebugChatFixture(messageCount: count, remoteFloor: nil, database: .shared, publisher: .shared)
       TimelineMessagesView.debugCurrentUserId = fixture.currentUserId
+      ComposeDebugOverrides.send = { send in
+        Task { @MainActor in
+          if let editing = send.editingMessageId {
+            try? fixture.editFromComposer(messageId: editing, text: send.text)
+          } else {
+            try? await fixture.sendFromComposer(text: send.text, replyToMessageId: send.replyToMessageId)
+          }
+        }
+      }
       initialState = try await fixture.initialState(for: Self.opening)
       self.fixture = fixture
     } catch {

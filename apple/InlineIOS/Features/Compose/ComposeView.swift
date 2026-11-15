@@ -1239,6 +1239,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       rawText
     }
 
+    #if DEBUG
+    // The timeline harness sends to its in-memory chat, never the network.
+    if let debugSend = ComposeDebugOverrides.send, !hasAttachments, forwardContext == nil {
+      debugSend(.init(
+        text: text ?? "", replyToMessageId: state.replyingMessageId, editingMessageId: state.editingMessageId
+      ))
+      if isEditing { ChatState.shared.clearEditingMessageId(peer: peerId) }
+      else { ChatState.shared.clearReplyingMessageId(peer: peerId) }
+      clearTextOnlyComposeAfterSend(shouldCoordinateSendAnimationReset: false, didPrepareSendAnimationPreview: false)
+      return
+    }
+    #endif
+
     let sendAnimationEligibility = SendMessageAnimationEligibility(
       hasText: hasText,
       hasAttachments: hasAttachments,
@@ -2867,3 +2880,18 @@ extension ComposeView: UIGestureRecognizerDelegate {
     return voiceButton.point(inside: touch.location(in: voiceButton), with: nil)
   }
 }
+
+#if DEBUG
+/// Debug builds only: lets the timeline harness drive the production composer against its
+/// in-memory chat. Nil in every normal run.
+@MainActor
+enum ComposeDebugOverrides {
+  struct Send {
+    let text: String
+    let replyToMessageId: Int64?
+    let editingMessageId: Int64?
+  }
+
+  static var send: ((Send) -> Void)?
+}
+#endif
