@@ -457,6 +457,7 @@ message MessageAction {
     MessageActionCopyText copy_text = 4;
     MessageActionOpenUrl open_url = 5;
     MessageActionOpenLink open_link = 6;
+    MessageActionCompose compose = 10;
   }
 
   Style style = 7;
@@ -484,6 +485,11 @@ message MessageActionCopyText {
 // without notifying the bot. Clients show the destination before opening a
 // non-web scheme.
 message MessageActionOpenUrl { string url = 1; }
+
+// Puts text in the viewer's composer for this chat, client-side, without
+// notifying the bot. The viewer edits and sends it. Clients add it after any
+// draft the viewer has, never replacing it.
+message MessageActionCompose { string text = 1; }
 
 // Navigates to an Inline chat or message, client-side. It never broadens
 // access: viewers without access to the target see that they lack it.
@@ -607,6 +613,14 @@ message Block {
     BlockForm form = 18;
     // Bot only. Sandboxed HTML; at most one per message.
     BlockWidget widget = 19;
+    // Agent surfaces from Claude and ChatGPT clients. Clients that can't draw one
+    // show the fallback text it covers and draw the rest of the message.
+    BlockPlanProposal plan_proposal = 20;
+    BlockApproval approval = 21;
+    BlockReview review = 22;
+    BlockTaskSuggestion task_suggestion = 23;
+    BlockNextStep next_step = 24;
+    BlockPromptSuggestions prompt_suggestions = 25;
   }
 }
 
@@ -857,6 +871,9 @@ message BlockFormField {
     BlockFormToggle toggle = 7;
     BlockFormNumber number = 8;
   }
+
+  // Short chip naming the question, such as "Auth method".
+  optional BlockText header = 9;
 }
 
 message BlockFormSelect {
@@ -872,6 +889,11 @@ message BlockFormOption {
   string option_id = 1;
   BlockText label = 2;
   optional BlockText description = 3;
+  // Shown monospaced beside the options while this one is focused, such as a
+  // code sample or a layout sketch.
+  optional BlockText preview = 4;
+  // The sender's recommended answer.
+  bool recommended = 5;
 }
 
 message BlockFormText {
@@ -953,6 +975,153 @@ message MessageWidgetCall {
   string name = 1;
   // UTF-8 JSON, at most 4 KiB. Empty means no payload.
   bytes payload = 2;
+}
+
+// Where an agent's request to a person stands. The sender edits the message as
+// it changes; clients may show a pressed button as pending until that edit.
+enum BlockDecisionState {
+  BLOCK_DECISION_STATE_UNSPECIFIED = 0;
+  BLOCK_DECISION_STATE_PENDING = 1;
+  // Approved, or for a task suggestion, started.
+  BLOCK_DECISION_STATE_ACCEPTED = 2;
+  // Denied, dismissed, or for a plan, kept planning.
+  BLOCK_DECISION_STATE_DECLINED = 3;
+  BLOCK_DECISION_STATE_EXPIRED = 4;
+  // A newer plan or request replaced this one.
+  BLOCK_DECISION_STATE_SUPERSEDED = 5;
+}
+
+// A plan the agent wants approved before it acts (Claude ExitPlanMode, Codex
+// proposed plans). The fallback text carries the title and the plan.
+message BlockPlanProposal {
+  optional BlockText title = 1;
+  // The plan body: headings, lists, code.
+  repeated Block children = 2;
+  BlockDecisionState state = 3;
+  // IDs from Message.actions drawn as this block's buttons, in order. Clients
+  // that draw them here leave them out of the message's action rows; older
+  // clients keep showing them there.
+  repeated string action_ids = 4;
+  optional int64 decided_by_user_id = 5;
+  optional bool is_rtl = 6;
+}
+
+// A request to run a command, change files, use a tool or widen permissions.
+message BlockApproval {
+  enum Subject {
+    SUBJECT_UNSPECIFIED = 0;
+    SUBJECT_COMMAND = 1;
+    SUBJECT_FILE_CHANGE = 2;
+    SUBJECT_TOOL = 3;
+    SUBJECT_PERMISSIONS = 4;
+    SUBJECT_NETWORK = 5;
+  }
+
+  Subject subject = 1;
+  BlockText title = 2;
+  // Rendered LTR and monospaced.
+  optional BlockText command = 3;
+  optional BlockText cwd = 4;
+  optional BlockText reason = 5;
+  // Diffs or fields describing what is being approved.
+  repeated Block children = 6;
+  BlockDecisionState state = 7;
+  // Same contract as BlockPlanProposal.action_ids.
+  repeated string action_ids = 8;
+  optional int64 decided_by_user_id = 9;
+  optional bool is_rtl = 10;
+}
+
+// Code review notes: findings with priority and location, and an overall
+// verdict.
+message BlockReview {
+  enum Verdict {
+    VERDICT_UNSPECIFIED = 0;
+    VERDICT_CORRECT = 1;
+    VERDICT_INCORRECT = 2;
+    VERDICT_NEEDS_ATTENTION = 3;
+  }
+
+  optional BlockText title = 1;
+  Verdict verdict = 2;
+  optional BlockText summary = 3;
+  repeated BlockReviewFinding findings = 4;
+  optional bool is_rtl = 5;
+}
+
+message BlockReviewFinding {
+  enum Priority {
+    PRIORITY_UNSPECIFIED = 0;
+    PRIORITY_P0 = 1;
+    PRIORITY_P1 = 2;
+    PRIORITY_P2 = 3;
+    PRIORITY_P3 = 4;
+  }
+  enum Confidence {
+    CONFIDENCE_UNSPECIFIED = 0;
+    CONFIDENCE_CONFIRMED = 1;
+    CONFIDENCE_PLAUSIBLE = 2;
+  }
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    OUTCOME_FIXED = 1;
+    OUTCOME_SKIPPED = 2;
+    OUTCOME_NO_CHANGE_NEEDED = 3;
+  }
+
+  BlockText title = 1;
+  // Explanation or failure scenario.
+  optional BlockText body = 2;
+  Priority priority = 3;
+  // Rendered LTR and monospaced.
+  optional BlockText path = 4;
+  optional uint32 start_line = 5;
+  optional uint32 end_line = 6;
+  // Lowercase slug such as "correctness"; at most 40 characters.
+  optional string category = 7;
+  Confidence confidence = 8;
+  Outcome outcome = 9;
+  // Message action run from the finding, such as "Fix".
+  optional string action_id = 10;
+}
+
+// Work the agent proposes to run separately, as a new thread.
+message BlockTaskSuggestion {
+  BlockText title = 1;
+  optional BlockText brief = 2;
+  BlockDecisionState state = 3;
+  // The thread the task started in, once accepted.
+  optional Peer started_peer = 4;
+  // Unix seconds after which the suggestion reads as expired.
+  optional int64 expires_at = 5;
+  // Same contract as BlockPlanProposal.action_ids.
+  repeated string action_ids = 6;
+  optional bool is_rtl = 7;
+}
+
+// The agent's end-of-turn recap and the one decision it waits on.
+message BlockNextStep {
+  BlockText recap = 1;
+  optional BlockText question = 2;
+  // Same contract as BlockPlanProposal.action_ids.
+  repeated string action_ids = 3;
+  // The agent is stopped until someone answers.
+  bool blocking = 4;
+  optional bool is_rtl = 5;
+}
+
+// Chips that put a prompt in the viewer's composer, like
+// MessageActionCompose.
+message BlockPromptSuggestions {
+  repeated BlockPromptSuggestion prompts = 1;
+  optional bool is_rtl = 2;
+}
+
+message BlockPromptSuggestion {
+  BlockText label = 1;
+  // Composer text when it differs from the label; not part of the fallback
+  // text. At most 4,000 characters.
+  optional string text = 2;
 }
 
 message Message {

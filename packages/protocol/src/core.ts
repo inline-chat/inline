@@ -1183,6 +1183,12 @@ export interface MessageAction {
          */
         openLink: MessageActionOpenLink;
     } | {
+        oneofKind: "compose";
+        /**
+         * @generated from protobuf field: MessageActionCompose compose = 10;
+         */
+        compose: MessageActionCompose;
+    } | {
         oneofKind: undefined;
     };
     /**
@@ -1255,6 +1261,19 @@ export interface MessageActionOpenUrl {
      * @generated from protobuf field: string url = 1;
      */
     url: string;
+}
+/**
+ * Puts text in the viewer's composer for this chat, client-side, without
+ * notifying the bot. The viewer edits and sends it. Clients add it after any
+ * draft the viewer has, never replacing it.
+ *
+ * @generated from protobuf message MessageActionCompose
+ */
+export interface MessageActionCompose {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
 }
 /**
  * Navigates to an Inline chat or message, client-side. It never broadens
@@ -1575,6 +1594,45 @@ export interface Block {
          * @generated from protobuf field: BlockWidget widget = 19;
          */
         widget: BlockWidget;
+    } | {
+        oneofKind: "planProposal";
+        /**
+         * Agent surfaces from Claude and ChatGPT clients. Clients that can't draw one
+         * show the fallback text it covers and draw the rest of the message.
+         *
+         * @generated from protobuf field: BlockPlanProposal plan_proposal = 20;
+         */
+        planProposal: BlockPlanProposal;
+    } | {
+        oneofKind: "approval";
+        /**
+         * @generated from protobuf field: BlockApproval approval = 21;
+         */
+        approval: BlockApproval;
+    } | {
+        oneofKind: "review";
+        /**
+         * @generated from protobuf field: BlockReview review = 22;
+         */
+        review: BlockReview;
+    } | {
+        oneofKind: "taskSuggestion";
+        /**
+         * @generated from protobuf field: BlockTaskSuggestion task_suggestion = 23;
+         */
+        taskSuggestion: BlockTaskSuggestion;
+    } | {
+        oneofKind: "nextStep";
+        /**
+         * @generated from protobuf field: BlockNextStep next_step = 24;
+         */
+        nextStep: BlockNextStep;
+    } | {
+        oneofKind: "promptSuggestions";
+        /**
+         * @generated from protobuf field: BlockPromptSuggestions prompt_suggestions = 25;
+         */
+        promptSuggestions: BlockPromptSuggestions;
     } | {
         oneofKind: undefined;
     };
@@ -2261,6 +2319,12 @@ export interface BlockFormField {
     } | {
         oneofKind: undefined;
     };
+    /**
+     * Short chip naming the question, such as "Auth method".
+     *
+     * @generated from protobuf field: optional BlockText header = 9;
+     */
+    header?: BlockText;
 }
 /**
  * @generated from protobuf message BlockFormSelect
@@ -2303,6 +2367,19 @@ export interface BlockFormOption {
      * @generated from protobuf field: optional BlockText description = 3;
      */
     description?: BlockText;
+    /**
+     * Shown monospaced beside the options while this one is focused, such as a
+     * code sample or a layout sketch.
+     *
+     * @generated from protobuf field: optional BlockText preview = 4;
+     */
+    preview?: BlockText;
+    /**
+     * The sender's recommended answer.
+     *
+     * @generated from protobuf field: bool recommended = 5;
+     */
+    recommended: boolean;
 }
 /**
  * @generated from protobuf message BlockFormText
@@ -2520,6 +2597,395 @@ export interface MessageWidgetCall {
      * @generated from protobuf field: bytes payload = 2;
      */
     payload: Uint8Array;
+}
+/**
+ * A plan the agent wants approved before it acts (Claude ExitPlanMode, Codex
+ * proposed plans). The fallback text carries the title and the plan.
+ *
+ * @generated from protobuf message BlockPlanProposal
+ */
+export interface BlockPlanProposal {
+    /**
+     * @generated from protobuf field: optional BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * The plan body: headings, lists, code.
+     *
+     * @generated from protobuf field: repeated Block children = 2;
+     */
+    children: Block[];
+    /**
+     * @generated from protobuf field: BlockDecisionState state = 3;
+     */
+    state: BlockDecisionState;
+    /**
+     * IDs from Message.actions drawn as this block's buttons, in order. Clients
+     * that draw them here leave them out of the message's action rows; older
+     * clients keep showing them there.
+     *
+     * @generated from protobuf field: repeated string action_ids = 4;
+     */
+    actionIds: string[];
+    /**
+     * @generated from protobuf field: optional int64 decided_by_user_id = 5;
+     */
+    decidedByUserId?: bigint;
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 6;
+     */
+    isRtl?: boolean;
+}
+/**
+ * A request to run a command, change files, use a tool or widen permissions.
+ *
+ * @generated from protobuf message BlockApproval
+ */
+export interface BlockApproval {
+    /**
+     * @generated from protobuf field: BlockApproval.Subject subject = 1;
+     */
+    subject: BlockApproval_Subject;
+    /**
+     * @generated from protobuf field: BlockText title = 2;
+     */
+    title?: BlockText;
+    /**
+     * Rendered LTR and monospaced.
+     *
+     * @generated from protobuf field: optional BlockText command = 3;
+     */
+    command?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText cwd = 4;
+     */
+    cwd?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText reason = 5;
+     */
+    reason?: BlockText;
+    /**
+     * Diffs or fields describing what is being approved.
+     *
+     * @generated from protobuf field: repeated Block children = 6;
+     */
+    children: Block[];
+    /**
+     * @generated from protobuf field: BlockDecisionState state = 7;
+     */
+    state: BlockDecisionState;
+    /**
+     * Same contract as BlockPlanProposal.action_ids.
+     *
+     * @generated from protobuf field: repeated string action_ids = 8;
+     */
+    actionIds: string[];
+    /**
+     * @generated from protobuf field: optional int64 decided_by_user_id = 9;
+     */
+    decidedByUserId?: bigint;
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 10;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockApproval.Subject
+ */
+export enum BlockApproval_Subject {
+    /**
+     * @generated from protobuf enum value: SUBJECT_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: SUBJECT_COMMAND = 1;
+     */
+    COMMAND = 1,
+    /**
+     * @generated from protobuf enum value: SUBJECT_FILE_CHANGE = 2;
+     */
+    FILE_CHANGE = 2,
+    /**
+     * @generated from protobuf enum value: SUBJECT_TOOL = 3;
+     */
+    TOOL = 3,
+    /**
+     * @generated from protobuf enum value: SUBJECT_PERMISSIONS = 4;
+     */
+    PERMISSIONS = 4,
+    /**
+     * @generated from protobuf enum value: SUBJECT_NETWORK = 5;
+     */
+    NETWORK = 5
+}
+/**
+ * Code review notes: findings with priority and location, and an overall
+ * verdict.
+ *
+ * @generated from protobuf message BlockReview
+ */
+export interface BlockReview {
+    /**
+     * @generated from protobuf field: optional BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * @generated from protobuf field: BlockReview.Verdict verdict = 2;
+     */
+    verdict: BlockReview_Verdict;
+    /**
+     * @generated from protobuf field: optional BlockText summary = 3;
+     */
+    summary?: BlockText;
+    /**
+     * @generated from protobuf field: repeated BlockReviewFinding findings = 4;
+     */
+    findings: BlockReviewFinding[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 5;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockReview.Verdict
+ */
+export enum BlockReview_Verdict {
+    /**
+     * @generated from protobuf enum value: VERDICT_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: VERDICT_CORRECT = 1;
+     */
+    CORRECT = 1,
+    /**
+     * @generated from protobuf enum value: VERDICT_INCORRECT = 2;
+     */
+    INCORRECT = 2,
+    /**
+     * @generated from protobuf enum value: VERDICT_NEEDS_ATTENTION = 3;
+     */
+    NEEDS_ATTENTION = 3
+}
+/**
+ * @generated from protobuf message BlockReviewFinding
+ */
+export interface BlockReviewFinding {
+    /**
+     * @generated from protobuf field: BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * Explanation or failure scenario.
+     *
+     * @generated from protobuf field: optional BlockText body = 2;
+     */
+    body?: BlockText;
+    /**
+     * @generated from protobuf field: BlockReviewFinding.Priority priority = 3;
+     */
+    priority: BlockReviewFinding_Priority;
+    /**
+     * Rendered LTR and monospaced.
+     *
+     * @generated from protobuf field: optional BlockText path = 4;
+     */
+    path?: BlockText;
+    /**
+     * @generated from protobuf field: optional uint32 start_line = 5;
+     */
+    startLine?: number;
+    /**
+     * @generated from protobuf field: optional uint32 end_line = 6;
+     */
+    endLine?: number;
+    /**
+     * Lowercase slug such as "correctness"; at most 40 characters.
+     *
+     * @generated from protobuf field: optional string category = 7;
+     */
+    category?: string;
+    /**
+     * @generated from protobuf field: BlockReviewFinding.Confidence confidence = 8;
+     */
+    confidence: BlockReviewFinding_Confidence;
+    /**
+     * @generated from protobuf field: BlockReviewFinding.Outcome outcome = 9;
+     */
+    outcome: BlockReviewFinding_Outcome;
+    /**
+     * Message action run from the finding, such as "Fix".
+     *
+     * @generated from protobuf field: optional string action_id = 10;
+     */
+    actionId?: string;
+}
+/**
+ * @generated from protobuf enum BlockReviewFinding.Priority
+ */
+export enum BlockReviewFinding_Priority {
+    /**
+     * @generated from protobuf enum value: PRIORITY_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P0 = 1;
+     */
+    P0 = 1,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P1 = 2;
+     */
+    P1 = 2,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P2 = 3;
+     */
+    P2 = 3,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P3 = 4;
+     */
+    P3 = 4
+}
+/**
+ * @generated from protobuf enum BlockReviewFinding.Confidence
+ */
+export enum BlockReviewFinding_Confidence {
+    /**
+     * @generated from protobuf enum value: CONFIDENCE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CONFIDENCE_CONFIRMED = 1;
+     */
+    CONFIRMED = 1,
+    /**
+     * @generated from protobuf enum value: CONFIDENCE_PLAUSIBLE = 2;
+     */
+    PLAUSIBLE = 2
+}
+/**
+ * @generated from protobuf enum BlockReviewFinding.Outcome
+ */
+export enum BlockReviewFinding_Outcome {
+    /**
+     * @generated from protobuf enum value: OUTCOME_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: OUTCOME_FIXED = 1;
+     */
+    FIXED = 1,
+    /**
+     * @generated from protobuf enum value: OUTCOME_SKIPPED = 2;
+     */
+    SKIPPED = 2,
+    /**
+     * @generated from protobuf enum value: OUTCOME_NO_CHANGE_NEEDED = 3;
+     */
+    NO_CHANGE_NEEDED = 3
+}
+/**
+ * Work the agent proposes to run separately, as a new thread.
+ *
+ * @generated from protobuf message BlockTaskSuggestion
+ */
+export interface BlockTaskSuggestion {
+    /**
+     * @generated from protobuf field: BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText brief = 2;
+     */
+    brief?: BlockText;
+    /**
+     * @generated from protobuf field: BlockDecisionState state = 3;
+     */
+    state: BlockDecisionState;
+    /**
+     * The thread the task started in, once accepted.
+     *
+     * @generated from protobuf field: optional Peer started_peer = 4;
+     */
+    startedPeer?: Peer;
+    /**
+     * Unix seconds after which the suggestion reads as expired.
+     *
+     * @generated from protobuf field: optional int64 expires_at = 5;
+     */
+    expiresAt?: bigint;
+    /**
+     * Same contract as BlockPlanProposal.action_ids.
+     *
+     * @generated from protobuf field: repeated string action_ids = 6;
+     */
+    actionIds: string[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 7;
+     */
+    isRtl?: boolean;
+}
+/**
+ * The agent's end-of-turn recap and the one decision it waits on.
+ *
+ * @generated from protobuf message BlockNextStep
+ */
+export interface BlockNextStep {
+    /**
+     * @generated from protobuf field: BlockText recap = 1;
+     */
+    recap?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText question = 2;
+     */
+    question?: BlockText;
+    /**
+     * Same contract as BlockPlanProposal.action_ids.
+     *
+     * @generated from protobuf field: repeated string action_ids = 3;
+     */
+    actionIds: string[];
+    /**
+     * The agent is stopped until someone answers.
+     *
+     * @generated from protobuf field: bool blocking = 4;
+     */
+    blocking: boolean;
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 5;
+     */
+    isRtl?: boolean;
+}
+/**
+ * Chips that put a prompt in the viewer's composer, like
+ * MessageActionCompose.
+ *
+ * @generated from protobuf message BlockPromptSuggestions
+ */
+export interface BlockPromptSuggestions {
+    /**
+     * @generated from protobuf field: repeated BlockPromptSuggestion prompts = 1;
+     */
+    prompts: BlockPromptSuggestion[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 2;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf message BlockPromptSuggestion
+ */
+export interface BlockPromptSuggestion {
+    /**
+     * @generated from protobuf field: BlockText label = 1;
+     */
+    label?: BlockText;
+    /**
+     * Composer text when it differs from the label; not part of the fallback
+     * text. At most 4,000 characters.
+     *
+     * @generated from protobuf field: optional string text = 2;
+     */
+    text?: string;
 }
 /**
  * @generated from protobuf message Message
@@ -17105,6 +17571,44 @@ export enum BlockStatus {
     CANCELLED = 6
 }
 /**
+ * Where an agent's request to a person stands. The sender edits the message as
+ * it changes; clients may show a pressed button as pending until that edit.
+ *
+ * @generated from protobuf enum BlockDecisionState
+ */
+export enum BlockDecisionState {
+    /**
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_PENDING = 1;
+     */
+    PENDING = 1,
+    /**
+     * Approved, or for a task suggestion, started.
+     *
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_ACCEPTED = 2;
+     */
+    ACCEPTED = 2,
+    /**
+     * Denied, dismissed, or for a plan, kept planning.
+     *
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_DECLINED = 3;
+     */
+    DECLINED = 3,
+    /**
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_EXPIRED = 4;
+     */
+    EXPIRED = 4,
+    /**
+     * A newer plan or request replaced this one.
+     *
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_SUPERSEDED = 5;
+     */
+    SUPERSEDED = 5
+}
+/**
  * Agent providers that implement Inline's session continuity contract. The
  * numeric values are stored by the server; additions must be append-only.
  *
@@ -21402,6 +21906,7 @@ class MessageAction$Type extends MessageType<MessageAction> {
             { no: 4, name: "copy_text", kind: "message", oneof: "action", T: () => MessageActionCopyText },
             { no: 5, name: "open_url", kind: "message", oneof: "action", T: () => MessageActionOpenUrl },
             { no: 6, name: "open_link", kind: "message", oneof: "action", T: () => MessageActionOpenLink },
+            { no: 10, name: "compose", kind: "message", oneof: "action", T: () => MessageActionCompose },
             { no: 7, name: "style", kind: "enum", T: () => ["MessageAction.Style", MessageAction_Style, "STYLE_"] },
             { no: 8, name: "confirm", kind: "message", T: () => MessageActionConfirm },
             { no: 9, name: "required_grant", kind: "enum", T: () => ["AgentGrantRequirement", AgentGrantRequirement, "AGENT_GRANT_REQUIREMENT_"] }
@@ -21453,6 +21958,12 @@ class MessageAction$Type extends MessageType<MessageAction> {
                         openLink: MessageActionOpenLink.internalBinaryRead(reader, reader.uint32(), options, (message.action as any).openLink)
                     };
                     break;
+                case /* MessageActionCompose compose */ 10:
+                    message.action = {
+                        oneofKind: "compose",
+                        compose: MessageActionCompose.internalBinaryRead(reader, reader.uint32(), options, (message.action as any).compose)
+                    };
+                    break;
                 case /* MessageAction.Style style */ 7:
                     message.style = reader.int32();
                     break;
@@ -21492,6 +22003,9 @@ class MessageAction$Type extends MessageType<MessageAction> {
         /* MessageActionOpenLink open_link = 6; */
         if (message.action.oneofKind === "openLink")
             MessageActionOpenLink.internalBinaryWrite(message.action.openLink, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* MessageActionCompose compose = 10; */
+        if (message.action.oneofKind === "compose")
+            MessageActionCompose.internalBinaryWrite(message.action.compose, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         /* MessageAction.Style style = 7; */
         if (message.style !== 0)
             writer.tag(7, WireType.Varint).int32(message.style);
@@ -21652,6 +22166,53 @@ class MessageActionOpenUrl$Type extends MessageType<MessageActionOpenUrl> {
  * @generated MessageType for protobuf message MessageActionOpenUrl
  */
 export const MessageActionOpenUrl = new MessageActionOpenUrl$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageActionCompose$Type extends MessageType<MessageActionCompose> {
+    constructor() {
+        super("MessageActionCompose", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageActionCompose>): MessageActionCompose {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<MessageActionCompose>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageActionCompose): MessageActionCompose {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageActionCompose, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageActionCompose
+ */
+export const MessageActionCompose = new MessageActionCompose$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageActionOpenLink$Type extends MessageType<MessageActionOpenLink> {
     constructor() {
@@ -22297,7 +22858,13 @@ class Block$Type extends MessageType<Block> {
             { no: 16, name: "callout", kind: "message", oneof: "kind", T: () => BlockCallout },
             { no: 17, name: "meter", kind: "message", oneof: "kind", T: () => BlockMeter },
             { no: 18, name: "form", kind: "message", oneof: "kind", T: () => BlockForm },
-            { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget }
+            { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget },
+            { no: 20, name: "plan_proposal", kind: "message", oneof: "kind", T: () => BlockPlanProposal },
+            { no: 21, name: "approval", kind: "message", oneof: "kind", T: () => BlockApproval },
+            { no: 22, name: "review", kind: "message", oneof: "kind", T: () => BlockReview },
+            { no: 23, name: "task_suggestion", kind: "message", oneof: "kind", T: () => BlockTaskSuggestion },
+            { no: 24, name: "next_step", kind: "message", oneof: "kind", T: () => BlockNextStep },
+            { no: 25, name: "prompt_suggestions", kind: "message", oneof: "kind", T: () => BlockPromptSuggestions }
         ]);
     }
     create(value?: PartialMessage<Block>): Block {
@@ -22426,6 +22993,42 @@ class Block$Type extends MessageType<Block> {
                         widget: BlockWidget.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).widget)
                     };
                     break;
+                case /* BlockPlanProposal plan_proposal */ 20:
+                    message.kind = {
+                        oneofKind: "planProposal",
+                        planProposal: BlockPlanProposal.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).planProposal)
+                    };
+                    break;
+                case /* BlockApproval approval */ 21:
+                    message.kind = {
+                        oneofKind: "approval",
+                        approval: BlockApproval.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).approval)
+                    };
+                    break;
+                case /* BlockReview review */ 22:
+                    message.kind = {
+                        oneofKind: "review",
+                        review: BlockReview.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).review)
+                    };
+                    break;
+                case /* BlockTaskSuggestion task_suggestion */ 23:
+                    message.kind = {
+                        oneofKind: "taskSuggestion",
+                        taskSuggestion: BlockTaskSuggestion.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).taskSuggestion)
+                    };
+                    break;
+                case /* BlockNextStep next_step */ 24:
+                    message.kind = {
+                        oneofKind: "nextStep",
+                        nextStep: BlockNextStep.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).nextStep)
+                    };
+                    break;
+                case /* BlockPromptSuggestions prompt_suggestions */ 25:
+                    message.kind = {
+                        oneofKind: "promptSuggestions",
+                        promptSuggestions: BlockPromptSuggestions.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).promptSuggestions)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22495,6 +23098,24 @@ class Block$Type extends MessageType<Block> {
         /* BlockWidget widget = 19; */
         if (message.kind.oneofKind === "widget")
             BlockWidget.internalBinaryWrite(message.kind.widget, writer.tag(19, WireType.LengthDelimited).fork(), options).join();
+        /* BlockPlanProposal plan_proposal = 20; */
+        if (message.kind.oneofKind === "planProposal")
+            BlockPlanProposal.internalBinaryWrite(message.kind.planProposal, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* BlockApproval approval = 21; */
+        if (message.kind.oneofKind === "approval")
+            BlockApproval.internalBinaryWrite(message.kind.approval, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* BlockReview review = 22; */
+        if (message.kind.oneofKind === "review")
+            BlockReview.internalBinaryWrite(message.kind.review, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
+        /* BlockTaskSuggestion task_suggestion = 23; */
+        if (message.kind.oneofKind === "taskSuggestion")
+            BlockTaskSuggestion.internalBinaryWrite(message.kind.taskSuggestion, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* BlockNextStep next_step = 24; */
+        if (message.kind.oneofKind === "nextStep")
+            BlockNextStep.internalBinaryWrite(message.kind.nextStep, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
+        /* BlockPromptSuggestions prompt_suggestions = 25; */
+        if (message.kind.oneofKind === "promptSuggestions")
+            BlockPromptSuggestions.internalBinaryWrite(message.kind.promptSuggestions, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23890,7 +24511,8 @@ class BlockFormField$Type extends MessageType<BlockFormField> {
             { no: 5, name: "select", kind: "message", oneof: "kind", T: () => BlockFormSelect },
             { no: 6, name: "text", kind: "message", oneof: "kind", T: () => BlockFormText },
             { no: 7, name: "toggle", kind: "message", oneof: "kind", T: () => BlockFormToggle },
-            { no: 8, name: "number", kind: "message", oneof: "kind", T: () => BlockFormNumber }
+            { no: 8, name: "number", kind: "message", oneof: "kind", T: () => BlockFormNumber },
+            { no: 9, name: "header", kind: "message", T: () => BlockText }
         ]);
     }
     create(value?: PartialMessage<BlockFormField>): BlockFormField {
@@ -23943,6 +24565,9 @@ class BlockFormField$Type extends MessageType<BlockFormField> {
                         number: BlockFormNumber.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).number)
                     };
                     break;
+                case /* optional BlockText header */ 9:
+                    message.header = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.header);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23979,6 +24604,9 @@ class BlockFormField$Type extends MessageType<BlockFormField> {
         /* BlockFormNumber number = 8; */
         if (message.kind.oneofKind === "number")
             BlockFormNumber.internalBinaryWrite(message.kind.number, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText header = 9; */
+        if (message.header)
+            BlockText.internalBinaryWrite(message.header, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24066,12 +24694,15 @@ class BlockFormOption$Type extends MessageType<BlockFormOption> {
         super("BlockFormOption", [
             { no: 1, name: "option_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "label", kind: "message", T: () => BlockText },
-            { no: 3, name: "description", kind: "message", T: () => BlockText }
+            { no: 3, name: "description", kind: "message", T: () => BlockText },
+            { no: 4, name: "preview", kind: "message", T: () => BlockText },
+            { no: 5, name: "recommended", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<BlockFormOption>): BlockFormOption {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.optionId = "";
+        message.recommended = false;
         if (value !== undefined)
             reflectionMergePartial<BlockFormOption>(this, message, value);
         return message;
@@ -24089,6 +24720,12 @@ class BlockFormOption$Type extends MessageType<BlockFormOption> {
                     break;
                 case /* optional BlockText description */ 3:
                     message.description = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.description);
+                    break;
+                case /* optional BlockText preview */ 4:
+                    message.preview = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.preview);
+                    break;
+                case /* bool recommended */ 5:
+                    message.recommended = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24111,6 +24748,12 @@ class BlockFormOption$Type extends MessageType<BlockFormOption> {
         /* optional BlockText description = 3; */
         if (message.description)
             BlockText.internalBinaryWrite(message.description, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText preview = 4; */
+        if (message.preview)
+            BlockText.internalBinaryWrite(message.preview, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* bool recommended = 5; */
+        if (message.recommended !== false)
+            writer.tag(5, WireType.Varint).bool(message.recommended);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24648,6 +25291,664 @@ class MessageWidgetCall$Type extends MessageType<MessageWidgetCall> {
  * @generated MessageType for protobuf message MessageWidgetCall
  */
 export const MessageWidgetCall = new MessageWidgetCall$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockPlanProposal$Type extends MessageType<BlockPlanProposal> {
+    constructor() {
+        super("BlockPlanProposal", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 3, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+            { no: 4, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "decided_by_user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockPlanProposal>): BlockPlanProposal {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.children = [];
+        message.state = 0;
+        message.actionIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockPlanProposal>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockPlanProposal): BlockPlanProposal {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* repeated Block children */ 2:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* BlockDecisionState state */ 3:
+                    message.state = reader.int32();
+                    break;
+                case /* repeated string action_ids */ 4:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* optional int64 decided_by_user_id */ 5:
+                    message.decidedByUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional bool is_rtl */ 6:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockPlanProposal, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Block children = 2; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDecisionState state = 3; */
+        if (message.state !== 0)
+            writer.tag(3, WireType.Varint).int32(message.state);
+        /* repeated string action_ids = 4; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(4, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* optional int64 decided_by_user_id = 5; */
+        if (message.decidedByUserId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.decidedByUserId);
+        /* optional bool is_rtl = 6; */
+        if (message.isRtl !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockPlanProposal
+ */
+export const BlockPlanProposal = new BlockPlanProposal$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockApproval$Type extends MessageType<BlockApproval> {
+    constructor() {
+        super("BlockApproval", [
+            { no: 1, name: "subject", kind: "enum", T: () => ["BlockApproval.Subject", BlockApproval_Subject, "SUBJECT_"] },
+            { no: 2, name: "title", kind: "message", T: () => BlockText },
+            { no: 3, name: "command", kind: "message", T: () => BlockText },
+            { no: 4, name: "cwd", kind: "message", T: () => BlockText },
+            { no: 5, name: "reason", kind: "message", T: () => BlockText },
+            { no: 6, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 7, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+            { no: 8, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "decided_by_user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 10, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockApproval>): BlockApproval {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.subject = 0;
+        message.children = [];
+        message.state = 0;
+        message.actionIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockApproval>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockApproval): BlockApproval {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockApproval.Subject subject */ 1:
+                    message.subject = reader.int32();
+                    break;
+                case /* BlockText title */ 2:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* optional BlockText command */ 3:
+                    message.command = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.command);
+                    break;
+                case /* optional BlockText cwd */ 4:
+                    message.cwd = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.cwd);
+                    break;
+                case /* optional BlockText reason */ 5:
+                    message.reason = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.reason);
+                    break;
+                case /* repeated Block children */ 6:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* BlockDecisionState state */ 7:
+                    message.state = reader.int32();
+                    break;
+                case /* repeated string action_ids */ 8:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* optional int64 decided_by_user_id */ 9:
+                    message.decidedByUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional bool is_rtl */ 10:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockApproval, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockApproval.Subject subject = 1; */
+        if (message.subject !== 0)
+            writer.tag(1, WireType.Varint).int32(message.subject);
+        /* BlockText title = 2; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText command = 3; */
+        if (message.command)
+            BlockText.internalBinaryWrite(message.command, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText cwd = 4; */
+        if (message.cwd)
+            BlockText.internalBinaryWrite(message.cwd, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText reason = 5; */
+        if (message.reason)
+            BlockText.internalBinaryWrite(message.reason, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Block children = 6; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDecisionState state = 7; */
+        if (message.state !== 0)
+            writer.tag(7, WireType.Varint).int32(message.state);
+        /* repeated string action_ids = 8; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(8, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* optional int64 decided_by_user_id = 9; */
+        if (message.decidedByUserId !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.decidedByUserId);
+        /* optional bool is_rtl = 10; */
+        if (message.isRtl !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockApproval
+ */
+export const BlockApproval = new BlockApproval$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockReview$Type extends MessageType<BlockReview> {
+    constructor() {
+        super("BlockReview", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "verdict", kind: "enum", T: () => ["BlockReview.Verdict", BlockReview_Verdict, "VERDICT_"] },
+            { no: 3, name: "summary", kind: "message", T: () => BlockText },
+            { no: 4, name: "findings", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockReviewFinding },
+            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockReview>): BlockReview {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.verdict = 0;
+        message.findings = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockReview>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockReview): BlockReview {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* BlockReview.Verdict verdict */ 2:
+                    message.verdict = reader.int32();
+                    break;
+                case /* optional BlockText summary */ 3:
+                    message.summary = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.summary);
+                    break;
+                case /* repeated BlockReviewFinding findings */ 4:
+                    message.findings.push(BlockReviewFinding.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 5:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockReview, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* BlockReview.Verdict verdict = 2; */
+        if (message.verdict !== 0)
+            writer.tag(2, WireType.Varint).int32(message.verdict);
+        /* optional BlockText summary = 3; */
+        if (message.summary)
+            BlockText.internalBinaryWrite(message.summary, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated BlockReviewFinding findings = 4; */
+        for (let i = 0; i < message.findings.length; i++)
+            BlockReviewFinding.internalBinaryWrite(message.findings[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 5; */
+        if (message.isRtl !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockReview
+ */
+export const BlockReview = new BlockReview$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockReviewFinding$Type extends MessageType<BlockReviewFinding> {
+    constructor() {
+        super("BlockReviewFinding", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "body", kind: "message", T: () => BlockText },
+            { no: 3, name: "priority", kind: "enum", T: () => ["BlockReviewFinding.Priority", BlockReviewFinding_Priority, "PRIORITY_"] },
+            { no: 4, name: "path", kind: "message", T: () => BlockText },
+            { no: 5, name: "start_line", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 6, name: "end_line", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 7, name: "category", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "confidence", kind: "enum", T: () => ["BlockReviewFinding.Confidence", BlockReviewFinding_Confidence, "CONFIDENCE_"] },
+            { no: 9, name: "outcome", kind: "enum", T: () => ["BlockReviewFinding.Outcome", BlockReviewFinding_Outcome, "OUTCOME_"] },
+            { no: 10, name: "action_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockReviewFinding>): BlockReviewFinding {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.priority = 0;
+        message.confidence = 0;
+        message.outcome = 0;
+        if (value !== undefined)
+            reflectionMergePartial<BlockReviewFinding>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockReviewFinding): BlockReviewFinding {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* optional BlockText body */ 2:
+                    message.body = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.body);
+                    break;
+                case /* BlockReviewFinding.Priority priority */ 3:
+                    message.priority = reader.int32();
+                    break;
+                case /* optional BlockText path */ 4:
+                    message.path = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.path);
+                    break;
+                case /* optional uint32 start_line */ 5:
+                    message.startLine = reader.uint32();
+                    break;
+                case /* optional uint32 end_line */ 6:
+                    message.endLine = reader.uint32();
+                    break;
+                case /* optional string category */ 7:
+                    message.category = reader.string();
+                    break;
+                case /* BlockReviewFinding.Confidence confidence */ 8:
+                    message.confidence = reader.int32();
+                    break;
+                case /* BlockReviewFinding.Outcome outcome */ 9:
+                    message.outcome = reader.int32();
+                    break;
+                case /* optional string action_id */ 10:
+                    message.actionId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockReviewFinding, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText body = 2; */
+        if (message.body)
+            BlockText.internalBinaryWrite(message.body, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockReviewFinding.Priority priority = 3; */
+        if (message.priority !== 0)
+            writer.tag(3, WireType.Varint).int32(message.priority);
+        /* optional BlockText path = 4; */
+        if (message.path)
+            BlockText.internalBinaryWrite(message.path, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional uint32 start_line = 5; */
+        if (message.startLine !== undefined)
+            writer.tag(5, WireType.Varint).uint32(message.startLine);
+        /* optional uint32 end_line = 6; */
+        if (message.endLine !== undefined)
+            writer.tag(6, WireType.Varint).uint32(message.endLine);
+        /* optional string category = 7; */
+        if (message.category !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.category);
+        /* BlockReviewFinding.Confidence confidence = 8; */
+        if (message.confidence !== 0)
+            writer.tag(8, WireType.Varint).int32(message.confidence);
+        /* BlockReviewFinding.Outcome outcome = 9; */
+        if (message.outcome !== 0)
+            writer.tag(9, WireType.Varint).int32(message.outcome);
+        /* optional string action_id = 10; */
+        if (message.actionId !== undefined)
+            writer.tag(10, WireType.LengthDelimited).string(message.actionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockReviewFinding
+ */
+export const BlockReviewFinding = new BlockReviewFinding$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockTaskSuggestion$Type extends MessageType<BlockTaskSuggestion> {
+    constructor() {
+        super("BlockTaskSuggestion", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "brief", kind: "message", T: () => BlockText },
+            { no: 3, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+            { no: 4, name: "started_peer", kind: "message", T: () => Peer },
+            { no: 5, name: "expires_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockTaskSuggestion>): BlockTaskSuggestion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = 0;
+        message.actionIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockTaskSuggestion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockTaskSuggestion): BlockTaskSuggestion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* optional BlockText brief */ 2:
+                    message.brief = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.brief);
+                    break;
+                case /* BlockDecisionState state */ 3:
+                    message.state = reader.int32();
+                    break;
+                case /* optional Peer started_peer */ 4:
+                    message.startedPeer = Peer.internalBinaryRead(reader, reader.uint32(), options, message.startedPeer);
+                    break;
+                case /* optional int64 expires_at */ 5:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* repeated string action_ids */ 6:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* optional bool is_rtl */ 7:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockTaskSuggestion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText brief = 2; */
+        if (message.brief)
+            BlockText.internalBinaryWrite(message.brief, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDecisionState state = 3; */
+        if (message.state !== 0)
+            writer.tag(3, WireType.Varint).int32(message.state);
+        /* optional Peer started_peer = 4; */
+        if (message.startedPeer)
+            Peer.internalBinaryWrite(message.startedPeer, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 expires_at = 5; */
+        if (message.expiresAt !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.expiresAt);
+        /* repeated string action_ids = 6; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(6, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* optional bool is_rtl = 7; */
+        if (message.isRtl !== undefined)
+            writer.tag(7, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockTaskSuggestion
+ */
+export const BlockTaskSuggestion = new BlockTaskSuggestion$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockNextStep$Type extends MessageType<BlockNextStep> {
+    constructor() {
+        super("BlockNextStep", [
+            { no: 1, name: "recap", kind: "message", T: () => BlockText },
+            { no: 2, name: "question", kind: "message", T: () => BlockText },
+            { no: 3, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "blocking", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockNextStep>): BlockNextStep {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.actionIds = [];
+        message.blocking = false;
+        if (value !== undefined)
+            reflectionMergePartial<BlockNextStep>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockNextStep): BlockNextStep {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText recap */ 1:
+                    message.recap = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.recap);
+                    break;
+                case /* optional BlockText question */ 2:
+                    message.question = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.question);
+                    break;
+                case /* repeated string action_ids */ 3:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* bool blocking */ 4:
+                    message.blocking = reader.bool();
+                    break;
+                case /* optional bool is_rtl */ 5:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockNextStep, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText recap = 1; */
+        if (message.recap)
+            BlockText.internalBinaryWrite(message.recap, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText question = 2; */
+        if (message.question)
+            BlockText.internalBinaryWrite(message.question, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated string action_ids = 3; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(3, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* bool blocking = 4; */
+        if (message.blocking !== false)
+            writer.tag(4, WireType.Varint).bool(message.blocking);
+        /* optional bool is_rtl = 5; */
+        if (message.isRtl !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockNextStep
+ */
+export const BlockNextStep = new BlockNextStep$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockPromptSuggestions$Type extends MessageType<BlockPromptSuggestions> {
+    constructor() {
+        super("BlockPromptSuggestions", [
+            { no: 1, name: "prompts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockPromptSuggestion },
+            { no: 2, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockPromptSuggestions>): BlockPromptSuggestions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.prompts = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockPromptSuggestions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockPromptSuggestions): BlockPromptSuggestions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BlockPromptSuggestion prompts */ 1:
+                    message.prompts.push(BlockPromptSuggestion.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 2:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockPromptSuggestions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BlockPromptSuggestion prompts = 1; */
+        for (let i = 0; i < message.prompts.length; i++)
+            BlockPromptSuggestion.internalBinaryWrite(message.prompts[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 2; */
+        if (message.isRtl !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockPromptSuggestions
+ */
+export const BlockPromptSuggestions = new BlockPromptSuggestions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockPromptSuggestion$Type extends MessageType<BlockPromptSuggestion> {
+    constructor() {
+        super("BlockPromptSuggestion", [
+            { no: 1, name: "label", kind: "message", T: () => BlockText },
+            { no: 2, name: "text", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockPromptSuggestion>): BlockPromptSuggestion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BlockPromptSuggestion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockPromptSuggestion): BlockPromptSuggestion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText label */ 1:
+                    message.label = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.label);
+                    break;
+                case /* optional string text */ 2:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockPromptSuggestion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText label = 1; */
+        if (message.label)
+            BlockText.internalBinaryWrite(message.label, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string text = 2; */
+        if (message.text !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockPromptSuggestion
+ */
+export const BlockPromptSuggestion = new BlockPromptSuggestion$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Message$Type extends MessageType<Message> {
     constructor() {
