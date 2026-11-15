@@ -15,17 +15,51 @@ public struct TimelineRows<ID: Hashable & Sendable> {
   public var update: (ID, UIView, CGFloat, TimelineTiming) -> Void
   /// The row left the placed window.
   public var recycle: (ID, UIView) -> Void
+  /// The view in a placed row that stays in sight while its span does; nil for most rows. Asked
+  /// after every change, so a row can gain or lose it with its content.
+  public var pin: (ID, UIView) -> TimelinePin<ID>?
+  /// Where a pin's span starting at this row begins, in the row's coordinates.
+  public var spanTop: (ID, UIView) -> CGFloat
 
   public init(
     height: @escaping (ID, CGFloat) -> CGFloat,
     make: @escaping (ID, CGFloat) -> UIView,
     update: @escaping (ID, UIView, CGFloat, TimelineTiming) -> Void = { _, _, _, _ in },
-    recycle: @escaping (ID, UIView) -> Void = { _, _ in }
+    recycle: @escaping (ID, UIView) -> Void = { _, _ in },
+    pin: @escaping (ID, UIView) -> TimelinePin<ID>? = { _, _ in nil },
+    spanTop: @escaping (ID, UIView) -> CGFloat = { _, _ in 0 }
   ) {
     self.height = height
     self.make = make
     self.update = update
     self.recycle = recycle
+    self.pin = pin
+    self.spanTop = spanTop
+  }
+}
+
+/// A view inside a row that stays in sight while its span does: the sender's avatar beside a group
+/// of messages. It rests at its place in the row; while that place is below the visible area the
+/// list lifts it to keep its bottom on the visible area's bottom edge, but never above the top of
+/// its span. The lift is the y translation of the view's transform, and it moves with the list on
+/// every path the list moves by: the finger, a fling (baked into the same render-server path), and
+/// the tracks of an animated change.
+@MainActor
+public struct TimelinePin<ID: Hashable & Sendable> {
+  /// A descendant of the row view, placed through bounds and center (never `frame`, which would
+  /// read the lift back as position).
+  public var view: UIView
+  /// The view's bottom and height at rest, in the row's coordinates.
+  public var bottom: CGFloat
+  public var height: CGFloat
+  /// The row the span starts in, this row or an older one; `TimelineRows.spanTop` says where.
+  public var spanStart: ID
+
+  public init(view: UIView, bottom: CGFloat, height: CGFloat, spanStart: ID) {
+    self.view = view
+    self.bottom = bottom
+    self.height = height
+    self.spanStart = spanStart
   }
 }
 
@@ -136,12 +170,33 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     var y: CGFloat = 0
     var height: CGFloat = 0
     var width: CGFloat = 0
+    var pin: PinState?
 
     init(row: UIView) {
       self.row = row
       view = UIView()
       view.layer.anchorPoint = .zero
       view.addSubview(row)
+    }
+  }
+
+  /// A pin as last applied. Its lift is a function of the scroll position, so this keeps the two
+  /// numbers that function needs, taken with the content at its layer's model value (the end of a
+  /// running flight), and the flight its path was baked for.
+  private struct PinState {
+    let view: UIView
+    /// How far the pin's resting bottom is below the visible area's bottom edge.
+    var overhang: CGFloat
+    /// How far it can be lifted before its top meets its span's top.
+    var maxLift: CGFloat
+    var flightStart: CFTimeInterval?
+
+    /// The lift its layer holds.
+    var lift: CGFloat { pinLift(overhang: overhang, maxLift: maxLift) }
+
+    func matches(_ other: PinState) -> Bool {
+      view === other.view && flightStart == other.flightStart && abs(overhang - other.overhang) < 0.01
+        && (maxLift == other.maxLift || abs(maxLift - other.maxLift) < 0.01)
     }
   }
 
@@ -158,6 +213,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   }
 
   private static var flightKey: String { "timeline.flight" }
+  private static var pinKey: String { "timeline.pin" }
+  private var pinTrackCount = 0
   /// Seconds of travel realised beyond the standard margins while flinging.
   private static var lookahead: CGFloat { 0.1 }
 
@@ -425,10 +482,129 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     } else if animates {
       content.layer.addTrack(timing, keyPath: "bounds.origin.y", from: originDelta)
     }
+    updatePins(timing: animates && carousel == nil ? timing : .none)
     CATransaction.commit()
 
     if !change.demands.isEmpty { onDemand?(change.demands) }
     onLayout?(layout)
+  }
+
+  // MARK: - Pins
+
+  /// Brings every placed row's pin to the lift the current state asks for. With an animated timing
+  /// a pin whose lift changed moves there on that timing from where it is on screen; while a flight
+  /// runs, each pin also gets the flight's path, so it moves on the render server with the content.
+  private func updatePins(timing: TimelineTiming) {
+    let layout = state.layout
+    guard let first = layout.placements.first else { return }
+    let edge = layout.viewport.usableBottom
+    // The layer's model scroll position is the end of a running flight; the state is where the
+    // flight has been realised to.
+    let ahead = flight.map { CGFloat($0.path.end - $0.applied) } ?? 0
+    let now = CACurrentMediaTime()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    defer { CATransaction.commit() }
+    for placement in layout.placements {
+      guard let slot = slots[placement.id] else { continue }
+      let pin = rows.pin(placement.id, slot.row)
+      if let old = slot.pin, old.view !== pin?.view { unpin(slot) }
+      guard let pin else { continue }
+      // A span starting above the placed rows starts above the screen too: it does not limit.
+      var spanTop = -CGFloat.infinity
+      if let index = state.index[pin.spanStart], index >= first.index, index - first.index < layout.placements.count {
+        let start = layout.placements[index - first.index]
+        if let startSlot = slots[start.id] { spanTop = start.y + rows.spanTop(start.id, startSlot.row) }
+      }
+      let bottom = placement.y + pin.bottom
+      let next = PinState(
+        view: pin.view, overhang: bottom - edge + ahead, maxLift: max(0, bottom - pin.height - spanTop),
+        flightStart: flight?.start
+      )
+      if let old = slot.pin, old.matches(next) { continue }
+      let layer = pin.view.layer
+      // Where the pin is on screen now, before this change.
+      let shown = slot.pin.map { presentedLift($0, now: now) }
+      if slot.pin == nil { slot.view.layer.zPosition = 1 }
+      if slot.pin?.lift != next.lift || slot.pin == nil {
+        layer.setValue(-next.lift, forKeyPath: "transform.translation.y")
+      }
+      slot.pin = next
+      if let flight {
+        bake(layer, next, flight: flight)
+      } else {
+        layer.removeAnimation(forKey: Self.pinKey)
+      }
+      // Tracks stack: each is keyed apart, so the next change does not cut the last one short.
+      if let shown {
+        let delta = presentedLift(next, now: now) - shown
+        if abs(delta) > 0.01, let track = timing.track(keyPath: "transform.translation.y", from: delta) {
+          pinTrackCount &+= 1
+          layer.add(track, forKey: "\(Self.pinKey).\(pinTrackCount)")
+        }
+      }
+    }
+  }
+
+  /// The pin's lift on screen at `now`, from its model value and its flight path.
+  private func presentedLift(_ pin: PinState, now: CFTimeInterval) -> CGFloat {
+    guard let start = pin.flightStart, let flight, flight.start == start else { return pin.lift }
+    let time = min(max(0, now - flight.start), flight.path.duration)
+    let travel = CGFloat(flight.path.end - flight.path.position(at: time))
+    return pinLift(overhang: pin.overhang - travel, maxLift: pin.maxLift)
+  }
+
+  /// The flight's path as the pin's lift: the same samples on the same clock as the content's.
+  private func bake(_ layer: CALayer, _ pin: PinState, flight: Flight) {
+    layer.removeAnimation(forKey: Self.pinKey)
+    let path = flight.path
+    let end = pin.lift
+    var varies = false
+    let values: [NSNumber] = path.positions.map { position in
+      let lift = pinLift(overhang: pin.overhang - CGFloat(path.end - position), maxLift: pin.maxLift)
+      if abs(lift - end) > 0.01 { varies = true }
+      return NSNumber(value: Double(end - lift))
+    }
+    guard varies else { return }
+    let animation = CAKeyframeAnimation(keyPath: "transform.translation.y")
+    animation.values = values
+    animation.duration = path.duration
+    animation.calculationMode = .linear
+    animation.isAdditive = true
+    animation.beginTime = layer.convertTime(flight.start, from: nil)
+    animation.isRemovedOnCompletion = true
+    animation.fillMode = .backwards
+    let maximum = Float(window?.screen.maximumFramesPerSecond ?? 60)
+    animation.preferredFrameRateRange = CAFrameRateRange(minimum: min(80, maximum), maximum: maximum, preferred: maximum)
+    layer.add(animation, forKey: Self.pinKey)
+  }
+
+  /// The pin goes back to rest: its row left, or no longer has it.
+  private func unpin(_ slot: Slot) {
+    guard let pin = slot.pin else { return }
+    slot.pin = nil
+    slot.view.layer.zPosition = 0
+    let layer = pin.view.layer
+    for key in layer.animationKeys() ?? [] where key.hasPrefix(Self.pinKey) {
+      layer.removeAnimation(forKey: key)
+    }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer.setValue(0, forKeyPath: "transform.translation.y")
+    CATransaction.commit()
+  }
+
+  /// A lifted pin hangs outside its row, where the row's own hit test does not look.
+  override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    if isUserInteractionEnabled, !isHidden, alpha > 0.01, self.point(inside: point, with: event) {
+      for slot in slots.values {
+        guard let pin = slot.pin, pin.lift > 0.5, !pin.view.isHidden, pin.view.alpha > 0.01,
+              pin.view.isUserInteractionEnabled else { continue }
+        let local = pin.view.convert(point, from: self)
+        if pin.view.point(inside: local, with: event), let hit = pin.view.hitTest(local, with: event) { return hit }
+      }
+    }
+    return super.hitTest(point, with: event)
   }
 
   // MARK: - Carousel
@@ -514,6 +690,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
   /// A slot leaves the list: its row goes back to the host, the slot is hidden for reuse.
   private func retire(_ id: ID, _ slot: Slot) {
+    unpin(slot)
     slot.view.layer.removeAllAnimations()
     rows.recycle(id, slot.row)
     guard slotPool.count < Self.slotPoolLimit else {
@@ -689,6 +866,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     self.flight = flight
     syncOrigin()
     content.layer.add(animation, forKey: Self.flightKey)
+    updatePins(timing: .none)
     CATransaction.commit()
     input.startTicking(maximumFramesPerSecond: window?.screen.maximumFramesPerSecond ?? 60)
   }
@@ -771,6 +949,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     input.stopTicking()
     scroll(by: CGFloat(position - flight.applied))
     syncOrigin()
+    updatePins(timing: .none)
   }
 
   private func endFlight(settle: Bool) {
@@ -788,6 +967,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       scroll(by: CGFloat(position - flight.applied))
       syncOrigin()
     }
+    updatePins(timing: .none)
   }
 
   /// Brings the content inside its limits and onto whole pixels, then reports the stop.
@@ -807,5 +987,10 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     syncOrigin()
     onScrollEnded?()
   }
+}
+/// How far a pin is lifted: as far as its resting place is below the visible bottom edge, at most
+/// to its span's top.
+private func pinLift(overhang: CGFloat, maxLift: CGFloat) -> CGFloat {
+  max(0, min(overhang, maxLift))
 }
 #endif
