@@ -152,6 +152,13 @@ class Nav3 {
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
   @ObservationIgnored private var lastUsagePeer: Peer?
   @ObservationIgnored var onRouteChange: (() -> Void)?
+  /// Prepares a chat that back, forward or the history menu is moving to, off the main thread like
+  /// a sidebar click, then calls the commit closure (once, unless a later navigation supersedes it).
+  /// Without it, history moves commit at once and the chat reads its first window on the main thread.
+  @ObservationIgnored var chatHistoryPreparer: ((Peer, @escaping @MainActor () -> Void) -> Void)?
+  /// The history entry a prepared back/forward move is heading to. Further moves are relative to it,
+  /// so pressing back twice goes back two entries even before the first one has opened.
+  @ObservationIgnored private var pendingHistoryIndex: Int?
   @ObservationIgnored private var isRestoringInitialState = true
   @ObservationIgnored private var inviteSessions: [UUID: InviteFlowSession] = [:]
   /// Message a side-pane thread was opened from, kept so the parent chat can anchor
@@ -279,6 +286,7 @@ class Nav3 {
   }
 
   func replace(_ route: Nav3Route) {
+    pendingHistoryIndex = nil
     let state = state(for: route)
     guard history.indices.contains(historyIndex) else {
       open(state)
@@ -335,6 +343,7 @@ class Nav3 {
 
   @discardableResult
   func removeChat(peer: Peer) -> Bool {
+    pendingHistoryIndex = nil
     if currentRoute.selectedPeer == peer {
       let spaceId = selectedSpaceId
 
@@ -373,6 +382,7 @@ class Nav3 {
   }
 
   func reset() {
+    pendingHistoryIndex = nil
     newThreadComposeFocusRequested = false
     guard currentRoute != .empty || selectedSpaceId != nil || cmdKVisible else { return }
     history = []
@@ -392,9 +402,9 @@ class Nav3 {
   }
 
   func goBack() {
-    guard canGoBack else { return }
-    historyIndex -= 1
-    notifyRouteChange()
+    let base = pendingHistoryIndex ?? historyIndex
+    guard base > 0 else { return }
+    moveInHistory(to: base - 1)
   }
 
   func goBackToAllChatsOriginIfNeeded() -> Bool {
@@ -409,15 +419,41 @@ class Nav3 {
   }
 
   func goForward() {
-    guard canGoForward else { return }
-    historyIndex += 1
-    notifyRouteChange()
+    let base = pendingHistoryIndex ?? historyIndex
+    guard base >= 0, base < history.count - 1 else { return }
+    moveInHistory(to: base + 1)
   }
 
   func go(to item: Nav3HistoryMenuItem) {
     guard history.indices.contains(item.index) else { return }
-    guard item.index != historyIndex else { return }
-    historyIndex = item.index
+    guard item.index != (pendingHistoryIndex ?? historyIndex) else { return }
+    moveInHistory(to: item.index)
+  }
+
+  /// Moving to another chat waits for its prepared payload, as a sidebar click does; anything else,
+  /// including the chat already shown with a different side pane, moves at once.
+  private func moveInHistory(to index: Int) {
+    let target = history[index]
+    if case let .chat(peer) = target.route,
+       peer != currentRoute.selectedPeer,
+       let chatHistoryPreparer
+    {
+      pendingHistoryIndex = index
+      chatHistoryPreparer(peer) { [weak self] in
+        guard let self,
+              self.pendingHistoryIndex == index,
+              self.history.indices.contains(index),
+              self.history[index] == target
+        else { return }
+        self.pendingHistoryIndex = nil
+        self.historyIndex = index
+        self.notifyRouteChange()
+      }
+      return
+    }
+
+    pendingHistoryIndex = nil
+    historyIndex = index
     notifyRouteChange()
   }
 
@@ -489,6 +525,7 @@ class Nav3 {
     tracksChatNavigation: Bool = true,
     recordsImplicitBase: Bool = false
   ) {
+    pendingHistoryIndex = nil
     guard currentState != state else { return }
 
     if recordsImplicitBase, historyIndex < 0 {

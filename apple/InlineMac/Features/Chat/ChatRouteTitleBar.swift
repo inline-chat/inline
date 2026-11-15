@@ -18,8 +18,9 @@ struct ChatRouteTitleBar: View {
 
   let db: AppDatabase
 
-  /// The title model reads its first snapshot synchronously, so the title is right on the chat's
-  /// first frame, including when a stable route swaps the model for another chat.
+  /// The title model starts from the snapshot read with the chat's prepared open, or reads one
+  /// synchronously without it, so the title is right on the chat's first frame, including when a
+  /// stable route swaps the model for another chat.
   @State private var modelBox: PeerBoundBox<ChatRouteToolbarTitleModel>
   @State private var suppressClick = false
   @FocusState private var isTitleFocused: Bool
@@ -41,7 +42,12 @@ struct ChatRouteTitleBar: View {
 
   private var model: ChatRouteToolbarTitleModel {
     modelBox.model(for: peer) { peer in
-      ChatRouteToolbarTitleModel(peer: peer, db: db, contextSpaceId: contextSpaceId)
+      ChatRouteToolbarTitleModel(
+        peer: peer,
+        db: db,
+        contextSpaceId: contextSpaceId,
+        initialSnapshot: dependencies?.nav3ChatOpenPreloader?.consumePreparedTitleSnapshot(for: peer)
+      )
     }
   }
 
@@ -153,11 +159,14 @@ struct ChatRouteTitleBar: View {
         titleLabel
       }
       .buttonStyle(.plain)
+      // SwiftUI can read a binding from an earlier render after a stable route moved to another
+      // chat. Going through `model` there would rebuild the old chat's model (with a synchronous
+      // read) and swap it back in, so the binding reads whichever model is current.
       .popover(isPresented: Binding(
-        get: { model.isEditingTitle },
-        set: { isPresented in
+        get: { [modelBox] in modelBox.current?.isEditingTitle ?? false },
+        set: { [modelBox] isPresented in
           guard !isPresented else { return }
-          model.cancelEditingTitle()
+          modelBox.current?.cancelEditingTitle()
         }
       ), arrowEdge: .bottom) {
         renamePopover

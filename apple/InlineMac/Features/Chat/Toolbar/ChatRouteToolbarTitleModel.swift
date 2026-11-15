@@ -70,13 +70,17 @@ final class ChatRouteToolbarTitleModel {
     }
   }
 
-  private struct Snapshot {
+  /// What the title shows on its first frame. A prepared chat open reads it with the rest of the
+  /// chat off the main thread; otherwise the model reads it synchronously.
+  struct Snapshot: Sendable {
     let chat: Chat?
     let userInfo: UserInfo?
     let parentChat: Chat?
     let parentUserInfo: UserInfo?
     let parentPeerUserId: Int64?
     let anchorText: String?
+    /// The chat's own space, for the breadcrumb and window title.
+    let space: Space?
   }
 
   let peer: Peer
@@ -104,6 +108,9 @@ final class ChatRouteToolbarTitleModel {
   @ObservationIgnored private var loadedAnchorText: String?
   @ObservationIgnored private var loadedSpace: Space?
   @ObservationIgnored private var loadedUserInfo: UserInfo?
+  /// A space read with a snapshot, used for the space observation's first value instead of a
+  /// synchronous read.
+  @ObservationIgnored private var seededSpace: Space?
   @ObservationIgnored private var contextSpaceId: Int64?
   @ObservationIgnored private var cancellables: Set<AnyCancellable> = []
   @ObservationIgnored private var parentChatCancellable: AnyCancellable?
@@ -123,7 +130,9 @@ final class ChatRouteToolbarTitleModel {
     }
   }
 
-  init(peer: Peer, db: AppDatabase, contextSpaceId: Int64? = nil) {
+  /// - Parameter initialSnapshot: The prepared chat open's snapshot. Without one, the first
+  ///   snapshot is read synchronously so the title is right on the first frame.
+  init(peer: Peer, db: AppDatabase, contextSpaceId: Int64? = nil, initialSnapshot: Snapshot? = nil) {
     let initialTitle = peer.isThread ? "Chat" : "Direct Message"
     self.peer = peer
     self.db = db
@@ -132,7 +141,11 @@ final class ChatRouteToolbarTitleModel {
     windowTitle = initialTitle
     titleDraft = initialTitle
 
-    loadInitialSnapshot()
+    if let initialSnapshot {
+      apply(initialSnapshot)
+    } else {
+      loadInitialSnapshot()
+    }
     observe()
     sync()
     if peer.isPrivate {
@@ -562,17 +575,31 @@ final class ChatRouteToolbarTitleModel {
 
     guard let spaceId else { return }
 
-    spaceCancellable = ValueObservation.tracking { db in
+    // A seeded space is shown now and the observation starts off the main thread; otherwise its
+    // first fetch runs synchronously so the breadcrumb is right on the first frame.
+    let seeded = seededSpace?.id == spaceId ? seededSpace : nil
+    seededSpace = nil
+    if let seeded {
+      loadedSpace = seeded
+    }
+
+    let observation = ValueObservation.tracking { db in
       try Space.fetchOne(db, id: spaceId)
     }
-    .start(in: db.reader, scheduling: .immediate, onError: { [weak self] error in
+    let onError: @MainActor @Sendable (Error) -> Void = { [weak self] error in
       Log.shared.error("Failed to observe window title space \(spaceId): \(error)")
       self?.observedSpaceId = nil
-    }, onChange: { [weak self] space in
+    }
+    let onChange: @MainActor @Sendable (Space?) -> Void = { [weak self] space in
       self?.loadedSpace = space
       self?.breadcrumb = self?.resolvedBreadcrumb()
       self?.refreshWindowTitle()
-    })
+    }
+    spaceCancellable = if seeded == nil {
+      observation.start(in: db.reader, scheduling: .immediate, onError: onError, onChange: onChange)
+    } else {
+      observation.start(in: db.reader, scheduling: .mainActor, onError: onError, onChange: onChange)
+    }
   }
 
   private func resolvedSpaceId() -> Int64? {
@@ -615,9 +642,10 @@ final class ChatRouteToolbarTitleModel {
     loadedParentPeerUserId = snapshot.parentPeerUserId
     loadedAnchorText = snapshot.anchorText
     loadedUserInfo = snapshot.userInfo
+    seededSpace = snapshot.space
   }
 
-  nonisolated private static func fetchSnapshot(
+  nonisolated static func fetchSnapshot(
     peer: Peer,
     db: Database
   ) throws -> Snapshot {
@@ -648,26 +676,30 @@ final class ChatRouteToolbarTitleModel {
       } else {
         anchorText = nil
       }
+      let space = try chat?.spaceId.flatMap { try Space.fetchOne(db, id: $0) }
       return Snapshot(
         chat: chat,
         userInfo: nil,
         parentChat: parentChat,
         parentUserInfo: parentUserInfo,
         parentPeerUserId: parentPeerUserId,
-        anchorText: anchorText
+        anchorText: anchorText,
+        space: space
       )
     case .user:
       let item = try Dialog
         .spaceChatItemQueryForUser()
         .filter(id: Dialog.getDialogId(peerId: peer))
         .fetchOne(db)
+      let space = try item?.chat?.spaceId.flatMap { try Space.fetchOne(db, id: $0) }
       return Snapshot(
         chat: item?.chat,
         userInfo: item?.userInfo,
         parentChat: nil,
         parentUserInfo: nil,
         parentPeerUserId: nil,
-        anchorText: nil
+        anchorText: nil,
+        space: space
       )
     }
   }
