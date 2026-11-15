@@ -28,6 +28,8 @@ extension MessageView {
     copy.spaceId = spaceId
     copy.isUserInteractionEnabled = false
     copy.apply(content, layout: layout, motion: .immediate)
+    // The menu lifts the bubble; an avatar beside it would show at the edge of the tail.
+    copy.avatarView?.isHidden = true
     copy.untransformedFrame = CGRect(
       x: -(layout.bubble.frame.minX + extent.minX),
       y: -(layout.bubble.frame.minY + extent.minY),
@@ -40,6 +42,16 @@ extension MessageView {
     container.clipsToBounds = true
     container.addSubview(copy)
     return container
+  }
+
+  /// The photo this message shows now, for the menu's Copy Photo and Save Photo.
+  var contextMenuPhotoImage: UIImage? {
+    blockViews.values.lazy.compactMap { ($0.contentView as? NewPhotoView)?.getCurrentImage() }.first
+  }
+
+  /// Opens the document this message shows, for a failed message's menu.
+  func openContextMenuDocument() {
+    blockViews.values.lazy.compactMap { $0.contentView as? DocumentView }.first?.openFile()
   }
 
   /// The body text for selection in the preview, framed relative to `extent`. Rich bodies and

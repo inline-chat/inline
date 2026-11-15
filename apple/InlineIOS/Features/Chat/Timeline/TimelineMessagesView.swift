@@ -47,6 +47,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var environmentRevision: UInt64 = 0
   private var rowPool: [TimelineRowView] = []
 
+  // Message menu
+  private let menuActions: MessageMenuActions
+  private var menu: TimelineMessageMenu!
+
   // Insets
   private var composeBottomInset: CGFloat = 0
   private var pinnedHeaderHeight: CGFloat = 0
@@ -101,7 +105,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       currentUserId: currentUserId
     )
     list = TimelineListView(rows: TimelineRows(height: { _, _ in 0 }, make: { _, _ in UIView() }))
+    menuActions = MessageMenuActions(peerId: peer, spaceId: spaceId, theme: theme)
     super.init(frame: .zero)
+    setUpMenu()
     backgroundColor = .clear
     list.rows = TimelineRows(
       height: { [unowned self] id, width in height(of: id, width: width) },
@@ -136,6 +142,34 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+  private func setUpMenu() {
+    menu = TimelineMessageMenu(list: list, actions: menuActions) { [weak self] id in self?.row(id) }
+    menu.onWillDisplay = { [weak self] in self?.onContextMenuWillDisplay?() }
+    menu.onDidEnd = { [weak self] in self?.onContextMenuDidEnd?() }
+    menuActions.presenter = { [weak self] in self?.findViewController() }
+    menuActions.containerWidth = { [weak self] in
+      self?.window?.bounds.width ?? self?.bounds.width ?? UIScreen.main.bounds.width
+    }
+    menuActions.currentMessage = { [weak self] stableId, messageId, chatId, randomId in
+      self?.snapshot?.rows.lazy.compactMap(\.content.message).first { message in
+        message.id == stableId
+          || (message.message.messageId == messageId && message.message.chatId == chatId)
+          || (randomId != nil && message.message.randomId == randomId && message.message.chatId == chatId)
+      }
+    }
+    menuActions.react = { [weak self] _, toggle in
+      guard let self else { return toggle() }
+      menu.react(toggle)
+    }
+    // Over the open menu's own window, so the sheet shows above it.
+    menuActions.emojiSheetOverWindow = { [weak self] in self?.menu.controller?.moveToOwnWindow() }
+    menuActions.onEmojiSheetDismissed = { [weak self] in
+      guard let self, !menu.isActive else { return }
+      onContextMenuDidEnd?()
+    }
+    menuActions.loadIntegrations()
+  }
+
   isolated deinit {
     for task in historyTasks.values { task.cancel() }
     jumpTask?.cancel()
@@ -158,6 +192,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       for task in historyTasks.values { task.cancel() }
       jumpTask?.cancel()
       returnToLatestTask?.cancel()
+      // The menu's overlay belongs to the window and would outlive the chat.
+      menu.dismissImmediately()
       saveReadingPlace()
       onVisibleMessagesChanged?(nil)
       #if DEBUG
@@ -306,6 +342,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func configure(_ view: TimelineRowView, id: ChatRowID, width: CGFloat, timing: TimelineTiming) {
     guard let row = row(id) else { return }
+    defer { view.isMenuSourceHidden = menu.isSource(id) }
     switch row.content {
       case let .message(message, grouping):
         configureMessage(view, row, message, grouping, isThreadAnchor: false, width: width, timing: timing)
@@ -344,6 +381,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       )
     }
     messageView.onPhotoTap = { [weak self] message, _, image, url in self?.presentPhoto(message, image: image, url: url) }
+    messageView.onReactionsMenu = { [weak self] message in self?.menuActions.showReactionEmojiPicker(for: message) }
     // A disclosure opened or closed, or a streamed line was revealed: the row is planned again
     // and the list moves with it.
     messageView.onContentStateChange = { [weak self] _ in self?.replan(id, timing: Self.rowTiming) }
@@ -386,6 +424,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   func applyTheme(_ theme: IOSThemeSnapshot) {
     guard theme != self.theme else { return }
     self.theme = theme
+    menuActions.theme = theme
     environmentChanged()
   }
 
@@ -679,9 +718,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     viewModel.messages.map(\.message.messageId).filter { $0 > 0 }.max()
   }
 
-  // Not built yet on this list: the custom context menu and the reaction picker.
-  var isContextMenuInteractionActive: Bool { false }
-  var isReactionPickerPresented: Bool { false }
+  var isContextMenuInteractionActive: Bool { menu.isActive }
+  var isReactionPickerPresented: Bool { menuActions.isReactionPickerPresented }
   func cancelContextMenuKeyboardRestoration() {}
   func preserveContextMenuViewportForKeyboardRestoration() {}
 

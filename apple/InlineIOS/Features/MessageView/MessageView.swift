@@ -28,7 +28,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   private(set) var blockViews: [String: MessageBlockHostView] = [:]
   private var acknowledgementView: MessageAcknowledgementView?
   private var uploadProgressView: PhotoUploadProgressView?
-  private var avatarView: UserAvatarLayerView?
+  private(set) var avatarView: UserAvatarLayerView?
   private lazy var textTap = UITapGestureRecognizer(target: self, action: #selector(handleTextTap(_:)))
   private lazy var bubbleDoubleTap: UITapGestureRecognizer = {
     let gesture = UITapGestureRecognizer(target: self, action: #selector(handleBubbleDoubleTap))

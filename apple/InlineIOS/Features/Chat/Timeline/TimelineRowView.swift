@@ -24,6 +24,24 @@ final class TimelineRowView: UIView {
   private var rules: [UIView] = []
   private var style = LabelStyle.plain
 
+  /// The message view this row shows, when it shows one.
+  var shownMessageView: MessageView? { messageView.flatMap { $0.isHidden ? nil : $0 } }
+  /// The older message view this row shows for a kind the production view does not support.
+  var shownLegacyView: UIMessageView? { legacyView }
+
+  /// The bubble the context menu lifts out of the row, hidden while the menu draws it.
+  var isMenuSourceHidden = false {
+    didSet { updateMenuSourceVisibility() }
+  }
+
+  private func updateMenuSourceVisibility() {
+    messageView?.bubbleContentView.isHidden = isMenuSourceHidden
+    guard let legacyView else { return }
+    let source: UIView = legacyView.fullMessage.message.isServiceMessage
+      ? legacyView.serviceContainerView : legacyView.bubbleView
+    source.isHidden = isMenuSourceHidden
+  }
+
   /// The production message view, filling the row. The caller applies a plan to it.
   func showMessage() -> MessageView {
     removeLegacy()
@@ -68,6 +86,7 @@ final class TimelineRowView: UIView {
     view.translatesAutoresizingMaskIntoConstraints = false
     addSubview(view)
     legacyView = view
+    updateMenuSourceVisibility()
     let top: CGFloat = isService ? 0 : (grouping.isFirstInGroup ? 6 : 1)
     legacyConstraints = [
       view.topAnchor.constraint(equalTo: topAnchor, constant: top),
@@ -170,9 +189,11 @@ final class TimelineRowView: UIView {
   }
 
   func prepareForReuse() {
+    isMenuSourceHidden = false
     removeLegacy()
     messageView?.onAvatarTap = nil
     messageView?.onPhotoTap = nil
+    messageView?.onReactionsMenu = nil
     messageView?.onContentStateChange = nil
     messageView?.onRevealLineChange = nil
     layer.removeAllAnimations()
