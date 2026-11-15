@@ -42,6 +42,43 @@ impl ApiError {
         (!reason.is_empty() && !reason.eq_ignore_ascii_case("Bad request")).then_some(reason)
     }
 
+    /// A stable, id-free name for logs and error reports: the client's error
+    /// category, or what went wrong before the server answered.
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Self::Request(ClientRequestError::Backend(error)) => error.category.code(),
+            Self::Request(ClientRequestError::Command(_)) => "client_closed",
+            Self::Request(_) => "client_request",
+            Self::UnexpectedResult(_) => "unexpected_result",
+        }
+    }
+
+    /// [`Self::code`], then the server's reason when it is itself a code
+    /// (`invalid_input select_value_not_offered`). Leads a log line, so the
+    /// bridge's error report groups by it.
+    pub(crate) fn log_code(&self) -> String {
+        let code = self.code();
+        match self.server_reason().filter(|reason| is_reason_code(reason)) {
+            Some(reason) => format!("{code} {reason}"),
+            None => code.to_owned(),
+        }
+    }
+
+    /// The server refused this request itself: sending it again gets the
+    /// same answer. Network loss, timeouts, rate limits, a session still
+    /// authenticating and a method an older server lacks can clear up.
+    pub(crate) fn is_permanent(&self) -> bool {
+        use inline_client::ClientErrorCategory as Category;
+        match self {
+            Self::Request(ClientRequestError::Backend(error)) => matches!(
+                error.category,
+                Category::InvalidInput | Category::NotFound | Category::ReloginRequired
+            ),
+            Self::Request(_) => false,
+            Self::UnexpectedResult(_) => true,
+        }
+    }
+
     pub(crate) fn failure(&self) -> Failure {
         use inline_client::ClientErrorCategory as Category;
         let Self::Request(ClientRequestError::Backend(error)) = self else {
@@ -60,6 +97,14 @@ impl ApiError {
             _ => Failure::Retry(None),
         }
     }
+}
+
+/// `select_value_not_offered`, not a sentence that could carry a name.
+fn is_reason_code(reason: &str) -> bool {
+    (1..=48).contains(&reason.len())
+        && reason
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character == '_')
 }
 
 macro_rules! call {
@@ -665,6 +710,26 @@ mod tests {
         let mut error = BackendError::new(category, "test");
         error.retry_after_seconds = retry_after;
         ApiError::Request(ClientRequestError::Backend(error))
+    }
+
+    #[test]
+    fn codes_are_stable_and_carry_only_a_code_like_server_reason() {
+        let refused = ApiError::Request(ClientRequestError::Backend(
+            BackendError::new(ClientErrorCategory::InvalidInput, "Bad request (HTTP 400)")
+                .with_server_message("select_value_not_offered"),
+        ));
+        assert_eq!(refused.log_code(), "invalid_input select_value_not_offered");
+        assert!(refused.is_permanent());
+        let worded = ApiError::Request(ClientRequestError::Backend(
+            BackendError::new(ClientErrorCategory::InvalidInput, "Bad request")
+                .with_server_message("User Ada Lovelace can't do that"),
+        ));
+        assert_eq!(worded.log_code(), "invalid_input");
+        let offline = error(ClientErrorCategory::Network, None);
+        assert_eq!(offline.log_code(), "network");
+        assert!(!offline.is_permanent());
+        assert!(!error(ClientErrorCategory::Timeout, None).is_permanent());
+        assert!(!error(ClientErrorCategory::PermissionDenied, None).is_permanent());
     }
 
     #[test]

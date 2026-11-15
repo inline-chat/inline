@@ -101,10 +101,7 @@ pub(crate) fn report(
     command: Option<&str>,
     failure: Option<&str>,
 ) {
-    if matches!(
-        error.code.as_str(),
-        "invalid_args" | "not_authenticated" | "setup_cancelled" | "confirmation_required"
-    ) {
+    if !command_failure_is_reportable(error) {
         return;
     }
     let mut event = sentry::protocol::Event {
@@ -162,6 +159,52 @@ pub(crate) fn process_host_failure_code(error: &ProcessHostError) -> String {
             "exit_unknown".into()
         }
     }
+}
+
+/// Usage mistakes and the user's own network or disk are not CLI defects; an
+/// HTTP failure with a status still reports, since the server answered.
+fn command_failure_is_reportable(error: &JsonCliError) -> bool {
+    let code = error.code.as_str();
+    if matches!(
+        code,
+        "invalid_args"
+            | "not_authenticated"
+            | "setup_cancelled"
+            | "confirmation_required"
+            | "missing_peer"
+            | "websocket_error"
+            | "realtime_connection_closed"
+            | "realtime_timeout"
+    ) {
+        return false;
+    }
+    if code == "network_error" && error.status.is_none() {
+        return false;
+    }
+    !is_disk_full_text(&error.message)
+}
+
+fn is_disk_full_text(text: &str) -> bool {
+    text.contains("No space left on device") || text.contains("os error 28")
+}
+
+/// Transport trouble between this machine and Inline or a provider: the
+/// client's `Network:`/`Timeout:`/`CommitOutcomeUnknown:` errors and raw
+/// socket failures. The bridge reconnects on its own, so these are not bugs.
+fn is_transient_network_text(text: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "Network: ",
+        "Timeout: ",
+        "CommitOutcomeUnknown: ",
+        "network error",
+        "websocket error",
+        "tls handshake",
+        "Connection reset by peer",
+        "Network is unreachable",
+        "failed to lookup address",
+        "error sending request",
+    ];
+    MARKERS.iter().any(|marker| text.contains(marker))
 }
 
 fn command_failure_kind(error: &JsonCliError) -> Option<&'static str> {
@@ -226,6 +269,12 @@ pub(crate) fn report_bridge_configuration_fallback(target: &str, failure: &'stat
 
 /// A terminal needs-setup stop of the account service or of one agent.
 pub(crate) fn report_bridge_setup_required(target: &str, failure: &'static str) {
+    // A missing or unsupported runtime on the user's machine (or a Dot that
+    // ChatGPT doesn't serve there) is their setup, not a bridge defect.
+    // Matches `bridge::backoff::PROVIDER_RUNTIME_SETUP`.
+    if failure == "provider_configuration" {
+        return;
+    }
     capture_bridge_runtime_event(target, "setup_required", failure, None, None, None);
 }
 
@@ -267,6 +316,9 @@ pub(crate) fn report_bridge_linger_refused() {
 pub(crate) fn report_bridge_log_error(target: &str, message: &str) {
     thread_local! {
         static REPORTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if is_transient_network_text(message) || is_disk_full_text(message) {
+        return;
     }
     if REPORTING.with(|reporting| reporting.replace(true)) {
         return;
@@ -420,9 +472,13 @@ fn capture_once_per_window(key: String, event: sentry::protocol::Event<'static>)
         return;
     }
     let admitted = match REPORT_LEDGER.get() {
-        Some(path) => {
-            admit_report(path, &key, unix_now()).unwrap_or_else(|_| admit_in_process(&key))
-        }
+        Some(path) => match admit_report(path, &key, unix_now()) {
+            Ok(admitted) => admitted,
+            // A full disk fails the ledger in every process, so the in-process
+            // fallback would report each run; the disk is the user's problem.
+            Err(error) if error.kind() == io::ErrorKind::StorageFull => false,
+            Err(_) => admit_in_process(&key),
+        },
         None => admit_in_process(&key),
     };
     if admitted {
@@ -605,6 +661,11 @@ fn install_panic_hook() {
     PANIC_HOOK.call_once(|| {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic| {
+            // `inline … | head`: the reader went away. main's hook exits quietly.
+            if is_broken_pipe_panic(&panic.to_string()) {
+                previous(panic);
+                return;
+            }
             let mut event = sentry::protocol::Event {
                 message: Some(PANIC_MESSAGE.into()),
                 level: sentry::Level::Fatal,
@@ -623,6 +684,11 @@ fn install_panic_hook() {
             previous(panic);
         }));
     });
+}
+
+pub(crate) fn is_broken_pipe_panic(message: &str) -> bool {
+    message.contains("failed printing to stdout")
+        && (message.contains("Broken pipe") || message.contains("broken pipe"))
 }
 
 /// Names a panic site without the payload or the path above the crate: the
@@ -665,6 +731,9 @@ fn safe_code(value: &str) -> String {
     }
 }
 
+const QUALIFICATION_VERSION_PREFIX: &str = "0.0.0-qualification.";
+const QUALIFICATION_ENVIRONMENT: &str = "qualification";
+
 fn update_event(
     outcome: &str,
     channel: &str,
@@ -694,6 +763,14 @@ fn update_event(
         "target".into(),
         format!("{}_{}", std::env::consts::ARCH, std::env::consts::OS),
     );
+    // CI's update qualification sends real outcomes for a synthetic version;
+    // keep them out of the production issue stream.
+    if [from, to]
+        .iter()
+        .any(|version| version.starts_with(QUALIFICATION_VERSION_PREFIX))
+    {
+        event.environment = Some(QUALIFICATION_ENVIRONMENT.into());
+    }
     event
 }
 
@@ -751,6 +828,9 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
             sentry::Level::Error
         },
         release: Some(format!("inline-cli@{}", env!("CARGO_PKG_VERSION")).into()),
+        environment: event
+            .environment
+            .filter(|environment| environment == QUALIFICATION_ENVIRONMENT),
         ..Default::default()
     };
     for name in [
@@ -886,10 +966,92 @@ mod tests {
     }
 
     #[test]
+    fn qualification_updates_get_their_own_environment() {
+        let qualification = allowlisted_event(update_event(
+            "rolled_back",
+            "stable",
+            "0.7.25",
+            "0.0.0-qualification.1700000000",
+            "committed",
+        ));
+        assert_eq!(qualification.environment.as_deref(), Some("qualification"));
+        let real = allowlisted_event(update_event(
+            "rolled_back",
+            "stable",
+            "0.7.25",
+            "0.7.26",
+            "committed",
+        ));
+        assert_eq!(real.environment, None);
+        let mut injected = update_event("staged", "stable", "0.7.25", "0.7.26", "committed");
+        injected.environment = Some("private-host".into());
+        assert_eq!(allowlisted_event(injected).environment, None);
+    }
+
+    #[test]
+    fn user_environment_failures_are_not_reported() {
+        for code in [
+            "missing_peer",
+            "websocket_error",
+            "realtime_connection_closed",
+            "realtime_timeout",
+        ] {
+            assert!(!command_failure_is_reportable(&JsonCliError::new(
+                code, "x"
+            )));
+        }
+        assert!(!command_failure_is_reportable(&JsonCliError::new(
+            "network_error",
+            "error sending request"
+        )));
+        let mut answered = JsonCliError::new("network_error", "HTTP 502");
+        answered.status = Some(502);
+        assert!(command_failure_is_reportable(&answered));
+        assert!(!command_failure_is_reportable(&JsonCliError::new(
+            "io_error",
+            "No space left on device (os error 28)"
+        )));
+        assert!(command_failure_is_reportable(&JsonCliError::new(
+            "io_error",
+            "permission denied"
+        )));
+    }
+
+    #[test]
+    fn transient_bridge_network_warnings_are_recognized() {
+        for message in [
+            "heartbeat failed: Network: websocket error: IO error: tls handshake eof",
+            "heartbeat failed: Timeout: realtime connect timed out after 10s",
+            "inline update failed: CommitOutcomeUnknown: realtime request commit outcome is unknown",
+            "poll failed: network error talking to ChatGPT: error sending request",
+            "settings capabilities not published: Network: websocket error: IO error: Connection reset by peer (os error 54)",
+        ] {
+            assert!(is_transient_network_text(message), "{message}");
+        }
+        for message in [
+            "skill sync failed: InvalidInput: Bad request (HTTP 400)",
+            "turn failed: Failed to authenticate: OAuth session expired",
+            "catalog unavailable: driver is unavailable: Claude Code did not initialize: control request initialize timed out",
+        ] {
+            assert!(!is_transient_network_text(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn broken_stdout_pipes_are_recognized() {
+        assert!(is_broken_pipe_panic(
+            "panicked at library/std/src/io/stdio.rs:1165:9:\nfailed printing to stdout: Broken pipe (os error 32)"
+        ));
+        assert!(!is_broken_pipe_panic(
+            "failed printing to stdout: Interrupted"
+        ));
+    }
+
+    #[test]
     #[ignore = "requires an explicitly injected Sentry DSN; sends three qualification events"]
     fn live_update_outcomes() {
         let _guard = init().expect("inject INLINE_CLI_SENTRY_DSN for live qualification");
-        let version = format!("0.0.0-qualification.{}", unix_now());
+        let version = format!("{QUALIFICATION_VERSION_PREFIX}{}", unix_now());
         for (outcome, stage) in [
             ("staged", "verified"),
             ("activated", "committed"),

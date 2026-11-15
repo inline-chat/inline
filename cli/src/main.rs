@@ -3179,17 +3179,11 @@ async fn run_until_terminated(
 fn install_broken_pipe_handler() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if is_broken_pipe_panic(info) {
+        if telemetry::is_broken_pipe_panic(&info.to_string()) {
             std::process::exit(0);
         }
         default_hook(info);
     }));
-}
-
-fn is_broken_pipe_panic(info: &std::panic::PanicHookInfo<'_>) -> bool {
-    let message = info.to_string();
-    message.contains("failed printing to stdout")
-        && (message.contains("Broken pipe") || message.contains("broken pipe"))
 }
 
 fn is_interactive_terminal() -> bool {

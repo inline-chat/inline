@@ -39,6 +39,9 @@ const CURRENT_FOLDER_VALUE: &str = "__inline_current_folder__";
 /// Inline takes at most 100 options per select; one stays free for the
 /// thread's folder when it is not among the choices.
 const MAX_FOLDER_OPTIONS: usize = 99;
+/// Inline's limits on a select's options and their values.
+const MAX_SELECT_OPTIONS: usize = 100;
+const MAX_OPTION_VALUE_BYTES: usize = 256;
 
 /// What a settings invocation asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -466,14 +469,42 @@ fn select(
         description: Some("What the harness uses on its own.".to_owned()),
         disabled: false,
     }];
-    choices.extend(
-        options.map(|(value, label, description)| BotChatSettingsSelectOption {
+    // Inline refuses a select with a blank label or value, a repeated value
+    // or more than 100 options; one stays free for the current value below.
+    for (value, label, description) in options {
+        let label = if label.trim().is_empty() {
+            value.clone()
+        } else {
+            label
+        };
+        if value.trim().is_empty()
+            || value.len() > MAX_OPTION_VALUE_BYTES
+            || choices.len() >= MAX_SELECT_OPTIONS - 1
+            || choices.iter().any(|choice| choice.value == value)
+        {
+            continue;
+        }
+        choices.push(BotChatSettingsSelectOption {
             value,
             label,
             description,
             disabled: false,
-        }),
-    );
+        });
+    }
+    let value = current
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(DEFAULT_VALUE);
+    // A choice this list does not offer: an effort picked for another model,
+    // or a model the harness no longer lists. Inline refuses a select whose
+    // value is not among its options, so it shows as itself, unavailable.
+    if !choices.iter().any(|choice| choice.value == value) {
+        choices.push(BotChatSettingsSelectOption {
+            value: value.to_owned(),
+            label: value.to_owned(),
+            description: Some("Not offered here now.".to_owned()),
+            disabled: true,
+        });
+    }
     BotChatSettingsItem {
         id: id.to_owned(),
         label: Some(label.to_owned()),
@@ -481,7 +512,7 @@ fn select(
         disabled: false,
         disabled_reason: None,
         control: BotChatSettingsControl::Select {
-            value: current.unwrap_or(DEFAULT_VALUE).to_owned(),
+            value: value.to_owned(),
             options: choices,
         },
     }
@@ -914,6 +945,55 @@ mod tests {
             item(&document, ITEM_FOLDER).control,
             BotChatSettingsControl::Info { .. }
         ));
+    }
+
+    /// Inline refuses the whole document when a select's value is not among
+    /// its options: an effort picked under one model, then another model
+    /// chosen, or a model the harness stopped listing.
+    #[test]
+    fn a_choice_the_list_does_not_offer_stays_a_valid_select() {
+        let catalog = catalog();
+        let settings = SettingsChange {
+            model: Some("gone".to_owned()),
+            effort: Some("xhigh".to_owned()),
+            ..SettingsChange::default()
+        };
+        let document = document(&facts(&catalog, &settings));
+        for id in [ITEM_MODEL, ITEM_REASONING] {
+            let BotChatSettingsControl::Select { value, options } = &item(&document, id).control
+            else {
+                panic!("{id} select");
+            };
+            let chosen = options
+                .iter()
+                .find(|option| &option.value == value)
+                .unwrap_or_else(|| panic!("{id}: {value} among its options"));
+            assert!(chosen.disabled, "{id}: shown, not offered");
+        }
+    }
+
+    #[test]
+    fn a_select_drops_blank_and_repeated_options() {
+        let item = select(
+            "x",
+            "X",
+            None,
+            [
+                ("a".to_owned(), "A".to_owned(), None),
+                ("a".to_owned(), "Again".to_owned(), None),
+                (" ".to_owned(), "Blank".to_owned(), None),
+                ("b".to_owned(), " ".to_owned(), None),
+            ]
+            .into_iter(),
+        );
+        let BotChatSettingsControl::Select { options, .. } = &item.control else {
+            panic!("select");
+        };
+        let shown: Vec<(&str, &str)> = options
+            .iter()
+            .map(|option| (option.value.as_str(), option.label.as_str()))
+            .collect();
+        assert_eq!(shown, [(DEFAULT_VALUE, "Default"), ("a", "A"), ("b", "b")]);
     }
 
     #[test]

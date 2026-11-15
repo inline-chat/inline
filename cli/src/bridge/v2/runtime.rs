@@ -66,6 +66,10 @@ const CAPABILITIES_REFRESH: Duration = Duration::from_secs(600);
 const NO_ACCESS: &str = "You don't have access to do that with this agent.";
 /// How often the bot's Inline connection is checked.
 const CONNECTION_CHECK: Duration = Duration::from_secs(5);
+/// The first wait before trying the allowlist import again; it doubles up to
+/// [`MAX_RECONNECT_DELAY`] for [`ALLOWLIST_IMPORT_ATTEMPTS`] tries.
+const ALLOWLIST_IMPORT_RETRY: Duration = Duration::from_secs(15);
+const ALLOWLIST_IMPORT_ATTEMPTS: u32 = 8;
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(300);
 
 /// Backoff for resuming a client that stopped receiving events.
@@ -315,6 +319,9 @@ pub(crate) struct Runtime {
     reconnect: Reconnect,
     /// The harness health the last heartbeat reported.
     reported_health: Option<RuntimeHealth>,
+    /// Told the harness health at every heartbeat, so the local service
+    /// status matches what the apps show.
+    health_observer: Option<HealthObserver>,
     /// What the apps were last told, republished when the catalog changes.
     published: Option<Vec<BotCapability>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
@@ -422,6 +429,7 @@ impl Runtime {
             folder_source: None,
             reconnect: Reconnect::default(),
             reported_health: None,
+            health_observer: None,
             published: None,
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
@@ -459,6 +467,14 @@ impl Runtime {
     }
 
     /// Publishes installed skills and answers `/skill-name`.
+    pub(crate) fn with_health_observer(
+        mut self,
+        observer: impl Fn(&RuntimeHealth) + Send + Sync + 'static,
+    ) -> Self {
+        self.health_observer = Some(Box::new(observer));
+        self
+    }
+
     pub(crate) fn with_skills(mut self, publisher: SkillPublisher) -> Self {
         self.skills = Some(publisher);
         self
@@ -480,12 +496,28 @@ impl Runtime {
         events: &mut LosslessEventReceiver,
         shutdown: impl std::future::Future<Output = ()>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.config.allowlist.is_empty()
-            && let Err(error) =
-                api::import_grants(&self.agent.bot, self.config.allowlist.clone()).await
-        {
-            log::warn!(target: "inline::bridge::v2", "allowlist import failed: {error}");
-        }
+        // Imported before recovery, so replayed requests from allowlisted
+        // people find their grants. A passing failure (the connection still
+        // coming up) is retried in the background, a refusal never.
+        let _allowlist_import = if self.config.allowlist.is_empty() {
+            None
+        } else {
+            let user_ids = self.config.allowlist.clone();
+            match api::import_grants(&self.agent.bot, user_ids.clone()).await {
+                Ok(()) => None,
+                Err(error) if error.is_permanent() => {
+                    log_allowlist_import_failure(&error);
+                    None
+                }
+                Err(error) => {
+                    log_allowlist_import_deferred(&error, ALLOWLIST_IMPORT_RETRY);
+                    Some(skills::AbortOnDrop::spawn(retry_allowlist_import(
+                        self.agent.bot.clone(),
+                        user_ids,
+                    )))
+                }
+            }
+        };
         self.recover().await;
         self.publish_capabilities().await;
         let _skill_sync = self.skills.clone().map(SkillPublisher::spawn);
@@ -697,6 +729,9 @@ impl Runtime {
     async fn heartbeat(&mut self) -> Duration {
         self.publish_capabilities().await;
         let health = self.agent.harness.describe().health;
+        if let Some(observer) = &self.health_observer {
+            observer(&health);
+        }
         let (status, setup) = runtime_status(&health, &self.config.agent_name);
         let reported = self.report_status(status, setup).await;
         if reported.is_some() {
@@ -1814,7 +1849,11 @@ impl Runtime {
             })
             .await
         {
-            log::warn!(target: "inline::bridge::v2", "settings answer failed: {error}");
+            // The code (and the server's reason, which names the rule a
+            // document broke) lead, so the error report groups by them.
+            let error = api::ApiError::from(error);
+            let code = error.log_code();
+            log::warn!(target: "inline::bridge::v2", "settings answer failed {code}: {error}");
         }
     }
 
@@ -4634,6 +4673,64 @@ fn output_mode(mode: i32) -> OutputMode {
         Ok(proto::AgentOutputMode::Friendly) => OutputMode::Friendly,
         _ => OutputMode::Detailed,
     }
+}
+
+/// Tries the allowlist import again while the failure is a passing one. The
+/// server only imports into a bot with no grants yet, so a repeat after a
+/// lost answer changes nothing.
+async fn retry_allowlist_import(bot: InlineClient, user_ids: Vec<i64>) {
+    let mut delay = ALLOWLIST_IMPORT_RETRY;
+    for attempt in 1..=ALLOWLIST_IMPORT_ATTEMPTS {
+        tokio::time::sleep(delay).await;
+        match api::import_grants(&bot, user_ids.clone()).await {
+            Ok(()) => return,
+            Err(error) if error.is_permanent() || attempt == ALLOWLIST_IMPORT_ATTEMPTS => {
+                log_allowlist_import_failure(&error);
+                return;
+            }
+            Err(error) => {
+                delay = (delay * 2).min(MAX_RECONNECT_DELAY);
+                log_allowlist_import_deferred(&error, delay);
+            }
+        }
+    }
+}
+
+/// The error's code comes first, so the bridge's error report groups by it
+/// (`allowlist_import_failed_permission_denied`) even when the detail after
+/// the colon is withheld.
+fn log_allowlist_import_failure(error: &api::ApiError) {
+    let code = error.log_code();
+    log::warn!(target: "inline::bridge::v2", "allowlist import failed {code}: {error}");
+}
+
+/// A passing failure is not an error report: it says what happened and when
+/// the next try is, without the word the report filter looks for.
+fn log_allowlist_import_deferred(error: &api::ApiError, retry_in: Duration) {
+    log::info!(
+        target: "inline::bridge::v2",
+        "allowlist import deferred ({}), retrying in {}s",
+        error.code(),
+        retry_in.as_secs()
+    );
+}
+
+type HealthObserver = Box<dyn Fn(&RuntimeHealth) + Send + Sync>;
+
+pub(crate) fn needs_sign_in(health: &RuntimeHealth) -> bool {
+    matches!(
+        health,
+        RuntimeHealth::NeedsSetup {
+            reason: SetupReason::SignIn
+        }
+    )
+}
+
+/// The fix a harness needing setup asks for, as the apps word it.
+pub(crate) fn setup_text(health: &RuntimeHealth, agent_name: &str) -> Option<String> {
+    runtime_status(health, agent_name)
+        .1
+        .and_then(|setup| setup.text)
 }
 
 /// What the apps show for the harness's health: online, or what to fix.

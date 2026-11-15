@@ -21,6 +21,9 @@ use super::runtime::INLINE_COMMANDS;
 const REFRESH: Duration = Duration::from_secs(5 * 60);
 const AMP_LIST_TIMEOUT: Duration = Duration::from_secs(20);
 const PUBLISH_TIMEOUT: Duration = Duration::from_secs(20);
+/// The first wait after a passing publish failure; it doubles up to
+/// [`REFRESH`].
+const PUBLISH_RETRY: Duration = Duration::from_secs(30);
 // Server limits, from `bot.skillsShared.ts` and `bot.commandsShared.ts`.
 const SKILL_LIMIT: usize = 250;
 const SKILL_KEY_LIMIT: usize = 256;
@@ -41,7 +44,7 @@ pub(crate) struct Skill {
 impl Skill {
     fn new(key: &str, description: Option<&str>) -> Option<Self> {
         let key = key.trim();
-        (!key.is_empty() && key.chars().count() <= SKILL_KEY_LIMIT).then(|| Self {
+        (!key.is_empty() && utf16_len(key) <= SKILL_KEY_LIMIT).then(|| Self {
             key: key.to_owned(),
             description: description
                 .map(str::trim)
@@ -57,8 +60,21 @@ impl Skill {
     }
 }
 
+/// The server counts lengths in UTF-16 units (JavaScript's `length`), so an
+/// emoji takes two.
+fn utf16_len(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
+}
+
+/// At most `limit` UTF-16 units, cut between characters.
 fn truncated(text: &str, limit: usize) -> String {
-    text.chars().take(limit).collect()
+    let mut used = 0;
+    text.chars()
+        .take_while(|character| {
+            used += character.len_utf16();
+            used <= limit
+        })
+        .collect()
 }
 
 fn normalized_command(name: &str) -> String {
@@ -398,6 +414,12 @@ pub(crate) struct SkillPublisher {
     pub(crate) bot_token: String,
 }
 
+impl AbortOnDrop {
+    pub(crate) fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) -> Self {
+        Self(tokio::spawn(future))
+    }
+}
+
 impl SkillPublisher {
     pub(crate) fn spawn(self) -> AbortOnDrop {
         AbortOnDrop(tokio::spawn(self.keep_published()))
@@ -405,22 +427,50 @@ impl SkillPublisher {
 
     async fn keep_published(self) {
         let mut published = None;
+        // A catalog the server refused as it is: not sent again until it
+        // changes, so a bad skill does not fail every refresh.
+        let mut refused: Option<Vec<Skill>> = None;
+        let mut retry = PUBLISH_RETRY;
         loop {
+            let mut wait = REFRESH;
             if let Some(skills) = self.catalog.list(&self.folder).await
                 && published.as_ref() != Some(&skills)
+                && refused.as_ref() != Some(&skills)
             {
                 match self.publish(&skills).await {
-                    Ok(()) => published = Some(skills),
+                    Ok(()) => {
+                        published = Some(skills);
+                        refused = None;
+                        retry = PUBLISH_RETRY;
+                    }
+                    Err(error) if error.permanent => {
+                        log::warn!(
+                            target: "inline::bridge::v2",
+                            "skill sync failed {}: {}",
+                            error.code,
+                            error.detail
+                        );
+                        refused = Some(skills);
+                    }
                     Err(error) => {
-                        log::warn!(target: "inline::bridge::v2", "skill sync failed: {error}");
+                        // Usually the connection coming up with the bridge:
+                        // soon again, without an error report.
+                        log::info!(
+                            target: "inline::bridge::v2",
+                            "skill sync deferred ({}), retrying in {}s",
+                            error.code,
+                            retry.as_secs()
+                        );
+                        wait = retry;
+                        retry = (retry * 2).min(REFRESH);
                     }
                 }
             }
-            tokio::time::sleep(REFRESH).await;
+            tokio::time::sleep(wait).await;
         }
     }
 
-    async fn publish(&self, skills: &[Skill]) -> Result<(), String> {
+    async fn publish(&self, skills: &[Skill]) -> Result<(), PublishError> {
         publish_to_bot(
             &self.api_base_url,
             &self.bot_token,
@@ -431,17 +481,80 @@ impl SkillPublisher {
     }
 }
 
+/// Why a publish did not land. `code` is stable and id-free
+/// (`setmyskills_bad_request`), so it leads the log line the error report
+/// groups by; `detail` is for the local log.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct PublishError {
+    pub(crate) code: String,
+    pub(crate) detail: String,
+    /// The same request gets the same answer: a refusal, not a lost
+    /// connection, a timeout, a rate limit or a server error.
+    pub(crate) permanent: bool,
+}
+
+impl PublishError {
+    fn transport(method: &str, error: reqwest::Error) -> Self {
+        let kind = if error.is_timeout() {
+            "timeout"
+        } else if error.is_connect() {
+            "connect"
+        } else if error.is_decode() {
+            "decode"
+        } else {
+            "request"
+        };
+        Self {
+            code: format!("{}_{kind}", method.to_ascii_lowercase()),
+            detail: error.without_url().to_string(),
+            permanent: false,
+        }
+    }
+
+    fn status(method: &str, status: reqwest::StatusCode) -> Self {
+        let reason = status
+            .canonical_reason()
+            .unwrap_or("unknown")
+            .to_ascii_lowercase()
+            .replace([' ', '-'], "_")
+            .replace('\'', "");
+        Self {
+            code: format!("{}_{reason}", method.to_ascii_lowercase()),
+            detail: format!("{method} returned {status}"),
+            permanent: status.is_client_error()
+                && status != reqwest::StatusCode::REQUEST_TIMEOUT
+                && status != reqwest::StatusCode::TOO_MANY_REQUESTS,
+        }
+    }
+
+    fn rejected(method: &str, envelope: &Value) -> Self {
+        let code = envelope
+            .get("error_code")
+            .and_then(Value::as_i64)
+            .map_or_else(|| "unknown".to_owned(), |code| code.to_string());
+        Self {
+            code: format!("{}_rejected", method.to_ascii_lowercase()),
+            detail: format!("{method} was rejected (error_code {code})"),
+            permanent: true,
+        }
+    }
+}
+
 async fn publish_to_bot(
     api_base_url: &str,
     bot_token: &str,
     provider_id: &str,
     skills: &[Skill],
-) -> Result<(), String> {
+) -> Result<(), PublishError> {
     let base = crate::bridge::setup::agent_command_catalog(provider_id);
     let client = crate::identity::http_client_builder()
         .timeout(PUBLISH_TIMEOUT)
         .build()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| PublishError {
+            code: "http_client".to_owned(),
+            detail: error.to_string(),
+            permanent: false,
+        })?;
     for (method, body) in [
         ("setMySkills", skills_body(skills)),
         (
@@ -455,17 +568,24 @@ async fn publish_to_bot(
             .json(&body)
             .send()
             .await
-            .map_err(|error| error.without_url().to_string())?;
+            .map_err(|error| PublishError::transport(method, error))?;
         let status = response.status();
         if !status.is_success() {
-            return Err(format!("{method} returned {status}"));
+            let mut error = PublishError::status(method, status);
+            // The Bot API says which rule a refused request broke.
+            if let Ok(body) = response.json::<Value>().await
+                && let Some(description) = body.get("description").and_then(Value::as_str)
+            {
+                error.detail = format!("{}: {}", error.detail, truncated(description, 200));
+            }
+            return Err(error);
         }
         let envelope: Value = response
             .json()
             .await
-            .map_err(|error| error.without_url().to_string())?;
+            .map_err(|error| PublishError::transport(method, error))?;
         if envelope.get("ok").and_then(Value::as_bool) == Some(false) {
-            return Err(format!("{method} was rejected"));
+            return Err(PublishError::rejected(method, &envelope));
         }
     }
     Ok(())
@@ -740,6 +860,56 @@ mod tests {
         assert!(requests[0].contains("\"key\":\"gh-fix-ci\""));
         assert!(requests[1].contains("\"command\":\"gh_fix_ci\""));
         assert!(requests[1].contains("\"command\":\"help\""));
+    }
+
+    #[test]
+    fn a_refusal_is_permanent_and_named_without_ids() {
+        let refused = PublishError::status("setMySkills", reqwest::StatusCode::BAD_REQUEST);
+        assert_eq!(refused.code, "setmyskills_bad_request");
+        assert!(refused.permanent);
+        let unauthorized = PublishError::status("setMyCommands", reqwest::StatusCode::UNAUTHORIZED);
+        assert_eq!(unauthorized.code, "setmycommands_unauthorized");
+        for passing in [
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::REQUEST_TIMEOUT,
+            reqwest::StatusCode::BAD_GATEWAY,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(
+                !PublishError::status("setMySkills", passing).permanent,
+                "{passing}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_is_a_passing_failure() {
+        // Bound then dropped: nothing listens there.
+        let address = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let error = publish_to_bot(
+            &format!("http://{address}/v1"),
+            "bot-token",
+            "claude",
+            &[skill("a", None)],
+        )
+        .await
+        .unwrap_err();
+        assert!(!error.permanent);
+        assert!(error.code.starts_with("setmyskills_"), "{}", error.code);
+        assert!(!error.detail.contains("bot-token"));
+    }
+
+    /// The server measures in UTF-16 units, so an emoji counts twice.
+    #[test]
+    fn limits_count_like_the_server() {
+        let text = "\u{1F600}".repeat(200);
+        assert_eq!(utf16_len(&truncated(&text, COMMAND_DESCRIPTION_LIMIT)), 256);
+        assert_eq!(truncated("ab\u{1F600}", 3), "ab");
+        assert!(Skill::new(&"\u{1F600}".repeat(129), None).is_none());
+        assert!(Skill::new(&"\u{1F600}".repeat(128), None).is_some());
     }
 
     #[test]
