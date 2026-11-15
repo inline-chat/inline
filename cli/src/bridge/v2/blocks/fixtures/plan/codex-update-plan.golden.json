@@ -1,0 +1,118 @@
+[
+  {
+    "label": "progress 1 · live after event 2",
+    "text": "Working · 2s\nRan cargo test -p inline-cli render · 2s\n$ cargo test -p inline-cli render\nok\n[x] Inspect render.rs\n[>] Add the pinned plan\n[ ] Write goldens",
+    "markdown": false,
+    "blocks": [
+      {
+        "disclosure": {
+          "summary": "Working",
+          "kind": 1,
+          "initially_open": true,
+          "children": [
+            {
+              "disclosure": {
+                "summary": "Ran cargo test -p inline-cli render",
+                "children": [
+                  {
+                    "code": {
+                      "text": "$ cargo test -p inline-cli render",
+                      "language": "sh"
+                    }
+                  },
+                  {
+                    "code": {
+                      "text": "ok"
+                    }
+                  }
+                ],
+                "activity_kind": "ACTIVITY_KIND_COMMAND",
+                "status": "BLOCK_STATUS_DONE",
+                "meta": "2s"
+              }
+            }
+          ],
+          "meta": "2s",
+          "started_at": 1
+        }
+      },
+      {
+        "steps": {
+          "steps": [
+            {
+              "text": "Inspect render.rs",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Add the pinned plan",
+              "status": "BLOCK_STATUS_RUNNING"
+            },
+            {
+              "text": "Write goldens",
+              "status": "BLOCK_STATUS_PENDING"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "progress 1",
+    "text": "Worked for 1m 1s\nRan cargo test -p inline-cli render · 2s\n$ cargo test -p inline-cli render\nok\n[x] Inspect render.rs\n[x] Add the pinned plan\n[x] Write goldens",
+    "markdown": false,
+    "blocks": [
+      {
+        "disclosure": {
+          "summary": "Worked for 1m 1s",
+          "children": [
+            {
+              "disclosure": {
+                "summary": "Ran cargo test -p inline-cli render",
+                "children": [
+                  {
+                    "code": {
+                      "text": "$ cargo test -p inline-cli render",
+                      "language": "sh"
+                    }
+                  },
+                  {
+                    "code": {
+                      "text": "ok"
+                    }
+                  }
+                ],
+                "activity_kind": "ACTIVITY_KIND_COMMAND",
+                "status": "BLOCK_STATUS_DONE",
+                "meta": "2s"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "steps": {
+          "steps": [
+            {
+              "text": "Inspect render.rs",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Add the pinned plan",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Write goldens",
+              "status": "BLOCK_STATUS_DONE"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "final",
+    "text": "The plan now stays pinned under the progress message.",
+    "markdown": true,
+    "blocks": []
+  }
+]

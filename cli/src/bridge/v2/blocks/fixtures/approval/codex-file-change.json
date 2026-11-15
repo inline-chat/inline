@@ -1,0 +1,59 @@
+{
+  "source": "Codex app-server v2 item/fileChange/requestApproval after item/started for the fileChange (its changes carry the diff).",
+  "native": {
+    "method": "item/fileChange/requestApproval",
+    "id": 43,
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-1",
+      "itemId": "item-f1",
+      "reason": "Guard the empty case",
+      "grantRoot": null
+    }
+  },
+  "input": {
+    "agent": "Codex",
+    "folder": "/work/inline",
+    "diffs": [
+      {
+        "path": "/work/inline/src/parser.ts",
+        "change": {
+          "kind": "update"
+        },
+        "diff": "@@ -40,6 +40,9 @@ export function tokenize(input: string) {\n-  const first = tokens[0]\n+  if (tokens.length === 0) {\n+    return []\n+  }\n+  const first = tokens[0]"
+      }
+    ],
+    "interaction": {
+      "id": "43",
+      "item": "item-f1",
+      "kind": {
+        "kind": "approval",
+        "subject": {
+          "kind": "file_change",
+          "paths": [
+            "/work/inline/src/parser.ts"
+          ],
+          "reason": "Guard the empty case"
+        },
+        "decisions": [
+          {
+            "id": "accept",
+            "label": "Yes, proceed",
+            "kind": "accept"
+          },
+          {
+            "id": "acceptForSession",
+            "label": "Yes, and don't ask again for these files",
+            "kind": "accept_for_session"
+          },
+          {
+            "id": "cancel",
+            "label": "No, and tell Codex what to do differently",
+            "kind": "cancel",
+            "accepts_message": true
+          }
+        ]
+      }
+    }
+  }
+}

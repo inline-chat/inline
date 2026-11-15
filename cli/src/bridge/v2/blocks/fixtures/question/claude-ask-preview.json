@@ -1,0 +1,62 @@
+{
+  "source": "Claude Code 2.1 AskUserQuestion can_use_tool input: questions with header, multiSelect and options with label, description and preview.",
+  "native": {
+    "type": "control_request",
+    "request_id": "req-ask-2",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "tool_use_id": "toolu_ask2",
+      "input": {
+        "questions": [
+          {
+            "question": "How should the empty state look?",
+            "header": "Empty state",
+            "multiSelect": false,
+            "options": [
+              {
+                "label": "Inline hint (Recommended)",
+                "description": "One muted line under the composer",
+                "preview": "┌──────────────────┐\n│  No messages yet │\n└──────────────────┘"
+              },
+              {
+                "label": "Illustration",
+                "description": "A centered image with a title",
+                "preview": "   ( ◕ ‿ ◕ )\n  Say hello!"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "input": {
+    "agent": "Claude",
+    "form": {
+      "fields": [
+        {
+          "id": "How should the empty state look?",
+          "header": "Empty state",
+          "prompt": "How should the empty state look?",
+          "input": {
+            "kind": "select",
+            "allow_other": true,
+            "options": [
+              {
+                "label": "Inline hint (Recommended)",
+                "description": "One muted line under the composer",
+                "preview": "┌──────────────────┐\n│  No messages yet │\n└──────────────────┘"
+              },
+              {
+                "label": "Illustration",
+                "description": "A centered image with a title",
+                "preview": "   ( ◕ ‿ ◕ )\n  Say hello!"
+              }
+            ]
+          },
+          "required": true
+        }
+      ]
+    }
+  }
+}

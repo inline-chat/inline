@@ -1,0 +1,76 @@
+[
+  {
+    "label": "open",
+    "text": "Codex asks for more permissions\nReason: Write outside the workspace\nPermissions: Write access to /Users/dena/.cache/inline",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_PERMISSIONS",
+          "title": "Codex asks for more permissions",
+          "reason": "Write outside the workspace",
+          "children": [
+            {
+              "fields": {
+                "fields": [
+                  {
+                    "label": "Permissions",
+                    "value": "Write access to /Users/dena/.cache/inline"
+                  }
+                ]
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Yes, grant these permissions",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "No",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Codex asks for more permissions\nReason: Write outside the workspace\nPermissions: Write access to /Users/dena/.cache/inline\nYes, grant these permissions (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_PERMISSIONS",
+          "title": "Codex asks for more permissions",
+          "reason": "Write outside the workspace",
+          "children": [
+            {
+              "fields": {
+                "fields": [
+                  {
+                    "label": "Permissions",
+                    "value": "Write access to /Users/dena/.cache/inline"
+                  }
+                ]
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Yes, grant these permissions (answered by Dena)"
+      }
+    ]
+  }
+]

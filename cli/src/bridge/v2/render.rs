@@ -18,13 +18,15 @@ use std::path::{Path, PathBuf};
 
 use inline_agent_bridge::harness::{
     ApprovalSubject, ChildRef, ClosedBy, CommandAction, Decision, DecisionKind, Envelope, Event,
-    FieldInput, FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId,
-    InteractionKind, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole, NoticeLevel,
-    OutputMode, QuestionForm, TurnPhase,
+    FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId, InteractionKind,
+    Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole, NoticeLevel, OutputMode,
+    QuestionForm, TurnPhase,
 };
-use inline_agent_bridge::{AgentMessagePhase, PlanStepStatus, TurnId, TurnOutcome};
+use inline_agent_bridge::{AgentMessagePhase, PlanStep, TurnId, TurnOutcome};
 use serde_json::Value;
 
+pub(crate) use super::blocks::question::{QUESTION_FORM_ID, pick_card, pickable, takes_reply};
+use super::blocks::{self, DecisionState, Resolution};
 use super::doc::{ActivityKind, CalloutKind, DiffChange, Doc, DocBuilder, Elapsed, Status};
 use super::limits;
 
@@ -71,6 +73,9 @@ pub(crate) enum RenderOp {
     Update { doc: Doc },
     /// The final answer: a separate message that notifies.
     Final { doc: Doc },
+    /// A Codex plan to approve, after the turn that proposed it, with the
+    /// `plan_proposal` buttons (approve, keep planning).
+    PlanProposal { doc: Doc },
     /// An approval or question card. `form` is set for questions.
     Card {
         interaction: InteractionId,
@@ -144,8 +149,17 @@ pub(crate) struct Renderer {
     pending_text: Option<(String, String)>,
     final_answer: Option<String>,
     interactions: HashMap<InteractionId, Interaction>,
+    /// The changes an open approval is about, for its card when it closes.
+    card_diffs: HashMap<InteractionId, Vec<FileDiff>>,
     /// People who answered cards, by user ID.
     names: HashMap<i64, String>,
+    /// The main agent's latest task list this turn, pinned under its
+    /// progress (Claude `TodoWrite`, Codex `update_plan`).
+    plan: Option<Vec<PlanStep>>,
+    /// A plan Codex proposed this turn, to approve after it.
+    proposed_plan: Option<String>,
+    /// Codex's review this turn, as it wrote it.
+    review: Option<String>,
 }
 
 impl Renderer {
@@ -165,7 +179,11 @@ impl Renderer {
             pending_text: None,
             final_answer: None,
             interactions: HashMap::new(),
+            card_diffs: HashMap::new(),
             names: HashMap::new(),
+            plan: None,
+            proposed_plan: None,
+            review: None,
         }
     }
 
@@ -200,6 +218,9 @@ impl Renderer {
                     self.turn_inputs = inputs.clone();
                     self.final_answer = None;
                     self.pending_text = None;
+                    self.plan = None;
+                    self.proposed_plan = None;
+                    self.review = None;
                     // Detailed shows "Working" from the start, as v1 did,
                     // even for a turn that only answers.
                     if self.mode == OutputMode::Detailed {
@@ -225,16 +246,24 @@ impl Renderer {
                     self.turn_inputs.push(id.clone());
                     self.flush_pending_update(&mut ops);
                     let elapsed = self.slot_elapsed(now);
-                    self.end_slot(elapsed, "Worked for", &mut ops);
+                    self.end_slot(elapsed, "Worked for", false, &mut ops);
                 }
             }
             Event::Item(item) => self.item(item, now, &mut ops),
             Event::Interaction(interaction) => self.interaction(interaction, &mut ops),
             Event::InteractionClosed { id, by } => {
                 if let Some(interaction) = self.interactions.remove(id) {
+                    let diffs = self.card_diffs.remove(id).unwrap_or_default();
                     ops.push(RenderOp::CardClosed {
                         interaction: id.clone(),
-                        doc: closed_card(&interaction, by, &self.names),
+                        doc: closed_card(
+                            &self.agent,
+                            &interaction,
+                            by,
+                            &self.names,
+                            &diffs,
+                            self.folder.as_deref(),
+                        ),
                     });
                 }
                 self.mark_rows_waiting(None);
@@ -261,7 +290,12 @@ impl Renderer {
             // it ends here and the next output starts a fresh one.
             Event::Gap { .. } => {
                 let elapsed = self.slot_elapsed(now);
-                self.end_slot(elapsed, "Some updates were skipped · worked for", &mut ops);
+                self.end_slot(
+                    elapsed,
+                    "Some updates were skipped · worked for",
+                    false,
+                    &mut ops,
+                );
             }
             _ => {}
         }
@@ -278,6 +312,7 @@ impl Renderer {
         {
             return;
         }
+        self.surfaces(item);
         let is_message = item.kind == ItemKind::Message;
         if self.mode == OutputMode::Friendly {
             self.friendly_item(item, &id, ops);
@@ -340,6 +375,35 @@ impl Renderer {
         self.push_progress(ops);
     }
 
+    /// Items that are their own surface: the task list pinned under the
+    /// progress, a Codex plan to approve, a Codex review.
+    fn surfaces(&mut self, item: &Item) {
+        let Some(body) = item.update.body() else {
+            return;
+        };
+        match body {
+            ItemBody::Plan { steps, .. } if item.parent.is_none() && !steps.is_empty() => {
+                self.plan = Some(steps.clone());
+            }
+            ItemBody::Plan {
+                steps,
+                text: Some(text),
+                ..
+            } if self.vocabulary == Vocabulary::Codex
+                && item.parent.is_none()
+                && steps.is_empty()
+                && !text.trim().is_empty()
+                && matches!(item.update, ItemUpdate::Completed { .. }) =>
+            {
+                self.proposed_plan = Some(text.clone());
+            }
+            ItemBody::Review { text } if item.parent.is_none() && !text.trim().is_empty() => {
+                self.review = Some(text.clone());
+            }
+            _ => {}
+        }
+    }
+
     fn open_slot(&mut self, now: u64) {
         if self.slot.is_none() {
             self.slot = Some(Slot {
@@ -386,17 +450,20 @@ impl Renderer {
             .filter(|(_, row)| row.parent.is_none())
             .map(|(index, _)| index)
             .collect();
+        // A row the message doesn't show (Codex's plan, which never
+        // completes) doesn't hold the split back.
         let finished = tops
             .iter()
             .take_while(|&&index| {
-                !matches!(slot.rows[index].status, Status::Running | Status::Waiting)
+                let row = &slot.rows[index];
+                !matches!(row.status, Status::Running | Status::Waiting) || !shows(row)
             })
             .count();
         // A longer prefix is never smaller, so the longest that fits is found
         // by bisection.
         let fits = |count: usize| {
             let part = subset(slot, &tops[..count]);
-            limits::progress_fits(&self.ended_doc(&part, &summary))
+            limits::progress_fits(&self.ended_doc(&part, &summary, false))
         };
         let (mut low, mut high) = (0, finished);
         while low < high {
@@ -423,7 +490,7 @@ impl Renderer {
         };
         ops.push(RenderOp::EndProgress {
             slot: slot.id,
-            doc: self.ended_doc(&kept, &summary),
+            doc: self.ended_doc(&kept, &summary, false),
         });
         self.next_slot += 1;
         self.turn_slots += 1;
@@ -431,13 +498,17 @@ impl Renderer {
         true
     }
 
-    /// A finished message: closed, under its summary.
-    fn ended_doc(&self, slot: &Slot, summary: &str) -> Doc {
+    /// A finished message: closed, under its summary, and with `plan` the
+    /// turn's task list under it, compact.
+    fn ended_doc(&self, slot: &Slot, summary: &str, plan: bool) -> Doc {
         let mut builder = DocBuilder::new();
         if slot.rows.is_empty() {
             builder.footer(summary);
         } else {
             builder.progress(summary, false, None, |inner| self.write_slot(inner, slot));
+        }
+        if plan && let Some(steps) = &self.plan {
+            blocks::plan::pinned(&mut builder, steps, true);
         }
         builder.finish()
     }
@@ -487,19 +558,30 @@ impl Renderer {
             InteractionKind::Dialog { .. } => {}
             InteractionKind::Approval { subject, decisions } => {
                 self.mark_rows_waiting(interaction.item.as_ref().map(ToString::to_string));
+                let actions = card_actions(subject, decisions);
+                let diffs = self.item_diffs(interaction.item.as_ref().map(ToString::to_string));
+                let doc = blocks::approval::card(
+                    &self.agent,
+                    subject,
+                    &diffs,
+                    self.folder.as_deref(),
+                    &blocks::action_ids(actions.len()),
+                    &Resolution::pending(),
+                );
                 ops.push(RenderOp::Card {
                     interaction: interaction.id.clone(),
-                    doc: approval_card(&self.agent, subject),
-                    actions: decisions.iter().map(card_action).collect(),
+                    doc,
+                    actions,
                     form: None,
                 });
+                self.card_diffs.insert(interaction.id.clone(), diffs);
                 self.interactions
                     .insert(interaction.id.clone(), interaction.clone());
             }
             InteractionKind::Question { form } => {
                 ops.push(RenderOp::Card {
                     interaction: interaction.id.clone(),
-                    doc: question_card(&self.agent, form),
+                    doc: blocks::question::card(&self.agent, form),
                     actions: Vec::new(),
                     form: Some(form.clone()),
                 });
@@ -508,6 +590,23 @@ impl Renderer {
             }
         }
         self.push_progress(ops);
+    }
+
+    /// The changes of the item an approval is about, when the harness
+    /// reported them (a Codex file change before its approval).
+    fn item_diffs(&self, item: Option<String>) -> Vec<FileDiff> {
+        let Some(item) = item else {
+            return Vec::new();
+        };
+        self.slot
+            .iter()
+            .flat_map(|slot| &slot.rows)
+            .find(|row| row.id == item)
+            .and_then(|row| match &row.body {
+                Some(ItemBody::FileChange { changes }) => Some(changes.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     fn mark_rows_waiting(&mut self, item: Option<String>) {
@@ -522,7 +621,7 @@ impl Renderer {
         }
     }
 
-    fn end_slot(&mut self, elapsed_ms: u64, verb: &str, ops: &mut Vec<RenderOp>) {
+    fn end_slot(&mut self, elapsed_ms: u64, verb: &str, plan: bool, ops: &mut Vec<RenderOp>) {
         let Some(id) = self.slot.as_ref().map(|slot| slot.id) else {
             return;
         };
@@ -547,9 +646,10 @@ impl Renderer {
                     ..slot.clone()
                 },
                 &summary,
+                plan,
             )
         } else {
-            self.ended_doc(&slot, &summary)
+            self.ended_doc(&slot, &summary, plan)
         };
         ops.push(RenderOp::EndProgress { slot: id, doc });
     }
@@ -588,14 +688,46 @@ impl Renderer {
         } else {
             self.slot_elapsed(now)
         };
-        self.end_slot(elapsed, verb, ops);
+        self.end_slot(elapsed, verb, true, ops);
         self.turn_slots = 0;
-        if let Some(text) = self.final_answer.take()
-            && !text.trim().is_empty()
-            && !is_quiet_marker(&text)
+        let answer = self
+            .final_answer
+            .take()
+            .filter(|text| !text.trim().is_empty() && !is_quiet_marker(text));
+        // Codex repeats its review as the answer: it goes out once, as a
+        // review block.
+        match (self.review.take(), answer) {
+            (Some(review), Some(answer)) if review.trim() == answer.trim() => {
+                ops.push(RenderOp::Final {
+                    doc: blocks::review::codex(&review, self.folder.as_deref()),
+                });
+            }
+            (review, answer) => {
+                if let Some(review) = review {
+                    ops.push(RenderOp::Final {
+                        doc: blocks::review::codex(&review, self.folder.as_deref()),
+                    });
+                }
+                if let Some(answer) = answer {
+                    ops.push(RenderOp::Final {
+                        doc: Doc::markdown(&answer),
+                    });
+                }
+            }
+        }
+        if let Some(plan) = self.proposed_plan.take()
+            && outcome == TurnOutcome::Completed
         {
-            ops.push(RenderOp::Final {
-                doc: Doc::markdown(&text),
+            ops.push(RenderOp::PlanProposal {
+                doc: blocks::plan_proposal::card(
+                    &self.agent,
+                    &plan,
+                    &[
+                        blocks::plan_proposal::APPROVE.to_owned(),
+                        blocks::plan_proposal::KEEP_PLANNING.to_owned(),
+                    ],
+                    &Resolution::pending(),
+                ),
             });
         }
         if let Some(error) = error
@@ -634,6 +766,9 @@ impl Renderer {
             text,
         });
         builder.progress("Working", true, elapsed, |inner| self.write_rows(inner));
+        if let Some(steps) = &self.plan {
+            blocks::plan::pinned(&mut builder, steps, false);
+        }
         builder.finish()
     }
 
@@ -905,7 +1040,12 @@ fn shows(row: &Row) -> bool {
             Some(ItemBody::Reasoning { summary, .. }) => !has_text(summary),
             _ => true,
         };
-    !(held_message || silent_reasoning)
+    // The main agent's task list is pinned under the rows instead; a review
+    // goes out as its own message.
+    let pinned_plan = row.parent.is_none()
+        && matches!(&row.body, Some(ItemBody::Plan { steps, .. }) if !steps.is_empty());
+    let review = row.kind == ItemKind::Review;
+    !(held_message || silent_reasoning || pinned_plan || review)
 }
 
 fn starts_phase(row: &Row) -> bool {
@@ -1189,29 +1329,6 @@ fn first_line(text: &str, max: usize) -> String {
     }
 }
 
-/// The start of a long text, such as a command a card shows in full.
-fn head(text: &str) -> String {
-    if text.chars().count() <= MAX_DETAIL_CHARS {
-        return text.to_owned();
-    }
-    let shown: String = text.chars().take(MAX_DETAIL_CHARS).collect();
-    format!("{shown}…")
-}
-
-/// Paths one per line, the first 50 of a long list and a count of the rest.
-fn path_list(paths: &[std::path::PathBuf]) -> String {
-    const SHOWN: usize = 50;
-    let mut lines: Vec<String> = paths
-        .iter()
-        .take(SHOWN)
-        .map(|path| path.display().to_string())
-        .collect();
-    if paths.len() > SHOWN {
-        lines.push(format!("and {} more", paths.len() - SHOWN));
-    }
-    lines.join("\n")
-}
-
 /// The end of a long text from a line start, with the hidden line count, as
 /// Codex's output previews show it ("… +120 lines").
 /// Hides credentials (assignments, auth headers, secret flags, URL
@@ -1354,6 +1471,11 @@ fn row_title(
             };
             (title, None, activity)
         }
+        ItemBody::Plan { steps, .. } if steps.is_empty() => (
+            "Proposed a plan".to_owned(),
+            None,
+            ActivityKind::Unspecified,
+        ),
         ItemBody::Plan { .. } => (
             match vocabulary {
                 Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => "Updated Plan",
@@ -1363,6 +1485,7 @@ fn row_title(
             None,
             ActivityKind::Unspecified,
         ),
+        ItemBody::Review { .. } => ("Reviewed".to_owned(), None, ActivityKind::Unspecified),
         ItemBody::Child { action, prompt, .. } => {
             let label = match vocabulary {
                 Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => "Sub-agent",
@@ -1501,27 +1624,15 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
             steps,
             text,
         } => {
+            // A sub-agent's task list; the main agent's is pinned instead.
             if let Some(explanation) = explanation {
                 builder.paragraph(explanation);
             }
-            if !steps.is_empty() {
-                let steps: Vec<(String, Status)> = steps
-                    .iter()
-                    .map(|step| {
-                        (
-                            step.text.clone(),
-                            match step.status {
-                                PlanStepStatus::Completed => Status::Done,
-                                PlanStepStatus::InProgress => Status::Running,
-                                PlanStepStatus::Pending => Status::None,
-                            },
-                        )
-                    })
-                    .collect();
-                builder.steps(&steps);
-            }
-            if let Some(text) = text.as_deref().or((!delta.is_empty()).then_some(delta)) {
-                builder.paragraph(&tail(text));
+            blocks::plan::pinned(builder, steps, false);
+            // A proposed plan's text is on its card; only a streaming one
+            // shows here.
+            if text.as_deref().is_none_or(|text| text.trim().is_empty()) && !delta.is_empty() {
+                builder.paragraph(&tail(delta));
             }
         }
         ItemBody::Error { message } => builder.paragraph(message),
@@ -1529,7 +1640,15 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
     }
 }
 
-fn card_action(decision: &Decision) -> CardAction {
+/// An approval's buttons: a plan's read Approve and Keep planning.
+fn card_actions(subject: &ApprovalSubject, decisions: &[Decision]) -> Vec<CardAction> {
+    match subject {
+        ApprovalSubject::Plan { .. } => blocks::plan_proposal::actions(decisions),
+        _ => decisions.iter().map(card_action).collect(),
+    }
+}
+
+pub(crate) fn card_action(decision: &Decision) -> CardAction {
     CardAction {
         decision: decision.id.to_string(),
         label: decision.label.clone(),
@@ -1541,202 +1660,89 @@ fn card_action(decision: &Decision) -> CardAction {
     }
 }
 
-/// Full details for everyone in the thread (Oct 24: no premature filtering).
-fn approval_card(agent: &str, subject: &ApprovalSubject) -> Doc {
-    let mut builder = DocBuilder::new();
-    match subject {
-        ApprovalSubject::Command {
-            command,
-            cwd,
-            reason,
-            network_host,
-            permissions,
-        } => {
-            builder.paragraph(&format!("{agent} wants to run a command"));
-            builder.fields(&[
-                ("Command", head(command), true),
-                (
-                    "Folder",
-                    cwd.as_ref()
-                        .map(|cwd| cwd.display().to_string())
-                        .unwrap_or_default(),
-                    true,
-                ),
-                ("Host", network_host.clone().unwrap_or_default(), true),
-                (
-                    "Permissions",
-                    permissions.clone().unwrap_or_default(),
-                    false,
-                ),
-                ("Reason", reason.clone().unwrap_or_default(), false),
-            ]);
-        }
-        ApprovalSubject::FileChange {
-            paths,
-            reason,
-            grant_root,
-        } => {
-            builder.paragraph(&format!("{agent} wants to edit files"));
-            builder.fields(&[
-                ("Files", path_list(paths), true),
-                (
-                    "Write access to",
-                    grant_root
-                        .as_ref()
-                        .map(|root| root.display().to_string())
-                        .unwrap_or_default(),
-                    true,
-                ),
-                ("Reason", reason.clone().unwrap_or_default(), false),
-            ]);
-        }
-        ApprovalSubject::Permissions { summary, reason } => {
-            builder.paragraph(&format!("{agent} asks for more permissions"));
-            builder.fields(&[
-                ("Permissions", summary.clone(), false),
-                ("Reason", reason.clone().unwrap_or_default(), false),
-            ]);
-        }
-        ApprovalSubject::Tool {
-            name,
-            input,
-            reason,
-        } => {
-            builder.paragraph(&format!("{agent} wants to use {name}"));
-            builder.fields(&[("Reason", reason.clone().unwrap_or_default(), false)]);
-            if !input.is_null() {
-                builder.code(
-                    &tail(&serde_json::to_string_pretty(input).unwrap_or_default()),
-                    Some("json"),
-                );
-            }
-        }
-        ApprovalSubject::Other { title, detail } => {
-            builder.paragraph(&format!("{agent}: {title}"));
-            if let Some(detail) = detail {
-                builder.paragraph(detail);
-            }
-        }
-    }
-    builder.finish()
-}
-
-/// Form ID of a question card; one form per card message.
-pub(crate) const QUESTION_FORM_ID: &str = "q";
-
-/// Most options a question shows as buttons.
-const MAX_PICK_OPTIONS: usize = 8;
-
-/// Every question picks one option, so the card can ask them one at a time
-/// with message buttons, which every Inline app already shows. Other forms
-/// stay forms until every app draws them.
-pub(crate) fn pickable(form: &QuestionForm) -> bool {
-    !form.fields.is_empty()
-        && form.fields.iter().all(|field| {
-            matches!(&field.input, FieldInput::Select { options, multiple: false, .. }
-                if !options.is_empty() && options.len() <= MAX_PICK_OPTIONS)
-        })
-}
-
-/// Whether the question `field` also takes an answer in the person's own
-/// words: a reply to the card.
-pub(crate) fn takes_reply(form: &QuestionForm, field: usize) -> bool {
-    matches!(
-        form.fields.get(field).map(|field| &field.input),
-        Some(FieldInput::Select {
-            allow_other: true,
-            ..
-        })
-    )
-}
-
-/// A pickable form's card while question `field` is open, with the answers
-/// already given above it. The buttons carry the options.
-pub(crate) fn pick_card(
+/// A card whose interaction closed: an approval or plan keeps its block,
+/// decided, with the outcome under it; a question becomes its outcome.
+fn closed_card(
     agent: &str,
-    form: &QuestionForm,
-    field: usize,
-    answered: &[String],
+    interaction: &Interaction,
+    by: &ClosedBy,
+    names: &HashMap<i64, String>,
+    diffs: &[FileDiff],
+    folder: Option<&Path>,
 ) -> Doc {
-    let mut builder = DocBuilder::new();
-    let count = form.fields.len();
-    builder.paragraph(&match (&form.title, count) {
-        (Some(title), _) => title.clone(),
-        (None, 1) => format!("{agent} has a question"),
-        (None, count) => format!("{agent} has {count} questions"),
-    });
-    for (question, answer) in form.fields.iter().zip(answered) {
-        builder.paragraph(&format!("{}: {answer}", question.prompt));
-    }
-    let Some(question) = form.fields.get(field) else {
-        return builder.finish();
+    let decided = match (by, &interaction.kind) {
+        (
+            ClosedBy::Inline {
+                decision: Some(decision),
+                ..
+            },
+            InteractionKind::Approval {
+                subject, decisions, ..
+            },
+        ) => decisions
+            .iter()
+            .zip(card_actions(subject, decisions))
+            .find(|(candidate, _)| &candidate.id == decision)
+            .map(|(candidate, action)| (candidate.kind, action.label)),
+        _ => None,
     };
-    builder.paragraph(&if count > 1 {
-        format!("{}/{count}. {}", field + 1, question.prompt)
-    } else {
-        question.prompt.clone()
-    });
-    if let FieldInput::Select { options, .. } = &question.input {
-        for option in options {
-            if let Some(description) = option
-                .description
-                .as_deref()
-                .filter(|text| !text.trim().is_empty())
-            {
-                builder.paragraph(&format!("• {}: {description}", option.label));
-            }
-        }
-    }
-    if takes_reply(form, field) {
-        builder.footer("Or reply to this message with your own answer.");
-    }
-    builder.finish()
-}
-
-fn question_card(agent: &str, form: &QuestionForm) -> Doc {
-    if pickable(form) {
-        return pick_card(agent, form, 0, &[]);
-    }
-    let mut builder = DocBuilder::new();
-    if form.title.is_none() {
-        builder.paragraph(&format!("{agent} has a question"));
-    }
-    // Anyone with access to the agent can answer its questions.
-    builder.form(
-        QUESTION_FORM_ID,
-        form,
-        inline_protocol::proto::AgentGrantRequirement::Access,
-    );
-    builder.finish()
-}
-
-fn closed_card(interaction: &Interaction, by: &ClosedBy, names: &HashMap<i64, String>) -> Doc {
-    let mut builder = DocBuilder::new();
-    let resolution = match by {
-        ClosedBy::Inline { user, decision } => {
-            let label = decision
-                .as_ref()
-                .and_then(|decision| match &interaction.kind {
-                    InteractionKind::Approval { decisions, .. } => decisions
-                        .iter()
-                        .find(|candidate| &candidate.id == decision)
-                        .map(|candidate| candidate.label.clone()),
-                    _ => None,
-                });
+    let (state, user, resolution) = match by {
+        ClosedBy::Inline { user, .. } => {
             let name = names
                 .get(&user.0)
                 .cloned()
                 .unwrap_or_else(|| format!("user {}", user.0));
-            match label {
-                Some(label) => format!("{label} (answered by {name})"),
-                None => format!("Answered by {name}"),
+            match &decided {
+                Some((kind, label)) => (
+                    decision_state(*kind),
+                    Some(user.0),
+                    format!("{label} (answered by {name})"),
+                ),
+                None => (
+                    DecisionState::Unspecified,
+                    Some(user.0),
+                    format!("Answered by {name}"),
+                ),
             }
         }
-        ClosedBy::External => "Answered outside Inline".to_owned(),
-        ClosedBy::Cancelled => "No longer needed".to_owned(),
+        ClosedBy::External => (
+            DecisionState::Unspecified,
+            None,
+            "Answered outside Inline".to_owned(),
+        ),
+        ClosedBy::Cancelled => (DecisionState::Expired, None, "No longer needed".to_owned()),
     };
-    builder.footer(&resolution);
-    builder.finish()
+    match &interaction.kind {
+        InteractionKind::Approval { subject, .. } => blocks::approval::card(
+            agent,
+            subject,
+            diffs,
+            folder,
+            &[],
+            &Resolution {
+                state,
+                by: user,
+                note: Some(resolution),
+            },
+        ),
+        _ => {
+            let mut builder = DocBuilder::new();
+            builder.footer(&resolution);
+            builder.finish()
+        }
+    }
+}
+
+fn decision_state(kind: DecisionKind) -> DecisionState {
+    match kind {
+        DecisionKind::Accept | DecisionKind::AcceptForSession | DecisionKind::AcceptAndRemember => {
+            DecisionState::Accepted
+        }
+        DecisionKind::Decline | DecisionKind::DeclineAndRemember | DecisionKind::Cancel => {
+            DecisionState::Declined
+        }
+        DecisionKind::Other => DecisionState::Unspecified,
+    }
 }
 
 #[cfg(test)]
@@ -1783,7 +1789,9 @@ mod quiet_tests {
 
 #[cfg(test)]
 mod tests {
-    use inline_agent_bridge::harness::{DeltaStream, ItemDelta, ItemId, SessionKey, TurnPhase};
+    use inline_agent_bridge::harness::{
+        DeltaStream, FieldInput, ItemDelta, ItemId, SessionKey, TurnPhase,
+    };
     use inline_agent_bridge::{ProviderId, ProviderSessionId};
 
     use super::*;
@@ -2464,6 +2472,7 @@ mod tests {
                     .map(|label| inline_agent_bridge::harness::FieldOption {
                         label: (*label).to_owned(),
                         description: Some(format!("{label} details")),
+                        preview: None,
                     })
                     .collect(),
                 multiple: false,
@@ -2557,9 +2566,133 @@ mod tests {
                 },
             )],
         );
-        assert!(
-            matches!(&ops[0], RenderOp::CardClosed { doc, .. } if doc.text == "Yes, proceed (answered by user 7)")
+        // The card keeps its approval, decided, with the outcome under it.
+        let RenderOp::CardClosed { doc, .. } = &ops[0] else {
+            panic!("expected the card closed");
+        };
+        assert_eq!(
+            doc.text,
+            "Codex wants to run a command\nCommand: cargo test\nFolder: /work\nYes, proceed (answered by user 7)"
         );
+        let Some(inline_protocol::proto::block::Kind::Approval(approval)) = &doc.blocks[0].kind
+        else {
+            panic!("expected an approval");
+        };
+        assert_eq!(approval.state, DecisionState::Accepted as i32);
+        assert_eq!(approval.decided_by_user_id, Some(7));
+        assert!(approval.action_ids.is_empty());
+    }
+
+    fn ended(outcome: TurnOutcome) -> Event {
+        turn(TurnPhase::Completed {
+            outcome,
+            inputs_consumed: vec![],
+            error: None,
+            duration_ms: None,
+        })
+    }
+
+    #[test]
+    fn a_codex_plan_is_offered_for_approval_only_after_a_completed_turn() {
+        let plan = || {
+            completed(
+                "item-p1",
+                ItemBody::Plan {
+                    explanation: None,
+                    steps: Vec::new(),
+                    text: Some("- Pin the plan".to_owned()),
+                },
+                None,
+            )
+        };
+        for (outcome, offered) in [
+            (TurnOutcome::Completed, true),
+            (TurnOutcome::Interrupted, false),
+        ] {
+            let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Codex, "Codex");
+            let ops = run(
+                &mut renderer,
+                vec![
+                    (0, turn(TurnPhase::Started { inputs: vec![] })),
+                    (1, plan()),
+                    (2, ended(outcome)),
+                ],
+            );
+            assert_eq!(
+                ops.iter()
+                    .any(|op| matches!(op, RenderOp::PlanProposal { .. })),
+                offered,
+                "{outcome:?}"
+            );
+        }
+        // Claude's plan is approved through its permission request instead.
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, plan()),
+                (2, ended(TurnOutcome::Completed)),
+            ],
+        );
+        assert!(
+            !ops.iter()
+                .any(|op| matches!(op, RenderOp::PlanProposal { .. }))
+        );
+    }
+
+    #[test]
+    fn a_withdrawn_approval_reads_expired_and_keeps_no_buttons() {
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Claude, "Claude");
+        let interaction = Interaction {
+            id: InteractionId::new("req-plan-1").expect("id"),
+            turn: None,
+            item: None,
+            parent: None,
+            kind: InteractionKind::Approval {
+                subject: ApprovalSubject::Plan {
+                    plan: "# Fix it\n\n1. Read\n2. Fix".to_owned(),
+                },
+                decisions: vec![Decision {
+                    id: inline_agent_bridge::harness::DecisionId::new("allow").expect("id"),
+                    label: "Yes".to_owned(),
+                    kind: DecisionKind::Accept,
+                    description: None,
+                    accepts_message: false,
+                    native: Value::Null,
+                }],
+            },
+            native: Value::Null,
+        };
+        let ops = run(&mut renderer, vec![(0, Event::Interaction(interaction))]);
+        let RenderOp::Card { doc, actions, .. } = &ops[0] else {
+            panic!("expected a card");
+        };
+        assert_eq!(actions[0].label, "Approve");
+        assert!(matches!(
+            &doc.blocks[0].kind,
+            Some(inline_protocol::proto::block::Kind::PlanProposal(plan)) if plan.action_ids == ["v2-0"]
+        ));
+        let ops = run(
+            &mut renderer,
+            vec![(
+                1,
+                Event::InteractionClosed {
+                    id: InteractionId::new("req-plan-1").expect("id"),
+                    by: ClosedBy::Cancelled,
+                },
+            )],
+        );
+        let RenderOp::CardClosed { doc, .. } = &ops[0] else {
+            panic!("expected the card closed");
+        };
+        let Some(inline_protocol::proto::block::Kind::PlanProposal(plan)) = &doc.blocks[0].kind
+        else {
+            panic!("expected the plan");
+        };
+        assert_eq!(plan.state, DecisionState::Expired as i32);
+        assert!(plan.action_ids.is_empty());
+        assert!(doc.text.ends_with("No longer needed"));
     }
 
     #[test]

@@ -1,0 +1,62 @@
+[
+  {
+    "label": "open",
+    "text": "Codex wants to run a command\nCommand: cargo test\nFolder: /work/inline\nReason: Run the test suite",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_COMMAND",
+          "title": "Codex wants to run a command",
+          "command": "cargo test",
+          "cwd": "/work/inline",
+          "reason": "Run the test suite",
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1",
+            "v2-2"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Yes, proceed",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "Yes, and don't ask again for commands that start with `cargo test`",
+        "style": "default"
+      },
+      {
+        "id": "v2-2",
+        "label": "No, and tell Codex what to do differently",
+        "style": "destructive"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Codex wants to run a command\nCommand: cargo test\nFolder: /work/inline\nReason: Run the test suite\nYes, proceed (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_COMMAND",
+          "title": "Codex wants to run a command",
+          "command": "cargo test",
+          "cwd": "/work/inline",
+          "reason": "Run the test suite",
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Yes, proceed (answered by Dena)"
+      }
+    ]
+  }
+]

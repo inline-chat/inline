@@ -1,0 +1,15 @@
+{
+  "source": "Inline tool suggest_thread arguments, after Claude's start_session task card.",
+  "native": {
+    "type": "tool_use",
+    "name": "mcp__inline__suggest_thread",
+    "input": {
+      "title": "Profile the sidebar scroll",
+      "brief": "The sidebar drops frames while scrolling 2k chats. Profile ChatListDatabaseQuery and the row cache, find the main-thread work, and report the top three costs with numbers."
+    }
+  },
+  "input": {
+    "title": "Profile the sidebar scroll",
+    "brief": "The sidebar drops frames while scrolling 2k chats. Profile ChatListDatabaseQuery and the row cache, find the main-thread work, and report the top three costs with numbers."
+  }
+}

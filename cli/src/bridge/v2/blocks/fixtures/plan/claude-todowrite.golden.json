@@ -1,0 +1,163 @@
+[
+  {
+    "label": "progress 1 · live after event 3",
+    "text": "Working · 3s\nI'll fix the empty-input crash in the parser.\n[>] Read the parser and its tests\n[ ] Handle empty input in tokenize()\n[ ] Run the parser tests",
+    "markdown": false,
+    "blocks": [
+      {
+        "disclosure": {
+          "summary": "Working",
+          "kind": 1,
+          "initially_open": true,
+          "children": [
+            {
+              "paragraph": "I'll fix the empty-input crash in the parser."
+            }
+          ],
+          "meta": "3s",
+          "started_at": 1
+        }
+      },
+      {
+        "steps": {
+          "steps": [
+            {
+              "text": "Read the parser and its tests",
+              "status": "BLOCK_STATUS_RUNNING"
+            },
+            {
+              "text": "Handle empty input in tokenize()",
+              "status": "BLOCK_STATUS_PENDING"
+            },
+            {
+              "text": "Run the parser tests",
+              "status": "BLOCK_STATUS_PENDING"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "progress 1 · live after event 5",
+    "text": "Working · 5s\nI'll fix the empty-input crash in the parser.\nBash pnpm test parser · 2s\n$ pnpm test parser\n1 failing\n[x] Read the parser and its tests\n[x] Handle empty input in tokenize()\n[>] Run the parser tests",
+    "markdown": false,
+    "blocks": [
+      {
+        "disclosure": {
+          "summary": "Working",
+          "kind": 1,
+          "initially_open": true,
+          "children": [
+            {
+              "paragraph": "I'll fix the empty-input crash in the parser."
+            },
+            {
+              "disclosure": {
+                "summary": "Bash pnpm test parser",
+                "children": [
+                  {
+                    "code": {
+                      "text": "$ pnpm test parser",
+                      "language": "sh"
+                    }
+                  },
+                  {
+                    "code": {
+                      "text": "1 failing"
+                    }
+                  }
+                ],
+                "activity_kind": "ACTIVITY_KIND_COMMAND",
+                "status": "BLOCK_STATUS_DONE",
+                "meta": "2s"
+              }
+            }
+          ],
+          "meta": "5s",
+          "started_at": 1
+        }
+      },
+      {
+        "steps": {
+          "steps": [
+            {
+              "text": "Read the parser and its tests",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Handle empty input in tokenize()",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Run the parser tests",
+              "status": "BLOCK_STATUS_RUNNING"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "progress 1",
+    "text": "Worked for 48s\nI'll fix the empty-input crash in the parser.\nBash pnpm test parser · 2s\n$ pnpm test parser\n1 failing\n[x] Read the parser and its tests\n[x] Handle empty input in tokenize()\n[x] Run the parser tests",
+    "markdown": false,
+    "blocks": [
+      {
+        "disclosure": {
+          "summary": "Worked for 48s",
+          "children": [
+            {
+              "paragraph": "I'll fix the empty-input crash in the parser."
+            },
+            {
+              "disclosure": {
+                "summary": "Bash pnpm test parser",
+                "children": [
+                  {
+                    "code": {
+                      "text": "$ pnpm test parser",
+                      "language": "sh"
+                    }
+                  },
+                  {
+                    "code": {
+                      "text": "1 failing"
+                    }
+                  }
+                ],
+                "activity_kind": "ACTIVITY_KIND_COMMAND",
+                "status": "BLOCK_STATUS_DONE",
+                "meta": "2s"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "steps": {
+          "steps": [
+            {
+              "text": "Read the parser and its tests",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Handle empty input in tokenize()",
+              "status": "BLOCK_STATUS_DONE"
+            },
+            {
+              "text": "Run the parser tests",
+              "status": "BLOCK_STATUS_DONE"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "final",
+    "text": "Fixed the empty-input case; parser tests pass.",
+    "markdown": true,
+    "blocks": []
+  }
+]

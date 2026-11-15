@@ -1,0 +1,52 @@
+{
+  "source": "Codex app-server v2 command approval for network access (networkApprovalContext host), mapped to a command subject with network_host.",
+  "native": {
+    "method": "item/commandExecution/requestApproval",
+    "id": 42,
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-1",
+      "itemId": "item-c2",
+      "command": "curl https://registry.npmjs.org/left-pad",
+      "cwd": "/work/inline",
+      "networkApprovalContext": {
+        "host": "registry.npmjs.org",
+        "protocol": "https"
+      }
+    }
+  },
+  "input": {
+    "agent": "Codex",
+    "folder": "/work/inline",
+    "interaction": {
+      "id": "42",
+      "item": "item-c2",
+      "kind": {
+        "kind": "approval",
+        "subject": {
+          "kind": "command",
+          "command": "curl https://registry.npmjs.org/left-pad",
+          "cwd": "/work/inline",
+          "network_host": "registry.npmjs.org"
+        },
+        "decisions": [
+          {
+            "id": "accept",
+            "label": "Yes, just this once",
+            "kind": "accept"
+          },
+          {
+            "id": "acceptForSession",
+            "label": "Yes, and allow this host for this session",
+            "kind": "accept_for_session"
+          },
+          {
+            "id": "decline",
+            "label": "No",
+            "kind": "decline"
+          }
+        ]
+      }
+    }
+  }
+}

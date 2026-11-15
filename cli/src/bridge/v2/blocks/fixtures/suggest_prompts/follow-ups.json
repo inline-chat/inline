@@ -1,0 +1,35 @@
+{
+  "source": "Inline tool suggest_prompts arguments, after ChatGPT's follow-up suggestions.",
+  "native": {
+    "type": "tool_use",
+    "name": "mcp__inline__suggest_prompts",
+    "input": {
+      "prompts": [
+        {
+          "label": "Add a test for whitespace-only input"
+        },
+        {
+          "label": "Explain the fix",
+          "text": "Explain the parser fix step by step, with the before and after behavior."
+        },
+        {
+          "label": "Open a PR"
+        }
+      ]
+    }
+  },
+  "input": {
+    "prompts": [
+      {
+        "label": "Add a test for whitespace-only input"
+      },
+      {
+        "label": "Explain the fix",
+        "text": "Explain the parser fix step by step, with the before and after behavior."
+      },
+      {
+        "label": "Open a PR"
+      }
+    ]
+  }
+}

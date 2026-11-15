@@ -1,0 +1,88 @@
+{
+  "source": "Codex app-server v2 item/tool/requestUserInput: questions with header, question and options (no previews).",
+  "native": {
+    "method": "item/tool/requestUserInput",
+    "id": 51,
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-1",
+      "itemId": "item-q1",
+      "questions": [
+        {
+          "id": "scope",
+          "header": "Scope",
+          "question": "Which packages should the fix cover?",
+          "isOther": true,
+          "options": [
+            {
+              "label": "CLI only",
+              "description": "Smallest change"
+            },
+            {
+              "label": "CLI and server",
+              "description": "Also fixes the API"
+            }
+          ]
+        },
+        {
+          "id": "tests",
+          "header": "Tests",
+          "question": "Add tests?",
+          "isOther": false,
+          "options": [
+            {
+              "label": "Yes"
+            },
+            {
+              "label": "No"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "input": {
+    "agent": "Codex",
+    "form": {
+      "fields": [
+        {
+          "id": "scope",
+          "header": "Scope",
+          "prompt": "Which packages should the fix cover?",
+          "input": {
+            "kind": "select",
+            "allow_other": true,
+            "options": [
+              {
+                "label": "CLI only",
+                "description": "Smallest change"
+              },
+              {
+                "label": "CLI and server",
+                "description": "Also fixes the API"
+              }
+            ]
+          },
+          "required": true
+        },
+        {
+          "id": "tests",
+          "header": "Tests",
+          "prompt": "Add tests?",
+          "input": {
+            "kind": "select",
+            "options": [
+              {
+                "label": "Yes"
+              },
+              {
+                "label": "No"
+              }
+            ]
+          },
+          "required": true
+        }
+      ]
+    }
+  }
+}

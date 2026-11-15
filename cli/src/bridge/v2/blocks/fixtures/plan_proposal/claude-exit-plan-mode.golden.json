@@ -1,0 +1,156 @@
+[
+  {
+    "label": "open",
+    "text": "Fix empty input in the parser\nContext\nThe tokenizer indexes `tokens[0]` without checking the length.\nSteps\n1. Return early from tokenize() on blank input\n2. Add a regression test for whitespace-only input\n3. Run `pnpm test parser`\nif (input.trim() === \"\") return []",
+    "markdown": false,
+    "blocks": [
+      {
+        "plan_proposal": {
+          "title": "Fix empty input in the parser",
+          "children": [
+            {
+              "heading": {
+                "text": "Context",
+                "level": 2
+              }
+            },
+            {
+              "paragraph": "The tokenizer indexes `tokens[0]` without checking the length."
+            },
+            {
+              "heading": {
+                "text": "Steps",
+                "level": 2
+              }
+            },
+            {
+              "list": {
+                "kind": 2,
+                "items": [
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Return early from tokenize() on blank input"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Add a regression test for whitespace-only input"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Run `pnpm test parser`"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "code": {
+                "text": "if (input.trim() === \"\") return []",
+                "language": "ts"
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1",
+            "v2-2"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Approve",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "Yes, and auto-accept edits",
+        "style": "default"
+      },
+      {
+        "id": "v2-2",
+        "label": "Keep planning",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "approved",
+    "text": "Fix empty input in the parser\nContext\nThe tokenizer indexes `tokens[0]` without checking the length.\nSteps\n1. Return early from tokenize() on blank input\n2. Add a regression test for whitespace-only input\n3. Run `pnpm test parser`\nif (input.trim() === \"\") return []\nApprove (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "plan_proposal": {
+          "title": "Fix empty input in the parser",
+          "children": [
+            {
+              "heading": {
+                "text": "Context",
+                "level": 2
+              }
+            },
+            {
+              "paragraph": "The tokenizer indexes `tokens[0]` without checking the length."
+            },
+            {
+              "heading": {
+                "text": "Steps",
+                "level": 2
+              }
+            },
+            {
+              "list": {
+                "kind": 2,
+                "items": [
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Return early from tokenize() on blank input"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Add a regression test for whitespace-only input"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Run `pnpm test parser`"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "code": {
+                "text": "if (input.trim() === \"\") return []",
+                "language": "ts"
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Approve (answered by Dena)"
+      }
+    ]
+  }
+]

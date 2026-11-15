@@ -37,6 +37,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::bridge::runtime::{BotAgentResolver, mentioned_agent_id};
 
 use super::api::{self, Notify, chat_peer};
+use super::blocks;
 use super::doc::DocBuilder;
 use super::folders::{FolderSource, Folders};
 use super::intake::{
@@ -330,6 +331,9 @@ pub(crate) struct Runtime {
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
     listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
     agent_profiles: Option<(BotAgentResolver, SqliteStore)>,
+    /// Tests: sent messages as Inline holds them, read instead of asking.
+    #[cfg(test)]
+    cards: HashMap<(i64, i64), super::doc::Doc>,
 }
 
 impl Runtime {
@@ -394,6 +398,7 @@ impl Runtime {
             usage: std::sync::Mutex::new(Vec::new()),
             context: std::sync::Mutex::new(HashMap::new()),
             bound_projects: std::sync::Mutex::new(HashMap::new()),
+            decisions: std::sync::Mutex::new(HashSet::new()),
         });
         Ok(Self {
             config,
@@ -426,6 +431,8 @@ impl Runtime {
             skills: None,
             listed_skills: HashMap::new(),
             agent_profiles: None,
+            #[cfg(test)]
+            cards: HashMap::new(),
         })
     }
 
@@ -756,6 +763,30 @@ impl Runtime {
                     Ok(ActionData::RaiseGateBudget) => {
                         self.raise_gate_budget(chat_id.get(), message_id.get(), actor_user_id.get())
                             .await
+                    }
+                    Ok(ActionData::Plan { approve }) => {
+                        self.on_plan(
+                            interaction_id.get(),
+                            chat_id.get(),
+                            message_id.get(),
+                            actor_user_id.get(),
+                            approve,
+                        )
+                        .await
+                    }
+                    Ok(ActionData::Task { start }) => {
+                        self.on_task(chat_id.get(), message_id.get(), actor_user_id.get(), start)
+                            .await
+                    }
+                    Ok(ActionData::NextStep { l }) => {
+                        self.on_next_step(
+                            interaction_id.get(),
+                            chat_id.get(),
+                            message_id.get(),
+                            actor_user_id.get(),
+                            &l,
+                        )
+                        .await
                     }
                     Ok(data) => {
                         self.ask(chat_id.get(), |reply| Command::Action {
@@ -3259,6 +3290,268 @@ impl Runtime {
             },
             Ok(Err(message)) => problem(message),
             Err(_) => problem("Listing the files failed."),
+        }
+    }
+}
+
+// ---------------------------------------------------------------
+// Buttons of agent blocks (see `blocks`)
+// ---------------------------------------------------------------
+
+impl Runtime {
+    /// A Codex plan card: Approve leaves Plan mode and sends "Implement the
+    /// plan." as the person, as Codex's own app does; Keep planning only
+    /// records the choice. A card already decided or replaced by a newer
+    /// plan does nothing.
+    async fn on_plan(
+        &mut self,
+        interaction_id: i64,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        approve: bool,
+    ) -> Option<String> {
+        if !self.access.grants(actor).await.permits(Operation::Steer) {
+            return Some(NO_ACCESS.to_owned());
+        }
+        let doc = match self.claim_card(chat_id, message_id).await {
+            Ok(doc) => doc,
+            Err(toast) => return toast,
+        };
+        let name = self.agent.names.of(actor).await;
+        if !approve {
+            self.decide(
+                chat_id,
+                message_id,
+                doc,
+                blocks::DecisionState::Declined,
+                actor,
+                None,
+                &format!("Kept planning ({name})"),
+            )
+            .await;
+            return None;
+        }
+        // Out of Plan mode before the input, which the work delivers in
+        // order; back in it if the input is refused, since the card stays.
+        let left_plan = self.works.contains_key(&chat_id);
+        if left_plan {
+            let _ = self
+                .ask(chat_id, |reply| Command::Session {
+                    op: SessionOp::Mode("default".to_owned()),
+                    reply,
+                })
+                .await;
+        }
+        let refused = self
+            .on_widget_call(
+                interaction_id,
+                chat_id,
+                message_id,
+                actor,
+                blocks::plan_proposal::IMPLEMENT_MESSAGE,
+            )
+            .await;
+        if refused.is_some() {
+            if left_plan {
+                let _ = self
+                    .ask(chat_id, |reply| Command::Session {
+                        op: SessionOp::Mode("plan".to_owned()),
+                        reply,
+                    })
+                    .await;
+            }
+            self.agent.release_decision(chat_id, message_id);
+            return refused;
+        }
+        self.decide(
+            chat_id,
+            message_id,
+            doc,
+            blocks::DecisionState::Accepted,
+            actor,
+            None,
+            &format!("Approved by {name}"),
+        )
+        .await;
+        None
+    }
+
+    /// A suggested task: Start runs it as `spawn_thread` would, with the
+    /// title and brief the card holds; Dismiss declines it. A card already
+    /// started or dismissed does nothing.
+    async fn on_task(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        start: bool,
+    ) -> Option<String> {
+        if !self
+            .access
+            .grants(actor)
+            .await
+            .permits(Operation::StartWork)
+        {
+            return Some(NO_ACCESS.to_owned());
+        }
+        let doc = match self.claim_card(chat_id, message_id).await {
+            Ok(doc) => doc,
+            Err(toast) => return toast,
+        };
+        let name = self.agent.names.of(actor).await;
+        if !start {
+            self.decide(
+                chat_id,
+                message_id,
+                doc,
+                blocks::DecisionState::Declined,
+                actor,
+                None,
+                &format!("Dismissed by {name}"),
+            )
+            .await;
+            return None;
+        }
+        let Some((title, brief)) = blocks::task::read(&doc) else {
+            self.agent.release_decision(chat_id, message_id);
+            return Some("This suggestion is no longer available.".to_owned());
+        };
+        let task = SpawnTask {
+            brief: brief.unwrap_or_else(|| title.clone()),
+            title,
+            model: None,
+            reasoning: None,
+            project: None,
+            fork: false,
+            // A retried press finds the task the first one started.
+            call_id: format!("suggested-{chat_id}-{message_id}"),
+        };
+        let started = match self.spawn_task(chat_id, task).await {
+            Ok(result) if result.success => serde_json::from_str::<Value>(&result.content)
+                .ok()
+                .and_then(|result| result["chat_id"].as_i64()),
+            Ok(result) => {
+                self.agent.release_decision(chat_id, message_id);
+                return Some(result.content);
+            }
+            Err(error) => {
+                self.agent.release_decision(chat_id, message_id);
+                return Some(error);
+            }
+        };
+        self.decide(
+            chat_id,
+            message_id,
+            doc,
+            blocks::DecisionState::Accepted,
+            actor,
+            started,
+            &format!("Started by {name}"),
+        )
+        .await;
+        None
+    }
+
+    /// A next-step answer: given to the agent as the person's reply to the
+    /// box, which then loses its buttons. A box already answered does
+    /// nothing.
+    async fn on_next_step(
+        &mut self,
+        interaction_id: i64,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        label: &str,
+    ) -> Option<String> {
+        let doc = match self.claim_card(chat_id, message_id).await {
+            Ok(doc) => doc,
+            Err(toast) => return toast,
+        };
+        let refused = self
+            .on_widget_call(interaction_id, chat_id, message_id, actor, label)
+            .await;
+        if refused.is_some() {
+            self.agent.release_decision(chat_id, message_id);
+            return refused;
+        }
+        let name = self.agent.names.of(actor).await;
+        self.decide(
+            chat_id,
+            message_id,
+            doc,
+            blocks::DecisionState::Accepted,
+            actor,
+            None,
+            &format!("{label} (answered by {name})"),
+        )
+        .await;
+        None
+    }
+
+    /// A decision card a button press may act on: still pending on Inline,
+    /// and not being decided by an earlier press whose edit has not landed.
+    /// The caller owns the claim and releases it if the action is refused.
+    /// Otherwise the toast to answer with: none for a later press, which
+    /// does nothing.
+    async fn claim_card(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+    ) -> Result<super::doc::Doc, Option<String>> {
+        let Some(doc) = self.sent_doc(chat_id, message_id).await else {
+            return Err(Some("This card couldn't be read. Try again.".to_owned()));
+        };
+        if !blocks::is_pending(&doc) || !self.agent.claim_decision(chat_id, message_id) {
+            return Err(None);
+        }
+        Ok(doc)
+    }
+
+    /// One of this bot's messages as Inline holds it.
+    async fn sent_doc(&self, chat_id: i64, message_id: i64) -> Option<super::doc::Doc> {
+        #[cfg(test)]
+        if let Some(doc) = self.cards.get(&(chat_id, message_id)) {
+            return Some(doc.clone());
+        }
+        match api::get_messages(&self.agent.bot, chat_id, vec![message_id]).await {
+            Ok(messages) => messages
+                .iter()
+                .find(|message| message.id == message_id)
+                .map(blocks::message_doc),
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} reading a card failed: {error}");
+                None
+            }
+        }
+    }
+
+    /// Edits a claimed card (`doc`, as Inline held it when claimed) to its
+    /// outcome and clears its buttons.
+    #[allow(clippy::too_many_arguments)]
+    async fn decide(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        mut doc: super::doc::Doc,
+        state: blocks::DecisionState,
+        actor: i64,
+        started: Option<i64>,
+        note: &str,
+    ) {
+        if !blocks::resolve(&mut doc, state, Some(actor), started, Some(note)) {
+            return;
+        }
+        if let Err(error) = api::edit_doc(
+            &self.agent.bot,
+            chat_id,
+            message_id,
+            &doc,
+            Some(proto::MessageActions::default()),
+        )
+        .await
+        {
+            log::warn!(target: "inline::bridge::v2", "chat={chat_id} card edit failed: {error}");
         }
     }
 }

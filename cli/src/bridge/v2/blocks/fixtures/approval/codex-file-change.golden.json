@@ -1,0 +1,80 @@
+[
+  {
+    "label": "open",
+    "text": "Codex wants to edit files\nReason: Guard the empty case\nsrc/parser.ts\n@@ -40,6 +40,9 @@ export function tokenize(input: string) {\n-  const first = tokens[0]\n+  if (tokens.length === 0) {\n+    return []\n+  }\n+  const first = tokens[0]",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_FILE_CHANGE",
+          "title": "Codex wants to edit files",
+          "reason": "Guard the empty case",
+          "children": [
+            {
+              "diff": {
+                "path": "src/parser.ts",
+                "text": "@@ -40,6 +40,9 @@ export function tokenize(input: string) {\n-  const first = tokens[0]\n+  if (tokens.length === 0) {\n+    return []\n+  }\n+  const first = tokens[0]",
+                "change": "CHANGE_MODIFIED",
+                "additions": 4,
+                "deletions": 1
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1",
+            "v2-2"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Yes, proceed",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "Yes, and don't ask again for these files",
+        "style": "default"
+      },
+      {
+        "id": "v2-2",
+        "label": "No, and tell Codex what to do differently",
+        "style": "destructive"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Codex wants to edit files\nReason: Guard the empty case\nsrc/parser.ts\n@@ -40,6 +40,9 @@ export function tokenize(input: string) {\n-  const first = tokens[0]\n+  if (tokens.length === 0) {\n+    return []\n+  }\n+  const first = tokens[0]\nYes, proceed (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_FILE_CHANGE",
+          "title": "Codex wants to edit files",
+          "reason": "Guard the empty case",
+          "children": [
+            {
+              "diff": {
+                "path": "src/parser.ts",
+                "text": "@@ -40,6 +40,9 @@ export function tokenize(input: string) {\n-  const first = tokens[0]\n+  if (tokens.length === 0) {\n+    return []\n+  }\n+  const first = tokens[0]",
+                "change": "CHANGE_MODIFIED",
+                "additions": 4,
+                "deletions": 1
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Yes, proceed (answered by Dena)"
+      }
+    ]
+  }
+]

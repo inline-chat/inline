@@ -63,10 +63,34 @@ impl Doc {
     }
 }
 
+impl Doc {
+    /// Adds a footer line after the existing content, such as a decided
+    /// card's outcome.
+    pub(crate) fn append_footer(&mut self, text: &str) {
+        if text.trim().is_empty() || self.markdown {
+            return;
+        }
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        let offset = self.text.encode_utf16().count() as i64;
+        self.text.push_str(text);
+        self.blocks.push(proto::Block {
+            kind: Some(proto::block::Kind::Footer(proto::BlockText {
+                offset,
+                length: text.encode_utf16().count() as i64,
+                ..Default::default()
+            })),
+        });
+    }
+}
+
 /// Status of a disclosure row or step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
     None,
+    /// Not started yet: a plan step still to do.
+    Pending,
     Running,
     Waiting,
     Done,
@@ -75,9 +99,10 @@ pub(crate) enum Status {
 }
 
 impl Status {
-    fn proto(self) -> i32 {
+    pub(crate) fn proto(self) -> i32 {
         (match self {
             Self::None => proto::BlockStatus::Unspecified,
+            Self::Pending => proto::BlockStatus::Pending,
             Self::Running => proto::BlockStatus::Running,
             Self::Waiting => proto::BlockStatus::Waiting,
             Self::Done => proto::BlockStatus::Done,
@@ -88,6 +113,9 @@ impl Status {
 }
 
 pub(crate) use proto::block_disclosure::ActivityKind;
+
+/// Line breaks a range never ends in.
+const LINE_END: [char; 2] = ['\n', '\r'];
 
 /// Appends text and blocks. Nested builders share the same text.
 #[derive(Debug, Default)]
@@ -117,8 +145,12 @@ impl DocBuilder {
         }
     }
 
-    /// Appends text and returns its range (without the trailing newline).
-    fn span(&mut self, text: &str) -> proto::BlockText {
+    /// Appends text as its own line and returns its range (without the
+    /// trailing newline). Line breaks at the end of `text` are left out:
+    /// [`finish`](Self::finish) drops the message's trailing newlines, and a
+    /// range must never reach past the text.
+    pub(crate) fn span(&mut self, text: &str) -> proto::BlockText {
+        let text = text.trim_end_matches(LINE_END);
         let offset = self.utf16;
         let length = text.encode_utf16().count() as i64;
         self.text.push_str(text);
@@ -131,13 +163,57 @@ impl DocBuilder {
         }
     }
 
-    fn push_raw(&mut self, text: &str) {
+    /// Appends text no block covers, such as a "Command: " label.
+    pub(crate) fn push_raw(&mut self, text: &str) {
         self.text.push_str(text);
         self.utf16 += text.encode_utf16().count() as i64;
     }
 
-    fn push_block(&mut self, kind: proto::block::Kind) {
+    /// Appends text on the current line and returns its range, without a
+    /// newline: a span followed by more text on the same line.
+    pub(crate) fn inline_span(&mut self, text: &str) -> proto::BlockText {
+        let text = text.trim_end_matches(LINE_END);
+        let offset = self.utf16;
+        self.push_raw(text);
+        proto::BlockText {
+            offset,
+            length: text.encode_utf16().count() as i64,
+            ..Default::default()
+        }
+    }
+
+    /// Ends the current line.
+    pub(crate) fn newline(&mut self) {
+        self.push_raw("\n");
+    }
+
+    pub(crate) fn push_block(&mut self, kind: proto::block::Kind) {
         self.blocks.push(proto::Block { kind: Some(kind) });
+    }
+
+    /// Child blocks written by `build` into the same text, for a block that
+    /// holds others (a plan's body, an approval's diffs).
+    pub(crate) fn nested(&mut self, build: impl FnOnce(&mut DocBuilder)) -> Vec<proto::Block> {
+        let mut children = DocBuilder {
+            text: std::mem::take(&mut self.text),
+            utf16: self.utf16,
+            blocks: Vec::new(),
+        };
+        build(&mut children);
+        self.text = children.text;
+        self.utf16 = children.utf16;
+        children.blocks
+    }
+
+    pub(crate) fn heading(&mut self, text: &str, level: u32) {
+        if text.trim().is_empty() {
+            return;
+        }
+        let span = self.span(text.trim());
+        self.push_block(proto::block::Kind::Heading(proto::BlockHeading {
+            text: Some(span),
+            level,
+        }));
     }
 
     pub(crate) fn paragraph(&mut self, text: &str) {
@@ -181,7 +257,7 @@ impl DocBuilder {
                     ..Default::default()
                 }
             };
-            let value_span = self.span(value);
+            let value_span = self.span(value.trim_end());
             blocks.push(proto::BlockField {
                 label: Some(label_span),
                 value: Some(value_span),
@@ -210,6 +286,11 @@ impl DocBuilder {
             .iter()
             .enumerate()
             .map(|(index, field)| {
+                let header = field
+                    .header
+                    .as_deref()
+                    .filter(|header| !header.trim().is_empty())
+                    .map(|header| self.span(header.trim()));
                 let label = self.span(&field.prompt);
                 let kind = match &field.input {
                     FieldInput::Select {
@@ -223,10 +304,22 @@ impl DocBuilder {
                             .map(|(index, option)| {
                                 self.push_raw("• ");
                                 let label = self.span(&option.label);
+                                let description = option
+                                    .description
+                                    .as_deref()
+                                    .filter(|text| !text.trim().is_empty())
+                                    .map(|text| self.span(text.trim()));
+                                let preview = option
+                                    .preview
+                                    .as_deref()
+                                    .filter(|preview| !preview.trim().is_empty())
+                                    .map(|preview| self.span(preview.trim_end()));
                                 proto::BlockFormOption {
                                     option_id: format!("o{index}"),
                                     label: Some(label),
-                                    description: None,
+                                    description,
+                                    preview,
+                                    recommended: is_recommended(&option.label),
                                 }
                             })
                             .collect(),
@@ -273,6 +366,7 @@ impl DocBuilder {
                     description: None,
                     required: field.required,
                     kind: Some(kind),
+                    header,
                 }
             })
             .collect();
@@ -293,7 +387,7 @@ impl DocBuilder {
             .map(|(text, status)| {
                 let marker = match status {
                     Status::Done => "[x] ",
-                    Status::Running => "[>] ",
+                    Status::Running | Status::Waiting => "[>] ",
                     _ => "[ ] ",
                 };
                 self.push_raw(marker);
@@ -364,19 +458,23 @@ impl DocBuilder {
         status: Status,
         build: impl FnOnce(&mut DocBuilder),
     ) {
+        let summary = summary.trim_end_matches(LINE_END);
         let summary_offset = self.utf16;
         let summary_len = summary.encode_utf16().count() as i64;
         self.push_raw(summary);
-        let meta = meta.filter(|meta| !meta.is_empty()).map(|meta| {
-            self.push_raw(" · ");
-            let offset = self.utf16;
-            self.push_raw(meta);
-            proto::BlockText {
-                offset,
-                length: meta.encode_utf16().count() as i64,
-                ..Default::default()
-            }
-        });
+        let meta = meta
+            .map(|meta| meta.trim_end_matches(LINE_END))
+            .filter(|meta| !meta.is_empty())
+            .map(|meta| {
+                self.push_raw(" · ");
+                let offset = self.utf16;
+                self.push_raw(meta);
+                proto::BlockText {
+                    offset,
+                    length: meta.encode_utf16().count() as i64,
+                    ..Default::default()
+                }
+            });
         self.push_raw("\n");
         let mut children = DocBuilder {
             text: std::mem::take(&mut self.text),
@@ -411,6 +509,7 @@ impl DocBuilder {
         elapsed: Option<Elapsed<'_>>,
         build: impl FnOnce(&mut DocBuilder),
     ) {
+        let summary = summary.trim_end_matches(LINE_END);
         let summary_offset = self.utf16;
         let summary_len = summary.encode_utf16().count() as i64;
         self.push_raw(summary);
@@ -465,6 +564,14 @@ pub(crate) struct Elapsed<'a> {
 pub(crate) use proto::block_callout::Kind as CalloutKind;
 pub(crate) use proto::block_diff::Change as DiffChange;
 
+/// Claude marks the option it recommends with "(Recommended)" on its label.
+pub(crate) fn is_recommended(label: &str) -> bool {
+    label
+        .trim_end()
+        .to_ascii_lowercase()
+        .ends_with("(recommended)")
+}
+
 /// The Inline form field ID of a harness question, by position.
 pub(crate) fn form_field_id(index: usize) -> String {
     format!("f{index}")
@@ -507,6 +614,58 @@ mod tests {
         };
         assert_eq!(slice(&doc, &code.text.expect("text")), "ok 🚀");
         assert_eq!(doc.text, "Café ✅ ready\nRan cargo test · 1.2s\nok 🚀");
+    }
+
+    fn assert_inside(doc: &Doc, span: &proto::BlockText) {
+        let units = doc.text.encode_utf16().count() as i64;
+        assert!(
+            span.length > 0 && span.offset + span.length <= units,
+            "range {}+{} outside {units} units of {:?}",
+            span.offset,
+            span.length,
+            doc.text
+        );
+    }
+
+    #[test]
+    fn a_value_ending_in_a_newline_stays_inside_the_text() {
+        let mut builder = DocBuilder::new();
+        builder.fields(&[("Reason", "it needs the network\n".to_owned(), false)]);
+        let doc = builder.finish();
+        assert_eq!(doc.text, "Reason: it needs the network");
+        let proto::block::Kind::Fields(fields) = doc.blocks[0].kind.clone().expect("kind") else {
+            panic!("expected fields");
+        };
+        let value = fields.fields[0].value.clone().expect("value");
+        assert_inside(&doc, &value);
+        assert_eq!(slice(&doc, &value), "it needs the network");
+
+        // Any span, inline span or row summary last in the message.
+        let mut builder = DocBuilder::new();
+        let span = builder.span("ends with breaks\r\n\n");
+        let doc = builder.finish();
+        assert_inside(&doc, &span);
+        assert_eq!(slice(&doc, &span), "ends with breaks");
+
+        let mut builder = DocBuilder::new();
+        let span = builder.inline_span("inline\n");
+        let doc = builder.finish();
+        assert_inside(&doc, &span);
+
+        let mut builder = DocBuilder::new();
+        builder.disclosure(
+            "Ran it\n",
+            Some("1s\n"),
+            ActivityKind::Command,
+            Status::Done,
+            |_| {},
+        );
+        let doc = builder.finish();
+        let proto::block::Kind::Disclosure(row) = doc.blocks[0].kind.clone().expect("kind") else {
+            panic!("expected a disclosure");
+        };
+        assert_inside(&doc, &row.summary.expect("summary"));
+        assert_inside(&doc, &row.meta.expect("meta"));
     }
 
     #[test]

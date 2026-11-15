@@ -1,0 +1,23 @@
+{
+  "source": "Inline tool ask_next_step arguments, after Claude's wrap_up box (recap, ask, actions).",
+  "native": {
+    "type": "tool_use",
+    "name": "mcp__inline__ask_next_step",
+    "input": {
+      "recap": "Fixed the empty-input crash in tokenize() and added a regression test; parser tests pass. Nothing is committed yet.",
+      "question": "Commit the fix?",
+      "options": [
+        "Yes, commit",
+        "Not yet"
+      ]
+    }
+  },
+  "input": {
+    "recap": "Fixed the empty-input crash in tokenize() and added a regression test; parser tests pass. Nothing is committed yet.",
+    "question": "Commit the fix?",
+    "options": [
+      "Yes, commit",
+      "Not yet"
+    ]
+  }
+}

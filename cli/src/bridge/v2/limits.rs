@@ -44,7 +44,7 @@ impl Size {
     }
 
     /// Counts as the server's validator does: list items, disclosures,
-    /// callouts and quotes nest one level deeper.
+    /// callouts, quotes, plan proposals and approvals nest one level deeper.
     fn walk(&mut self, blocks: &[proto::Block], depth: usize) {
         use proto::block::Kind;
         if !blocks.is_empty() {
@@ -61,6 +61,8 @@ impl Size {
                 Some(Kind::Disclosure(disclosure)) => self.walk(&disclosure.children, depth + 1),
                 Some(Kind::Callout(callout)) => self.walk(&callout.children, depth + 1),
                 Some(Kind::Quote(quote)) => self.walk(&quote.children, depth + 1),
+                Some(Kind::PlanProposal(plan)) => self.walk(&plan.children, depth + 1),
+                Some(Kind::Approval(approval)) => self.walk(&approval.children, depth + 1),
                 _ => {}
             }
         }

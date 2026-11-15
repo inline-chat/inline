@@ -1,0 +1,45 @@
+{
+  "source": "Codex app-server v2 permissions approval (additional sandbox permissions), mapped to a permissions subject.",
+  "native": {
+    "method": "item/permissions/requestApproval",
+    "id": 44,
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-1",
+      "reason": "Write outside the workspace",
+      "permissions": {
+        "fileSystem": {
+          "write": [
+            "/Users/dena/.cache/inline"
+          ]
+        }
+      }
+    }
+  },
+  "input": {
+    "agent": "Codex",
+    "interaction": {
+      "id": "44",
+      "kind": {
+        "kind": "approval",
+        "subject": {
+          "kind": "permissions",
+          "summary": "Write access to /Users/dena/.cache/inline",
+          "reason": "Write outside the workspace"
+        },
+        "decisions": [
+          {
+            "id": "accept",
+            "label": "Yes, grant these permissions",
+            "kind": "accept"
+          },
+          {
+            "id": "decline",
+            "label": "No",
+            "kind": "decline"
+          }
+        ]
+      }
+    }
+  }
+}
