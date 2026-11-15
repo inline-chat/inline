@@ -50,11 +50,17 @@ export const unreachableBotChatSettingsResponse = (): BotChatSettingsResponse =>
   },
 })
 
+/**
+ * A bot's settings broke a rule. The reason is a stable code the bot logs and
+ * reports (`select_value_not_offered`), never the offending text.
+ */
+const invalid = (reason: string): RealtimeRpcError => RealtimeRpcError.BadRequestWithReason(reason)
+
 const utf8Length = (value: string): number => Buffer.byteLength(value, "utf8")
 
 function requiredString(value: string | undefined, maxLength: number): string {
   const normalized = value?.trim() ?? ""
-  if (!normalized || utf8Length(normalized) > maxLength) throw RealtimeRpcError.BadRequest()
+  if (!normalized || utf8Length(normalized) > maxLength) throw invalid("text_blank_or_too_long")
   return normalized
 }
 
@@ -62,24 +68,24 @@ function optionalString(value: string | undefined, maxLength: number): string | 
   if (value == null) return undefined
   const normalized = value.trim()
   if (!normalized) return undefined
-  if (utf8Length(normalized) > maxLength) throw RealtimeRpcError.BadRequest()
+  if (utf8Length(normalized) > maxLength) throw invalid("text_too_long")
   return normalized
 }
 
 function boundedText(value: string | undefined, maxLength: number): string {
-  if (value == null || utf8Length(value) > maxLength) throw RealtimeRpcError.BadRequest()
+  if (value == null || utf8Length(value) > maxLength) throw invalid("text_missing_or_too_long")
   return value
 }
 
 function opaqueIdentifier(value: string | undefined, maxLength: number): string {
   const normalized = requiredString(value, maxLength)
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(normalized)) throw RealtimeRpcError.BadRequest()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(normalized)) throw invalid("identifier_invalid")
   return normalized
 }
 
 function localLoopbackPort(value: number | undefined): number {
   if (value == null || !Number.isInteger(value) || value < 1024 || value > 65_535) {
-    throw RealtimeRpcError.BadRequest()
+    throw invalid("picker_port_invalid")
   }
   return value
 }
@@ -91,7 +97,7 @@ function displayComponent(value: string | undefined, maxLength: number, required
     ? requiredString(value, maxLength)
     : optionalString(value, maxLength)
   if (normalized != null && (/[\\/]/.test(normalized) || /[\u0000-\u001f\u007f]/.test(normalized))) {
-    throw RealtimeRpcError.BadRequest()
+    throw invalid("display_text_invalid")
   }
   return normalized
 }
@@ -125,22 +131,22 @@ function normalizeItem(item: BotChatSettingsItem): BotChatSettingsItem {
 
   switch (item.control.oneofKind) {
     case "toggle":
-      if (!common.label) throw RealtimeRpcError.BadRequest()
+      if (!common.label) throw invalid("toggle_label_missing")
       return { ...common, control: { oneofKind: "toggle", toggle: { value: item.control.toggle.value } } }
     case "select": {
       if (!common.label || item.control.select.options.length === 0 ||
         item.control.select.options.length > BOT_CHAT_SETTINGS_LIMITS.selectOptions) {
-        throw RealtimeRpcError.BadRequest()
+        throw invalid("select_options_count")
       }
       const options = item.control.select.options.map(normalizeOption)
-      if (new Set(options.map((option) => option.value)).size !== options.length) throw RealtimeRpcError.BadRequest()
+      if (new Set(options.map((option) => option.value)).size !== options.length) throw invalid("select_option_repeated")
       const value = requiredString(item.control.select.value, BOT_CHAT_SETTINGS_LIMITS.optionValue)
-      if (!options.some((option) => option.value === value)) throw RealtimeRpcError.BadRequest()
+      if (!options.some((option) => option.value === value)) throw invalid("select_value_not_offered")
       return { ...common, control: { oneofKind: "select", select: { value, options } } }
     }
     case "info": {
       const tone = item.control.info.tone
-      if (!Object.values(BotChatSettingsInfo_Tone).includes(tone)) throw RealtimeRpcError.BadRequest()
+      if (!Object.values(BotChatSettingsInfo_Tone).includes(tone)) throw invalid("info_tone_unknown")
       return {
         ...common,
         control: {
@@ -153,23 +159,23 @@ function normalizeItem(item: BotChatSettingsItem): BotChatSettingsItem {
       }
     }
     case "button":
-      if (!common.label) throw RealtimeRpcError.BadRequest()
+      if (!common.label) throw invalid("button_label_missing")
       return { ...common, control: { oneofKind: "button", button: {} } }
     case "folder": {
       if (!common.label || item.control.folder.recentFolders.length === 0 ||
         item.control.folder.recentFolders.length > BOT_CHAT_SETTINGS_LIMITS.folderOptions) {
-        throw RealtimeRpcError.BadRequest()
+        throw invalid("folder_options_count")
       }
       const recentFolders = item.control.folder.recentFolders.map(normalizeFolderOption)
       if (new Set(recentFolders.map((option) => option.value)).size !== recentFolders.length) {
-        throw RealtimeRpcError.BadRequest()
+        throw invalid("folder_option_repeated")
       }
       const value = opaqueIdentifier(item.control.folder.value, BOT_CHAT_SETTINGS_LIMITS.optionValue)
-      if (!recentFolders.some((option) => option.value === value)) throw RealtimeRpcError.BadRequest()
+      if (!recentFolders.some((option) => option.value === value)) throw invalid("folder_value_not_offered")
       const pickerPort = item.control.folder.localPickerPort
       const pickerCapability = item.control.folder.localPickerCapability
       const hasPickerEndpoint = pickerPort != null || pickerCapability != null
-      if (item.control.folder.allowsLocalPicker !== hasPickerEndpoint) throw RealtimeRpcError.BadRequest()
+      if (item.control.folder.allowsLocalPicker !== hasPickerEndpoint) throw invalid("folder_picker_mismatch")
       const localPickerPort = hasPickerEndpoint ? localLoopbackPort(pickerPort) : undefined
       const localPickerCapability = hasPickerEndpoint
         ? opaqueIdentifier(pickerCapability, BOT_CHAT_SETTINGS_LIMITS.localPickerCapability)
@@ -195,7 +201,7 @@ function normalizeItem(item: BotChatSettingsItem): BotChatSettingsItem {
       }
     }
     default:
-      throw RealtimeRpcError.BadRequest()
+      throw invalid("control_unknown")
   }
 }
 
@@ -210,14 +216,14 @@ function normalizeSection(section: BotChatSettingsSection): BotChatSettingsSecti
 
 export function normalizeBotChatSettingsDocument(document: BotChatSettingsDocument): BotChatSettingsDocument {
   if (document.version !== BOT_CHAT_SETTINGS_VERSION || document.sections.length > BOT_CHAT_SETTINGS_LIMITS.sections) {
-    throw RealtimeRpcError.BadRequest()
+    throw invalid("document_version_or_sections")
   }
   const sections = document.sections.map(normalizeSection)
-  if (new Set(sections.map((section) => section.id)).size !== sections.length) throw RealtimeRpcError.BadRequest()
+  if (new Set(sections.map((section) => section.id)).size !== sections.length) throw invalid("section_repeated")
 
   const itemIds = sections.flatMap((section) => section.items.map((item) => item.id))
   if (itemIds.length > BOT_CHAT_SETTINGS_LIMITS.items || new Set(itemIds).size !== itemIds.length) {
-    throw RealtimeRpcError.BadRequest()
+    throw invalid("items_repeated_or_too_many")
   }
   const normalized = {
     version: document.version,
@@ -225,7 +231,7 @@ export function normalizeBotChatSettingsDocument(document: BotChatSettingsDocume
     sections,
   }
   if (utf8Length(JSON.stringify(normalized)) > BOT_CHAT_SETTINGS_LIMITS.documentBytes) {
-    throw RealtimeRpcError.BadRequest()
+    throw invalid("document_too_large")
   }
   return normalized
 }
@@ -248,7 +254,7 @@ export function normalizeBotChatSettingsResponse(
         code === BotChatSettingsProblem_Code.UNREACHABLE ||
         !Object.values(BotChatSettingsProblem_Code).includes(code)
       ) {
-        throw RealtimeRpcError.BadRequest()
+        throw invalid("problem_code_invalid")
       }
       const currentDocument = response.result.problem.currentDocument
         ? normalizeBotChatSettingsDocument(response.result.problem.currentDocument)
@@ -265,7 +271,7 @@ export function normalizeBotChatSettingsResponse(
       }
     }
     default:
-      throw RealtimeRpcError.BadRequest()
+      throw invalid("response_empty")
   }
 }
 

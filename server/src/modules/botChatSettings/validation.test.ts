@@ -9,6 +9,7 @@ import {
   normalizeBotChatSettingsDocument,
   normalizeBotChatSettingsResponse,
 } from "./validation"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 const document = (): BotChatSettingsDocument => ({
   version: 1,
@@ -102,6 +103,26 @@ describe("bot chat settings validation", () => {
         recentFolders: [{ label: "inline", parentHint: "inline-chat" }],
       },
     })
+  })
+
+  test("names the broken rule with a stable code the bot can report", () => {
+    const unoffered = document()
+    const control = unoffered.sections[0]?.items[1]?.control
+    if (control?.oneofKind !== "select") throw new Error("missing select fixture")
+    control.select.value = "sometimes"
+    expect(() => normalizeBotChatSettingsDocument(unoffered)).toThrow(
+      expect.objectContaining({
+        code: RealtimeRpcError.Code.BAD_REQUEST,
+        message: "select_value_not_offered",
+        publicReason: "select_value_not_offered",
+      }),
+    )
+
+    const unknownFolder = document()
+    const folder = unknownFolder.sections[0]?.items[4]?.control
+    if (folder?.oneofKind !== "folder") throw new Error("missing folder fixture")
+    folder.folder.value = "workspace-missing"
+    expect(() => normalizeBotChatSettingsDocument(unknownFolder)).toThrow("folder_value_not_offered")
   })
 
   test("rejects local paths and unknown folder selections", () => {
