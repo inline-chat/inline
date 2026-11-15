@@ -324,7 +324,8 @@ extension RichBlockLayoutPlanner.Builder {
         width: card.contentWidth,
         depth: depth,
         inheritedDirection: isRTL,
-        fullBleedContainer: nil
+        fullBleedContainer: nil,
+        bounds: childBounds[path]
       ) else { return false }
       // A long plan shows the first blocks that fit, with "Show full plan".
       let limit = ceil(baseFontSize * 1.35 * Metrics.collapsedPlanLines)
@@ -363,6 +364,12 @@ extension RichBlockLayoutPlanner.Builder {
         }
         // A first block taller than the limit still shows, whole.
         if shown.isEmpty { shown = [plan.children[0]] }
+        // The shown blocks may claim text only up to the first hidden one.
+        let hiddenStart = plan.children.dropFirst(shown.count).lazy.compactMap { BlockContentSpan.span(of: $0) }.first?.lowerBound
+        let shownBounds = childBounds[path].flatMap { inner in
+          let upper = min(inner.upperBound, hiddenStart ?? inner.upperBound)
+          return inner.lowerBound < upper ? inner.lowerBound ..< upper : nil
+        }
         restore(beforeBody, claimedActionIDs: claimedBeforeBody)
         guard layout(
           blocks: shown,
@@ -371,7 +378,8 @@ extension RichBlockLayoutPlanner.Builder {
           width: card.contentWidth,
           depth: depth,
           inheritedDirection: isRTL,
-          fullBleedContainer: nil
+          fullBleedContainer: nil,
+          bounds: shownBounds
         ) else { return false }
       }
     }
@@ -456,7 +464,8 @@ extension RichBlockLayoutPlanner.Builder {
         width: card.contentWidth,
         depth: depth,
         inheritedDirection: isRTL,
-        fullBleedContainer: nil
+        fullBleedContainer: nil,
+        bounds: childBounds[path]
       ) else { return false }
     }
     appendActions(

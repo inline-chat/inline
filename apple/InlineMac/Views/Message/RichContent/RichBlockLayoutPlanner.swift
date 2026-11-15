@@ -596,6 +596,9 @@ final class RichBlockLayoutPlanner {
     /// Actions that drawn blocks claim. Part of the builder's state, so a block that rolls
     /// back to its fallback text gives its claims back.
     var claimedActionIDs: Set<String> = []
+    /// For container blocks by path: the text their children may claim (see
+    /// `BlockContentSpan.childBounds`), so an unknown kind first or last inside still shows.
+    var childBounds: [BlockContentPath: Range<Int>] = [:]
     var nodes: [RichBlockLayoutPlan.Node] = []
     var height: CGFloat = 0
     var trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
@@ -682,6 +685,9 @@ final class RichBlockLayoutPlanner {
     ) -> Bool {
       guard depth <= 16, nodes.count + blocks.count <= RichBlockLayoutPlanner.maximumBlocks else { return false }
       for index in blocks.indices {
+        if let inner = BlockContentSpan.childBounds(at: index, in: blocks, bounds: bounds) {
+          childBounds[BlockContentPath(parent.components + [.block(index)])] = inner
+        }
         // A block this build can't draw, of a newer kind or malformed, shows the fallback
         // text it covers, so the rest of the message keeps its formatting.
         let saved = checkpoint()
@@ -861,7 +867,8 @@ final class RichBlockLayoutPlanner {
           width: width,
           depth: depth + 1,
           inheritedDirection: direction,
-          fullBleedContainer: fullBleedContainer
+          fullBleedContainer: fullBleedContainer,
+          bounds: childBounds[path]
         )
       case let .footer(text):
         return appendText(
@@ -1072,7 +1079,8 @@ final class RichBlockLayoutPlanner {
         width: max(1, width - RichBlockQuoteMetrics.leadingInset - RichBlockQuoteMetrics.trailingInset),
         depth: depth,
         inheritedDirection: isRTL,
-        fullBleedContainer: nil
+        fullBleedContainer: nil,
+        bounds: childBounds[path]
       ) else { return false }
       let quotedContentMaxX = measuredMaxX
       let endingInset = isRTL

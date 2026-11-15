@@ -339,7 +339,8 @@ extension RichBlockLayoutPlanner.Builder {
         width: contentWidth,
         depth: depth,
         inheritedDirection: isRTL,
-        fullBleedContainer: nil
+        fullBleedContainer: nil,
+        bounds: childBounds[path]
       ) else { return false }
     }
     height += insetY
