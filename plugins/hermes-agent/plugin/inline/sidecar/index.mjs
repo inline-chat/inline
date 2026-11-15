@@ -6217,6 +6217,43 @@ var BlockFormText_Kind;
   BlockFormText_Kind[BlockFormText_Kind["MULTILINE"] = 1] = "MULTILINE";
   BlockFormText_Kind[BlockFormText_Kind["SECRET"] = 2] = "SECRET";
 })(BlockFormText_Kind || (BlockFormText_Kind = {}));
+var BlockApproval_Subject;
+(function(BlockApproval_Subject) {
+  BlockApproval_Subject[BlockApproval_Subject["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockApproval_Subject[BlockApproval_Subject["COMMAND"] = 1] = "COMMAND";
+  BlockApproval_Subject[BlockApproval_Subject["FILE_CHANGE"] = 2] = "FILE_CHANGE";
+  BlockApproval_Subject[BlockApproval_Subject["TOOL"] = 3] = "TOOL";
+  BlockApproval_Subject[BlockApproval_Subject["PERMISSIONS"] = 4] = "PERMISSIONS";
+  BlockApproval_Subject[BlockApproval_Subject["NETWORK"] = 5] = "NETWORK";
+})(BlockApproval_Subject || (BlockApproval_Subject = {}));
+var BlockReview_Verdict;
+(function(BlockReview_Verdict) {
+  BlockReview_Verdict[BlockReview_Verdict["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockReview_Verdict[BlockReview_Verdict["CORRECT"] = 1] = "CORRECT";
+  BlockReview_Verdict[BlockReview_Verdict["INCORRECT"] = 2] = "INCORRECT";
+  BlockReview_Verdict[BlockReview_Verdict["NEEDS_ATTENTION"] = 3] = "NEEDS_ATTENTION";
+})(BlockReview_Verdict || (BlockReview_Verdict = {}));
+var BlockReviewFinding_Priority;
+(function(BlockReviewFinding_Priority) {
+  BlockReviewFinding_Priority[BlockReviewFinding_Priority["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockReviewFinding_Priority[BlockReviewFinding_Priority["P0"] = 1] = "P0";
+  BlockReviewFinding_Priority[BlockReviewFinding_Priority["P1"] = 2] = "P1";
+  BlockReviewFinding_Priority[BlockReviewFinding_Priority["P2"] = 3] = "P2";
+  BlockReviewFinding_Priority[BlockReviewFinding_Priority["P3"] = 4] = "P3";
+})(BlockReviewFinding_Priority || (BlockReviewFinding_Priority = {}));
+var BlockReviewFinding_Confidence;
+(function(BlockReviewFinding_Confidence) {
+  BlockReviewFinding_Confidence[BlockReviewFinding_Confidence["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockReviewFinding_Confidence[BlockReviewFinding_Confidence["CONFIRMED"] = 1] = "CONFIRMED";
+  BlockReviewFinding_Confidence[BlockReviewFinding_Confidence["PLAUSIBLE"] = 2] = "PLAUSIBLE";
+})(BlockReviewFinding_Confidence || (BlockReviewFinding_Confidence = {}));
+var BlockReviewFinding_Outcome;
+(function(BlockReviewFinding_Outcome) {
+  BlockReviewFinding_Outcome[BlockReviewFinding_Outcome["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockReviewFinding_Outcome[BlockReviewFinding_Outcome["FIXED"] = 1] = "FIXED";
+  BlockReviewFinding_Outcome[BlockReviewFinding_Outcome["SKIPPED"] = 2] = "SKIPPED";
+  BlockReviewFinding_Outcome[BlockReviewFinding_Outcome["NO_CHANGE_NEEDED"] = 3] = "NO_CHANGE_NEEDED";
+})(BlockReviewFinding_Outcome || (BlockReviewFinding_Outcome = {}));
 var MessageEntity_Type;
 (function(MessageEntity_Type) {
   MessageEntity_Type[MessageEntity_Type["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -6501,6 +6538,15 @@ var BlockStatus;
   BlockStatus[BlockStatus["FAILED"] = 5] = "FAILED";
   BlockStatus[BlockStatus["CANCELLED"] = 6] = "CANCELLED";
 })(BlockStatus || (BlockStatus = {}));
+var BlockDecisionState;
+(function(BlockDecisionState) {
+  BlockDecisionState[BlockDecisionState["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockDecisionState[BlockDecisionState["PENDING"] = 1] = "PENDING";
+  BlockDecisionState[BlockDecisionState["ACCEPTED"] = 2] = "ACCEPTED";
+  BlockDecisionState[BlockDecisionState["DECLINED"] = 3] = "DECLINED";
+  BlockDecisionState[BlockDecisionState["EXPIRED"] = 4] = "EXPIRED";
+  BlockDecisionState[BlockDecisionState["SUPERSEDED"] = 5] = "SUPERSEDED";
+})(BlockDecisionState || (BlockDecisionState = {}));
 var AgentSessionProvider;
 (function(AgentSessionProvider) {
   AgentSessionProvider[AgentSessionProvider["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -6797,6 +6843,7 @@ var Method;
   Method[Method["READ_ACTIVITY"] = 168] = "READ_ACTIVITY";
   Method[Method["SET_FOCUS_STATUS"] = 169] = "SET_FOCUS_STATUS";
   Method[Method["GET_SPACES"] = 170] = "GET_SPACES";
+  Method[Method["SEND_COMPOSE_SUGGESTION"] = 171] = "SEND_COMPOSE_SUGGESTION";
 })(Method || (Method = {}));
 var GridTranscriptionState;
 (function(GridTranscriptionState) {
@@ -9365,6 +9412,7 @@ class MessageAction$Type extends import_runtime4.MessageType {
       { no: 4, name: "copy_text", kind: "message", oneof: "action", T: () => MessageActionCopyText },
       { no: 5, name: "open_url", kind: "message", oneof: "action", T: () => MessageActionOpenUrl },
       { no: 6, name: "open_link", kind: "message", oneof: "action", T: () => MessageActionOpenLink },
+      { no: 10, name: "compose", kind: "message", oneof: "action", T: () => MessageActionCompose },
       { no: 7, name: "style", kind: "enum", T: () => ["MessageAction.Style", MessageAction_Style, "STYLE_"] },
       { no: 8, name: "confirm", kind: "message", T: () => MessageActionConfirm },
       { no: 9, name: "required_grant", kind: "enum", T: () => ["AgentGrantRequirement", AgentGrantRequirement, "AGENT_GRANT_REQUIREMENT_"] }
@@ -9416,6 +9464,12 @@ class MessageAction$Type extends import_runtime4.MessageType {
             openLink: MessageActionOpenLink.internalBinaryRead(reader, reader.uint32(), options, message.action.openLink)
           };
           break;
+        case 10:
+          message.action = {
+            oneofKind: "compose",
+            compose: MessageActionCompose.internalBinaryRead(reader, reader.uint32(), options, message.action.compose)
+          };
+          break;
         case 7:
           message.style = reader.int32();
           break;
@@ -9449,6 +9503,8 @@ class MessageAction$Type extends import_runtime4.MessageType {
       MessageActionOpenUrl.internalBinaryWrite(message.action.openUrl, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.action.oneofKind === "openLink")
       MessageActionOpenLink.internalBinaryWrite(message.action.openLink, writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.action.oneofKind === "compose")
+      MessageActionCompose.internalBinaryWrite(message.action.compose, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.style !== 0)
       writer.tag(7, import_runtime.WireType.Varint).int32(message.style);
     if (message.confirm)
@@ -9591,6 +9647,49 @@ class MessageActionOpenUrl$Type extends import_runtime4.MessageType {
   }
 }
 var MessageActionOpenUrl = new MessageActionOpenUrl$Type;
+
+class MessageActionCompose$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageActionCompose", [
+      { no: 1, name: "text", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.text = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.text = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.text !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.text);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageActionCompose = new MessageActionCompose$Type;
 
 class MessageActionOpenLink$Type extends import_runtime4.MessageType {
   constructor() {
@@ -10179,7 +10278,13 @@ class Block$Type extends import_runtime4.MessageType {
       { no: 16, name: "callout", kind: "message", oneof: "kind", T: () => BlockCallout },
       { no: 17, name: "meter", kind: "message", oneof: "kind", T: () => BlockMeter },
       { no: 18, name: "form", kind: "message", oneof: "kind", T: () => BlockForm },
-      { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget }
+      { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget },
+      { no: 20, name: "plan_proposal", kind: "message", oneof: "kind", T: () => BlockPlanProposal },
+      { no: 21, name: "approval", kind: "message", oneof: "kind", T: () => BlockApproval },
+      { no: 22, name: "review", kind: "message", oneof: "kind", T: () => BlockReview },
+      { no: 23, name: "task_suggestion", kind: "message", oneof: "kind", T: () => BlockTaskSuggestion },
+      { no: 24, name: "next_step", kind: "message", oneof: "kind", T: () => BlockNextStep },
+      { no: 25, name: "prompt_suggestions", kind: "message", oneof: "kind", T: () => BlockPromptSuggestions }
     ]);
   }
   create(value) {
@@ -10308,6 +10413,42 @@ class Block$Type extends import_runtime4.MessageType {
             widget: BlockWidget.internalBinaryRead(reader, reader.uint32(), options, message.kind.widget)
           };
           break;
+        case 20:
+          message.kind = {
+            oneofKind: "planProposal",
+            planProposal: BlockPlanProposal.internalBinaryRead(reader, reader.uint32(), options, message.kind.planProposal)
+          };
+          break;
+        case 21:
+          message.kind = {
+            oneofKind: "approval",
+            approval: BlockApproval.internalBinaryRead(reader, reader.uint32(), options, message.kind.approval)
+          };
+          break;
+        case 22:
+          message.kind = {
+            oneofKind: "review",
+            review: BlockReview.internalBinaryRead(reader, reader.uint32(), options, message.kind.review)
+          };
+          break;
+        case 23:
+          message.kind = {
+            oneofKind: "taskSuggestion",
+            taskSuggestion: BlockTaskSuggestion.internalBinaryRead(reader, reader.uint32(), options, message.kind.taskSuggestion)
+          };
+          break;
+        case 24:
+          message.kind = {
+            oneofKind: "nextStep",
+            nextStep: BlockNextStep.internalBinaryRead(reader, reader.uint32(), options, message.kind.nextStep)
+          };
+          break;
+        case 25:
+          message.kind = {
+            oneofKind: "promptSuggestions",
+            promptSuggestions: BlockPromptSuggestions.internalBinaryRead(reader, reader.uint32(), options, message.kind.promptSuggestions)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -10358,6 +10499,18 @@ class Block$Type extends import_runtime4.MessageType {
       BlockForm.internalBinaryWrite(message.kind.form, writer.tag(18, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.kind.oneofKind === "widget")
       BlockWidget.internalBinaryWrite(message.kind.widget, writer.tag(19, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "planProposal")
+      BlockPlanProposal.internalBinaryWrite(message.kind.planProposal, writer.tag(20, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "approval")
+      BlockApproval.internalBinaryWrite(message.kind.approval, writer.tag(21, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "review")
+      BlockReview.internalBinaryWrite(message.kind.review, writer.tag(22, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "taskSuggestion")
+      BlockTaskSuggestion.internalBinaryWrite(message.kind.taskSuggestion, writer.tag(23, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "nextStep")
+      BlockNextStep.internalBinaryWrite(message.kind.nextStep, writer.tag(24, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.kind.oneofKind === "promptSuggestions")
+      BlockPromptSuggestions.internalBinaryWrite(message.kind.promptSuggestions, writer.tag(25, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11615,7 +11768,8 @@ class BlockFormField$Type extends import_runtime4.MessageType {
       { no: 5, name: "select", kind: "message", oneof: "kind", T: () => BlockFormSelect },
       { no: 6, name: "text", kind: "message", oneof: "kind", T: () => BlockFormText },
       { no: 7, name: "toggle", kind: "message", oneof: "kind", T: () => BlockFormToggle },
-      { no: 8, name: "number", kind: "message", oneof: "kind", T: () => BlockFormNumber }
+      { no: 8, name: "number", kind: "message", oneof: "kind", T: () => BlockFormNumber },
+      { no: 9, name: "header", kind: "message", T: () => BlockText }
     ]);
   }
   create(value) {
@@ -11668,6 +11822,9 @@ class BlockFormField$Type extends import_runtime4.MessageType {
             number: BlockFormNumber.internalBinaryRead(reader, reader.uint32(), options, message.kind.number)
           };
           break;
+        case 9:
+          message.header = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.header);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -11696,6 +11853,8 @@ class BlockFormField$Type extends import_runtime4.MessageType {
       BlockFormToggle.internalBinaryWrite(message.kind.toggle, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.kind.oneofKind === "number")
       BlockFormNumber.internalBinaryWrite(message.kind.number, writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.header)
+      BlockText.internalBinaryWrite(message.header, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11773,12 +11932,15 @@ class BlockFormOption$Type extends import_runtime4.MessageType {
     super("BlockFormOption", [
       { no: 1, name: "option_id", kind: "scalar", T: 9 },
       { no: 2, name: "label", kind: "message", T: () => BlockText },
-      { no: 3, name: "description", kind: "message", T: () => BlockText }
+      { no: 3, name: "description", kind: "message", T: () => BlockText },
+      { no: 4, name: "preview", kind: "message", T: () => BlockText },
+      { no: 5, name: "recommended", kind: "scalar", T: 8 }
     ]);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
     message.optionId = "";
+    message.recommended = false;
     if (value !== undefined)
       import_runtime3.reflectionMergePartial(this, message, value);
     return message;
@@ -11796,6 +11958,12 @@ class BlockFormOption$Type extends import_runtime4.MessageType {
           break;
         case 3:
           message.description = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.description);
+          break;
+        case 4:
+          message.preview = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.preview);
+          break;
+        case 5:
+          message.recommended = reader.bool();
           break;
         default:
           let u = options.readUnknownField;
@@ -11815,6 +11983,10 @@ class BlockFormOption$Type extends import_runtime4.MessageType {
       BlockText.internalBinaryWrite(message.label, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.description)
       BlockText.internalBinaryWrite(message.description, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.preview)
+      BlockText.internalBinaryWrite(message.preview, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.recommended !== false)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.recommended);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12298,6 +12470,593 @@ class MessageWidgetCall$Type extends import_runtime4.MessageType {
   }
 }
 var MessageWidgetCall = new MessageWidgetCall$Type;
+
+class BlockPlanProposal$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockPlanProposal", [
+      { no: 1, name: "title", kind: "message", T: () => BlockText },
+      { no: 2, name: "children", kind: "message", repeat: 1, T: () => Block },
+      { no: 3, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+      { no: 4, name: "action_ids", kind: "scalar", repeat: 2, T: 9 },
+      { no: 5, name: "decided_by_user_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 6, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.children = [];
+    message.state = 0;
+    message.actionIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+          break;
+        case 2:
+          message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.state = reader.int32();
+          break;
+        case 4:
+          message.actionIds.push(reader.string());
+          break;
+        case 5:
+          message.decidedByUserId = reader.int64().toBigInt();
+          break;
+        case 6:
+          message.isRtl = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.title)
+      BlockText.internalBinaryWrite(message.title, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.children.length; i++)
+      Block.internalBinaryWrite(message.children[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.state !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.state);
+    for (let i = 0;i < message.actionIds.length; i++)
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.actionIds[i]);
+    if (message.decidedByUserId !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.decidedByUserId);
+    if (message.isRtl !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).bool(message.isRtl);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockPlanProposal = new BlockPlanProposal$Type;
+
+class BlockApproval$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockApproval", [
+      { no: 1, name: "subject", kind: "enum", T: () => ["BlockApproval.Subject", BlockApproval_Subject, "SUBJECT_"] },
+      { no: 2, name: "title", kind: "message", T: () => BlockText },
+      { no: 3, name: "command", kind: "message", T: () => BlockText },
+      { no: 4, name: "cwd", kind: "message", T: () => BlockText },
+      { no: 5, name: "reason", kind: "message", T: () => BlockText },
+      { no: 6, name: "children", kind: "message", repeat: 1, T: () => Block },
+      { no: 7, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+      { no: 8, name: "action_ids", kind: "scalar", repeat: 2, T: 9 },
+      { no: 9, name: "decided_by_user_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 10, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.subject = 0;
+    message.children = [];
+    message.state = 0;
+    message.actionIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.subject = reader.int32();
+          break;
+        case 2:
+          message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+          break;
+        case 3:
+          message.command = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.command);
+          break;
+        case 4:
+          message.cwd = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.cwd);
+          break;
+        case 5:
+          message.reason = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.reason);
+          break;
+        case 6:
+          message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 7:
+          message.state = reader.int32();
+          break;
+        case 8:
+          message.actionIds.push(reader.string());
+          break;
+        case 9:
+          message.decidedByUserId = reader.int64().toBigInt();
+          break;
+        case 10:
+          message.isRtl = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.subject !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.subject);
+    if (message.title)
+      BlockText.internalBinaryWrite(message.title, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.command)
+      BlockText.internalBinaryWrite(message.command, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.cwd)
+      BlockText.internalBinaryWrite(message.cwd, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.reason)
+      BlockText.internalBinaryWrite(message.reason, writer.tag(5, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.children.length; i++)
+      Block.internalBinaryWrite(message.children[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.state !== 0)
+      writer.tag(7, import_runtime.WireType.Varint).int32(message.state);
+    for (let i = 0;i < message.actionIds.length; i++)
+      writer.tag(8, import_runtime.WireType.LengthDelimited).string(message.actionIds[i]);
+    if (message.decidedByUserId !== undefined)
+      writer.tag(9, import_runtime.WireType.Varint).int64(message.decidedByUserId);
+    if (message.isRtl !== undefined)
+      writer.tag(10, import_runtime.WireType.Varint).bool(message.isRtl);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockApproval = new BlockApproval$Type;
+
+class BlockReview$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockReview", [
+      { no: 1, name: "title", kind: "message", T: () => BlockText },
+      { no: 2, name: "verdict", kind: "enum", T: () => ["BlockReview.Verdict", BlockReview_Verdict, "VERDICT_"] },
+      { no: 3, name: "summary", kind: "message", T: () => BlockText },
+      { no: 4, name: "findings", kind: "message", repeat: 1, T: () => BlockReviewFinding },
+      { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.verdict = 0;
+    message.findings = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+          break;
+        case 2:
+          message.verdict = reader.int32();
+          break;
+        case 3:
+          message.summary = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.summary);
+          break;
+        case 4:
+          message.findings.push(BlockReviewFinding.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 5:
+          message.isRtl = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.title)
+      BlockText.internalBinaryWrite(message.title, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.verdict !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).int32(message.verdict);
+    if (message.summary)
+      BlockText.internalBinaryWrite(message.summary, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.findings.length; i++)
+      BlockReviewFinding.internalBinaryWrite(message.findings[i], writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.isRtl !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.isRtl);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockReview = new BlockReview$Type;
+
+class BlockReviewFinding$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockReviewFinding", [
+      { no: 1, name: "title", kind: "message", T: () => BlockText },
+      { no: 2, name: "body", kind: "message", T: () => BlockText },
+      { no: 3, name: "priority", kind: "enum", T: () => ["BlockReviewFinding.Priority", BlockReviewFinding_Priority, "PRIORITY_"] },
+      { no: 4, name: "path", kind: "message", T: () => BlockText },
+      { no: 5, name: "start_line", kind: "scalar", opt: true, T: 13 },
+      { no: 6, name: "end_line", kind: "scalar", opt: true, T: 13 },
+      { no: 7, name: "category", kind: "scalar", opt: true, T: 9 },
+      { no: 8, name: "confidence", kind: "enum", T: () => ["BlockReviewFinding.Confidence", BlockReviewFinding_Confidence, "CONFIDENCE_"] },
+      { no: 9, name: "outcome", kind: "enum", T: () => ["BlockReviewFinding.Outcome", BlockReviewFinding_Outcome, "OUTCOME_"] },
+      { no: 10, name: "action_id", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.priority = 0;
+    message.confidence = 0;
+    message.outcome = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+          break;
+        case 2:
+          message.body = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.body);
+          break;
+        case 3:
+          message.priority = reader.int32();
+          break;
+        case 4:
+          message.path = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.path);
+          break;
+        case 5:
+          message.startLine = reader.uint32();
+          break;
+        case 6:
+          message.endLine = reader.uint32();
+          break;
+        case 7:
+          message.category = reader.string();
+          break;
+        case 8:
+          message.confidence = reader.int32();
+          break;
+        case 9:
+          message.outcome = reader.int32();
+          break;
+        case 10:
+          message.actionId = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.title)
+      BlockText.internalBinaryWrite(message.title, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.body)
+      BlockText.internalBinaryWrite(message.body, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.priority !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.priority);
+    if (message.path)
+      BlockText.internalBinaryWrite(message.path, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.startLine !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).uint32(message.startLine);
+    if (message.endLine !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).uint32(message.endLine);
+    if (message.category !== undefined)
+      writer.tag(7, import_runtime.WireType.LengthDelimited).string(message.category);
+    if (message.confidence !== 0)
+      writer.tag(8, import_runtime.WireType.Varint).int32(message.confidence);
+    if (message.outcome !== 0)
+      writer.tag(9, import_runtime.WireType.Varint).int32(message.outcome);
+    if (message.actionId !== undefined)
+      writer.tag(10, import_runtime.WireType.LengthDelimited).string(message.actionId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockReviewFinding = new BlockReviewFinding$Type;
+
+class BlockTaskSuggestion$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockTaskSuggestion", [
+      { no: 1, name: "title", kind: "message", T: () => BlockText },
+      { no: 2, name: "brief", kind: "message", T: () => BlockText },
+      { no: 3, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+      { no: 4, name: "started_peer", kind: "message", T: () => Peer },
+      { no: 5, name: "expires_at", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 6, name: "action_ids", kind: "scalar", repeat: 2, T: 9 },
+      { no: 7, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.state = 0;
+    message.actionIds = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+          break;
+        case 2:
+          message.brief = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.brief);
+          break;
+        case 3:
+          message.state = reader.int32();
+          break;
+        case 4:
+          message.startedPeer = Peer.internalBinaryRead(reader, reader.uint32(), options, message.startedPeer);
+          break;
+        case 5:
+          message.expiresAt = reader.int64().toBigInt();
+          break;
+        case 6:
+          message.actionIds.push(reader.string());
+          break;
+        case 7:
+          message.isRtl = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.title)
+      BlockText.internalBinaryWrite(message.title, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.brief)
+      BlockText.internalBinaryWrite(message.brief, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.state !== 0)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.state);
+    if (message.startedPeer)
+      Peer.internalBinaryWrite(message.startedPeer, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.expiresAt !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.expiresAt);
+    for (let i = 0;i < message.actionIds.length; i++)
+      writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.actionIds[i]);
+    if (message.isRtl !== undefined)
+      writer.tag(7, import_runtime.WireType.Varint).bool(message.isRtl);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockTaskSuggestion = new BlockTaskSuggestion$Type;
+
+class BlockNextStep$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockNextStep", [
+      { no: 1, name: "recap", kind: "message", T: () => BlockText },
+      { no: 2, name: "question", kind: "message", T: () => BlockText },
+      { no: 3, name: "action_ids", kind: "scalar", repeat: 2, T: 9 },
+      { no: 4, name: "blocking", kind: "scalar", T: 8 },
+      { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.actionIds = [];
+    message.blocking = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.recap = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.recap);
+          break;
+        case 2:
+          message.question = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.question);
+          break;
+        case 3:
+          message.actionIds.push(reader.string());
+          break;
+        case 4:
+          message.blocking = reader.bool();
+          break;
+        case 5:
+          message.isRtl = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.recap)
+      BlockText.internalBinaryWrite(message.recap, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.question)
+      BlockText.internalBinaryWrite(message.question, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.actionIds.length; i++)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.actionIds[i]);
+    if (message.blocking !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.blocking);
+    if (message.isRtl !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.isRtl);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockNextStep = new BlockNextStep$Type;
+
+class BlockPromptSuggestions$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockPromptSuggestions", [
+      { no: 1, name: "prompts", kind: "message", repeat: 1, T: () => BlockPromptSuggestion },
+      { no: 2, name: "is_rtl", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.prompts = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.prompts.push(BlockPromptSuggestion.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.isRtl = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.prompts.length; i++)
+      BlockPromptSuggestion.internalBinaryWrite(message.prompts[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.isRtl !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.isRtl);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockPromptSuggestions = new BlockPromptSuggestions$Type;
+
+class BlockPromptSuggestion$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BlockPromptSuggestion", [
+      { no: 1, name: "label", kind: "message", T: () => BlockText },
+      { no: 2, name: "text", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.label = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.label);
+          break;
+        case 2:
+          message.text = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.label)
+      BlockText.internalBinaryWrite(message.label, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.text !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.text);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BlockPromptSuggestion = new BlockPromptSuggestion$Type;
 
 class Message$Type extends import_runtime4.MessageType {
   constructor() {
@@ -13776,7 +14535,6 @@ class AgentHeldBy$Type extends import_runtime4.MessageType {
   }
 }
 var AgentHeldBy = new AgentHeldBy$Type;
-
 class AgentSessionState$Type extends import_runtime4.MessageType {
   constructor() {
     super("AgentSessionState", [
@@ -18911,7 +19669,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
       { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
       { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
-      { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput }
+      { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput },
+      { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput }
     ]);
   }
   create(value) {
@@ -19944,6 +20703,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
             getSpaces: GetSpacesInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getSpaces)
           };
           break;
+        case 172:
+          message.input = {
+            oneofKind: "sendComposeSuggestion",
+            sendComposeSuggestion: SendComposeSuggestionInput.internalBinaryRead(reader, reader.uint32(), options, message.input.sendComposeSuggestion)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -20296,6 +21061,8 @@ class RpcCall$Type extends import_runtime4.MessageType {
       SetFocusStatusInput.internalBinaryWrite(message.input.setFocusStatus, writer.tag(170, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "getSpaces")
       GetSpacesInput.internalBinaryWrite(message.input.getSpaces, writer.tag(171, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "sendComposeSuggestion")
+      SendComposeSuggestionInput.internalBinaryWrite(message.input.sendComposeSuggestion, writer.tag(172, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -20476,7 +21243,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
       { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
       { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
-      { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult }
+      { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult },
+      { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult }
     ]);
   }
   create(value) {
@@ -21509,6 +22277,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
             getSpaces: GetSpacesResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getSpaces)
           };
           break;
+        case 172:
+          message.result = {
+            oneofKind: "sendComposeSuggestion",
+            sendComposeSuggestion: SendComposeSuggestionResult.internalBinaryRead(reader, reader.uint32(), options, message.result.sendComposeSuggestion)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -21861,6 +22635,8 @@ class RpcResult$Type extends import_runtime4.MessageType {
       SetFocusStatusResult.internalBinaryWrite(message.result.setFocusStatus, writer.tag(170, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "getSpaces")
       GetSpacesResult.internalBinaryWrite(message.result.getSpaces, writer.tag(171, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "sendComposeSuggestion")
+      SendComposeSuggestionResult.internalBinaryWrite(message.result.sendComposeSuggestion, writer.tag(172, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -30917,6 +31693,90 @@ class SendComposeActionResult$Type extends import_runtime4.MessageType {
 }
 var SendComposeActionResult = new SendComposeActionResult$Type;
 
+class SendComposeSuggestionInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SendComposeSuggestionInput", [
+      { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 2, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "text", kind: "scalar", T: 9 },
+      { no: 4, name: "after_message_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.userId = 0n;
+    message.text = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 2:
+          message.userId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.text = reader.string();
+          break;
+        case 4:
+          message.afterMessageId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.userId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.text !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.text);
+    if (message.afterMessageId !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.afterMessageId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SendComposeSuggestionInput = new SendComposeSuggestionInput$Type;
+
+class SendComposeSuggestionResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SendComposeSuggestionResult", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SendComposeSuggestionResult = new SendComposeSuggestionResult$Type;
+
 class PushContentEncryptionKey$Type extends import_runtime4.MessageType {
   constructor() {
     super("PushContentEncryptionKey", [
@@ -36928,7 +37788,8 @@ class Update$Type extends import_runtime4.MessageType {
       { no: 56, name: "agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
       { no: 57, name: "agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl },
       { no: 58, name: "agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings },
-      { no: 59, name: "unread_activity", kind: "message", oneof: "update", T: () => UpdateUnreadActivity }
+      { no: 59, name: "unread_activity", kind: "message", oneof: "update", T: () => UpdateUnreadActivity },
+      { no: 60, name: "compose_suggestion", kind: "message", oneof: "update", T: () => UpdateComposeSuggestion }
     ]);
   }
   create(value) {
@@ -37285,6 +38146,12 @@ class Update$Type extends import_runtime4.MessageType {
             unreadActivity: UpdateUnreadActivity.internalBinaryRead(reader, reader.uint32(), options, message.update.unreadActivity)
           };
           break;
+        case 60:
+          message.update = {
+            oneofKind: "composeSuggestion",
+            composeSuggestion: UpdateComposeSuggestion.internalBinaryRead(reader, reader.uint32(), options, message.update.composeSuggestion)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -37413,6 +38280,8 @@ class Update$Type extends import_runtime4.MessageType {
       UpdateAgentSettings.internalBinaryWrite(message.update.agentSettings, writer.tag(58, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.update.oneofKind === "unreadActivity")
       UpdateUnreadActivity.internalBinaryWrite(message.update.unreadActivity, writer.tag(59, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.update.oneofKind === "composeSuggestion")
+      UpdateComposeSuggestion.internalBinaryWrite(message.update.composeSuggestion, writer.tag(60, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -39751,6 +40620,68 @@ class UpdateComposeAction$Type extends import_runtime4.MessageType {
   }
 }
 var UpdateComposeAction = new UpdateComposeAction$Type;
+
+class UpdateComposeSuggestion$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UpdateComposeSuggestion", [
+      { no: 1, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "peer_id", kind: "message", T: () => Peer },
+      { no: 3, name: "text", kind: "scalar", T: 9 },
+      { no: 4, name: "after_message_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.userId = 0n;
+    message.text = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.userId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 3:
+          message.text = reader.string();
+          break;
+        case 4:
+          message.afterMessageId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.userId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.peerId)
+      Peer.internalBinaryWrite(message.peerId, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.text !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.text);
+    if (message.afterMessageId !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.afterMessageId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UpdateComposeSuggestion = new UpdateComposeSuggestion$Type;
 
 class UpdateMessageAttachment$Type extends import_runtime4.MessageType {
   constructor() {
@@ -45659,7 +46590,8 @@ class CreateUploadInput$Type extends import_runtime4.MessageType {
       { no: 6, name: "kind", kind: "enum", T: () => ["UploadKind", UploadKind, "UPLOAD_KIND_"] },
       { no: 7, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 },
       { no: 8, name: "video", kind: "message", oneof: "metadata", T: () => UploadVideoMetadata },
-      { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata }
+      { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata },
+      { no: 10, name: "inline_data", kind: "scalar", opt: true, T: 12 }
     ]);
   }
   create(value) {
@@ -45713,6 +46645,9 @@ class CreateUploadInput$Type extends import_runtime4.MessageType {
             voice: UploadVoiceMetadata.internalBinaryRead(reader, reader.uint32(), options, message.metadata.voice)
           };
           break;
+        case 10:
+          message.inlineData = reader.bytes();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -45743,6 +46678,8 @@ class CreateUploadInput$Type extends import_runtime4.MessageType {
       UploadVideoMetadata.internalBinaryWrite(message.metadata.video, writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.metadata.oneofKind === "voice")
       UploadVoiceMetadata.internalBinaryWrite(message.metadata.voice, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.inlineData !== undefined)
+      writer.tag(10, import_runtime.WireType.LengthDelimited).bytes(message.inlineData);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45758,7 +46695,8 @@ class CreateUploadResult$Type extends import_runtime4.MessageType {
       { no: 2, name: "part_size", kind: "scalar", T: 13 },
       { no: 3, name: "part_count", kind: "scalar", T: 13 },
       { no: 4, name: "expires_at", kind: "scalar", T: 3, L: 0 },
-      { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1, T: 13 }
+      { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1, T: 13 },
+      { no: 6, name: "complete", kind: "message", T: () => UploadComplete }
     ]);
   }
   create(value) {
@@ -45796,6 +46734,9 @@ class CreateUploadResult$Type extends import_runtime4.MessageType {
           else
             message.acceptedParts.push(reader.uint32());
           break;
+        case 6:
+          message.complete = UploadComplete.internalBinaryRead(reader, reader.uint32(), options, message.complete);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -45822,6 +46763,8 @@ class CreateUploadResult$Type extends import_runtime4.MessageType {
         writer.uint32(message.acceptedParts[i]);
       writer.join();
     }
+    if (message.complete)
+      UploadComplete.internalBinaryWrite(message.complete, writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
