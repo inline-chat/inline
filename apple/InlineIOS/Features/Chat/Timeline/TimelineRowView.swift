@@ -21,6 +21,7 @@ final class TimelineRowView: UIView {
   private var legacyConstraints: [NSLayoutConstraint] = []
   private var label: UILabel?
   private var pill: UIView?
+  private var rules: [UIView] = []
   private var style = LabelStyle.plain
 
   /// The production message view, filling the row. The caller applies a plan to it.
@@ -28,6 +29,7 @@ final class TimelineRowView: UIView {
     removeLegacy()
     label?.isHidden = true
     pill?.isHidden = true
+    for rule in rules { rule.isHidden = true }
     if let messageView {
       messageView.isHidden = false
       return messageView
@@ -50,6 +52,7 @@ final class TimelineRowView: UIView {
     messageView?.isHidden = true
     label?.isHidden = true
     pill?.isHidden = true
+    for rule in rules { rule.isHidden = true }
     let outgoing = message.message.out == true
     let isService = message.message.isServiceMessage
     let tail: MessageBubbleTailSide = grouping.isLastInGroup && !isService ? (outgoing ? .trailing : .leading) : .none
@@ -99,8 +102,22 @@ final class TimelineRowView: UIView {
     }()
     label.isHidden = false
     label.text = text
-    label.font = .preferredFont(forTextStyle: style == .pill ? .footnote : .caption1)
-    label.textColor = style == .line ? theme.primary.uiColor : .secondaryLabel
+    switch style {
+      case .pill: label.font = .preferredFont(forTextStyle: .footnote)
+      // As `MessageListSeparatorCell` draws it.
+      case .line: label.font = .systemFont(ofSize: 12, weight: .semibold)
+      case .plain: label.font = .preferredFont(forTextStyle: .caption1)
+    }
+    label.textColor = .secondaryLabel
+    if style == .line, rules.isEmpty {
+      rules = (0 ..< 2).map { _ in
+        let rule = UIView()
+        rule.backgroundColor = .separator
+        addSubview(rule)
+        return rule
+      }
+    }
+    for rule in rules { rule.isHidden = style != .line }
     if style == .pill {
       let pill = pill ?? {
         let pill = UIView()
@@ -126,6 +143,14 @@ final class TimelineRowView: UIView {
     if let pill, !pill.isHidden {
       pill.frame = label.frame.insetBy(dx: -10, dy: -5)
       pill.layer.cornerRadius = pill.bounds.height / 2
+    }
+    if rules.count == 2, !rules[0].isHidden {
+      let hairline = 1 / max(1, traitCollection.displayScale)
+      let y = label.frame.midY - hairline / 2
+      rules[0].frame = CGRect(x: 16, y: y, width: max(0, label.frame.minX - 10 - 16), height: hairline)
+      rules[1].frame = CGRect(
+        x: label.frame.maxX + 10, y: y, width: max(0, bounds.width - 16 - label.frame.maxX - 10), height: hairline
+      )
     }
   }
 

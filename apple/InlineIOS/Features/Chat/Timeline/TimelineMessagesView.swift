@@ -380,7 +380,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .latest:
         break
       case .unread:
-        if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(0)) }
+        // Below where the date pill sits, as the collection view places it.
+        if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(DateSeparatorView.height)) }
       case let .saved(place):
         if let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == place.messageId }) {
           scroll = .to(row.id, .top(place.offset))
@@ -437,7 +438,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .latest:
         return .latest
       case .unreadLine:
-        return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(0)) : .latest
+        return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(DateSeparatorView.height)) : .latest
       case let .message(messageId):
         guard let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == messageId })
         else { return .latest }
