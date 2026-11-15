@@ -13,6 +13,7 @@ import UIKit
 /// - `--timeline-harness-count N` seeds N messages (420).
 /// - `--timeline-harness-collection` shows the collection view list instead, for comparison.
 /// - `--timeline-harness-push` pushes the chat onto a stack, so it can be swiped back.
+/// - `--timeline-legacy-rows` shows every message with the older view, to check the fallback rows.
 struct TimelineHarnessRootView: View {
   static var isRequested: Bool { CommandLine.arguments.contains("--chatlist-harness") }
 
@@ -129,6 +130,7 @@ private struct TimelineHarnessScreen: View {
           Button("Edit newest") { model.run { try $0.edit() } }
           Button("Stream") { model.runAsync { try await $0.stream(steps: 120, every: .milliseconds(50)) } }
           Button("Delete newest") { model.run { try $0.deleteNewest() } }
+          Button("Collapse history") { model.box.container?.setCollapsedMaxId(380) }
           Button("Jump far up") {
             model.box.container?.focusMessage(40, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
           }

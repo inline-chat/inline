@@ -14,11 +14,20 @@ final class TimelineRowView: UIView {
     /// The unread line: text with a rule either side.
     case line
     case plain
+    /// Tappable text, as the line without its rules (the collapsed-history row).
+    case action
   }
 
   private var messageView: MessageView?
   private var legacyView: UIMessageView?
   private var legacyConstraints: [NSLayoutConstraint] = []
+  /// The sender's name and avatar around an older view, as `MessageCell` draws them.
+  private var legacyName: UILabel?
+  private var legacyAvatar: UserAvatarView?
+  private var labelTap: UITapGestureRecognizer?
+  private var onLabelTap: (() -> Void)?
+  /// The sender's avatar was tapped on a row shown by the older view.
+  var onAvatarTap: (() -> Void)?
   private var label: UILabel?
   /// A day row: the plain style of the list's date badge.
   private var pill: TimelineDatePill?
@@ -115,13 +124,54 @@ final class TimelineRowView: UIView {
     addSubview(view)
     legacyView = view
     updateMenuSourceVisibility()
-    let top: CGFloat = isService ? 0 : (grouping.isFirstInGroup ? 6 : 1)
+    var top: CGFloat = isService ? 0 : (grouping.isFirstInGroup ? 6 : 1)
+    var constraints: [NSLayoutConstraint] = []
+    if !isService, !outgoing, grouping.showsSenderName {
+      let name = UILabel()
+      name.font = ChatTypography.font(13, weight: .medium, style: .caption1, compatibleWith: traitCollection)
+      name.textColor = .secondaryLabel
+      name.text = message.from?.firstName ?? "USER"
+      name.translatesAutoresizingMaskIntoConstraints = false
+      addSubview(name)
+      legacyName = name
+      let height = max(16, ceil(name.font.lineHeight))
+      constraints += [
+        name.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+        name.heightAnchor.constraint(equalToConstant: height),
+        // 9 pt after the avatar, as `MessageCell` places it; the lane adds 3 pt of gap to the avatar.
+        name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8 + max(0, avatarLane - 3) + 9),
+        name.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+      ]
+      top = height + 9
+    }
+    if !isService, !outgoing, grouping.showsAvatar, grouping.isLastInGroup || isThreadAnchor,
+       let sender = message.senderInfo
+    {
+      let avatar = UserAvatarView()
+      avatar.configure(with: sender, size: 28)
+      avatar.translatesAutoresizingMaskIntoConstraints = false
+      avatar.isUserInteractionEnabled = true
+      avatar.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleAvatarTap)))
+      addSubview(avatar)
+      legacyAvatar = avatar
+      constraints += [
+        avatar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+        avatar.bottomAnchor.constraint(equalTo: bottomAnchor),
+        avatar.widthAnchor.constraint(equalToConstant: 28),
+        avatar.heightAnchor.constraint(equalToConstant: 28),
+      ]
+    }
+    // The view's top first: the height measure reads it.
     legacyConstraints = [
       view.topAnchor.constraint(equalTo: topAnchor, constant: top),
       view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8 + avatarLane),
       view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-    ]
+    ] + constraints
     NSLayoutConstraint.activate(legacyConstraints)
+  }
+
+  @objc private func handleAvatarTap() {
+    onAvatarTap?()
   }
 
   /// The height the older view needs at this width, with the row's top spacing.
@@ -135,7 +185,7 @@ final class TimelineRowView: UIView {
     return ceil(fitted.height + top)
   }
 
-  func showLabel(_ text: String, style: LabelStyle, theme: IOSThemeSnapshot) {
+  func showLabel(_ text: String, style: LabelStyle, theme: IOSThemeSnapshot, onTap: (() -> Void)? = nil) {
     removeLegacy()
     messageView?.isHidden = true
     self.style = style
@@ -152,7 +202,7 @@ final class TimelineRowView: UIView {
     switch style {
       case .pill: label.font = .preferredFont(forTextStyle: .footnote)
       // As `MessageListSeparatorCell` draws it.
-      case .line: label.font = .systemFont(ofSize: 12, weight: .semibold)
+      case .line, .action: label.font = .systemFont(ofSize: 12, weight: .semibold)
       case .plain: label.font = .preferredFont(forTextStyle: .caption1)
     }
     label.textColor = .secondaryLabel
@@ -165,6 +215,13 @@ final class TimelineRowView: UIView {
       }
     }
     for rule in rules { rule.isHidden = style != .line }
+    onLabelTap = onTap
+    label.isUserInteractionEnabled = onTap != nil
+    if onTap != nil, labelTap == nil {
+      let tap = UITapGestureRecognizer(target: self, action: #selector(handleLabelTap))
+      label.addGestureRecognizer(tap)
+      labelTap = tap
+    }
     if style == .pill {
       let pill = pill ?? {
         let pill = TimelineDatePill(floating: false)
@@ -178,6 +235,10 @@ final class TimelineRowView: UIView {
       pill?.isHidden = true
     }
     setNeedsLayout()
+  }
+
+  @objc private func handleLabelTap() {
+    onLabelTap?()
   }
 
   override func layoutSubviews() {
@@ -217,6 +278,9 @@ final class TimelineRowView: UIView {
     isMenuSourceHidden = false
     isSendTargetHidden = false
     replyMessage = nil
+    onAvatarTap = nil
+    onLabelTap = nil
+    label?.isUserInteractionEnabled = false
     removeLegacy()
     messageView?.onAvatarTap = nil
     messageView?.onPhotoTap = nil
@@ -231,6 +295,10 @@ final class TimelineRowView: UIView {
     legacyConstraints = []
     legacyView?.removeFromSuperview()
     legacyView = nil
+    legacyName?.removeFromSuperview()
+    legacyName = nil
+    legacyAvatar?.removeFromSuperview()
+    legacyAvatar = nil
   }
 
   // MARK: - Swipe to reply
@@ -245,7 +313,7 @@ final class TimelineRowView: UIView {
 
   /// The views that slide with the finger.
   private var swipedViews: [UIView] {
-    [messageView.flatMap { $0.isHidden ? nil : $0 }, legacyView].compactMap(\.self)
+    [messageView.flatMap { $0.isHidden ? nil : $0 }, legacyView, legacyName].compactMap(\.self)
   }
 
   @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {

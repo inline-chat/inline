@@ -353,6 +353,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     return height
   }
 
+  #if DEBUG
+  private static let forcesLegacyRows = CommandLine.arguments.contains("--timeline-legacy-rows")
+  #endif
+
   /// The plan for a message the next message view supports; nil for the kinds it does not.
   private func plan(
     _ row: ChatRow, _ message: FullMessage, _ grouping: ChatRowGrouping, isThreadAnchor: Bool, width: CGFloat
@@ -367,6 +371,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     guard width > 0, MessageViewContent.supports(message, displayMode: isThreadAnchor ? .threadAnchor : .normal)
     else { return nil }
+    #if DEBUG
+    // The harness can show every message with the older view, to check the fallback rows.
+    if Self.forcesLegacyRows { return nil }
+    #endif
     let avatar: MessageLayoutInput.Avatar = grouping.showsAvatar
       ? (grouping.isLastInGroup || isThreadAnchor ? .visible : .reserved)
       : .none
@@ -422,7 +430,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case let .statusNotice(text):
         view.showLabel(text, style: .plain, theme: theme)
       case .collapsedHistory:
-        view.showLabel("Earlier messages are hidden", style: .plain, theme: theme)
+        // As the collection view: tapping brings the hidden history back.
+        view.showLabel("Cleared", style: .action, theme: theme) { [weak self] in
+          Task { @MainActor in
+            do {
+              try await self?.collapseHistory(maxID: nil)
+            } catch {
+              Log.shared.error("Failed to show collapsed history", error: error)
+            }
+          }
+        }
       case .threadRepliesHeader:
         view.showLabel("Replies", style: .plain, theme: theme)
     }
@@ -432,7 +449,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     _ view: TimelineRowView, _ row: ChatRow, _ message: FullMessage, _ grouping: ChatRowGrouping,
     isThreadAnchor: Bool, width: CGFloat, timing: TimelineTiming
   ) {
+    let id = row.id
+    let openSender = { [weak self] in
+      guard let from = self?.row(id)?.content.message?.from else { return }
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToUser"), object: nil, userInfo: ["userId": from.id]
+      )
+    }
     guard let plan = plan(row, message, grouping, isThreadAnchor: isThreadAnchor, width: width) else {
+      view.onAvatarTap = openSender
       view.showLegacy(
         message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId
       )
@@ -440,13 +465,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     let messageView = view.showMessage()
     messageView.spaceId = spaceId
-    let id = row.id
-    messageView.onAvatarTap = { [weak self] in
-      guard let from = self?.row(id)?.content.message?.from else { return }
-      NotificationCenter.default.post(
-        name: Notification.Name("NavigateToUser"), object: nil, userInfo: ["userId": from.id]
-      )
-    }
+    messageView.onAvatarTap = openSender
     messageView.onPhotoTap = { [weak self] message, _, image, url in self?.presentPhoto(message, image: image, url: url) }
     messageView.onReactionsMenu = { [weak self] message in self?.menuActions.showReactionEmojiPicker(for: message) }
     // A disclosure opened or closed, or a streamed line was revealed: the row is planned again
