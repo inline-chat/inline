@@ -46,6 +46,13 @@ OpenCode admits a prompt id once, so a send whose response was lost is retried
 with the same id. Sub-agent sessions (`subagent` tool) stream as child work of
 their parent; their approvals are answered on the child session.
 
+Since 2.3.0 sub-agents always run in the background: the parent's turn ends
+while the child works (it stays live work), and each report the child sends
+when it goes idle (`synthetic`, `metadata.source = "subagent"`) wakes an idle
+parent into a turn of its own, named after the report, with no Inline input.
+Reports show as system notes under the child, never as user prompts, and an
+interrupt never withdraws them.
+
 The client-MCP connection is per folder, so OpenCode also offers `inline_*`
 tools to sessions Inline did not open in that folder; those calls are refused.
 In Code Mode, OpenCode exposes them inside `execute` as `inline.<tool>`.
@@ -56,6 +63,10 @@ In Code Mode, OpenCode exposes them inside `execute` as `inline.<tool>`.
 - `tests/fake_service.rs` runs a full turn (approval, tool call over client
   MCP, catalog, side call) against an in-process fake of the service API.
 - `tests/live_opencode.rs` qualifies a real OpenCode v2 (opt-in, see the file).
+- `tests/service_surface.rs` checks an installed OpenCode without a model:
+  the version gate, every route the driver calls in the service's OpenAPI
+  document, and a session handshake (opt-in; CI runs it on latest and the
+  floor).
 - `tests/live_lab.rs` exercises approvals, steer and queue, interrupt, Inline
   tools, questions, sub-agents, settings, commands, compact, fork, undo and a
   service restart against a real service. Point it at an isolated service by
