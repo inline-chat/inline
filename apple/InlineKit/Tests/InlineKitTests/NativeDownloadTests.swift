@@ -1000,6 +1000,72 @@ private struct NativeDownloadManagerTests {
     #expect(await flaky.snapshot().0.count == 2)
   }
 
+  @Test func joiningCallerRaisesAWaitingDownloadByItsMessage() async throws {
+    let manager = NativeDownloadManager(window: 1 ... 1)
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let transport = HeldDownloadTransport(bytes: Data([1, 2, 3]), holdAt: 0)
+    let admitted = DownloadAdmissionProbe()
+    var tappedMessage = FileMessageLocation(); tappedMessage.chatID = 3; tappedMessage.messageID = 4
+    let tappedLocation = tappedMessage
+    func start(_ file: String, message: FileMessageLocation? = nil) -> Task<URL, any Error> {
+      Task {
+        try await manager.download(.init(accountID: 1, fileUniqueID: file, message: message,
+          destination: directory.appendingPathComponent(file), validateAccount: { admitted.mark(file) }, transport: transport))
+      }
+    }
+    let first = start("INP_first")
+    await transport.waitForRequest("INP_first", offset: 0)
+    let queued = start("INP_queued")
+    // Queued ahead of the automatic download, so only the raise can let it go first.
+    while await manager.waitingParts < 1 { try await Task.sleep(for: .milliseconds(5)) }
+    let auto = start("INP_auto", message: tappedLocation)
+    await admitted.wait(for: "INP_auto")
+    while await manager.waitingParts < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    // A tap on the file that started as an automatic download.
+    await manager.raisePriority(accountID: 1, message: tappedLocation, to: .userInitiated)
+    await transport.release("INP_first")
+    _ = try await first.value
+    await transport.waitForRequest("INP_auto", offset: 0)
+    #expect(await transport.snapshot().0.map(\.fileUniqueID) == ["INP_first", "INP_auto"])
+    await transport.release("INP_auto")
+    await transport.release("INP_queued")
+    _ = try await auto.value
+    _ = try await queued.value
+  }
+
+  @Test func savedPartialsReportVerifiedBytesForTheAccountsIdleFiles() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var message = FileMessageLocation(); message.chatID = 7; message.messageID = 8
+    let total = 524_288 * 3 + 10
+    // v2: parts 0 and 2 of four.
+    try Data(repeating: 1, count: 524_288 * 3).write(to: nativePartial(directory, file: "INP_sparse"))
+    let sparse: [String: Any] = ["v": 2, "accountID": 1, "fileUniqueID": "INP_sparse", "totalSize": total,
+      "chatID": 7, "messageID": 8, "parts": [[0, 1], [2, 3]]]
+    try JSONSerialization.data(withJSONObject: sparse).write(to: nativePartial(directory, file: "INP_sparse").appendingPathExtension("json"))
+    // v1: a prefix, rounded down to whole parts.
+    try Data(repeating: 2, count: 524_288 + 5).write(to: nativePartial(directory, file: "INP_prefix"))
+    try nativeRecord(directory: directory, file: "INP_prefix", total: total, message: {
+      var other = FileMessageLocation(); other.chatID = 7; other.messageID = 9; return other
+    }())
+    // Another account's partial, and one with no message, are not reported.
+    try Data(repeating: 3, count: 524_288).write(to: nativePartial(directory, file: "INP_other"))
+    try nativeRecord(directory: directory, file: "INP_other", accountID: 2, total: total, message: message)
+    try Data(repeating: 3, count: 524_288).write(to: nativePartial(directory, file: "INP_nomessage"))
+    try nativeRecord(directory: directory, file: "INP_nomessage", total: total)
+    // Nor is a partial that already holds the whole file.
+    try Data(repeating: 4, count: 10).write(to: nativePartial(directory, file: "INP_whole"))
+    try nativeRecord(directory: directory, file: "INP_whole", total: 10, message: message)
+
+    let saved = await NativeDownloadManager().savedPartials(accountID: 1, in: [directory])
+      .sorted { $0.messageID < $1.messageID }
+    #expect(saved == [
+      .init(chatID: 7, messageID: 8, bytesReceived: 524_288 * 2, totalBytes: Int64(total)),
+      .init(chatID: 7, messageID: 9, bytesReceived: 524_288, totalBytes: Int64(total)),
+    ])
+  }
+
   @Test func windowGrowsOnFastPartsAndHalvesOnSlowOrFailingOnes() async {
     let manager = NativeDownloadManager(window: 2 ... 12, initialWindow: 4)
     for _ in 0 ..< 20 { await manager.adaptWindow(after: .milliseconds(200)) }

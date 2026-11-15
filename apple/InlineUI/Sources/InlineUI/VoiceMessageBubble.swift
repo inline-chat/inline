@@ -463,7 +463,8 @@ public struct VoiceMessageBubble: View {
 
     bindDownloadProgressIfNeeded()
     let revision = downloadRevision
-    FileDownloader.shared.downloadVoice(message: message) { result in
+    // Autoplay means the user tapped play; otherwise this is an automatic download.
+    FileDownloader.shared.downloadVoice(message: message, priority: autoplay ? .userInitiated : .visible) { result in
       guard self.downloadRevision == revision else { return }
       switch result {
       case let .success(fileURL):

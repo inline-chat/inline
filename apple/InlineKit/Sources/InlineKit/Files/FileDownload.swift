@@ -285,6 +285,14 @@ public final class FileDownloader: NSObject, Sendable {
     for directory in nativeCacheDirectories { await nativeManager.sweep(directory: directory) }
   }
 
+
+  private func raiseNativePriority(_ priority: NativeDownloadPriority, message: Message?, accountID: Int64) {
+    guard priority > .visible, let message, message.messageId > 0 else { return }
+    let location = Self.location(for: message)
+    let manager = nativeManager
+    Task { await manager.raisePriority(accountID: accountID, message: location, to: priority) }
+  }
+
   public func beginCacheMaintenance() async {
     cacheMaintenanceDepth += 1
     await resetSession()
@@ -335,9 +343,12 @@ public final class FileDownloader: NSObject, Sendable {
     currentProgress(for: "voice_\(voiceId)")
   }
 
+  /// `priority` orders native downloads competing for transfer slots: pass `.userInitiated`
+  /// for a tap; automatic downloads keep the default. Joining a running download raises it.
   public func downloadDocument(
     document: DocumentInfo,
     for message: Message? = nil,
+    priority: NativeDownloadPriority = .visible,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
     let accountToken: AuthAccountMutationToken
@@ -361,7 +372,7 @@ public final class FileDownloader: NSObject, Sendable {
         nativeDownload = { destination, progress in
           try await source.download(
             media: .document(document.document.documentId), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) }, progress: progress
+            fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
           )
         }
       } else {
@@ -383,7 +394,10 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "doc_\(document.id)"
-    if joinRequest(id: downloadId, completion: completion) { return }
+    if joinRequest(id: downloadId, completion: completion) {
+      raiseNativePriority(priority, message: message, accountID: accountToken.userID)
+      return
+    }
     let requestToken = registerRequest(id: downloadId, completion: completion)
     let completion: (Result<URL, Error>) -> Void = { [weak self] result in
       self?.finishRequest(id: downloadId, token: requestToken, result: result)
@@ -428,6 +442,7 @@ public final class FileDownloader: NSObject, Sendable {
   public func downloadVideo(
     video: VideoInfo,
     for message: Message,
+    priority: NativeDownloadPriority = .visible,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
     let accountToken: AuthAccountMutationToken
@@ -451,7 +466,7 @@ public final class FileDownloader: NSObject, Sendable {
         nativeDownload = { destination, progress in
           try await source.download(
             media: .video(video.video.videoId), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) }, progress: progress
+            fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
           )
         }
       } else {
@@ -473,7 +488,10 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "video_\(video.id)"
-    if joinRequest(id: downloadId, completion: completion) { return }
+    if joinRequest(id: downloadId, completion: completion) {
+      raiseNativePriority(priority, message: message, accountID: accountToken.userID)
+      return
+    }
     let requestToken = registerRequest(id: downloadId, completion: completion)
     let completion: (Result<URL, Error>) -> Void = { [weak self] result in
       self?.finishRequest(id: downloadId, token: requestToken, result: result)
@@ -533,6 +551,7 @@ public final class FileDownloader: NSObject, Sendable {
 
   public func downloadVoice(
     message: Message,
+    priority: NativeDownloadPriority = .visible,
     completion: @escaping (Result<URL, Error>) -> Void
   ) {
     let accountToken: AuthAccountMutationToken
@@ -563,7 +582,7 @@ public final class FileDownloader: NSObject, Sendable {
         nativeDownload = { destination, progress in
           try await source.download(
             media: .voice(voiceID), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) }, progress: progress
+            fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
           )
         }
       } else {
@@ -585,7 +604,10 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "voice_\(voice.voiceID)"
-    if joinRequest(id: downloadId, completion: completion) { return }
+    if joinRequest(id: downloadId, completion: completion) {
+      raiseNativePriority(priority, message: message, accountID: accountToken.userID)
+      return
+    }
     guard let fileExtension = Self.voiceFileExtension(mimeType: voice.mimeType) else {
       let error = NSError(
         domain: "FileDownloader",
