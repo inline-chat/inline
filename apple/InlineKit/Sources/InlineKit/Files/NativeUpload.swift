@@ -659,10 +659,24 @@ public actor DurableUploadCoordinator: MediaUploading {
         create.thumbnailFileUniqueID = thumbnailFileUniqueID
       }
       create.metadata = request.metadata
+      // A file that fits in one part rides along with create, which stores and finishes it in the
+      // same call: one round trip instead of create, part and finish. Older servers ignore it and
+      // the part uploads as usual. It counts against the part window, and only when a slot is free
+      // right away; otherwise the create goes without it and the part waits like any other.
+      let holdsInlineSlot = byteCount <= Int64(Self.partSize) && tryAcquirePartTransferSlot()
+      if holdsInlineSlot {
+        do {
+          create.inlineData = try await Self.readPart(at: stagedURL, offset: 0, length: Int(byteCount))
+        } catch {
+          releasePartTransferSlot()
+          throw error
+        }
+      }
 
       let createdResult: RpcResult.OneOf_Result?
       hasAttemptedCreate = true
       do {
+        defer { if holdsInlineSlot { releasePartTransferSlot() } }
         createdResult = try await callUploadRPC(
           method: .createUpload,
           input: .createUpload(create),
@@ -674,6 +688,9 @@ public actor DurableUploadCoordinator: MediaUploading {
         try validateAccount(accountToken)
         // createUpload is idempotent for the stable clientUploadID. Replay once
         // to recover a commit whose response was lost, without adding resume state.
+        // The replay goes without the body: if the first attempt stored it, the result reports
+        // it accepted or complete; otherwise the part uploads through the ordinary path.
+        create.clearInlineData()
         createdResult = try await callUploadRPC(
           method: .createUpload,
           input: .createUpload(create),
@@ -712,6 +729,14 @@ public actor DurableUploadCoordinator: MediaUploading {
           accountToken: accountToken
         )
         throw CancellationError()
+      }
+
+      if created.hasComplete {
+        try validateAccount(accountToken)
+        progress(byteCount, byteCount)
+        await staging.discard(logicalID: ownerScopedLogicalID)
+        try validateAccount(accountToken)
+        return created.complete
       }
 
       var accepted = Set(created.acceptedParts)
@@ -1185,6 +1210,13 @@ public actor DurableUploadCoordinator: MediaUploading {
     } catch {
       return false
     }
+  }
+
+  /// Takes a part slot only if one is free now; never waits.
+  private func tryAcquirePartTransferSlot() -> Bool {
+    guard activePartTransfers < Self.maximumConcurrentParts else { return false }
+    activePartTransfers += 1
+    return true
   }
 
   private func acquirePartTransferSlot() async throws {

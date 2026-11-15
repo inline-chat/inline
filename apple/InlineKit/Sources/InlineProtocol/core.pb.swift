@@ -27250,6 +27250,19 @@ public nonisolated struct CreateUploadInput: Sendable {
     set {metadata = .voice(newValue)}
   }
 
+  /// The whole file, when it fits in one part (byte_count <= part size). The server saves it as
+  /// part 0 and finishes the upload in this call, returning `complete` when it finalizes. Servers
+  /// that predate this field ignore it; part 0 is then missing from accepted_parts and the client
+  /// uploads it as usual.
+  public var inlineData: Data {
+    get {_inlineData ?? Data()}
+    set {_inlineData = newValue}
+  }
+  /// Returns true if `inlineData` has been explicitly set.
+  public var hasInlineData: Bool {self._inlineData != nil}
+  /// Clears the value of `inlineData`. Subsequent reads from it will return its default value.
+  public mutating func clearInlineData() {self._inlineData = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Metadata: Equatable, Sendable {
@@ -27261,26 +27274,54 @@ public nonisolated struct CreateUploadInput: Sendable {
   public init() {}
 
   fileprivate var _thumbnailFileUniqueID: String? = nil
+  fileprivate var _inlineData: Data? = nil
 }
 
-public nonisolated struct CreateUploadResult: Sendable {
+public nonisolated struct CreateUploadResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var uploadID: Data = Data()
+  public var uploadID: Data {
+    get {_storage._uploadID}
+    set {_uniqueStorage()._uploadID = newValue}
+  }
 
-  public var partSize: UInt32 = 0
+  public var partSize: UInt32 {
+    get {_storage._partSize}
+    set {_uniqueStorage()._partSize = newValue}
+  }
 
-  public var partCount: UInt32 = 0
+  public var partCount: UInt32 {
+    get {_storage._partCount}
+    set {_uniqueStorage()._partCount = newValue}
+  }
 
-  public var expiresAt: Int64 = 0
+  public var expiresAt: Int64 {
+    get {_storage._expiresAt}
+    set {_uniqueStorage()._expiresAt = newValue}
+  }
 
-  public var acceptedParts: [UInt32] = []
+  public var acceptedParts: [UInt32] {
+    get {_storage._acceptedParts}
+    set {_uniqueStorage()._acceptedParts = newValue}
+  }
+
+  /// Set when inline_data finalized the upload in this call.
+  public var complete: UploadComplete {
+    get {_storage._complete ?? UploadComplete()}
+    set {_uniqueStorage()._complete = newValue}
+  }
+  /// Returns true if `complete` has been explicitly set.
+  public var hasComplete: Bool {_storage._complete != nil}
+  /// Clears the value of `complete`. Subsequent reads from it will return its default value.
+  public mutating func clearComplete() {_uniqueStorage()._complete = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct SaveUploadPartInput: Sendable {
@@ -64613,7 +64654,7 @@ nonisolated extension UploadVoiceMetadata: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}client_upload_id\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0\u{3}thumbnail_file_unique_id\0\u{1}video\0\u{1}voice\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}client_upload_id\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0\u{3}thumbnail_file_unique_id\0\u{1}video\0\u{1}voice\0\u{3}inline_data\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -64654,6 +64695,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
           self.metadata = .voice(v)
         }
       }()
+      case 10: try { try decoder.decodeSingularBytesField(value: &self._inlineData) }()
       default: break
       }
     }
@@ -64696,6 +64738,9 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     }()
     case nil: break
     }
+    try { if let v = self._inlineData {
+      try visitor.visitSingularBytesField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -64708,6 +64753,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     if lhs.kind != rhs.kind {return false}
     if lhs._thumbnailFileUniqueID != rhs._thumbnailFileUniqueID {return false}
     if lhs.metadata != rhs.metadata {return false}
+    if lhs._inlineData != rhs._inlineData {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -64715,49 +64761,104 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0\u{1}complete\0")
+
+  fileprivate class _StorageClass {
+    var _uploadID: Data = Data()
+    var _partSize: UInt32 = 0
+    var _partCount: UInt32 = 0
+    var _expiresAt: Int64 = 0
+    var _acceptedParts: [UInt32] = []
+    var _complete: UploadComplete? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _uploadID = source._uploadID
+      _partSize = source._partSize
+      _partCount = source._partCount
+      _expiresAt = source._expiresAt
+      _acceptedParts = source._acceptedParts
+      _complete = source._complete
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
-      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.partSize) }()
-      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.partCount) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
-      case 5: try { try decoder.decodeRepeatedUInt32Field(value: &self.acceptedParts) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularBytesField(value: &_storage._uploadID) }()
+        case 2: try { try decoder.decodeSingularUInt32Field(value: &_storage._partSize) }()
+        case 3: try { try decoder.decodeSingularUInt32Field(value: &_storage._partCount) }()
+        case 4: try { try decoder.decodeSingularInt64Field(value: &_storage._expiresAt) }()
+        case 5: try { try decoder.decodeRepeatedUInt32Field(value: &_storage._acceptedParts) }()
+        case 6: try { try decoder.decodeSingularMessageField(value: &_storage._complete) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.uploadID.isEmpty {
-      try visitor.visitSingularBytesField(value: self.uploadID, fieldNumber: 1)
-    }
-    if self.partSize != 0 {
-      try visitor.visitSingularUInt32Field(value: self.partSize, fieldNumber: 2)
-    }
-    if self.partCount != 0 {
-      try visitor.visitSingularUInt32Field(value: self.partCount, fieldNumber: 3)
-    }
-    if self.expiresAt != 0 {
-      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 4)
-    }
-    if !self.acceptedParts.isEmpty {
-      try visitor.visitPackedUInt32Field(value: self.acceptedParts, fieldNumber: 5)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._uploadID.isEmpty {
+        try visitor.visitSingularBytesField(value: _storage._uploadID, fieldNumber: 1)
+      }
+      if _storage._partSize != 0 {
+        try visitor.visitSingularUInt32Field(value: _storage._partSize, fieldNumber: 2)
+      }
+      if _storage._partCount != 0 {
+        try visitor.visitSingularUInt32Field(value: _storage._partCount, fieldNumber: 3)
+      }
+      if _storage._expiresAt != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._expiresAt, fieldNumber: 4)
+      }
+      if !_storage._acceptedParts.isEmpty {
+        try visitor.visitPackedUInt32Field(value: _storage._acceptedParts, fieldNumber: 5)
+      }
+      try { if let v = _storage._complete {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateUploadResult, rhs: CreateUploadResult) -> Bool {
-    if lhs.uploadID != rhs.uploadID {return false}
-    if lhs.partSize != rhs.partSize {return false}
-    if lhs.partCount != rhs.partCount {return false}
-    if lhs.expiresAt != rhs.expiresAt {return false}
-    if lhs.acceptedParts != rhs.acceptedParts {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._uploadID != rhs_storage._uploadID {return false}
+        if _storage._partSize != rhs_storage._partSize {return false}
+        if _storage._partCount != rhs_storage._partCount {return false}
+        if _storage._expiresAt != rhs_storage._expiresAt {return false}
+        if _storage._acceptedParts != rhs_storage._acceptedParts {return false}
+        if _storage._complete != rhs_storage._complete {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
