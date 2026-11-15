@@ -103,6 +103,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   /// Rows changing in place move like `MessageMotion.standard` (a critically damped 0.27 s spring).
   private static let rowTiming = TimelineTiming.spring(mass: 1, stiffness: 541.5, damping: 46.54, duration: 0.4)
+  /// A jump beyond the placed rows: Telegram's jump curve, UIKit's critically damped scroll-to-top
+  /// spring played over 1.15 s (response 0.43).
+  private static let jumpTiming = TimelineTiming.spring(mass: 1, stiffness: 212.3, damping: 29.14, duration: 1.15)
 
   init(
     peer: Peer, chatId: Int64?, spaceId: Int64?, initialState: MessagesProgressiveViewModel.InitialState?,
@@ -545,6 +548,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func apply(_ update: ChatRowUpdate) {
     guard hasOpened else { return }
+    // Read before the rows on screen leave with the old snapshot.
+    let shownMessageId = messageIdOnScreen()
     let snapshot = update.snapshot
     self.snapshot = snapshot
     rebuildDayRows()
@@ -559,6 +564,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
     var timing = TimelineTiming.none
     var scroll = TimelineScroll<ChatRowID>.preserve
+    var towards: TimelineEdge?
     switch snapshot.reason {
       case .liveAdd, .liveUpdate, .delete, .sendAck:
         timing = Self.rowTiming
@@ -568,6 +574,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         ChatReadingPlaceStore.shared.clear(for: peer)
       case let .jump(target):
         scroll = jumpScroll(for: target, in: snapshot)
+        timing = Self.jumpTiming
+        towards = direction(of: target, from: shownMessageId)
       case .initialOpen, .olderPage, .newerPage, .refresh, .presentation:
         break
     }
@@ -575,12 +583,32 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let releasedInset = snapshot.reason == .localSend ? releaseComposeInsetHold(applying: false) : nil
     list.apply(TimelineTransaction(
       rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll,
-      bottomInset: releasedInset.map { $0 + Self.bottomPadding }, changed: changed, timing: timing
+      bottomInset: releasedInset.map { $0 + Self.bottomPadding }, changed: changed, timing: timing,
+      towards: towards
     ))
     if !diff.insertions.isEmpty { beginSendFlights(diff.insertions.map(\.id)) }
     if case .jump = snapshot.reason { highlightPendingFocus() }
     viewModel.ensureThreadAnchorCached()
     readPass(force: true)
+  }
+
+  /// The server id of a message on screen, to tell which way a jump to another window goes.
+  private func messageIdOnScreen() -> Int64? {
+    for placement in list.layout.visible.reversed() {
+      if let id = row(placement.id)?.content.message?.message.messageId, id > 0 { return id }
+    }
+    return nil
+  }
+
+  private func direction(of target: ChatRowJumpTarget, from shown: Int64?) -> TimelineEdge? {
+    let destination: Int64
+    switch target {
+      case .latest: return .newer
+      case let .message(id): destination = pendingFocusMessageId ?? id
+      case let .unreadLine(boundary): destination = boundary
+    }
+    guard let shown else { return nil }
+    return destination < shown ? .older : .newer
   }
 
   private func jumpScroll(for target: ChatRowJumpTarget, in snapshot: ChatRowSnapshot) -> TimelineScroll<ChatRowID> {
@@ -697,9 +725,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     jumpTask?.cancel()
     pendingFocusMessageId = nil
     if viewModel.historyCoverage.isAtCertifiedLiveEnd {
-      // Near enough to travel there; a far jump lands at once until the carousel exists.
+      // Near: the rows travel there. Far: the screen slides out and the newest rows in.
       let near = distanceFromBottom < bounds.height * 3
-      list.apply(TimelineTransaction(scroll: .latest, timing: near ? Self.rowTiming : .none))
+      list.apply(TimelineTransaction(scroll: .latest, timing: near ? Self.rowTiming : Self.jumpTiming, towards: .newer))
       return
     }
     guard returnToLatestTask == nil else { return }
@@ -732,7 +760,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     pendingFocusMessageId = messageID
     if let row = snapshot?.rows.first(where: { $0.content.message?.message.messageId == messageID }) {
       let near = list.layout.placement(for: row.id) != nil
-      list.apply(TimelineTransaction(scroll: .to(row.id, .center), timing: near ? Self.rowTiming : .none))
+      list.apply(TimelineTransaction(scroll: .to(row.id, .center), timing: near ? Self.rowTiming : Self.jumpTiming))
       highlightPendingFocus()
       return
     }
@@ -914,7 +942,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard let day = datePillDay else { return }
     let id = ChatRowID.daySeparator(day)
     let near = list.layout.placement(for: id) != nil
-    list.apply(TimelineTransaction(scroll: .to(id, .top(0)), timing: near ? Self.rowTiming : .none))
+    list.apply(TimelineTransaction(scroll: .to(id, .top(0)), timing: near ? Self.rowTiming : Self.jumpTiming))
     scheduleDatePillHide()
   }
 
