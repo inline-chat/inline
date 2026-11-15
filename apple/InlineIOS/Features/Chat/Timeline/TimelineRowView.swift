@@ -51,6 +51,11 @@ final class TimelineRowView: UIView {
   /// The older message view this row shows for a kind the production view does not support.
   var shownLegacyView: UIMessageView? { legacyView }
 
+  /// A sent message's row while its bubble is still flying in from the composer.
+  var isSendTargetHidden = false {
+    didSet { alpha = isSendTargetHidden ? 0 : 1 }
+  }
+
   /// The bubble the context menu lifts out of the row, hidden while the menu draws it.
   var isMenuSourceHidden = false {
     didSet { updateMenuSourceVisibility() }
@@ -212,6 +217,7 @@ final class TimelineRowView: UIView {
 
   func prepareForReuse() {
     isMenuSourceHidden = false
+    isSendTargetHidden = false
     replyMessage = nil
     removeLegacy()
     messageView?.onAvatarTap = nil

@@ -47,12 +47,22 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var environmentRevision: UInt64 = 0
   private var rowPool: [TimelineRowView] = []
 
+  // Send flight
+  weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
+  /// Rows of sent messages whose bubble is still flying in from the composer.
+  private var flightTargets: Set<ChatRowID> = []
+
   // Message menu
   private let menuActions: MessageMenuActions
   private var menu: TimelineMessageMenu!
 
   // Insets
   private var composeBottomInset: CGFloat = 0
+  /// A send shrinks the composer before its row arrives. The shrink waits for the row, so the list
+  /// moves once, not down and back up.
+  private var heldComposeInset: CGFloat?
+  private var holdsComposeInsetForSend = false
+  private var composeInsetHoldTask: Task<Void, Never>?
   private var pinnedHeaderHeight: CGFloat = 0
   private var lastNavigationInset: CGFloat = 0
   private static let bottomPadding: CGFloat = 12
@@ -234,9 +244,47 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   func composeAreaDidChange(bottomInset: CGFloat, timing: TimelineTiming, isInteractive _: Bool) {
+    // The composer shrinks right after a send (the text, a reply or edit bar going away) while the
+    // sent row is still on its way.
+    if !holdsComposeInsetForSend, bottomInset < composeBottomInset,
+       sendAnimationCoordinator?.hasPreparedSource == true
+    {
+      deferComposeInsetForPendingSendAnimation(composeHeight: 0)
+    }
+    if holdsComposeInsetForSend, bottomInset < composeBottomInset {
+      heldComposeInset = bottomInset
+      return
+    }
+    heldComposeInset = nil
     guard abs(bottomInset - composeBottomInset) > 0.01 else { return }
     composeBottomInset = bottomInset
     applyInsets(timing)
+  }
+
+  /// The composer is about to shrink for a send whose row is on its way.
+  func deferComposeInsetForPendingSendAnimation(composeHeight _: CGFloat) {
+    holdsComposeInsetForSend = true
+    composeInsetHoldTask?.cancel()
+    composeInsetHoldTask = Task { @MainActor [weak self] in
+      // The row normally arrives within a frame or two; without it the shrink still lands.
+      try? await Task.sleep(for: .milliseconds(450))
+      guard !Task.isCancelled else { return }
+      self?.releaseComposeInsetHold(applying: true)
+    }
+  }
+
+  /// Ends a send's hold. The held inset is applied now, or returned for the caller's transaction.
+  @discardableResult
+  private func releaseComposeInsetHold(applying: Bool) -> CGFloat? {
+    guard holdsComposeInsetForSend else { return nil }
+    holdsComposeInsetForSend = false
+    composeInsetHoldTask?.cancel()
+    composeInsetHoldTask = nil
+    guard let held = heldComposeInset else { return nil }
+    heldComposeInset = nil
+    composeBottomInset = held
+    if applying { applyInsets(Self.rowTiming) }
+    return held
   }
 
   func updatePinnedHeaderHeight(_ height: CGFloat) {
@@ -248,7 +296,6 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   // The container reports the whole compose area; these older, partial reports are not needed.
   func setInitialComposeHeight(_: CGFloat) {}
   func updateComposeInset(composeHeight _: CGFloat, animation _: ComposeHeightChangeAnimation) {}
-  func deferComposeInsetForPendingSendAnimation(composeHeight _: CGFloat) {}
   func setComposeBottomOffset(_: CGFloat) {}
 
   // MARK: - Rows
@@ -344,6 +391,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard let row = row(id) else { return }
     defer {
       view.isMenuSourceHidden = menu.isSource(id)
+      view.isSendTargetHidden = flightTargets.contains(id)
       // A swipe replies to a message that can take a reply; never to the thread's parent.
       if case let .message(message, _) = row.content, message.canReply {
         view.replyMessage = message
@@ -491,9 +539,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .initialOpen, .olderPage, .newerPage, .refresh, .presentation:
         break
     }
+    // The sent row and the composer's shrink move as one.
+    let releasedInset = snapshot.reason == .localSend ? releaseComposeInsetHold(applying: false) : nil
     list.apply(TimelineTransaction(
-      rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll, changed: changed, timing: timing
+      rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll,
+      bottomInset: releasedInset.map { $0 + Self.bottomPadding }, changed: changed, timing: timing
     ))
+    if !diff.insertions.isEmpty { beginSendFlights(diff.insertions.map(\.id)) }
     if case .jump = snapshot.reason { highlightPendingFocus() }
     viewModel.ensureThreadAnchorCached()
     readPass(force: true)
@@ -550,7 +602,63 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private var distanceFromBottom: CGFloat { list.layout.distanceToNewest ?? .greatestFiniteMagnitude }
 
-  var acceptsSendAnimation: Bool { false }
+  /// The composer prepares a flight only when the new message will land on screen: the list is at
+  /// the live end, within a screen of the newest message.
+  var acceptsSendAnimation: Bool {
+    hasOpened && viewModel.historyCoverage.isAtCertifiedLiveEnd && distanceFromBottom < bounds.height
+  }
+
+  /// A new row the composer prepared a flight for: its bubble lands where the row settles, and the
+  /// row shows once it has.
+  private func beginSendFlights(_ inserted: [ChatRowID]) {
+    guard let coordinator = sendAnimationCoordinator, let window else { return }
+    for id in inserted {
+      guard case let .message(message, _)? = row(id)?.content,
+            let identity = coordinator.pendingIdentity(for: message),
+            !coordinator.isAnimating(identity: identity)
+      else { continue }
+      guard let rowView = list.view(for: id) as? TimelineRowView, let messageView = rowView.shownMessageView,
+            let frames = messageView.sendAnimationTargetFrames(),
+            let snapshot = messageView.sendAnimationBubbleSnapshot()
+      else {
+        coordinator.cancel(identity: identity)
+        continue
+      }
+      // The row and the list are at their settled places in the model; the motion is additive tracks.
+      let bubbleFrame = messageView.convert(frames.bubble, to: window)
+      let textFrame = messageView.convert(frames.text, to: window)
+      let baseline = messageView.convert(CGPoint(x: 0, y: frames.firstBaseline), to: window).y
+      guard bubbleFrame.isFiniteAndVisible, textFrame.isFiniteAndVisible, baseline.isFinite else {
+        coordinator.cancel(identity: identity)
+        continue
+      }
+      let target = SendMessageAnimationTarget(
+        identity: identity,
+        messageStableId: message.id,
+        bubbleFrameInWindow: bubbleFrame,
+        textFrameInWindow: textFrame,
+        bubbleSnapshotView: snapshot,
+        textFrameInBubble: frames.text.offsetBy(dx: -frames.bubble.minX, dy: -frames.bubble.minY),
+        textFirstBaselineYInWindow: baseline,
+        textFirstBaselineYInBubble: frames.firstBaseline - frames.bubble.minY,
+        bubbleTailSide: message.message.out == true ? .trailing : .leading
+      )
+      flightTargets.insert(id)
+      rowView.isSendTargetHidden = true
+      let began = SendMessageAnimationActions.performWithAnimationsEnabled(reason: "timeline-begin-flight") {
+        coordinator.beginIfPossible(target: target) { [weak self] _ in self?.endFlight(id) }
+      }
+      if !began {
+        endFlight(id)
+        coordinator.cancel(identity: identity)
+      }
+    }
+  }
+
+  private func endFlight(_ id: ChatRowID) {
+    flightTargets.remove(id)
+    (list.view(for: id) as? TimelineRowView)?.isSendTargetHidden = false
+  }
 
   func scrollToBottom() {
     ChatReadingPlaceStore.shared.clear(for: peer)

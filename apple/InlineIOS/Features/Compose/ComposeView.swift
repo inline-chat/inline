@@ -1239,19 +1239,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       rawText
     }
 
-    #if DEBUG
-    // The timeline harness sends to its in-memory chat, never the network.
-    if let debugSend = ComposeDebugOverrides.send, !hasAttachments, forwardContext == nil {
-      debugSend(.init(
-        text: text ?? "", replyToMessageId: state.replyingMessageId, editingMessageId: state.editingMessageId
-      ))
-      if isEditing { ChatState.shared.clearEditingMessageId(peer: peerId) }
-      else { ChatState.shared.clearReplyingMessageId(peer: peerId) }
-      clearTextOnlyComposeAfterSend(shouldCoordinateSendAnimationReset: false, didPrepareSendAnimationPreview: false)
-      return
-    }
-    #endif
-
     let sendAnimationEligibility = SendMessageAnimationEligibility(
       hasText: hasText,
       hasAttachments: hasAttachments,
@@ -1367,6 +1354,36 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         }
       }
     }
+
+    #if DEBUG
+    // The timeline harness sends to its in-memory chat, never the network. A text send still
+    // prepares the flight from the composer, with the ids the fixture's row will carry.
+    if let debugSend = ComposeDebugOverrides.send, !hasAttachments, forwardContext == nil {
+      var ids: (randomId: Int64, temporaryMessageId: Int64)?
+      var coordinates = false
+      var prepared = false
+      if !isEditing {
+        let transaction = makeTextSendTransaction(replyToMessageId: state.replyingMessageId)
+        ids = (transaction.context.randomId, transaction.context.temporaryMessageId)
+        coordinates = shouldCoordinateTextSendAnimationReset(replyToMessageId: state.replyingMessageId)
+        prepared = prepareTextSendAnimationIfNeeded(
+          transaction: transaction,
+          replyToMessageId: state.replyingMessageId,
+          shouldCoordinateSendAnimationReset: coordinates
+        )
+      }
+      debugSend(.init(
+        text: text ?? "", replyToMessageId: state.replyingMessageId, editingMessageId: state.editingMessageId,
+        randomId: ids?.randomId, temporaryMessageId: ids?.temporaryMessageId
+      ))
+      if isEditing { ChatState.shared.clearEditingMessageId(peer: peerId) }
+      else { ChatState.shared.clearReplyingMessageId(peer: peerId) }
+      clearTextOnlyComposeAfterSend(
+        shouldCoordinateSendAnimationReset: coordinates, didPrepareSendAnimationPreview: prepared
+      )
+      return
+    }
+    #endif
 
     var didPrepareSendAnimationPreview = false
     var shouldCoordinateSendAnimationReset = false
@@ -2890,6 +2907,8 @@ enum ComposeDebugOverrides {
     let text: String
     let replyToMessageId: Int64?
     let editingMessageId: Int64?
+    let randomId: Int64?
+    let temporaryMessageId: Int64?
   }
 
   static var send: ((Send) -> Void)?

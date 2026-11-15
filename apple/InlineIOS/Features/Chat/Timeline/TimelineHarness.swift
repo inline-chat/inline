@@ -75,7 +75,10 @@ final class TimelineHarnessModel {
           if let editing = send.editingMessageId {
             try? fixture.editFromComposer(messageId: editing, text: send.text)
           } else {
-            try? await fixture.sendFromComposer(text: send.text, replyToMessageId: send.replyToMessageId)
+            try? await fixture.sendFromComposer(
+              text: send.text, replyToMessageId: send.replyToMessageId, randomId: send.randomId,
+              temporaryMessageId: send.temporaryMessageId
+            )
           }
         }
       }

@@ -120,6 +120,13 @@ final class SendMessageAnimationCoordinator {
     pendingIdentity(for: message) != nil
   }
 
+  /// A send prepared its flight and its row hasn't arrived yet.
+  var hasPreparedSource: Bool {
+    pendingByIdentity.values.contains { state in
+      if case .prepared = state { true } else { false }
+    }
+  }
+
   func isAnimating(identity: SendMessageAnimationIdentity) -> Bool {
     guard case .animating = pendingByIdentity[identity] else {
       return false

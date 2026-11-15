@@ -102,6 +102,7 @@ public class ChatContainerView: UIView {
       peer: peerId, chatId: chatId, spaceId: spaceId, initialState: initialMessages,
       collapsedMaxId: collapsedMaxId, theme: theme
     )
+    timeline.sendAnimationCoordinator = sendAnimationCoordinator
     timeline.onScrollAffordanceChanged = { [weak self] state in
       self?.setScrollButtonShown(state.isVisible)
       self?.scrollButton.setCount(state.unreadCount)
