@@ -11,7 +11,7 @@ Inline draws agent surfaces (plans, approvals, review notes, task suggestions, n
 
 - Every user-visible string in a block is a `BlockText` UTF-16 range into `Message.message`. That text is the complete readable fallback for older clients, notifications, search and copy. Machine strings (ids, composer text, categories) are plain fields.
 - Ranges of top-level blocks are ascending and don't overlap. The server enforces this.
-- A client that can't draw a block shows the text it covers and draws everything else (`BlockContentSpan` in InlineKit). A kind newer than the build shows the text between its neighbours. Never fail a whole message because of one block.
+- A client that can't draw a block shows the text it covers and draws everything else (`BlockContentSpan` in InlineKit). A kind newer than the build shows the text between its neighbours; inside a container, `BlockContentSpan.childBounds` stands in for missing neighbours, so pass it to nested layouts of any new container kind (and add the kind there). Never fail a whole message because of one block.
 - Buttons are ordinary `Message.actions` referenced by id (`action_ids`). Clients draw them inside the block and drop them from the action rows (`BlockInlineActions`). Older clients keep them in the rows, still working.
 - State that changes (decision state, step status, who decided) lives in the block. The sender edits the message. Edits are realtime-only: no push, and "edited" shows only in the context menu.
 - Composer text goes through `MessageActionCompose` / `MessageComposeRequests`. It is appended to the draft and never sent by itself. Post it with `post(_:from:isThreadAnchor:)`: a message shown as a thread's anchor fills that thread's composer, not the parent chat's.
