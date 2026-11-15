@@ -29,7 +29,7 @@ enum MessageActionInvoker {
       if presentation.intent == .callback {
         invokeCallback(action, on: message)
       } else {
-        MessageActionPerformer.performLocal(presentation.intent, peer: message.peerId)
+        MessageActionPerformer.performLocal(presentation.intent, message: message)
       }
     }
   }

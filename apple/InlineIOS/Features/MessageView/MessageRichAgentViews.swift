@@ -305,9 +305,9 @@ final class RichCardView: UIView {
       guard let context, let action = context.actions[id] else { return }
       MessageActionInvoker.tap(action, on: context.message, from: self)
     case let .compose(text):
-      guard let peer = context?.message.peerId else { return }
+      guard let message = context?.message else { return }
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
-      MessageComposeRequests.shared.post(text, for: peer)
+      MessageComposeRequests.shared.post(text, from: message)
     case let .toggle(path, isExpanded):
       UIImpactFeedbackGenerator(style: .light).impactOccurred()
       onToggle?(path, isExpanded)

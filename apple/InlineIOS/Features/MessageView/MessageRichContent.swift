@@ -113,6 +113,9 @@ struct MessageRichContent {
     /// The message's actions by ID, for blocks that draw some as buttons.
     var actions: [String: MessageAction] = [:]
     var inlineActionIDs: Set<String> = []
+    /// For container blocks by path: the text their children may claim, so an unknown kind
+    /// first or last inside still shows (`BlockContentSpan.childBounds`).
+    var childBounds: [RichPath: Range<Int>] = [:]
 
     init(body: NSAttributedString, style: Style, expanded: [RichPath: Bool], messageDate: Date = .distantPast) {
       self.body = body
@@ -175,6 +178,9 @@ struct MessageRichContent {
       var result: [RichBlock] = []
       for (index, block) in list.enumerated() {
         let blockPath = path.appending(index)
+        if let inner = BlockContentSpan.childBounds(at: index, in: list, bounds: bounds) {
+          childBounds[blockPath] = inner
+        }
         // A block that falls back gives back the buttons it claimed.
         let claimed = inlineActionIDs
         if let converted = self.block(block, path: blockPath) {
@@ -236,7 +242,7 @@ struct MessageRichContent {
         }
         return .list(RichList(items: items, isRightToLeft: list.hasIsRtl && list.isRtl))
       case let .quote(quote)?:
-        guard let children = blocks(quote.children, path: path) else { return nil }
+        guard let children = blocks(quote.children, path: path, bounds: childBounds[path]) else { return nil }
         return .quote(children: children, isRightToLeft: quote.hasIsRtl && quote.isRtl)
       case let .table(table)?:
         var rows: [[MessageText]] = []
@@ -273,7 +279,7 @@ struct MessageRichContent {
         let isExpanded = expanded[path] ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen)
         let claimed = inlineActionIDs
         guard disclosure.hasSummary, let summary = slice(disclosure.summary, color: style.secondaryColor, removesLinks: true),
-              let children = blocks(disclosure.children, path: path)
+              let children = blocks(disclosure.children, path: path, bounds: childBounds[path])
         else { return nil }
         // Buttons inside collapsed content aren't drawn, so they stay in the action rows.
         if !isExpanded { inlineActionIDs = claimed }

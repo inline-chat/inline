@@ -223,7 +223,7 @@ extension MessageRichContent.Builder {
       ? slice(callout.title, font: .systemFont(ofSize: size, weight: .semibold))
       : nil
     guard title != nil || !callout.children.isEmpty,
-          let children = blocks(callout.children, path: path)
+          let children = blocks(callout.children, path: path, bounds: childBounds[path])
     else { return nil }
     recordSpan(of: block, at: path)
     return .callout(RichCallout(
@@ -306,7 +306,7 @@ extension MessageRichContent.Builder {
     let title = present(plan.title, when: plan.hasTitle)
       ? slice(plan.title, font: titleFont)
       : plain("Plan", font: titleFont, color: style.textColor)
-    guard let title, let children = blocks(plan.children, path: path) else { return nil }
+    guard let title, let children = blocks(plan.children, path: path, bounds: childBounds[path]) else { return nil }
     let isExpanded = expanded[path] ?? false
     let decided = Self.isDecided(plan.state)
     inlineActionIDs.formUnion(plan.actionIds)
@@ -332,7 +332,7 @@ extension MessageRichContent.Builder {
 
   mutating func approval(_ approval: BlockApproval, block: Block, path: RichPath) -> RichBlock? {
     guard let title = slice(approval.title, font: titleFont), title.length > 0,
-          let children = blocks(approval.children, path: path)
+          let children = blocks(approval.children, path: path, bounds: childBounds[path])
     else { return nil }
     let symbol = switch approval.subject {
     case .command: "terminal"
