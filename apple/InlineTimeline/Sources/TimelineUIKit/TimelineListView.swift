@@ -101,6 +101,11 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   private var origin: CGFloat = 0
   private let input = TimelineInput()
   private var flight: Flight?
+  /// The display link's latest frame: when it will be shown, and the frame length. It runs while a
+  /// finger is down too, so a release knows when the finger's last movement reached the screen.
+  private var frameClock: (target: CFTimeInterval, duration: CFTimeInterval)?
+  /// When the content the finger last moved is on screen.
+  private var lastDragShown: CFTimeInterval?
   private var lastTranslation: CGFloat = 0
   /// How far the finger has pulled past an end, before the rubber band.
   private var pulled: CGFloat = 0
@@ -435,6 +440,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       case .began:
         catchFlight()
         isTracking = true
+        lastDragShown = nil
+        input.startTicking(maximumFramesPerSecond: window?.screen.maximumFramesPerSecond ?? 60)
         lastTranslation = pan.translation(in: self).y
         let shown = -state.layout.restShift
         let dimension = Double(max(1, state.viewport.usableHeight))
@@ -482,6 +489,20 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
     let nowShown = pulled == 0 ? 0 : (pulled > 0 ? 1 : -1) * CGFloat(physics.rubberBanded(Double(abs(pulled)), dimension: dimension))
     scroll(by: moved + (nowShown - shown))
+    lastDragShown = nextFrameTime()
+  }
+
+  /// When a change made now reaches the screen: the frame being prepared, or a later one.
+  private func nextFrameTime() -> CFTimeInterval {
+    let now = CACurrentMediaTime()
+    guard let clock = frameClock, clock.duration > 0 else { return now }
+    var time = clock.target
+    var steps = 0
+    while time < now, steps < 8 {
+      time += clock.duration
+      steps += 1
+    }
+    return max(time, now)
   }
 
   private func scroll(by delta: CGFloat) {
@@ -513,8 +534,15 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       rest()
       return
     }
+    // The path continues the finger's motion from the frame that showed its last movement, not from
+    // when the release is handled, which is often a frame later: starting then would hold the
+    // content still for that frame. More than two frames back the finger had stopped anyway.
+    // When the last movement and the lift share a frame, that frame is still to come.
+    let now = CACurrentMediaTime()
+    let frame = frameClock?.duration ?? 1.0 / 60
+    let begin = lastDragShown.map { min(now + frame, max($0, now - 2 * frame)) } ?? now
     start(Flight(
-      path: physics.path(velocity: Double(velocity), lower: lower, upper: upper), start: CACurrentMediaTime(),
+      path: physics.path(velocity: Double(velocity), lower: lower, upper: upper), start: begin,
       applied: 0, lower: lower, upper: upper
     ))
   }
@@ -536,6 +564,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     animation.isAdditive = true
     animation.beginTime = content.layer.convertTime(flight.start, from: nil)
     animation.isRemovedOnCompletion = true
+    // A path that starts at a frame still to come holds its first position until then.
+    animation.fillMode = .backwards
     let maximum = Float(window?.screen.maximumFramesPerSecond ?? 60)
     animation.preferredFrameRateRange = CAFrameRateRange(minimum: min(80, maximum), maximum: maximum, preferred: maximum)
 
@@ -551,12 +581,13 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// Each frame: move the state to where the path is at the frame's time, which realises the rows
   /// coming into view. The motion itself does not depend on this running on time.
   private func tick(_ link: CADisplayLink) {
+    frameClock = (link.targetTimestamp, link.targetTimestamp - link.timestamp)
     guard var flight else {
-      input.stopTicking()
+      if !isTracking { input.stopTicking() }
       return
     }
     let now = CACurrentMediaTime()
-    let time = min(max(link.targetTimestamp, now) - flight.start, flight.path.duration)
+    let time = min(max(0, max(link.targetTimestamp, now) - flight.start), flight.path.duration)
     let position = flight.path.position(at: time)
     // Realise further ahead the faster it goes, so a late frame still finds its rows there.
     let ahead = min(CGFloat(abs(flight.path.velocity(at: time))) * Self.lookahead, state.viewport.height)
@@ -597,7 +628,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     let lowerMatters = differs(lower, flight.lower) && (flight.path.touchesLower || (lower.map { $0 > end + 0.5 } ?? false))
     guard upperMatters || lowerMatters else { return }
 
-    let time = min(now - flight.start, flight.path.duration)
+    let time = min(max(0, now - flight.start), flight.path.duration)
     let position = flight.path.position(at: time)
     let velocity = flight.path.velocity(at: time)
     let path = physics.path(
@@ -613,7 +644,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// A finger landed: stop exactly where the content is on screen.
   private func catchFlight() {
     guard let flight else { return }
-    var position = flight.path.position(at: min(CACurrentMediaTime() - flight.start, flight.path.duration))
+    var position = flight.path.position(at: min(max(0, CACurrentMediaTime() - flight.start), flight.path.duration))
     if content.layer.animationKeys() == [Self.flightKey], let presented = content.layer.presentation() {
       // Nothing else is moving the content, so what is presented is the path's position exactly.
       position = Double(origin) + flight.applied - Double(presented.bounds.origin.y)
@@ -637,7 +668,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       rest()
     } else {
       // Another change takes over from where the content is now.
-      let position = flight.path.position(at: min(CACurrentMediaTime() - flight.start, flight.path.duration))
+      let position = flight.path.position(at: min(max(0, CACurrentMediaTime() - flight.start), flight.path.duration))
       scroll(by: CGFloat(position - flight.applied))
       syncOrigin()
     }
