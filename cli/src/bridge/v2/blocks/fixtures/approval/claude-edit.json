@@ -1,0 +1,62 @@
+{
+  "source": "Claude Code 2.1 can_use_tool for Edit; the Claude driver keeps the tool's full input on a tool subject.",
+  "native": {
+    "type": "control_request",
+    "request_id": "req-edit-1",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "Edit",
+      "tool_use_id": "toolu_edit1",
+      "input": {
+        "file_path": "/work/inline/src/parser.ts",
+        "old_string": "  const first = tokens[0]",
+        "new_string": "  if (tokens.length === 0) return []\n  const first = tokens[0]"
+      },
+      "permission_suggestions": [
+        {
+          "type": "setMode",
+          "mode": "acceptEdits",
+          "destination": "session"
+        }
+      ]
+    }
+  },
+  "input": {
+    "agent": "Claude",
+    "folder": "/work/inline",
+    "interaction": {
+      "id": "req-edit-1",
+      "item": "toolu_edit1",
+      "kind": {
+        "kind": "approval",
+        "subject": {
+          "kind": "tool",
+          "name": "Edit",
+          "input": {
+            "file_path": "/work/inline/src/parser.ts",
+            "old_string": "  const first = tokens[0]",
+            "new_string": "  if (tokens.length === 0) return []\n  const first = tokens[0]"
+          }
+        },
+        "decisions": [
+          {
+            "id": "allow",
+            "label": "Yes",
+            "kind": "accept"
+          },
+          {
+            "id": "allow:suggestion:0",
+            "label": "Yes, and auto-accept edits",
+            "kind": "accept_and_remember"
+          },
+          {
+            "id": "deny",
+            "label": "No, and tell Claude what to do differently",
+            "kind": "decline",
+            "accepts_message": true
+          }
+        ]
+      }
+    }
+  }
+}

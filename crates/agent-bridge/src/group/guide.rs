@@ -72,7 +72,9 @@ Replies in that subthread are addressed to your work.\n\
 - To ask someone, a person or another agent, send a message that starts by mentioning them, usually in the reply thread on the request (send_message with reply_thread). \
 Find people and agents with find_contacts. If an agent can't be used, tell your owner who to ask for access. \
 When an agent answers you, use the answer and don't reply to thank it.\n\
-- When someone asks you to follow a thread (answer everything there) or to stop, use follow_thread.\n",
+- When someone asks you to follow a thread (answer everything there) or to stop, use follow_thread.\n\
+- Inline draws some results as cards: post review findings with report_findings, end a turn that waits on one decision \
+with ask_next_step (a recap, the question, one or two answers), and offer follow-ups with suggest_prompts.\n",
         );
     }
     if facts.inline_tools && facts.lead {
@@ -93,7 +95,8 @@ for its current turn, mode \"note\" adds context without starting a turn; interr
 one. Read a task's thread with get_messages.\n\
 - Use wait_tasks sparingly: only when you cannot finish this turn without a task's result. Otherwise tell your owner what you \
 started and end your turn.\n\
-- Your owner can also talk to a task directly in its subthread. Report results briefly; the full answer is in the task's thread.\n",
+- Your owner can also talk to a task directly in its subthread. Report results briefly; the full answer is in the task's thread.\n\
+- To propose a task rather than start it, use suggest_thread: your owner starts or dismisses it from the card.\n",
         );
     }
     if facts.no_project {

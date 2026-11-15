@@ -275,6 +275,64 @@ public nonisolated enum BlockStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
+/// Where an agent's request to a person stands. The sender edits the message as
+/// it changes; clients may show a pressed button as pending until that edit.
+public nonisolated enum BlockDecisionState: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case pending // = 1
+
+  /// Approved, or for a task suggestion, started.
+  case accepted // = 2
+
+  /// Denied, dismissed, or for a plan, kept planning.
+  case declined // = 3
+  case expired // = 4
+
+  /// A newer plan or request replaced this one.
+  case superseded // = 5
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .pending
+    case 2: self = .accepted
+    case 3: self = .declined
+    case 4: self = .expired
+    case 5: self = .superseded
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .pending: return 1
+    case .accepted: return 2
+    case .declined: return 3
+    case .expired: return 4
+    case .superseded: return 5
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [BlockDecisionState] = [
+    .unspecified,
+    .pending,
+    .accepted,
+    .declined,
+    .expired,
+    .superseded,
+  ]
+
+}
+
 /// Agent providers that implement Inline's session continuity contract. The
 /// numeric values are stored by the server; additions must be append-only.
 public nonisolated enum AgentSessionProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -810,7 +868,8 @@ public nonisolated enum AgentGrantOperation: SwiftProtobuf.Enum, Swift.CaseItera
   /// Answer approvals as a delegate of the owner.
   case approve // = 3
 
-  /// Change the agent's settings.
+  /// Manage the bot as an admin: its access list, who can message it, its
+  /// profile, settings and token. Only the owner deletes the bot.
   case configure // = 5
   case UNRECOGNIZED(Int)
 
@@ -1210,6 +1269,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getUnreadActivity // = 167
   case readActivity // = 168
   case setFocusStatus // = 169
+  case getSpaces // = 170
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -1387,6 +1447,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 167: self = .getUnreadActivity
     case 168: self = .readActivity
     case 169: self = .setFocusStatus
+    case 170: self = .getSpaces
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -1562,6 +1623,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getUnreadActivity: return 167
     case .readActivity: return 168
     case .setFocusStatus: return 169
+    case .getSpaces: return 170
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -1737,6 +1799,7 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getUnreadActivity,
     .readActivity,
     .setFocusStatus,
+    .getSpaces,
   ]
 
 }
@@ -2065,6 +2128,127 @@ public nonisolated enum DeleteDialogFolderDisposition: SwiftProtobuf.Enum, Swift
     .unspecified,
     .closeDialogs,
     .keepDialogs,
+  ]
+
+}
+
+public nonisolated enum ChatListScope: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Chats the viewer has a dialog with, except dialogs marked chat_list_hidden.
+  case dialogs // = 0
+
+  /// Every chat the viewer can access, with or without a dialog, including
+  /// linked subthreads.
+  case accessible // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .dialogs
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .dialogs
+    case 1: self = .accessible
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .dialogs: return 0
+    case .accessible: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ChatListScope] = [
+    .dialogs,
+    .accessible,
+  ]
+
+}
+
+public nonisolated enum ChatListOrder: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Latest activity first (last message date, else creation date), then chat
+  /// ID descending. Pinned chats are not moved to the front.
+  case recent // = 0
+
+  /// Ascending chat ID. Pages never shift and new chats land at the end.
+  /// For complete walks, sync and export.
+  case id // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .recent
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .recent
+    case 1: self = .id
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .recent: return 0
+    case .id: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ChatListOrder] = [
+    .recent,
+    .id,
+  ]
+
+}
+
+public nonisolated enum ChatListKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case dm // = 1
+  case spaceThread // = 2
+  case homeThread // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .dm
+    case 2: self = .spaceThread
+    case 3: self = .homeThread
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .dm: return 1
+    case .spaceThread: return 2
+    case .homeThread: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [ChatListKind] = [
+    .unspecified,
+    .dm,
+    .spaceThread,
+    .homeThread,
   ]
 
 }
@@ -4455,6 +4639,14 @@ public nonisolated struct MessageAction: Sendable {
     set {action = .openLink(newValue)}
   }
 
+  public var compose: MessageActionCompose {
+    get {
+      if case .compose(let v)? = action {return v}
+      return MessageActionCompose()
+    }
+    set {action = .compose(newValue)}
+  }
+
   public var style: MessageAction.Style = .default
 
   /// Ask before running the action.
@@ -4479,6 +4671,7 @@ public nonisolated struct MessageAction: Sendable {
     case copyText(MessageActionCopyText)
     case openURL(MessageActionOpenUrl)
     case openLink(MessageActionOpenLink)
+    case compose(MessageActionCompose)
 
   }
 
@@ -4560,6 +4753,21 @@ public nonisolated struct MessageActionOpenUrl: Sendable {
   // methods supported on all messages.
 
   public var url: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Puts text in the viewer's composer for this chat, client-side, without
+/// notifying the bot. The viewer edits and sends it. Clients add it after any
+/// draft the viewer has, never replacing it.
+public nonisolated struct MessageActionCompose: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var text: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -5037,6 +5245,56 @@ public nonisolated struct Block: Sendable {
     set {kind = .widget(newValue)}
   }
 
+  /// Agent surfaces from Claude and ChatGPT clients. Clients that can't draw one
+  /// show the fallback text it covers and draw the rest of the message.
+  public var planProposal: BlockPlanProposal {
+    get {
+      if case .planProposal(let v)? = kind {return v}
+      return BlockPlanProposal()
+    }
+    set {kind = .planProposal(newValue)}
+  }
+
+  public var approval: BlockApproval {
+    get {
+      if case .approval(let v)? = kind {return v}
+      return BlockApproval()
+    }
+    set {kind = .approval(newValue)}
+  }
+
+  public var review: BlockReview {
+    get {
+      if case .review(let v)? = kind {return v}
+      return BlockReview()
+    }
+    set {kind = .review(newValue)}
+  }
+
+  public var taskSuggestion: BlockTaskSuggestion {
+    get {
+      if case .taskSuggestion(let v)? = kind {return v}
+      return BlockTaskSuggestion()
+    }
+    set {kind = .taskSuggestion(newValue)}
+  }
+
+  public var nextStep: BlockNextStep {
+    get {
+      if case .nextStep(let v)? = kind {return v}
+      return BlockNextStep()
+    }
+    set {kind = .nextStep(newValue)}
+  }
+
+  public var promptSuggestions: BlockPromptSuggestions {
+    get {
+      if case .promptSuggestions(let v)? = kind {return v}
+      return BlockPromptSuggestions()
+    }
+    set {kind = .promptSuggestions(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Kind: Equatable, Sendable {
@@ -5065,6 +5323,14 @@ public nonisolated struct Block: Sendable {
     case form(BlockForm)
     /// Bot only. Sandboxed HTML; at most one per message.
     case widget(BlockWidget)
+    /// Agent surfaces from Claude and ChatGPT clients. Clients that can't draw one
+    /// show the fallback text it covers and draw the rest of the message.
+    case planProposal(BlockPlanProposal)
+    case approval(BlockApproval)
+    case review(BlockReview)
+    case taskSuggestion(BlockTaskSuggestion)
+    case nextStep(BlockNextStep)
+    case promptSuggestions(BlockPromptSuggestions)
 
   }
 
@@ -6188,6 +6454,16 @@ public nonisolated struct BlockFormField: Sendable {
     set {kind = .number(newValue)}
   }
 
+  /// Short chip naming the question, such as "Auth method".
+  public var header: BlockText {
+    get {_header ?? BlockText()}
+    set {_header = newValue}
+  }
+  /// Returns true if `header` has been explicitly set.
+  public var hasHeader: Bool {self._header != nil}
+  /// Clears the value of `header`. Subsequent reads from it will return its default value.
+  public mutating func clearHeader() {self._header = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Kind: Equatable, Sendable {
@@ -6202,6 +6478,7 @@ public nonisolated struct BlockFormField: Sendable {
 
   fileprivate var _label: BlockText? = nil
   fileprivate var _description_p: BlockText? = nil
+  fileprivate var _header: BlockText? = nil
 }
 
 public nonisolated struct BlockFormSelect: Sendable {
@@ -6249,12 +6526,27 @@ public nonisolated struct BlockFormOption: Sendable {
   /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
   public mutating func clearDescription_p() {self._description_p = nil}
 
+  /// Shown monospaced beside the options while this one is focused, such as a
+  /// code sample or a layout sketch.
+  public var preview: BlockText {
+    get {_preview ?? BlockText()}
+    set {_preview = newValue}
+  }
+  /// Returns true if `preview` has been explicitly set.
+  public var hasPreview: Bool {self._preview != nil}
+  /// Clears the value of `preview`. Subsequent reads from it will return its default value.
+  public mutating func clearPreview() {self._preview = nil}
+
+  /// The sender's recommended answer.
+  public var recommended: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _label: BlockText? = nil
   fileprivate var _description_p: BlockText? = nil
+  fileprivate var _preview: BlockText? = nil
 }
 
 public nonisolated struct BlockFormText: Sendable {
@@ -6570,6 +6862,680 @@ public nonisolated struct MessageWidgetCall: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+/// A plan the agent wants approved before it acts (Claude ExitPlanMode, Codex
+/// proposed plans). The fallback text carries the title and the plan.
+public nonisolated struct BlockPlanProposal: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var title: BlockText {
+    get {_title ?? BlockText()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  /// The plan body: headings, lists, code.
+  public var children: [Block] = []
+
+  public var state: BlockDecisionState = .unspecified
+
+  /// IDs from Message.actions drawn as this block's buttons, in order. Clients
+  /// that draw them here leave them out of the message's action rows; older
+  /// clients keep showing them there.
+  public var actionIds: [String] = []
+
+  public var decidedByUserID: Int64 {
+    get {_decidedByUserID ?? 0}
+    set {_decidedByUserID = newValue}
+  }
+  /// Returns true if `decidedByUserID` has been explicitly set.
+  public var hasDecidedByUserID: Bool {self._decidedByUserID != nil}
+  /// Clears the value of `decidedByUserID`. Subsequent reads from it will return its default value.
+  public mutating func clearDecidedByUserID() {self._decidedByUserID = nil}
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: BlockText? = nil
+  fileprivate var _decidedByUserID: Int64? = nil
+  fileprivate var _isRtl: Bool? = nil
+}
+
+/// A request to run a command, change files, use a tool or widen permissions.
+public nonisolated struct BlockApproval: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var subject: BlockApproval.Subject {
+    get {_storage._subject}
+    set {_uniqueStorage()._subject = newValue}
+  }
+
+  public var title: BlockText {
+    get {_storage._title ?? BlockText()}
+    set {_uniqueStorage()._title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {_storage._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {_uniqueStorage()._title = nil}
+
+  /// Rendered LTR and monospaced.
+  public var command: BlockText {
+    get {_storage._command ?? BlockText()}
+    set {_uniqueStorage()._command = newValue}
+  }
+  /// Returns true if `command` has been explicitly set.
+  public var hasCommand: Bool {_storage._command != nil}
+  /// Clears the value of `command`. Subsequent reads from it will return its default value.
+  public mutating func clearCommand() {_uniqueStorage()._command = nil}
+
+  public var cwd: BlockText {
+    get {_storage._cwd ?? BlockText()}
+    set {_uniqueStorage()._cwd = newValue}
+  }
+  /// Returns true if `cwd` has been explicitly set.
+  public var hasCwd: Bool {_storage._cwd != nil}
+  /// Clears the value of `cwd`. Subsequent reads from it will return its default value.
+  public mutating func clearCwd() {_uniqueStorage()._cwd = nil}
+
+  public var reason: BlockText {
+    get {_storage._reason ?? BlockText()}
+    set {_uniqueStorage()._reason = newValue}
+  }
+  /// Returns true if `reason` has been explicitly set.
+  public var hasReason: Bool {_storage._reason != nil}
+  /// Clears the value of `reason`. Subsequent reads from it will return its default value.
+  public mutating func clearReason() {_uniqueStorage()._reason = nil}
+
+  /// Diffs or fields describing what is being approved.
+  public var children: [Block] {
+    get {_storage._children}
+    set {_uniqueStorage()._children = newValue}
+  }
+
+  public var state: BlockDecisionState {
+    get {_storage._state}
+    set {_uniqueStorage()._state = newValue}
+  }
+
+  /// Same contract as BlockPlanProposal.action_ids.
+  public var actionIds: [String] {
+    get {_storage._actionIds}
+    set {_uniqueStorage()._actionIds = newValue}
+  }
+
+  public var decidedByUserID: Int64 {
+    get {_storage._decidedByUserID ?? 0}
+    set {_uniqueStorage()._decidedByUserID = newValue}
+  }
+  /// Returns true if `decidedByUserID` has been explicitly set.
+  public var hasDecidedByUserID: Bool {_storage._decidedByUserID != nil}
+  /// Clears the value of `decidedByUserID`. Subsequent reads from it will return its default value.
+  public mutating func clearDecidedByUserID() {_uniqueStorage()._decidedByUserID = nil}
+
+  public var isRtl: Bool {
+    get {_storage._isRtl ?? false}
+    set {_uniqueStorage()._isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {_storage._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {_uniqueStorage()._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Subject: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case command // = 1
+    case fileChange // = 2
+    case tool // = 3
+    case permissions // = 4
+    case network // = 5
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .command
+      case 2: self = .fileChange
+      case 3: self = .tool
+      case 4: self = .permissions
+      case 5: self = .network
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .command: return 1
+      case .fileChange: return 2
+      case .tool: return 3
+      case .permissions: return 4
+      case .network: return 5
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockApproval.Subject] = [
+      .unspecified,
+      .command,
+      .fileChange,
+      .tool,
+      .permissions,
+      .network,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Code review notes: findings with priority and location, and an overall
+/// verdict.
+public nonisolated struct BlockReview: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var title: BlockText {
+    get {_title ?? BlockText()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  public var verdict: BlockReview.Verdict = .unspecified
+
+  public var summary: BlockText {
+    get {_summary ?? BlockText()}
+    set {_summary = newValue}
+  }
+  /// Returns true if `summary` has been explicitly set.
+  public var hasSummary: Bool {self._summary != nil}
+  /// Clears the value of `summary`. Subsequent reads from it will return its default value.
+  public mutating func clearSummary() {self._summary = nil}
+
+  public var findings: [BlockReviewFinding] = []
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Verdict: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case correct // = 1
+    case incorrect // = 2
+    case needsAttention // = 3
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .correct
+      case 2: self = .incorrect
+      case 3: self = .needsAttention
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .correct: return 1
+      case .incorrect: return 2
+      case .needsAttention: return 3
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockReview.Verdict] = [
+      .unspecified,
+      .correct,
+      .incorrect,
+      .needsAttention,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _title: BlockText? = nil
+  fileprivate var _summary: BlockText? = nil
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct BlockReviewFinding: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var title: BlockText {
+    get {_title ?? BlockText()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  /// Explanation or failure scenario.
+  public var body: BlockText {
+    get {_body ?? BlockText()}
+    set {_body = newValue}
+  }
+  /// Returns true if `body` has been explicitly set.
+  public var hasBody: Bool {self._body != nil}
+  /// Clears the value of `body`. Subsequent reads from it will return its default value.
+  public mutating func clearBody() {self._body = nil}
+
+  public var priority: BlockReviewFinding.Priority = .unspecified
+
+  /// Rendered LTR and monospaced.
+  public var path: BlockText {
+    get {_path ?? BlockText()}
+    set {_path = newValue}
+  }
+  /// Returns true if `path` has been explicitly set.
+  public var hasPath: Bool {self._path != nil}
+  /// Clears the value of `path`. Subsequent reads from it will return its default value.
+  public mutating func clearPath() {self._path = nil}
+
+  public var startLine: UInt32 {
+    get {_startLine ?? 0}
+    set {_startLine = newValue}
+  }
+  /// Returns true if `startLine` has been explicitly set.
+  public var hasStartLine: Bool {self._startLine != nil}
+  /// Clears the value of `startLine`. Subsequent reads from it will return its default value.
+  public mutating func clearStartLine() {self._startLine = nil}
+
+  public var endLine: UInt32 {
+    get {_endLine ?? 0}
+    set {_endLine = newValue}
+  }
+  /// Returns true if `endLine` has been explicitly set.
+  public var hasEndLine: Bool {self._endLine != nil}
+  /// Clears the value of `endLine`. Subsequent reads from it will return its default value.
+  public mutating func clearEndLine() {self._endLine = nil}
+
+  /// Lowercase slug such as "correctness"; at most 40 characters.
+  public var category: String {
+    get {_category ?? String()}
+    set {_category = newValue}
+  }
+  /// Returns true if `category` has been explicitly set.
+  public var hasCategory: Bool {self._category != nil}
+  /// Clears the value of `category`. Subsequent reads from it will return its default value.
+  public mutating func clearCategory() {self._category = nil}
+
+  public var confidence: BlockReviewFinding.Confidence = .unspecified
+
+  public var outcome: BlockReviewFinding.Outcome = .unspecified
+
+  /// Message action run from the finding, such as "Fix".
+  public var actionID: String {
+    get {_actionID ?? String()}
+    set {_actionID = newValue}
+  }
+  /// Returns true if `actionID` has been explicitly set.
+  public var hasActionID: Bool {self._actionID != nil}
+  /// Clears the value of `actionID`. Subsequent reads from it will return its default value.
+  public mutating func clearActionID() {self._actionID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Priority: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case p0 // = 1
+    case p1 // = 2
+    case p2 // = 3
+    case p3 // = 4
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .p0
+      case 2: self = .p1
+      case 3: self = .p2
+      case 4: self = .p3
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .p0: return 1
+      case .p1: return 2
+      case .p2: return 3
+      case .p3: return 4
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockReviewFinding.Priority] = [
+      .unspecified,
+      .p0,
+      .p1,
+      .p2,
+      .p3,
+    ]
+
+  }
+
+  public nonisolated enum Confidence: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case confirmed // = 1
+    case plausible // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .confirmed
+      case 2: self = .plausible
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .confirmed: return 1
+      case .plausible: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockReviewFinding.Confidence] = [
+      .unspecified,
+      .confirmed,
+      .plausible,
+    ]
+
+  }
+
+  public nonisolated enum Outcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case fixed // = 1
+    case skipped // = 2
+    case noChangeNeeded // = 3
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .fixed
+      case 2: self = .skipped
+      case 3: self = .noChangeNeeded
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .fixed: return 1
+      case .skipped: return 2
+      case .noChangeNeeded: return 3
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [BlockReviewFinding.Outcome] = [
+      .unspecified,
+      .fixed,
+      .skipped,
+      .noChangeNeeded,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _title: BlockText? = nil
+  fileprivate var _body: BlockText? = nil
+  fileprivate var _path: BlockText? = nil
+  fileprivate var _startLine: UInt32? = nil
+  fileprivate var _endLine: UInt32? = nil
+  fileprivate var _category: String? = nil
+  fileprivate var _actionID: String? = nil
+}
+
+/// Work the agent proposes to run separately, as a new thread.
+public nonisolated struct BlockTaskSuggestion: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var title: BlockText {
+    get {_title ?? BlockText()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  public var brief: BlockText {
+    get {_brief ?? BlockText()}
+    set {_brief = newValue}
+  }
+  /// Returns true if `brief` has been explicitly set.
+  public var hasBrief: Bool {self._brief != nil}
+  /// Clears the value of `brief`. Subsequent reads from it will return its default value.
+  public mutating func clearBrief() {self._brief = nil}
+
+  public var state: BlockDecisionState = .unspecified
+
+  /// The thread the task started in, once accepted.
+  public var startedPeer: Peer {
+    get {_startedPeer ?? Peer()}
+    set {_startedPeer = newValue}
+  }
+  /// Returns true if `startedPeer` has been explicitly set.
+  public var hasStartedPeer: Bool {self._startedPeer != nil}
+  /// Clears the value of `startedPeer`. Subsequent reads from it will return its default value.
+  public mutating func clearStartedPeer() {self._startedPeer = nil}
+
+  /// Unix seconds after which the suggestion reads as expired.
+  public var expiresAt: Int64 {
+    get {_expiresAt ?? 0}
+    set {_expiresAt = newValue}
+  }
+  /// Returns true if `expiresAt` has been explicitly set.
+  public var hasExpiresAt: Bool {self._expiresAt != nil}
+  /// Clears the value of `expiresAt`. Subsequent reads from it will return its default value.
+  public mutating func clearExpiresAt() {self._expiresAt = nil}
+
+  /// Same contract as BlockPlanProposal.action_ids.
+  public var actionIds: [String] = []
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: BlockText? = nil
+  fileprivate var _brief: BlockText? = nil
+  fileprivate var _startedPeer: Peer? = nil
+  fileprivate var _expiresAt: Int64? = nil
+  fileprivate var _isRtl: Bool? = nil
+}
+
+/// The agent's end-of-turn recap and the one decision it waits on.
+public nonisolated struct BlockNextStep: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var recap: BlockText {
+    get {_recap ?? BlockText()}
+    set {_recap = newValue}
+  }
+  /// Returns true if `recap` has been explicitly set.
+  public var hasRecap: Bool {self._recap != nil}
+  /// Clears the value of `recap`. Subsequent reads from it will return its default value.
+  public mutating func clearRecap() {self._recap = nil}
+
+  public var question: BlockText {
+    get {_question ?? BlockText()}
+    set {_question = newValue}
+  }
+  /// Returns true if `question` has been explicitly set.
+  public var hasQuestion: Bool {self._question != nil}
+  /// Clears the value of `question`. Subsequent reads from it will return its default value.
+  public mutating func clearQuestion() {self._question = nil}
+
+  /// Same contract as BlockPlanProposal.action_ids.
+  public var actionIds: [String] = []
+
+  /// The agent is stopped until someone answers.
+  public var blocking: Bool = false
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _recap: BlockText? = nil
+  fileprivate var _question: BlockText? = nil
+  fileprivate var _isRtl: Bool? = nil
+}
+
+/// Chips that put a prompt in the viewer's composer, like
+/// MessageActionCompose.
+public nonisolated struct BlockPromptSuggestions: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var prompts: [BlockPromptSuggestion] = []
+
+  public var isRtl: Bool {
+    get {_isRtl ?? false}
+    set {_isRtl = newValue}
+  }
+  /// Returns true if `isRtl` has been explicitly set.
+  public var hasIsRtl: Bool {self._isRtl != nil}
+  /// Clears the value of `isRtl`. Subsequent reads from it will return its default value.
+  public mutating func clearIsRtl() {self._isRtl = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _isRtl: Bool? = nil
+}
+
+public nonisolated struct BlockPromptSuggestion: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var label: BlockText {
+    get {_label ?? BlockText()}
+    set {_label = newValue}
+  }
+  /// Returns true if `label` has been explicitly set.
+  public var hasLabel: Bool {self._label != nil}
+  /// Clears the value of `label`. Subsequent reads from it will return its default value.
+  public mutating func clearLabel() {self._label = nil}
+
+  /// Composer text when it differs from the label; not part of the fallback
+  /// text. At most 4,000 characters.
+  public var text: String {
+    get {_text ?? String()}
+    set {_text = newValue}
+  }
+  /// Returns true if `text` has been explicitly set.
+  public var hasText: Bool {self._text != nil}
+  /// Clears the value of `text`. Subsequent reads from it will return its default value.
+  public mutating func clearText() {self._text = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _label: BlockText? = nil
+  fileprivate var _text: String? = nil
 }
 
 public nonisolated struct Message: @unchecked Sendable {
@@ -7993,6 +8959,11 @@ public nonisolated struct AgentSettings: Sendable {
   /// Clears the value of `date`. Subsequent reads from it will return its default value.
   public mutating func clearDate() {self._date = nil}
 
+  /// Anyone on Inline may message the bot, add it to chats and find it by its
+  /// username; the bot's own software decides who it answers. Off by default:
+  /// only the owner and the access list (AgentGrant) reach the bot.
+  public var openToEveryone: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8000,8 +8971,9 @@ public nonisolated struct AgentSettings: Sendable {
   fileprivate var _date: Int64? = nil
 }
 
-/// Opt-in access to a bot for one person. No grants means owner-only. Any grant
-/// lets its holder answer the agent's questions.
+/// One entry of a bot's access list. No grants means owner-only, unless the bot
+/// is open to everyone (AgentSettings). Any grant lets its holder message the
+/// bot, add it to chats and answer its questions.
 public nonisolated struct AgentGrant: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -8400,7 +9372,7 @@ public nonisolated struct ListAgentGrantsResult: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// All grants for the owner and the bot; only the viewer's own otherwise.
+  /// All grants for the owner, admins and the bot; only the viewer's own otherwise.
   public var grants: [AgentGrant] = []
 
   public var revision: Int64 = 0
@@ -8412,8 +9384,9 @@ public nonisolated struct ListAgentGrantsResult: Sendable {
   public init() {}
 }
 
-/// Creates or replaces one person's grant. Owner, or the bot itself for grants
-/// without APPROVE and CONFIGURE (the bridge's /allowlist).
+/// Creates or replaces one access list entry. The owner; an admin, for grants
+/// without APPROVE; or the bot itself, for grants without APPROVE and
+/// CONFIGURE (the bridge's /allowlist).
 public nonisolated struct SetAgentGrantInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -8507,6 +9480,10 @@ public nonisolated struct GetAgentAccessInput: Sendable {
 
   public var userID: Int64 = 0
 
+  /// Several bots at once, about the caller. When set, the fields above are
+  /// ignored and the answers come back in `access`. At most 200.
+  public var botUserIds: [Int64] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -8520,6 +9497,39 @@ public nonisolated struct GetAgentAccessResult: Sendable {
   public var isOwner: Bool = false
 
   public var operations: [AgentGrantOperation] = []
+
+  /// One entry per bot asked about with `bot_user_ids`. Deleted and unknown
+  /// bots are left out.
+  public var access: [AgentAccess] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// What the caller may do with one bot.
+public nonisolated struct AgentAccess: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  public var isOwner: Bool = false
+
+  /// From the access list. Empty for an open bot the caller has no grant on.
+  public var operations: [AgentGrantOperation] = []
+
+  public var ownerUserID: Int64 = 0
+
+  /// Whether the caller may message the bot, add it to chats and find it: the
+  /// owner, anyone on its access list, or anyone when the bot is open to
+  /// everyone. Clients hide the composer and the bot's mention when false.
+  public var canMessage: Bool = false
+
+  /// The bot wrote to the caller in their direct chat in the last week, so
+  /// they can answer it there even without access. Clients keep the composer.
+  public var canReply: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -8667,11 +9677,21 @@ public nonisolated struct UpdateAgentSettingsInput: Sendable {
   /// Clears the value of `defaultOutputMode`. Subsequent reads from it will return its default value.
   public mutating func clearDefaultOutputMode() {self._defaultOutputMode = nil}
 
+  public var openToEveryone: Bool {
+    get {_openToEveryone ?? false}
+    set {_openToEveryone = newValue}
+  }
+  /// Returns true if `openToEveryone` has been explicitly set.
+  public var hasOpenToEveryone: Bool {self._openToEveryone != nil}
+  /// Clears the value of `openToEveryone`. Subsequent reads from it will return its default value.
+  public mutating func clearOpenToEveryone() {self._openToEveryone = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _defaultOutputMode: AgentOutputMode? = nil
+  fileprivate var _openToEveryone: Bool? = nil
 }
 
 public nonisolated struct UpdateAgentSettingsResult: @unchecked Sendable {
@@ -12104,6 +13124,14 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .setFocusStatus(newValue)}
   }
 
+  public var getSpaces: GetSpacesInput {
+    get {
+      if case .getSpaces(let v)? = input {return v}
+      return GetSpacesInput()
+    }
+    set {input = .getSpaces(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Input: Equatable, Sendable {
@@ -12275,6 +13303,7 @@ public nonisolated struct RpcCall: Sendable {
     case getUnreadActivity(GetUnreadActivityInput)
     case readActivity(ReadActivityInput)
     case setFocusStatus(SetFocusStatusInput)
+    case getSpaces(GetSpacesInput)
 
   }
 
@@ -13640,6 +14669,14 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .setFocusStatus(newValue)}
   }
 
+  public var getSpaces: GetSpacesResult {
+    get {
+      if case .getSpaces(let v)? = _storage._result {return v}
+      return GetSpacesResult()
+    }
+    set {_uniqueStorage()._result = .getSpaces(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -13811,6 +14848,7 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case getUnreadActivity(GetUnreadActivityResult)
     case readActivity(ReadActivityResult)
     case setFocusStatus(SetFocusStatusResult)
+    case getSpaces(GetSpacesResult)
 
   }
 
@@ -16775,9 +17813,22 @@ public nonisolated struct ListBotsInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// Also list the bots the caller manages as an admin, after their own. Each
+  /// bot's `bot_info` says who owns it.
+  public var includeManaged: Bool {
+    get {_includeManaged ?? false}
+    set {_includeManaged = newValue}
+  }
+  /// Returns true if `includeManaged` has been explicitly set.
+  public var hasIncludeManaged: Bool {self._includeManaged != nil}
+  /// Clears the value of `includeManaged`. Subsequent reads from it will return its default value.
+  public mutating func clearIncludeManaged() {self._includeManaged = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _includeManaged: Bool? = nil
 }
 
 public nonisolated struct ListBotsResult: Sendable {
@@ -18995,8 +20046,7 @@ public nonisolated struct GetChatsInput: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Include every accessible linked subthread, regardless of dialog visibility.
-  /// Omitted/false preserves the normal chat-list snapshot.
+  /// Legacy. true is the same as scope = CHAT_LIST_SCOPE_ACCESSIBLE.
   public var includeSubthreads: Bool {
     get {_includeSubthreads ?? false}
     set {_includeSubthreads = newValue}
@@ -19006,11 +20056,154 @@ public nonisolated struct GetChatsInput: Sendable {
   /// Clears the value of `includeSubthreads`. Subsequent reads from it will return its default value.
   public mutating func clearIncludeSubthreads() {self._includeSubthreads = nil}
 
+  /// Page size, capped at 100. Absent: legacy unpaged snapshot (deprecated).
+  public var limit: Int32 {
+    get {_limit ?? 0}
+    set {_limit = newValue}
+  }
+  /// Returns true if `limit` has been explicitly set.
+  public var hasLimit: Bool {self._limit != nil}
+  /// Clears the value of `limit`. Subsequent reads from it will return its default value.
+  public mutating func clearLimit() {self._limit = nil}
+
+  /// Exclusive start. Pass the previous result's next_offset; absent = first page.
+  public var offset: ChatListOffset {
+    get {_offset ?? ChatListOffset()}
+    set {_offset = newValue}
+  }
+  /// Returns true if `offset` has been explicitly set.
+  public var hasOffset: Bool {self._offset != nil}
+  /// Clears the value of `offset`. Subsequent reads from it will return its default value.
+  public mutating func clearOffset() {self._offset = nil}
+
+  public var order: ChatListOrder = .recent
+
+  /// Predicates, ANDed. Absent fields do not constrain.
+  public var filter: ChatListFilter {
+    get {_filter ?? ChatListFilter()}
+    set {_filter = newValue}
+  }
+  /// Returns true if `filter` has been explicitly set.
+  public var hasFilter: Bool {self._filter != nil}
+  /// Clears the value of `filter`. Subsequent reads from it will return its default value.
+  public mutating func clearFilter() {self._filter = nil}
+
+  public var scope: ChatListScope = .dialogs
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _includeSubthreads: Bool? = nil
+  fileprivate var _limit: Int32? = nil
+  fileprivate var _offset: ChatListOffset? = nil
+  fileprivate var _filter: ChatListFilter? = nil
+}
+
+public nonisolated struct ChatListOffset: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chatID: Int64 = 0
+
+  /// Activity date of that chat. RECENT order only.
+  public var date: Int64 {
+    get {_date ?? 0}
+    set {_date = newValue}
+  }
+  /// Returns true if `date` has been explicitly set.
+  public var hasDate: Bool {self._date != nil}
+  /// Clears the value of `date`. Subsequent reads from it will return its default value.
+  public mutating func clearDate() {self._date = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _date: Int64? = nil
+}
+
+public nonisolated struct ChatListFilter: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Empty: all kinds.
+  public var kinds: [ChatListKind] = []
+
+  /// Restrict space threads to these spaces. Empty: all spaces.
+  public var spaceIds: [Int64] = []
+
+  /// Unread messages or a manual unread mark.
+  public var unread: Bool {
+    get {_unread ?? false}
+    set {_unread = newValue}
+  }
+  /// Returns true if `unread` has been explicitly set.
+  public var hasUnread: Bool {self._unread != nil}
+  /// Clears the value of `unread`. Subsequent reads from it will return its default value.
+  public mutating func clearUnread() {self._unread = nil}
+
+  /// The four below are tri-state on stored dialog state:
+  /// true = only, false = exclude, absent = both.
+  public var archived: Bool {
+    get {_archived ?? false}
+    set {_archived = newValue}
+  }
+  /// Returns true if `archived` has been explicitly set.
+  public var hasArchived: Bool {self._archived != nil}
+  /// Clears the value of `archived`. Subsequent reads from it will return its default value.
+  public mutating func clearArchived() {self._archived = nil}
+
+  public var `open`: Bool {
+    get {_open ?? false}
+    set {_open = newValue}
+  }
+  /// Returns true if ``open`` has been explicitly set.
+  public var hasOpen: Bool {self._open != nil}
+  /// Clears the value of ``open``. Subsequent reads from it will return its default value.
+  public mutating func clearOpen() {self._open = nil}
+
+  public var pinned: Bool {
+    get {_pinned ?? false}
+    set {_pinned = newValue}
+  }
+  /// Returns true if `pinned` has been explicitly set.
+  public var hasPinned: Bool {self._pinned != nil}
+  /// Clears the value of `pinned`. Subsequent reads from it will return its default value.
+  public mutating func clearPinned() {self._pinned = nil}
+
+  /// Dialogs in this folder.
+  public var folderID: Int64 {
+    get {_folderID ?? 0}
+    set {_folderID = newValue}
+  }
+  /// Returns true if `folderID` has been explicitly set.
+  public var hasFolderID: Bool {self._folderID != nil}
+  /// Clears the value of `folderID`. Subsequent reads from it will return its default value.
+  public mutating func clearFolderID() {self._folderID = nil}
+
+  /// Case-insensitive match on the chat title or DM peer name. (Phase 2.)
+  public var query: String {
+    get {_query ?? String()}
+    set {_query = newValue}
+  }
+  /// Returns true if `query` has been explicitly set.
+  public var hasQuery: Bool {self._query != nil}
+  /// Clears the value of `query`. Subsequent reads from it will return its default value.
+  public mutating func clearQuery() {self._query = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _unread: Bool? = nil
+  fileprivate var _archived: Bool? = nil
+  fileprivate var _open: Bool? = nil
+  fileprivate var _pinned: Bool? = nil
+  fileprivate var _folderID: Int64? = nil
+  fileprivate var _query: String? = nil
 }
 
 public nonisolated struct GetChatsResult: Sendable {
@@ -19034,7 +20227,43 @@ public nonisolated struct GetChatsResult: Sendable {
   public var messages: [Message] = []
 
   /// Personal dialog folders. Dialogs remain present for unsupported clients.
+  /// Paged requests: complete, on the first page only.
   public var folders: [DialogFolder] = []
+
+  /// Paged requests: pass as `offset` for the next page. Absent: end of list.
+  public var nextOffset: ChatListOffset {
+    get {_nextOffset ?? ChatListOffset()}
+    set {_nextOffset = newValue}
+  }
+  /// Returns true if `nextOffset` has been explicitly set.
+  public var hasNextOffset: Bool {self._nextOffset != nil}
+  /// Clears the value of `nextOffset`. Subsequent reads from it will return its default value.
+  public mutating func clearNextOffset() {self._nextOffset = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _nextOffset: ChatListOffset? = nil
+}
+
+/// Every space the viewer is a member of. Small and unpaged.
+public nonisolated struct GetSpacesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GetSpacesResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaces: [Space] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -26861,6 +28090,19 @@ public nonisolated struct CreateUploadInput: Sendable {
     set {metadata = .voice(newValue)}
   }
 
+  /// The whole file, when it fits in one part (byte_count <= part size). The server saves it as
+  /// part 0 and finishes the upload in this call, returning `complete` when it finalizes. Servers
+  /// that predate this field ignore it; part 0 is then missing from accepted_parts and the client
+  /// uploads it as usual.
+  public var inlineData: Data {
+    get {_inlineData ?? Data()}
+    set {_inlineData = newValue}
+  }
+  /// Returns true if `inlineData` has been explicitly set.
+  public var hasInlineData: Bool {self._inlineData != nil}
+  /// Clears the value of `inlineData`. Subsequent reads from it will return its default value.
+  public mutating func clearInlineData() {self._inlineData = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Metadata: Equatable, Sendable {
@@ -26872,26 +28114,54 @@ public nonisolated struct CreateUploadInput: Sendable {
   public init() {}
 
   fileprivate var _thumbnailFileUniqueID: String? = nil
+  fileprivate var _inlineData: Data? = nil
 }
 
-public nonisolated struct CreateUploadResult: Sendable {
+public nonisolated struct CreateUploadResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var uploadID: Data = Data()
+  public var uploadID: Data {
+    get {_storage._uploadID}
+    set {_uniqueStorage()._uploadID = newValue}
+  }
 
-  public var partSize: UInt32 = 0
+  public var partSize: UInt32 {
+    get {_storage._partSize}
+    set {_uniqueStorage()._partSize = newValue}
+  }
 
-  public var partCount: UInt32 = 0
+  public var partCount: UInt32 {
+    get {_storage._partCount}
+    set {_uniqueStorage()._partCount = newValue}
+  }
 
-  public var expiresAt: Int64 = 0
+  public var expiresAt: Int64 {
+    get {_storage._expiresAt}
+    set {_uniqueStorage()._expiresAt = newValue}
+  }
 
-  public var acceptedParts: [UInt32] = []
+  public var acceptedParts: [UInt32] {
+    get {_storage._acceptedParts}
+    set {_uniqueStorage()._acceptedParts = newValue}
+  }
+
+  /// Set when inline_data finalized the upload in this call.
+  public var complete: UploadComplete {
+    get {_storage._complete ?? UploadComplete()}
+    set {_uniqueStorage()._complete = newValue}
+  }
+  /// Returns true if `complete` has been explicitly set.
+  public var hasComplete: Bool {_storage._complete != nil}
+  /// Clears the value of `complete`. Subsequent reads from it will return its default value.
+  public mutating func clearComplete() {_uniqueStorage()._complete = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 public nonisolated struct SaveUploadPartInput: Sendable {
@@ -27761,6 +29031,10 @@ nonisolated extension BlockStatus: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0BLOCK_STATUS_UNSPECIFIED\0\u{1}BLOCK_STATUS_PENDING\0\u{1}BLOCK_STATUS_RUNNING\0\u{1}BLOCK_STATUS_WAITING\0\u{1}BLOCK_STATUS_DONE\0\u{1}BLOCK_STATUS_FAILED\0\u{1}BLOCK_STATUS_CANCELLED\0")
 }
 
+nonisolated extension BlockDecisionState: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0BLOCK_DECISION_STATE_UNSPECIFIED\0\u{1}BLOCK_DECISION_STATE_PENDING\0\u{1}BLOCK_DECISION_STATE_ACCEPTED\0\u{1}BLOCK_DECISION_STATE_DECLINED\0\u{1}BLOCK_DECISION_STATE_EXPIRED\0\u{1}BLOCK_DECISION_STATE_SUPERSEDED\0")
+}
+
 nonisolated extension AgentSessionProvider: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_SESSION_PROVIDER_UNSPECIFIED\0\u{1}AGENT_SESSION_PROVIDER_CODEX\0\u{1}AGENT_SESSION_PROVIDER_CODEX_CLOUD\0\u{1}AGENT_SESSION_PROVIDER_CLAUDE\0\u{1}AGENT_SESSION_PROVIDER_OPEN_CODE\0\u{1}AGENT_SESSION_PROVIDER_AMP\0")
 }
@@ -27826,7 +29100,7 @@ nonisolated extension AgentSessionMessageSyncState: SwiftProtobuf._ProtoNameProv
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0\u{1}REPORT_AGENT_RUNTIME\0\u{1}GET_AGENT_RUNTIME\0\u{1}UPDATE_AGENT_SESSION_STATE\0\u{1}GET_AGENT_SESSION_STATES\0\u{1}LIST_AGENT_GRANTS\0\u{1}SET_AGENT_GRANT\0\u{1}DELETE_AGENT_GRANT\0\u{1}IMPORT_AGENT_GRANTS\0\u{1}GET_AGENT_PARTICIPATIONS\0\u{1}SET_AGENT_PARTICIPATION\0\u{1}UPDATE_AGENT_SETTINGS\0\u{1}CONTROL_AGENT_SESSION\0\u{1}MOVE_AGENT_SESSION\0\u{1}UNPIN_ALL_MESSAGES\0\u{1}GET_AGENT_SETTINGS\0\u{1}GET_CONTACTS\0\u{1}GET_AGENT_ACCESS\0\u{1}GET_UNREAD_ACTIVITY\0\u{1}READ_ACTIVITY\0\u{1}SET_FOCUS_STATUS\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0\u{1}REPORT_AGENT_RUNTIME\0\u{1}GET_AGENT_RUNTIME\0\u{1}UPDATE_AGENT_SESSION_STATE\0\u{1}GET_AGENT_SESSION_STATES\0\u{1}LIST_AGENT_GRANTS\0\u{1}SET_AGENT_GRANT\0\u{1}DELETE_AGENT_GRANT\0\u{1}IMPORT_AGENT_GRANTS\0\u{1}GET_AGENT_PARTICIPATIONS\0\u{1}SET_AGENT_PARTICIPATION\0\u{1}UPDATE_AGENT_SETTINGS\0\u{1}CONTROL_AGENT_SESSION\0\u{1}MOVE_AGENT_SESSION\0\u{1}UNPIN_ALL_MESSAGES\0\u{1}GET_AGENT_SETTINGS\0\u{1}GET_CONTACTS\0\u{1}GET_AGENT_ACCESS\0\u{1}GET_UNREAD_ACTIVITY\0\u{1}READ_ACTIVITY\0\u{1}SET_FOCUS_STATUS\0\u{1}GET_SPACES\0")
 }
 
 nonisolated extension GridTranscriptionState: SwiftProtobuf._ProtoNameProviding {
@@ -27859,6 +29133,18 @@ nonisolated extension PushNotificationProvider: SwiftProtobuf._ProtoNameProvidin
 
 nonisolated extension DeleteDialogFolderDisposition: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED\0\u{1}CLOSE_DIALOGS\0\u{1}KEEP_DIALOGS\0")
+}
+
+nonisolated extension ChatListScope: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CHAT_LIST_SCOPE_DIALOGS\0\u{1}CHAT_LIST_SCOPE_ACCESSIBLE\0")
+}
+
+nonisolated extension ChatListOrder: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CHAT_LIST_ORDER_RECENT\0\u{1}CHAT_LIST_ORDER_ID\0")
+}
+
+nonisolated extension ChatListKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CHAT_LIST_KIND_UNSPECIFIED\0\u{1}CHAT_LIST_KIND_DM\0\u{1}CHAT_LIST_KIND_SPACE_THREAD\0\u{1}CHAT_LIST_KIND_HOME_THREAD\0")
 }
 
 nonisolated extension GetChatHistoryMode: SwiftProtobuf._ProtoNameProviding {
@@ -30305,7 +31591,7 @@ nonisolated extension MessageActionRow: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageAction"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}action_id\0\u{1}text\0\u{1}callback\0\u{3}copy_text\0\u{3}open_url\0\u{3}open_link\0\u{1}style\0\u{1}confirm\0\u{3}required_grant\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}action_id\0\u{1}text\0\u{1}callback\0\u{3}copy_text\0\u{3}open_url\0\u{3}open_link\0\u{1}style\0\u{1}confirm\0\u{3}required_grant\0\u{1}compose\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30370,6 +31656,19 @@ nonisolated extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._Messa
       case 7: try { try decoder.decodeSingularEnumField(value: &self.style) }()
       case 8: try { try decoder.decodeSingularMessageField(value: &self._confirm) }()
       case 9: try { try decoder.decodeSingularEnumField(value: &self.requiredGrant) }()
+      case 10: try {
+        var v: MessageActionCompose?
+        var hadOneofValue = false
+        if let current = self.action {
+          hadOneofValue = true
+          if case .compose(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.action = .compose(v)
+        }
+      }()
       default: break
       }
     }
@@ -30403,7 +31702,7 @@ nonisolated extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._Messa
       guard case .openLink(let v)? = self.action else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
     }()
-    case nil: break
+    default: break
     }
     if self.style != .default {
       try visitor.visitSingularEnumField(value: self.style, fieldNumber: 7)
@@ -30414,6 +31713,9 @@ nonisolated extension MessageAction: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if self.requiredGrant != .none {
       try visitor.visitSingularEnumField(value: self.requiredGrant, fieldNumber: 9)
     }
+    try { if case .compose(let v)? = self.action {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -30518,6 +31820,36 @@ nonisolated extension MessageActionOpenUrl: SwiftProtobuf.Message, SwiftProtobuf
 
   public static func ==(lhs: MessageActionOpenUrl, rhs: MessageActionOpenUrl) -> Bool {
     if lhs.url != rhs.url {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageActionCompose: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageActionCompose"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}text\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.text) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.text.isEmpty {
+      try visitor.visitSingularStringField(value: self.text, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageActionCompose, rhs: MessageActionCompose) -> Bool {
+    if lhs.text != rhs.text {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -31024,7 +32356,7 @@ nonisolated extension BlockText: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Block"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0\u{1}math\0\u{1}diff\0\u{1}fields\0\u{1}steps\0\u{1}callout\0\u{1}meter\0\u{1}form\0\u{1}widget\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0\u{1}math\0\u{1}diff\0\u{1}fields\0\u{1}steps\0\u{1}callout\0\u{1}meter\0\u{1}form\0\u{1}widget\0\u{3}plan_proposal\0\u{1}approval\0\u{1}review\0\u{3}task_suggestion\0\u{3}next_step\0\u{3}prompt_suggestions\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -31279,6 +32611,84 @@ nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
           self.kind = .widget(v)
         }
       }()
+      case 20: try {
+        var v: BlockPlanProposal?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .planProposal(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .planProposal(v)
+        }
+      }()
+      case 21: try {
+        var v: BlockApproval?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .approval(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .approval(v)
+        }
+      }()
+      case 22: try {
+        var v: BlockReview?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .review(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .review(v)
+        }
+      }()
+      case 23: try {
+        var v: BlockTaskSuggestion?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .taskSuggestion(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .taskSuggestion(v)
+        }
+      }()
+      case 24: try {
+        var v: BlockNextStep?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .nextStep(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .nextStep(v)
+        }
+      }()
+      case 25: try {
+        var v: BlockPromptSuggestions?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .promptSuggestions(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .promptSuggestions(v)
+        }
+      }()
       default: break
       }
     }
@@ -31365,6 +32775,30 @@ nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     case .widget?: try {
       guard case .widget(let v)? = self.kind else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+    }()
+    case .planProposal?: try {
+      guard case .planProposal(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
+    }()
+    case .approval?: try {
+      guard case .approval(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 21)
+    }()
+    case .review?: try {
+      guard case .review(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 22)
+    }()
+    case .taskSuggestion?: try {
+      guard case .taskSuggestion(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 23)
+    }()
+    case .nextStep?: try {
+      guard case .nextStep(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 24)
+    }()
+    case .promptSuggestions?: try {
+      guard case .promptSuggestions(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
     }()
     case nil: break
     }
@@ -32409,7 +33843,7 @@ nonisolated extension BlockForm: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension BlockFormField: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BlockFormField"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}field_id\0\u{1}label\0\u{1}description\0\u{1}required\0\u{1}select\0\u{1}text\0\u{1}toggle\0\u{1}number\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}field_id\0\u{1}label\0\u{1}description\0\u{1}required\0\u{1}select\0\u{1}text\0\u{1}toggle\0\u{1}number\0\u{1}header\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -32473,6 +33907,7 @@ nonisolated extension BlockFormField: SwiftProtobuf.Message, SwiftProtobuf._Mess
           self.kind = .number(v)
         }
       }()
+      case 9: try { try decoder.decodeSingularMessageField(value: &self._header) }()
       default: break
       }
     }
@@ -32514,6 +33949,9 @@ nonisolated extension BlockFormField: SwiftProtobuf.Message, SwiftProtobuf._Mess
     }()
     case nil: break
     }
+    try { if let v = self._header {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -32523,6 +33961,7 @@ nonisolated extension BlockFormField: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._description_p != rhs._description_p {return false}
     if lhs.required != rhs.required {return false}
     if lhs.kind != rhs.kind {return false}
+    if lhs._header != rhs._header {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -32575,7 +34014,7 @@ nonisolated extension BlockFormSelect: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension BlockFormOption: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BlockFormOption"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}option_id\0\u{1}label\0\u{1}description\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}option_id\0\u{1}label\0\u{1}description\0\u{1}preview\0\u{1}recommended\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -32586,6 +34025,8 @@ nonisolated extension BlockFormOption: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 1: try { try decoder.decodeSingularStringField(value: &self.optionID) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._label) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._description_p) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._preview) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.recommended) }()
       default: break
       }
     }
@@ -32605,6 +34046,12 @@ nonisolated extension BlockFormOption: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._description_p {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._preview {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    if self.recommended != false {
+      try visitor.visitSingularBoolField(value: self.recommended, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -32612,6 +34059,8 @@ nonisolated extension BlockFormOption: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.optionID != rhs.optionID {return false}
     if lhs._label != rhs._label {return false}
     if lhs._description_p != rhs._description_p {return false}
+    if lhs._preview != rhs._preview {return false}
+    if lhs.recommended != rhs.recommended {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -33008,6 +34457,547 @@ nonisolated extension MessageWidgetCall: SwiftProtobuf.Message, SwiftProtobuf._M
   public static func ==(lhs: MessageWidgetCall, rhs: MessageWidgetCall) -> Bool {
     if lhs.name != rhs.name {return false}
     if lhs.payload != rhs.payload {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockPlanProposal: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockPlanProposal"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}children\0\u{1}state\0\u{3}action_ids\0\u{3}decided_by_user_id\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._title) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.children) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.state) }()
+      case 4: try { try decoder.decodeRepeatedStringField(value: &self.actionIds) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._decidedByUserID) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._title {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.children.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.children, fieldNumber: 2)
+    }
+    if self.state != .unspecified {
+      try visitor.visitSingularEnumField(value: self.state, fieldNumber: 3)
+    }
+    if !self.actionIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.actionIds, fieldNumber: 4)
+    }
+    try { if let v = self._decidedByUserID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockPlanProposal, rhs: BlockPlanProposal) -> Bool {
+    if lhs._title != rhs._title {return false}
+    if lhs.children != rhs.children {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs.actionIds != rhs.actionIds {return false}
+    if lhs._decidedByUserID != rhs._decidedByUserID {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockApproval: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockApproval"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}subject\0\u{1}title\0\u{1}command\0\u{1}cwd\0\u{1}reason\0\u{1}children\0\u{1}state\0\u{3}action_ids\0\u{3}decided_by_user_id\0\u{3}is_rtl\0")
+
+  fileprivate class _StorageClass {
+    var _subject: BlockApproval.Subject = .unspecified
+    var _title: BlockText? = nil
+    var _command: BlockText? = nil
+    var _cwd: BlockText? = nil
+    var _reason: BlockText? = nil
+    var _children: [Block] = []
+    var _state: BlockDecisionState = .unspecified
+    var _actionIds: [String] = []
+    var _decidedByUserID: Int64? = nil
+    var _isRtl: Bool? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _subject = source._subject
+      _title = source._title
+      _command = source._command
+      _cwd = source._cwd
+      _reason = source._reason
+      _children = source._children
+      _state = source._state
+      _actionIds = source._actionIds
+      _decidedByUserID = source._decidedByUserID
+      _isRtl = source._isRtl
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularEnumField(value: &_storage._subject) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._title) }()
+        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._command) }()
+        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._cwd) }()
+        case 5: try { try decoder.decodeSingularMessageField(value: &_storage._reason) }()
+        case 6: try { try decoder.decodeRepeatedMessageField(value: &_storage._children) }()
+        case 7: try { try decoder.decodeSingularEnumField(value: &_storage._state) }()
+        case 8: try { try decoder.decodeRepeatedStringField(value: &_storage._actionIds) }()
+        case 9: try { try decoder.decodeSingularInt64Field(value: &_storage._decidedByUserID) }()
+        case 10: try { try decoder.decodeSingularBoolField(value: &_storage._isRtl) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._subject != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._subject, fieldNumber: 1)
+      }
+      try { if let v = _storage._title {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._command {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      } }()
+      try { if let v = _storage._cwd {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      } }()
+      try { if let v = _storage._reason {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+      } }()
+      if !_storage._children.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._children, fieldNumber: 6)
+      }
+      if _storage._state != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._state, fieldNumber: 7)
+      }
+      if !_storage._actionIds.isEmpty {
+        try visitor.visitRepeatedStringField(value: _storage._actionIds, fieldNumber: 8)
+      }
+      try { if let v = _storage._decidedByUserID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 9)
+      } }()
+      try { if let v = _storage._isRtl {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockApproval, rhs: BlockApproval) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._subject != rhs_storage._subject {return false}
+        if _storage._title != rhs_storage._title {return false}
+        if _storage._command != rhs_storage._command {return false}
+        if _storage._cwd != rhs_storage._cwd {return false}
+        if _storage._reason != rhs_storage._reason {return false}
+        if _storage._children != rhs_storage._children {return false}
+        if _storage._state != rhs_storage._state {return false}
+        if _storage._actionIds != rhs_storage._actionIds {return false}
+        if _storage._decidedByUserID != rhs_storage._decidedByUserID {return false}
+        if _storage._isRtl != rhs_storage._isRtl {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockApproval.Subject: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUBJECT_UNSPECIFIED\0\u{1}SUBJECT_COMMAND\0\u{1}SUBJECT_FILE_CHANGE\0\u{1}SUBJECT_TOOL\0\u{1}SUBJECT_PERMISSIONS\0\u{1}SUBJECT_NETWORK\0")
+}
+
+nonisolated extension BlockReview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockReview"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}verdict\0\u{1}summary\0\u{1}findings\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._title) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.verdict) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._summary) }()
+      case 4: try { try decoder.decodeRepeatedMessageField(value: &self.findings) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._title {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.verdict != .unspecified {
+      try visitor.visitSingularEnumField(value: self.verdict, fieldNumber: 2)
+    }
+    try { if let v = self._summary {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    if !self.findings.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.findings, fieldNumber: 4)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockReview, rhs: BlockReview) -> Bool {
+    if lhs._title != rhs._title {return false}
+    if lhs.verdict != rhs.verdict {return false}
+    if lhs._summary != rhs._summary {return false}
+    if lhs.findings != rhs.findings {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockReview.Verdict: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0VERDICT_UNSPECIFIED\0\u{1}VERDICT_CORRECT\0\u{1}VERDICT_INCORRECT\0\u{1}VERDICT_NEEDS_ATTENTION\0")
+}
+
+nonisolated extension BlockReviewFinding: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockReviewFinding"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}body\0\u{1}priority\0\u{1}path\0\u{3}start_line\0\u{3}end_line\0\u{1}category\0\u{1}confidence\0\u{1}outcome\0\u{3}action_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._title) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._body) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.priority) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._path) }()
+      case 5: try { try decoder.decodeSingularUInt32Field(value: &self._startLine) }()
+      case 6: try { try decoder.decodeSingularUInt32Field(value: &self._endLine) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self._category) }()
+      case 8: try { try decoder.decodeSingularEnumField(value: &self.confidence) }()
+      case 9: try { try decoder.decodeSingularEnumField(value: &self.outcome) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self._actionID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._title {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._body {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.priority != .unspecified {
+      try visitor.visitSingularEnumField(value: self.priority, fieldNumber: 3)
+    }
+    try { if let v = self._path {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._startLine {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._endLine {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._category {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+    } }()
+    if self.confidence != .unspecified {
+      try visitor.visitSingularEnumField(value: self.confidence, fieldNumber: 8)
+    }
+    if self.outcome != .unspecified {
+      try visitor.visitSingularEnumField(value: self.outcome, fieldNumber: 9)
+    }
+    try { if let v = self._actionID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 10)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockReviewFinding, rhs: BlockReviewFinding) -> Bool {
+    if lhs._title != rhs._title {return false}
+    if lhs._body != rhs._body {return false}
+    if lhs.priority != rhs.priority {return false}
+    if lhs._path != rhs._path {return false}
+    if lhs._startLine != rhs._startLine {return false}
+    if lhs._endLine != rhs._endLine {return false}
+    if lhs._category != rhs._category {return false}
+    if lhs.confidence != rhs.confidence {return false}
+    if lhs.outcome != rhs.outcome {return false}
+    if lhs._actionID != rhs._actionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockReviewFinding.Priority: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PRIORITY_UNSPECIFIED\0\u{1}PRIORITY_P0\0\u{1}PRIORITY_P1\0\u{1}PRIORITY_P2\0\u{1}PRIORITY_P3\0")
+}
+
+nonisolated extension BlockReviewFinding.Confidence: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONFIDENCE_UNSPECIFIED\0\u{1}CONFIDENCE_CONFIRMED\0\u{1}CONFIDENCE_PLAUSIBLE\0")
+}
+
+nonisolated extension BlockReviewFinding.Outcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0OUTCOME_UNSPECIFIED\0\u{1}OUTCOME_FIXED\0\u{1}OUTCOME_SKIPPED\0\u{1}OUTCOME_NO_CHANGE_NEEDED\0")
+}
+
+nonisolated extension BlockTaskSuggestion: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockTaskSuggestion"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{1}brief\0\u{1}state\0\u{3}started_peer\0\u{3}expires_at\0\u{3}action_ids\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._title) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._brief) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.state) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._startedPeer) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._expiresAt) }()
+      case 6: try { try decoder.decodeRepeatedStringField(value: &self.actionIds) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._title {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._brief {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.state != .unspecified {
+      try visitor.visitSingularEnumField(value: self.state, fieldNumber: 3)
+    }
+    try { if let v = self._startedPeer {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._expiresAt {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    if !self.actionIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.actionIds, fieldNumber: 6)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 7)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockTaskSuggestion, rhs: BlockTaskSuggestion) -> Bool {
+    if lhs._title != rhs._title {return false}
+    if lhs._brief != rhs._brief {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs._startedPeer != rhs._startedPeer {return false}
+    if lhs._expiresAt != rhs._expiresAt {return false}
+    if lhs.actionIds != rhs.actionIds {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockNextStep: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockNextStep"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}recap\0\u{1}question\0\u{3}action_ids\0\u{1}blocking\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._recap) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._question) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.actionIds) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.blocking) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._recap {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._question {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if !self.actionIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.actionIds, fieldNumber: 3)
+    }
+    if self.blocking != false {
+      try visitor.visitSingularBoolField(value: self.blocking, fieldNumber: 4)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockNextStep, rhs: BlockNextStep) -> Bool {
+    if lhs._recap != rhs._recap {return false}
+    if lhs._question != rhs._question {return false}
+    if lhs.actionIds != rhs.actionIds {return false}
+    if lhs.blocking != rhs.blocking {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockPromptSuggestions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockPromptSuggestions"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}prompts\0\u{3}is_rtl\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.prompts) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self._isRtl) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.prompts.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.prompts, fieldNumber: 1)
+    }
+    try { if let v = self._isRtl {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockPromptSuggestions, rhs: BlockPromptSuggestions) -> Bool {
+    if lhs.prompts != rhs.prompts {return false}
+    if lhs._isRtl != rhs._isRtl {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockPromptSuggestion: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockPromptSuggestion"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}label\0\u{1}text\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._label) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._text) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._label {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._text {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockPromptSuggestion, rhs: BlockPromptSuggestion) -> Bool {
+    if lhs._label != rhs._label {return false}
+    if lhs._text != rhs._text {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -34616,7 +36606,7 @@ nonisolated extension AgentRuntime: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "AgentSettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0\u{1}revision\0\u{1}date\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0\u{1}revision\0\u{1}date\0\u{3}open_to_everyone\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -34628,6 +36618,7 @@ nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._Messa
       case 2: try { try decoder.decodeSingularEnumField(value: &self.defaultOutputMode) }()
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.revision) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.openToEveryone) }()
       default: break
       }
     }
@@ -34650,6 +36641,9 @@ nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try { if let v = self._date {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
     } }()
+    if self.openToEveryone != false {
+      try visitor.visitSingularBoolField(value: self.openToEveryone, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -34658,6 +36652,7 @@ nonisolated extension AgentSettings: SwiftProtobuf.Message, SwiftProtobuf._Messa
     if lhs.defaultOutputMode != rhs.defaultOutputMode {return false}
     if lhs.revision != rhs.revision {return false}
     if lhs._date != rhs._date {return false}
+    if lhs.openToEveryone != rhs.openToEveryone {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35397,7 +37392,7 @@ nonisolated extension DeleteAgentGrantInput: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetAgentAccessInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}user_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}user_id\0\u{3}bot_user_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35407,6 +37402,7 @@ nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf.
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 3: try { try decoder.decodeRepeatedInt64Field(value: &self.botUserIds) }()
       default: break
       }
     }
@@ -35419,12 +37415,16 @@ nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf.
     if self.userID != 0 {
       try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
     }
+    if !self.botUserIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.botUserIds, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetAgentAccessInput, rhs: GetAgentAccessInput) -> Bool {
     if lhs.botUserID != rhs.botUserID {return false}
     if lhs.userID != rhs.userID {return false}
+    if lhs.botUserIds != rhs.botUserIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35432,7 +37432,7 @@ nonisolated extension GetAgentAccessInput: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension GetAgentAccessResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetAgentAccessResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_owner\0\u{1}operations\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_owner\0\u{1}operations\0\u{1}access\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35442,6 +37442,7 @@ nonisolated extension GetAgentAccessResult: SwiftProtobuf.Message, SwiftProtobuf
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.isOwner) }()
       case 2: try { try decoder.decodeRepeatedEnumField(value: &self.operations) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.access) }()
       default: break
       }
     }
@@ -35454,12 +37455,71 @@ nonisolated extension GetAgentAccessResult: SwiftProtobuf.Message, SwiftProtobuf
     if !self.operations.isEmpty {
       try visitor.visitPackedEnumField(value: self.operations, fieldNumber: 2)
     }
+    if !self.access.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.access, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetAgentAccessResult, rhs: GetAgentAccessResult) -> Bool {
     if lhs.isOwner != rhs.isOwner {return false}
     if lhs.operations != rhs.operations {return false}
+    if lhs.access != rhs.access {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension AgentAccess: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "AgentAccess"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}is_owner\0\u{1}operations\0\u{3}owner_user_id\0\u{3}can_message\0\u{3}can_reply\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.isOwner) }()
+      case 3: try { try decoder.decodeRepeatedEnumField(value: &self.operations) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.ownerUserID) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.canMessage) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.canReply) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    if self.isOwner != false {
+      try visitor.visitSingularBoolField(value: self.isOwner, fieldNumber: 2)
+    }
+    if !self.operations.isEmpty {
+      try visitor.visitPackedEnumField(value: self.operations, fieldNumber: 3)
+    }
+    if self.ownerUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.ownerUserID, fieldNumber: 4)
+    }
+    if self.canMessage != false {
+      try visitor.visitSingularBoolField(value: self.canMessage, fieldNumber: 5)
+    }
+    if self.canReply != false {
+      try visitor.visitSingularBoolField(value: self.canReply, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: AgentAccess, rhs: AgentAccess) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.isOwner != rhs.isOwner {return false}
+    if lhs.operations != rhs.operations {return false}
+    if lhs.ownerUserID != rhs.ownerUserID {return false}
+    if lhs.canMessage != rhs.canMessage {return false}
+    if lhs.canReply != rhs.canReply {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -35680,7 +37740,7 @@ nonisolated extension SetAgentParticipationInput: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension UpdateAgentSettingsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateAgentSettingsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}bot_user_id\0\u{3}default_output_mode\0\u{3}open_to_everyone\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -35690,6 +37750,7 @@ nonisolated extension UpdateAgentSettingsInput: SwiftProtobuf.Message, SwiftProt
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self._defaultOutputMode) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._openToEveryone) }()
       default: break
       }
     }
@@ -35706,12 +37767,16 @@ nonisolated extension UpdateAgentSettingsInput: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._defaultOutputMode {
       try visitor.visitSingularEnumField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._openToEveryone {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateAgentSettingsInput, rhs: UpdateAgentSettingsInput) -> Bool {
     if lhs.botUserID != rhs.botUserID {return false}
     if lhs._defaultOutputMode != rhs._defaultOutputMode {return false}
+    if lhs._openToEveryone != rhs._openToEveryone {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -38474,7 +40539,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{1}getSpaces\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -40667,6 +42732,19 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .setFocusStatus(v)
         }
       }()
+      case 171: try {
+        var v: GetSpacesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getSpaces(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getSpaces(v)
+        }
+      }()
       default: break
       }
     }
@@ -41353,6 +43431,10 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .setFocusStatus(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 170)
     }()
+    case .getSpaces?: try {
+      guard case .getSpaces(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 171)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -41368,7 +43450,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{1}setFocusStatus\0\u{1}getSpaces\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -43588,6 +45670,19 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .setFocusStatus(v)
           }
         }()
+        case 171: try {
+          var v: GetSpacesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getSpaces(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getSpaces(v)
+          }
+        }()
         default: break
         }
       }
@@ -44275,6 +46370,10 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .setFocusStatus?: try {
         guard case .setFocusStatus(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 170)
+      }()
+      case .getSpaces?: try {
+        guard case .getSpaces(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 171)
       }()
       case nil: break
       }
@@ -48909,18 +51008,33 @@ nonisolated extension DeleteBotAgentResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension ListBotsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ListBotsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_managed\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self._includeManaged) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._includeManaged {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ListBotsInput, rhs: ListBotsInput) -> Bool {
+    if lhs._includeManaged != rhs._includeManaged {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -52233,7 +54347,7 @@ nonisolated extension DeleteDialogFolderResult: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_subthreads\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}include_subthreads\0\u{1}limit\0\u{1}offset\0\u{1}order\0\u{1}filter\0\u{1}scope\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52242,6 +54356,11 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self._includeSubthreads) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._offset) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.order) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._filter) }()
+      case 6: try { try decoder.decodeSingularEnumField(value: &self.scope) }()
       default: break
       }
     }
@@ -52255,11 +54374,139 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
     try { if let v = self._includeSubthreads {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 1)
     } }()
+    try { if let v = self._limit {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._offset {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    if self.order != .recent {
+      try visitor.visitSingularEnumField(value: self.order, fieldNumber: 4)
+    }
+    try { if let v = self._filter {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    if self.scope != .dialogs {
+      try visitor.visitSingularEnumField(value: self.scope, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: GetChatsInput, rhs: GetChatsInput) -> Bool {
     if lhs._includeSubthreads != rhs._includeSubthreads {return false}
+    if lhs._limit != rhs._limit {return false}
+    if lhs._offset != rhs._offset {return false}
+    if lhs.order != rhs.order {return false}
+    if lhs._filter != rhs._filter {return false}
+    if lhs.scope != rhs.scope {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ChatListOffset: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ChatListOffset"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}chat_id\0\u{1}date\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    try { if let v = self._date {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ChatListOffset, rhs: ChatListOffset) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs._date != rhs._date {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ChatListFilter: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ChatListFilter"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kinds\0\u{3}space_ids\0\u{1}unread\0\u{1}archived\0\u{1}open\0\u{1}pinned\0\u{3}folder_id\0\u{1}query\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedEnumField(value: &self.kinds) }()
+      case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.spaceIds) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._unread) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._archived) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._open) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self._pinned) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self._folderID) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._query) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.kinds.isEmpty {
+      try visitor.visitPackedEnumField(value: self.kinds, fieldNumber: 1)
+    }
+    if !self.spaceIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.spaceIds, fieldNumber: 2)
+    }
+    try { if let v = self._unread {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._archived {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._open {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._pinned {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._folderID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._query {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ChatListFilter, rhs: ChatListFilter) -> Bool {
+    if lhs.kinds != rhs.kinds {return false}
+    if lhs.spaceIds != rhs.spaceIds {return false}
+    if lhs._unread != rhs._unread {return false}
+    if lhs._archived != rhs._archived {return false}
+    if lhs._open != rhs._open {return false}
+    if lhs._pinned != rhs._pinned {return false}
+    if lhs._folderID != rhs._folderID {return false}
+    if lhs._query != rhs._query {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -52267,7 +54514,7 @@ nonisolated extension GetChatsInput: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetChatsResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}dialogs\0\u{1}chats\0\u{1}spaces\0\u{1}users\0\u{1}messages\0\u{1}folders\0\u{3}next_offset\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52281,12 +54528,17 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.users) }()
       case 5: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       case 6: try { try decoder.decodeRepeatedMessageField(value: &self.folders) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._nextOffset) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.dialogs.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.dialogs, fieldNumber: 1)
     }
@@ -52305,6 +54557,9 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.folders.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.folders, fieldNumber: 6)
     }
+    try { if let v = self._nextOffset {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -52315,6 +54570,56 @@ nonisolated extension GetChatsResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.users != rhs.users {return false}
     if lhs.messages != rhs.messages {return false}
     if lhs.folders != rhs.folders {return false}
+    if lhs._nextOffset != rhs._nextOffset {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetSpacesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpacesInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpacesInput, rhs: GetSpacesInput) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetSpacesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetSpacesResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}spaces\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.spaces) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.spaces.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.spaces, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetSpacesResult, rhs: GetSpacesResult) -> Bool {
+    if lhs.spaces != rhs.spaces {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -63897,7 +66202,7 @@ nonisolated extension UploadVoiceMetadata: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}client_upload_id\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0\u{3}thumbnail_file_unique_id\0\u{1}video\0\u{1}voice\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}client_upload_id\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0\u{3}thumbnail_file_unique_id\0\u{1}video\0\u{1}voice\0\u{3}inline_data\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -63938,6 +66243,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
           self.metadata = .voice(v)
         }
       }()
+      case 10: try { try decoder.decodeSingularBytesField(value: &self._inlineData) }()
       default: break
       }
     }
@@ -63980,6 +66286,9 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     }()
     case nil: break
     }
+    try { if let v = self._inlineData {
+      try visitor.visitSingularBytesField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -63992,6 +66301,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     if lhs.kind != rhs.kind {return false}
     if lhs._thumbnailFileUniqueID != rhs._thumbnailFileUniqueID {return false}
     if lhs.metadata != rhs.metadata {return false}
+    if lhs._inlineData != rhs._inlineData {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -63999,49 +66309,104 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension CreateUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}part_size\0\u{3}part_count\0\u{3}expires_at\0\u{3}accepted_parts\0\u{1}complete\0")
+
+  fileprivate class _StorageClass {
+    var _uploadID: Data = Data()
+    var _partSize: UInt32 = 0
+    var _partCount: UInt32 = 0
+    var _expiresAt: Int64 = 0
+    var _acceptedParts: [UInt32] = []
+    var _complete: UploadComplete? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _uploadID = source._uploadID
+      _partSize = source._partSize
+      _partCount = source._partCount
+      _expiresAt = source._expiresAt
+      _acceptedParts = source._acceptedParts
+      _complete = source._complete
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
-      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.partSize) }()
-      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.partCount) }()
-      case 4: try { try decoder.decodeSingularInt64Field(value: &self.expiresAt) }()
-      case 5: try { try decoder.decodeRepeatedUInt32Field(value: &self.acceptedParts) }()
-      default: break
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularBytesField(value: &_storage._uploadID) }()
+        case 2: try { try decoder.decodeSingularUInt32Field(value: &_storage._partSize) }()
+        case 3: try { try decoder.decodeSingularUInt32Field(value: &_storage._partCount) }()
+        case 4: try { try decoder.decodeSingularInt64Field(value: &_storage._expiresAt) }()
+        case 5: try { try decoder.decodeRepeatedUInt32Field(value: &_storage._acceptedParts) }()
+        case 6: try { try decoder.decodeSingularMessageField(value: &_storage._complete) }()
+        default: break
+        }
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.uploadID.isEmpty {
-      try visitor.visitSingularBytesField(value: self.uploadID, fieldNumber: 1)
-    }
-    if self.partSize != 0 {
-      try visitor.visitSingularUInt32Field(value: self.partSize, fieldNumber: 2)
-    }
-    if self.partCount != 0 {
-      try visitor.visitSingularUInt32Field(value: self.partCount, fieldNumber: 3)
-    }
-    if self.expiresAt != 0 {
-      try visitor.visitSingularInt64Field(value: self.expiresAt, fieldNumber: 4)
-    }
-    if !self.acceptedParts.isEmpty {
-      try visitor.visitPackedUInt32Field(value: self.acceptedParts, fieldNumber: 5)
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if !_storage._uploadID.isEmpty {
+        try visitor.visitSingularBytesField(value: _storage._uploadID, fieldNumber: 1)
+      }
+      if _storage._partSize != 0 {
+        try visitor.visitSingularUInt32Field(value: _storage._partSize, fieldNumber: 2)
+      }
+      if _storage._partCount != 0 {
+        try visitor.visitSingularUInt32Field(value: _storage._partCount, fieldNumber: 3)
+      }
+      if _storage._expiresAt != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._expiresAt, fieldNumber: 4)
+      }
+      if !_storage._acceptedParts.isEmpty {
+        try visitor.visitPackedUInt32Field(value: _storage._acceptedParts, fieldNumber: 5)
+      }
+      try { if let v = _storage._complete {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: CreateUploadResult, rhs: CreateUploadResult) -> Bool {
-    if lhs.uploadID != rhs.uploadID {return false}
-    if lhs.partSize != rhs.partSize {return false}
-    if lhs.partCount != rhs.partCount {return false}
-    if lhs.expiresAt != rhs.expiresAt {return false}
-    if lhs.acceptedParts != rhs.acceptedParts {return false}
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._uploadID != rhs_storage._uploadID {return false}
+        if _storage._partSize != rhs_storage._partSize {return false}
+        if _storage._partCount != rhs_storage._partCount {return false}
+        if _storage._expiresAt != rhs_storage._expiresAt {return false}
+        if _storage._acceptedParts != rhs_storage._acceptedParts {return false}
+        if _storage._complete != rhs_storage._complete {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

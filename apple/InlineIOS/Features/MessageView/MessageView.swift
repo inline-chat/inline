@@ -110,6 +110,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       if let rich = layout.rich {
         let view = richView ?? makeRichView()
         view.isHidden = false
+        view.actionContext = MessageRichActionContext(message: content.message.message)
         view.apply(
           rich,
           palette: content.richPalette,

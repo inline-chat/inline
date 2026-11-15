@@ -1,8 +1,13 @@
 import type {
+  BotApprovalSubject,
   BotBlockStatus,
+  BotDecisionState,
   BotFile,
   BotFormField,
   BotGrantRequirement,
+  BotPeerId,
+  BotReviewFinding,
+  BotReviewVerdict,
   BotRichBlock,
   BotRichMessage,
   BotRichText,
@@ -10,12 +15,18 @@ import type {
 } from "@inline-chat/bot-api-types"
 import {
   AgentGrantRequirement,
+  BlockApproval_Subject,
   BlockCallout_Kind,
+  BlockDecisionState,
   BlockDiff_Change,
   BlockDisclosure_Kind,
   BlockFormText_Kind,
   BlockList_Kind,
   BlockMeter_Tone,
+  BlockReview_Verdict,
+  BlockReviewFinding_Confidence,
+  BlockReviewFinding_Outcome,
+  BlockReviewFinding_Priority,
   BlockStatus,
   BlockTable_Alignment,
   MessageEntity_Type,
@@ -26,6 +37,7 @@ import {
   type BlockText,
   type MessageEntities,
   type MessageEntity,
+  type Peer,
   type Photo,
 } from "@inline-chat/protocol/core"
 import type { DbFullPhoto } from "@in/server/db/models/files"
@@ -302,6 +314,59 @@ const textFieldKinds: Record<BlockFormText_Kind, "single_line" | "multiline" | "
   [BlockFormText_Kind.SECRET]: "secret",
 }
 
+const decisionStates: Partial<Record<BlockDecisionState, BotDecisionState>> = {
+  [BlockDecisionState.PENDING]: "pending",
+  [BlockDecisionState.ACCEPTED]: "accepted",
+  [BlockDecisionState.DECLINED]: "declined",
+  [BlockDecisionState.EXPIRED]: "expired",
+  [BlockDecisionState.SUPERSEDED]: "superseded",
+}
+
+const approvalSubjects: Partial<Record<BlockApproval_Subject, BotApprovalSubject>> = {
+  [BlockApproval_Subject.COMMAND]: "command",
+  [BlockApproval_Subject.FILE_CHANGE]: "file_change",
+  [BlockApproval_Subject.TOOL]: "tool",
+  [BlockApproval_Subject.PERMISSIONS]: "permissions",
+  [BlockApproval_Subject.NETWORK]: "network",
+}
+
+const reviewVerdicts: Partial<Record<BlockReview_Verdict, BotReviewVerdict>> = {
+  [BlockReview_Verdict.CORRECT]: "correct",
+  [BlockReview_Verdict.INCORRECT]: "incorrect",
+  [BlockReview_Verdict.NEEDS_ATTENTION]: "needs_attention",
+}
+
+const findingPriorities: Partial<Record<BlockReviewFinding_Priority, NonNullable<BotReviewFinding["priority"]>>> = {
+  [BlockReviewFinding_Priority.P0]: "p0",
+  [BlockReviewFinding_Priority.P1]: "p1",
+  [BlockReviewFinding_Priority.P2]: "p2",
+  [BlockReviewFinding_Priority.P3]: "p3",
+}
+
+const findingConfidences: Partial<Record<BlockReviewFinding_Confidence, NonNullable<BotReviewFinding["confidence"]>>> = {
+  [BlockReviewFinding_Confidence.CONFIRMED]: "confirmed",
+  [BlockReviewFinding_Confidence.PLAUSIBLE]: "plausible",
+}
+
+const findingOutcomes: Partial<Record<BlockReviewFinding_Outcome, NonNullable<BotReviewFinding["outcome"]>>> = {
+  [BlockReviewFinding_Outcome.FIXED]: "fixed",
+  [BlockReviewFinding_Outcome.SKIPPED]: "skipped",
+  [BlockReviewFinding_Outcome.NO_CHANGE_NEEDED]: "no_change_needed",
+}
+
+const actionIds = (values: readonly string[]): string[] | undefined => values.length > 0 ? [...values] : undefined
+
+const botPeerId = (peer: Peer | undefined): BotPeerId | undefined => {
+  switch (peer?.type.oneofKind) {
+    case "user":
+      return { user_id: Number(peer.type.user.userId) }
+    case "chat":
+      return { chat_id: Number(peer.type.chat.chatId) }
+    default:
+      return undefined
+  }
+}
+
 const grantRequirements: Partial<Record<AgentGrantRequirement, BotGrantRequirement>> = {
   [AgentGrantRequirement.ACCESS]: "access",
   [AgentGrantRequirement.INVOKE]: "invoke",
@@ -442,6 +507,7 @@ const encodeBlocks = (input: {
           fields: form.fields.flatMap((field): BotFormField[] => {
             const base = {
               field_id: field.fieldId,
+              header: field.header ? richText(field.header) : undefined,
               label: richText(field.label),
               description: field.description ? richText(field.description) : undefined,
               is_required: trueOrUndefined(field.required),
@@ -456,6 +522,8 @@ const encodeBlocks = (input: {
                     option_id: option.optionId,
                     label: richText(option.label),
                     description: option.description ? richText(option.description) : undefined,
+                    preview: option.preview ? richText(option.preview) : undefined,
+                    is_recommended: trueOrUndefined(option.recommended),
                   })),
                   is_multiple: trueOrUndefined(select.multiple),
                   default_option_ids: select.defaultOptionIds.length > 0 ? select.defaultOptionIds : undefined,
@@ -543,7 +611,93 @@ const encodeBlocks = (input: {
           required_grant: botGrantRequirement(widget.requiredGrant),
         }]
       }
+      case "planProposal": {
+        const plan = block.kind.planProposal
+        return [{
+          type: "plan_proposal",
+          title: plan.title ? richText(plan.title) : undefined,
+          blocks: blocks(plan.children),
+          state: decisionStates[plan.state],
+          action_ids: actionIds(plan.actionIds),
+          decided_by_user_id: plan.decidedByUserId !== undefined ? Number(plan.decidedByUserId) : undefined,
+          is_rtl: trueOrUndefined(plan.isRtl),
+        }]
+      }
+      case "approval": {
+        const approval = block.kind.approval
+        return [{
+          type: "approval",
+          subject: approvalSubjects[approval.subject],
+          title: richText(approval.title),
+          command: approval.command ? richText(approval.command) : undefined,
+          cwd: approval.cwd ? richText(approval.cwd) : undefined,
+          reason: approval.reason ? richText(approval.reason) : undefined,
+          blocks: blocks(approval.children),
+          state: decisionStates[approval.state],
+          action_ids: actionIds(approval.actionIds),
+          decided_by_user_id: approval.decidedByUserId !== undefined ? Number(approval.decidedByUserId) : undefined,
+          is_rtl: trueOrUndefined(approval.isRtl),
+        }]
+      }
+      case "review": {
+        const review = block.kind.review
+        return [{
+          type: "review",
+          title: review.title ? richText(review.title) : undefined,
+          verdict: reviewVerdicts[review.verdict],
+          summary: review.summary ? richText(review.summary) : undefined,
+          findings: review.findings.map((finding) => ({
+            title: richText(finding.title),
+            body: finding.body ? richText(finding.body) : undefined,
+            priority: findingPriorities[finding.priority],
+            path: finding.path ? richText(finding.path) : undefined,
+            start_line: finding.startLine,
+            end_line: finding.endLine,
+            category: finding.category,
+            confidence: findingConfidences[finding.confidence],
+            outcome: findingOutcomes[finding.outcome],
+            action_id: finding.actionId,
+          })),
+          is_rtl: trueOrUndefined(review.isRtl),
+        }]
+      }
+      case "taskSuggestion": {
+        const task = block.kind.taskSuggestion
+        return [{
+          type: "task_suggestion",
+          title: richText(task.title),
+          brief: task.brief ? richText(task.brief) : undefined,
+          state: decisionStates[task.state],
+          started_peer_id: botPeerId(task.startedPeer),
+          expires_at: task.expiresAt !== undefined ? Number(task.expiresAt) : undefined,
+          action_ids: actionIds(task.actionIds),
+          is_rtl: trueOrUndefined(task.isRtl),
+        }]
+      }
+      case "nextStep": {
+        const step = block.kind.nextStep
+        return [{
+          type: "next_step",
+          recap: richText(step.recap),
+          question: step.question ? richText(step.question) : undefined,
+          action_ids: actionIds(step.actionIds),
+          is_blocking: trueOrUndefined(step.blocking),
+          is_rtl: trueOrUndefined(step.isRtl),
+        }]
+      }
+      case "promptSuggestions":
+        return [{
+          type: "prompt_suggestions",
+          prompts: block.kind.promptSuggestions.prompts.map((prompt) => ({
+            label: richText(prompt.label),
+            text: prompt.text,
+          })),
+          is_rtl: trueOrUndefined(block.kind.promptSuggestions.isRtl),
+        }]
       case undefined:
+        return []
+      default:
+        block.kind satisfies never
         return []
     }
   })

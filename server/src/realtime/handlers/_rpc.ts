@@ -34,6 +34,7 @@ import { addChatParticipant } from "@in/server/realtime/handlers/messages.addCha
 import { removeChatParticipant } from "@in/server/realtime/handlers/messages.removeChatParticipant"
 import { handleTranslateMessages } from "./translateMessages"
 import { handleGetChats } from "./messages.getChats"
+import { handleGetSpaces } from "./space.getSpaces"
 import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
@@ -786,6 +787,11 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await handleGetChats(call.input.getChats, handlerContext)
       return { oneofKind: "getChats", getChats: result }
+    }
+
+    case Method.GET_SPACES: {
+      if (call.input.oneofKind !== "getSpaces") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "getSpaces", getSpaces: await handleGetSpaces(call.input.getSpaces, handlerContext) }
     }
 
     case Method.GET_CHAT: {

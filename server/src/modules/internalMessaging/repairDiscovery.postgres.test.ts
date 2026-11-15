@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
 import {
   chats, chatParticipants, chatParticipantGroups, dialogs, members, messages, spaces, updates,
@@ -352,4 +352,171 @@ test("empty batches do no SQL and malformed requests fail closed", async () => {
     await expect(discovery.prepare([], new Date(NaN))).rejects.toThrow()
   }, async () => {})
   expect(sample.sql.commands).toBe(0)
+})
+
+// Reference copy of the membership-driven prefilter that predates the
+// change-driven query. Equivalence tests compare production against it.
+const referenceChangedUsers = async (requests: readonly { userId: number; date: bigint }[]) => {
+  const values = sql.join(requests.map(({ userId, date }) =>
+    sql`(${userId}::integer, to_timestamp(${date.toString()}::double precision) at time zone 'UTC')`), sql`, `)
+  const rows = await db.execute<{ userId: number }>(sql`
+    with requested(user_id, since) as (values ${values})
+    select r.user_id as "userId" from requested r
+    inner join ${chats} on ${chats.minUserId} = r.user_id
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${chats} on ${chats.maxUserId} = r.user_id
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${chatParticipants} on ${chatParticipants.userId} = r.user_id
+    inner join ${chats} on ${chats.id} = ${chatParticipants.chatId}
+    where ${chats.spaceId} is null and ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${members} on ${members.userId} = r.user_id
+    inner join ${chats} on ${chats.spaceId} = ${members.spaceId}
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${dialogs} on ${dialogs.userId} = r.user_id
+    inner join ${chats} on ${chats.id} = ${dialogs.chatId}
+    where ${chats.lastUpdateDate} >= r.since
+    union
+    select r.user_id from requested r
+    inner join ${members} on ${members.userId} = r.user_id
+    inner join ${spaces} on ${spaces.id} = ${members.spaceId}
+    where ${spaces.lastUpdateDate} >= r.since
+  `)
+  return new Set(rows.map((row) => row.userId))
+}
+const preparedChangedUsers = async (requests: readonly { userId: number; date: bigint }[], at: Date) => {
+  const snapshots = await discovery.prepare(requests, at)
+  expect(snapshots.size).toBe(requests.length)
+  return new Set(requests.filter(({ userId }) => snapshots.get(userId)?.resourcesUnchangedSince === undefined)
+    .map(({ userId }) => userId))
+}
+const sorted = (ids: Iterable<number>) => [...ids].sort((a, b) => a - b)
+const seconds = (value: bigint) => new Date(Number(value) * 1000)
+
+/** One user per branch, positive (changed at `date`) and negative (changed
+ * 60 s before). `latest` is an independent oracle: the newest relevant change. */
+const seedBranchWorld = async () => {
+  const latest = new Map<number, bigint>()
+  let counter = 0
+  const user = async (label: string, changed?: bigint) => {
+    const { id } = await testUtils.createUser(`branch-${label}-${counter++}@example.test`)
+    if (changed !== undefined) latest.set(id, changed)
+    return id
+  }
+  const space = async (changed: bigint | null = null) => {
+    const [row] = await db.insert(spaces).values({
+      name: `Branch ${counter++}`, lastUpdateDate: changed === null ? null : seconds(changed),
+    }).returning({ id: spaces.id })
+    return row!.id
+  }
+  const chat = async (values: Omit<typeof chats.$inferInsert, "lastUpdateDate">, changed: bigint) => {
+    const [row] = await db.insert(chats).values({ ...values, lastUpdateDate: seconds(changed) }).returning({ id: chats.id })
+    return row!.id
+  }
+  const old = date - 60n
+  for (const changed of [date, old]) {
+    const tag = changed === date ? "pos" : "neg"
+    // Branches 1 and 2: DMs by min and by max user.
+    const dmMin = await user(`dm-min-${tag}`, changed)
+    const dmMax = await user(`dm-max-${tag}`, changed)
+    await chat({ type: "private", minUserId: Math.min(dmMin, dmMax), maxUserId: Math.max(dmMin, dmMax) }, changed)
+    // Branch 3: Home participant without a dialog.
+    const home = await user(`home-${tag}`, changed)
+    const homeChat = await chat({ type: "thread" }, changed)
+    await db.insert(chatParticipants).values({ chatId: homeChat, userId: home })
+    // Branch 4: space member, chat in the space, no dialog or participant row.
+    const member = await user(`member-${tag}`, changed)
+    const memberSpace = await space()
+    await db.insert(members).values({ userId: member, spaceId: memberSpace })
+    await chat({ type: "thread", spaceId: memberSpace, publicThread: false }, changed)
+    // Branch 5: dialog-only link to a space the user is not a member of.
+    const dialogUser = await user(`dialog-${tag}`, changed)
+    const dialogChat = await chat({ type: "thread", spaceId: await space(), publicThread: true }, changed)
+    await db.insert(dialogs).values({ userId: dialogUser, chatId: dialogChat })
+    // Branch 6: changed space, no changed chats.
+    const spaceUser = await user(`space-${tag}`, changed)
+    await db.insert(members).values({ userId: spaceUser, spaceId: await space(changed) })
+  }
+  // A participant row on a space chat is not a Home relationship.
+  const spaceParticipant = await user("space-participant")
+  const participantChat = await chat({ type: "thread", spaceId: await space(), publicThread: true }, date)
+  await db.insert(chatParticipants).values({ chatId: participantChat, userId: spaceParticipant })
+  // Many unchanged memberships of every kind, plus one changed chat.
+  const ancient = old - 600n
+  const wideSpace = await space(ancient)
+  const wideIdle = await user("wide-idle", old)
+  const wide = await user("wide", date)
+  const peer = await user("wide-peer", old)
+  await db.insert(members).values([wide, wideIdle].map((userId) => ({ userId, spaceId: wideSpace })))
+  const wideChats = await db.insert(chats).values(Array.from({ length: 200 }, () => ({
+    type: "thread" as const, spaceId: wideSpace, publicThread: true, lastUpdateDate: seconds(ancient),
+  }))).returning({ id: chats.id })
+  await db.insert(dialogs).values(wideChats.slice(0, 50).flatMap(({ id }) =>
+    [wide, wideIdle].map((userId) => ({ userId, chatId: id, spaceId: wideSpace }))))
+  const homeChats = await db.insert(chats).values(Array.from({ length: 20 }, () => ({
+    type: "thread" as const, lastUpdateDate: seconds(ancient),
+  }))).returning({ id: chats.id })
+  await db.insert(chatParticipants).values(homeChats.flatMap(({ id }) =>
+    [wide, wideIdle].map((userId) => ({ userId, chatId: id }))))
+  for (const other of [wide, wideIdle]) {
+    await chat({ type: "private", minUserId: Math.min(other, peer), maxUserId: Math.max(other, peer) }, old)
+  }
+  // The one changed chat: a Home thread only `wide` participates in.
+  const changedHome = await chat({ type: "thread" }, date)
+  await db.insert(chatParticipants).values({ chatId: changedHome, userId: wide })
+  const userIds = sorted([...latest.keys(), spaceParticipant])
+  const expected = (requests: readonly { userId: number; date: bigint }[]) =>
+    sorted(requests.filter(({ userId, date: since }) => (latest.get(userId) ?? -1n) >= since).map(({ userId }) => userId))
+  return { userIds, expected, wide, wideIdle, spaceParticipant }
+}
+
+test("change-driven discovery matches every branch, inclusive at the checkpoint", async () => {
+  const world = await seedBranchWorld()
+  for (const since of [date - 700n, date - 120n, date - 60n, date - 59n, date, date + 1n]) {
+    const requests = world.userIds.map((userId) => ({ userId, date: since }))
+    const actual = sorted(await preparedChangedUsers(requests, watermark))
+    expect(actual).toEqual(world.expected(requests))
+    expect(actual).toEqual(sorted(await referenceChangedUsers(requests)))
+  }
+  const atCheckpoint = await preparedChangedUsers(world.userIds.map((userId) => ({ userId, date })), watermark)
+  expect(atCheckpoint.has(world.wide)).toBe(true)
+  expect(atCheckpoint.has(world.wideIdle)).toBe(false)
+  expect(atCheckpoint.has(world.spaceParticipant)).toBe(false)
+  // Six positive branch users (DM min, DM max, Home, member, dialog, space) plus `wide`.
+  expect(atCheckpoint.size).toBe(7)
+})
+
+test("each user in one batch is filtered by its own checkpoint", async () => {
+  const world = await seedBranchWorld()
+  const sinces = [date - 120n, date, date + 1n, date - 61n, date - 59n]
+  for (let rotation = 0; rotation < sinces.length; rotation++) {
+    const requests = world.userIds.map((userId, index) => ({ userId, date: sinces[(index + rotation) % sinces.length]! }))
+    const actual = sorted(await preparedChangedUsers(requests, watermark))
+    expect(actual).toEqual(world.expected(requests))
+    expect(actual).toEqual(sorted(await referenceChangedUsers(requests)))
+  }
+})
+
+test("checkpoints older than the horizon use the membership query, mixed with recent ones", async () => {
+  const world = await seedBranchWorld()
+  const late = date + 7_000n
+  const lateWatermark = seconds(date + 7_200n)
+  const lateUser = (await testUtils.createUser("branch-late@example.test")).id
+  const lateSpace = (await db.insert(spaces).values({ name: "Late" }).returning({ id: spaces.id }))[0]!.id
+  await db.insert(members).values({ userId: lateUser, spaceId: lateSpace })
+  await db.insert(chats).values({ type: "thread", spaceId: lateSpace, publicThread: true, lastUpdateDate: seconds(late) })
+  const stale = world.userIds.map((userId, index) => ({ userId, date: index % 2 === 0 ? date : date - 120n }))
+  const requests = [...stale, { userId: lateUser, date: late - 100n }]
+  const actual = sorted(await preparedChangedUsers(requests, lateWatermark))
+  expect(actual).toEqual(sorted([...world.expected(stale), lateUser]))
+  expect(actual).toEqual(sorted(await referenceChangedUsers(requests)))
+  // A recent request after the late change is negative on the change-driven path.
+  expect([...await preparedChangedUsers([{ userId: lateUser, date: late + 1n }], lateWatermark)]).toEqual([])
 })

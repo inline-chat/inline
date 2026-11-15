@@ -2,7 +2,7 @@ import { BotCommandsModel } from "@in/server/db/models/botCommands"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat } from "@in/server/db/schema"
-import { getBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
+import { getReachableBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
 import { getFollowingDialogUserIds } from "@in/server/modules/dialogFollow"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
@@ -76,7 +76,7 @@ export const resolveBotCommandTargets = async ({
   )
   if (commandEntities.length === 0) return entities
 
-  const botUserIds = Array.from(new Set(await getBotUserIdsForChatScope(chat, currentUserId)))
+  const botUserIds = await getReachableBotUserIdsForChatScope(chat, currentUserId)
   const commandsByBotUserId = await BotCommandsModel.getForBotUserIds(botUserIds)
   const botRows = await UsersModel.getUsersWithPhotos(botUserIds)
   const botUserIdByUsername = new Map(

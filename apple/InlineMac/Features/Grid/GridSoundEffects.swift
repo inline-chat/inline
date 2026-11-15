@@ -9,11 +9,22 @@ final class GridSoundEffects {
     case join = "maybe-join"
     case leave = "unlock"
     case connected = "connected2"
+    case microphoneOn = "grid-mic-on"
+    case microphoneOff = "grid-mic-off"
 
     var volume: Float {
       switch self {
       case .join, .leave: 0.12
       case .connected: 0.7
+      // The files carry their own quiet level, shared with iOS.
+      case .microphoneOn, .microphoneOff: 1
+      }
+    }
+
+    var fileExtension: String {
+      switch self {
+      case .join, .leave, .connected: "mp3"
+      case .microphoneOn, .microphoneOff: "caf"
       }
     }
   }
@@ -72,8 +83,9 @@ private actor GridSoundPlaybackEngine {
   }
 
   private func soundURL(_ effect: GridSoundEffects.Effect) -> URL? {
-    Bundle.main.url(forResource: effect.rawValue, withExtension: "mp3", subdirectory: "GridSounds")
-      ?? Bundle.main.url(forResource: effect.rawValue, withExtension: "mp3", subdirectory: "Resources/GridSounds")
-      ?? Bundle.main.url(forResource: effect.rawValue, withExtension: "mp3")
+    let ext = effect.fileExtension
+    return Bundle.main.url(forResource: effect.rawValue, withExtension: ext, subdirectory: "GridSounds")
+      ?? Bundle.main.url(forResource: effect.rawValue, withExtension: ext, subdirectory: "Resources/GridSounds")
+      ?? Bundle.main.url(forResource: effect.rawValue, withExtension: ext)
   }
 }

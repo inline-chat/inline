@@ -1,6 +1,7 @@
 import {
   AgentGrantRequirement,
   AgentOutputMode,
+  AgentRuntimeStatus,
   type AgentSettings,
   type GetAgentSettingsInput,
   type GetAgentSettingsResult,
@@ -14,6 +15,7 @@ import type { Transaction } from "@in/server/db/types"
 import { agentGrants, agentRuntimes, agentSettings, type DbAgentSettings, type DbUser } from "@in/server/db/schema"
 import { resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
 import {
+  effectiveRuntimeStatus,
   encodeAgentRuntime,
   enqueueRuntimeChange,
   pushRuntimeChange,
@@ -39,6 +41,7 @@ export function encodeAgentSettings(botUserId: number, row: DbAgentSettings | un
     defaultOutputMode: row?.defaultOutputMode ?? AgentOutputMode.UNSPECIFIED,
     revision: row?.revision ?? 0n,
     date: row ? encodeDateStrict(row.updatedAt) : undefined,
+    openToEveryone: row?.openToEveryone ?? false,
   }
 }
 
@@ -74,7 +77,8 @@ export async function getAgentSettings(
 
 /**
  * Agent Settings: the owner or a CONFIGURE grantee, for any owned bot. The
- * runtime's mirror keeps bridges that read the mode from it in step.
+ * runtime's mirror keeps bridges that read the mode from it in step. Admins
+ * also decide whether anyone can message the bot.
  */
 export async function updateAgentSettings(
   input: UpdateAgentSettingsInput,
@@ -88,8 +92,21 @@ export async function updateAgentSettings(
   const ownerUserId = bot.botCreatorId
   const viewer = currentUserId === ownerUserId ? "owner" : "other"
   const [currentRuntime] = await db.select().from(agentRuntimes).where(eq(agentRuntimes.botUserId, bot.id)).limit(1)
+  // A running bridge answers only its owner and access list. Opening its bot
+  // would show everyone a composer for an agent that refuses them. A bot whose
+  // bridge is no longer running can be opened, and closes again if it returns.
+  if (
+    input.openToEveryone === true && currentRuntime &&
+    effectiveRuntimeStatus(currentRuntime) !== AgentRuntimeStatus.OFFLINE
+  ) {
+    throw new RealtimeRpcError(
+      RealtimeRpcError.Code.BAD_REQUEST,
+      "A bot run by an agent bridge can't be opened to everyone; share it with people instead",
+      400,
+    )
+  }
 
-  if (input.defaultOutputMode === undefined) {
+  if (input.defaultOutputMode === undefined && input.openToEveryone === undefined) {
     return {
       runtime: currentRuntime ? encodeAgentRuntime(currentRuntime, viewer) : undefined,
       settings: encodeAgentSettings(bot.id, await loadAgentSettings(bot.id)),
@@ -97,6 +114,7 @@ export async function updateAgentSettings(
   }
 
   const defaultOutputMode = input.defaultOutputMode
+  const openToEveryone = input.openToEveryone
   // Members of the agent's chats resolve its effective output mode from the
   // runtime's default, so they get the runtime change too (status-only view).
   const memberAudience = currentRuntime ? await runtimeAudience(bot.id, ownerUserId) : []
@@ -106,13 +124,15 @@ export async function updateAgentSettings(
     // settings. Keep that order during overlap and rollback to avoid deadlocks.
     await tx.select({ botUserId: agentRuntimes.botUserId }).from(agentRuntimes)
       .where(eq(agentRuntimes.botUserId, bot.id)).for("update").limit(1)
+    // Absent fields keep their value: `undefined` is left out of both the insert and the update.
     const [saved] = await tx
       .insert(agentSettings)
-      .values({ botUserId: bot.id, defaultOutputMode, updatedBy: currentUserId, updatedAt: now })
+      .values({ botUserId: bot.id, defaultOutputMode, openToEveryone, updatedBy: currentUserId, updatedAt: now })
       .onConflictDoUpdate({
         target: agentSettings.botUserId,
         set: {
           defaultOutputMode,
+          openToEveryone,
           updatedBy: currentUserId,
           revision: sql`${agentSettings.revision} + 1`,
           updatedAt: now,
@@ -120,12 +140,14 @@ export async function updateAgentSettings(
       })
       .returning()
     if (!saved) throw RealtimeRpcError.InternalError()
-    const [runtime] = await tx
-      .update(agentRuntimes)
-      .set({ defaultOutputMode, updatedAt: now })
-      .where(eq(agentRuntimes.botUserId, bot.id))
-      .returning()
-    const liveRuntime = runtime
+    const [runtime] = defaultOutputMode === undefined
+      ? [currentRuntime]
+      : await tx
+          .update(agentRuntimes)
+          .set({ defaultOutputMode, updatedAt: now })
+          .where(eq(agentRuntimes.botUserId, bot.id))
+          .returning()
+    const liveRuntime = runtime && defaultOutputMode !== undefined
       ? await enqueueRuntimeChange(tx, runtime, ownerUserId, memberAudience, { includeBot: true })
       : []
     const liveSettings = await enqueueSettingsChange(tx, bot.id, ownerUserId, saved)

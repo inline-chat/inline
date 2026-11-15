@@ -2476,6 +2476,7 @@ pub fn question_form(form: &Value) -> Option<QuestionForm> {
                             .get("description")
                             .and_then(Value::as_str)
                             .map(str::to_owned),
+                        preview: None,
                     })
                 })
                 .collect()

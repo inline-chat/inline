@@ -9,13 +9,15 @@ export type ScenarioSpec = {
 // These are reviewed upper bounds for complete operations, including tracked
 // detached work and transaction control. They describe current costs, not targets.
 // Fixture or semantic changes require a version bump before comparing timings.
-export const scenarioVersion = 3
+export const scenarioVersion = 4
 
 // Coherent reads submit BEGIN, SET TRANSACTION and COMMIT. Catalog discovery
-// additionally prepares missing dialogs and checks candidate access. History
-// reads its explicit chat once inside the snapshot. Fixed costs do not scale with rows.
+// additionally prepares missing dialogs, reads candidate IDs, checks their
+// access, and then hydrates only the authorized chats (one statement more than
+// hydrating every candidate before the check). History reads its explicit chat
+// once inside the snapshot. Fixed costs do not scale with rows.
 const snapshotCommands = 3
-const catalogAdmissionCommands = 2
+const catalogAdmissionCommands = 3
 // One indexed lookup for per-dialog counts or per-page unread activity flags.
 const unreadActivityCommands = 1
 // DM writes check whether the sender is a bot before retry recovery, enforcing

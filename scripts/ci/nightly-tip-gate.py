@@ -313,11 +313,9 @@ def select_tip(github, event, now, channel="tip"):
     """Return (sha, outcome, reason, create_new_appcast)."""
     tag_sha = github.tip_commit()
     sha, running = newest_green_main(github, lambda candidate: candidate == tag_sha, now)
-    # Every CI completion retriggers this gate, so wait for newer commits instead
-    # of building one that is about to be superseded. The sweep never waits.
-    if running and event == "workflow_run":
-        return sha, DEFERRED, f"newer main commit {running[:9]} is still in CI", False
     if sha is None:
+        if running:
+            return running, DEFERRED, f"main commit {running[:9]} is still in CI", False
         return None, BLOCKED, f"no green main commit at or after the current {channel}", False
     if sha == tag_sha and event == "workflow_run":
         # Re-hashing the published DMG on every CI completion would be wasteful,
@@ -347,9 +345,9 @@ def ios_published(github, sha):
 def select_ios(github, event, now):
     """Return (sha, outcome, reason) for internal Early Testers."""
     sha, running = newest_green_main(github, lambda candidate: ios_published(github, candidate), now)
-    if running and event == "workflow_run":
-        return sha, DEFERRED, f"newer main commit {running[:9]} is still in CI"
     if sha is None:
+        if running:
+            return running, DEFERRED, f"main commit {running[:9]} is still in CI"
         return None, BLOCKED, "no green main commit since the last Early Testers build"
     # Scheduled and manual runs still resume the publisher, which is idempotent
     # and refreshes a build approaching TestFlight expiry.

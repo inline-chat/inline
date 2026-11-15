@@ -99,15 +99,10 @@ class LegacyComposeAppKit: NSView {
   // Mention completion
   private var mentionCompletionMenu: MentionCompletionMenu?
   private var mentionDetector = MentionDetector()
-  private var chatParticipantsViewModel: InlineKit.ChatParticipantsWithMembersViewModel?
+  private var mentionSource: MentionCandidatesSource?
   private var currentMentionRange: MentionRange?
   private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
-  private var didRequestMentionParticipants = false
-  private var mentionParticipantsTask: Task<Void, Never>?
-  private var mentionAgentsTask: Task<Void, Never>?
-  private var mentionCandidates = MentionCompletionCandidates.empty
-  private var mentionAgents: [MentionableBotAgent] = []
 
   // Slash command completion
   private var commandCompletionMenu: CommandCompletionMenu?
@@ -619,6 +614,14 @@ class LegacyComposeAppKit: NSView {
         self?.insertPrompt(text)
       }.store(in: &cancellables)
 
+    // Compose actions and prompt suggestions in this chat's messages, or in the anchor of
+    // this thread. Only the composer in the window the viewer clicked takes them.
+    MessageComposeRequests.shared.requests
+      .sink { [weak self] request in
+        guard let self, request.targets(peer: peerId, chat: chat), window?.isKeyWindow == true else { return }
+        insertPrompt(request.text)
+      }.store(in: &cancellables)
+
     state.editingMsgIdPublisher
       .sink { [weak self] editingMsgId in
         guard let self else { return }
@@ -925,25 +928,25 @@ class LegacyComposeAppKit: NSView {
   private func ensureMentionCompletion() {
     guard mentionCompletionMenu == nil, let chatId else { return }
 
-    // Initialize chat participants view model
-    chatParticipantsViewModel = InlineKit.ChatParticipantsWithMembersViewModel(
+    let source = MentionCandidatesSource(
       db: dependencies.database,
-      chatId: chatId,
-      purpose: .mentionCandidates
+      scope: .chat(chatId: chatId, peer: peerId)
     )
+    mentionSource = source
+    // The first session reads the database synchronously, so the menu opens filled.
+    source.beginSession()
 
-    // Create mention completion menu
     mentionCompletionMenu = MentionCompletionMenu(surfaceStyle: .material)
     mentionCompletionMenu?.delegate = self
     mentionCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
+    mentionCompletionMenu?.updateCandidates(source.candidates)
 
-    // Subscribe to participants updates
-    chatParticipantsViewModel?.$mentionCandidates
+    source.updates
+      .dropFirst()
       .sink { [weak self] candidates in
         guard let self else { return }
         log.trace("Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
-        mentionCandidates = candidates
-        applyMentionCandidates()
+        mentionCompletionMenu?.updateCandidates(candidates)
 
         if let currentMentionRange,
            mentionCompletionMenu?.hasItems == true,
@@ -953,50 +956,6 @@ class LegacyComposeAppKit: NSView {
         }
       }
       .store(in: &cancellables)
-
-    NotificationCenter.default.publisher(for: .botAgentsChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.loadMentionAgents(forceRefresh: true)
-        }
-      }
-      .store(in: &cancellables)
-
-    loadMentionAgents()
-  }
-
-  private func loadMentionAgents(forceRefresh: Bool = false) {
-    mentionAgentsTask?.cancel()
-    mentionAgentsTask = Task { @MainActor [weak self, peerId = peerId] in
-      guard let self else { return }
-      do {
-        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId, forceRefresh: forceRefresh)
-      } catch is CancellationError {
-        return
-      } catch {
-        mentionAgents = []
-      }
-      applyMentionCandidates()
-    }
-  }
-
-  private func applyMentionCandidates() {
-    var candidates = mentionCandidates
-    candidates.agents = mentionAgents
-    mentionCompletionMenu?.updateCandidates(candidates)
-  }
-
-  private func refetchMentionParticipantsIfNeeded() {
-    guard !didRequestMentionParticipants, let chatParticipantsViewModel else { return }
-    didRequestMentionParticipants = true
-
-    mentionParticipantsTask?.cancel()
-    mentionParticipantsTask = Task { @MainActor [weak self, weak chatParticipantsViewModel] in
-      await Task.yield()
-      guard !Task.isCancelled else { return }
-      self?.log.trace("Fetching chat participants from server")
-      await chatParticipantsViewModel?.refetchParticipants()
-    }
   }
 
   private func addMentionMenuToSuperview() {
@@ -1148,7 +1107,6 @@ class LegacyComposeAppKit: NSView {
 
     mentionCompletionMenu.filterParticipants(with: query)
     mentionCompletionMenu.show()
-    refetchMentionParticipantsIfNeeded()
 
     // Add escape handler for mention menu
     mentionKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -1163,6 +1121,7 @@ class LegacyComposeAppKit: NSView {
   private func hideMentionCompletion() {
     currentMentionRange = nil
     mentionCompletionMenu?.hide()
+    mentionSource?.endSession()
 
     // Remove escape handler
     mentionKeyMonitorEscUnsubscribe?()
@@ -1233,7 +1192,7 @@ class LegacyComposeAppKit: NSView {
       let isNewMentionSession = currentMentionRange?.range.location != mentionRange.range.location
       currentMentionRange = mentionRange
       if isNewMentionSession {
-        loadMentionAgents()
+        mentionSource?.beginSession()
       }
       showMentionCompletion(for: mentionRange.query)
     } else {
@@ -2315,10 +2274,6 @@ class LegacyComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
     mentionCompletionMenu?.removeFromSuperview()
-    mentionParticipantsTask?.cancel()
-    mentionParticipantsTask = nil
-    mentionAgentsTask?.cancel()
-    mentionAgentsTask = nil
 
     log.trace("deinit")
   }

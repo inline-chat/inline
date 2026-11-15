@@ -25,6 +25,9 @@ final class RichBlockLayoutPlanner {
     let disclosureOverrides: [BlockContentPath: Bool]
     let widgetLayout: RichBlockWidgetLayout?
     let mathSignature: Int
+    let fillsAvailableWidth: Bool
+    /// Button titles and styles that blocks draw inline.
+    let actions: InlineProtocol.MessageActions?
     private let precomputedHash: Int
 
     init(
@@ -37,7 +40,9 @@ final class RichBlockLayoutPlanner {
       inlineMathAttachmentsEnabled: Bool,
       disclosureOverrides: [BlockContentPath: Bool],
       widgetLayout: RichBlockWidgetLayout?,
-      mathSignature: Int
+      mathSignature: Int,
+      fillsAvailableWidth: Bool,
+      actions: InlineProtocol.MessageActions?
     ) {
       self.contentCacheSignature = contentCacheSignature
       self.contentByteCount = contentByteCount
@@ -52,6 +57,8 @@ final class RichBlockLayoutPlanner {
       self.disclosureOverrides = disclosureOverrides
       self.widgetLayout = widgetLayout
       self.mathSignature = mathSignature
+      self.fillsAvailableWidth = fillsAvailableWidth
+      self.actions = actions
       var hasher = Hasher()
       hasher.combine(contentCacheSignature)
       hasher.combine(contentByteCount)
@@ -64,6 +71,8 @@ final class RichBlockLayoutPlanner {
       hasher.combine(disclosureOverrides)
       hasher.combine(widgetLayout)
       hasher.combine(mathSignature)
+      hasher.combine(fillsAvailableWidth)
+      hasher.combine(actions)
       precomputedHash = hasher.finalize()
     }
 
@@ -84,6 +93,8 @@ final class RichBlockLayoutPlanner {
           && mathSignature == other.mathSignature
           && disclosureOverrides == other.disclosureOverrides
           && widgetLayout == other.widgetLayout
+          && fillsAvailableWidth == other.fillsAvailableWidth
+          && actions == other.actions
       )
     }
   }
@@ -138,7 +149,9 @@ final class RichBlockLayoutPlanner {
     secondaryColor: NSColor = .secondaryLabelColor,
     inlineMathAttachmentsEnabled: Bool,
     disclosureOverrides: [BlockContentPath: Bool] = [:],
-    widgetLayout: RichBlockWidgetLayout? = nil
+    widgetLayout: RichBlockWidgetLayout? = nil,
+    fillsAvailableWidth: Bool = false,
+    actions: InlineProtocol.MessageActions? = nil
   ) -> RichBlockLayoutPlan? {
     guard availableWidth.isFinite, availableWidth >= 1,
           !content.blocks.isEmpty,
@@ -174,7 +187,9 @@ final class RichBlockLayoutPlanner {
       inlineMathAttachmentsEnabled: inlineMathAttachmentsEnabled,
       disclosureOverrides: disclosureOverrides,
       widgetLayout: widgetLayout,
-      mathSignature: math.signature
+      mathSignature: math.signature,
+      fillsAvailableWidth: fillsAvailableWidth,
+      actions: actions
     )
     if let cached = cache.object(forKey: key),
        cached.matches(content: content, attributedText: attributedText)
@@ -192,7 +207,8 @@ final class RichBlockLayoutPlanner {
       disclosureOverrides: disclosureOverrides,
       widgetLayout: widgetLayout,
       textMeasurements: textMeasurements,
-      tableCellWidths: tableCellWidths
+      tableCellWidths: tableCellWidths,
+      actionsByID: BlockInlineActions.byID(actions)
     )
     // Direction is decided per block from its own text, replacing the stored flags.
     let directed = BlockContentDirection.resolved(content, text: attributedText.string)
@@ -202,9 +218,15 @@ final class RichBlockLayoutPlanner {
       x: resolvedContentInset,
       width: max(1, availableWidth - resolvedContentInset * 2),
       depth: 0,
-      fullBleedContainer: (x: 0, width: availableWidth)
+      fullBleedContainer: (x: 0, width: availableWidth),
+      bounds: 0 ..< attributedText.length
     ) else {
       return nil
+    }
+    if fillsAvailableWidth {
+      // Right-to-left messages keep the full width, so trailing-anchored prose
+      // lines up with the column's trailing edge like plain right-to-left text.
+      builder.claimMaximumWidth()
     }
     let resolvedWidth = builder.resolvedPlanWidth(maximumWidth: availableWidth)
     builder.normalizeFlexibleFrames(
@@ -217,7 +239,8 @@ final class RichBlockLayoutPlanner {
       mathSnapshot: math,
       contentHorizontalInset: resolvedContentInset,
       nodes: builder.nodes,
-      trailingTextLine: builder.trailingTextLine
+      trailingTextLine: builder.trailingTextLine,
+      claimedActionIDs: builder.claimedActionIDs
     )
     let box = PlanBox(plan: plan, content: content, attributedText: attributedText)
     let estimatedCost = contentByteCount + attributedText.length * 8 + plan.nodes.count * 128
@@ -267,6 +290,20 @@ final class RichBlockLayoutPlanner {
       case let .quote(quote):
         guard consumeStructuralBudget(
           quote.children,
+          remainingTableCells: &remainingTableCells,
+          remainingBlocks: &remainingBlocks,
+          depth: depth + 1
+        ) else { return false }
+      case let .planProposal(plan):
+        guard consumeStructuralBudget(
+          plan.children,
+          remainingTableCells: &remainingTableCells,
+          remainingBlocks: &remainingBlocks,
+          depth: depth + 1
+        ) else { return false }
+      case let .approval(approval):
+        guard consumeStructuralBudget(
+          approval.children,
           remainingTableCells: &remainingTableCells,
           remainingBlocks: &remainingBlocks,
           depth: depth + 1
@@ -554,6 +591,14 @@ final class RichBlockLayoutPlanner {
     let widgetLayout: RichBlockWidgetLayout?
     let textMeasurements: TextMeasurementCache<RawTextMeasurement>
     let tableCellWidths: TextMeasurementCache<TableCellWidths>
+    /// The message's actions, for blocks that draw some as their own buttons.
+    let actionsByID: [String: InlineProtocol.MessageAction]
+    /// Actions that drawn blocks claim. Part of the builder's state, so a block that rolls
+    /// back to its fallback text gives its claims back.
+    var claimedActionIDs: Set<String> = []
+    /// For container blocks by path: the text their children may claim (see
+    /// `BlockContentSpan.childBounds`), so an unknown kind first or last inside still shows.
+    var childBounds: [BlockContentPath: Range<Int>] = [:]
     var nodes: [RichBlockLayoutPlan.Node] = []
     var height: CGFloat = 0
     var trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
@@ -561,6 +606,38 @@ final class RichBlockLayoutPlanner {
     /// Node index to the leading edge of its container, for text anchored to the trailing edge.
     private var trailingAnchoredMinX: [Int: CGFloat] = [:]
     private var claimsMaximumWidth = false
+
+    /// What laying out a block can change. Blocks only append nodes and edit their own, so
+    /// undoing one truncates instead of copying the whole builder per block.
+    struct Checkpoint {
+      fileprivate let nodeCount: Int
+      fileprivate let height: CGFloat
+      fileprivate let trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
+      fileprivate let measuredMaxX: CGFloat
+      fileprivate let claimsMaximumWidth: Bool
+    }
+
+    func checkpoint() -> Checkpoint {
+      Checkpoint(
+        nodeCount: nodes.count,
+        height: height,
+        trailingTextLine: trailingTextLine,
+        measuredMaxX: measuredMaxX,
+        claimsMaximumWidth: claimsMaximumWidth
+      )
+    }
+
+    mutating func restore(_ checkpoint: Checkpoint, claimedActionIDs claimed: Set<String>? = nil) {
+      nodes.removeSubrange(checkpoint.nodeCount...)
+      if trailingAnchoredMinX.keys.contains(where: { $0 >= checkpoint.nodeCount }) {
+        trailingAnchoredMinX = trailingAnchoredMinX.filter { $0.key < checkpoint.nodeCount }
+      }
+      height = checkpoint.height
+      trailingTextLine = checkpoint.trailingTextLine
+      measuredMaxX = checkpoint.measuredMaxX
+      claimsMaximumWidth = checkpoint.claimsMaximumWidth
+      if let claimed { claimedActionIDs = claimed }
+    }
 
     func resolvedPlanWidth(maximumWidth: CGFloat) -> CGFloat {
       guard !claimsMaximumWidth else { return maximumWidth }
@@ -603,43 +680,88 @@ final class RichBlockLayoutPlanner {
       width: CGFloat,
       depth: Int,
       inheritedDirection: Bool? = nil,
-      fullBleedContainer: (x: CGFloat, width: CGFloat)? = nil
+      fullBleedContainer: (x: CGFloat, width: CGFloat)? = nil,
+      bounds: Range<Int>? = nil
     ) -> Bool {
       guard depth <= 16, nodes.count + blocks.count <= RichBlockLayoutPlanner.maximumBlocks else { return false }
-      for (index, block) in blocks.enumerated() {
-        if index == 0, case .heading? = block.kind {
-          height += parent.components.isEmpty ? 6 : 4
-        } else if index > 0 {
-          let startsNestedList: Bool = if case .list? = block.kind,
-                                         case .listItem? = parent.components.last
-          {
-            true
-          } else {
-            false
+      for index in blocks.indices {
+        if let inner = BlockContentSpan.childBounds(at: index, in: blocks, bounds: bounds) {
+          childBounds[BlockContentPath(parent.components + [.block(index)])] = inner
+        }
+        // A block this build can't draw, of a newer kind or malformed, shows the fallback
+        // text it covers, so the rest of the message keeps its formatting.
+        let saved = checkpoint()
+        let claimed = claimedActionIDs
+        if !layout(blockAt: index, of: blocks, parent: parent, x: x, width: width, depth: depth,
+                   inheritedDirection: inheritedDirection, fullBleedContainer: fullBleedContainer)
+        {
+          restore(saved, claimedActionIDs: claimed)
+          guard let range = BlockContentSpan.fallbackRange(
+            at: index, in: blocks, text: attributedText.string as NSString, bounds: bounds
+          ) else { continue }
+          if index > 0 { height += Self.blockSpacing }
+          let fallback = InlineProtocol.BlockText.with {
+            $0.offset = Int64(range.lowerBound)
+            $0.length = Int64(range.count)
           }
-          let adjoinsQuote: Bool = if case .quote? = block.kind { true }
-            else if case .quote? = blocks[index - 1].kind { true }
-            else { false }
-          height += startsNestedList ? RichBlockListMetrics.itemSpacing
-            : adjoinsQuote ? RichBlockQuoteMetrics.adjacentSpacing : Self.blockSpacing
-          if case let .heading(heading)? = block.kind {
-            height += heading.level <= 2 ? 7 : 5
+          if !appendText(
+            fallback,
+            role: .paragraph,
+            path: BlockContentPath(parent.components + [.block(index)]),
+            x: x,
+            width: width,
+            inheritedDirection: inheritedDirection,
+            capturesTrailingLine: parent.components.isEmpty && index == blocks.count - 1
+          ) {
+            restore(saved, claimedActionIDs: claimed)
           }
         }
-        let path = BlockContentPath(parent.components + [.block(index)])
-        let isTerminalRoot = parent.components.isEmpty && index == blocks.count - 1
-        guard layout(
-          block: block,
-          path: path,
-          x: x,
-          width: width,
-          depth: depth,
-          inheritedDirection: inheritedDirection,
-          fullBleedContainer: fullBleedContainer,
-          isTerminalRoot: isTerminalRoot
-        ) else { return false }
       }
       return true
+    }
+
+    private mutating func layout(
+      blockAt index: Int,
+      of blocks: [InlineProtocol.Block],
+      parent: BlockContentPath,
+      x: CGFloat,
+      width: CGFloat,
+      depth: Int,
+      inheritedDirection: Bool?,
+      fullBleedContainer: (x: CGFloat, width: CGFloat)?
+    ) -> Bool {
+      let block = blocks[index]
+      if index == 0, case .heading? = block.kind {
+        height += parent.components.isEmpty ? 6 : 4
+      } else if index > 0 {
+        let startsNestedList: Bool = if case .list? = block.kind,
+                                       case .listItem? = parent.components.last
+        {
+          true
+        } else {
+          false
+        }
+        let adjoinsQuote: Bool = if case .quote? = block.kind { true }
+          else if case .quote? = blocks[index - 1].kind { true }
+          else { false }
+        height += startsNestedList ? RichBlockListMetrics.itemSpacing
+          : adjoinsQuote ? RichBlockQuoteMetrics.adjacentSpacing : Self.blockSpacing
+        if case let .heading(heading)? = block.kind {
+          height += heading.level <= 2 ? 7 : 5
+        }
+      }
+      let path = BlockContentPath(parent.components + [.block(index)])
+      let isTerminalRoot = parent.components.isEmpty && index == blocks.count - 1
+      return layout(
+        block: block,
+        path: path,
+        x: x,
+        width: width,
+        depth: depth,
+        inheritedDirection: inheritedDirection,
+        fullBleedContainer: fullBleedContainer,
+        isTerminalRoot: isTerminalRoot
+      )
     }
 
     private mutating func layout(
@@ -745,7 +867,8 @@ final class RichBlockLayoutPlanner {
           width: width,
           depth: depth + 1,
           inheritedDirection: direction,
-          fullBleedContainer: fullBleedContainer
+          fullBleedContainer: fullBleedContainer,
+          bounds: childBounds[path]
         )
       case let .footer(text):
         return appendText(
@@ -797,9 +920,21 @@ final class RichBlockLayoutPlanner {
       case let .form(form):
         return appendForm(form, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
       case let .widget(widget):
-        // With widgets off, the message falls back to its flat text, like an unknown kind.
+        // With widgets off, the widget shows its fallback text, like an unknown kind.
         guard let widgetLayout else { return false }
         return appendWidget(widget, layout: widgetLayout, path: path, x: x, width: width)
+      case let .planProposal(plan):
+        return layout(planProposal: plan, path: path, x: x, width: width, depth: depth + 1, inheritedDirection: inheritedDirection)
+      case let .approval(approval):
+        return layout(approval: approval, path: path, x: x, width: width, depth: depth + 1, inheritedDirection: inheritedDirection)
+      case let .review(review):
+        return appendReview(review, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .taskSuggestion(task):
+        return layout(taskSuggestion: task, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .nextStep(step):
+        return layout(nextStep: step, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .promptSuggestions(prompts):
+        return appendPromptChips(prompts, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
       }
     }
 
@@ -944,7 +1079,8 @@ final class RichBlockLayoutPlanner {
         width: max(1, width - RichBlockQuoteMetrics.leadingInset - RichBlockQuoteMetrics.trailingInset),
         depth: depth,
         inheritedDirection: isRTL,
-        fullBleedContainer: nil
+        fullBleedContainer: nil,
+        bounds: childBounds[path]
       ) else { return false }
       let quotedContentMaxX = measuredMaxX
       let endingInset = isRTL

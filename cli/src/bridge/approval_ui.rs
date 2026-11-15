@@ -201,6 +201,7 @@ pub(super) async fn clear_approval(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(chat_id),
                 message_id,
                 text: text.to_string(),
@@ -225,6 +226,7 @@ pub(super) async fn clear_shared_approval_status(
     edit_message_with_retry(
         bot,
         EditMessageRequest {
+            entities: Vec::new(),
             chat_id: InlineId::new(approval.origin_chat_id),
             message_id: InlineId::new(message_id),
             text: text.to_string(),

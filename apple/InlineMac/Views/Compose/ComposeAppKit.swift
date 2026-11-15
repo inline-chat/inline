@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 
 protocol ComposeImplementation: AnyObject {
@@ -33,6 +34,17 @@ final class ComposeAppKit: NSView {
   private let implementation: any ComposeImplementation
   private let usesGlassCompose: Bool
   let surfaceStyle: ChatViewAppearance.SurfaceStyle
+  private let peerId: InlineKit.Peer
+  private let dependencies: AppDependencies
+
+  // A DM with a bot the viewer can't message shows a notice instead of the
+  // editor. Only a known "no" does this; an unknown answer keeps the editor.
+  private var peerUser: InlineKit.User?
+  private var botAccessCancellable: AnyCancellable?
+  private var noAccessBar: BotNoAccessBar?
+  private var editorConstraints: [NSLayoutConstraint] = []
+  private var noAccessConstraints: [NSLayoutConstraint] = []
+  private(set) var isBlockedByBotAccess = false
 
   weak var messageList: (any ChatMessageListController)? {
     get { implementation.messageList }
@@ -51,6 +63,9 @@ final class ComposeAppKit: NSView {
     surfaceStyle: ChatViewAppearance.SurfaceStyle = .content
   ) {
     self.surfaceStyle = surfaceStyle
+    self.peerId = peerId
+    self.dependencies = dependencies
+    self.peerUser = peerUser
     if #available(macOS 26.0, *) {
       implementation = GlassComposeAppKit(
         peerId: peerId,
@@ -79,6 +94,7 @@ final class ComposeAppKit: NSView {
 
     super.init(frame: .zero)
     setupView()
+    observeBotAccess()
   }
 
   @available(*, unavailable)
@@ -96,45 +112,145 @@ final class ComposeAppKit: NSView {
   }
 
   func didLayout() {
+    guard !isBlockedByBotAccess else { return }
     implementation.didLayout()
   }
 
   func focusEditor() {
+    guard !isBlockedByBotAccess else { return }
     implementation.focusEditor()
   }
 
   func setPeerUser(_ user: InlineKit.User?) {
+    peerUser = user
     implementation.setPeerUser(user)
+    observeBotAccess()
+  }
+
+  /// Nothing reaches the editor while it is replaced: no drop, paste or selection.
+  private var acceptsInput: Bool {
+    !isBlockedByBotAccess && messageList?.isMessageSelectionActive != true
   }
 
   func handleAttachments(from pasteboard: NSPasteboard) -> Bool {
-    guard messageList?.isMessageSelectionActive != true else { return false }
+    guard acceptsInput else { return false }
     return implementation.handleAttachments(from: pasteboard)
   }
 
   func handleFileDrop(_ urls: [URL]) {
-    guard messageList?.isMessageSelectionActive != true else { return }
+    guard acceptsInput else { return }
     implementation.handleFileDrop(urls)
   }
 
   func handleTextDropOrPaste(_ text: String) {
-    guard messageList?.isMessageSelectionActive != true else { return }
+    guard acceptsInput else { return }
     implementation.handleTextDropOrPaste(text)
   }
 
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
-    guard messageList?.isMessageSelectionActive != true else { return }
+    guard acceptsInput else { return }
     implementation.handleImageDropOrPaste(image, url)
   }
 
   func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage? = nil) {
-    guard messageList?.isMessageSelectionActive != true else { return }
+    guard acceptsInput else { return }
     implementation.handleVideoDropOrPaste(url, thumbnail: thumbnail)
   }
 
   func handleAnimatedImageDropOrPaste(_ url: URL) {
-    guard messageList?.isMessageSelectionActive != true else { return }
+    guard acceptsInput else { return }
     implementation.handleAnimatedImageDropOrPaste(url)
+  }
+
+  // MARK: - Bot access
+
+  /// The bot whose DM this is, when the chat is one.
+  private var directBotUserID: Int64? {
+    guard case let .user(id) = peerId, peerUser?.id == id, peerUser?.bot == true else { return nil }
+    return id
+  }
+
+  private func observeBotAccess() {
+    guard let botUserID = directBotUserID else {
+      botAccessCancellable = nil
+      applyBotAccess(nil)
+      return
+    }
+    guard botAccessCancellable == nil else {
+      applyBotAccess(AgentGrantStore.shared.access(botUserID: botUserID))
+      return
+    }
+    // The stored answer arrives synchronously, so the first frame is right;
+    // opening the chat also asks the server again.
+    botAccessCancellable = AgentGrantStore.shared.$accessByBotUserID
+      .map { $0[botUserID] }
+      .removeDuplicates()
+      .sink { [weak self] access in self?.applyBotAccess(access) }
+    AgentGrantStore.shared.refresh(botUserID: botUserID)
+  }
+
+  private func applyBotAccess(_ access: AgentGrantAccess?) {
+    let owner = access.flatMap { $0.ownerUserID > 0 ? ObjectCache.shared.getCachedUser(id: $0.ownerUserID)?.user : nil }
+    let notice = peerUser.flatMap { BotNoAccessNotice.make(bot: $0, access: access, owner: owner) }
+    guard let notice else {
+      setBlocked(false)
+      return
+    }
+    let bar = noAccessBar ?? makeNoAccessBar()
+    bar.update(notice)
+    setBlocked(true)
+    // The owner's name makes the notice useful; fetch it once if it isn't here.
+    if notice.ownerUserID == nil, let ownerUserID = access?.ownerUserID, ownerUserID > 0 {
+      Task { @MainActor [weak self] in
+        await ObjectCache.shared.ensure([.user(ownerUserID)])
+        guard let self, let botUserID = self.directBotUserID else { return }
+        let current = AgentGrantStore.shared.access(botUserID: botUserID)
+        guard current == access, ObjectCache.shared.getCachedUser(id: ownerUserID) != nil else { return }
+        self.applyBotAccess(current)
+      }
+    }
+  }
+
+  private func makeNoAccessBar() -> BotNoAccessBar {
+    let bar = BotNoAccessBar { [weak self] ownerUserID in
+      self?.dependencies.openChatRoute(peer: .user(id: ownerUserID))
+    }
+    bar.isHidden = true
+    addSubview(bar)
+    noAccessConstraints = [
+      bar.leadingAnchor.constraint(equalTo: leadingAnchor),
+      bar.trailingAnchor.constraint(equalTo: trailingAnchor),
+      bar.topAnchor.constraint(equalTo: topAnchor),
+      bar.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ]
+    noAccessBar = bar
+    return bar
+  }
+
+  private func setBlocked(_ blocked: Bool) {
+    guard blocked != isBlockedByBotAccess else { return }
+    isBlockedByBotAccess = blocked
+    let editor = implementation.view
+    if blocked {
+      // Typing must not land in an editor nobody can see.
+      if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: editor) {
+        window?.makeFirstResponder(nil)
+      }
+      NSLayoutConstraint.deactivate(editorConstraints)
+      NSLayoutConstraint.activate(noAccessConstraints)
+    } else {
+      NSLayoutConstraint.deactivate(noAccessConstraints)
+      NSLayoutConstraint.activate(editorConstraints)
+    }
+    editor.isHidden = blocked
+    noAccessBar?.isHidden = !blocked
+    layoutSubtreeIfNeeded()
+    if blocked {
+      messageList?.updateInsetForCompose(BotNoAccessBar.height, animate: false)
+    } else {
+      implementation.didLayout()
+      messageList?.updateInsetForCompose(frame.height, animate: false)
+    }
   }
 
   private func setupView() {
@@ -159,14 +275,15 @@ final class ComposeAppKit: NSView {
     contentView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(contentView)
 
-    constraints.append(contentsOf: [
+    // Kept apart: the no-access notice takes over the wrapper's height.
+    editorConstraints = [
       contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
       contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
       contentView.topAnchor.constraint(equalTo: topAnchor),
       contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
+    ]
 
-    NSLayoutConstraint.activate(constraints)
+    NSLayoutConstraint.activate(constraints + editorConstraints)
   }
 }
 

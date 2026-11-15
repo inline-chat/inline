@@ -12,7 +12,9 @@ public final class CLIInstallerController {
   @ObservationIgnored private let recoveryURL: URL
 
   public init(configuration: CLIInstallerConfiguration = .production) {
-    service = CLIInstallerService(configuration: configuration)
+    // The controller only installs when the user asks, so it may prompt for
+    // an administrator password when an existing CLI lives in a root-owned folder.
+    service = CLIInstallerService(configuration: configuration, allowsAdministratorAuthorization: true)
     recoveryURL = configuration.documentationURL
   }
 

@@ -20,6 +20,8 @@ public struct CLIUpdateStatus: Decodable, Sendable, Equatable {
   public let staged: Artifact?
   public let retryAt: Int64?
   public let bridges: [Bridge]?
+  /// Launchers the CLI won't replace because only an administrator can write them.
+  public let launchersNeedingAdministrator: [String]?
 }
 
 /// Orders short policy writes while downloads remain free to observe an opt-out.

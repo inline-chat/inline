@@ -36,15 +36,13 @@ final class ComposeAutocompleteManager: NSObject {
   private let emojiDetector = EmojiAutocompleteDetector()
   private let mentionViewModel: MentionCompletionViewModel
   private let commandViewModel: PeerBotCommandsViewModel
-  private let participantsViewModel: ChatParticipantsWithMembersViewModel
+  /// Observed only while a mention match is open.
+  private let mentionSource: MentionCandidatesSource
   private let peerId: InlineKit.Peer
   private let viewModel: ComposeAutocompleteViewModel
   private var completionConstraints: [NSLayoutConstraint] = []
   private var cancellables = Set<AnyCancellable>()
   private var commandLoadTask: Task<Void, Never>?
-  private var agentLoadTask: Task<Void, Never>?
-  private var mentionCandidates = MentionCompletionCandidates.empty
-  private var mentionAgents: [MentionableBotAgent] = []
   private var loadingPresentationTask: Task<Void, Never>?
   private var commandLoadStateOverride: ComposeAutocompleteLoadState?
   private var suppressMentionDetection = false
@@ -61,11 +59,7 @@ final class ComposeAutocompleteManager: NSObject {
     self.mentionViewModel = mentionViewModel
     self.commandViewModel = commandViewModel
     self.peerId = peerId
-    participantsViewModel = ChatParticipantsWithMembersViewModel(
-      db: database,
-      chatId: chatId,
-      purpose: .mentionCandidates
-    )
+    mentionSource = MentionCandidatesSource(db: database, scope: .chat(chatId: chatId, peer: peerId))
     viewModel = ComposeAutocompleteViewModel(
       db: database,
       peer: peerId,
@@ -96,9 +90,7 @@ final class ComposeAutocompleteManager: NSObject {
     )
     super.init()
     bindViewModel()
-    bindParticipants()
-    observeBotAgentChanges()
-    loadMentionAgents()
+    bindMentionCandidates()
   }
 
   func configure(spaceId: Int64?) {
@@ -122,11 +114,15 @@ final class ComposeAutocompleteManager: NSObject {
       return false
     }
 
-    let isNewMentionSession = match.kind == .mention && viewModel.match?.kind != .mention
-    viewModel.update(match: match)
-    if isNewMentionSession {
-      loadMentionAgents()
+    if match.kind == .mention {
+      // Before `update`, so the first session's synchronous read fills its first frame.
+      if viewModel.match?.kind != .mention {
+        mentionSource.beginSession()
+      }
+    } else {
+      mentionSource.endSession()
     }
+    viewModel.update(match: match)
     loadCommandsIfNeeded(for: match)
     return true
   }
@@ -173,6 +169,7 @@ final class ComposeAutocompleteManager: NSObject {
     presentationSession = nil
     viewModel.hide(suppressCurrentMatch: suppressCurrentMatch)
     completionView?.hide()
+    mentionSource.endSession()
   }
 
   func cleanup() {
@@ -183,8 +180,6 @@ final class ComposeAutocompleteManager: NSObject {
     completionView = nil
     commandLoadTask?.cancel()
     commandLoadTask = nil
-    agentLoadTask?.cancel()
-    agentLoadTask = nil
     cancellables.removeAll()
   }
 
@@ -209,51 +204,18 @@ final class ComposeAutocompleteManager: NSObject {
     .store(in: &cancellables)
   }
 
-  private func bindParticipants() {
-    participantsViewModel.$mentionCandidates
+  private func bindMentionCandidates() {
+    mentionSource.updates
       .sink { [weak self] candidates in
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          self.mentionCandidates = candidates
-          self.applyMentionCandidates()
-        }
-      }
-      .store(in: &cancellables)
-
-    Task { [weak self] in
-      await self?.participantsViewModel.refetchParticipants()
-    }
-  }
-
-  private func loadMentionAgents(forceRefresh: Bool = false) {
-    agentLoadTask?.cancel()
-    agentLoadTask = Task { @MainActor [weak self, peerId = peerId] in
-      guard let self else { return }
-      do {
-        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId, forceRefresh: forceRefresh)
-        applyMentionCandidates()
-      } catch is CancellationError {
-        return
-      } catch {
-        mentionAgents = []
-        applyMentionCandidates()
-      }
-    }
-  }
-
-  private func observeBotAgentChanges() {
-    NotificationCenter.default.publisher(for: .botAgentsChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.loadMentionAgents(forceRefresh: true)
+        // Sent on the main actor, synchronously for the first session's read.
+        MainActor.assumeIsolated {
+          self?.applyMentionCandidates(candidates)
         }
       }
       .store(in: &cancellables)
   }
 
-  private func applyMentionCandidates() {
-    var candidates = mentionCandidates
-    candidates.agents = mentionAgents
+  private func applyMentionCandidates(_ candidates: MentionCompletionCandidates) {
     mentionViewModel.updateCandidates(candidates)
     if viewModel.match?.kind == .mention {
       viewModel.reloadCurrentMatch()

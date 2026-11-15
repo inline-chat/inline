@@ -221,6 +221,7 @@ export const handler = async (
             payload: {
               kind: "alert",
               senderUserId: context.currentUserId,
+              chatId,
               threadId: `chat_${chatId}`,
               title: `${senderUser.firstName ?? "Someone"} will do`,
               subtitle: result.taskTitle ?? undefined,

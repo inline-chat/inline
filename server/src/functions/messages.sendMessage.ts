@@ -62,7 +62,7 @@ import { processOutgoingText } from "@in/server/modules/message/processOutgoingT
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { validateBotBlockContent } from "@in/server/modules/message/botBlockContent"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
-import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
+import { normalizeAndValidateMessageActions, validateBlockActionReferences } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
   emitMessageSubthreadUpdateIfNeeded,
@@ -104,7 +104,12 @@ import {
   normalizeAgentThreadContext,
   validateAgentThreadContext,
 } from "@in/server/modules/agentConfiguration"
-import { getBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
+import { getReachableBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
+import {
+  dropUnreachableBotMentions,
+  ensureCanWriteInBotDm,
+  ensureCanWriteUnderBotDm,
+} from "@in/server/modules/agents/access"
 import { InlineError } from "@in/server/types/errors"
 import { logReplacedSendDate, resolveMessageDate } from "@in/server/modules/message/clientSendDate"
 
@@ -221,6 +226,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
+  if (chat.parentChatId != null) await ensureCanWriteUnderBotDm(chat, currentUserId)
   if (chat.type === "private" && (await senderIsBot())) await ensureBotCanReachDmPeer(chat, currentUserId)
   const inputPeer = Encoders.peerFromChat(chat, { currentUserId })
   const chatId = chat.id
@@ -310,6 +316,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
         replyToMessageId: replyToMsgIdNumber ?? undefined,
       })
     }
+    entities = await dropUnreachableBotMentions(entities, currentUserId)
   } catch (error) {
     log.error("sendMessage failed to resolve outgoing entities", { chatId, currentUserId, error })
     if (RealtimeRpcError.is(error)) {
@@ -386,6 +393,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const normalizedActions = normalizeAndValidateMessageActions(input.actions, botBlockContent)
+  validateBlockActionReferences(botBlockContent, normalizedActions)
   if (normalizedActions !== undefined && !(await senderIsBot())) {
     throw RealtimeRpcError.BadRequest()
   }
@@ -444,7 +452,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       }
     }
 
-    const visibleBotIds = await getBotUserIdsForChatScope(chat, currentUserId)
+    const visibleBotIds = await getReachableBotUserIdsForChatScope(chat, currentUserId)
     if (!visibleBotIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
 
     const hasConsumableInput =
@@ -895,6 +903,9 @@ async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: 
   if (!peerUser || UsersModel.isDeleted(peerUser)) {
     throw RealtimeRpcError.PeerIdInvalid()
   }
+  // A bot's DM takes messages from people who can reach the bot, and answers
+  // to something the bot asked them there.
+  if (peerUser.bot === true) await ensureCanWriteInBotDm(chat.id, peerUser, currentUserId)
 }
 
 async function ensureUrgentNudgeHasPriorTwoWayChat({
@@ -1473,6 +1484,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const access = await getEffectiveChatAccessUserIds(db, [chat.id], {
     userIds: notifications.map((value) => value.userId),
     source: "messages.send",
+    committed: true,
   })
   await Promise.all(
     notifications

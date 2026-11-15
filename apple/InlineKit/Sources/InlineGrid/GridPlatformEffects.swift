@@ -9,6 +9,8 @@ public struct GridPlatformEffects {
     case join
     case leave
     case connected
+    case microphoneOn
+    case microphoneOff
   }
 
   public var playSound: ((Sound) -> Void)?

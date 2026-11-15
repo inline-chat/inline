@@ -30,32 +30,6 @@ public extension Date {
   }
 }
 
-public func getStatusText(_ state: RealtimeAPIState) -> String {
-  switch state {
-    case .connected:
-      "Connected"
-    case .connecting:
-      "Connecting"
-    case .updating:
-      "Updating"
-    case .waitingForNetwork:
-      "Waiting for network"
-  }
-}
-
-public func getStatusTextForChatHeader(_ state: RealtimeAPIState) -> String {
-  switch state {
-    case .connected:
-      "connected"
-    case .connecting:
-      "connecting..."
-    case .updating:
-      "updating..."
-    case .waitingForNetwork:
-      "waiting for network"
-  }
-}
-
 public func getDenaOrMoUserId(username: String) -> Int64 {
   #if DEBUG
   if username == "mo" {

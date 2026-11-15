@@ -355,7 +355,12 @@ pub(super) async fn provision_dev_bot(
         .unwrap_or_else(|| {
             provider_bot_username(provider.provider_id, me.id, &account.host_installation_id)
         });
-    let bots = owner.call(proto::ListBotsInput {}).await?.bots;
+    let bots = owner
+        .call(proto::ListBotsInput {
+            include_managed: None,
+        })
+        .await?
+        .bots;
     let (bot, replaces_saved_bot) = select_bridge_bot(
         &bots,
         saved.as_ref().map(|saved| saved.bot_user_id),
@@ -666,6 +671,22 @@ pub(super) async fn provision_dev_bot(
 }
 
 pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand> {
+    if provider_id == super::dots::DOTS_PROVIDER_ID {
+        return [
+            ("help", "What this bridge does"),
+            ("status", "Show the ChatGPT connection"),
+            ("mirror", "Show messages you type in ChatGPT here (on/off)"),
+            ("share", "Let someone else use your Dot (/unshare to stop)"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (command, description))| proto::BotCommand {
+            command: command.to_string(),
+            description: description.to_string(),
+            sort_order: i32::try_from(index).ok(),
+        })
+        .collect();
+    }
     let mut commands = vec![
         ("help", "Show agent commands"),
         ("status", "Show bridge and session status"),
@@ -690,7 +711,7 @@ pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand>
         ("permissions", "Show or choose permission mode"),
         ("verbose", "Toggle detailed agent activity"),
         ("threads", "Configure Inline reply-thread routing"),
-        ("allowlist", "Allow another user to drive this agent"),
+        ("share", "Let someone else use this agent"),
     ];
     if provider_id == "codex" {
         commands.splice(

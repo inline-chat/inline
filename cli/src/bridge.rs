@@ -68,6 +68,7 @@ mod adapter;
 mod allowlist_ui;
 mod approval_ui;
 mod copy;
+mod dots;
 mod inline_tools;
 mod provider;
 mod question_ui;
@@ -220,6 +221,7 @@ pub(crate) struct ProviderSetupOutcome {
     pub(crate) display_name: String,
     pub(crate) workspace: PathBuf,
     pub(crate) background_service: String,
+    pub(crate) config_path: PathBuf,
 }
 
 pub(crate) struct ProviderSetupOptions {
@@ -227,6 +229,8 @@ pub(crate) struct ProviderSetupOptions {
     pub(crate) allow_adapter_install: bool,
     pub(crate) manage_service: bool,
     pub(crate) operator_user_ids: Option<Vec<i64>>,
+    /// People, spaces and admins to share the bot with as part of setup.
+    pub(crate) sharing: crate::bot_sharing::BotSharingArgs,
 }
 
 pub(crate) enum ProviderSetupProgress {
@@ -234,12 +238,15 @@ pub(crate) enum ProviderSetupProgress {
     Completed(&'static str, &'static str),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn setup_provider(
     config: &Config,
     owner_auth: AuthCredential,
     provider_id: &str,
     folder: Option<PathBuf>,
     name: Option<String>,
+    sharing: crate::bot_sharing::BotSharingArgs,
+    manage_service: bool,
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -252,8 +259,9 @@ pub async fn setup_provider(
         ProviderSetupOptions {
             quiet_adapter_install: json,
             allow_adapter_install: true,
-            manage_service: true,
+            manage_service,
             operator_user_ids: None,
+            sharing: sharing.clone(),
         },
     )
     .await?;
@@ -270,12 +278,26 @@ pub async fn setup_provider(
         output::print_json(&result, json_format)?;
     } else {
         println!("{} is ready in Inline.", result.display_name);
+        // People new to agents often assume their team can reach the bot. Say who can.
+        for line in crate::bot_sharing::access_summary_lines(outcome.bot_user_id, &sharing, false) {
+            println!("{line}");
+        }
         println!(
             "Provider: {} ({})",
             result.provider, result.provider_version
         );
-        println!("Workspace: {}", workspace_label(&outcome.workspace));
+        if result.provider != dots::DOTS_PROVIDER_ID {
+            println!("Workspace: {}", workspace_label(&outcome.workspace));
+        }
         println!("Background service: {}", result.background_service);
+        if result.background_service == "restart_required" {
+            println!(
+                "No service was installed. Start the bridge with: inline bridge run --config {}",
+                crate::intro::quote_argument(&outcome.config_path.display().to_string())
+            );
+        } else if let Some(hint) = service::setup_lifecycle_hint() {
+            println!("{hint}");
+        }
     }
     Ok(())
 }
@@ -342,6 +364,17 @@ where
     )
     .await
     .map_err(CliError::provider_integration_failed)?;
+    // The Dot must exist and Codex must hold a ChatGPT login before a bot is
+    // created; the bot takes the Dot's name unless one was given.
+    let dots_name_follows_dot = provider.provider_id == dots::DOTS_PROVIDER_ID && name.is_none();
+    let name = if provider.provider_id == dots::DOTS_PROVIDER_ID {
+        let room = dots::preflight(&provider.executable)
+            .await
+            .map_err(CliError::provider_integration_failed)?;
+        name.or(Some(room.name))
+    } else {
+        name
+    };
     progress(ProviderSetupProgress::Completed("integration", "ready"));
 
     progress(ProviderSetupProgress::Started("bot"));
@@ -354,12 +387,39 @@ where
         name.as_deref(),
     )
     .await?;
+    if dots_name_follows_dot {
+        // The bot follows the Dot's name until the owner renames it.
+        fs::write(
+            provisioned
+                .installation
+                .state_dir
+                .join(dots::MANAGED_NAME_FILE),
+            &provisioned.installation.display_name,
+        )?;
+    }
     progress(ProviderSetupProgress::Completed("bot", "configured"));
 
     progress(ProviderSetupProgress::Started("access"));
     validate_account(&provisioned.account, &provisioned.secrets)?;
     if let Some(operator_user_ids) = options.operator_user_ids.as_deref() {
         set_provider_operator_ids(&provisioned.account, provider_id, operator_user_ids)?;
+    }
+    let bot_user_id = provisioned.installation.bot_user_id;
+    for grant in options.sharing.grants(bot_user_id)? {
+        owner.call(grant).await?;
+    }
+    if provider_id == dots::DOTS_PROVIDER_ID {
+        // A Dot answers only its owner and the people it is shared with, so
+        // nobody else should see a composer for it. Other bridges report a
+        // runtime, which makes them private on its own; the Dots relay doesn't.
+        // Best effort: an older server has no such setting.
+        let _ = owner
+            .call(proto::UpdateAgentSettingsInput {
+                bot_user_id,
+                default_output_mode: None,
+                open_to_everyone: Some(false),
+            })
+            .await;
     }
     progress(ProviderSetupProgress::Completed("access", "configured"));
 
@@ -402,6 +462,7 @@ where
         display_name: provisioned.installation.display_name.clone(),
         workspace: provisioned.installation.workspace.clone(),
         background_service,
+        config_path: provisioned.paths.config.clone(),
     })
 }
 
@@ -477,6 +538,12 @@ pub async fn run_service(
     let Some(_instance_lock) = wait_for_instance_lock(&paths.instance_lock).await? else {
         return Ok(());
     };
+    // Installs from before linger repair, and runtimes the updater activated,
+    // never ran setup's repair; check it whenever systemd starts the service.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("INVOCATION_ID").is_some() {
+        service::ensure_linux_linger();
+    }
     // The service manager restarts a failed exit every ten seconds; keep the
     // persisted backoff for repeated failures it cannot see.
     let service_ledger = FailureLedger::service(&paths);
@@ -2114,6 +2181,32 @@ async fn run_provider_installation(
             "Owner dialog state is unavailable: {}",
             safe_diagnostic(&error.to_string())
         );
+    }
+    if installation.provider_id == dots::DOTS_PROVIDER_ID {
+        // A Dot has no coding turns: the relay owns the DM instead of a
+        // driver, sharing this service's bot, owner control, and health.
+        drop(startup_activity);
+        return dots::run_dots_relay(dots::DotsLaunch {
+            installation: &installation,
+            owner_user_id: account.owner_user_id,
+            dm_chat_id,
+            bot,
+            bot_store: bot_store.clone(),
+            inline_events,
+            connection_lease: &connection_lease,
+            readiness: shared_provider_readiness.as_ref(),
+            external_shutdown,
+            standalone_runtime,
+            owner_control: owner_control.clone(),
+            profile: Some(dots::ProfileSync {
+                config: config.clone(),
+                owner_auth: owner_credential(&secrets)?,
+                bot_user_id: installation.bot_user_id,
+                state_dir: installation.state_dir.clone(),
+                bundled_avatar_id: installation.managed_avatar_file_unique_id.clone(),
+            }),
+        })
+        .await;
     }
     let bridge_store = Arc::new(BridgeStore::open(&provider_paths.bridge_db)?);
     let installation_id = InstallationId::new(installation.installation_id.clone())?;

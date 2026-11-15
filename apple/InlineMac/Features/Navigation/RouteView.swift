@@ -27,8 +27,10 @@ struct RouteView: View {
       }
 
     case let .chat(peer):
+      // With the stable route, one chat route view (and its toolbar items) survives chat switches and
+      // swaps the chat inside it; otherwise every chat rebuilds the route from scratch.
       ChatRouteView(peer: peer)
-        .id(peer.toString())
+        .id(settings.stableChatRouteEnabled ? "chat-route" : peer.toString())
 
     case let .chatInfo(peer, query):
       ChatInfoRouteView(peer: peer, query: query)

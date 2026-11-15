@@ -10,16 +10,21 @@ on:
       - 'cli/**'
       - 'crates/**'
       - 'vendor/**'
+      - '.cargo/**'
       - 'proto/**'
       - 'apple/InlineMacUI/**'
       - 'scripts/release-cli*'
       - 'scripts/cli-release-*'
       - 'scripts/ci/assert-release-commit.mjs'
+      - 'scripts/ci/ensure-public-workspaces.sh'
+      - 'scripts/ci/public-workspaces-ref'
+      - 'scripts/ci/cli-alpha-gate.*'
       - 'scripts/ci/release-tag.test.ts'
       - 'scripts/ci/cli-release-version*'
       - 'scripts/ci/test-cli-update-*'
       - 'scripts/ci/test-cli-installer.py'
       - '.github/workflows/cli-release.yml'
+      - '.github/workflows/cli-alpha.yml'
       - '.github/workflows/cli-update-qualification.yml'
   pull_request:
     paths:
@@ -29,16 +34,21 @@ on:
       - 'cli/**'
       - 'crates/**'
       - 'vendor/**'
+      - '.cargo/**'
       - 'proto/**'
       - 'apple/InlineMacUI/**'
       - 'scripts/release-cli*'
       - 'scripts/cli-release-*'
       - 'scripts/ci/assert-release-commit.mjs'
+      - 'scripts/ci/ensure-public-workspaces.sh'
+      - 'scripts/ci/public-workspaces-ref'
+      - 'scripts/ci/cli-alpha-gate.*'
       - 'scripts/ci/release-tag.test.ts'
       - 'scripts/ci/cli-release-version*'
       - 'scripts/ci/test-cli-update-*'
       - 'scripts/ci/test-cli-installer.py'
       - '.github/workflows/cli-release.yml'
+      - '.github/workflows/cli-alpha.yml'
       - '.github/workflows/cli-update-qualification.yml'
   workflow_dispatch:
     inputs:
@@ -55,8 +65,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: cli-update-${{ github.ref }}
-  cancel-in-progress: true
+  group: cli-update-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   qualify:

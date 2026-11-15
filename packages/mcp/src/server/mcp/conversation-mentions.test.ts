@@ -19,6 +19,9 @@ const sdk = vi.hoisted(() => ({
 vi.mock("@inline-chat/realtime-sdk", () => ({
   InlineSdkClient: vi.fn(function InlineSdkClient() { return sdk.client }),
 }))
+vi.mock("../inline/rpc-invoker", () => ({
+  createHttpRpcInvoker: () => ({ invoke: (method: Method, input: unknown) => sdk.client.invoke(method, input) }),
+}))
 
 const grant: McpGrant = {
   id: "g1", clientId: "c1", inlineUserId: 1n, scope: "messages:read", spaceIds: [10n], allowDms: true, allowHomeThreads: true,

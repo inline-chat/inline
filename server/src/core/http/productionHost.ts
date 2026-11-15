@@ -95,6 +95,8 @@ import { MAX_HTTP_UPLOAD_BYTES } from "../../modules/files/limits"
 import { isLegacyFileUploadRequest, limitHttpRequestBody } from "./requestBodyLimit"
 import { startAgentRuntimeSweeper, stopAgentRuntimeSweeper } from "@in/server/modules/agents/runtime"
 import { startBotOnlineSweeper, stopBotOnlineSweeper } from "@in/server/modules/bots/online"
+import { SessionsModel } from "@in/server/db/models/sessions"
+import { Log } from "@in/server/utils/log"
 export type { CoreWebSocketData } from "./combinedWebsocket"
 
 export interface CoreHttpDrain {
@@ -674,6 +676,12 @@ export const startCoreProductionServer = async <
       startAgentRuntimeSweeper()
       // Bots seen only over HTTP go offline once their activity lapses.
       startBotOnlineSweeper()
+      // Push tokens registered before fingerprints existed get one live owner each. Idempotent.
+      applicationBackgroundWork.track(
+        SessionsModel.backfillPushTokenFingerprints().catch((error: unknown) => {
+          Log.shared.error("Push token fingerprint backfill failed", { error })
+        }),
+      )
     }
     admitting = true
   } catch (cause) {

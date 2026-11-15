@@ -172,6 +172,8 @@ pub enum ItemKind {
     FileChange,
     /// Plan or todo list.
     Plan,
+    /// Code review result (Codex review mode).
+    Review,
     /// Sub-agent or background task item.
     Child,
     /// Usage or compaction marker.
@@ -408,6 +410,12 @@ pub enum ItemBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text: Option<String>,
     },
+    /// A finished code review, as the harness wrote it for people (Codex
+    /// `exitedReviewMode`). The agent usually repeats it as its answer.
+    Review {
+        /// Review text: an explanation, then findings.
+        text: String,
+    },
     /// A sub-agent or background task started or reported from this session.
     Child {
         /// The child.
@@ -449,6 +457,7 @@ impl ItemBody {
             Self::Command { .. } => ItemKind::Command,
             Self::FileChange { .. } => ItemKind::FileChange,
             Self::Plan { .. } => ItemKind::Plan,
+            Self::Review { .. } => ItemKind::Review,
             Self::Child { .. } => ItemKind::Child,
             Self::Usage { .. } => ItemKind::Usage,
             Self::Error { .. } => ItemKind::Error,
@@ -615,6 +624,11 @@ pub enum ApprovalSubject {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// Approve a plan and leave plan mode (Claude `ExitPlanMode`).
+    Plan {
+        /// The plan, Markdown.
+        plan: String,
+    },
     /// Use a tool (Claude `can_use_tool`, MCP elicitation).
     Tool {
         /// Tool name.
@@ -766,6 +780,10 @@ pub struct FieldOption {
     /// Description.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// What picking it looks like, shown monospaced (Claude's option
+    /// `preview`: a code sample or a layout sketch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 /// Who or what closed an interaction.

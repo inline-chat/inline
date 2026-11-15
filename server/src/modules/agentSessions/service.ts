@@ -689,6 +689,7 @@ async function syncAgentSessionMessagesOnce(
 
     let nextMessageId = Math.max(lockedChat.lastMsgId ?? 0, lockedChat.messageIdCounter ?? 0)
     let lastCreatedMessageId: number | undefined
+    let lastCreatedMessageDate: Date | undefined
     let lastUpdate: UpdateSeqAndDate | undefined
     const itemResults: AgentSessionMessageSyncResult[] = []
 
@@ -1093,6 +1094,7 @@ async function syncAgentSessionMessagesOnce(
       lockedChat.updateSeq = update.seq
       lastUpdate = update
       lastCreatedMessageId = created.messageId
+      lastCreatedMessageDate = created.date
       projected.push({
         kind: "newMessage",
         messageId: created.messageId,
@@ -1108,6 +1110,7 @@ async function syncAgentSessionMessagesOnce(
         lastUpdateDate: lastUpdate.date,
         messageIdCounter: nextMessageId,
         lastMsgId: lastCreatedMessageId ?? lockedChat.lastMsgId,
+        lastMessageDate: lastCreatedMessageDate ?? lockedChat.lastMessageDate,
       }).where(eq(chats.id, lockedChat.id))
     }
     return itemResults

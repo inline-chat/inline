@@ -130,6 +130,13 @@ export const TBotMessageAction = t.Union([
     copy_text: t.String(),
     ...botMessageActionOptions,
   }),
+  t.Object({
+    action_id: t.String(),
+    text: t.String(),
+    type: t.Literal("compose"),
+    compose_text: t.String(),
+    ...botMessageActionOptions,
+  }),
   t.Object({ action_id: t.String(), text: t.String(), type: t.Literal("open_url"), url: t.String(), ...botMessageActionOptions }),
   t.Object({
     action_id: t.String(),

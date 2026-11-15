@@ -1,3 +1,4 @@
+import AppKit
 import InlineGrid
 import Auth
 import Foundation
@@ -35,7 +36,6 @@ public struct AppDependencies {
   let cliUpdates: CLIUpdateController
   let navigation = tracedLaunchDependency("DependencyNavigation") { NavigationModel.shared }
   let transactions = tracedLaunchDependency("DependencyTransactions") { Transactions.shared }
-  let realtime = tracedLaunchDependency("DependencyRealtimeLegacy") { Realtime.shared }
   let realtimeV2 = tracedLaunchDependency("DependencyRealtimeV2") { Api.realtime }
   let database = tracedLaunchDependency("DependencyDatabase") { AppDatabase.shared }
   let data = tracedLaunchDependency("DependencyDataManager") {
@@ -91,7 +91,6 @@ extension View {
       .environmentObject(deps.userSettings.notification)
       .environmentObject(Api.realtime.stateObject)
       .environment(\.transactions, deps.transactions)
-      .environment(\.realtime, deps.realtime)
       .environment(\.realtimeV2, deps.realtimeV2)
       .appDatabase(deps.database)
       .environment(\.logOut, deps.logOut)
@@ -682,6 +681,13 @@ final class Nav3ChatOpenPreloadBridge {
           targetMessageId: targetMessageId,
           database: database
         )
+        // A burst of clicks queues the later clicks behind the chat being built. Let a queued click
+        // or key press supersede this open before committing, so the burst builds only its last chat.
+        var inputYields = 0
+        while inputYields < Self.maxInputYields, self.requestID == id, Self.hasPendingNavigationInput() {
+          inputYields += 1
+          try await Task.sleep(for: .milliseconds(8))
+        }
         guard self.requestID == id, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
             .end,
@@ -766,6 +772,18 @@ final class Nav3ChatOpenPreloadBridge {
         }
       }
     }
+  }
+
+  private static let maxInputYields = 6
+
+  /// A mouse press or key press waiting in the event queue: the user may be opening another chat.
+  private static func hasPendingNavigationInput() -> Bool {
+    NSApp.nextEvent(
+      matching: [.leftMouseDown, .keyDown],
+      until: .distantPast,
+      inMode: .default,
+      dequeue: false
+    ) != nil
   }
 
   func consumePreparedPayload(for peer: Peer) -> PreparedChatPayload? {

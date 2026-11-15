@@ -1,16 +1,25 @@
 import { describe, expect, test } from "bun:test"
 import {
+  BlockApproval_Subject,
+  BlockDecisionState,
   BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
   BlockTable_Alignment,
+  BlockReview_Verdict,
+  BlockReviewFinding_Confidence,
+  BlockReviewFinding_Outcome,
+  BlockReviewFinding_Priority,
   MessageEntity_Type,
   Photo_Format,
   type BlockContent,
+  type BlockText,
   type MessageEntities,
 } from "@inline-chat/protocol/core"
 import { encodeBotEntities } from "./entityCodec"
 import { encodeBotRichMessage } from "./richContent"
+import { BotRichMessage } from "./types.effect"
+import { Schema } from "effect"
 
 const none = { oneofKind: undefined } as const
 
@@ -288,5 +297,100 @@ describe("Bot rich content projection", () => {
       width: 640,
       height: 480,
     })
+  })
+
+  test("projects agent decision blocks and form extensions with snake_case keys", () => {
+    let text = ""
+    const range = (value: string): BlockText => {
+      const offset = text.length
+      text += value + "\n"
+      return { offset: BigInt(offset), length: BigInt(value.length) }
+    }
+    const blockContent: BlockContent = {
+      blocks: [
+        { kind: { oneofKind: "planProposal", planProposal: {
+          title: range("Plan"),
+          children: [{ kind: { oneofKind: "paragraph", paragraph: range("Do it") } }],
+          state: BlockDecisionState.ACCEPTED,
+          actionIds: ["approve", "keep"],
+          decidedByUserId: 7n,
+        } } },
+        { kind: { oneofKind: "approval", approval: {
+          subject: BlockApproval_Subject.FILE_CHANGE,
+          title: range("Apply patch?"),
+          command: range("git apply"),
+          cwd: range("~/dev"),
+          reason: range("Fix"),
+          children: [],
+          state: BlockDecisionState.PENDING,
+          actionIds: ["allow"],
+        } } },
+        { kind: { oneofKind: "review", review: {
+          verdict: BlockReview_Verdict.INCORRECT,
+          summary: range("1 finding"),
+          findings: [{
+            title: range("Null deref"),
+            priority: BlockReviewFinding_Priority.P0,
+            path: range("a.ts"),
+            startLine: 3,
+            endLine: 4,
+            category: "correctness",
+            confidence: BlockReviewFinding_Confidence.PLAUSIBLE,
+            outcome: BlockReviewFinding_Outcome.NO_CHANGE_NEEDED,
+            actionId: "fix",
+          }],
+        } } },
+        { kind: { oneofKind: "taskSuggestion", taskSuggestion: {
+          title: range("Upgrade"),
+          state: BlockDecisionState.ACCEPTED,
+          startedPeer: { type: { oneofKind: "chat", chat: { chatId: 42n } } },
+          expiresAt: 1_800_000_000n,
+          actionIds: [],
+        } } },
+        { kind: { oneofKind: "nextStep", nextStep: { recap: range("Done"), question: range("Ship?"), actionIds: ["yes"], blocking: true } } },
+        { kind: { oneofKind: "promptSuggestions", promptSuggestions: { prompts: [{ label: range("Tests"), text: "Write tests" }] } } },
+        { kind: { oneofKind: "form", form: {
+          formId: "auth",
+          fields: [{
+            fieldId: "method",
+            header: range("Auth"),
+            label: range("Method?"),
+            required: false,
+            kind: { oneofKind: "select", select: {
+              options: [{ optionId: "oauth", label: range("OAuth"), preview: range("GET /authorize"), recommended: true }],
+              multiple: false,
+              defaultOptionIds: [],
+              allowOther: false,
+            } },
+          }],
+          requiredGrant: 0,
+          closed: false,
+        } } },
+      ],
+    }
+
+    const rich = encodeBotRichMessage({ text, blockContent })!
+    expect(rich.blocks).toEqual([
+      { type: "plan_proposal", title: "Plan", blocks: [{ type: "paragraph", text: "Do it", is_rtl: undefined }], state: "accepted", action_ids: ["approve", "keep"], decided_by_user_id: 7, is_rtl: undefined },
+      { type: "approval", subject: "file_change", title: "Apply patch?", command: "git apply", cwd: "~/dev", reason: "Fix", blocks: [], state: "pending", action_ids: ["allow"], decided_by_user_id: undefined, is_rtl: undefined },
+      { type: "review", title: undefined, verdict: "incorrect", summary: "1 finding", findings: [{
+        title: "Null deref", body: undefined, priority: "p0", path: "a.ts", start_line: 3, end_line: 4,
+        category: "correctness", confidence: "plausible", outcome: "no_change_needed", action_id: "fix",
+      }], is_rtl: undefined },
+      { type: "task_suggestion", title: "Upgrade", brief: undefined, state: "accepted", started_peer_id: { chat_id: 42 }, expires_at: 1_800_000_000, action_ids: undefined, is_rtl: undefined },
+      { type: "next_step", recap: "Done", question: "Ship?", action_ids: ["yes"], is_blocking: true, is_rtl: undefined },
+      { type: "prompt_suggestions", prompts: [{ label: "Tests", text: "Write tests" }], is_rtl: undefined },
+      expect.objectContaining({
+        type: "form",
+        fields: [expect.objectContaining({
+          header: "Auth",
+          options: [{ option_id: "oauth", label: "OAuth", description: undefined, preview: "GET /authorize", is_recommended: true }],
+        })],
+      }),
+    ])
+
+    // The response schema accepts every projected block unchanged once undefined keys are dropped.
+    const json = JSON.parse(JSON.stringify(rich))
+    expect(Schema.encodeUnknownSync(BotRichMessage)(Schema.decodeUnknownSync(BotRichMessage)(json))).toEqual(json)
   })
 })

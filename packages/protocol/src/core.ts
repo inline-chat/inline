@@ -1183,6 +1183,12 @@ export interface MessageAction {
          */
         openLink: MessageActionOpenLink;
     } | {
+        oneofKind: "compose";
+        /**
+         * @generated from protobuf field: MessageActionCompose compose = 10;
+         */
+        compose: MessageActionCompose;
+    } | {
         oneofKind: undefined;
     };
     /**
@@ -1255,6 +1261,19 @@ export interface MessageActionOpenUrl {
      * @generated from protobuf field: string url = 1;
      */
     url: string;
+}
+/**
+ * Puts text in the viewer's composer for this chat, client-side, without
+ * notifying the bot. The viewer edits and sends it. Clients add it after any
+ * draft the viewer has, never replacing it.
+ *
+ * @generated from protobuf message MessageActionCompose
+ */
+export interface MessageActionCompose {
+    /**
+     * @generated from protobuf field: string text = 1;
+     */
+    text: string;
 }
 /**
  * Navigates to an Inline chat or message, client-side. It never broadens
@@ -1575,6 +1594,45 @@ export interface Block {
          * @generated from protobuf field: BlockWidget widget = 19;
          */
         widget: BlockWidget;
+    } | {
+        oneofKind: "planProposal";
+        /**
+         * Agent surfaces from Claude and ChatGPT clients. Clients that can't draw one
+         * show the fallback text it covers and draw the rest of the message.
+         *
+         * @generated from protobuf field: BlockPlanProposal plan_proposal = 20;
+         */
+        planProposal: BlockPlanProposal;
+    } | {
+        oneofKind: "approval";
+        /**
+         * @generated from protobuf field: BlockApproval approval = 21;
+         */
+        approval: BlockApproval;
+    } | {
+        oneofKind: "review";
+        /**
+         * @generated from protobuf field: BlockReview review = 22;
+         */
+        review: BlockReview;
+    } | {
+        oneofKind: "taskSuggestion";
+        /**
+         * @generated from protobuf field: BlockTaskSuggestion task_suggestion = 23;
+         */
+        taskSuggestion: BlockTaskSuggestion;
+    } | {
+        oneofKind: "nextStep";
+        /**
+         * @generated from protobuf field: BlockNextStep next_step = 24;
+         */
+        nextStep: BlockNextStep;
+    } | {
+        oneofKind: "promptSuggestions";
+        /**
+         * @generated from protobuf field: BlockPromptSuggestions prompt_suggestions = 25;
+         */
+        promptSuggestions: BlockPromptSuggestions;
     } | {
         oneofKind: undefined;
     };
@@ -2261,6 +2319,12 @@ export interface BlockFormField {
     } | {
         oneofKind: undefined;
     };
+    /**
+     * Short chip naming the question, such as "Auth method".
+     *
+     * @generated from protobuf field: optional BlockText header = 9;
+     */
+    header?: BlockText;
 }
 /**
  * @generated from protobuf message BlockFormSelect
@@ -2303,6 +2367,19 @@ export interface BlockFormOption {
      * @generated from protobuf field: optional BlockText description = 3;
      */
     description?: BlockText;
+    /**
+     * Shown monospaced beside the options while this one is focused, such as a
+     * code sample or a layout sketch.
+     *
+     * @generated from protobuf field: optional BlockText preview = 4;
+     */
+    preview?: BlockText;
+    /**
+     * The sender's recommended answer.
+     *
+     * @generated from protobuf field: bool recommended = 5;
+     */
+    recommended: boolean;
 }
 /**
  * @generated from protobuf message BlockFormText
@@ -2520,6 +2597,395 @@ export interface MessageWidgetCall {
      * @generated from protobuf field: bytes payload = 2;
      */
     payload: Uint8Array;
+}
+/**
+ * A plan the agent wants approved before it acts (Claude ExitPlanMode, Codex
+ * proposed plans). The fallback text carries the title and the plan.
+ *
+ * @generated from protobuf message BlockPlanProposal
+ */
+export interface BlockPlanProposal {
+    /**
+     * @generated from protobuf field: optional BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * The plan body: headings, lists, code.
+     *
+     * @generated from protobuf field: repeated Block children = 2;
+     */
+    children: Block[];
+    /**
+     * @generated from protobuf field: BlockDecisionState state = 3;
+     */
+    state: BlockDecisionState;
+    /**
+     * IDs from Message.actions drawn as this block's buttons, in order. Clients
+     * that draw them here leave them out of the message's action rows; older
+     * clients keep showing them there.
+     *
+     * @generated from protobuf field: repeated string action_ids = 4;
+     */
+    actionIds: string[];
+    /**
+     * @generated from protobuf field: optional int64 decided_by_user_id = 5;
+     */
+    decidedByUserId?: bigint;
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 6;
+     */
+    isRtl?: boolean;
+}
+/**
+ * A request to run a command, change files, use a tool or widen permissions.
+ *
+ * @generated from protobuf message BlockApproval
+ */
+export interface BlockApproval {
+    /**
+     * @generated from protobuf field: BlockApproval.Subject subject = 1;
+     */
+    subject: BlockApproval_Subject;
+    /**
+     * @generated from protobuf field: BlockText title = 2;
+     */
+    title?: BlockText;
+    /**
+     * Rendered LTR and monospaced.
+     *
+     * @generated from protobuf field: optional BlockText command = 3;
+     */
+    command?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText cwd = 4;
+     */
+    cwd?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText reason = 5;
+     */
+    reason?: BlockText;
+    /**
+     * Diffs or fields describing what is being approved.
+     *
+     * @generated from protobuf field: repeated Block children = 6;
+     */
+    children: Block[];
+    /**
+     * @generated from protobuf field: BlockDecisionState state = 7;
+     */
+    state: BlockDecisionState;
+    /**
+     * Same contract as BlockPlanProposal.action_ids.
+     *
+     * @generated from protobuf field: repeated string action_ids = 8;
+     */
+    actionIds: string[];
+    /**
+     * @generated from protobuf field: optional int64 decided_by_user_id = 9;
+     */
+    decidedByUserId?: bigint;
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 10;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockApproval.Subject
+ */
+export enum BlockApproval_Subject {
+    /**
+     * @generated from protobuf enum value: SUBJECT_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: SUBJECT_COMMAND = 1;
+     */
+    COMMAND = 1,
+    /**
+     * @generated from protobuf enum value: SUBJECT_FILE_CHANGE = 2;
+     */
+    FILE_CHANGE = 2,
+    /**
+     * @generated from protobuf enum value: SUBJECT_TOOL = 3;
+     */
+    TOOL = 3,
+    /**
+     * @generated from protobuf enum value: SUBJECT_PERMISSIONS = 4;
+     */
+    PERMISSIONS = 4,
+    /**
+     * @generated from protobuf enum value: SUBJECT_NETWORK = 5;
+     */
+    NETWORK = 5
+}
+/**
+ * Code review notes: findings with priority and location, and an overall
+ * verdict.
+ *
+ * @generated from protobuf message BlockReview
+ */
+export interface BlockReview {
+    /**
+     * @generated from protobuf field: optional BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * @generated from protobuf field: BlockReview.Verdict verdict = 2;
+     */
+    verdict: BlockReview_Verdict;
+    /**
+     * @generated from protobuf field: optional BlockText summary = 3;
+     */
+    summary?: BlockText;
+    /**
+     * @generated from protobuf field: repeated BlockReviewFinding findings = 4;
+     */
+    findings: BlockReviewFinding[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 5;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf enum BlockReview.Verdict
+ */
+export enum BlockReview_Verdict {
+    /**
+     * @generated from protobuf enum value: VERDICT_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: VERDICT_CORRECT = 1;
+     */
+    CORRECT = 1,
+    /**
+     * @generated from protobuf enum value: VERDICT_INCORRECT = 2;
+     */
+    INCORRECT = 2,
+    /**
+     * @generated from protobuf enum value: VERDICT_NEEDS_ATTENTION = 3;
+     */
+    NEEDS_ATTENTION = 3
+}
+/**
+ * @generated from protobuf message BlockReviewFinding
+ */
+export interface BlockReviewFinding {
+    /**
+     * @generated from protobuf field: BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * Explanation or failure scenario.
+     *
+     * @generated from protobuf field: optional BlockText body = 2;
+     */
+    body?: BlockText;
+    /**
+     * @generated from protobuf field: BlockReviewFinding.Priority priority = 3;
+     */
+    priority: BlockReviewFinding_Priority;
+    /**
+     * Rendered LTR and monospaced.
+     *
+     * @generated from protobuf field: optional BlockText path = 4;
+     */
+    path?: BlockText;
+    /**
+     * @generated from protobuf field: optional uint32 start_line = 5;
+     */
+    startLine?: number;
+    /**
+     * @generated from protobuf field: optional uint32 end_line = 6;
+     */
+    endLine?: number;
+    /**
+     * Lowercase slug such as "correctness"; at most 40 characters.
+     *
+     * @generated from protobuf field: optional string category = 7;
+     */
+    category?: string;
+    /**
+     * @generated from protobuf field: BlockReviewFinding.Confidence confidence = 8;
+     */
+    confidence: BlockReviewFinding_Confidence;
+    /**
+     * @generated from protobuf field: BlockReviewFinding.Outcome outcome = 9;
+     */
+    outcome: BlockReviewFinding_Outcome;
+    /**
+     * Message action run from the finding, such as "Fix".
+     *
+     * @generated from protobuf field: optional string action_id = 10;
+     */
+    actionId?: string;
+}
+/**
+ * @generated from protobuf enum BlockReviewFinding.Priority
+ */
+export enum BlockReviewFinding_Priority {
+    /**
+     * @generated from protobuf enum value: PRIORITY_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P0 = 1;
+     */
+    P0 = 1,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P1 = 2;
+     */
+    P1 = 2,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P2 = 3;
+     */
+    P2 = 3,
+    /**
+     * @generated from protobuf enum value: PRIORITY_P3 = 4;
+     */
+    P3 = 4
+}
+/**
+ * @generated from protobuf enum BlockReviewFinding.Confidence
+ */
+export enum BlockReviewFinding_Confidence {
+    /**
+     * @generated from protobuf enum value: CONFIDENCE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CONFIDENCE_CONFIRMED = 1;
+     */
+    CONFIRMED = 1,
+    /**
+     * @generated from protobuf enum value: CONFIDENCE_PLAUSIBLE = 2;
+     */
+    PLAUSIBLE = 2
+}
+/**
+ * @generated from protobuf enum BlockReviewFinding.Outcome
+ */
+export enum BlockReviewFinding_Outcome {
+    /**
+     * @generated from protobuf enum value: OUTCOME_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: OUTCOME_FIXED = 1;
+     */
+    FIXED = 1,
+    /**
+     * @generated from protobuf enum value: OUTCOME_SKIPPED = 2;
+     */
+    SKIPPED = 2,
+    /**
+     * @generated from protobuf enum value: OUTCOME_NO_CHANGE_NEEDED = 3;
+     */
+    NO_CHANGE_NEEDED = 3
+}
+/**
+ * Work the agent proposes to run separately, as a new thread.
+ *
+ * @generated from protobuf message BlockTaskSuggestion
+ */
+export interface BlockTaskSuggestion {
+    /**
+     * @generated from protobuf field: BlockText title = 1;
+     */
+    title?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText brief = 2;
+     */
+    brief?: BlockText;
+    /**
+     * @generated from protobuf field: BlockDecisionState state = 3;
+     */
+    state: BlockDecisionState;
+    /**
+     * The thread the task started in, once accepted.
+     *
+     * @generated from protobuf field: optional Peer started_peer = 4;
+     */
+    startedPeer?: Peer;
+    /**
+     * Unix seconds after which the suggestion reads as expired.
+     *
+     * @generated from protobuf field: optional int64 expires_at = 5;
+     */
+    expiresAt?: bigint;
+    /**
+     * Same contract as BlockPlanProposal.action_ids.
+     *
+     * @generated from protobuf field: repeated string action_ids = 6;
+     */
+    actionIds: string[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 7;
+     */
+    isRtl?: boolean;
+}
+/**
+ * The agent's end-of-turn recap and the one decision it waits on.
+ *
+ * @generated from protobuf message BlockNextStep
+ */
+export interface BlockNextStep {
+    /**
+     * @generated from protobuf field: BlockText recap = 1;
+     */
+    recap?: BlockText;
+    /**
+     * @generated from protobuf field: optional BlockText question = 2;
+     */
+    question?: BlockText;
+    /**
+     * Same contract as BlockPlanProposal.action_ids.
+     *
+     * @generated from protobuf field: repeated string action_ids = 3;
+     */
+    actionIds: string[];
+    /**
+     * The agent is stopped until someone answers.
+     *
+     * @generated from protobuf field: bool blocking = 4;
+     */
+    blocking: boolean;
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 5;
+     */
+    isRtl?: boolean;
+}
+/**
+ * Chips that put a prompt in the viewer's composer, like
+ * MessageActionCompose.
+ *
+ * @generated from protobuf message BlockPromptSuggestions
+ */
+export interface BlockPromptSuggestions {
+    /**
+     * @generated from protobuf field: repeated BlockPromptSuggestion prompts = 1;
+     */
+    prompts: BlockPromptSuggestion[];
+    /**
+     * @generated from protobuf field: optional bool is_rtl = 2;
+     */
+    isRtl?: boolean;
+}
+/**
+ * @generated from protobuf message BlockPromptSuggestion
+ */
+export interface BlockPromptSuggestion {
+    /**
+     * @generated from protobuf field: BlockText label = 1;
+     */
+    label?: BlockText;
+    /**
+     * Composer text when it differs from the label; not part of the fallback
+     * text. At most 4,000 characters.
+     *
+     * @generated from protobuf field: optional string text = 2;
+     */
+    text?: string;
 }
 /**
  * @generated from protobuf message Message
@@ -3535,10 +4001,19 @@ export interface AgentSettings {
      * @generated from protobuf field: optional int64 date = 4;
      */
     date?: bigint;
+    /**
+     * Anyone on Inline may message the bot, add it to chats and find it by its
+     * username; the bot's own software decides who it answers. Off by default:
+     * only the owner and the access list (AgentGrant) reach the bot.
+     *
+     * @generated from protobuf field: bool open_to_everyone = 5;
+     */
+    openToEveryone: boolean;
 }
 /**
- * Opt-in access to a bot for one person. No grants means owner-only. Any grant
- * lets its holder answer the agent's questions.
+ * One entry of a bot's access list. No grants means owner-only, unless the bot
+ * is open to everyone (AgentSettings). Any grant lets its holder message the
+ * bot, add it to chats and answer its questions.
  *
  * @generated from protobuf message AgentGrant
  */
@@ -3812,7 +4287,7 @@ export interface ListAgentGrantsInput {
  */
 export interface ListAgentGrantsResult {
     /**
-     * All grants for the owner and the bot; only the viewer's own otherwise.
+     * All grants for the owner, admins and the bot; only the viewer's own otherwise.
      *
      * @generated from protobuf field: repeated AgentGrant grants = 1;
      */
@@ -3827,8 +4302,9 @@ export interface ListAgentGrantsResult {
     ownerUserId: bigint;
 }
 /**
- * Creates or replaces one person's grant. Owner, or the bot itself for grants
- * without APPROVE and CONFIGURE (the bridge's /allowlist).
+ * Creates or replaces one access list entry. The owner; an admin, for grants
+ * without APPROVE; or the bot itself, for grants without APPROVE and
+ * CONFIGURE (the bridge's /allowlist).
  *
  * @generated from protobuf message SetAgentGrantInput
  */
@@ -3907,6 +4383,13 @@ export interface GetAgentAccessInput {
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * Several bots at once, about the caller. When set, the fields above are
+     * ignored and the answers come back in `access`. At most 200.
+     *
+     * @generated from protobuf field: repeated int64 bot_user_ids = 3;
+     */
+    botUserIds: bigint[];
 }
 /**
  * @generated from protobuf message GetAgentAccessResult
@@ -3920,6 +4403,53 @@ export interface GetAgentAccessResult {
      * @generated from protobuf field: repeated AgentGrantOperation operations = 2;
      */
     operations: AgentGrantOperation[];
+    /**
+     * One entry per bot asked about with `bot_user_ids`. Deleted and unknown
+     * bots are left out.
+     *
+     * @generated from protobuf field: repeated AgentAccess access = 3;
+     */
+    access: AgentAccess[];
+}
+/**
+ * What the caller may do with one bot.
+ *
+ * @generated from protobuf message AgentAccess
+ */
+export interface AgentAccess {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: bool is_owner = 2;
+     */
+    isOwner: boolean;
+    /**
+     * From the access list. Empty for an open bot the caller has no grant on.
+     *
+     * @generated from protobuf field: repeated AgentGrantOperation operations = 3;
+     */
+    operations: AgentGrantOperation[];
+    /**
+     * @generated from protobuf field: int64 owner_user_id = 4;
+     */
+    ownerUserId: bigint;
+    /**
+     * Whether the caller may message the bot, add it to chats and find it: the
+     * owner, anyone on its access list, or anyone when the bot is open to
+     * everyone. Clients hide the composer and the bot's mention when false.
+     *
+     * @generated from protobuf field: bool can_message = 5;
+     */
+    canMessage: boolean;
+    /**
+     * The bot wrote to the caller in their direct chat in the last week, so
+     * they can answer it there even without access. Clients keep the composer.
+     *
+     * @generated from protobuf field: bool can_reply = 6;
+     */
+    canReply: boolean;
 }
 /**
  * @generated from protobuf message DeleteAgentGrantResult
@@ -4022,6 +4552,10 @@ export interface UpdateAgentSettingsInput {
      * @generated from protobuf field: optional AgentOutputMode default_output_mode = 2;
      */
     defaultOutputMode?: AgentOutputMode;
+    /**
+     * @generated from protobuf field: optional bool open_to_everyone = 3;
+     */
+    openToEveryone?: boolean;
 }
 /**
  * @generated from protobuf message UpdateAgentSettingsResult
@@ -6553,6 +7087,12 @@ export interface RpcCall {
          */
         setFocusStatus: SetFocusStatusInput;
     } | {
+        oneofKind: "getSpaces";
+        /**
+         * @generated from protobuf field: GetSpacesInput getSpaces = 171;
+         */
+        getSpaces: GetSpacesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7575,6 +8115,12 @@ export interface RpcResult {
          * @generated from protobuf field: SetFocusStatusResult setFocusStatus = 170;
          */
         setFocusStatus: SetFocusStatusResult;
+    } | {
+        oneofKind: "getSpaces";
+        /**
+         * @generated from protobuf field: GetSpacesResult getSpaces = 171;
+         */
+        getSpaces: GetSpacesResult;
     } | {
         oneofKind: undefined;
     };
@@ -9573,6 +10119,13 @@ export interface DeleteBotAgentResult {
  * @generated from protobuf message ListBotsInput
  */
 export interface ListBotsInput {
+    /**
+     * Also list the bots the caller manages as an admin, after their own. Each
+     * bot's `bot_info` says who owns it.
+     *
+     * @generated from protobuf field: optional bool include_managed = 1;
+     */
+    includeManaged?: boolean;
 }
 /**
  * @generated from protobuf message ListBotsResult
@@ -10934,12 +11487,102 @@ export interface DeleteDialogFolderResult {
  */
 export interface GetChatsInput {
     /**
-     * Include every accessible linked subthread, regardless of dialog visibility.
-     * Omitted/false preserves the normal chat-list snapshot.
+     * Legacy. true is the same as scope = CHAT_LIST_SCOPE_ACCESSIBLE.
      *
      * @generated from protobuf field: optional bool include_subthreads = 1;
      */
     includeSubthreads?: boolean;
+    /**
+     * Page size, capped at 100. Absent: legacy unpaged snapshot (deprecated).
+     *
+     * @generated from protobuf field: optional int32 limit = 2;
+     */
+    limit?: number;
+    /**
+     * Exclusive start. Pass the previous result's next_offset; absent = first page.
+     *
+     * @generated from protobuf field: optional ChatListOffset offset = 3;
+     */
+    offset?: ChatListOffset;
+    /**
+     * @generated from protobuf field: ChatListOrder order = 4;
+     */
+    order: ChatListOrder;
+    /**
+     * Predicates, ANDed. Absent fields do not constrain.
+     *
+     * @generated from protobuf field: optional ChatListFilter filter = 5;
+     */
+    filter?: ChatListFilter;
+    /**
+     * @generated from protobuf field: ChatListScope scope = 6;
+     */
+    scope: ChatListScope;
+}
+/**
+ * @generated from protobuf message ChatListOffset
+ */
+export interface ChatListOffset {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * Activity date of that chat. RECENT order only.
+     *
+     * @generated from protobuf field: optional int64 date = 2;
+     */
+    date?: bigint;
+}
+/**
+ * @generated from protobuf message ChatListFilter
+ */
+export interface ChatListFilter {
+    /**
+     * Empty: all kinds.
+     *
+     * @generated from protobuf field: repeated ChatListKind kinds = 1;
+     */
+    kinds: ChatListKind[];
+    /**
+     * Restrict space threads to these spaces. Empty: all spaces.
+     *
+     * @generated from protobuf field: repeated int64 space_ids = 2;
+     */
+    spaceIds: bigint[];
+    /**
+     * Unread messages or a manual unread mark.
+     *
+     * @generated from protobuf field: optional bool unread = 3;
+     */
+    unread?: boolean;
+    /**
+     * The four below are tri-state on stored dialog state:
+     * true = only, false = exclude, absent = both.
+     *
+     * @generated from protobuf field: optional bool archived = 4;
+     */
+    archived?: boolean;
+    /**
+     * @generated from protobuf field: optional bool open = 5;
+     */
+    open?: boolean;
+    /**
+     * @generated from protobuf field: optional bool pinned = 6;
+     */
+    pinned?: boolean;
+    /**
+     * Dialogs in this folder.
+     *
+     * @generated from protobuf field: optional int64 folder_id = 7;
+     */
+    folderId?: bigint;
+    /**
+     * Case-insensitive match on the chat title or DM peer name. (Phase 2.)
+     *
+     * @generated from protobuf field: optional string query = 8;
+     */
+    query?: string;
 }
 /**
  * @generated from protobuf message GetChatsResult
@@ -10977,10 +11620,33 @@ export interface GetChatsResult {
     messages: Message[];
     /**
      * Personal dialog folders. Dialogs remain present for unsupported clients.
+     * Paged requests: complete, on the first page only.
      *
      * @generated from protobuf field: repeated DialogFolder folders = 6;
      */
     folders: DialogFolder[];
+    /**
+     * Paged requests: pass as `offset` for the next page. Absent: end of list.
+     *
+     * @generated from protobuf field: optional ChatListOffset next_offset = 7;
+     */
+    nextOffset?: ChatListOffset;
+}
+/**
+ * Every space the viewer is a member of. Small and unpaged.
+ *
+ * @generated from protobuf message GetSpacesInput
+ */
+export interface GetSpacesInput {
+}
+/**
+ * @generated from protobuf message GetSpacesResult
+ */
+export interface GetSpacesResult {
+    /**
+     * @generated from protobuf field: repeated Space spaces = 1;
+     */
+    spaces: Space[];
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -16091,6 +16757,15 @@ export interface CreateUploadInput {
     } | {
         oneofKind: undefined;
     };
+    /**
+     * The whole file, when it fits in one part (byte_count <= part size). The server saves it as
+     * part 0 and finishes the upload in this call, returning `complete` when it finalizes. Servers
+     * that predate this field ignore it; part 0 is then missing from accepted_parts and the client
+     * uploads it as usual.
+     *
+     * @generated from protobuf field: optional bytes inline_data = 10;
+     */
+    inlineData?: Uint8Array;
 }
 /**
  * @generated from protobuf message CreateUploadResult
@@ -16116,6 +16791,12 @@ export interface CreateUploadResult {
      * @generated from protobuf field: repeated uint32 accepted_parts = 5;
      */
     acceptedParts: number[];
+    /**
+     * Set when inline_data finalized the upload in this call.
+     *
+     * @generated from protobuf field: optional UploadComplete complete = 6;
+     */
+    complete?: UploadComplete;
 }
 /**
  * @generated from protobuf message SaveUploadPartInput
@@ -16890,6 +17571,44 @@ export enum BlockStatus {
     CANCELLED = 6
 }
 /**
+ * Where an agent's request to a person stands. The sender edits the message as
+ * it changes; clients may show a pressed button as pending until that edit.
+ *
+ * @generated from protobuf enum BlockDecisionState
+ */
+export enum BlockDecisionState {
+    /**
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_PENDING = 1;
+     */
+    PENDING = 1,
+    /**
+     * Approved, or for a task suggestion, started.
+     *
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_ACCEPTED = 2;
+     */
+    ACCEPTED = 2,
+    /**
+     * Denied, dismissed, or for a plan, kept planning.
+     *
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_DECLINED = 3;
+     */
+    DECLINED = 3,
+    /**
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_EXPIRED = 4;
+     */
+    EXPIRED = 4,
+    /**
+     * A newer plan or request replaced this one.
+     *
+     * @generated from protobuf enum value: BLOCK_DECISION_STATE_SUPERSEDED = 5;
+     */
+    SUPERSEDED = 5
+}
+/**
  * Agent providers that implement Inline's session continuity contract. The
  * numeric values are stored by the server; additions must be append-only.
  *
@@ -17210,7 +17929,8 @@ export enum AgentGrantOperation {
      */
     APPROVE = 3,
     /**
-     * Change the agent's settings.
+     * Manage the bot as an admin: its access list, who can message it, its
+     * profile, settings and token. Only the owner deletes the bot.
      *
      * @generated from protobuf enum value: AGENT_GRANT_OPERATION_CONFIGURE = 5;
      */
@@ -17999,7 +18719,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SET_FOCUS_STATUS = 169;
      */
-    SET_FOCUS_STATUS = 169
+    SET_FOCUS_STATUS = 169,
+    /**
+     * @generated from protobuf enum value: GET_SPACES = 170;
+     */
+    GET_SPACES = 170
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -18160,6 +18884,64 @@ export enum DeleteDialogFolderDisposition {
      * @generated from protobuf enum value: KEEP_DIALOGS = 2;
      */
     KEEP_DIALOGS = 2
+}
+/**
+ * @generated from protobuf enum ChatListScope
+ */
+export enum ChatListScope {
+    /**
+     * Chats the viewer has a dialog with, except dialogs marked chat_list_hidden.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_SCOPE_DIALOGS = 0;
+     */
+    DIALOGS = 0,
+    /**
+     * Every chat the viewer can access, with or without a dialog, including
+     * linked subthreads.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_SCOPE_ACCESSIBLE = 1;
+     */
+    ACCESSIBLE = 1
+}
+/**
+ * @generated from protobuf enum ChatListOrder
+ */
+export enum ChatListOrder {
+    /**
+     * Latest activity first (last message date, else creation date), then chat
+     * ID descending. Pinned chats are not moved to the front.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_ORDER_RECENT = 0;
+     */
+    RECENT = 0,
+    /**
+     * Ascending chat ID. Pages never shift and new chats land at the end.
+     * For complete walks, sync and export.
+     *
+     * @generated from protobuf enum value: CHAT_LIST_ORDER_ID = 1;
+     */
+    ID = 1
+}
+/**
+ * @generated from protobuf enum ChatListKind
+ */
+export enum ChatListKind {
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_DM = 1;
+     */
+    DM = 1,
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_SPACE_THREAD = 2;
+     */
+    SPACE_THREAD = 2,
+    /**
+     * @generated from protobuf enum value: CHAT_LIST_KIND_HOME_THREAD = 3;
+     */
+    HOME_THREAD = 3
 }
 /**
  * @generated from protobuf enum GetChatHistoryMode
@@ -21124,6 +21906,7 @@ class MessageAction$Type extends MessageType<MessageAction> {
             { no: 4, name: "copy_text", kind: "message", oneof: "action", T: () => MessageActionCopyText },
             { no: 5, name: "open_url", kind: "message", oneof: "action", T: () => MessageActionOpenUrl },
             { no: 6, name: "open_link", kind: "message", oneof: "action", T: () => MessageActionOpenLink },
+            { no: 10, name: "compose", kind: "message", oneof: "action", T: () => MessageActionCompose },
             { no: 7, name: "style", kind: "enum", T: () => ["MessageAction.Style", MessageAction_Style, "STYLE_"] },
             { no: 8, name: "confirm", kind: "message", T: () => MessageActionConfirm },
             { no: 9, name: "required_grant", kind: "enum", T: () => ["AgentGrantRequirement", AgentGrantRequirement, "AGENT_GRANT_REQUIREMENT_"] }
@@ -21175,6 +21958,12 @@ class MessageAction$Type extends MessageType<MessageAction> {
                         openLink: MessageActionOpenLink.internalBinaryRead(reader, reader.uint32(), options, (message.action as any).openLink)
                     };
                     break;
+                case /* MessageActionCompose compose */ 10:
+                    message.action = {
+                        oneofKind: "compose",
+                        compose: MessageActionCompose.internalBinaryRead(reader, reader.uint32(), options, (message.action as any).compose)
+                    };
+                    break;
                 case /* MessageAction.Style style */ 7:
                     message.style = reader.int32();
                     break;
@@ -21214,6 +22003,9 @@ class MessageAction$Type extends MessageType<MessageAction> {
         /* MessageActionOpenLink open_link = 6; */
         if (message.action.oneofKind === "openLink")
             MessageActionOpenLink.internalBinaryWrite(message.action.openLink, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* MessageActionCompose compose = 10; */
+        if (message.action.oneofKind === "compose")
+            MessageActionCompose.internalBinaryWrite(message.action.compose, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         /* MessageAction.Style style = 7; */
         if (message.style !== 0)
             writer.tag(7, WireType.Varint).int32(message.style);
@@ -21374,6 +22166,53 @@ class MessageActionOpenUrl$Type extends MessageType<MessageActionOpenUrl> {
  * @generated MessageType for protobuf message MessageActionOpenUrl
  */
 export const MessageActionOpenUrl = new MessageActionOpenUrl$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageActionCompose$Type extends MessageType<MessageActionCompose> {
+    constructor() {
+        super("MessageActionCompose", [
+            { no: 1, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageActionCompose>): MessageActionCompose {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<MessageActionCompose>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageActionCompose): MessageActionCompose {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string text */ 1:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageActionCompose, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string text = 1; */
+        if (message.text !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageActionCompose
+ */
+export const MessageActionCompose = new MessageActionCompose$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageActionOpenLink$Type extends MessageType<MessageActionOpenLink> {
     constructor() {
@@ -22019,7 +22858,13 @@ class Block$Type extends MessageType<Block> {
             { no: 16, name: "callout", kind: "message", oneof: "kind", T: () => BlockCallout },
             { no: 17, name: "meter", kind: "message", oneof: "kind", T: () => BlockMeter },
             { no: 18, name: "form", kind: "message", oneof: "kind", T: () => BlockForm },
-            { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget }
+            { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget },
+            { no: 20, name: "plan_proposal", kind: "message", oneof: "kind", T: () => BlockPlanProposal },
+            { no: 21, name: "approval", kind: "message", oneof: "kind", T: () => BlockApproval },
+            { no: 22, name: "review", kind: "message", oneof: "kind", T: () => BlockReview },
+            { no: 23, name: "task_suggestion", kind: "message", oneof: "kind", T: () => BlockTaskSuggestion },
+            { no: 24, name: "next_step", kind: "message", oneof: "kind", T: () => BlockNextStep },
+            { no: 25, name: "prompt_suggestions", kind: "message", oneof: "kind", T: () => BlockPromptSuggestions }
         ]);
     }
     create(value?: PartialMessage<Block>): Block {
@@ -22148,6 +22993,42 @@ class Block$Type extends MessageType<Block> {
                         widget: BlockWidget.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).widget)
                     };
                     break;
+                case /* BlockPlanProposal plan_proposal */ 20:
+                    message.kind = {
+                        oneofKind: "planProposal",
+                        planProposal: BlockPlanProposal.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).planProposal)
+                    };
+                    break;
+                case /* BlockApproval approval */ 21:
+                    message.kind = {
+                        oneofKind: "approval",
+                        approval: BlockApproval.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).approval)
+                    };
+                    break;
+                case /* BlockReview review */ 22:
+                    message.kind = {
+                        oneofKind: "review",
+                        review: BlockReview.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).review)
+                    };
+                    break;
+                case /* BlockTaskSuggestion task_suggestion */ 23:
+                    message.kind = {
+                        oneofKind: "taskSuggestion",
+                        taskSuggestion: BlockTaskSuggestion.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).taskSuggestion)
+                    };
+                    break;
+                case /* BlockNextStep next_step */ 24:
+                    message.kind = {
+                        oneofKind: "nextStep",
+                        nextStep: BlockNextStep.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).nextStep)
+                    };
+                    break;
+                case /* BlockPromptSuggestions prompt_suggestions */ 25:
+                    message.kind = {
+                        oneofKind: "promptSuggestions",
+                        promptSuggestions: BlockPromptSuggestions.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).promptSuggestions)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -22217,6 +23098,24 @@ class Block$Type extends MessageType<Block> {
         /* BlockWidget widget = 19; */
         if (message.kind.oneofKind === "widget")
             BlockWidget.internalBinaryWrite(message.kind.widget, writer.tag(19, WireType.LengthDelimited).fork(), options).join();
+        /* BlockPlanProposal plan_proposal = 20; */
+        if (message.kind.oneofKind === "planProposal")
+            BlockPlanProposal.internalBinaryWrite(message.kind.planProposal, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* BlockApproval approval = 21; */
+        if (message.kind.oneofKind === "approval")
+            BlockApproval.internalBinaryWrite(message.kind.approval, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
+        /* BlockReview review = 22; */
+        if (message.kind.oneofKind === "review")
+            BlockReview.internalBinaryWrite(message.kind.review, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
+        /* BlockTaskSuggestion task_suggestion = 23; */
+        if (message.kind.oneofKind === "taskSuggestion")
+            BlockTaskSuggestion.internalBinaryWrite(message.kind.taskSuggestion, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* BlockNextStep next_step = 24; */
+        if (message.kind.oneofKind === "nextStep")
+            BlockNextStep.internalBinaryWrite(message.kind.nextStep, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
+        /* BlockPromptSuggestions prompt_suggestions = 25; */
+        if (message.kind.oneofKind === "promptSuggestions")
+            BlockPromptSuggestions.internalBinaryWrite(message.kind.promptSuggestions, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23612,7 +24511,8 @@ class BlockFormField$Type extends MessageType<BlockFormField> {
             { no: 5, name: "select", kind: "message", oneof: "kind", T: () => BlockFormSelect },
             { no: 6, name: "text", kind: "message", oneof: "kind", T: () => BlockFormText },
             { no: 7, name: "toggle", kind: "message", oneof: "kind", T: () => BlockFormToggle },
-            { no: 8, name: "number", kind: "message", oneof: "kind", T: () => BlockFormNumber }
+            { no: 8, name: "number", kind: "message", oneof: "kind", T: () => BlockFormNumber },
+            { no: 9, name: "header", kind: "message", T: () => BlockText }
         ]);
     }
     create(value?: PartialMessage<BlockFormField>): BlockFormField {
@@ -23665,6 +24565,9 @@ class BlockFormField$Type extends MessageType<BlockFormField> {
                         number: BlockFormNumber.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).number)
                     };
                     break;
+                case /* optional BlockText header */ 9:
+                    message.header = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.header);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23701,6 +24604,9 @@ class BlockFormField$Type extends MessageType<BlockFormField> {
         /* BlockFormNumber number = 8; */
         if (message.kind.oneofKind === "number")
             BlockFormNumber.internalBinaryWrite(message.kind.number, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText header = 9; */
+        if (message.header)
+            BlockText.internalBinaryWrite(message.header, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23788,12 +24694,15 @@ class BlockFormOption$Type extends MessageType<BlockFormOption> {
         super("BlockFormOption", [
             { no: 1, name: "option_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "label", kind: "message", T: () => BlockText },
-            { no: 3, name: "description", kind: "message", T: () => BlockText }
+            { no: 3, name: "description", kind: "message", T: () => BlockText },
+            { no: 4, name: "preview", kind: "message", T: () => BlockText },
+            { no: 5, name: "recommended", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<BlockFormOption>): BlockFormOption {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.optionId = "";
+        message.recommended = false;
         if (value !== undefined)
             reflectionMergePartial<BlockFormOption>(this, message, value);
         return message;
@@ -23811,6 +24720,12 @@ class BlockFormOption$Type extends MessageType<BlockFormOption> {
                     break;
                 case /* optional BlockText description */ 3:
                     message.description = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.description);
+                    break;
+                case /* optional BlockText preview */ 4:
+                    message.preview = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.preview);
+                    break;
+                case /* bool recommended */ 5:
+                    message.recommended = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -23833,6 +24748,12 @@ class BlockFormOption$Type extends MessageType<BlockFormOption> {
         /* optional BlockText description = 3; */
         if (message.description)
             BlockText.internalBinaryWrite(message.description, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText preview = 4; */
+        if (message.preview)
+            BlockText.internalBinaryWrite(message.preview, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* bool recommended = 5; */
+        if (message.recommended !== false)
+            writer.tag(5, WireType.Varint).bool(message.recommended);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24370,6 +25291,664 @@ class MessageWidgetCall$Type extends MessageType<MessageWidgetCall> {
  * @generated MessageType for protobuf message MessageWidgetCall
  */
 export const MessageWidgetCall = new MessageWidgetCall$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockPlanProposal$Type extends MessageType<BlockPlanProposal> {
+    constructor() {
+        super("BlockPlanProposal", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 3, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+            { no: 4, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "decided_by_user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockPlanProposal>): BlockPlanProposal {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.children = [];
+        message.state = 0;
+        message.actionIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockPlanProposal>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockPlanProposal): BlockPlanProposal {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* repeated Block children */ 2:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* BlockDecisionState state */ 3:
+                    message.state = reader.int32();
+                    break;
+                case /* repeated string action_ids */ 4:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* optional int64 decided_by_user_id */ 5:
+                    message.decidedByUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional bool is_rtl */ 6:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockPlanProposal, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Block children = 2; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDecisionState state = 3; */
+        if (message.state !== 0)
+            writer.tag(3, WireType.Varint).int32(message.state);
+        /* repeated string action_ids = 4; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(4, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* optional int64 decided_by_user_id = 5; */
+        if (message.decidedByUserId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.decidedByUserId);
+        /* optional bool is_rtl = 6; */
+        if (message.isRtl !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockPlanProposal
+ */
+export const BlockPlanProposal = new BlockPlanProposal$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockApproval$Type extends MessageType<BlockApproval> {
+    constructor() {
+        super("BlockApproval", [
+            { no: 1, name: "subject", kind: "enum", T: () => ["BlockApproval.Subject", BlockApproval_Subject, "SUBJECT_"] },
+            { no: 2, name: "title", kind: "message", T: () => BlockText },
+            { no: 3, name: "command", kind: "message", T: () => BlockText },
+            { no: 4, name: "cwd", kind: "message", T: () => BlockText },
+            { no: 5, name: "reason", kind: "message", T: () => BlockText },
+            { no: 6, name: "children", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Block },
+            { no: 7, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+            { no: 8, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "decided_by_user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 10, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockApproval>): BlockApproval {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.subject = 0;
+        message.children = [];
+        message.state = 0;
+        message.actionIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockApproval>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockApproval): BlockApproval {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockApproval.Subject subject */ 1:
+                    message.subject = reader.int32();
+                    break;
+                case /* BlockText title */ 2:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* optional BlockText command */ 3:
+                    message.command = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.command);
+                    break;
+                case /* optional BlockText cwd */ 4:
+                    message.cwd = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.cwd);
+                    break;
+                case /* optional BlockText reason */ 5:
+                    message.reason = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.reason);
+                    break;
+                case /* repeated Block children */ 6:
+                    message.children.push(Block.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* BlockDecisionState state */ 7:
+                    message.state = reader.int32();
+                    break;
+                case /* repeated string action_ids */ 8:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* optional int64 decided_by_user_id */ 9:
+                    message.decidedByUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional bool is_rtl */ 10:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockApproval, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockApproval.Subject subject = 1; */
+        if (message.subject !== 0)
+            writer.tag(1, WireType.Varint).int32(message.subject);
+        /* BlockText title = 2; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText command = 3; */
+        if (message.command)
+            BlockText.internalBinaryWrite(message.command, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText cwd = 4; */
+        if (message.cwd)
+            BlockText.internalBinaryWrite(message.cwd, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText reason = 5; */
+        if (message.reason)
+            BlockText.internalBinaryWrite(message.reason, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Block children = 6; */
+        for (let i = 0; i < message.children.length; i++)
+            Block.internalBinaryWrite(message.children[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDecisionState state = 7; */
+        if (message.state !== 0)
+            writer.tag(7, WireType.Varint).int32(message.state);
+        /* repeated string action_ids = 8; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(8, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* optional int64 decided_by_user_id = 9; */
+        if (message.decidedByUserId !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.decidedByUserId);
+        /* optional bool is_rtl = 10; */
+        if (message.isRtl !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockApproval
+ */
+export const BlockApproval = new BlockApproval$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockReview$Type extends MessageType<BlockReview> {
+    constructor() {
+        super("BlockReview", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "verdict", kind: "enum", T: () => ["BlockReview.Verdict", BlockReview_Verdict, "VERDICT_"] },
+            { no: 3, name: "summary", kind: "message", T: () => BlockText },
+            { no: 4, name: "findings", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockReviewFinding },
+            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockReview>): BlockReview {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.verdict = 0;
+        message.findings = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockReview>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockReview): BlockReview {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* BlockReview.Verdict verdict */ 2:
+                    message.verdict = reader.int32();
+                    break;
+                case /* optional BlockText summary */ 3:
+                    message.summary = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.summary);
+                    break;
+                case /* repeated BlockReviewFinding findings */ 4:
+                    message.findings.push(BlockReviewFinding.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 5:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockReview, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* BlockReview.Verdict verdict = 2; */
+        if (message.verdict !== 0)
+            writer.tag(2, WireType.Varint).int32(message.verdict);
+        /* optional BlockText summary = 3; */
+        if (message.summary)
+            BlockText.internalBinaryWrite(message.summary, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated BlockReviewFinding findings = 4; */
+        for (let i = 0; i < message.findings.length; i++)
+            BlockReviewFinding.internalBinaryWrite(message.findings[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 5; */
+        if (message.isRtl !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockReview
+ */
+export const BlockReview = new BlockReview$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockReviewFinding$Type extends MessageType<BlockReviewFinding> {
+    constructor() {
+        super("BlockReviewFinding", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "body", kind: "message", T: () => BlockText },
+            { no: 3, name: "priority", kind: "enum", T: () => ["BlockReviewFinding.Priority", BlockReviewFinding_Priority, "PRIORITY_"] },
+            { no: 4, name: "path", kind: "message", T: () => BlockText },
+            { no: 5, name: "start_line", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 6, name: "end_line", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 7, name: "category", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "confidence", kind: "enum", T: () => ["BlockReviewFinding.Confidence", BlockReviewFinding_Confidence, "CONFIDENCE_"] },
+            { no: 9, name: "outcome", kind: "enum", T: () => ["BlockReviewFinding.Outcome", BlockReviewFinding_Outcome, "OUTCOME_"] },
+            { no: 10, name: "action_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockReviewFinding>): BlockReviewFinding {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.priority = 0;
+        message.confidence = 0;
+        message.outcome = 0;
+        if (value !== undefined)
+            reflectionMergePartial<BlockReviewFinding>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockReviewFinding): BlockReviewFinding {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* optional BlockText body */ 2:
+                    message.body = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.body);
+                    break;
+                case /* BlockReviewFinding.Priority priority */ 3:
+                    message.priority = reader.int32();
+                    break;
+                case /* optional BlockText path */ 4:
+                    message.path = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.path);
+                    break;
+                case /* optional uint32 start_line */ 5:
+                    message.startLine = reader.uint32();
+                    break;
+                case /* optional uint32 end_line */ 6:
+                    message.endLine = reader.uint32();
+                    break;
+                case /* optional string category */ 7:
+                    message.category = reader.string();
+                    break;
+                case /* BlockReviewFinding.Confidence confidence */ 8:
+                    message.confidence = reader.int32();
+                    break;
+                case /* BlockReviewFinding.Outcome outcome */ 9:
+                    message.outcome = reader.int32();
+                    break;
+                case /* optional string action_id */ 10:
+                    message.actionId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockReviewFinding, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText body = 2; */
+        if (message.body)
+            BlockText.internalBinaryWrite(message.body, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockReviewFinding.Priority priority = 3; */
+        if (message.priority !== 0)
+            writer.tag(3, WireType.Varint).int32(message.priority);
+        /* optional BlockText path = 4; */
+        if (message.path)
+            BlockText.internalBinaryWrite(message.path, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional uint32 start_line = 5; */
+        if (message.startLine !== undefined)
+            writer.tag(5, WireType.Varint).uint32(message.startLine);
+        /* optional uint32 end_line = 6; */
+        if (message.endLine !== undefined)
+            writer.tag(6, WireType.Varint).uint32(message.endLine);
+        /* optional string category = 7; */
+        if (message.category !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.category);
+        /* BlockReviewFinding.Confidence confidence = 8; */
+        if (message.confidence !== 0)
+            writer.tag(8, WireType.Varint).int32(message.confidence);
+        /* BlockReviewFinding.Outcome outcome = 9; */
+        if (message.outcome !== 0)
+            writer.tag(9, WireType.Varint).int32(message.outcome);
+        /* optional string action_id = 10; */
+        if (message.actionId !== undefined)
+            writer.tag(10, WireType.LengthDelimited).string(message.actionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockReviewFinding
+ */
+export const BlockReviewFinding = new BlockReviewFinding$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockTaskSuggestion$Type extends MessageType<BlockTaskSuggestion> {
+    constructor() {
+        super("BlockTaskSuggestion", [
+            { no: 1, name: "title", kind: "message", T: () => BlockText },
+            { no: 2, name: "brief", kind: "message", T: () => BlockText },
+            { no: 3, name: "state", kind: "enum", T: () => ["BlockDecisionState", BlockDecisionState, "BLOCK_DECISION_STATE_"] },
+            { no: 4, name: "started_peer", kind: "message", T: () => Peer },
+            { no: 5, name: "expires_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockTaskSuggestion>): BlockTaskSuggestion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.state = 0;
+        message.actionIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockTaskSuggestion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockTaskSuggestion): BlockTaskSuggestion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText title */ 1:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* optional BlockText brief */ 2:
+                    message.brief = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.brief);
+                    break;
+                case /* BlockDecisionState state */ 3:
+                    message.state = reader.int32();
+                    break;
+                case /* optional Peer started_peer */ 4:
+                    message.startedPeer = Peer.internalBinaryRead(reader, reader.uint32(), options, message.startedPeer);
+                    break;
+                case /* optional int64 expires_at */ 5:
+                    message.expiresAt = reader.int64().toBigInt();
+                    break;
+                case /* repeated string action_ids */ 6:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* optional bool is_rtl */ 7:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockTaskSuggestion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText title = 1; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText brief = 2; */
+        if (message.brief)
+            BlockText.internalBinaryWrite(message.brief, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* BlockDecisionState state = 3; */
+        if (message.state !== 0)
+            writer.tag(3, WireType.Varint).int32(message.state);
+        /* optional Peer started_peer = 4; */
+        if (message.startedPeer)
+            Peer.internalBinaryWrite(message.startedPeer, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 expires_at = 5; */
+        if (message.expiresAt !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.expiresAt);
+        /* repeated string action_ids = 6; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(6, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* optional bool is_rtl = 7; */
+        if (message.isRtl !== undefined)
+            writer.tag(7, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockTaskSuggestion
+ */
+export const BlockTaskSuggestion = new BlockTaskSuggestion$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockNextStep$Type extends MessageType<BlockNextStep> {
+    constructor() {
+        super("BlockNextStep", [
+            { no: 1, name: "recap", kind: "message", T: () => BlockText },
+            { no: 2, name: "question", kind: "message", T: () => BlockText },
+            { no: 3, name: "action_ids", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "blocking", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockNextStep>): BlockNextStep {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.actionIds = [];
+        message.blocking = false;
+        if (value !== undefined)
+            reflectionMergePartial<BlockNextStep>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockNextStep): BlockNextStep {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText recap */ 1:
+                    message.recap = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.recap);
+                    break;
+                case /* optional BlockText question */ 2:
+                    message.question = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.question);
+                    break;
+                case /* repeated string action_ids */ 3:
+                    message.actionIds.push(reader.string());
+                    break;
+                case /* bool blocking */ 4:
+                    message.blocking = reader.bool();
+                    break;
+                case /* optional bool is_rtl */ 5:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockNextStep, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText recap = 1; */
+        if (message.recap)
+            BlockText.internalBinaryWrite(message.recap, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional BlockText question = 2; */
+        if (message.question)
+            BlockText.internalBinaryWrite(message.question, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated string action_ids = 3; */
+        for (let i = 0; i < message.actionIds.length; i++)
+            writer.tag(3, WireType.LengthDelimited).string(message.actionIds[i]);
+        /* bool blocking = 4; */
+        if (message.blocking !== false)
+            writer.tag(4, WireType.Varint).bool(message.blocking);
+        /* optional bool is_rtl = 5; */
+        if (message.isRtl !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockNextStep
+ */
+export const BlockNextStep = new BlockNextStep$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockPromptSuggestions$Type extends MessageType<BlockPromptSuggestions> {
+    constructor() {
+        super("BlockPromptSuggestions", [
+            { no: 1, name: "prompts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockPromptSuggestion },
+            { no: 2, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockPromptSuggestions>): BlockPromptSuggestions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.prompts = [];
+        if (value !== undefined)
+            reflectionMergePartial<BlockPromptSuggestions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockPromptSuggestions): BlockPromptSuggestions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated BlockPromptSuggestion prompts */ 1:
+                    message.prompts.push(BlockPromptSuggestion.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional bool is_rtl */ 2:
+                    message.isRtl = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockPromptSuggestions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated BlockPromptSuggestion prompts = 1; */
+        for (let i = 0; i < message.prompts.length; i++)
+            BlockPromptSuggestion.internalBinaryWrite(message.prompts[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_rtl = 2; */
+        if (message.isRtl !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.isRtl);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockPromptSuggestions
+ */
+export const BlockPromptSuggestions = new BlockPromptSuggestions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockPromptSuggestion$Type extends MessageType<BlockPromptSuggestion> {
+    constructor() {
+        super("BlockPromptSuggestion", [
+            { no: 1, name: "label", kind: "message", T: () => BlockText },
+            { no: 2, name: "text", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BlockPromptSuggestion>): BlockPromptSuggestion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BlockPromptSuggestion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockPromptSuggestion): BlockPromptSuggestion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BlockText label */ 1:
+                    message.label = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.label);
+                    break;
+                case /* optional string text */ 2:
+                    message.text = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockPromptSuggestion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BlockText label = 1; */
+        if (message.label)
+            BlockText.internalBinaryWrite(message.label, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string text = 2; */
+        if (message.text !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.text);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockPromptSuggestion
+ */
+export const BlockPromptSuggestion = new BlockPromptSuggestion$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Message$Type extends MessageType<Message> {
     constructor() {
@@ -26310,7 +27889,8 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "default_output_mode", kind: "enum", T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] },
             { no: 3, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 4, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 4, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "open_to_everyone", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<AgentSettings>): AgentSettings {
@@ -26318,6 +27898,7 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
         message.botUserId = 0n;
         message.defaultOutputMode = 0;
         message.revision = 0n;
+        message.openToEveryone = false;
         if (value !== undefined)
             reflectionMergePartial<AgentSettings>(this, message, value);
         return message;
@@ -26338,6 +27919,9 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
                     break;
                 case /* optional int64 date */ 4:
                     message.date = reader.int64().toBigInt();
+                    break;
+                case /* bool open_to_everyone */ 5:
+                    message.openToEveryone = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -26363,6 +27947,9 @@ class AgentSettings$Type extends MessageType<AgentSettings> {
         /* optional int64 date = 4; */
         if (message.date !== undefined)
             writer.tag(4, WireType.Varint).int64(message.date);
+        /* bool open_to_everyone = 5; */
+        if (message.openToEveryone !== false)
+            writer.tag(5, WireType.Varint).bool(message.openToEveryone);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27413,13 +29000,15 @@ class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
     constructor() {
         super("GetAgentAccessInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "bot_user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetAgentAccessInput>): GetAgentAccessInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.botUserId = 0n;
         message.userId = 0n;
+        message.botUserIds = [];
         if (value !== undefined)
             reflectionMergePartial<GetAgentAccessInput>(this, message, value);
         return message;
@@ -27434,6 +29023,13 @@ class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
                     break;
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
+                    break;
+                case /* repeated int64 bot_user_ids */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.botUserIds.push(reader.int64().toBigInt());
+                    else
+                        message.botUserIds.push(reader.int64().toBigInt());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -27453,6 +29049,13 @@ class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* repeated int64 bot_user_ids = 3; */
+        if (message.botUserIds.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.botUserIds.length; i++)
+                writer.int64(message.botUserIds[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27468,13 +29071,15 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
     constructor() {
         super("GetAgentAccessResult", [
             { no: 1, name: "is_owner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] }
+            { no: 2, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+            { no: 3, name: "access", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => AgentAccess }
         ]);
     }
     create(value?: PartialMessage<GetAgentAccessResult>): GetAgentAccessResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.isOwner = false;
         message.operations = [];
+        message.access = [];
         if (value !== undefined)
             reflectionMergePartial<GetAgentAccessResult>(this, message, value);
         return message;
@@ -27493,6 +29098,9 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
                             message.operations.push(reader.int32());
                     else
                         message.operations.push(reader.int32());
+                    break;
+                case /* repeated AgentAccess access */ 3:
+                    message.access.push(AgentAccess.internalBinaryRead(reader, reader.uint32(), options));
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -27516,6 +29124,9 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
                 writer.int32(message.operations[i]);
             writer.join();
         }
+        /* repeated AgentAccess access = 3; */
+        for (let i = 0; i < message.access.length; i++)
+            AgentAccess.internalBinaryWrite(message.access[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -27526,6 +29137,101 @@ class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
  * @generated MessageType for protobuf message GetAgentAccessResult
  */
 export const GetAgentAccessResult = new GetAgentAccessResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AgentAccess$Type extends MessageType<AgentAccess> {
+    constructor() {
+        super("AgentAccess", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "is_owner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+            { no: 4, name: "owner_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "can_message", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "can_reply", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AgentAccess>): AgentAccess {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.isOwner = false;
+        message.operations = [];
+        message.ownerUserId = 0n;
+        message.canMessage = false;
+        message.canReply = false;
+        if (value !== undefined)
+            reflectionMergePartial<AgentAccess>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AgentAccess): AgentAccess {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* bool is_owner */ 2:
+                    message.isOwner = reader.bool();
+                    break;
+                case /* repeated AgentGrantOperation operations */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.operations.push(reader.int32());
+                    else
+                        message.operations.push(reader.int32());
+                    break;
+                case /* int64 owner_user_id */ 4:
+                    message.ownerUserId = reader.int64().toBigInt();
+                    break;
+                case /* bool can_message */ 5:
+                    message.canMessage = reader.bool();
+                    break;
+                case /* bool can_reply */ 6:
+                    message.canReply = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AgentAccess, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* bool is_owner = 2; */
+        if (message.isOwner !== false)
+            writer.tag(2, WireType.Varint).bool(message.isOwner);
+        /* repeated AgentGrantOperation operations = 3; */
+        if (message.operations.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.operations.length; i++)
+                writer.int32(message.operations[i]);
+            writer.join();
+        }
+        /* int64 owner_user_id = 4; */
+        if (message.ownerUserId !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.ownerUserId);
+        /* bool can_message = 5; */
+        if (message.canMessage !== false)
+            writer.tag(5, WireType.Varint).bool(message.canMessage);
+        /* bool can_reply = 6; */
+        if (message.canReply !== false)
+            writer.tag(6, WireType.Varint).bool(message.canReply);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AgentAccess
+ */
+export const AgentAccess = new AgentAccess$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DeleteAgentGrantResult$Type extends MessageType<DeleteAgentGrantResult> {
     constructor() {
@@ -27857,7 +29563,8 @@ class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput
     constructor() {
         super("UpdateAgentSettingsInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
+            { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] },
+            { no: 3, name: "open_to_everyone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<UpdateAgentSettingsInput>): UpdateAgentSettingsInput {
@@ -27878,6 +29585,9 @@ class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput
                 case /* optional AgentOutputMode default_output_mode */ 2:
                     message.defaultOutputMode = reader.int32();
                     break;
+                case /* optional bool open_to_everyone */ 3:
+                    message.openToEveryone = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -27896,6 +29606,9 @@ class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput
         /* optional AgentOutputMode default_output_mode = 2; */
         if (message.defaultOutputMode !== undefined)
             writer.tag(2, WireType.Varint).int32(message.defaultOutputMode);
+        /* optional bool open_to_everyone = 3; */
+        if (message.openToEveryone !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.openToEveryone);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31551,7 +33264,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 167, name: "getAgentAccess", kind: "message", oneof: "input", T: () => GetAgentAccessInput },
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
             { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
-            { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput }
+            { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
+            { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -32578,6 +34292,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         setFocusStatus: SetFocusStatusInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setFocusStatus)
                     };
                     break;
+                case /* GetSpacesInput getSpaces */ 171:
+                    message.input = {
+                        oneofKind: "getSpaces",
+                        getSpaces: GetSpacesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaces)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33097,6 +34817,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SetFocusStatusInput setFocusStatus = 170; */
         if (message.input.oneofKind === "setFocusStatus")
             SetFocusStatusInput.internalBinaryWrite(message.input.setFocusStatus, writer.tag(170, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpacesInput getSpaces = 171; */
+        if (message.input.oneofKind === "getSpaces")
+            GetSpacesInput.internalBinaryWrite(message.input.getSpaces, writer.tag(171, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33279,7 +35002,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 167, name: "getAgentAccess", kind: "message", oneof: "result", T: () => GetAgentAccessResult },
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
             { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
-            { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult }
+            { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
+            { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -34306,6 +36030,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         setFocusStatus: SetFocusStatusResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setFocusStatus)
                     };
                     break;
+                case /* GetSpacesResult getSpaces */ 171:
+                    message.result = {
+                        oneofKind: "getSpaces",
+                        getSpaces: GetSpacesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaces)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -34825,6 +36555,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SetFocusStatusResult setFocusStatus = 170; */
         if (message.result.oneofKind === "setFocusStatus")
             SetFocusStatusResult.internalBinaryWrite(message.result.setFocusStatus, writer.tag(170, WireType.LengthDelimited).fork(), options).join();
+        /* GetSpacesResult getSpaces = 171; */
+        if (message.result.oneofKind === "getSpaces")
+            GetSpacesResult.internalBinaryWrite(message.result.getSpaces, writer.tag(171, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -41262,7 +42995,9 @@ export const DeleteBotAgentResult = new DeleteBotAgentResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ListBotsInput$Type extends MessageType<ListBotsInput> {
     constructor() {
-        super("ListBotsInput", []);
+        super("ListBotsInput", [
+            { no: 1, name: "include_managed", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
     }
     create(value?: PartialMessage<ListBotsInput>): ListBotsInput {
         const message = globalThis.Object.create((this.messagePrototype!));
@@ -41271,9 +43006,28 @@ class ListBotsInput$Type extends MessageType<ListBotsInput> {
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ListBotsInput): ListBotsInput {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional bool include_managed */ 1:
+                    message.includeManaged = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: ListBotsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional bool include_managed = 1; */
+        if (message.includeManaged !== undefined)
+            writer.tag(1, WireType.Varint).bool(message.includeManaged);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45880,11 +47634,18 @@ export const DeleteDialogFolderResult = new DeleteDialogFolderResult$Type();
 class GetChatsInput$Type extends MessageType<GetChatsInput> {
     constructor() {
         super("GetChatsInput", [
-            { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 1, name: "include_subthreads", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "offset", kind: "message", T: () => ChatListOffset },
+            { no: 4, name: "order", kind: "enum", T: () => ["ChatListOrder", ChatListOrder, "CHAT_LIST_ORDER_"] },
+            { no: 5, name: "filter", kind: "message", T: () => ChatListFilter },
+            { no: 6, name: "scope", kind: "enum", T: () => ["ChatListScope", ChatListScope, "CHAT_LIST_SCOPE_"] }
         ]);
     }
     create(value?: PartialMessage<GetChatsInput>): GetChatsInput {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.order = 0;
+        message.scope = 0;
         if (value !== undefined)
             reflectionMergePartial<GetChatsInput>(this, message, value);
         return message;
@@ -45896,6 +47657,21 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
             switch (fieldNo) {
                 case /* optional bool include_subthreads */ 1:
                     message.includeSubthreads = reader.bool();
+                    break;
+                case /* optional int32 limit */ 2:
+                    message.limit = reader.int32();
+                    break;
+                case /* optional ChatListOffset offset */ 3:
+                    message.offset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.offset);
+                    break;
+                case /* ChatListOrder order */ 4:
+                    message.order = reader.int32();
+                    break;
+                case /* optional ChatListFilter filter */ 5:
+                    message.filter = ChatListFilter.internalBinaryRead(reader, reader.uint32(), options, message.filter);
+                    break;
+                case /* ChatListScope scope */ 6:
+                    message.scope = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -45912,6 +47688,21 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
         /* optional bool include_subthreads = 1; */
         if (message.includeSubthreads !== undefined)
             writer.tag(1, WireType.Varint).bool(message.includeSubthreads);
+        /* optional int32 limit = 2; */
+        if (message.limit !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.limit);
+        /* optional ChatListOffset offset = 3; */
+        if (message.offset)
+            ChatListOffset.internalBinaryWrite(message.offset, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* ChatListOrder order = 4; */
+        if (message.order !== 0)
+            writer.tag(4, WireType.Varint).int32(message.order);
+        /* optional ChatListFilter filter = 5; */
+        if (message.filter)
+            ChatListFilter.internalBinaryWrite(message.filter, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* ChatListScope scope = 6; */
+        if (message.scope !== 0)
+            writer.tag(6, WireType.Varint).int32(message.scope);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45923,6 +47714,173 @@ class GetChatsInput$Type extends MessageType<GetChatsInput> {
  */
 export const GetChatsInput = new GetChatsInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ChatListOffset$Type extends MessageType<ChatListOffset> {
+    constructor() {
+        super("ChatListOffset", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatListOffset>): ChatListOffset {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ChatListOffset>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatListOffset): ChatListOffset {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatListOffset, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 date = 2; */
+        if (message.date !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.date);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatListOffset
+ */
+export const ChatListOffset = new ChatListOffset$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChatListFilter$Type extends MessageType<ChatListFilter> {
+    constructor() {
+        super("ChatListFilter", [
+            { no: 1, name: "kinds", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["ChatListKind", ChatListKind, "CHAT_LIST_KIND_"] },
+            { no: 2, name: "space_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "archived", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "open", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "pinned", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 7, name: "folder_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "query", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ChatListFilter>): ChatListFilter {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.kinds = [];
+        message.spaceIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChatListFilter>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChatListFilter): ChatListFilter {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated ChatListKind kinds */ 1:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.kinds.push(reader.int32());
+                    else
+                        message.kinds.push(reader.int32());
+                    break;
+                case /* repeated int64 space_ids */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.spaceIds.push(reader.int64().toBigInt());
+                    else
+                        message.spaceIds.push(reader.int64().toBigInt());
+                    break;
+                case /* optional bool unread */ 3:
+                    message.unread = reader.bool();
+                    break;
+                case /* optional bool archived */ 4:
+                    message.archived = reader.bool();
+                    break;
+                case /* optional bool open */ 5:
+                    message.open = reader.bool();
+                    break;
+                case /* optional bool pinned */ 6:
+                    message.pinned = reader.bool();
+                    break;
+                case /* optional int64 folder_id */ 7:
+                    message.folderId = reader.int64().toBigInt();
+                    break;
+                case /* optional string query */ 8:
+                    message.query = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChatListFilter, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated ChatListKind kinds = 1; */
+        if (message.kinds.length) {
+            writer.tag(1, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.kinds.length; i++)
+                writer.int32(message.kinds[i]);
+            writer.join();
+        }
+        /* repeated int64 space_ids = 2; */
+        if (message.spaceIds.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.spaceIds.length; i++)
+                writer.int64(message.spaceIds[i]);
+            writer.join();
+        }
+        /* optional bool unread = 3; */
+        if (message.unread !== undefined)
+            writer.tag(3, WireType.Varint).bool(message.unread);
+        /* optional bool archived = 4; */
+        if (message.archived !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.archived);
+        /* optional bool open = 5; */
+        if (message.open !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.open);
+        /* optional bool pinned = 6; */
+        if (message.pinned !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.pinned);
+        /* optional int64 folder_id = 7; */
+        if (message.folderId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.folderId);
+        /* optional string query = 8; */
+        if (message.query !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.query);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ChatListFilter
+ */
+export const ChatListFilter = new ChatListFilter$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class GetChatsResult$Type extends MessageType<GetChatsResult> {
     constructor() {
         super("GetChatsResult", [
@@ -45931,7 +47889,8 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
             { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
             { no: 4, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User },
             { no: 5, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
-            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder }
+            { no: 6, name: "folders", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => DialogFolder },
+            { no: 7, name: "next_offset", kind: "message", T: () => ChatListOffset }
         ]);
     }
     create(value?: PartialMessage<GetChatsResult>): GetChatsResult {
@@ -45969,6 +47928,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
                 case /* repeated DialogFolder folders */ 6:
                     message.folders.push(DialogFolder.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional ChatListOffset next_offset */ 7:
+                    message.nextOffset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.nextOffset);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45999,6 +47961,9 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
         /* repeated DialogFolder folders = 6; */
         for (let i = 0; i < message.folders.length; i++)
             DialogFolder.internalBinaryWrite(message.folders[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatListOffset next_offset = 7; */
+        if (message.nextOffset)
+            ChatListOffset.internalBinaryWrite(message.nextOffset, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -46009,6 +47974,78 @@ class GetChatsResult$Type extends MessageType<GetChatsResult> {
  * @generated MessageType for protobuf message GetChatsResult
  */
 export const GetChatsResult = new GetChatsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpacesInput$Type extends MessageType<GetSpacesInput> {
+    constructor() {
+        super("GetSpacesInput", []);
+    }
+    create(value?: PartialMessage<GetSpacesInput>): GetSpacesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetSpacesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpacesInput): GetSpacesInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: GetSpacesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpacesInput
+ */
+export const GetSpacesInput = new GetSpacesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetSpacesResult$Type extends MessageType<GetSpacesResult> {
+    constructor() {
+        super("GetSpacesResult", [
+            { no: 1, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space }
+        ]);
+    }
+    create(value?: PartialMessage<GetSpacesResult>): GetSpacesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaces = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetSpacesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetSpacesResult): GetSpacesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Space spaces */ 1:
+                    message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetSpacesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Space spaces = 1; */
+        for (let i = 0; i < message.spaces.length; i++)
+            Space.internalBinaryWrite(message.spaces[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetSpacesResult
+ */
+export const GetSpacesResult = new GetSpacesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TranslateMessagesInput$Type extends MessageType<TranslateMessagesInput> {
     constructor() {
@@ -60831,7 +62868,8 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
             { no: 6, name: "kind", kind: "enum", T: () => ["UploadKind", UploadKind, "UPLOAD_KIND_"] },
             { no: 7, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "video", kind: "message", oneof: "metadata", T: () => UploadVideoMetadata },
-            { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata }
+            { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata },
+            { no: 10, name: "inline_data", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ }
         ]);
     }
     create(value?: PartialMessage<CreateUploadInput>): CreateUploadInput {
@@ -60885,6 +62923,9 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
                         voice: UploadVoiceMetadata.internalBinaryRead(reader, reader.uint32(), options, (message.metadata as any).voice)
                     };
                     break;
+                case /* optional bytes inline_data */ 10:
+                    message.inlineData = reader.bytes();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -60924,6 +62965,9 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
         /* UploadVoiceMetadata voice = 9; */
         if (message.metadata.oneofKind === "voice")
             UploadVoiceMetadata.internalBinaryWrite(message.metadata.voice, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        /* optional bytes inline_data = 10; */
+        if (message.inlineData !== undefined)
+            writer.tag(10, WireType.LengthDelimited).bytes(message.inlineData);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -60942,7 +62986,8 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
             { no: 2, name: "part_size", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 3, name: "part_count", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ }
+            { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
+            { no: 6, name: "complete", kind: "message", T: () => UploadComplete }
         ]);
     }
     create(value?: PartialMessage<CreateUploadResult>): CreateUploadResult {
@@ -60980,6 +63025,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
                     else
                         message.acceptedParts.push(reader.uint32());
                     break;
+                case /* optional UploadComplete complete */ 6:
+                    message.complete = UploadComplete.internalBinaryRead(reader, reader.uint32(), options, message.complete);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -61011,6 +63059,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
                 writer.uint32(message.acceptedParts[i]);
             writer.join();
         }
+        /* optional UploadComplete complete = 6; */
+        if (message.complete)
+            UploadComplete.internalBinaryWrite(message.complete, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

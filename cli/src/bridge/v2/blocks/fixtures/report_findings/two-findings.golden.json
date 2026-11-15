@@ -1,0 +1,38 @@
+[
+  {
+    "label": "message",
+    "text": "Review of the parser fix\nOne blocking issue; the rest is cleanup.\n[P1] Blank input still throws — src/parser.ts:42-48\n`tokens[0]` is read before the length check.\n[P3] Typo in the error message — src/errors.ts:7",
+    "markdown": false,
+    "blocks": [
+      {
+        "review": {
+          "title": "Review of the parser fix",
+          "verdict": "VERDICT_NEEDS_ATTENTION",
+          "summary": "One blocking issue; the rest is cleanup.",
+          "findings": [
+            {
+              "title": "Blank input still throws",
+              "body": "`tokens[0]` is read before the length check.",
+              "priority": "PRIORITY_P1",
+              "path": "src/parser.ts",
+              "start_line": 42,
+              "end_line": 48,
+              "category": "correctness",
+              "confidence": "CONFIDENCE_CONFIRMED",
+              "outcome": "OUTCOME_FIXED"
+            },
+            {
+              "title": "Typo in the error message",
+              "priority": "PRIORITY_P3",
+              "path": "src/errors.ts",
+              "start_line": 7,
+              "category": "style",
+              "confidence": "CONFIDENCE_PLAUSIBLE",
+              "outcome": "OUTCOME_SKIPPED"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

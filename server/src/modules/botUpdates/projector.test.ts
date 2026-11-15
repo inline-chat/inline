@@ -7,6 +7,7 @@ import { encodeAgentThreadContext } from "@in/server/modules/agentConfiguration"
 import {
   activationReason,
   agentMentionTargetForChat,
+  encodeBotActions,
   foreignBotActivationAllowed,
   hasConsumableAgentContent,
   hasResolvedBoundAgent,
@@ -188,5 +189,13 @@ describe("Bot activation routing", () => {
     })).toBe(true)
     // Unknown ownership fails closed.
     expect(foreignBotActivationAllowed({ senderBotOwnerId: null, targetBotOwnerId: null, recipientUserIds: [] })).toBe(false)
+  })
+})
+
+describe("Bot action projection", () => {
+  test("a compose action reaches the bot API with its composer text", () => {
+    expect(encodeBotActions({
+      rows: [{ actions: [{ actionId: "draft", text: "Draft", action: { oneofKind: "compose", compose: { text: "Summarize" } }, style: 1, requiredGrant: 0 }] }],
+    })).toEqual([[{ action_id: "draft", text: "Draft", style: "primary", type: "compose", compose_text: "Summarize" }]])
   })
 })

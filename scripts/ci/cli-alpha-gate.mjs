@@ -96,6 +96,24 @@ export function selectCliAlpha({ api = github, event = "workflow_dispatch", now 
   const tags = cliTags(api)
   const latest = tags.at(-1)
   const published = latest ? peel(api, latest.object) : null
+  // Tag creation and dispatch are separate writes. Retry the same immutable
+  // alpha after a failed dispatch/build instead of treating its tag as published.
+  if (published && ALPHA.test(latest.version)) {
+    const release = api(`releases/tags/${latest.tag}`, { missingOk: true })
+    if (!release || release.draft) {
+      if (!["ahead", "identical"].includes(api(`compare/${published.sha}...main`).status)) {
+        throw new ReleaseGateError(`${latest.tag} is not on main`)
+      }
+      try {
+        requireWorkflowJobs(published.sha, CI_WORKFLOW, REQUIRED_JOBS.cli, "cli", "Main CI", api)
+        requireWorkflowJobs(published.sha, CLI_CHANGE_WORKFLOW, CLI_UPDATE_JOBS, "CLI update", "CLI update qualification", api)
+      } catch (error) {
+        if (!(error instanceof ReleaseGateError)) throw error
+        return { sha: published.sha, outcome: error.outcome, reason: error.message }
+      }
+      return { sha: published.sha, outcome: RELEASE, reason: `resuming unpublished ${latest.tag}`, tag: latest.tag, version: latest.version }
+    }
+  }
   const ci = latestMainPushRuns(api, CI_WORKFLOW)
   const changes = latestMainPushRuns(api, CLI_CHANGE_WORKFLOW)
 
@@ -118,9 +136,8 @@ export function selectCliAlpha({ api = github, event = "workflow_dispatch", now 
     }
   }
 
-  // Each CI completion retriggers the gate, so wait for a newer change instead of
-  // publishing one that is about to be superseded. The sweep never waits.
-  if (running && event === "workflow_run") return { sha: running, outcome: DEFERRED, reason: `newer CLI change ${running.slice(0, 9)} is still in CI` }
+  // A newer pending change must not starve a qualified candidate. Later
+  // completions and the sweep pick it up after the normal release interval.
   if (!candidate) {
     return running
       ? { sha: running, outcome: DEFERRED, reason: `CLI change ${running.slice(0, 9)} is still in CI` }
@@ -151,7 +168,7 @@ export function publishCliAlpha({ api = github, sha, tag, version }) {
     } catch (error) {
       // The tag was absent a moment ago, so a refusal here is the creation ruleset.
       if (/HTTP 40[13]|HTTP 422|rule/i.test(String(error?.stderr ?? error?.message))) {
-        throw new ReleaseGateError(`GitHub Actions could not create ${tag}; add it to the bypass list of the "Release tags: admin creation" ruleset`)
+        throw new ReleaseGateError(`GitHub Actions could not create ${tag}; exclude refs/tags/cli-v*-alpha.* from the "Release tags: admin creation" ruleset (keep release tags immutable)`)
       }
       throw error
     }

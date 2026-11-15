@@ -45,6 +45,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case outputDevice
   case autoUnmuteOnJoin
   case autoMuteWhenAlone
+  case microphoneSounds
 
   // Notifications
   case dockBadge
@@ -89,9 +90,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case richContentRenderer
   case inlineMathAttachments
   case messageWidgets
-  case richMessageMultiBlockSelection
   case richCopyMarkdownEditing
   case quickForward
+  case stableChatRoute
   case fileBrowser
   case nativeFileDownloads
 
@@ -121,7 +122,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearance, .theme, .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
          .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize:
       .appearance
-    case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone:
+    case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds:
       .audioAndVideo
     case .dockBadge, .notificationSounds:
       .notifications
@@ -142,7 +143,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .quickForward,
+         .messageWidgets, .richCopyMarkdownEditing, .quickForward, .stableChatRoute,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -188,6 +189,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .outputDevice: "Output Device"
     case .autoUnmuteOnJoin: "Auto-Unmute on Join"
     case .autoMuteWhenAlone: "Auto-Mute When Alone"
+    case .microphoneSounds: "Microphone Sounds"
     case .dockBadge: "Dock Badge"
     case .notificationSounds: "Notification Sounds"
     case .appearInGlobalSearch: "Appear in Global Search"
@@ -214,9 +216,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
     case .messageWidgets: "Message Widgets"
-    case .richMessageMultiBlockSelection: "Rich Message Multi-Block Selection"
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .quickForward: "Quick Forward"
+    case .stableChatRoute: "Faster Chat Switching"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
     case .syncEngine: "Sync Engine"
@@ -254,7 +256,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .centeredChats: "Chat Layout"
     case .fonts, .fontSize: "Typography"
     case .inputDevice, .outputDevice: "Devices"
-    case .autoUnmuteOnJoin, .autoMuteWhenAlone: "Grid"
+    case .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds: "Grid"
     case .dockBadge: "Dock"
     case .notificationSounds: "Sound"
     case .appearInGlobalSearch: "Discovery"
@@ -273,9 +275,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .automaticUpdates, .updateChannel: "Automatic Updates"
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richMessageMultiBlockSelection:
+         .messageWidgets:
       "Agents"
-    case .richCopyMarkdownEditing, .quickForward: "Messages"
+    case .richCopyMarkdownEditing, .quickForward, .stableChatRoute: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -322,6 +324,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .outputDevice: ["speaker", "headphones"]
     case .autoUnmuteOnJoin: ["microphone", "call", "room"]
     case .autoMuteWhenAlone: ["microphone", "call", "room"]
+    case .microphoneSounds: ["mute", "unmute", "sound", "effect", "microphone"]
     case .dockBadge: ["unread", "count", "icon"]
     case .notificationSounds: ["alert", "mute"]
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
@@ -348,9 +351,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
     case .messageWidgets: ["html", "widget", "visualization", "chart"]
-    case .richMessageMultiBlockSelection: ["select", "copy"]
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .quickForward: ["forward"]
+    case .stableChatRoute: ["performance", "speed", "switch", "toolbar"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]
     case .syncEngine: ["realtime", "sync"]

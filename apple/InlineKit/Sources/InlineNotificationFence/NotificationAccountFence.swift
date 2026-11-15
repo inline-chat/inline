@@ -35,21 +35,24 @@ public protocol NotificationAccountFenceStorage: Sendable {
 /// Shared-keychain record readable by the iOS app and its notification service extension.
 public struct KeychainNotificationAccountFenceStorage: NotificationAccountFenceStorage {
   public static let service = "chat.inline.notification-account-fence"
-  public static let account = "fence-v1"
+  /// Per install: every Inline build shares the access group (see `InlineInstallNamespace`).
+  public static let account = InlineInstallNamespace.scoped("fence-v1")
   /// Both the app and the notification extension entitlements list this group.
   public static let sharedAccessGroup = "2487AN8AL4.keychainGroup"
 
   private let accessGroup: String
+  private let account: String
 
-  public init(accessGroup: String = Self.sharedAccessGroup) {
+  public init(accessGroup: String = Self.sharedAccessGroup, account: String = Self.account) {
     self.accessGroup = accessGroup
+    self.account = account
   }
 
   private var baseQuery: [String: Any] {
     [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: Self.service,
-      kSecAttrAccount as String: Self.account,
+      kSecAttrAccount as String: account,
       kSecAttrAccessGroup as String: accessGroup,
     ]
   }
@@ -148,6 +151,15 @@ public enum NotificationAccountAdmission: Equatable, Sendable {
     case fenceUnavailable
     case signedOut
     case otherAccount
+
+    /// The push is for an account that is not signed in on this install: a server session the
+    /// device left behind, or this build signed out. Not this user's missed message.
+    public var isForAnotherAccount: Bool {
+      switch self {
+      case .otherAccount, .signedOut, .missingFence: true
+      case .missingRecipient, .fenceUnavailable: false
+      }
+    }
   }
 
   public static func evaluate(
@@ -196,9 +208,39 @@ public enum NotificationAccountRedaction {
   public static let body = "Open Inline to read it."
   /// Enough for the app to check a tap against its current account and open the chat.
   public static let retainedUserInfoKeys: Set<String> = ["kind", "recipientUserId", "threadId", "messageId"]
+  /// Groups pushes for accounts not signed in here; the app removes them when it opens.
+  public static let withheldThreadIdentifier = "inline.withheld"
 
   /// Keeps sound, grouping and routing; drops text, attachments and sender or encrypted metadata.
   public static func content(from content: UNNotificationContent) -> UNNotificationContent {
+    redact(content)
+  }
+
+  /// Inline has no notification filtering entitlement, so a push the extension can't show must
+  /// still be shown. One for this user (a locked keychain, an old payload) keeps its sound: it may
+  /// be a real missed message. One for an account that isn't signed in here is shown quietly,
+  /// grouped apart, without opening a chat.
+  public static func content(
+    from content: UNNotificationContent,
+    rejection: NotificationAccountAdmission.Rejection
+  ) -> UNNotificationContent {
+    let redacted = redact(content)
+    guard rejection.isForAnotherAccount else { return redacted }
+    redacted.title = "Inline"
+    redacted.body = rejection == .otherAccount
+      ? "New activity for an account that isn't signed in on this device."
+      : "You're signed out. Sign in to see new messages."
+    redacted.sound = nil
+    redacted.badge = nil
+    redacted.interruptionLevel = .passive
+    redacted.relevanceScore = 0
+    redacted.threadIdentifier = withheldThreadIdentifier
+    redacted.targetContentIdentifier = nil
+    redacted.userInfo = redacted.userInfo.filter { key, _ in (key as? String) == "recipientUserId" }
+    return redacted
+  }
+
+  private static func redact(_ content: UNNotificationContent) -> UNMutableNotificationContent {
     let redacted = (content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
     redacted.title = title
     redacted.subtitle = ""
@@ -208,5 +250,13 @@ public enum NotificationAccountRedaction {
       (key as? String).map(retainedUserInfoKeys.contains) ?? false
     }
     return redacted
+  }
+
+  /// Delivered notifications that no longer belong on screen: pushes grouped as withheld, and any
+  /// addressed to an account other than `currentUserID`.
+  public static func isStale(_ content: UNNotificationContent, currentUserID: Int64) -> Bool {
+    if content.threadIdentifier == withheldThreadIdentifier { return true }
+    guard let recipient = NotificationAccountAdmission.recipientUserID(in: content.userInfo) else { return false }
+    return recipient != currentUserID
   }
 }

@@ -1,0 +1,69 @@
+[
+  {
+    "label": "progress 1",
+    "text": "Worked for 1m 35s\nRan git diff --stat · 2s\n$ git diff --stat\nok",
+    "markdown": false,
+    "blocks": [
+      {
+        "disclosure": {
+          "summary": "Worked for 1m 35s",
+          "children": [
+            {
+              "disclosure": {
+                "summary": "Ran git diff --stat",
+                "children": [
+                  {
+                    "code": {
+                      "text": "$ git diff --stat",
+                      "language": "sh"
+                    }
+                  },
+                  {
+                    "code": {
+                      "text": "ok"
+                    }
+                  }
+                ],
+                "activity_kind": "ACTIVITY_KIND_COMMAND",
+                "status": "BLOCK_STATUS_DONE",
+                "meta": "2s"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "final",
+    "text": "Code review\nThe empty-input guard is right, but two paths still break on blank input.\n[P1] Guard the empty slice before indexing — src/parser.ts:42-48\n`tokens[0]` is read before the length check, so blank input still throws.\nMove the guard above the first read.\n[P3] Typo in the error message — src/errors.ts:7\n\"recieved\" should be \"received\".",
+    "markdown": false,
+    "blocks": [
+      {
+        "review": {
+          "title": "Code review",
+          "verdict": "VERDICT_NEEDS_ATTENTION",
+          "summary": "The empty-input guard is right, but two paths still break on blank input.",
+          "findings": [
+            {
+              "title": "Guard the empty slice before indexing",
+              "body": "`tokens[0]` is read before the length check, so blank input still throws.\nMove the guard above the first read.",
+              "priority": "PRIORITY_P1",
+              "path": "src/parser.ts",
+              "start_line": 42,
+              "end_line": 48
+            },
+            {
+              "title": "Typo in the error message",
+              "body": "\"recieved\" should be \"received\".",
+              "priority": "PRIORITY_P3",
+              "path": "src/errors.ts",
+              "start_line": 7,
+              "end_line": 7
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

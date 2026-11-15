@@ -3,7 +3,6 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
-import MultipartFormDataKit
 import RealtimeV2
 
 #if os(iOS)
@@ -34,7 +33,10 @@ public enum FailedMessageResender {
   }
 
   public static func resend(_ fullMessage: FullMessage) async throws {
-    try await resend(fullMessage, database: .shared, auth: Auth.shared.handle) {
+    try await resend(
+      fullMessage, database: .shared, auth: Auth.shared.handle,
+      resume: { Transactions.shared.resumeRecovered(transaction: .sendMessage($0)) }
+    ) {
       Transactions.shared.mutate(transaction: .sendMessage($0))
     }
   }
@@ -42,6 +44,7 @@ public enum FailedMessageResender {
   static func resend(
     _ fullMessage: FullMessage, database: AppDatabase, auth: AuthHandle,
     beforeAdmission: (@MainActor () async throws -> Void)? = nil,
+    resume: (@MainActor (TransactionSendMessage) -> Bool)? = nil,
     admit: @MainActor (TransactionSendMessage) -> Bool
   ) async throws {
     let message = fullMessage.message
@@ -59,6 +62,22 @@ public enum FailedMessageResender {
     guard stillFailed else { return }
     try await beforeAdmission?()
     try auth.validateAccountMutation(account)
+
+    // Resend under the original identity when the row has one. If the last attempt's send
+    // actually reached the server (a timeout or lost response), the server's random-id dedupe
+    // returns that message instead of creating a second copy.
+    if let resume,
+       let recovered = TransactionSendMessage(recovering: message, mediaItems: mediaItems(for: fullMessage))
+    {
+      guard try await setStatus(of: message, from: .failed, to: .sending, database: database, auth: auth, account: account)
+      else { return }
+      if !resume(recovered) {
+        // Rejected admission (logout or reset): leave the row failed so Retry stays available.
+        _ = try? await setStatus(of: message, from: .sending, to: .failed, database: database, auth: auth, account: account)
+      }
+      return
+    }
+
     // Admit before deleting. An account transition or rejected admission leaves
     // the recoverable failed row and its original media untouched.
     guard admit(.init(
@@ -76,6 +95,25 @@ public enum FailedMessageResender {
     }
     try auth.validateAccountMutation(account)
     if deleted { MessagesPublisher.shared.messagesDeleted(messageIds: [message.messageId], peer: message.peerId) }
+  }
+
+  private static func setStatus(
+    of message: Message, from: MessageSendingStatus, to: MessageSendingStatus,
+    database: AppDatabase, auth: AuthHandle, account: AuthAccountMutationToken
+  ) async throws -> Bool {
+    let updated = try await database.dbWriter.write { db -> Message? in
+      try auth.validateAccountMutation(account)
+      let changed = try Message
+        .filter(Column("messageId") == message.messageId && Column("chatId") == message.chatId)
+        .filter(Column("status") == from.rawValue)
+        .filter(Column("fromId") == account.userID)
+        .updateAll(db, Column("status").set(to: to.rawValue))
+      guard changed > 0 else { return nil }
+      return try Message.fetchOne(db, key: ["messageId": message.messageId, "chatId": message.chatId])
+    }
+    guard let updated else { return false }
+    MessagesPublisher.shared.messageUpdatedSync(message: updated, peer: updated.peerId, animated: false)
+    return true
   }
 }
 
@@ -287,6 +325,31 @@ public struct TransactionSendMessage: Transaction {
     }
   }
 
+  /// Rebuilds the send for an outgoing row left in `.sending` by a terminated process.
+  /// Reuses the row's identity (transaction id, random id, temporary id) so the
+  /// server's per-sender random-id dedupe makes the resend idempotent and the
+  /// existing optimistic row is reconciled instead of duplicated.
+  init?(recovering message: Message, mediaItems: [FileMediaItem]) {
+    guard message.messageId < 0, let randomId = message.randomId,
+          let transactionId = message.transactionId, !transactionId.isEmpty else { return nil }
+    self.init(
+      text: message.text,
+      peerId: message.peerId,
+      chatId: message.chatId,
+      mediaItems: mediaItems,
+      replyToMsgId: message.repliedToMessageId,
+      isSticker: message.isSticker,
+      entities: message.entities
+    )
+    id = transactionId
+    date = message.date
+    self.randomId = randomId
+    temporaryMessageId = message.messageId
+    if !attachments.isEmpty {
+      attachments[0].randomId = randomId
+    }
+  }
+
   private static func sendConfiguration(_ config: TransactionConfig, hasAttachments: Bool) -> TransactionConfig {
     guard hasAttachments else { return config }
     // Upload parts have bounded RPC stall timeouts, and final send has its own
@@ -491,6 +554,14 @@ public struct TransactionSendMessage: Transaction {
       }
     }
 
+    // Never turn an attachment send into a text-only (or empty) message when the
+    // upload finished without a server id; fail so the user can retry.
+    if !attachments.isEmpty, inputMedia == nil {
+      throw FileUploadError.failedToUpload
+    }
+
+    // Uploads overlap; the final sends in a chat go out in admission order.
+    await OutgoingSendOrder.shared.waitForTurn(transactionId: id)
     try Task.checkCancellation()
 
     // input for send message
@@ -521,6 +592,17 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
+    if let error = error as? FileUploadError {
+      switch error {
+      case .failedToUpload, .invalidPhoto, .invalidVideo, .invalidDocument, .invalidVoice,
+           .invalidPhotoId, .invalidDocumentId, .invalidVideoId, .invalidVoiceId, .invalidVideoMetadata:
+        // Deterministic: retrying returns the same cached result and blocks the chat's later sends.
+        return false
+      default:
+        break
+      }
+    }
+
     if let error = error as? NativeMediaUploadError {
       switch error {
       case .emptySource, .fileTooLarge, .invalidGeometry, .sourceChanged, .canceled, .expired, .processingTimedOut:
@@ -577,6 +659,11 @@ public struct TransactionSendMessage: Transaction {
       }
     }
 
+    // Deterministic local failures: a missing or unreadable file, or a cancellation, fails the
+    // same way every time and would hold the chat's later sends behind 30 retries.
+    if error is CancellationError || error is CocoaError { return false }
+    if let urlError = error as? URLError { return urlError.code != .cancelled }
+
     return true
   }
 
@@ -585,7 +672,37 @@ public struct TransactionSendMessage: Transaction {
     return config.maxRetries
   }
 
+  /// Offline is not a failure: the send waits for the connection and keeps its attempts.
+  public func waitsForConnection(after error: Error) -> Bool {
+    Self.isConnectivityError(error)
+  }
+
+  static func isConnectivityError(_ error: Error) -> Bool {
+    if case .notConnected? = error as? RealtimeDirectRpcError { return true }
+    if let urlError = error as? URLError {
+      switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+          return true
+        default:
+          return false
+      }
+    }
+    return false
+  }
+
+  /// 2, 4, 8 … 60 seconds with ±20% jitter. A fixed 4 s ran a send's 30 attempts out in about
+  /// two minutes; this spreads them over roughly 25, long enough to ride out a server incident.
+  public func retryDelay(afterAttempt attempt: Int, error: Error) -> TimeInterval {
+    Self.backoff(afterAttempt: attempt) * Double.random(in: 0.8 ... 1.2)
+  }
+
+  static func backoff(afterAttempt attempt: Int) -> TimeInterval {
+    min(60, 2 * pow(2, Double(max(0, attempt - 1))))
+  }
+
   public func didSucceed(result: [InlineProtocol.Update]) async {
+    // The server already ordered this send; release the next one before the local apply.
+    OutgoingSendOrder.shared.finish(transactionId: id)
     await Api.realtime.applyUpdates(result)
 
     #if os(iOS)
@@ -596,6 +713,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func didFail(error: Error?) async {
+    OutgoingSendOrder.shared.finish(transactionId: id)
     Log.shared.error("Failed to send message", error: error)
 
     if !attachments.isEmpty {
@@ -638,6 +756,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func rollback() async {
+    OutgoingSendOrder.shared.finish(transactionId: id)
     do {
       // Remove from database and update chat state
       let _ = try await AppDatabase.shared.dbWriter.write { db in

@@ -71,6 +71,14 @@ public struct DeleteBotTransaction: Transaction2 {
         log.error("Failed to remove the deleted bot's chat locally", error: error)
       }
     }
+    // A deleted bot is nobody's to mention anymore.
+    do {
+      try await (database ?? AppDatabase.shared).dbWriter.write { db in
+        try BotOwner.remove(db, botUserId: context.botUserId)
+      }
+    } catch {
+      log.error("Failed to clear the deleted bot's owner locally", error: error)
+    }
     NotificationCenter.default.post(name: .botAgentsChanged, object: context.botUserId)
   }
 

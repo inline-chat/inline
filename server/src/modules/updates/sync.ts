@@ -1574,7 +1574,7 @@ async function getAccessibleReplayChatIds(
   // The canonical projection is one SELECT, so PostgreSQL already gives all
   // its CTEs one statement snapshot. An explicit transaction adds BEGIN/SET/
   // COMMIT round trips and bypasses the shared client's prepared replay plans.
-  const access = await getEffectiveChatAccessUserIds(db, missing, { userIds: [userId], source })
+  const access = await getEffectiveChatAccessUserIds(db, missing, { userIds: [userId], source, committed: true })
   for (const chatId of missing) {
     const allowed = access.get(chatId)?.has(userId) === true
     cache?.set(chatId, allowed)

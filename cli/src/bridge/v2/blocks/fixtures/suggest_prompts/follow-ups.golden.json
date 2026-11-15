@@ -1,0 +1,25 @@
+[
+  {
+    "label": "message",
+    "text": "Suggested prompts:\n• Add a test for whitespace-only input\n• Explain the fix\n• Open a PR",
+    "markdown": false,
+    "blocks": [
+      {
+        "prompt_suggestions": {
+          "prompts": [
+            {
+              "label": "Add a test for whitespace-only input"
+            },
+            {
+              "label": "Explain the fix",
+              "text": "Explain the parser fix step by step, with the before and after behavior."
+            },
+            {
+              "label": "Open a PR"
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

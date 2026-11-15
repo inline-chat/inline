@@ -1,5 +1,6 @@
 import AppKit
 import InlineCLIInstaller
+import InlineKit
 import SwiftUI
 
 struct AgentSetupWizardToolbar: ToolbarContent {
@@ -838,6 +839,7 @@ private struct AgentSetupCompletionScreen: View {
         VStack(alignment: .leading, spacing: 16) {
           if let result {
             summaryCard(result)
+            AgentSetupAccessCard(bot: result.bot)
           }
 
           if let readiness = result?.readiness, !readiness.ready {
@@ -1296,6 +1298,56 @@ private extension AgentSetupProgressItem.Outcome {
       case "action_required": "Action required"
       default: "Completed"
       }
+    }
+  }
+}
+
+/// Says who can message the agent that was just set up, and offers to share
+/// it. People new to agents often assume their team can reach the bot; it is
+/// private until they choose otherwise.
+private struct AgentSetupAccessCard: View {
+  let bot: AgentSetupResult.Bot
+  @ObservedObject private var grants = AgentGrantStore.shared
+  @State private var showsAccessSheet = false
+
+  private var summary: String {
+    guard let owned = grants.ownedGrants(botUserID: bot.id) else {
+      return String(localized: "Private: only you can message \(bot.name).")
+    }
+    if grants.openToEveryoneByBotUserID[bot.id] == true {
+      return String(localized: "Anyone on Inline can message \(bot.name).")
+    }
+    if owned.operationsBySubject.isEmpty {
+      return String(localized: "Private: only you can message \(bot.name).")
+    }
+    return String(localized: "Shared with: \(owned.sharedWithSummary(openToEveryone: false)).")
+  }
+
+  private var botInfo: UserInfo {
+    if let cached = ObjectCache.shared.getCachedUser(id: bot.id) { return cached }
+    var user = User(id: bot.id, email: nil, firstName: bot.name)
+    user.username = bot.username
+    user.bot = true
+    return UserInfo(user: user)
+  }
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
+      Image(systemName: "lock.fill")
+        .foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(summary)
+        Text("Nobody else sees a composer for it or can mention it. You can change this any time in its chat info.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 8)
+      Button("Share…") { showsAccessSheet = true }
+    }
+    .task(id: bot.id) { grants.ensureLoaded(botUserID: bot.id) }
+    .sheet(isPresented: $showsAccessSheet) {
+      BotAccessSheet(bot: botInfo)
     }
   }
 }

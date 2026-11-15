@@ -206,6 +206,12 @@ extension RichBlockLayoutPlanner.Builder {
   ) -> Bool {
     guard !steps.steps.isEmpty, steps.steps.count <= 256 else { return false }
     let isRTL = steps.hasIsRtl ? steps.isRtl : (inheritedDirection ?? false)
+    // A plan on its own, not inside a list or card, reads as the agent's task list.
+    let isCard = path.components.count == 1
+    let cardInsetX: CGFloat = isCard ? RichBlockAgentCardMetrics.horizontalInset : 0
+    let cardInsetY: CGFloat = isCard ? 9 : 0
+    let outerWidth = width
+    let width = max(1, width - cardInsetX * 2)
     let marker = RichBlockAgentMetrics.stepMarkerSide
     let textX = isRTL ? 0 : marker + RichBlockAgentMetrics.stepMarkerGap
     let textWidth = max(1, width - marker - RichBlockAgentMetrics.stepMarkerGap)
@@ -254,8 +260,21 @@ extension RichBlockLayoutPlanner.Builder {
       ))
       y += stepHeight
     }
-    let frame = CGRect(x: x, y: height, width: isRTL ? width : min(width, ceil(usedWidth)), height: ceil(y))
-    nodes.append(.init(path: path, frame: frame, kind: .steps(.init(steps: planned, isRTL: isRTL))))
+    if isCard {
+      planned = planned.map { step in
+        var step = step
+        step.markerFrame.origin = CGPoint(x: step.markerFrame.minX + cardInsetX, y: step.markerFrame.minY + cardInsetY)
+        step.textFrame.origin = CGPoint(x: step.textFrame.minX + cardInsetX, y: step.textFrame.minY + cardInsetY)
+        step.detailFrame?.origin.x += cardInsetX
+        step.detailFrame?.origin.y += cardInsetY
+        return step
+      }
+      claimMaximumWidth()
+    }
+    let frame = isCard
+      ? CGRect(x: x, y: height, width: outerWidth, height: ceil(y + cardInsetY * 2))
+      : CGRect(x: x, y: height, width: isRTL ? width : min(width, ceil(usedWidth)), height: ceil(y))
+    nodes.append(.init(path: path, frame: frame, kind: .steps(.init(steps: planned, isRTL: isRTL, isCard: isCard))))
     recordMeasuredFrame(frame)
     height = frame.maxY
     return true
@@ -320,7 +339,8 @@ extension RichBlockLayoutPlanner.Builder {
         width: contentWidth,
         depth: depth,
         inheritedDirection: isRTL,
-        fullBleedContainer: nil
+        fullBleedContainer: nil,
+        bounds: childBounds[path]
       ) else { return false }
     }
     height += insetY

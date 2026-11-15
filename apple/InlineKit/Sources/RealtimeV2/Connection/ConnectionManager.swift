@@ -65,6 +65,7 @@ actor ConnectionManager {
   private var dropReason: ConnectionReason = .none
   private var reconnectStartedAt: Date?
   private var attemptsAtOpen: UInt32 = 0
+  private var openedAt: Date?
 
   private var commandTask: Task<Void, Never>?
   private var sessionTask: Task<Void, Never>?
@@ -81,7 +82,15 @@ actor ConnectionManager {
   private var probeTimeoutTask: Task<Void, Never>?
   private var probeContinuation: CheckedContinuation<Bool, Never>?
   private var probeNonce: UInt64?
+  private var probeSentUptime: TimeInterval?
   private var pendingPingNonce: UInt64?
+  private var pendingPingSentUptime: TimeInterval?
+  private var pendingPingDeadlineUptime: TimeInterval?
+  private var pendingPingGraces = 0
+  // Server traffic the account collector has received but not finished applying. A pong sent
+  // behind it waits in the same ordered pipeline, so a busy collector is not a dead socket.
+  private var accountEventsInFlight = 0
+  private var lastAccountEventUptime: TimeInterval?
   private var backgroundConnectionRetained = false
   private var mediaConnectionRetained = false
   private var mediaRetentionRevision: UInt64 = 0
@@ -315,14 +324,14 @@ actor ConnectionManager {
 
     case .connectNow:
       constraints.userWantsConnection = true
-      attempt = 0
+      resetAttempts()
       cancelBackoff()
       await evaluateConstraints(resetBackoff: true)
 
     case .authAvailable:
       constraints.authAvailable = true
       log.info("Realtime auth constraint applied available=1 state=\(state) session=\(sessionID)")
-      attempt = 0
+      resetAttempts()
       cancelBackoff()
       await evaluateConstraints(resetBackoff: true)
 
@@ -358,7 +367,7 @@ actor ConnectionManager {
 
       constraints.networkAvailable = true
       guard availabilityChanged || routeChanged else { return }
-      attempt = 0
+      resetAttempts()
       cancelBackoff()
       // Route notifications often arrive in a burst with foregrounding. An
       // in-flight connect/handshake already observes the current system route;
@@ -382,7 +391,7 @@ actor ConnectionManager {
           "state=\(state) session=\(sessionID)"
       )
       constraints.appActive = true
-      attempt = 0
+      resetAttempts()
       backgroundConnectionRetained = false
       cancelBackoff()
       if !transportWasRetained, userInitiatedOperations == 0, !mediaConnectionRetained, state == .open {
@@ -405,7 +414,7 @@ actor ConnectionManager {
 
     case .systemWake:
       constraints.appActive = true
-      attempt = 0
+      resetAttempts()
       backgroundConnectionRetained = false
       cancelBackoff()
       if wakeProbeTask == nil {
@@ -483,6 +492,7 @@ actor ConnectionManager {
       handshakeTask = nil
       attemptsAtOpen = attempt
       attempt = 0
+      openedAt = timeProvider.now()
       lastErrorDescription = nil
       await transition(to: .open, reason: .none)
       log.info("Realtime authenticated handshake opened session=\(sessionID)")
@@ -505,6 +515,17 @@ actor ConnectionManager {
 
     case .pingTimeout:
       guard state == .open else { return }
+      if let graceReason = pingTimeoutGraceReason(),
+         pendingPingGraces < policy.maxPingTimeoutGraces,
+         let nonce = pendingPingNonce {
+        pendingPingGraces += 1
+        log.warning(
+          "Realtime heartbeat timeout deferred reason=\(graceReason) grace=\(pendingPingGraces) " +
+            "session=\(sessionID)"
+        )
+        armPingTimeout(nonce: nonce, sessionID: sessionID)
+        return
+      }
       lastErrorDescription = "ping_timeout"
       attemptLive = false
       await session.stopTransport()
@@ -706,6 +727,9 @@ actor ConnectionManager {
   }
 
   private func forwardSessionEvent(_ envelope: ProtocolSessionEventEnvelope) async {
+    if envelope.awaitsProcessing {
+      trackAccountEvent(envelope)
+    }
     await withTaskCancellationHandler {
       await sessionEventChannel.send(envelope)
       if Task.isCancelled {
@@ -731,7 +755,7 @@ actor ConnectionManager {
     switch state {
     case .stopped, .waitingForConstraints, .backgroundSuspended, .backoff:
       if resetBackoff {
-        attempt = 0
+        resetAttempts()
       }
       await startConnecting()
     case .connectingTransport, .authenticating, .open:
@@ -759,6 +783,12 @@ actor ConnectionManager {
       return
     }
 
+    if state == .open, let openedAt,
+       timeProvider.now().timeIntervalSince(openedAt) < Self.seconds(policy.stableOpenDuration) {
+      // The open did not last. Continue the escalation it interrupted.
+      attempt = attemptsAtOpen
+    }
+    openedAt = nil
     attempt = attempt &+ 1
     await transition(to: .backoff, reason: reason)
     scheduleBackoff(sessionID: sessionID)
@@ -766,16 +796,24 @@ actor ConnectionManager {
 
   private func forceReconnect(reason: ConnectionReason) async {
     lastErrorDescription = nil
-    attempt = 0
+    resetAttempts()
     cancelBackoff()
     await transition(to: .stopped, reason: reason)
     await stopTransportAndReset()
     await evaluateConstraints(resetBackoff: true)
   }
 
+  /// An outside signal (user, network, foreground, wake) asks for a prompt retry. It also
+  /// forgets an unstable open, so a drop right after it starts from the shortest delay.
+  private func resetAttempts() {
+    attempt = 0
+    attemptsAtOpen = 0
+  }
+
   private func startConnecting() async {
     sessionID = sessionID &+ 1
     attemptLive = true
+    openedAt = nil
     cancelAllTimers()
     handshakeTask?.cancel()
     handshakeTask = nil
@@ -966,6 +1004,10 @@ actor ConnectionManager {
     )
   }
 
+  private static func seconds(_ duration: Duration) -> TimeInterval {
+    Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+  }
+
   private static func milliseconds(_ duration: Duration) -> Int {
     Int(duration.components.seconds * 1_000 + duration.components.attoseconds / 1_000_000_000_000_000)
   }
@@ -1043,9 +1085,17 @@ actor ConnectionManager {
     guard pendingPingNonce == nil else { return }
     let nonce = UInt64.random(in: 0 ... UInt64.max)
     pendingPingNonce = nonce
+    pendingPingSentUptime = timeProvider.uptime()
+    pendingPingGraces = 0
+    armPingTimeout(nonce: nonce, sessionID: sessionID)
 
+    await session.sendPing(nonce: nonce)
+  }
+
+  private func armPingTimeout(nonce: UInt64, sessionID: UInt64) {
     pingTimeoutTask?.cancel()
     let timeout = policy.pingTimeout(for: networkQuality)
+    pendingPingDeadlineUptime = timeProvider.uptime() + Self.seconds(timeout)
     let timeProvider = self.timeProvider
     pingTimeoutTask = Task { [weak self] in
       await timeProvider.sleep(for: timeout)
@@ -1056,17 +1106,60 @@ actor ConnectionManager {
         pingNonce: nonce
       )
     }
-
-    await session.sendPing(nonce: nonce)
   }
 
+  /// Why a heartbeat that timed out may still be on a live socket, if there is a reason.
+  private func pingTimeoutGraceReason() -> String? {
+    let now = timeProvider.uptime()
+    if let deadline = pendingPingDeadlineUptime,
+       now - deadline > Self.seconds(policy.pingTimerLagTolerance) {
+      // The timer (or this owner) ran late: the process was frozen, not the network.
+      return "timer_lag"
+    }
+    if accountEventsInFlight > 0 {
+      return "account_pipeline_busy"
+    }
+    if let sent = pendingPingSentUptime, let received = lastAccountEventUptime, received > sent {
+      return "inbound_traffic"
+    }
+    return nil
+  }
+
+  private func trackAccountEvent(_ envelope: ProtocolSessionEventEnvelope) {
+    accountEventsInFlight += 1
+    lastAccountEventUptime = timeProvider.uptime()
+    Task { [weak self] in
+      await envelope.waitUntilProcessed()
+      await self?.accountEventProcessed()
+    }
+  }
+
+  private func accountEventProcessed() {
+    accountEventsInFlight = max(0, accountEventsInFlight - 1)
+    lastAccountEventUptime = timeProvider.uptime()
+  }
+
+  /// Any pong proves the socket delivered after its ping was sent. The V3 transport answers only
+  /// its most recent ping, so the pong for a newer heartbeat or wake probe also settles an older
+  /// outstanding one instead of letting it time out on a healthy connection.
   private func handlePong(nonce: UInt64) {
-    if pendingPingNonce == nonce {
+    let provenSince: TimeInterval?
+    if nonce == pendingPingNonce {
+      provenSince = pendingPingSentUptime
+    } else if nonce == probeNonce {
+      provenSince = probeSentUptime
+    } else {
+      provenSince = nil
+    }
+    guard let provenSince else { return }
+
+    if pendingPingNonce != nil, let sent = pendingPingSentUptime, sent <= provenSince {
       resetPendingPing()
     }
 
-    if probeNonce == nonce {
+    if probeNonce != nil, let sent = probeSentUptime, sent <= provenSince {
       probeNonce = nil
+      probeSentUptime = nil
       probeTimeoutTask?.cancel()
       probeTimeoutTask = nil
       if let continuation = probeContinuation {
@@ -1084,6 +1177,7 @@ actor ConnectionManager {
 
     let nonce = UInt64.random(in: 0 ... UInt64.max)
     probeNonce = nonce
+    probeSentUptime = timeProvider.uptime()
 
     return await withCheckedContinuation { continuation in
       probeContinuation = continuation
@@ -1152,6 +1246,9 @@ actor ConnectionManager {
 
   private func resetPendingPing() {
     pendingPingNonce = nil
+    pendingPingSentUptime = nil
+    pendingPingDeadlineUptime = nil
+    pendingPingGraces = 0
     pingTimeoutTask?.cancel()
     pingTimeoutTask = nil
   }

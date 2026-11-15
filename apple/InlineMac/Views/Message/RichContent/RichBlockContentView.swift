@@ -4,10 +4,14 @@ import InlineProtocol
 import Quartz
 import TextProcessing
 
-final class RichBlockContentView: NSView, NSUserInterfaceValidations {
+final class RichBlockContentView: NSView {
   var onDisclosureToggle: ((BlockContentPath, Bool) -> Void)?
   var onTextEntityClick: ((MessageTextEntityHit, NSAttributedString) -> Bool)?
   var onTextLongPress: ((NSEvent) -> Void)?
+  /// Runs a message action that a block draws as its own button, such as a plan's Approve.
+  var onMessageAction: ((InlineProtocol.MessageAction) -> Void)?
+  /// Puts a prompt chip's text in the composer.
+  var onCompose: ((String) -> Void)?
 
   private var nodeViews: [BlockContentPath: RichBlockRenderableView] = [:]
   /// Removed nodes still fading out. Never reused, hit-tested or selected.
@@ -16,6 +20,16 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   private var previousSource: String?
   private var previousContent: InlineProtocol.BlockContent?
   private var currentPlan: RichBlockLayoutPlan?
+  /// The last bind's inputs, to rebind when a width change alters which nodes exist.
+  private var lastBind: (
+    content: InlineProtocol.BlockContent,
+    attributedText: NSAttributedString,
+    baseFontSize: CGFloat,
+    palette: RichBlockPalette,
+    relatedMessage: InlineKit.Message,
+    codePresentation: RichBlockCodePresentation,
+    renderStyle: MessageRenderStyle
+  )?
   private var mathSnapshot: RichTextMath.Snapshot?
   private var mathLayoutSignature: Int = 0
   private var mathPreparationTask: Task<Void, Never>?
@@ -31,16 +45,22 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   private var previewGeneration: UInt64 = 0
   private var previewWasPresented = false
   private weak var loadingPreviewView: RichBlockImageNodeView?
-  private lazy var multiSurfaceSelection = RichBlockMultiSurfaceSelectionCoordinator(owner: self)
 
   override var isFlipped: Bool { true }
-  override var acceptsFirstResponder: Bool { true }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     clipsToBounds = true
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
+  }
+
+  /// Rereads loading state for buttons drawn inside blocks, after a tap or its answer.
+  func refreshInlineActionStates() {
+    for view in nodeViews.values {
+      (view as? RichBlockAgentActionsNodeView)?.refreshLoadingState()
+      (view as? RichBlockReviewNodeView)?.refreshLoadingState()
+    }
   }
 
   @available(*, unavailable)
@@ -79,11 +99,6 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     default: true
     }
     let contentChanged = previousContent.map { $0 != content } ?? false
-    if sourceChanged || contentChanged
-      || selectionTopology(for: currentPlan) != selectionTopology(for: plan)
-    {
-      multiSurfaceSelection.clear()
-    }
     if previewGallery != nil, sourceChanged || previousContent.map({ $0 != content }) == true {
       // Quick Look owns an immutable tap-time gallery. A streamed structural
       // revision must close only this view's panel before its source nodes move.
@@ -96,9 +111,15 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     // Only an update of an already shown message animates nodes in and out; a
     // first bind or a different message appears as a whole.
     let isUpdate = previousContent != nil
+    // Text direction by node, to snap a node that changes reading direction instead of
+    // sliding it across the row.
+    let previousDirections: [BlockContentPath: Bool] = (currentPlan?.nodes ?? []).reduce(into: [:]) {
+      if case let .text(text) = $1.kind { $0[$1.path] = text.isRTL }
+    }
     previousSource = relatedMessage.text
     previousContent = content
     currentPlan = plan
+    lastBind = (content, attributedText, baseFontSize, palette, relatedMessage, codePresentation, renderStyle)
     styleCache.begin(
       source: attributedText,
       environment: .init(baseFontSize: baseFontSize, math: math, palette: palette, appearance: effectiveAppearance)
@@ -118,6 +139,12 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
         },
         onImageClick: { [weak self] image in
           self?.openImage(image)
+        },
+        onMessageAction: { [weak self] action in
+          self?.onMessageAction?(action)
+        },
+        onCompose: { [weak self] text in
+          self?.onCompose?(text)
         }
       ),
       isContentVisible: isContentVisible,
@@ -135,8 +162,16 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     // the view we still need for a later destination.
     var remainingViews = nodeViews
     nodeViews.removeAll(keepingCapacity: true)
+    // A block's own parts (a card's command, recap, buttons) aren't reconciled nodes; they
+    // follow their block.
+    func previousPath(of path: BlockContentPath) -> BlockContentPath? {
+      if let mapped = reconciliation.previousPathByCurrentPath[path] { return mapped }
+      guard case .part? = path.components.last else { return nil }
+      let owner = BlockContentPath(Array(path.components.dropLast()))
+      return reconciliation.previousPathByCurrentPath[owner].map { BlockContentPath($0.components + [path.components.last!]) }
+    }
     for node in plan.nodes {
-      guard let oldPath = reconciliation.previousPathByCurrentPath[node.path],
+      guard let oldPath = previousPath(of: node.path),
             let view = remainingViews[oldPath], view.reuseKind == node.reuseKind
       else { continue }
       nodeViews[node.path] = remainingViews.removeValue(forKey: oldPath)
@@ -145,9 +180,6 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     for removed in remainingViews.values {
       if fadesNodes {
         // Out of `nodeViews`, so selection and gesture routing already skip it.
-        for surface in removed.orderedTextSurfaces {
-          surface.clearCoordinatedSelection()
-        }
         fadingOutViews.append(removed)
         fadeOuts.append(removed)
       } else {
@@ -191,7 +223,15 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
         } : nil)
       }
       view.setContentVisible(isContentVisible)
-      if shouldAnimate, view.frame != .zero, view.frame != node.frame {
+      let flipsDirection: Bool = if case let .text(text) = node.kind,
+        let oldPath = reconciliation.previousPathByCurrentPath[node.path],
+        let previous = previousDirections[oldPath]
+      {
+        previous != text.isRTL
+      } else {
+        false
+      }
+      if shouldAnimate, !flipsDirection, view.frame != .zero, view.frame != node.frame {
         frameChanges.append((view, node.frame))
       } else {
         view.frame = node.frame
@@ -199,7 +239,6 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     }
 
     animate(frameChanges, fadeIns: fadeIns, fadeOuts: fadeOuts)
-    configureMultiSurfaceSelection(for: plan)
     mathMessageStableID = relatedMessage.stableId
     updateMathPreparation(math, layoutSignature: plan.mathSignature)
     if identityChanged || sourceChanged || contentChanged || accessibilityStructureChanged {
@@ -212,8 +251,21 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   }
 
   func applyLayout(_ plan: RichBlockLayoutPlan, animated: Bool) {
-    if selectionTopology(for: currentPlan) != selectionTopology(for: plan) {
-      multiSurfaceSelection.clear()
+    // Some layouts depend on width (a long plan collapses to the blocks that fit), so a
+    // resize can add or drop nodes. That needs a full bind, not just new frames.
+    if let lastBind, let currentPlan, !Self.sameNodes(currentPlan, plan) {
+      update(
+        plan: plan,
+        content: lastBind.content,
+        attributedText: lastBind.attributedText,
+        baseFontSize: lastBind.baseFontSize,
+        palette: lastBind.palette,
+        relatedMessage: lastBind.relatedMessage,
+        codePresentation: lastBind.codePresentation,
+        renderStyle: lastBind.renderStyle,
+        animated: false
+      )
+      return
     }
     currentPlan = plan
     let shouldAnimate = animated && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -227,7 +279,11 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       return nil
     }
     animate(frameChanges)
-    configureMultiSurfaceSelection(for: plan)
+  }
+
+  private static func sameNodes(_ lhs: RichBlockLayoutPlan, _ rhs: RichBlockLayoutPlan) -> Bool {
+    lhs.nodes.count == rhs.nodes.count
+      && zip(lhs.nodes, rhs.nodes).allSatisfy { $0.path == $1.path && $0.reuseKind == $1.reuseKind }
   }
 
   func setContentVisible(_ visible: Bool) {
@@ -263,7 +319,6 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   }
 
   override func prepareForReuse() {
-    multiSurfaceSelection.configure(surfaces: [], document: [], literals: [], enabled: false)
     cancelMathPreparation()
     mathSnapshot = nil
     mathMessageStableID = 0
@@ -284,89 +339,18 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     previousContent = nil
     previousSource = nil
     currentPlan = nil
+    lastBind = nil
     messageIdentity = nil
   }
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    NotificationCenter.default.removeObserver(
-      self,
-      name: NSWindow.didResignKeyNotification,
-      object: nil
-    )
-    NotificationCenter.default.removeObserver(
-      self,
-      name: NSApplication.didResignActiveNotification,
-      object: nil
-    )
     if window == nil {
-      multiSurfaceSelection.clear()
       clearPreview()
       cancelMathPreparation()
     } else {
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(selectionContextDidDeactivate),
-        name: NSWindow.didResignKeyNotification,
-        object: window
-      )
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(selectionContextDidDeactivate),
-        name: NSApplication.didResignActiveNotification,
-        object: nil
-      )
       startMathPreparation()
     }
-  }
-
-  override func resignFirstResponder() -> Bool {
-    if !multiSurfaceSelection.isTrackingGesture {
-      multiSurfaceSelection.clear()
-    }
-    return super.resignFirstResponder()
-  }
-
-  @objc private func selectionContextDidDeactivate() {
-    multiSurfaceSelection.clear()
-  }
-
-  func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
-    if item.action == #selector(NSText.copy(_:)) { return multiSurfaceSelection.hasSelection }
-    if item.action == #selector(NSText.selectAll(_:)) { return multiSurfaceSelection.canSelectAll }
-    return true
-  }
-
-  @objc func copy(_ sender: Any?) {
-    _ = multiSurfaceSelection.writeSelection(to: .general)
-  }
-
-  override func selectAll(_ sender: Any?) {
-    multiSurfaceSelection.selectAll()
-  }
-
-  var hasMultiSurfaceSelection: Bool { multiSurfaceSelection.hasSelection }
-  var multiSurfaceSelectedText: NSAttributedString? {
-    multiSurfaceSelection.hasSelection ? multiSurfaceSelection.selectedText : nil
-  }
-
-  func retargetMultiSurfaceCopy(in menu: NSMenu) -> NSMenu {
-    guard multiSurfaceSelection.hasSelection else { return menu }
-    let copyAction = #selector(NSText.copy(_:))
-    let item = menu.items.first(where: { $0.action == copyAction }) ?? {
-      let item = NSMenuItem(title: "Copy Selected Text", action: copyAction, keyEquivalent: "c")
-      menu.insertItem(item, at: 0)
-      return item
-    }()
-    item.title = "Copy Selected Text"
-    item.action = copyAction
-    item.target = self
-    item.isEnabled = true
-    item.keyEquivalent = "c"
-    for other in menu.items where other !== item && other.keyEquivalent == "c" {
-      other.keyEquivalent = ""
-    }
-    return menu
   }
 
   private func updateMathPreparation(_ snapshot: RichTextMath.Snapshot?, layoutSignature: Int) {
@@ -447,6 +431,8 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     var surfaces: [RichBlockTextSurface]
     var document: [RichTextMultiSurfaceSelection.DocumentItem]
     var literals: [NSAttributedString]
+    var roles: [MessageClipboardDocument.SurfaceRole]
+    var literalRoles: [MessageClipboardDocument.LiteralRole]
   }
 
   private func selectionTopology(for plan: RichBlockLayoutPlan?) -> [SelectionTopologyItem] {
@@ -469,22 +455,22 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     } ?? []
   }
 
-  private func configureMultiSurfaceSelection(for plan: RichBlockLayoutPlan) {
-    guard AppSettings.shared.richTextMultiSurfaceSelectionEnabled,
-          let projection = selectionProjection(for: plan)
-    else {
-      multiSurfaceSelection.configure(surfaces: [], document: [], literals: [], enabled: false)
-      return
-    }
-    multiSurfaceSelection.configure(
-      surfaces: projection.surfaces,
+  /// Text views in reading order for the message list's selection across blocks and messages.
+  func textSelectionProjection() -> MessageTextSelectionProjection? {
+    guard let currentPlan, let projection = selectionProjection(for: currentPlan),
+          !projection.surfaces.isEmpty
+    else { return nil }
+    return MessageTextSelectionProjection(
+      textViews: projection.surfaces.map(\.selectionTextView),
       document: projection.document,
       literals: projection.literals,
-      enabled: true
+      roles: projection.roles,
+      literalRoles: projection.literalRoles
     )
   }
 
   private func selectionProjection(for plan: RichBlockLayoutPlan) -> SelectionProjection? {
+    typealias Role = MessageClipboardDocument.SurfaceRole
     let surfacesByNode = plan.nodes.map { nodeViews[$0.path]?.orderedTextSurfaces ?? [] }
     let surfaces = surfacesByNode.flatMap { $0 }
     var surfaceIndices: [ObjectIdentifier: Int] = [:]
@@ -493,23 +479,48 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
     }
     var document: [RichTextMultiSurfaceSelection.DocumentItem] = []
     var literals: [NSAttributedString] = []
+    var roles = Array(repeating: Role.body, count: surfaces.count)
+    var literalRoles: [MessageClipboardDocument.LiteralRole] = []
+    let quotePaths = plan.nodes.compactMap { node -> BlockContentPath? in
+      if case .quote = node.kind { return node.path }
+      return nil
+    }
+
+    func listDepth(_ path: BlockContentPath) -> Int {
+      path.components.filter {
+        if case .listItem = $0 { return true }
+        return false
+      }.count
+    }
+
+    /// What a text node reads as: a list item's text, a heading, quoted text or a paragraph.
+    func textRole(_ node: RichBlockLayoutPlan.Node, role: RichBlockTextRole) -> Role {
+      let depth = listDepth(node.path)
+      if depth > 0 { return .listItem(depth: depth) }
+      if case let .heading(level) = role { return .heading(level: level) }
+      if quotePaths.contains(where: { node.path.isStrictDescendant(of: $0) }) { return .quote }
+      return .body
+    }
 
     func appendLiteral(
       _ source: NSAttributedString,
+      role: MessageClipboardDocument.LiteralRole,
       leadingForSurface: Int? = nil,
       separatorAfter: String
     ) {
       guard source.length > 0 else { return }
       let index = literals.count
       literals.append(source)
+      literalRoles.append(role)
       document.append(.init(
         content: .literal(index, leadingForSurface: leadingForSurface),
         separatorAfter: separatorAfter
       ))
     }
 
-    func appendSurface(_ surface: RichBlockTextSurface, separatorAfter: String) -> Bool {
+    func appendSurface(_ surface: RichBlockTextSurface, role: Role, separatorAfter: String) -> Bool {
       guard let index = surfaceIndices[ObjectIdentifier(surface)] else { return false }
+      roles[index] = role
       document.append(.init(content: .surface(index), separatorAfter: separatorAfter))
       return true
     }
@@ -520,54 +531,72 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
       case let .text(text):
         if case .listMarker = text.role {
           guard let marker = nodeViews[node.path] as? RichBlockListMarkerNodeView else { continue }
+          let markerRole = MessageClipboardDocument.LiteralRole.listMarker(.init(rendered: marker.selectionSource.string))
           for candidateIndex in plan.nodes.indices.dropFirst(nodeIndex + 1) {
             let candidate = plan.nodes[candidateIndex]
             guard candidate.path.isStrictDescendant(of: node.path) else { break }
             if let surface = surfacesByNode[candidateIndex].first,
                let target = surfaceIndices[ObjectIdentifier(surface)] {
-              appendLiteral(marker.selectionSource, leadingForSurface: target, separatorAfter: " ")
+              appendLiteral(marker.selectionSource, role: markerRole, leadingForSurface: target, separatorAfter: " ")
               break
             }
             if case .math = candidate.kind,
                let math = nodeViews[candidate.path] as? RichBlockMathNodeView,
                math.selectionSource.length > 0 {
-              appendLiteral(marker.selectionSource, separatorAfter: " ")
+              appendLiteral(marker.selectionSource, role: markerRole, separatorAfter: " ")
               break
             }
           }
         } else {
           for surface in nodeSurfaces {
-            guard appendSurface(surface, separatorAfter: "\n") else { return nil }
+            guard appendSurface(surface, role: textRole(node, role: text.role), separatorAfter: "\n") else { return nil }
           }
         }
-      case .code:
+      case let .code(code):
         for surface in nodeSurfaces {
-          guard appendSurface(surface, separatorAfter: "\n") else { return nil }
+          guard appendSurface(surface, role: .code(language: code.language), separatorAfter: "\n") else { return nil }
         }
       case .math:
+        let depth = listDepth(node.path)
         if let surface = nodeSurfaces.first {
-          guard nodeSurfaces.count == 1, appendSurface(surface, separatorAfter: "\n") else { return nil }
+          let role: Role = depth > 0 ? .listItem(depth: depth) : .body
+          guard nodeSurfaces.count == 1, appendSurface(surface, role: role, separatorAfter: "\n") else { return nil }
         } else if let math = nodeViews[node.path] as? RichBlockMathNodeView {
-          appendLiteral(math.selectionSource, separatorAfter: "\n")
+          appendLiteral(math.selectionSource, role: .block, separatorAfter: "\n")
         }
       case let .table(table):
         guard nodeSurfaces.count == table.cells.count else { return nil }
+        var row = 0
+        var column = 0
         for index in table.cells.indices {
+          if index > 0, table.cells[index].frame.minY != table.cells[index - 1].frame.minY {
+            row += 1
+            column = 0
+          }
           let sameRow = index + 1 < table.cells.count
             && table.cells[index].frame.minY == table.cells[index + 1].frame.minY
-          guard appendSurface(nodeSurfaces[index], separatorAfter: sameRow ? "\t" : "\n") else { return nil }
+          let role = Role.tableCell(table: nodeIndex, row: row, column: column, isHeader: table.cells[index].isHeader)
+          guard appendSurface(nodeSurfaces[index], role: role, separatorAfter: sameRow ? "\t" : "\n") else { return nil }
+          column += 1
         }
-      case .fields, .steps, .callout, .meter, .form:
+      case .fields, .steps, .callout, .meter, .form, .agentCard, .review, .promptChips:
         for surface in nodeSurfaces {
-          guard appendSurface(surface, separatorAfter: "\n") else { return nil }
+          guard appendSurface(surface, role: .body, separatorAfter: "\n") else { return nil }
         }
-      case .separator, .image, .album, .quote, .diff, .widget:
+      case .separator, .image, .album, .quote, .diff, .widget, .agentActions:
         guard nodeSurfaces.isEmpty else { return nil }
       }
     }
     guard surfaces.isEmpty || !document.isEmpty else { return nil }
-    return SelectionProjection(surfaces: surfaces, document: document, literals: literals)
+    return SelectionProjection(
+      surfaces: surfaces,
+      document: document,
+      literals: literals,
+      roles: roles,
+      literalRoles: literalRoles
+    )
   }
+
 
   private var readyImageOccurrences: [BlockImageOccurrence] {
     (currentPlan?.nodes ?? []).flatMap { node -> [BlockImageOccurrence] in
@@ -623,7 +652,6 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
         return URL(string: cdnURL)
       }
     ) else { return }
-    multiSurfaceSelection.clear()
     clearPreview()
     previewGallery = gallery
     let generation = previewGeneration

@@ -450,7 +450,7 @@ export class ProgressRenderer {
       case "edit": {
         let shown = 0
         for (const file of body.files) {
-          const diff = file.diff && shown < MAX_ROW_DIFF_CHARS ? tail(file.diff) : undefined
+          const diff = file.diff && shown < MAX_ROW_DIFF_CHARS ? tail(redactSecrets(file.diff)) : undefined
           shown += diff?.length ?? 0
           const counts = {
             ...(file.additions !== undefined ? { additions: file.additions } : {}),

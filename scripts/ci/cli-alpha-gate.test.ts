@@ -19,6 +19,7 @@ type Options = {
   ci?: Record<string, Run>
   cli?: Record<string, Run>
   releaseRuns?: { status: string }[]
+  releases?: Record<string, { draft: boolean } | null>
   compare?: Record<string, string>
   version?: string
 }
@@ -49,6 +50,10 @@ function fakeApi(options: Options) {
     }
     if (resource === "git/tags" && method === "POST") return { sha: "new-tag-object" }
     if (resource === "git/refs" && method === "POST") return { ref: body.ref }
+    if (resource.startsWith("releases/tags/")) {
+      const tag = resource.slice("releases/tags/".length)
+      return options.releases && tag in options.releases ? options.releases[tag] : { draft: false }
+    }
     if (resource.endsWith("/dispatches")) return null
     if (resource.startsWith("actions/workflows/cli-release.yml/runs")) return { workflow_runs: options.releaseRuns ?? [] }
     if (resource.startsWith("actions/workflows/integrations.yml/runs")) {
@@ -62,7 +67,7 @@ function fakeApi(options: Options) {
     const jobs = /^actions\/runs\/(\d+)\/jobs/.exec(resource)
     if (jobs) return jobsFor(Number(jobs[1]))
     if (resource.startsWith("commits?sha=main")) return options.main.map((value) => ({ sha: value }))
-    const compare = /^compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40})$/.exec(resource)
+    const compare = /^compare\/([0-9a-f]{40})\.\.\.([0-9a-f]{40}|main)$/.exec(resource)
     if (compare) return { status: options.compare?.[`${compare[1]}...${compare[2]}`] ?? "ahead" }
     if (resource.startsWith("contents/Cargo.toml")) {
       const toml = `[workspace]\nmembers = ["cli"]\n\n[workspace.package]\nauthors = ["Inline"]\nversion = "${options.version ?? "0.7.22-alpha.4"}"\n`
@@ -100,10 +105,16 @@ describe("CLI alpha selection", () => {
     })
   })
 
-  test("waits on a CI completion while a newer CLI change is still running, but the sweep releases", () => {
+  test("releases the newest green CLI change while a newer change is still running", () => {
     const options = { tags: tagged(), main: [sha("c"), sha("b"), sha("1")], ci: { [sha("c")]: { id: 3, status: "in_progress" }, [sha("b")]: green(2) }, cli: { [sha("c")]: green(13), [sha("b")]: green(12) } }
-    expect(selectCliAlpha({ api: fakeApi(options).api, event: "workflow_run", now: NOW })).toMatchObject({ outcome: DEFERRED, sha: sha("c") })
-    expect(selectCliAlpha({ api: fakeApi(options).api, event: "schedule", now: NOW })).toMatchObject({ outcome: RELEASE, sha: sha("b") })
+    for (const event of ["workflow_run", "schedule", "workflow_dispatch"]) {
+      expect(selectCliAlpha({ api: fakeApi(options).api, event, now: NOW })).toMatchObject({ outcome: RELEASE, sha: sha("b") })
+    }
+  })
+
+  test("defers when every new CLI change is still in CI", () => {
+    const { api } = fakeApi({ tags: tagged(), main: [sha("b"), sha("1")], ci: { [sha("b")]: green(2) }, cli: { [sha("b")]: { id: 12, status: "in_progress" } } })
+    expect(selectCliAlpha({ api, event: "workflow_run", now: NOW })).toMatchObject({ outcome: DEFERRED, sha: sha("b") })
   })
 
   test("skips red CLI changes and never walks past the last tagged commit", () => {
@@ -126,6 +137,28 @@ describe("CLI alpha selection", () => {
   test("never stacks releases on a running CLI Release", () => {
     const { api } = fakeApi({ tags: tagged(), main: [sha("b"), sha("1")], releaseRuns: [{ status: "queued" }] })
     expect(selectCliAlpha({ api, event: "workflow_dispatch", now: NOW })).toMatchObject({ outcome: DEFERRED, reason: "a CLI release is already running" })
+  })
+
+  test("resumes an unpublished alpha tag after a failed dispatch or release without allocating another version", () => {
+    for (const release of [null, { draft: true }]) {
+      const { api, calls } = fakeApi({ tags: tagged(1), main: [sha("b"), sha("1")],
+        ci: { [sha("1")]: green(2) }, cli: { [sha("1")]: green(12) },
+        releases: { "cli-v0.7.22-alpha.4": release } })
+      const selected = selectCliAlpha({ api, event: "workflow_run", now: NOW })
+      expect(selected).toMatchObject({ outcome: RELEASE, sha: sha("1"), tag: "cli-v0.7.22-alpha.4", version: "0.7.22-alpha.4" })
+      publishCliAlpha({ api, sha: selected.sha, tag: selected.tag, version: selected.version })
+      expect(calls.filter((call) => call.method === "POST")).toEqual([
+        { resource: "actions/workflows/cli-release.yml/dispatches", method: "POST", body: { ref: "main", inputs: { tag: "cli-v0.7.22-alpha.4" } } },
+      ])
+    }
+  })
+
+  test("an unpublished alpha must still be on main with passing release jobs before retrying", () => {
+    const options = { tags: tagged(), main: [sha("1")], releases: { "cli-v0.7.22-alpha.4": null },
+      ci: { [sha("1")]: green(2) }, cli: { [sha("1")]: green(12) } }
+    expect(() => selectCliAlpha({ api: fakeApi({ ...options, compare: { [`${sha("1")}...main`]: "diverged" } }).api })).toThrow("not on main")
+    expect(selectCliAlpha({ api: fakeApi({ ...options, ci: { [sha("1")]: { id: 2, status: "completed", conclusion: "failure" } } }).api })).toMatchObject({ outcome: "blocked" })
+    expect(selectCliAlpha({ api: fakeApi({ ...options, cli: { [sha("1")]: { id: 12, status: "in_progress" } } }).api })).toMatchObject({ outcome: DEFERRED })
   })
 })
 
@@ -158,6 +191,7 @@ describe("CLI alpha publication", () => {
     try { publishCliAlpha({ api: refusing, sha: sha("b"), tag: "cli-v0.7.22-alpha.5", version: "0.7.22-alpha.5" }) } catch (caught) { error = caught }
     expect(error.outcome).toBe("blocked")
     expect(error.message).toContain("Release tags: admin creation")
+    expect(error.message).toContain("refs/tags/cli-v*-alpha.*")
   })
 
   test("only publishes alpha tags", () => {
@@ -189,6 +223,23 @@ describe("CLI alpha workflow boundaries", () => {
   test("names the workflows that actually exist", () => {
     for (const [file, name] of [["integrations.yml", "CI"], ["cli-update-qualification.yml", "CLI Update Qualification"]]) {
       expect((parse(readFileSync(path.join(root, ".github/workflows", file), "utf8")) as any).name).toBe(name)
+    }
+  })
+
+  test("main CI and updater qualification survive unrelated pushes while PR runs can be superseded", () => {
+    for (const file of ["integrations.yml", "cli-update-qualification.yml"]) {
+      const parsed = parse(readFileSync(path.join(root, ".github/workflows", file), "utf8")) as any
+      expect(parsed.concurrency.group).toContain("github.event_name == 'pull_request' && github.ref || github.sha")
+      expect(parsed.concurrency["cancel-in-progress"]).toBe("${{ github.event_name == 'pull_request' }}")
+    }
+  })
+
+  test("qualifies changes to the Rust toolchain inputs and alpha automation itself", () => {
+    const parsed = parse(readFileSync(path.join(root, ".github/workflows/cli-update-qualification.yml"), "utf8")) as any
+    for (const event of ["push", "pull_request"]) {
+      for (const input of [".cargo/**", "scripts/ci/ensure-public-workspaces.sh", "scripts/ci/public-workspaces-ref", "scripts/ci/cli-alpha-gate.*", ".github/workflows/cli-alpha.yml"]) {
+        expect(parsed.on[event].paths).toContain(input)
+      }
     }
   })
 })

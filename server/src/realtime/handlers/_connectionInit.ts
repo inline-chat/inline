@@ -7,7 +7,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"
 import { sessions } from "@in/server/db/schema"
-import { and, eq } from "drizzle-orm"
+import { and, eq, or, sql, type SQL } from "drizzle-orm"
 import { validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { connectionBackgroundWork } from "@in/server/ws/backgroundWork"
 
@@ -82,11 +82,26 @@ export const handleConnectionInit = async (
   return {}
 }
 
-async function storeSessionInfo(sessionId: number, userId: number, clientVersion?: string, osVersion?: string) {
+/**
+ * Records client metadata only when it changed. Request-scoped clients connect
+ * once per call with the same versions, so an unconditional write would update
+ * the session row on every connection. Returns the number of rows written.
+ */
+export async function storeSessionInfo(sessionId: number, userId: number, clientVersion?: string, osVersion?: string): Promise<number> {
   const values: { clientVersion?: string; osVersion?: string } = {}
-  if (clientVersion) values.clientVersion = clientVersion
-  if (osVersion) values.osVersion = osVersion
-  if (!Object.keys(values).length) return
+  const changed: SQL[] = []
+  if (clientVersion) {
+    values.clientVersion = clientVersion
+    changed.push(sql`${sessions.clientVersion} is distinct from ${clientVersion}`)
+  }
+  if (osVersion) {
+    values.osVersion = osVersion
+    changed.push(sql`${sessions.osVersion} is distinct from ${osVersion}`)
+  }
+  if (changed.length === 0) return 0
 
-  await db.update(sessions).set(values).where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+  const rows = await db.update(sessions).set(values)
+    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId), or(...changed)))
+    .returning({ id: sessions.id })
+  return rows.length
 }

@@ -20,7 +20,7 @@ import { NativeUploadOperations } from "./operations"
 import { countTransferWork } from "@in/server/modules/transfers/trace"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 import { sql } from "drizzle-orm"
-import type { UploadPartStore } from "./partStore"
+import { UploadPartStorageUnavailableError, type UploadPartStore } from "./partStore"
 
 setDefaultTimeout(60_000)
 
@@ -704,6 +704,48 @@ describe("native upload operations", () => {
     await expect(stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
       .rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     expect(store.objects.size).toBe(1)
+  })
+
+  test("a part resent after finish in the same process is acknowledged as already present", async () => {
+    const user = await testUtils.createUser("native-upload-late-part@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([5, 5, 5])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(103), fileName: "late.bin",
+      mimeType: "application/octet-stream", byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+    expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
+    // The reply to the original part was lost; the client resends it after finishing.
+    expect(await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .toEqual({ alreadyPresent: true })
+    expect(store.objects.size).toBe(1)
+  })
+
+  test("a part storage outage is a retryable 503 with a wait hint", async () => {
+    class UnavailableStore extends MemoryPartStore {
+      override async put(): Promise<string> {
+        throw new UploadPartStorageUnavailableError()
+      }
+    }
+    const user = await testUtils.createUser("native-upload-storage-outage@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), new UnavailableStore(), finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([6, 6, 6])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(104), fileName: "outage.bin",
+      mimeType: "application/octet-stream", byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await expect(operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .rejects.toMatchObject({ codeNumber: 503, retryAfterSeconds: 5 })
   })
 
   test("concurrent parts of one upload do not wait on each other", async () => {

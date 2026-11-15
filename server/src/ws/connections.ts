@@ -11,7 +11,6 @@ import { connectionDirectory } from "@in/server/modules/internalMessaging/direct
 import { connectedUserRepair } from "@in/server/modules/internalMessaging/repair"
 import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
 import { connectionBackgroundWork } from "./backgroundWork"
-import { WebSocketTopic } from "@in/server/ws/topics"
 import type { Server } from "bun"
 import type { ElysiaWS } from "elysia/ws"
 import invariant from "tiny-invariant"
@@ -75,7 +74,6 @@ const loadCurrentSpaceMembership: SpaceMembershipHydrator = async ({ userId, spa
 }
 
 export enum ConnVersion {
-  BASIC_V1 = 1,
   REALTIME_V1 = 2,
   REALTIME_V3 = 3,
 }
@@ -570,17 +568,6 @@ class ConnectionManager {
     if (!cachedSpaceIds.includes(spaceId)) {
       this.userSpaceIds.set(userId, [...cachedSpaceIds, spaceId])
     }
-
-    // Subscribe the user to the space
-    const userConnections = this.authenticatedUsers.get(userId)
-    if (userConnections) {
-      userConnections.forEach((connectionId) => {
-        const connection = this.connections.get(connectionId)
-        if (connection?.version === ConnVersion.BASIC_V1) {
-          connection?.ws.subscribe(WebSocketTopic.Space(spaceId))
-        }
-      })
-    }
   }
 
   /**
@@ -667,13 +654,6 @@ class ConnectionManager {
 
     const cachedSpaceIds = this.userSpaceIds.get(userId)
     if (cachedSpaceIds) this.userSpaceIds.set(userId, cachedSpaceIds.filter((id) => id !== spaceId))
-
-    for (const connectionId of this.authenticatedUsers.get(userId) ?? []) {
-      const connection = this.connections.get(connectionId)
-      if (connection?.version === ConnVersion.BASIC_V1) {
-        connection.ws.unsubscribe(WebSocketTopic.Space(spaceId))
-      }
-    }
   }
 
   // ------------------------------------------------------------------------------------------------

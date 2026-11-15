@@ -261,7 +261,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       db: dependencies.database,
       destination: initialDestination
     )
-    mentionSource.candidateUpdates
+    mentionSource.source.updates
       .sink { [weak self] _ in
         guard let self else { return }
         updateVisibilityTooltip()
@@ -464,29 +464,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     do {
       let result = try await dependencies.realtimeV2.send(.listBots())
       guard case let .listBots(response) = result else { return }
-      // Save the bots so mentions read them, and their later renames, from
-      // the database. A bot set up moments ago may not be saved yet.
-      do {
-        try await dependencies.database.dbWriter.write { db in
-          for bot in response.bots {
-            // This runs on every activation; skip unchanged rows so their
-            // observers don't fire.
-            let listed = InlineKit.User(from: bot)
-            if let saved = try InlineKit.User.fetchOne(db, id: bot.id),
-               saved.firstName == listed.firstName,
-               saved.lastName == listed.lastName,
-               saved.username == listed.username,
-               saved.pendingSetup == listed.pendingSetup,
-               saved.profileFileUniqueId == listed.profileFileUniqueId
-            {
-              continue
-            }
-            _ = try InlineKit.User.save(db, user: bot)
-          }
-        }
-      } catch {
-        log.error("Could not save listed bots", error: error)
-      }
+      // Listing saves the bots and their owner, so mentions read them from the database.
       var choices: [AllChatsAgentChoice] = []
       for bot in response.bots {
         choices.append(AllChatsAgentChoice(bot: bot, agent: nil))
@@ -499,17 +477,6 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         }
       }
       agentChoices = choices
-      let botUserInfos = response.bots.map { bot in
-        ObjectCache.shared.getCachedUser(id: bot.id) ?? UserInfo(user: InlineKit.User(from: bot))
-      }
-      let botUserInfosByID = Dictionary(uniqueKeysWithValues: botUserInfos.map { ($0.id, $0) })
-      mentionSource.setAgents(
-        choices.compactMap { choice in
-          guard let agent = choice.agent, let userInfo = botUserInfosByID[choice.bot.id] else { return nil }
-          return MentionableBotAgent(agent: agent, botUserInfo: userInfo)
-        },
-        ownedBots: botUserInfos
-      )
       applyFirstAgentMentionIfNeeded()
       updateVisibilityTooltip()
     } catch {
@@ -603,7 +570,6 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     preferences.save(destination: destination)
     mentionSource.setDestination(destination)
     updateVisibilityTooltip()
-    Task { await mentionSource.refresh() }
   }
 
   private func draftDidChange(

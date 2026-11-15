@@ -160,3 +160,74 @@ public struct GridGlassGroup<Content: View>: View {
     }
   }
 }
+
+/// A crossed microphone on a white disc, worn at a face's lower corner while
+/// that person's microphone is off.
+public struct GridMutedBadge: View {
+  let diameter: CGFloat
+
+  public init(diameter: CGFloat) {
+    self.diameter = diameter
+  }
+
+  public var body: some View {
+    Image(systemName: "mic.slash.fill")
+      .font(.system(size: diameter * 0.48, weight: .semibold))
+      .foregroundStyle(Color.black.opacity(0.6))
+      .frame(width: diameter, height: diameter)
+      .background(Color.white, in: Circle())
+      .shadow(color: .black.opacity(0.18), radius: 1.5, y: 0.5)
+      .accessibilityHidden(true)
+  }
+}
+
+public extension AnyTransition {
+  static var gridBadge: AnyTransition {
+    .scale(scale: 0.5).combined(with: .opacity)
+  }
+}
+
+public extension View {
+  /// A faint second ring just outside a face's microphone ring that thickens
+  /// with the speaker's voice, so the room can see who is talking.
+  ///
+  /// LiveKit reports levels a few times a second, so a soft spring carries
+  /// the ring between reports instead of stepping.
+  func gridSpeakingHalo(level: Float, maxWidth: CGFloat = 3) -> some View {
+    background {
+      GridSpeakingHaloRing(gap: 1, width: GridSpeakingHaloRing.width(level: level, maxWidth: maxWidth))
+        .fill(Color.green.opacity(0.3), style: FillStyle(eoFill: true))
+        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: level)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+  }
+}
+
+/// A ring drawn outside the view's bounds; a width of zero draws nothing.
+struct GridSpeakingHaloRing: Shape {
+  var gap: CGFloat
+  var width: CGFloat
+
+  var animatableData: CGFloat {
+    get { width }
+    set { width = newValue }
+  }
+
+  func path(in rect: CGRect) -> SwiftUI.Path {
+    guard width > 0.05 else { return SwiftUI.Path() }
+    let inner = rect.insetBy(dx: -gap, dy: -gap)
+    var path = SwiftUI.Path(ellipseIn: inner.insetBy(dx: -width, dy: -width))
+    path.addEllipse(in: inner)
+    return path
+  }
+
+  /// LiveKit levels are linear amplitude, so speech mostly sits between
+  /// 0.01 and 0.3. Map them in decibels: -40 dB is a whisper, -10 dB is full.
+  static func width(level: Float, maxWidth: CGFloat) -> CGFloat {
+    guard level > 0.005 else { return 0 }
+    let decibels = 20 * log10(Double(min(level, 1)))
+    let loudness = min(max((decibels + 40) / 30, 0), 1)
+    return 1 + (maxWidth - 1) * CGFloat(loudness)
+  }
+}

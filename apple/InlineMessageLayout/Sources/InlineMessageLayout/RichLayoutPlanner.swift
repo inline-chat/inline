@@ -18,7 +18,7 @@ public enum RichLayoutPlanner {
     sources: [RichPath: Range<Int>]? = nil
   ) -> RichLayout? {
     guard !blocks.isEmpty, maximumWidth.isFinite, maximumWidth >= 1 else { return nil }
-    var builder = Builder(metrics: metrics, grid: grid, fallbackDirection: layoutDirection, cache: cache)
+    var builder = RichBuilder(metrics: metrics, grid: grid, fallbackDirection: layoutDirection, cache: cache)
     builder.sources = sources
     guard builder.layout(blocks, parent: RichPath(), x: 0, width: maximumWidth, depth: 0, isRightToLeft: false) else {
       return nil
@@ -27,7 +27,7 @@ public enum RichLayoutPlanner {
   }
 }
 
-private struct Builder {
+struct RichBuilder {
   /// How a node follows the content's final width when it is narrower than the maximum.
   enum Anchor {
     case leading
@@ -215,6 +215,28 @@ private struct Builder {
       return appendAlbum(images, path: path, x: x, width: width)
     case let .disclosure(disclosure):
       return layout(disclosure: disclosure, path: path, x: x, width: width, depth: depth + 1)
+    case let .steps(steps):
+      return appendSteps(steps, path: path, x: x, width: width)
+    case let .fields(fields):
+      return appendFields(fields, path: path, x: x, width: width)
+    case let .callout(callout):
+      return layout(callout: callout, path: path, x: x, width: width, depth: depth + 1)
+    case let .meter(meter):
+      return appendMeter(meter, path: path, x: x, width: width)
+    case let .diff(diff):
+      return appendDiff(diff, path: path, x: x, width: width)
+    case let .planProposal(plan):
+      return layout(plan: plan, path: path, x: x, width: width, depth: depth + 1)
+    case let .approval(approval):
+      return layout(approval: approval, path: path, x: x, width: width, depth: depth + 1)
+    case let .review(review):
+      return appendReview(review, path: path, x: x, width: width)
+    case let .taskSuggestion(task):
+      return appendTaskSuggestion(task, path: path, x: x, width: width)
+    case let .nextStep(step):
+      return appendNextStep(step, path: path, x: x, width: width)
+    case let .promptSuggestions(prompts):
+      return appendPromptSuggestions(prompts, path: path, x: x, width: width)
     }
   }
 

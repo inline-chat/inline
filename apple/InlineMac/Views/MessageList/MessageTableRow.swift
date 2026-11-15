@@ -45,6 +45,11 @@ class MessageTableCell: NSView {
   private var messageLeadingConstraint: NSLayoutConstraint?
   private var forwardSelectionActive = false
 
+  /// The rendered message's text, for the list's selection across blocks and messages.
+  var textSelectionSource: MessageTextSelectionSource? {
+    messageView as? MessageTextSelectionSource
+  }
+
   /// - Parameter animated: animates entering and leaving selection mode (checkbox slides in from the
   ///   avatar column while the message slides aside) and per-row checkbox changes.
   func setForwardSelection(

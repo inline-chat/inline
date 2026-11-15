@@ -587,6 +587,7 @@ async function sendNotificationToUser({
     payload: {
       kind: "alert",
       senderUserId: currentUserId,
+      chatId,
       threadId: `chat_${chatId}`,
       title,
       body,

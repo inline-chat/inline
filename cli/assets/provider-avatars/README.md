@@ -1,11 +1,12 @@
 # Provider avatar defaults
 
-The server-usable runtime contract is the four canonical PNG files in this directory:
+The server-usable runtime contract is the five canonical PNG files in this directory:
 
 - `codex.png`
 - `claude.png`
 - `opencode.png`
 - `amp.png`
+- `dots.png` (ChatGPT Dots bridge; an original neutral mark, not OpenAI branding)
 
 Every runtime avatar is a square 512 x 512 PNG, kept below the bridge's 512 KiB upload limit. Setup embeds these files and updates an existing avatar only while it is still managed by Inline; a user-customized avatar is preserved. Claude uses the approved opaque RGB `249, 248, 244` background rather than transparency.
 

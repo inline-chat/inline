@@ -1,3 +1,4 @@
+import { ensureCanMessageBot } from "@in/server/modules/agents/access"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -161,6 +162,8 @@ async function persistMemberAdd(tx: Transaction, input: AddSpaceMemberInput): Pr
     .limit(1)
 
   ensureAdmission(space, actorMembership, input)
+  // A bot joins a space only through someone who can reach it.
+  if (user.bot === true) await ensureCanMessageBot(user, input.actorUserId)
   if (targetMembership) {
     throw RealtimeRpcError.UserAlreadyMember()
   }

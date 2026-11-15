@@ -13,6 +13,8 @@ final class MessageActionsView: UIView {
   private let stack = UIStackView()
   private var buttons: [String: MessageActionButton] = [:]
   private var message: Message?
+  /// Actions drawn inside the message's blocks instead.
+  private var excluded: Set<String> = []
   private var loadingSubscription: AnyCancellable?
   private var answeredSubscription: AnyCancellable?
   private var grantsSubscription: AnyCancellable?
@@ -38,10 +40,12 @@ final class MessageActionsView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  /// Rows with at least one usable button, as the current view filters them.
-  static func rows(for message: Message) -> [MessageActionRow] {
+  /// Rows with at least one usable button, as the current view filters them, without the
+  /// actions in `excluded`, which the message's blocks draw themselves.
+  static func rows(for message: Message, excluding excluded: Set<String> = []) -> [MessageActionRow] {
     guard let actions = message.actions else { return [] }
-    return actions.rows.compactMap { row in
+    let rows = excluded.isEmpty ? actions.rows : BlockInlineActions.remainingRows(actions, drawnInside: excluded)
+    return rows.compactMap { row in
       let usable = row.actions.filter { action in
         !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
           && !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -69,8 +73,9 @@ final class MessageActionsView: UIView {
     return CGFloat(rowCount) * row + CGFloat(rowCount - 1) * rowSpacing
   }
 
-  func configure(message: Message) {
-    let rows = Self.rows(for: message)
+  func configure(message: Message, excluding excluded: Set<String> = []) {
+    self.excluded = excluded
+    let rows = Self.rows(for: message, excluding: excluded)
     let sameButtons = self.message?.id == message.id
       && rows.flatMap(\.actions).map(\.actionID) == stack.arrangedSubviews.flatMap { ($0 as? UIStackView)?.arrangedSubviews ?? [] }
       .compactMap { ($0 as? MessageActionButton)?.actionId }
@@ -118,10 +123,11 @@ final class MessageActionsView: UIView {
     answeredSubscription = MessageActionInteractionState.shared.answeredPublisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] event in
+        // Buttons inside blocks answer for themselves.
         guard let message = self?.message,
               event.key.peerId == message.peerId,
               event.key.messageId == message.messageId,
-              let self
+              let self, self.buttons[event.key.actionId] != nil
         else { return }
         if let toastText = event.toastText {
           ToastManager.shared.showToast(toastText, type: .info)
@@ -134,7 +140,7 @@ final class MessageActionsView: UIView {
 
   private func refreshPresentations() {
     guard let message else { return }
-    for row in Self.rows(for: message) {
+    for row in Self.rows(for: message, excluding: excluded) {
       for action in row.actions {
         buttons[action.actionID]?.configure(
           action: action,
@@ -162,50 +168,7 @@ final class MessageActionsView: UIView {
 
   @objc private func handleTap(_ sender: MessageActionButton) {
     guard let action = sender.messageAction, let message else { return }
-    let presentation = MessageActionPerformer.presentation(for: action, message: message)
-    MessageActionPerformer.run(presentation, from: self) { [weak self] in
-      if presentation.intent == .callback {
-        self?.invokeCallback(action, on: message)
-      } else {
-        MessageActionPerformer.performLocal(presentation.intent)
-      }
-    }
-  }
-
-  private func invokeCallback(_ action: MessageAction, on message: Message) {
-    let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !actionId.isEmpty else { return }
-    let key = MessageActionInteractionState.LoadingKey(
-      peerId: message.peerId,
-      messageId: message.messageId,
-      rev: message.rev,
-      actionId: actionId
-    )
-    guard MessageActionInteractionState.shared.begin(key: key) else { return }
-    updateLoading()
-    Task {
-      do {
-        let result = try await Api.realtime.send(.invokeMessageAction(
-          peerId: message.peerId,
-          messageId: message.messageId,
-          actionId: actionId
-        ))
-        guard case let .invokeMessageAction(response) = result else {
-          throw MessageActionsError.invalidResponse
-        }
-        await MainActor.run {
-          MessageActionInteractionState.shared.attachInteractionId(response.interactionID, for: key)
-        }
-      } catch {
-        await MainActor.run {
-          MessageActionInteractionState.shared.fail(key: key)
-          ToastManager.shared.showToast("Action failed", type: .error, systemImage: "exclamationmark.triangle")
-        }
-      }
-    }
+    MessageActionInvoker.tap(action, on: message, from: self)
   }
 }
 
-private enum MessageActionsError: Error {
-  case invalidResponse
-}

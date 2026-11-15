@@ -1,0 +1,2 @@
+ALTER TABLE "sessions" ADD COLUMN "push_token_fingerprint" "bytea";--> statement-breakpoint
+CREATE UNIQUE INDEX "sessions_push_token_fingerprint_live" ON "sessions" USING btree ("push_token_fingerprint") WHERE "sessions"."revoked" IS NULL AND "sessions"."push_token_fingerprint" IS NOT NULL;

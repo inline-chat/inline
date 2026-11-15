@@ -1,5 +1,5 @@
 import Foundation
-import InlineNotificationFence
+@testable import InlineNotificationFence
 import Testing
 @preconcurrency import UserNotifications
 
@@ -205,4 +205,69 @@ struct NotificationAccountFenceTests {
     let keys = Set(redacted.userInfo.keys.compactMap { $0 as? String })
     #expect(keys == ["kind", "recipientUserId", "threadId", "messageId"])
   }
+
+  @Test("a push for another account is shown quietly, grouped apart, without routing")
+  func anotherAccountIsQuiet() throws {
+    let content = UNMutableNotificationContent()
+    content.title = "Vlad"
+    content.body = "secret"
+    content.threadIdentifier = "chat_7"
+    content.sound = .default
+    content.userInfo = payload(recipient: "42")
+      .merging(["threadId": "chat_7", "messageId": "9"]) { current, _ in current }
+
+    for reason in [NotificationAccountAdmission.Rejection.otherAccount, .signedOut, .missingFence] {
+      let quiet = NotificationAccountRedaction.content(from: content, rejection: reason)
+      #expect(quiet.sound == nil)
+      #expect(quiet.interruptionLevel == .passive)
+      #expect(quiet.threadIdentifier == NotificationAccountRedaction.withheldThreadIdentifier)
+      #expect(!quiet.body.contains("secret"))
+      #expect(Set(quiet.userInfo.keys.compactMap { $0 as? String }) == ["recipientUserId"])
+    }
+
+    // Own-account failures may hide a real missed message: keep the sound and the chat.
+    for reason in [NotificationAccountAdmission.Rejection.fenceUnavailable, .missingRecipient] {
+      let audible = NotificationAccountRedaction.content(from: content, rejection: reason)
+      #expect(audible.sound != nil)
+      #expect(audible.threadIdentifier == "chat_7")
+      #expect(audible.body == NotificationAccountRedaction.body)
+    }
+  }
+
+  @Test("delivered notifications for other accounts are stale once the app opens")
+  func staleDeliveredNotifications() {
+    let mine = UNMutableNotificationContent()
+    mine.userInfo = payload(recipient: "42")
+    let theirs = UNMutableNotificationContent()
+    theirs.userInfo = payload(recipient: "43")
+    let withheld = UNMutableNotificationContent()
+    withheld.threadIdentifier = NotificationAccountRedaction.withheldThreadIdentifier
+    let local = UNMutableNotificationContent()
+
+    #expect(!NotificationAccountRedaction.isStale(mine, currentUserID: 42))
+    #expect(NotificationAccountRedaction.isStale(theirs, currentUserID: 42))
+    #expect(NotificationAccountRedaction.isStale(withheld, currentUserID: 42))
+    #expect(!NotificationAccountRedaction.isStale(local, currentUserID: 42))
+  }
 }
+
+@Suite("Install namespace")
+struct InstallNamespaceTests {
+  @Test("release keeps historical names; other builds get their own")
+  func namespaces() {
+    #expect(InlineInstallNamespace.resolve(bundleIdentifier: "chat.inline.InlineIOS", isExtension: false) == "")
+    #expect(InlineInstallNamespace.resolve(
+      bundleIdentifier: "chat.inline.InlineIOS.InlineNotificationExtension", isExtension: true
+    ) == "")
+    #expect(InlineInstallNamespace.resolve(
+      bundleIdentifier: "chat.inline.InlineIOS.debug", isExtension: false
+    ) == "debug")
+    #expect(InlineInstallNamespace.resolve(
+      bundleIdentifier: "chat.inline.InlineIOS.devbuild.InlineNotificationExtension", isExtension: true
+    ) == "devbuild")
+    #expect(InlineInstallNamespace.resolve(bundleIdentifier: "chat.inline.InlineMac", isExtension: false) == "")
+    #expect(InlineInstallNamespace.scoped("fence-v1", namespace: "") == "fence-v1")
+    #expect(InlineInstallNamespace.scoped("fence-v1", namespace: "debug") == "fence-v1.debug")
+  }
+}
+

@@ -1,0 +1,99 @@
+{
+  "source": "Codex app-server v2 review turn: exitedReviewMode.review is render_review_output_text (codex-rs/protocol/src/review_format.rs), and the same text follows as the agent message.",
+  "native": {
+    "method": "item/completed",
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-r",
+      "item": {
+        "type": "exitedReviewMode",
+        "id": "item-r2",
+        "review": "The empty-input guard is right, but two paths still break on blank input.\n\nFull review comments:\n\n- [P1] Guard the empty slice before indexing — /work/inline/src/parser.ts:42-48\n  `tokens[0]` is read before the length check, so blank input still throws.\n  Move the guard above the first read.\n\n- [P3] Typo in the error message — /work/inline/src/errors.ts:7-7\n  \"recieved\" should be \"received\"."
+      }
+    }
+  },
+  "input": {
+    "vocabulary": "codex",
+    "agent": "Codex",
+    "folder": "/work/inline",
+    "events": [
+      {
+        "type": "turn",
+        "turn": "turn-r",
+        "phase": {
+          "phase": "started"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-r1",
+        "turn": "turn-r",
+        "kind": "message",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "message",
+            "role": "system",
+            "text": "current changes"
+          },
+          "status": "completed"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-c1",
+        "turn": "turn-r",
+        "kind": "command",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "command",
+            "command": "git diff --stat",
+            "output": "ok",
+            "exit_code": 0,
+            "duration_ms": 2400
+          },
+          "status": "completed"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-r2",
+        "turn": "turn-r",
+        "kind": "review",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "review",
+            "text": "The empty-input guard is right, but two paths still break on blank input.\n\nFull review comments:\n\n- [P1] Guard the empty slice before indexing — /work/inline/src/parser.ts:42-48\n  `tokens[0]` is read before the length check, so blank input still throws.\n  Move the guard above the first read.\n\n- [P3] Typo in the error message — /work/inline/src/errors.ts:7-7\n  \"recieved\" should be \"received\"."
+          },
+          "status": "completed"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-m1",
+        "turn": "turn-r",
+        "kind": "message",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "message",
+            "role": "assistant",
+            "text": "The empty-input guard is right, but two paths still break on blank input.\n\nFull review comments:\n\n- [P1] Guard the empty slice before indexing — /work/inline/src/parser.ts:42-48\n  `tokens[0]` is read before the length check, so blank input still throws.\n  Move the guard above the first read.\n\n- [P3] Typo in the error message — /work/inline/src/errors.ts:7-7\n  \"recieved\" should be \"received\"."
+          },
+          "status": "completed"
+        }
+      },
+      {
+        "type": "turn",
+        "turn": "turn-r",
+        "phase": {
+          "phase": "completed",
+          "outcome": "completed",
+          "duration_ms": 95000
+        }
+      }
+    ]
+  }
+}

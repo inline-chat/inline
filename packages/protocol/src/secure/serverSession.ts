@@ -317,6 +317,12 @@ export class InlineProtocolServerSession {
   readonly #deferredInvokeAfter = new Map<bigint, PreparedLogicalMessage>()
   #deferredInvokeAfterBytes = 0
   readonly #inFlightApplications = new Set<bigint>()
+  /**
+   * Running session-tier applications. They keep no durable result, so a client that reconnects
+   * runs them again; on disconnect they are aborted so they stop holding admission slots and
+   * object-store work for an answer nobody can receive.
+   */
+  readonly #abortOnDisconnect = new Set<AbortController>()
   readonly #droppedApplicationAnswers = new Set<bigint>()
   readonly #sessionTierApplications = new Map<bigint, true>()
   readonly #handshake: InlineHandshakeServer
@@ -355,6 +361,8 @@ export class InlineProtocolServerSession {
   /** Release resend copies while accepted applications still settle their durable replay outcome. */
   disconnect(): void {
     this.#transportClosed = true
+    for (const controller of this.#abortOnDisconnect) controller.abort()
+    this.#abortOnDisconnect.clear()
     this.#pending.clear()
     this.#clearDeferred()
     // Nothing encrypted after disconnect can reach the peer; do not retain key material
@@ -1133,6 +1141,7 @@ export class InlineProtocolServerSession {
             }, true)
           }
         }
+        if (replayTier === "session") this.#abortOnDisconnect.add(controller)
         const applicationDispatch = (async (): Promise<{
           kind: "settled"
           dispatched: Awaited<ReturnType<ServerApplicationDispatcher["dispatch"]>>
@@ -1182,12 +1191,16 @@ export class InlineProtocolServerSession {
                 ? {
                   kind: "error",
                   code: executionStarted ? 504 : 503,
-                  message: executionStarted
+                  message: this.#transportClosed
+                    ? "Realtime transport closed during execution"
+                    : executionStarted
                     ? "Realtime application deadline exceeded; commit outcome is unknown"
                     : "Realtime application deadline exceeded before execution",
                 }
                 : { kind: "error", code: 500, message: "Internal server error" },
             }
+          } finally {
+            this.#abortOnDisconnect.delete(controller)
           }
         })()
         const applicationDeadline = new Promise<{ kind: "deadline" }>((resolve) => {

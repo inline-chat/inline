@@ -51,10 +51,7 @@ enum CLIExecutableVerifier {
       throw invalidSignature(configuration)
     }
 
-    let escapedIdentifier = identifier.replacingOccurrences(of: "\"", with: "\\\"")
-    let escapedTeam = configuration.expectedTeamIdentifier.replacingOccurrences(of: "\"", with: "\\\"")
-    let requirementText =
-      "anchor apple generic and identifier \"\(escapedIdentifier)\" and certificate leaf[subject.OU] = \"\(escapedTeam)\""
+    let requirementText = Self.requirement(identifiers: [identifier], team: configuration.expectedTeamIdentifier)
     var requirement: SecRequirement?
     let requirementStatus = SecRequirementCreateWithString(
       requirementText as CFString,
@@ -74,6 +71,23 @@ enum CLIExecutableVerifier {
     guard validationStatus == errSecSuccess else {
       throw invalidSignature(configuration)
     }
+  }
+
+  /// Code requirement text for a Developer ID executable from Inline's team.
+  static func requirement(identifiers: [String], team: String) -> String {
+    let escape = { (value: String) in value.replacingOccurrences(of: "\"", with: "\\\"") }
+    let identifierClause = identifiers.sorted()
+      .map { "identifier \"\(escape($0))\"" }
+      .joined(separator: " or ")
+    return "anchor apple generic and (\(identifierClause)) and certificate leaf[subject.OU] = \"\(escape(team))\""
+  }
+
+  /// Requirement for any executable the installer may place on PATH.
+  static func installRequirement(_ configuration: CLIInstallerConfiguration) -> String {
+    requirement(
+      identifiers: Array(configuration.legacySigningIdentifiers.union([configuration.expectedSigningIdentifier])),
+      team: configuration.expectedTeamIdentifier
+    )
   }
 
   private static func invalidSignature(_ configuration: CLIInstallerConfiguration) -> CLIInstallerFailure {

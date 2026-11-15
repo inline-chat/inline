@@ -875,3 +875,14 @@ fn service_restart_backoff_is_visible_without_claiming_setup() {
     clear_account_failure_ledgers(&paths, &account);
     assert!(recovery_check(&paths, &provider).ok);
 }
+
+#[test]
+fn setup_warns_only_when_linger_is_disabled() {
+    assert!(
+        linux_setup_lifecycle_hint(Some(false))
+            .unwrap()
+            .contains("loginctl enable-linger")
+    );
+    assert_eq!(linux_setup_lifecycle_hint(Some(true)), None);
+    assert_eq!(linux_setup_lifecycle_hint(None), None);
+}

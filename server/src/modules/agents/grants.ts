@@ -44,7 +44,7 @@ async function lockBotGrants(tx: Transaction, botUserId: number): Promise<void> 
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agent_grants'), ${botUserId})`)
 }
 
-const grantableOperations = [
+export const grantableOperations = [
   AgentGrantOperation.INVOKE,
   AgentGrantOperation.STEER,
   AgentGrantOperation.APPROVE,
@@ -227,6 +227,7 @@ export async function getAgentAccess(input: GetAgentAccessInput, currentUserId: 
   return {
     isOwner: access.isOwner,
     operations: access.isOwner ? [...grantableOperations] : maskToOperations(access.operations),
+    access: [],
   }
 }
 
@@ -294,18 +295,32 @@ function encodeGrant(row: DbAgentGrant): AgentGrant {
   }
 }
 
-type GrantEditor = { bot: DbUser; ownerUserId: number; actor: "owner" | "bot" }
+type GrantEditor = { bot: DbUser; ownerUserId: number; actorUserId: number; actor: "owner" | "admin" | "bot" }
 
-/** The owner, or the bot itself (the bridge's /allowlist and allowlist import). */
+/** What only the owner hands out: answering a coding agent's approvals on the owner's behalf. */
+const ownerOnlyMask = maskOf([AgentGrantOperation.APPROVE])
+
+/**
+ * The owner, an admin (a person with CONFIGURE), or the bot itself (the
+ * bridge's /allowlist and allowlist import).
+ */
 async function grantEditor(botUserIdInput: bigint, currentUserId: number): Promise<GrantEditor> {
   const botUserId = botUserIdInput === 0n ? currentUserId : Number(botUserIdInput)
   if (!Number.isSafeInteger(botUserId) || botUserId <= 0) throw RealtimeRpcError.UserIdInvalid()
   const bot = await UsersModel.getUserById(botUserId)
   const ownerUserId = activeBotOwner(bot)
   if (!bot || ownerUserId === null) throw RealtimeRpcError.UserIdInvalid()
-  if (currentUserId === ownerUserId) return { bot, ownerUserId, actor: "owner" }
-  if (currentUserId === bot.id) return { bot, ownerUserId, actor: "bot" }
+  const editor = { bot, ownerUserId, actorUserId: currentUserId }
+  if (currentUserId === ownerUserId) return { ...editor, actor: "owner" }
+  if (currentUserId === bot.id) return { ...editor, actor: "bot" }
+  if (await isAdmin(bot, currentUserId)) return { ...editor, actor: "admin" }
   throw RealtimeRpcError.UserIdInvalid()
+}
+
+/** A person the owner (or another admin) appointed to manage the bot. Bots never qualify. */
+async function isAdmin(bot: DbUser, userId: number): Promise<boolean> {
+  const access = await resolveAgentAccess(bot, userId)
+  return !access.isOwner && (access.operations & bit(AgentGrantOperation.CONFIGURE)) !== 0
 }
 
 async function validSubject(subject: GrantSubject, editor: GrantEditor): Promise<GrantSubject> {
@@ -316,13 +331,13 @@ async function validSubject(subject: GrantSubject, editor: GrantEditor): Promise
     if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
     return subject
   }
-  // Only the owner opens a bot to a whole space or group, and only one they're in.
-  if (editor.actor !== "owner") throw RealtimeRpcError.UserIdInvalid()
+  // Only the owner or an admin opens a bot to a whole space or group, and only one they're in.
+  if (editor.actor === "bot") throw RealtimeRpcError.UserIdInvalid()
   const spaceId = subject.kind === "space"
     ? subject.id
     : (await db.select({ spaceId: userGroups.spaceId }).from(userGroups).where(eq(userGroups.id, subject.id)).limit(1))[0]?.spaceId
   if (spaceId === undefined) throw RealtimeRpcError.BadRequest()
-  if (!(await getCurrentSpaceMembership(spaceId, editor.ownerUserId))) throw RealtimeRpcError.SpaceIdInvalid()
+  if (!(await getCurrentSpaceMembership(spaceId, editor.actorUserId))) throw RealtimeRpcError.SpaceIdInvalid()
   return subject
 }
 
@@ -336,7 +351,7 @@ export async function listAgentGrants(
   const ownerUserId = activeBotOwner(bot)
   if (!bot || ownerUserId === null) throw RealtimeRpcError.UserIdInvalid()
 
-  const seesAll = currentUserId === ownerUserId || currentUserId === bot.id
+  const seesAll = currentUserId === ownerUserId || currentUserId === bot.id || (await isAdmin(bot, currentUserId))
   const rows = await db
     .select()
     .from(agentGrants)
@@ -360,6 +375,7 @@ export async function setAgentGrant(input: SetAgentGrantInput, currentUserId: nu
   const subject = await validSubject(subjectFromInput(input.subject, input.userId), editor)
   const operations = operationsToMask(input.operations)
   if (editor.actor === "bot" && (operations & ~botGrantableMask) !== 0) throw RealtimeRpcError.UserIdInvalid()
+  if (editor.actor === "admin" && (operations & ownerOnlyMask) !== 0) throw RealtimeRpcError.UserIdInvalid()
   // A bot opening itself to someone notifies them, so it may only do that for its contacts.
   if (editor.actor === "bot" && subject.kind === "user") {
     await ensureBotCanReach(editor.bot, subject.id, { action: "grant" })
@@ -403,7 +419,7 @@ export async function deleteAgentGrant(
 ): Promise<DeleteAgentGrantResult> {
   const editor = await grantEditor(input.botUserId, currentUserId)
   const subject = subjectFromInput(input.subject, input.userId)
-  if (subject.kind !== "user" && editor.actor !== "owner") throw RealtimeRpcError.UserIdInvalid()
+  if (subject.kind !== "user" && editor.actor === "bot") throw RealtimeRpcError.UserIdInvalid()
 
   const live: LiveGrantUpdate[] = []
   await db.transaction(async (tx) => {

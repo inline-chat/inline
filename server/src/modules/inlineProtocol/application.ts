@@ -77,7 +77,10 @@ const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
 
 const errorResponse = (error: unknown): Uint8Array => {
   const rpc = toRealtimeRpcError(error)
-  if (rpc.codeNumber >= 500) {
+  if (rpc.codeNumber === 503) {
+    // A dependency outage the client retries; one error per request would flood reporting.
+    log.warn("Inline Protocol application request unavailable", { reason: rpc.message })
+  } else if (rpc.codeNumber >= 500) {
     log.error("Inline Protocol application request failed", error)
   }
   return RealtimeV3Response.toBinary({
@@ -232,6 +235,11 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
     authorization: ServerApplicationAuthorization,
     options: InlineProtocolAuthorizationOptions,
   ) => boolean
+  /**
+   * Establishes session authority for a transfer-only socket before `onAuthorized` registers it,
+   * so it does not depend on a main socket being connected to this process.
+   */
+  prepareTransferAuthority?: (authorization: ServerApplicationAuthorization) => Promise<boolean>
 }): ServerApplicationDispatcher => {
   const lanes = new InlineProtocolApplicationLanes()
   let recordedProtocolUse = false
@@ -318,7 +326,17 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
           const current = await input.authorizationKeys.load(authorization.authKeyId)
           if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError")
           const requestsTransferOnly = request.body.connectionInit.transferOnly === true
-          if (!current?.temporary || !current.binding || !authorization.permanentAuthKeyId ||
+          const bindingCurrent = current?.temporary && current.binding && authorization.permanentAuthKeyId &&
+            current.binding.userId === authorization.userId &&
+            current.binding.accountSessionId === authorization.accountSessionId &&
+            Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId)
+          // Check the binding before spending a session lookup on a stale or rotated key.
+          if (bindingCurrent && requestsTransferOnly && input.prepareTransferAuthority &&
+              !await input.prepareTransferAuthority(authorization)) {
+            throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+          }
+          if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError")
+          if (!bindingCurrent || !current?.temporary || !current.binding || !authorization.permanentAuthKeyId ||
               current.binding.userId !== authorization.userId ||
               current.binding.accountSessionId !== authorization.accountSessionId ||
               !Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId) ||

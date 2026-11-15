@@ -1,5 +1,5 @@
 import { Log } from "@in/server/utils/log"
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto"
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "crypto"
 import { MAX_ENCRYPTED_DATA_LENGTH } from "./limits"
 
 const ALGORITHM = "aes-256-gcm"
@@ -36,6 +36,24 @@ export function assertEncryptionConfigured(): void {
     validateKey(key)
   } finally {
     key.fill(0)
+  }
+}
+
+/**
+ * Deterministic keyed fingerprint for looking up a secret stored with random IVs (push tokens).
+ * The key is derived from the server encryption key per domain, so a database reader cannot
+ * confirm a known value and fingerprints from different domains never collide.
+ */
+export function keyedFingerprint(domain: string, value: string): Buffer {
+  const key = new Uint8Array(Buffer.from(getEncryptionKey(), "hex"))
+  validateKey(key)
+  let derived: Uint8Array | undefined
+  try {
+    derived = new Uint8Array(hkdfSync("sha256", key, new Uint8Array(0), `inline.fingerprint.${domain}`, 32))
+    return createHmac("sha256", derived).update(value, "utf8").digest()
+  } finally {
+    key.fill(0)
+    derived?.fill(0)
   }
 }
 

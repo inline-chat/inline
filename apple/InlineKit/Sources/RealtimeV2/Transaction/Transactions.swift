@@ -809,6 +809,10 @@ actor Transactions {
     }
   }
 
+  /// Persisted work older than this fails (or reports commit-unknown) when it is loaded.
+  static let persistedMaximumAge: TimeInterval = 10 * 60
+  static let persistedReplaySafeMaximumAge: TimeInterval = 24 * 60 * 60
+
   private func canReplayAfterReconnect(transaction: TransactionWrapper) -> Bool {
     transaction.transaction.effectiveReconnectReplayPolicy == .replaySafe
   }
@@ -1077,13 +1081,17 @@ actor Transactions {
         let allTransactions = try await persistenceHandler.loadTransactions(for: owner)
         log.trace("Loaded \(allTransactions.count) raw transactions from disk")
 
-        // Separate valid and expired transactions
-        let expirationDate = Date().addingTimeInterval(-10 * 60) // 10 minutes
+        // Separate valid and expired transactions. Replay-safe work (sends keyed by a random
+        // ID, idempotent set operations) stays deliverable across a long offline relaunch; the
+        // same work would never expire while it stayed in memory.
+        let now = Date()
         var validTransactions: [TransactionWrapper] = []
         var expiredTransactions: [TransactionWrapper] = []
 
         for transaction in allTransactions {
-          if transaction.date < expirationDate {
+          let maximumAge = canReplayAfterReconnect(transaction: transaction)
+            ? Self.persistedReplaySafeMaximumAge : Self.persistedMaximumAge
+          if transaction.date < now.addingTimeInterval(-maximumAge) {
             log.trace("Transaction \(transaction.id) expired (created: \(transaction.date))")
             expiredTransactions.append(transaction)
           } else {

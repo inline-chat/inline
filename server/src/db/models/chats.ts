@@ -321,7 +321,10 @@ async function refreshLastMessageId(chatId: number) {
       .limit(1)
 
     const newLastMsgId = message?.messageId ?? null
-    await tx.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))
+    await tx
+      .update(chats)
+      .set({ lastMsgId: newLastMsgId, lastMessageDate: message?.date ?? null })
+      .where(eq(chats.id, chatId))
 
     return newLastMsgId
   })
@@ -337,7 +340,7 @@ async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx:
     }
 
     // clear first
-    await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
+    await tx.update(chats).set({ lastMsgId: null, lastMessageDate: null }).where(eq(chats.id, chatId))
 
     await transaction(tx)
 
@@ -349,7 +352,10 @@ async function refreshLastMessageIdTransaction(chatId: number, transaction: (tx:
       .limit(1)
 
     const newLastMsgId = message?.messageId ?? null
-    await tx.update(chats).set({ lastMsgId: newLastMsgId }).where(eq(chats.id, chatId))
+    await tx
+      .update(chats)
+      .set({ lastMsgId: newLastMsgId, lastMessageDate: message?.date ?? null })
+      .where(eq(chats.id, chatId))
 
     return newLastMsgId
   })

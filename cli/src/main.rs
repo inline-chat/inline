@@ -3,6 +3,7 @@ mod agents;
 mod attachments;
 mod auth;
 mod auth_flow;
+mod bot_sharing;
 mod bots;
 mod bridge;
 mod chat_output;
@@ -661,6 +662,7 @@ impl Command {
                 SetupCommand::Opencode(_) => "setup_opencode",
                 SetupCommand::Claude(_) => "setup_claude",
                 SetupCommand::Amp(_) => "setup_amp",
+                SetupCommand::Dots(_) => "setup_dots",
                 SetupCommand::Hermes(_) => "setup_hermes",
                 SetupCommand::Openclaw(_) => "setup_openclaw",
             },
@@ -718,6 +720,8 @@ enum SetupCommand {
     Claude(SetupAgentArgs),
     #[command(about = "Set up Amp as an experimental personal Inline bot")]
     Amp(SetupAgentArgs),
+    #[command(about = "Bridge your ChatGPT Dot into Inline as a personal bot")]
+    Dots(SetupDotsArgs),
     #[command(about = "Set up Hermes as an Inline bot")]
     Hermes(agents::AgentsSetupArgs),
     #[command(about = "Set up OpenClaw as an Inline bot")]
@@ -751,11 +755,30 @@ enum PluginCommand {
 }
 
 #[derive(Args)]
+struct SetupDotsArgs {
+    #[arg(
+        long,
+        value_name = "NAME",
+        help = "Bot name (defaults to your Dot's name)"
+    )]
+    name: Option<String>,
+    #[arg(
+        long,
+        help = "Configure without installing a launchd/systemd service (containers run `inline bridge run` themselves)"
+    )]
+    no_service: bool,
+    #[command(flatten)]
+    sharing: bot_sharing::BotSharingArgs,
+}
+
+#[derive(Args)]
 struct SetupAgentArgs {
     #[arg(long, value_name = "PATH")]
     folder: Option<PathBuf>,
     #[arg(long, value_name = "NAME")]
     name: Option<String>,
+    #[command(flatten)]
+    sharing: bot_sharing::BotSharingArgs,
 }
 
 #[derive(Subcommand)]
@@ -1140,15 +1163,22 @@ enum BotsCommand {
 
 #[derive(Subcommand)]
 enum BotsAccessCommand {
-    #[command(about = "List people with access to a bot", visible_alias = "ls")]
+    #[command(about = "List who can message a bot", visible_alias = "ls")]
     List(BotsBotArgs),
     #[command(
         about = "Grant or replace one person's access to a bot",
-        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n\nReplaces the person's existing operations. Defaults to invoke,steer."
+        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --space-id 3\n  inline bots access grant --bot-user-id 42 --user-id 7 --admin\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n\nReplaces the person's existing operations. Defaults to invoke,steer. An admin manages the bot with you; only you can delete it."
     )]
     Grant(BotsAccessGrantArgs),
     #[command(about = "Revoke one person's access to a bot")]
     Revoke(BotsAccessUserArgs),
+    #[command(
+        about = "Let anyone on Inline message a bot",
+        after_help = "For bots meant for everyone, like a support or team bot. The bot's own software still decides who it answers; an Inline agent bridge keeps answering only its owner and access list."
+    )]
+    Open(BotsBotArgs),
+    #[command(about = "Limit a bot to its owner and access list again")]
+    Close(BotsBotArgs),
 }
 
 #[derive(Subcommand)]
@@ -1498,6 +1528,15 @@ struct BotsCreateArgs {
 
     #[arg(long, help = "Optional space id to add the bot to")]
     add_to_space: Option<i64>,
+
+    #[command(flatten)]
+    sharing: bot_sharing::BotSharingArgs,
+
+    #[arg(
+        long,
+        help = "Let anyone on Inline message the bot (a new bot is private otherwise)"
+    )]
+    open: bool,
 }
 
 #[derive(Args)]
@@ -1566,9 +1605,16 @@ struct BotsAccessGrantArgs {
         value_enum,
         value_delimiter = ',',
         num_args = 1..,
+        conflicts_with = "admin",
         help = "Allowed operations (comma-separated; default invoke,steer)"
     )]
     operations: Vec<bots::BotGrantOperation>,
+
+    #[arg(
+        long,
+        help = "Make them an admin: they manage access, profile, settings and token with you (invoke,steer,configure)"
+    )]
+    admin: bool,
 }
 
 #[derive(Args)]
@@ -3205,6 +3251,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     output::print_json(&result, json_format)?;
                 } else {
                     println!("Inline CLI update: {}", result.state.outcome);
+                    update::print_launchers_needing_administrator(&result.state);
                 }
             }
         }
@@ -3288,11 +3335,21 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .await?;
                     }
                     legacy => {
+                        let manage_service =
+                            !matches!(&legacy, SetupCommand::Dots(args) if args.no_service);
                         let (provider_id, args) = match legacy {
                             SetupCommand::Codex(args) => ("codex", args),
                             SetupCommand::Opencode(args) => ("opencode", args),
                             SetupCommand::Claude(args) => ("claude", args),
                             SetupCommand::Amp(args) => ("amp", args),
+                            SetupCommand::Dots(args) => (
+                                "dots",
+                                SetupAgentArgs {
+                                    folder: None,
+                                    name: args.name,
+                                    sharing: args.sharing,
+                                },
+                            ),
                             SetupCommand::Hermes(_) | SetupCommand::Openclaw(_) => unreachable!(),
                         };
                         let owner_auth = match owner_session::resolve_owner_credential(&auth_store)? {
@@ -3329,6 +3386,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             provider_id,
                             args.folder,
                             args.name,
+                            args.sharing,
+                            manage_service,
                             cli.json,
                             json_format,
                         )
@@ -3346,7 +3405,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         &auth_store,
                         &api,
                         &local_db,
-                        args,
+                        *args,
                         cli.json,
                         json_format,
                     )
@@ -3617,7 +3676,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let mut payload = realtime.call(proto::ListBotsInput {}).await?;
+                    let mut payload = realtime.call(proto::ListBotsInput { include_managed: None }).await?;
                     if cli.json {
                         filter_bots_payload(&mut payload, args.filter.as_deref());
                         output::print_json(&payload, json_format)?;
@@ -3666,10 +3725,28 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         add_to_space,
                     };
                     let payload = realtime.call(input).await?;
+                    // A new bot is private. Share it in the same step when asked.
+                    if let Some(bot) = payload.bot.as_ref() {
+                        for grant in args.sharing.grants(bot.id)? {
+                            realtime.call(grant).await?;
+                        }
+                        if args.open {
+                            realtime
+                                .call(proto::UpdateAgentSettingsInput {
+                                    bot_user_id: bot.id,
+                                    default_output_mode: None,
+                                    open_to_everyone: Some(true),
+                                })
+                                .await?;
+                        }
+                    }
                     if cli.json {
                         output::print_json(&payload, json_format)?;
                     } else if let Some(bot) = payload.bot.as_ref() {
                         println!("Created bot {} (id {}).", output::terminal_text(&user_display_name(bot)), bot.id);
+                        for line in bot_sharing::access_summary_lines(bot.id, &args.sharing, args.open) {
+                            println!("{line}");
+                        }
                         println!(
                             "To reveal token: inline bots reveal-token --bot-user-id {}",
                             bot.id
@@ -3750,6 +3827,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let payload = realtime
                         .call(proto::GetChatsInput {
                             include_subthreads: Some(args.include_subthreads),
+                            ..Default::default()
                         })
                         .await?;
                     let payload = apply_chat_list_scope(payload, &args.scope);
@@ -7571,18 +7649,22 @@ mod cli_parsing_tests {
             "--dry-run",
         ])
         .expect("gateway setup parses");
+        let Command::Agents {
+            command: agents::AgentsCommand::Setup(args),
+        } = cli.command
+        else {
+            panic!("expected agents setup command");
+        };
         assert!(matches!(
-            cli.command,
-            Command::Agents {
-                command: agents::AgentsCommand::Setup(agents::AgentsSetupArgs {
-                    target: Some(agents::AgentTarget::Hermes),
-                    profile: Some(profile),
-                    bot_id: Some(42),
-                    bot_username: Some(username),
-                    replace: true,
-                    dry_run: true,
-                    ..
-                })
+            *args,
+            agents::AgentsSetupArgs {
+                target: Some(agents::AgentTarget::Hermes),
+                profile: Some(profile),
+                bot_id: Some(42),
+                bot_username: Some(username),
+                replace: true,
+                dry_run: true,
+                ..
             } if profile == "work" && username == "@work_helper_bot"
         ));
     }
@@ -8941,6 +9023,28 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn parses_dots_setup() {
+        let cli = Cli::try_parse_from(["inline", "setup", "dots", "--name", "Pip"]).unwrap();
+        match cli.command {
+            Command::Setup {
+                command: SetupCommand::Dots(args),
+            } => assert_eq!(args.name.as_deref(), Some("Pip")),
+            _ => panic!("expected dots setup"),
+        }
+        assert!(Cli::try_parse_from(["inline", "setup", "dots", "--folder", "/tmp"]).is_err());
+        let cli = Cli::try_parse_from(["inline", "setup", "dots", "--no-service"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Setup {
+                command: SetupCommand::Dots(SetupDotsArgs {
+                    no_service: true,
+                    ..
+                })
+            }
+        ));
+    }
+
+    #[test]
     fn parses_all_provider_setup_and_bridge_lifecycle_commands() {
         for provider in ["codex", "opencode", "claude", "amp"] {
             let cli = Cli::try_parse_from([
@@ -9831,6 +9935,7 @@ mod cli_parsing_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
 
         filter_users_payload(&mut payload, Some("mo"));

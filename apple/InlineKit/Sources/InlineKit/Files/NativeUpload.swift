@@ -220,6 +220,12 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     self.copyRequiresFullAllocation = copyRequiresFullAllocation
   }
 
+  /// True when an earlier attempt already staged this upload's body, which `stage` reuses.
+  public func hasStagedBody(logicalID: String) -> Bool {
+    let body = root.appendingPathComponent("\(Self.fileName(for: logicalID)).body")
+    return FileManager.default.fileExists(atPath: body.path)
+  }
+
   public func stage(logicalID: String, sourceURL: URL) throws -> URL {
     let fileManager = FileManager.default
     try fileManager.createDirectory(
@@ -237,15 +243,62 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     let copySource = sourceURL.resolvingSymlinksInPath()
     try requireCopyCapacity(for: copySource)
 
-    let temporary = root.appendingPathComponent("staging-\(UUID().uuidString)")
+    let temporary = temporaryStagingURL()
     do {
       try fileManager.copyItem(at: copySource, to: temporary)
+      // copyItem keeps the source's modification date; stamp the staging time so
+      // `pruneStale` ages the staged body, not the original photo or file.
+      try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: temporary.path)
       try fileManager.moveItem(at: temporary, to: destination)
       return destination
     } catch {
       try? fileManager.removeItem(at: temporary)
       throw error
     }
+  }
+
+  /// Temporary copies carry their creation time in the name, because a copy keeps the
+  /// source's modification date and the App Group folder is shared with the Share Extension.
+  private func temporaryStagingURL(now: Date = Date()) -> URL {
+    root.appendingPathComponent("staging-\(Int64(now.timeIntervalSince1970))-\(UUID().uuidString)")
+  }
+
+  static func temporaryStagingCreation(fileName: String) -> Date? {
+    let parts = fileName.split(separator: "-", maxSplits: 2)
+    guard parts.count == 3, parts[0] == "staging", let seconds = Int64(parts[1]) else { return nil }
+    return Date(timeIntervalSince1970: TimeInterval(seconds))
+  }
+
+  /// Interrupted copies older than this are never completed.
+  static let abandonedCopyAge: TimeInterval = 60 * 60
+  /// Matches the server's hard upload expiry; nothing can resume past it.
+  static let staleUploadAge: TimeInterval = 7 * 24 * 60 * 60
+
+  /// Removes staging left behind by terminated processes, failed sends that were
+  /// deleted, and uploads past the server's expiry. A retry re-stages from the
+  /// original media file, so dropping an expired body only costs a re-copy.
+  @discardableResult
+  public func pruneStale(now: Date = Date()) -> Int {
+    let fileManager = FileManager.default
+    guard let urls = try? fileManager.contentsOfDirectory(
+      at: root,
+      includingPropertiesForKeys: [.contentModificationDateKey],
+      options: [.skipsHiddenFiles]
+    ) else { return 0 }
+    var removed = 0
+    for url in urls {
+      let name = url.lastPathComponent
+      // Pending server cancellations expire on their own schedule.
+      guard !name.hasPrefix("cancel-") else { continue }
+      let modified = Self.temporaryStagingCreation(fileName: name)
+        ?? (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        ?? .distantPast
+      let age = now.timeIntervalSince(modified)
+      let limit = name.hasPrefix("staging-") ? Self.abandonedCopyAge : Self.staleUploadAge
+      guard age > limit else { continue }
+      if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
+    }
+    return removed
   }
 
   public func discard(logicalID: String) {
@@ -309,7 +362,7 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     let sourceSignature = try SourceSignature.read(at: source)
     try requireCopyCapacity(for: source)
     try Task.checkCancellation()
-    let temporary = root.appendingPathComponent("staging-\(UUID().uuidString)")
+    let temporary = temporaryStagingURL()
     defer { try? FileManager.default.removeItem(at: temporary) }
     try FileManager.default.copyItem(at: source, to: temporary)
     guard sourceSignature == (try SourceSignature.read(at: source)),
@@ -606,10 +659,24 @@ public actor DurableUploadCoordinator: MediaUploading {
         create.thumbnailFileUniqueID = thumbnailFileUniqueID
       }
       create.metadata = request.metadata
+      // A file that fits in one part rides along with create, which stores and finishes it in the
+      // same call: one round trip instead of create, part and finish. Older servers ignore it and
+      // the part uploads as usual. It counts against the part window, and only when a slot is free
+      // right away; otherwise the create goes without it and the part waits like any other.
+      let holdsInlineSlot = byteCount <= Int64(Self.partSize) && tryAcquirePartTransferSlot()
+      if holdsInlineSlot {
+        do {
+          create.inlineData = try await Self.readPart(at: stagedURL, offset: 0, length: Int(byteCount))
+        } catch {
+          releasePartTransferSlot()
+          throw error
+        }
+      }
 
       let createdResult: RpcResult.OneOf_Result?
       hasAttemptedCreate = true
       do {
+        defer { if holdsInlineSlot { releasePartTransferSlot() } }
         createdResult = try await callUploadRPC(
           method: .createUpload,
           input: .createUpload(create),
@@ -621,6 +688,9 @@ public actor DurableUploadCoordinator: MediaUploading {
         try validateAccount(accountToken)
         // createUpload is idempotent for the stable clientUploadID. Replay once
         // to recover a commit whose response was lost, without adding resume state.
+        // The replay goes without the body: if the first attempt stored it, the result reports
+        // it accepted or complete; otherwise the part uploads through the ordinary path.
+        create.clearInlineData()
         createdResult = try await callUploadRPC(
           method: .createUpload,
           input: .createUpload(create),
@@ -659,6 +729,14 @@ public actor DurableUploadCoordinator: MediaUploading {
           accountToken: accountToken
         )
         throw CancellationError()
+      }
+
+      if created.hasComplete {
+        try validateAccount(accountToken)
+        progress(byteCount, byteCount)
+        await staging.discard(logicalID: ownerScopedLogicalID)
+        try validateAccount(accountToken)
+        return created.complete
       }
 
       var accepted = Set(created.acceptedParts)
@@ -1064,6 +1142,18 @@ public actor DurableUploadCoordinator: MediaUploading {
           accepted = true
           break
         }
+        // The server's verdict is final for this upload: surface it so the caller rotates
+        // the identity instead of retrying a dead upload with the raw transport error.
+        switch state.status {
+          case .expired: throw NativeMediaUploadError.expired
+          case .canceled: throw NativeMediaUploadError.canceled
+          case .failed:
+            throw NativeMediaUploadError.rejected(
+              code: state.failure.code,
+              retryable: state.hasFailure && state.failure.retryable
+            )
+          default: break
+        }
         guard state.status == .uploading,
               attempt + 1 < Self.maximumPartAttempts
         else { throw saveError }
@@ -1120,6 +1210,13 @@ public actor DurableUploadCoordinator: MediaUploading {
     } catch {
       return false
     }
+  }
+
+  /// Takes a part slot only if one is free now; never waits.
+  private func tryAcquirePartTransferSlot() -> Bool {
+    guard activePartTransfers < Self.maximumConcurrentParts else { return false }
+    activePartTransfers += 1
+    return true
   }
 
   private func acquirePartTransferSlot() async throws {

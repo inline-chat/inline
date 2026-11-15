@@ -13,6 +13,18 @@ public indirect enum RichBlock: Hashable, Sendable {
   case image(RichImage)
   case album([RichImage])
   case disclosure(RichDisclosure)
+  // Agent blocks. Each protocol kind has its own input; the planner lays each out its own way.
+  case steps(RichSteps)
+  case fields(RichFields)
+  case callout(RichCallout)
+  case meter(RichMeter)
+  case diff(RichDiff)
+  case planProposal(RichPlanProposal)
+  case approval(RichApproval)
+  case review(RichReview)
+  case taskSuggestion(RichTaskSuggestion)
+  case nextStep(RichNextStep)
+  case promptSuggestions(RichPromptSuggestions)
 }
 
 public enum RichTextRole: Hashable, Sendable {
@@ -197,6 +209,43 @@ public struct RichLayoutMetrics: Hashable, Sendable {
   public var disclosureActivityGap: CGFloat = 5
   /// About a space between a working row's summary and its live time.
   public var disclosureElapsedGap: CGFloat = 5
+  // Agent blocks.
+  public var cardHorizontalInset: CGFloat = 12
+  public var cardVerticalInset: CGFloat = 10
+  public var cardCornerRadius: CGFloat = 12
+  /// Between a card's header, body and buttons.
+  public var cardSectionSpacing: CGFloat = 10
+  /// Between lines inside one section, such as a title and its secondary line.
+  public var cardLineSpacing: CGFloat = 3
+  /// A leading glyph and the text after it.
+  public var symbolGap: CGFloat = 8
+  public var stepSpacing: CGFloat = 7
+  /// A top-level task list's card.
+  public var stepsCardHorizontalInset: CGFloat = 12
+  public var stepsCardVerticalInset: CGFloat = 9
+  public var stepsCardCornerRadius: CGFloat = 10
+  public var fieldsLabelGap: CGFloat = 12
+  public var fieldsRowSpacing: CGFloat = 4
+  public var chipHorizontalPadding: CGFloat = 7
+  public var chipVerticalPadding: CGFloat = 2
+  public var chipSymbolGap: CGFloat = 3
+  public var chipSpacing: CGFloat = 6
+  public var buttonHorizontalPadding: CGFloat = 14
+  public var buttonVerticalPadding: CGFloat = 8
+  public var buttonMinimumHeight: CGFloat = 34
+  public var buttonSpacing: CGFloat = 8
+  public var suggestionHorizontalPadding: CGFloat = 12
+  public var suggestionVerticalPadding: CGFloat = 7
+  public var commandHorizontalInset: CGFloat = 9
+  public var commandVerticalInset: CGFloat = 7
+  public var meterBarHeight: CGFloat = 6
+  public var meterBarGap: CGFloat = 6
+  public var diffHeaderVerticalInset: CGFloat = 7
+  public var diffBodyVerticalInset: CGFloat = 6
+  public var diffHorizontalInset: CGFloat = 10
+  public var reviewRowSpacing: CGFloat = 9
+  /// Lines a task suggestion's brief shows before it ends in an ellipsis.
+  public var briefLineLimit = 3
   /// Content past these limits falls back to plain text, as on the server.
   public var maximumDepth = 16
   public var maximumNodes = 2_048
@@ -219,6 +268,10 @@ public struct RichLayout: Sendable {
     case image(id: String)
     case album([AlbumItem])
     case disclosure(Disclosure)
+    /// An agent block's own drawing: a task list, approval, review and the rest. Blocks with
+    /// children (callouts, plans, approvals) sit behind them, like quotes.
+    case card(Card)
+    case diff(Diff)
   }
 
   public struct Code: Sendable {

@@ -60,7 +60,6 @@ private struct InlineSceneRoot: View {
         appDelegate.sceneRouterRegistry.attachWindow(window, sceneID: sceneID)
       })
       .environment(\.auth, Auth.shared)
-      .environment(\.realtime, Realtime.shared)
       .environment(\.transactions, Transactions.shared)
       .environment(router)
       .focusedSceneValue(\.iPadSceneCommandGate, IPadNavigationLane.isEnabled
@@ -98,11 +97,17 @@ private struct InlineSceneRoot: View {
         guard scenePhase == .active else { return }
         ToastManager.shared.showToast(notice.message, type: notice.isError ? .error : .info)
       }
+      .onChange(of: auth.isLoggedIn) { _, isLoggedIn in
+        // Signing in while the app is open: start tracking bot access right away.
+        if isLoggedIn { AgentGrantStore.shared.start() }
+      }
       .onChange(of: scenePhase) { _, newValue in
         if newValue == .active {
           appDelegate.sceneRouterRegistry.activate(sceneID)
           synchronizeUserSettings()
           ExtensionHealth.flush()
+          // Which bots this person can reach: decides composers, mentions and search.
+          if auth.isLoggedIn { AgentGrantStore.shared.start() }
           // After a real trip to the background (not Control Center or a
           // permission prompt), renew Grid presence and reconnect media now
           // rather than at the next heartbeat. A process that never opened

@@ -10,9 +10,14 @@ public enum ChatListDatabaseQuery {
     includeSpaceChatsInHome: Bool,
     translationLanguage: String,
     includePreviewSenderIdentity: Bool = false,
+    includeOpenedDate: Bool = true,
+    includeTimestampText: Bool = true,
     now: Date = Date(),
     calendar: Calendar = .autoupdatingCurrent
   ) throws -> [ChatListItemSnapshot] {
+    // Not reading `openedDate` keeps it out of the tracked region, so callers
+    // that ignore it are not invalidated each time a chat is opened.
+    let openedDateSQL = includeOpenedDate ? #""dialog"."openedDate""# : "NULL"
     let scope = scopePredicate(
       spaceID: spaceID,
       includeSpaceChatsInHome: includeSpaceChatsInHome
@@ -43,7 +48,7 @@ public enum ChatListDatabaseQuery {
         "dialog"."archived" AS "isArchived",
         "dialog"."pinned" AS "isPinned",
         "dialog"."open" AS "isOpen",
-        "dialog"."openedDate" AS "openedDate",
+        \(openedDateSQL) AS "openedDate",
         "dialog"."order" AS "normalOrder",
         "dialog"."pinnedOrder" AS "pinnedOrder",
         "dialog"."folderId" AS "folderID",
@@ -171,6 +176,7 @@ public enum ChatListDatabaseQuery {
         now: now,
         calendar: calendar,
         includePreviewSenderIdentity: includePreviewSenderIdentity,
+        includeTimestampText: includeTimestampText,
         profileCacheDirectory: profileCacheDirectory
       )
     }
@@ -181,6 +187,7 @@ public enum ChatListDatabaseQuery {
     now: Date,
     calendar: Calendar,
     includePreviewSenderIdentity: Bool,
+    includeTimestampText: Bool,
     profileCacheDirectory: URL?
   ) -> ChatListItemSnapshot? {
     let peerUserID: Int64? = row[.peerUserID]
@@ -284,11 +291,9 @@ public enum ChatListDatabaseQuery {
         : nil,
       previewText: draftPreview ?? lastMessagePreview?.text,
       translatedPreviewText: draftPreview == nil ? translatedPreview : nil,
-      timestampText: ChatListDateFormatter.rowTitle(
-        for: lastUpdatedAt,
-        now: now,
-        calendar: calendar
-      ),
+      timestampText: includeTimestampText
+        ? ChatListDateFormatter.rowTitle(for: lastUpdatedAt, now: now, calendar: calendar)
+        : nil,
       identity: identity,
       unreadCount: max(row[.unreadCount] ?? 0, 0),
       unreadMark: row[.unreadMark] ?? false,
@@ -463,14 +468,54 @@ public enum ChatListDatabaseQuery {
       ?? singleLineText(phoneNumber)
   }
 
-  private static func singleLineText(_ value: String?) -> String? {
+  /// Collapses every run of whitespace and newlines into one space and trims the ends.
+  /// One pass over the scalars; most names and titles need no change and are returned as is.
+  static func singleLineText(_ value: String?) -> String? {
     guard let value else { return nil }
-    let normalized = value
-      .components(separatedBy: .whitespacesAndNewlines)
-      .filter { $0.isEmpty == false }
-      .joined(separator: " ")
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    return normalized.isEmpty ? nil : normalized
+    var needsRewrite = false
+    var previousWasSpace = true
+    for scalar in value.unicodeScalars {
+      if isSingleLineWhitespace(scalar) {
+        if previousWasSpace || scalar != " " {
+          needsRewrite = true
+          break
+        }
+        previousWasSpace = true
+      } else {
+        previousWasSpace = false
+      }
+    }
+    // Already normalized unless empty or ending in a space.
+    if needsRewrite == false {
+      if value.isEmpty { return nil }
+      if previousWasSpace == false { return value }
+    }
+
+    var result = String.UnicodeScalarView()
+    var pendingSpace = false
+    for scalar in value.unicodeScalars {
+      if isSingleLineWhitespace(scalar) {
+        pendingSpace = result.isEmpty == false
+        continue
+      }
+      if pendingSpace {
+        result.append(" ")
+        pendingSpace = false
+      }
+      result.append(scalar)
+    }
+    return result.isEmpty ? nil : String(result)
+  }
+
+  private static func isSingleLineWhitespace(_ scalar: Unicode.Scalar) -> Bool {
+    switch scalar.value {
+    case 0x20, 0x09 ... 0x0D:
+      return true
+    case 0 ..< 0x80:
+      return false
+    default:
+      return CharacterSet.whitespacesAndNewlines.contains(scalar)
+    }
   }
 
   private static func normalizedEmoji(_ emoji: String?) -> String? {

@@ -1,6 +1,19 @@
 import { bytea } from "@in/server/db/schema/common"
 import { users } from "@in/server/db/schema/users"
-import { integer, pgEnum, pgTable, serial, varchar, boolean, timestamp, text, unique, index } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
+import {
+  integer,
+  pgEnum,
+  pgTable,
+  serial,
+  varchar,
+  boolean,
+  timestamp,
+  text,
+  unique,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core"
 
 export const clientTypeEnum = pgEnum("client_type", [
   "ios",
@@ -40,6 +53,8 @@ export const sessions = pgTable(
     pushContentKeyId: text("push_content_key_id"),
     pushContentKeyAlgorithm: text("push_content_key_algorithm"),
     pushContentVersion: integer("push_content_version"),
+    // Keyed fingerprint of the push token: a token addresses one app install, so it has one live owner.
+    pushTokenFingerprint: bytea("push_token_fingerprint"),
     // @deprecated Unused: no notification filtering entitlement. Drop in a later migration.
     pushFilteredSyncPushes: boolean("push_filtered_sync_pushes"),
 
@@ -56,6 +71,9 @@ export const sessions = pgTable(
   (table) => ({
     deviceIdUserUnique: unique("device_id_user_unique").on(table.deviceId, table.userId),
     tokenHashIndex: index("sessions_token_hash_idx").on(table.tokenHash),
+    pushTokenFingerprintLive: uniqueIndex("sessions_push_token_fingerprint_live")
+      .on(table.pushTokenFingerprint)
+      .where(sql`${table.revoked} IS NULL AND ${table.pushTokenFingerprint} IS NOT NULL`),
   }),
 )
 

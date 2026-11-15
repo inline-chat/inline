@@ -3,6 +3,7 @@
 //! OpenCode v1 and older Amp adapters stay on v1; INLINE_BRIDGE_V2 can roll back.
 
 pub(crate) mod api;
+pub(crate) mod blocks;
 #[cfg(test)]
 mod corpus;
 pub(crate) mod doc;

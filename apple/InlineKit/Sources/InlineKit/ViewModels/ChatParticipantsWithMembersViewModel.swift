@@ -5,13 +5,9 @@ import Logger
 import SwiftUI
 
 /// Chat participants view model that falls back to space members for public threads
-/// and parent participants for subthreads.
+/// and parent participants for subthreads. Mention candidates live in
+/// `MentionCandidatesSource`.
 public final class ChatParticipantsWithMembersViewModel: ObservableObject {
-  public enum Purpose: Sendable {
-    case participantsList
-    case mentionCandidates
-  }
-
   private enum RefreshRequest {
     case none
     case participants(Int64)
@@ -22,7 +18,6 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     var participants: [UserInfo]
     var groupParticipants: [UserGroup]
     var effectiveUserIds: Set<Int64>
-    var mentionCandidates: MentionCompletionCandidates
   }
 
   public struct EffectiveParticipantAccess: Sendable {
@@ -34,56 +29,17 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
   @Published public private(set) var participants: [UserInfo] = []
   @Published public private(set) var groupParticipants: [UserGroup] = []
   @Published public private(set) var effectiveUserIds: Set<Int64> = []
-  @Published public private(set) var mentionCandidates: MentionCompletionCandidates = .empty
 
   private var participantsCancellable: AnyCancellable?
-  private var spaceMembersCancellable: AnyCancellable?
   private let db: AppDatabase
   private let chatId: Int64
-  private let purpose: Purpose
   private let log = Log.scoped("EnhancedChatParticipantsViewModel")
 
-  public init(db: AppDatabase, chatId: Int64, purpose: Purpose = .participantsList) {
+  public init(db: AppDatabase, chatId: Int64) {
     self.db = db
     self.chatId = chatId
-    self.purpose = purpose
 
     fetchParticipants()
-  }
-
-  private static func filterMentionCandidates(_ users: [UserInfo]) -> [UserInfo] {
-    let currentUserId = Auth.shared.getCurrentUserId()
-    return users.filter { userInfo in
-      if userInfo.user.pendingSetup == true {
-        return false
-      }
-      if let currentUserId {
-        return userInfo.user.id != currentUserId
-      }
-      return true
-    }
-  }
-
-  private static func uniqueUsers(_ users: [UserInfo]) -> [UserInfo] {
-    var seen = Set<Int64>()
-    return users.filter { seen.insert($0.id).inserted }
-  }
-
-  private static func userInfoRequest(_ userIds: [Int64]? = nil) -> QueryInterfaceRequest<UserInfo> {
-    var request = User
-      .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-      .asRequest(of: UserInfo.self)
-
-    if let userIds {
-      request = request.filter(userIds.contains(Column("id")))
-    }
-
-    return request
-  }
-
-  private static func fetchUserInfos(_ db: Database, ids: [Int64]) throws -> [UserInfo] {
-    guard !ids.isEmpty else { return [] }
-    return try userInfoRequest(ids).fetchAll(db)
   }
 
   private static func fetchChatParticipants(_ db: Database, chatId: Int64) throws -> [UserInfo] {
@@ -103,13 +59,6 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
       .filter(Column("spaceId") == spaceId)
       .fetchAll(db)
       .map(\.userInfo)
-  }
-
-  private static func fetchUserGroups(_ db: Database, spaceId: Int64) throws -> [UserGroup] {
-    try UserGroup
-      .filter(UserGroup.Columns.spaceId == spaceId)
-      .order(UserGroup.Columns.name)
-      .fetchAll(db)
   }
 
   private static func fetchChatParticipantGroups(_ db: Database, chatId: Int64) throws -> [UserGroup] {
@@ -161,75 +110,12 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     let userId: Int64
   }
 
-  private static func fetchPinnedMentionUserIds(_ db: Database) throws -> Set<Int64> {
-    // One scalar batch read in the existing observation, never a lookup while typing.
-    // A DM dialog can be optimistic (chatId is nil), so use its stable peer identity.
-    try Set(Dialog
-      .select(Dialog.Columns.peerUserId)
-      .filter(Dialog.Columns.peerUserId != nil)
-      .filter(Dialog.Columns.pinned == true)
-      .asRequest(of: Int64.self)
-      .fetchAll(db))
-  }
-
-  private static func fetchDirectChatCandidates(
-    _ db: Database,
-    pinnedUserIds: Set<Int64>
-  ) throws -> [MentionCompletionUser] {
-    let chats = try Chat
-      .filter(Chat.Columns.type == ChatType.privateChat.rawValue)
-      .filter(Chat.Columns.peerUserId != nil)
-      .filter(Chat.Columns.lastMsgId != nil)
-      .filter(Chat.Columns.lastMsgId > 0)
-      .fetchAll(db)
-
-    let userInfos = try fetchUserInfos(db, ids: chats.compactMap(\.peerUserId))
-    let usersById = Dictionary(uniqueKeysWithValues: userInfos.map { ($0.id, $0) })
-
-    return chats.compactMap { chat in
-      guard let peerUserId = chat.peerUserId,
-            let userInfo = usersById[peerUserId]
-      else {
-        return nil
-      }
-
-      return MentionCompletionUser(
-        userInfo: userInfo,
-        source: .directChat,
-        lastMsgId: chat.lastMsgId,
-        isPinned: pinnedUserIds.contains(peerUserId)
-      )
-    }
-  }
-
-  static func newThreadMentionCandidates(
-    _ db: Database,
-    spaceID: Int64?
-  ) throws -> MentionCompletionCandidates {
-    let pinnedUserIds = try fetchPinnedMentionUserIds(db)
-    let directChats = try fetchDirectChatCandidates(db, pinnedUserIds: pinnedUserIds).filter {
-      !filterMentionCandidates([$0.userInfo]).isEmpty
-    }
-    guard let spaceID else {
-      return MentionCompletionCandidates(users: directChats, groups: [])
-    }
-
-    let members = try filterMentionCandidates(fetchSpaceMembers(db, spaceId: spaceID))
-    let memberCandidates = members.map {
-      MentionCompletionUser(userInfo: $0, source: .spaceMember, isPinned: pinnedUserIds.contains($0.id))
-    }
-    return try MentionCompletionCandidates(
-      users: MentionCompletionUser.mergingDuplicates(memberCandidates + directChats),
-      groups: fetchUserGroups(db, spaceId: spaceID)
-    )
-  }
-
-  static func participantsSourceChat(_ db: Database, chatId: Int64, purpose: Purpose) throws -> Chat? {
+  static func participantsSourceChat(_ db: Database, chatId: Int64) throws -> Chat? {
     guard let chat = try Chat.fetchOne(db, id: chatId) else { return nil }
-    return try participantsSourceChat(db, for: chat, purpose: purpose)
+    return try participantsSourceChat(db, for: chat)
   }
 
-  private static func participantsSourceChat(_ db: Database, for chat: Chat, purpose _: Purpose) throws -> Chat {
+  static func participantsSourceChat(_ db: Database, for chat: Chat) throws -> Chat {
     // Every subthread inherits access from its top-level parent. Participant and
     // mention projections therefore use that same source instead of presenting
     // an empty child-local participant set on first open.
@@ -238,8 +124,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
   /// Resolves access already granted to a chat directly or by its top-level root.
   ///
-  /// Subthread autocomplete keeps its broad space/direct-chat candidates and
-  /// projects the inherited `sourceChat` roster. Send-time mention handling uses
+  /// Mention autocomplete ranks these users first. Send-time mention handling uses
   /// the target's direct grants plus the server-defined root access mode: normal
   /// root grants, a DM peer, or eligible public members. Intermediate subthread
   /// grants do not propagate. A missing parent or cycle simply ends the chain.
@@ -307,7 +192,6 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
   }
 
   private func fetchParticipants() {
-    let purpose = purpose
     let log = log
 
     log.trace("Fetching participants for chatId: \(chatId)")
@@ -317,115 +201,39 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
     participantsCancellable = ValueObservation
       .tracking { db in
-        // First, get the chat to check if it's a public thread
         let requestedChat = try Chat.fetchOne(db, id: chatId)
-        let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0, purpose: purpose) }
+        let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0) }
         let sourceChatId = chat?.id ?? chatId
-        let pinnedUserIds = purpose == .mentionCandidates ? try Self.fetchPinnedMentionUserIds(db) : []
-        let directChats = purpose == .mentionCandidates ?
-          try Self.fetchDirectChatCandidates(db, pinnedUserIds: pinnedUserIds) : []
 
-        func snapshot(
-          participants: [UserInfo],
-          spaceMembers: [UserInfo] = [],
-          groups: [UserGroup] = [],
-          groupParticipants: [UserGroup] = [],
-          directChats: [MentionCompletionUser]
-        ) -> ParticipantsSnapshot {
-          let mentionParticipants = Self.filterMentionCandidates(participants)
-          let mentionSpaceMembers = Self.filterMentionCandidates(spaceMembers)
-
-          var mentionUsers = mentionParticipants.map {
-            MentionCompletionUser(userInfo: $0, source: .participant, isPinned: pinnedUserIds.contains($0.id))
-          }
-          mentionUsers.append(contentsOf: mentionSpaceMembers.map {
-            MentionCompletionUser(userInfo: $0, source: .spaceMember, isPinned: pinnedUserIds.contains($0.id))
-          })
-          mentionUsers.append(contentsOf: directChats)
-
-          let users: [UserInfo]
-          if purpose == .mentionCandidates {
-            users = Self.uniqueUsers(mentionParticipants + mentionSpaceMembers)
-          } else {
-            users = participants
-          }
-
+        func snapshot(participants: [UserInfo], groupParticipants: [UserGroup] = []) -> ParticipantsSnapshot {
           let groupMemberIds = (try? Self.fetchGroupMemberIds(db, groupIds: groupParticipants.map(\.id))) ?? []
-          let effectiveUserIds = Set(users.map(\.id)).union(groupMemberIds)
-
           return ParticipantsSnapshot(
-            participants: users,
+            participants: participants,
             groupParticipants: groupParticipants,
-            effectiveUserIds: effectiveUserIds,
-            mentionCandidates: MentionCompletionCandidates(users: mentionUsers, groups: groups)
+            effectiveUserIds: Set(participants.map(\.id)).union(groupMemberIds)
           )
         }
 
-        // DMs: mention candidates should only include the peer (not chat_participants).
-        if let chat, chat.type == .privateChat, let peerUserId = chat.peerUserId {
-          log.trace("DM chat, fetching peer user")
+        guard let chat else { return snapshot(participants: []) }
+
+        // DMs list only the peer, not chat_participants.
+        if chat.type == .privateChat, let peerUserId = chat.peerUserId {
           let peer = try User
             .filter(Column("id") == peerUserId)
             .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
             .asRequest(of: UserInfo.self)
             .fetchOne(db)
-
-          let users = peer.map { [$0] } ?? []
-          let peerCandidates = users.map {
-            MentionCompletionUser(userInfo: $0, source: .participant)
-          }
-          let candidates = purpose == .mentionCandidates ? directChats + peerCandidates : []
-          return snapshot(participants: users, directChats: candidates)
+          return snapshot(participants: peer.map { [$0] } ?? [])
         }
 
-        if let chat {
-          if let spaceId = chat.spaceId {
-            switch purpose {
-            case .mentionCandidates:
-              log.trace("Space thread, fetching chat participants and space members for mention candidates")
-              let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
-              let spaceMembers = try Self.fetchSpaceMembers(db, spaceId: spaceId)
-              let groups = try Self.fetchUserGroups(db, spaceId: spaceId)
-              let groupParticipants = try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
-
-              return snapshot(
-                participants: participants,
-                spaceMembers: spaceMembers,
-                groups: groups,
-                groupParticipants: groupParticipants,
-                directChats: directChats
-              )
-
-            case .participantsList:
-              if chat.isPublic == true {
-                log.trace("Public space thread, fetching space members")
-                let spaceMembers = try Self.fetchSpaceMembers(db, spaceId: spaceId)
-                return snapshot(participants: spaceMembers, directChats: [])
-              }
-
-              log.trace("Private space thread, fetching chat participants")
-              let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
-              let groupParticipants = try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
-              return snapshot(participants: participants, groupParticipants: groupParticipants, directChats: [])
-            }
-          }
-
-          if purpose == .mentionCandidates {
-            log.trace("Home thread mention candidates, fetching participants and direct chats")
-            let participants = try Self.fetchChatParticipants(db, chatId: sourceChatId)
-            return snapshot(participants: participants, directChats: directChats)
-          }
-
-          log.trace("Home thread, fetching chat participants")
-          return snapshot(participants: try Self.fetchChatParticipants(db, chatId: sourceChatId), directChats: [])
+        if let spaceId = chat.spaceId, chat.isPublic == true {
+          return snapshot(participants: try Self.fetchSpaceMembers(db, spaceId: spaceId))
         }
 
-        if purpose == .mentionCandidates {
-          log.trace("Missing chat, falling back to direct chat mention candidates")
-          return snapshot(participants: [], directChats: directChats)
-        }
-
-        return snapshot(participants: [], directChats: [])
+        return snapshot(
+          participants: try Self.fetchChatParticipants(db, chatId: sourceChatId),
+          groupParticipants: chat.spaceId == nil ? [] : try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
+        )
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
@@ -439,25 +247,20 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           self?.participants = snapshot.participants
           self?.groupParticipants = snapshot.groupParticipants
           self?.effectiveUserIds = snapshot.effectiveUserIds
-          self?.mentionCandidates = snapshot.mentionCandidates
         }
       )
   }
 
   public func refetchParticipants() async {
-    await Self.refetchParticipants(db: db, chatId: chatId, purpose: purpose)
+    await Self.refetchParticipants(db: db, chatId: chatId)
   }
 
-  public static func ensureParticipantsLoaded(
-    db: AppDatabase,
-    chatId: Int64,
-    purpose: Purpose = .participantsList
-  ) async {
+  public static func ensureParticipantsLoaded(db: AppDatabase, chatId: Int64) async {
     let log = Log.scoped("EnhancedChatParticipantsViewModel")
 
     do {
       let request = try await db.reader.read { db in
-        try refreshRequest(db, chatId: chatId, purpose: purpose)
+        try refreshRequest(db, chatId: chatId)
       }
 
       switch request {
@@ -473,53 +276,42 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     }
   }
 
-  public static func refetchParticipants(
-    db: AppDatabase,
-    chatId: Int64,
-    purpose: Purpose = .participantsList
-  ) async {
+  public static func refetchParticipants(db: AppDatabase, chatId: Int64) async {
     let log = Log.scoped("EnhancedChatParticipantsViewModel")
     log.trace("Refetching participants...")
 
+    let source: Chat?
     do {
-      let source = try await db.reader.read { db in
-        try participantsSourceChat(db, chatId: chatId, purpose: purpose)
+      source = try await db.reader.read { db in
+        try participantsSourceChat(db, chatId: chatId)
       }
-      let sourceChatId = source?.id ?? chatId
-
-      // First try to get chat participants
-      try await Api.realtime.send(.getChatParticipants(chatID: sourceChatId))
-
-      // Also try to get space members if this is a space thread
-      if let source,
-         let spaceId = source.spaceId
-      {
-        if purpose == .mentionCandidates || source.isPublic == true {
-          log.trace("Also fetching space members for space thread, spaceId: \(spaceId)")
-          try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
-        }
-
-        if purpose == .mentionCandidates {
-          log.trace("Also fetching user groups for mention candidates, spaceId: \(spaceId)")
-          try await Api.realtime.send(.getUserGroups(spaceId: spaceId))
-        }
-      }
-
     } catch {
-      log.error("Failed to refetch enhanced chat participants", error: error)
+      log.error("Failed to resolve the participants source chat", error: error)
+      return
+    }
+
+    // Each request stands alone so one failure doesn't skip the rest.
+    do {
+      try await Api.realtime.send(.getChatParticipants(chatID: source?.id ?? chatId))
+    } catch {
+      log.error("Failed to refetch chat participants", error: error)
+    }
+
+    if let source, let spaceId = source.spaceId, source.isPublic == true {
+      do {
+        try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
+      } catch {
+        log.error("Failed to refetch space members", error: error)
+      }
     }
   }
 
-  private static func refreshRequest(
-    _ db: Database,
-    chatId: Int64,
-    purpose: Purpose
-  ) throws -> RefreshRequest {
-    guard let chat = try participantsSourceChat(db, chatId: chatId, purpose: purpose) else {
+  private static func refreshRequest(_ db: Database, chatId: Int64) throws -> RefreshRequest {
+    guard let chat = try participantsSourceChat(db, chatId: chatId) else {
       return .participants(chatId)
     }
 
-    if let spaceId = chat.spaceId, purpose == .mentionCandidates || chat.isPublic == true {
+    if let spaceId = chat.spaceId, chat.isPublic == true {
       let hasMembers = try Member
         .filter(Member.Columns.spaceId == spaceId)
         .limit(1)
@@ -534,92 +326,5 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
       .fetchCount(db) > 0
 
     return hasParticipants ? .none : .participants(chat.id)
-  }
-}
-
-/// Mention candidates for a composer that has a destination but no chat yet.
-/// Home uses known direct chats; a space additionally contributes its members
-/// and user groups. The existing chat-scoped view model remains unchanged.
-@MainActor
-public final class NewThreadMentionCandidatesViewModel: ObservableObject {
-  @Published public private(set) var candidates: MentionCompletionCandidates = .empty
-
-  private let db: AppDatabase
-  private var spaceID: Int64?
-  private var ownedBotIDs: [Int64] = []
-  private var cancellable: AnyCancellable?
-  private var isObserving = false
-  private let log = Log.scoped("NewThreadMentionCandidatesViewModel")
-
-  public init(db: AppDatabase, spaceID: Int64?) {
-    self.db = db
-    self.spaceID = spaceID
-  }
-
-  public func startObserving() {
-    guard !isObserving else { return }
-    isObserving = true
-    observe()
-  }
-
-  public func setSpaceID(_ spaceID: Int64?) {
-    guard self.spaceID != spaceID else { return }
-    self.spaceID = spaceID
-    if isObserving {
-      observe()
-    }
-  }
-
-  /// The user's own bots are offered even without a chat or membership.
-  /// They're read from the database with the rest, so a rename shows live.
-  public func setOwnedBotIDs(_ ids: [Int64]) {
-    guard ownedBotIDs != ids else { return }
-    ownedBotIDs = ids
-    if isObserving {
-      observe()
-    }
-  }
-
-  public func refresh() async {
-    startObserving()
-    guard let spaceID else { return }
-
-    do {
-      try await Api.realtime.send(.getSpaceMembers(spaceId: spaceID))
-      try await Api.realtime.send(.getUserGroups(spaceId: spaceID))
-    } catch {
-      log.error("Failed to refresh new-thread mention candidates", error: error)
-    }
-  }
-
-  private func observe() {
-    cancellable?.cancel()
-    let spaceID = spaceID
-    let ownedBotIDs = ownedBotIDs
-    db.warnIfInMemoryDatabaseForObservation("NewThreadMentionCandidatesViewModel.candidates")
-    cancellable = ValueObservation
-      .tracking { db in
-        let candidates = try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(
-          db,
-          spaceID: spaceID
-        )
-        guard !ownedBotIDs.isEmpty else { return candidates }
-        let bots = try User
-          .filter(ids: ownedBotIDs)
-          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-          .asRequest(of: UserInfo.self)
-          .fetchAll(db)
-        return candidates.addingOwnedBots(bots)
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
-      .sink(
-        receiveCompletion: { [weak self] completion in
-          guard case let .failure(error) = completion else { return }
-          self?.log.error("Failed to observe new-thread mention candidates", error: error)
-        },
-        receiveValue: { [weak self] candidates in
-          self?.candidates = candidates
-        }
-      )
   }
 }

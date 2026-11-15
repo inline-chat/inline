@@ -24,8 +24,10 @@ final class AddParticipantsViewModel: ObservableObject {
   private var didRequestMembers = false
 
   var filteredMembers: [FullMemberItem] {
+    // A bot can be added only by someone who can reach it.
     let members = availableMembers.filter { member in
-      !currentParticipantIds.contains(member.userInfo.user.id)
+      !currentParticipantIds.contains(member.userInfo.user.id) &&
+        AgentGrantStore.shared.offers(member.userInfo.user)
     }
 
     if searchText.isEmpty {

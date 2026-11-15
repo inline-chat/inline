@@ -1,0 +1,68 @@
+[
+  {
+    "label": "open",
+    "text": "Claude wants to use linear · create_issue\nReason: Create a Linear issue\n{\n  \"team\": \"INL\",\n  \"title\": \"Parser crashes on blank input\"\n}",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_TOOL",
+          "title": "Claude wants to use linear · create_issue",
+          "reason": "Create a Linear issue",
+          "children": [
+            {
+              "code": {
+                "text": "{\n  \"team\": \"INL\",\n  \"title\": \"Parser crashes on blank input\"\n}",
+                "language": "json"
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Yes",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "No, and tell Claude what to do differently",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Claude wants to use linear · create_issue\nReason: Create a Linear issue\n{\n  \"team\": \"INL\",\n  \"title\": \"Parser crashes on blank input\"\n}\nYes (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_TOOL",
+          "title": "Claude wants to use linear · create_issue",
+          "reason": "Create a Linear issue",
+          "children": [
+            {
+              "code": {
+                "text": "{\n  \"team\": \"INL\",\n  \"title\": \"Parser crashes on blank input\"\n}",
+                "language": "json"
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Yes (answered by Dena)"
+      }
+    ]
+  }
+]

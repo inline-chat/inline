@@ -320,12 +320,13 @@ describe("bot access for a space or a user group", () => {
       [0n, { oneofKind: "spaceId", spaceId: BigInt(space.id) }],
     ])
 
-    expect(await getAgentAccess({ botUserId: BigInt(denaCodex.id), userId: BigInt(moClaude.id) }, moClaude.id)).toEqual({
+    expect(await getAgentAccess({ botUserId: BigInt(denaCodex.id), userId: BigInt(moClaude.id), botUserIds: [] }, moClaude.id)).toEqual({
       isOwner: false,
       operations: [AgentGrantOperation.INVOKE],
+      access: [],
     })
     await expect(
-      getAgentAccess({ botUserId: BigInt(denaCodex.id), userId: BigInt(mo.id) }, zed.id),
+      getAgentAccess({ botUserId: BigInt(denaCodex.id), userId: BigInt(mo.id), botUserIds: [] }, zed.id),
     ).rejects.toBeInstanceOf(RealtimeRpcError)
 
     const contacts = await getContacts({ kind: ContactKind.BOTS }, moClaude)

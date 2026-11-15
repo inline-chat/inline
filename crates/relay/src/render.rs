@@ -1,0 +1,186 @@
+//! Text the relay posts in Inline. Kept in one place so copy stays consistent
+//! across connectors.
+
+use crate::engine::RelayHealth;
+use crate::model::{Confirmation, ConnectorHealth, TaskUpdate};
+
+/// Longest text the relay posts; longer remote text is cut with a pointer.
+pub const MAX_TEXT_CHARS: usize = 16_000;
+
+fn clip(text: &str, suffix: &str) -> String {
+    if text.chars().count() <= MAX_TEXT_CHARS {
+        return text.to_owned();
+    }
+    let mut clipped: String = text.chars().take(MAX_TEXT_CHARS).collect();
+    clipped.push_str(suffix);
+    clipped
+}
+
+/// An agent message.
+pub fn agent_text(text: &str) -> String {
+    clip(
+        text,
+        "\n\n_…cut here; the rest is in the original conversation._",
+    )
+}
+
+/// A message from someone the owner shared the agent with. It reaches the
+/// agent as the owner's own message, so the first line says who it is from.
+/// `sender: None` is the owner writing in a chat other than their DM.
+pub fn guest_request(sender: Option<&str>, chat_title: Option<&str>, text: &str) -> String {
+    let place = chat_title
+        .map(one_line)
+        .filter(|title| !title.is_empty())
+        .map(|title| format!(" in “{title}”"))
+        .unwrap_or_default();
+    let header = match sender {
+        Some(sender) => format!(
+            "💬 From {} via Inline{place}, not from me. Reply to this message to answer them.",
+            one_line(sender)
+        ),
+        None => format!("💬 From me via Inline{place}. Reply to this message to answer there."),
+    };
+    format!("{header}\n\n{}", clip(text, "…"))
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(80)
+        .collect()
+}
+
+/// A message the owner typed in the remote app.
+pub fn owner_mirror(network: &str, text: &str) -> String {
+    let quoted = clip(text, "…")
+        .lines()
+        .map(|line| format!("> {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("_You, in {network}:_\n{quoted}")
+}
+
+/// A notice from the network itself.
+pub fn system_notice(text: &str) -> String {
+    format!("_{}_", clip(text.trim(), "…"))
+}
+
+/// A task transcript entry.
+pub fn task_entry(entry: &crate::model::TaskEntry) -> String {
+    match entry.speaker {
+        crate::model::Speaker::Owner => format!("_Task prompt:_\n{}", clip(&entry.text, "…")),
+        _ => agent_text(&entry.text),
+    }
+}
+
+/// Replacement for a message deleted remotely.
+pub fn deleted(network: &str) -> String {
+    format!("_Deleted in {network}._")
+}
+
+/// Placeholder for a file that could not be mirrored.
+pub fn file_unavailable(name: &str, network: &str) -> String {
+    format!("📎 {name} — couldn't be loaded here. Open it in {network}.")
+}
+
+/// Confirmation card body (without its status line).
+pub fn confirmation_body(confirmation: &Confirmation) -> String {
+    let mut text = format!(
+        "**{}**\n{}",
+        confirmation
+            .title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or("Confirmation needed"),
+        confirmation.message
+    );
+    for (label, value) in &confirmation.fields {
+        text.push_str(&format!("\n• {label}: {value}"));
+    }
+    text
+}
+
+/// A closed confirmation card.
+pub fn confirmation_closed(body: &str, status: &str) -> String {
+    format!("{body}\n\n_{status}_")
+}
+
+/// Status line for a confirmation closed remotely.
+pub fn closed_status(status: &str) -> String {
+    match status {
+        "accepted" | "applied" | "approved" => "Approved.".into(),
+        "declined" | "rejected" => "Declined.".into(),
+        "expired" => "Expired.".into(),
+        "cancelled" | "canceled" => "Cancelled.".into(),
+        other => format!("No longer waiting ({other})."),
+    }
+}
+
+/// A task card.
+pub fn task_card(task: &TaskUpdate) -> String {
+    format!(
+        "🗂 **{}**\n{}",
+        task.title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or("Task"),
+        task.label
+    )
+}
+
+/// `/help`.
+pub fn help(agent: &str, network: &str) -> String {
+    format!(
+        "This chat is a bridge to your {network} {agent}. Messages, replies, reactions, and files go both ways.\n\n\
+         `/status` — bridge and {network} connection\n\
+         `/mirror on|off` — show messages you type in {network} here\n\
+         `/share @name` · `/unshare @name` — let someone else use your {agent} in their DM with this bot or by mentioning it\n\
+         `/help` — this message\n\n\
+         {network} has no way to take edits or deletions from Inline, so those stay here; the bridge tells you when it happens."
+    )
+}
+
+/// `/status`.
+pub fn status(network: &str, health: &RelayHealth, detail: &str, mirror: bool) -> String {
+    let connection = match &health.connector {
+        None => "starting".to_owned(),
+        Some(ConnectorHealth::Ready) => "connected".to_owned(),
+        Some(ConnectorHealth::Degraded(reason)) => format!("degraded ({reason})"),
+        Some(ConnectorHealth::NeedsLogin(reason)) => format!("sign-in needed ({reason})"),
+    };
+    let mut text = format!("{network}: {connection}\n{detail}");
+    if health.pending_sends > 0 {
+        text.push_str(&format!(
+            "\nWaiting to deliver: {} message(s)",
+            health.pending_sends
+        ));
+    }
+    text.push_str(&format!(
+        "\nMirroring messages you type in {network}: {}",
+        if mirror { "on" } else { "off" }
+    ));
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_mirror_quotes_every_line() {
+        assert_eq!(
+            owner_mirror("ChatGPT", "a\nb"),
+            "_You, in ChatGPT:_\n> a\n> b"
+        );
+    }
+
+    #[test]
+    fn long_text_is_clipped() {
+        let text = "x".repeat(MAX_TEXT_CHARS + 10);
+        let clipped = agent_text(&text);
+        assert!(clipped.starts_with(&"x".repeat(MAX_TEXT_CHARS)));
+        assert!(clipped.contains("cut here"));
+    }
+}

@@ -247,6 +247,9 @@ public class MessagesProgressiveViewModel {
     /// The last read id the unread line is drawn after, frozen when the chat opened, whichever
     /// anchor won. Nil when nothing was unread.
     public let unreadBoundary: Int64?
+    /// Set when the cache couldn't show the unread line, so the rows are the latest messages;
+    /// the list may fetch history around the line and open there instead.
+    public let uncachedUnreadBoundary: Int64?
 
     public var threadAnchor: FullMessage? {
       if case let .resolved(anchor) = threadAnchorState { anchor } else { nil }
@@ -278,7 +281,8 @@ public class MessagesProgressiveViewModel {
       loadedWindowMetadata: LoadedWindowMetadata,
       publicationRevision: UInt64? = nil,
       openAnchor: ChatOpenAnchor = .latest,
-      unreadBoundary: Int64? = nil
+      unreadBoundary: Int64? = nil,
+      uncachedUnreadBoundary: Int64? = nil
     ) {
       self.messages = messages
       threadAnchorState = threadAnchor
@@ -286,6 +290,7 @@ public class MessagesProgressiveViewModel {
       self.publicationRevision = publicationRevision
       self.openAnchor = openAnchor
       self.unreadBoundary = unreadBoundary
+      self.uncachedUnreadBoundary = uncachedUnreadBoundary
     }
   }
 
@@ -508,7 +513,8 @@ public class MessagesProgressiveViewModel {
           : loadedWindowMetadata(db, peer: peer, messages: opening.messages),
         publicationRevision: publicationRevision,
         openAnchor: opening.anchor,
-        unreadBoundary: opening.unreadBoundary
+        unreadBoundary: opening.unreadBoundary,
+        uncachedUnreadBoundary: opening.uncachedUnreadBoundary
       )
     }
   }

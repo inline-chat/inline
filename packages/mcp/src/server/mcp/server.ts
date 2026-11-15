@@ -2188,6 +2188,36 @@ export function createInlineMcpServer(params: {
       const matchesFilters = (chat: InlineEligibleChat): boolean =>
         (!onlyUnread || chat.unreadCount > 0) && (parsedSpaceId == null || chat.spaceId === parsedSpaceId) && (kind == null || chat.kind === kind)
 
+      if (!safeQuery && completeCatalog && params.inline.listChats) {
+        // Archive discovery: one server-scoped GetChats page per tool call,
+        // filtered in SQL, with the server's cursor.
+        const page = await params.inline.listChats({
+          includeSubthreads: true,
+          limit: safeLimit,
+          ...(parsedAfterChatId != null ? { afterChatId: parsedAfterChatId } : {}),
+          ...(parsedSpaceId != null ? { spaceId: parsedSpaceId } : {}),
+          ...(kind != null ? { kind } : {}),
+          ...(onlyUnread ? { unreadOnly: true } : {}),
+        })
+        // Local checks only drop rows; they never move the server cursor.
+        const selected = sortedConversations(page.chats.filter(matchesFilters), "id")
+          .filter((chat) => parsedAfterChatId == null || chat.chatId > parsedAfterChatId)
+        const payload = {
+          query: null,
+          sort: safeSort,
+          bestMatch: null,
+          unreadOnly: onlyUnread,
+          spaceId: parsedSpaceId?.toString() ?? null,
+          kind: kind ?? null,
+          items: selected.map((chat, index) => conversationListItem(chat, index + 1)),
+          nextAfterChatId: page.nextAfterChatId?.toString() ?? null,
+        }
+        return {
+          structuredContent: payload,
+          content: [jsonText(payload)],
+        }
+      }
+
       if (!safeQuery) {
         const chats = completeCatalog ? await params.inline.getEligibleChats({ includeSubthreads: true }) : await params.inline.getEligibleChats()
         const filtered = chats.filter(matchesFilters)

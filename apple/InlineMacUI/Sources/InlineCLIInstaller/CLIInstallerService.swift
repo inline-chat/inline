@@ -22,8 +22,14 @@ public actor CLIInstallerService: CLIInstalling {
     let standardError: String
   }
 
+  private enum InstallAccess {
+    case direct
+    case administrator
+  }
+
   private var configuration: CLIInstallerConfiguration
   private let requiresSignedManifest: Bool
+  private let allowsAdministratorAuthorization: Bool
   private let fileManager: FileManager
   private let session: URLSession
 
@@ -31,10 +37,13 @@ public actor CLIInstallerService: CLIInstalling {
     configuration: CLIInstallerConfiguration = .production,
     fileManager: FileManager = .default,
     session: URLSession = .shared,
-    requiresSignedManifest: Bool = false
+    requiresSignedManifest: Bool = false,
+    allowsAdministratorAuthorization: Bool = false
   ) {
     self.configuration = configuration
     self.requiresSignedManifest = requiresSignedManifest
+    // Only user-initiated installs may show the system password prompt.
+    self.allowsAdministratorAuthorization = allowsAdministratorAuthorization
     self.fileManager = fileManager
     let network = session.configuration
     network.httpShouldSetCookies = false
@@ -188,6 +197,8 @@ public actor CLIInstallerService: CLIInstalling {
         message: "Inline could not find a safe, writable location for the CLI."
       )
     }
+    // Decide before downloading so a prompt that can't appear fails fast.
+    let access = try installAccess(for: destinationURL)
 
     try Task.checkCancellation()
     await progress(.downloading(version: plan.release.version, expectedBytes: plan.release.size))
@@ -229,8 +240,14 @@ public actor CLIInstallerService: CLIInstalling {
     }
 
     await progress(.installing(destinationURL: destinationURL))
-    try Self.performInstallUnlessCancelled {
-      try installExecutable(executableURL, at: destinationURL)
+    switch access {
+    case .direct:
+      try Self.performInstallUnlessCancelled {
+        try installExecutable(executableURL, at: destinationURL)
+      }
+    case .administrator:
+      try Task.checkCancellation()
+      try await installExecutableAsAdministrator(executableURL, at: destinationURL)
     }
     try verifySignature(of: destinationURL)
 
@@ -633,6 +650,92 @@ public actor CLIInstallerService: CLIInstalling {
     )
   }
 
+  /// An existing directory the user can't write (usually a root-owned
+  /// `/usr/local/bin` holding an earlier CLI) needs administrator approval.
+  private func installAccess(for destinationURL: URL) throws -> InstallAccess {
+    guard Self.requiresAdministrator(toInstallAt: destinationURL, fileManager: fileManager) else {
+      return .direct
+    }
+    guard allowsAdministratorAuthorization, CLIPrivilegedInstaller.isAvailable else {
+      throw failure(
+        .permissionDenied,
+        title: "Administrator Permission Required",
+        message: "\(destinationURL.deletingLastPathComponent().path) belongs to an administrator, so Inline can’t \(installVerb(for: destinationURL)) the CLI there. \(Self.manualRemovalHint(for: destinationURL))"
+      )
+    }
+    return .administrator
+  }
+
+  static func requiresAdministrator(toInstallAt destinationURL: URL, fileManager: FileManager = .default) -> Bool {
+    let directory = destinationURL.deletingLastPathComponent().path
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
+      return false
+    }
+    return !fileManager.isWritableFile(atPath: directory)
+  }
+
+  static func manualRemovalHint(for destinationURL: URL) -> String {
+    "To use a copy you own instead, run “sudo rm \(destinationURL.path)” in Terminal, then install again."
+  }
+
+  private func installVerb(for destinationURL: URL) -> String {
+    Self.pathIsOccupied(destinationURL, fileManager: fileManager) ? "update" : "install"
+  }
+
+  private func installExecutableAsAdministrator(_ executableURL: URL, at destinationURL: URL) async throws {
+    try validateExistingDestination(destinationURL)
+    let request = CLIPrivilegedInstaller.Request(
+      sourceURL: executableURL,
+      destinationURL: destinationURL,
+      codeRequirement: CLIExecutableVerifier.installRequirement(configuration),
+      prompt: "Inline wants to \(installVerb(for: destinationURL)) the Inline CLI at \(destinationURL.path)."
+    )
+    do {
+      try await CLIPrivilegedInstaller.run(request)
+    } catch let error as CLIPrivilegedInstaller.Failure {
+      switch error {
+      case .canceled:
+        throw failure(
+          .permissionDenied,
+          title: installVerb(for: destinationURL) == "update" ? "Inline CLI Wasn’t Updated" : "Inline CLI Wasn’t Installed",
+          message: "\(destinationURL.deletingLastPathComponent().path) belongs to an administrator, so Inline needs an administrator password to \(installVerb(for: destinationURL)) the CLI there. Try again to enter it. \(Self.manualRemovalHint(for: destinationURL))"
+        )
+      case .signatureRejected:
+        throw failure(
+          .invalidSignature,
+          title: "Inline CLI Signature Couldn’t Be Verified",
+          message: "The executable was not signed by Inline and was not used."
+        )
+      case .unsafeDestination:
+        throw failure(
+          .conflictingInstallation,
+          title: "Existing Inline CLI Was Left Unchanged",
+          message: "The item at \(destinationURL.path) is not a regular file."
+        )
+      case let .failed(message):
+        throw failure(
+          .permissionDenied,
+          title: "Inline CLI Couldn’t Be Installed",
+          message: "Inline could not write to \(destinationURL.path)\(message.isEmpty ? "." : ": \(message)")"
+        )
+      }
+    }
+  }
+
+  private func validateExistingDestination(_ destinationURL: URL) throws {
+    guard Self.pathIsOccupied(destinationURL, fileManager: fileManager) else { return }
+    let attributes = try fileManager.attributesOfItem(atPath: destinationURL.path)
+    guard attributes[.type] as? FileAttributeType == .typeRegular else {
+      throw failure(
+        .conflictingInstallation,
+        title: "Existing Inline CLI Was Left Unchanged",
+        message: "The item at \(destinationURL.path) is not a regular file."
+      )
+    }
+    try verifySignature(of: destinationURL, allowLegacyAdHoc: true)
+  }
+
   private func installExecutable(_ executableURL: URL, at destinationURL: URL) throws {
     let directoryURL = destinationURL.deletingLastPathComponent()
     do {
@@ -645,17 +748,7 @@ public actor CLIInstallerService: CLIInstalling {
       throw permissionFailure(destinationURL, error: error)
     }
 
-    if fileManager.fileExists(atPath: destinationURL.path) {
-      let attributes = try fileManager.attributesOfItem(atPath: destinationURL.path)
-      guard attributes[.type] as? FileAttributeType == .typeRegular else {
-        throw failure(
-          .conflictingInstallation,
-          title: "Existing Inline CLI Was Left Unchanged",
-          message: "The item at \(destinationURL.path) is not a regular file."
-        )
-      }
-      try verifySignature(of: destinationURL, allowLegacyAdHoc: true)
-    }
+    try validateExistingDestination(destinationURL)
 
     let stagedURL = directoryURL.appending(path: ".inline.installing-\(UUID().uuidString)")
     defer { try? fileManager.removeItem(at: stagedURL) }

@@ -424,6 +424,9 @@ describe("InlineProtocolV3Connection", () => {
       oneofKind: "getMe",
       getMe: { user: { id: 7n } },
     })
+    // Omitted fields take proto defaults instead of failing to encode.
+    await expect(temporary.callRpc({ method: Method.GET_CHATS, input: { oneofKind: "getChats", getChats: {} } }))
+      .resolves.toEqual({ oneofKind: undefined })
 
     expect(permanent.authorization.temporary).toBe(false)
     expect(temporary.authorization.temporary).toBe(true)

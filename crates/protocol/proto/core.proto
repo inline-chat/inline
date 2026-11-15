@@ -457,6 +457,7 @@ message MessageAction {
     MessageActionCopyText copy_text = 4;
     MessageActionOpenUrl open_url = 5;
     MessageActionOpenLink open_link = 6;
+    MessageActionCompose compose = 10;
   }
 
   Style style = 7;
@@ -484,6 +485,11 @@ message MessageActionCopyText {
 // without notifying the bot. Clients show the destination before opening a
 // non-web scheme.
 message MessageActionOpenUrl { string url = 1; }
+
+// Puts text in the viewer's composer for this chat, client-side, without
+// notifying the bot. The viewer edits and sends it. Clients add it after any
+// draft the viewer has, never replacing it.
+message MessageActionCompose { string text = 1; }
 
 // Navigates to an Inline chat or message, client-side. It never broadens
 // access: viewers without access to the target see that they lack it.
@@ -607,6 +613,14 @@ message Block {
     BlockForm form = 18;
     // Bot only. Sandboxed HTML; at most one per message.
     BlockWidget widget = 19;
+    // Agent surfaces from Claude and ChatGPT clients. Clients that can't draw one
+    // show the fallback text it covers and draw the rest of the message.
+    BlockPlanProposal plan_proposal = 20;
+    BlockApproval approval = 21;
+    BlockReview review = 22;
+    BlockTaskSuggestion task_suggestion = 23;
+    BlockNextStep next_step = 24;
+    BlockPromptSuggestions prompt_suggestions = 25;
   }
 }
 
@@ -857,6 +871,9 @@ message BlockFormField {
     BlockFormToggle toggle = 7;
     BlockFormNumber number = 8;
   }
+
+  // Short chip naming the question, such as "Auth method".
+  optional BlockText header = 9;
 }
 
 message BlockFormSelect {
@@ -872,6 +889,11 @@ message BlockFormOption {
   string option_id = 1;
   BlockText label = 2;
   optional BlockText description = 3;
+  // Shown monospaced beside the options while this one is focused, such as a
+  // code sample or a layout sketch.
+  optional BlockText preview = 4;
+  // The sender's recommended answer.
+  bool recommended = 5;
 }
 
 message BlockFormText {
@@ -953,6 +975,153 @@ message MessageWidgetCall {
   string name = 1;
   // UTF-8 JSON, at most 4 KiB. Empty means no payload.
   bytes payload = 2;
+}
+
+// Where an agent's request to a person stands. The sender edits the message as
+// it changes; clients may show a pressed button as pending until that edit.
+enum BlockDecisionState {
+  BLOCK_DECISION_STATE_UNSPECIFIED = 0;
+  BLOCK_DECISION_STATE_PENDING = 1;
+  // Approved, or for a task suggestion, started.
+  BLOCK_DECISION_STATE_ACCEPTED = 2;
+  // Denied, dismissed, or for a plan, kept planning.
+  BLOCK_DECISION_STATE_DECLINED = 3;
+  BLOCK_DECISION_STATE_EXPIRED = 4;
+  // A newer plan or request replaced this one.
+  BLOCK_DECISION_STATE_SUPERSEDED = 5;
+}
+
+// A plan the agent wants approved before it acts (Claude ExitPlanMode, Codex
+// proposed plans). The fallback text carries the title and the plan.
+message BlockPlanProposal {
+  optional BlockText title = 1;
+  // The plan body: headings, lists, code.
+  repeated Block children = 2;
+  BlockDecisionState state = 3;
+  // IDs from Message.actions drawn as this block's buttons, in order. Clients
+  // that draw them here leave them out of the message's action rows; older
+  // clients keep showing them there.
+  repeated string action_ids = 4;
+  optional int64 decided_by_user_id = 5;
+  optional bool is_rtl = 6;
+}
+
+// A request to run a command, change files, use a tool or widen permissions.
+message BlockApproval {
+  enum Subject {
+    SUBJECT_UNSPECIFIED = 0;
+    SUBJECT_COMMAND = 1;
+    SUBJECT_FILE_CHANGE = 2;
+    SUBJECT_TOOL = 3;
+    SUBJECT_PERMISSIONS = 4;
+    SUBJECT_NETWORK = 5;
+  }
+
+  Subject subject = 1;
+  BlockText title = 2;
+  // Rendered LTR and monospaced.
+  optional BlockText command = 3;
+  optional BlockText cwd = 4;
+  optional BlockText reason = 5;
+  // Diffs or fields describing what is being approved.
+  repeated Block children = 6;
+  BlockDecisionState state = 7;
+  // Same contract as BlockPlanProposal.action_ids.
+  repeated string action_ids = 8;
+  optional int64 decided_by_user_id = 9;
+  optional bool is_rtl = 10;
+}
+
+// Code review notes: findings with priority and location, and an overall
+// verdict.
+message BlockReview {
+  enum Verdict {
+    VERDICT_UNSPECIFIED = 0;
+    VERDICT_CORRECT = 1;
+    VERDICT_INCORRECT = 2;
+    VERDICT_NEEDS_ATTENTION = 3;
+  }
+
+  optional BlockText title = 1;
+  Verdict verdict = 2;
+  optional BlockText summary = 3;
+  repeated BlockReviewFinding findings = 4;
+  optional bool is_rtl = 5;
+}
+
+message BlockReviewFinding {
+  enum Priority {
+    PRIORITY_UNSPECIFIED = 0;
+    PRIORITY_P0 = 1;
+    PRIORITY_P1 = 2;
+    PRIORITY_P2 = 3;
+    PRIORITY_P3 = 4;
+  }
+  enum Confidence {
+    CONFIDENCE_UNSPECIFIED = 0;
+    CONFIDENCE_CONFIRMED = 1;
+    CONFIDENCE_PLAUSIBLE = 2;
+  }
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    OUTCOME_FIXED = 1;
+    OUTCOME_SKIPPED = 2;
+    OUTCOME_NO_CHANGE_NEEDED = 3;
+  }
+
+  BlockText title = 1;
+  // Explanation or failure scenario.
+  optional BlockText body = 2;
+  Priority priority = 3;
+  // Rendered LTR and monospaced.
+  optional BlockText path = 4;
+  optional uint32 start_line = 5;
+  optional uint32 end_line = 6;
+  // Lowercase slug such as "correctness"; at most 40 characters.
+  optional string category = 7;
+  Confidence confidence = 8;
+  Outcome outcome = 9;
+  // Message action run from the finding, such as "Fix".
+  optional string action_id = 10;
+}
+
+// Work the agent proposes to run separately, as a new thread.
+message BlockTaskSuggestion {
+  BlockText title = 1;
+  optional BlockText brief = 2;
+  BlockDecisionState state = 3;
+  // The thread the task started in, once accepted.
+  optional Peer started_peer = 4;
+  // Unix seconds after which the suggestion reads as expired.
+  optional int64 expires_at = 5;
+  // Same contract as BlockPlanProposal.action_ids.
+  repeated string action_ids = 6;
+  optional bool is_rtl = 7;
+}
+
+// The agent's end-of-turn recap and the one decision it waits on.
+message BlockNextStep {
+  BlockText recap = 1;
+  optional BlockText question = 2;
+  // Same contract as BlockPlanProposal.action_ids.
+  repeated string action_ids = 3;
+  // The agent is stopped until someone answers.
+  bool blocking = 4;
+  optional bool is_rtl = 5;
+}
+
+// Chips that put a prompt in the viewer's composer, like
+// MessageActionCompose.
+message BlockPromptSuggestions {
+  repeated BlockPromptSuggestion prompts = 1;
+  optional bool is_rtl = 2;
+}
+
+message BlockPromptSuggestion {
+  BlockText label = 1;
+  // Composer text when it differs from the label; not part of the fallback
+  // text. At most 4,000 characters.
+  optional string text = 2;
 }
 
 message Message {
@@ -1427,6 +1596,10 @@ message AgentSettings {
   int64 revision = 3;
   // Last change, Unix seconds. Absent when never set.
   optional int64 date = 4;
+  // Anyone on Inline may message the bot, add it to chats and find it by its
+  // username; the bot's own software decides who it answers. Off by default:
+  // only the owner and the access list (AgentGrant) reach the bot.
+  bool open_to_everyone = 5;
 }
 
 // Work bar controls, relayed to the bot, which maps them to harness operations.
@@ -1447,12 +1620,14 @@ enum AgentGrantOperation {
   AGENT_GRANT_OPERATION_APPROVE = 3;
   reserved 4;
   reserved "AGENT_GRANT_OPERATION_VIEW";
-  // Change the agent's settings.
+  // Manage the bot as an admin: its access list, who can message it, its
+  // profile, settings and token. Only the owner deletes the bot.
   AGENT_GRANT_OPERATION_CONFIGURE = 5;
 }
 
-// Opt-in access to a bot for one person. No grants means owner-only. Any grant
-// lets its holder answer the agent's questions.
+// One entry of a bot's access list. No grants means owner-only, unless the bot
+// is open to everyone (AgentSettings). Any grant lets its holder message the
+// bot, add it to chats and answer its questions.
 message AgentGrant {
   int64 id = 1;
   int64 bot_user_id = 2;
@@ -1561,14 +1736,15 @@ message ListAgentGrantsInput {
 }
 
 message ListAgentGrantsResult {
-  // All grants for the owner and the bot; only the viewer's own otherwise.
+  // All grants for the owner, admins and the bot; only the viewer's own otherwise.
   repeated AgentGrant grants = 1;
   int64 revision = 2;
   int64 owner_user_id = 3;
 }
 
-// Creates or replaces one person's grant. Owner, or the bot itself for grants
-// without APPROVE and CONFIGURE (the bridge's /allowlist).
+// Creates or replaces one access list entry. The owner; an admin, for grants
+// without APPROVE; or the bot itself, for grants without APPROVE and
+// CONFIGURE (the bridge's /allowlist).
 message SetAgentGrantInput {
   int64 bot_user_id = 1;
   // The person; ignored when `subject` is set.
@@ -1599,11 +1775,33 @@ message GetAgentAccessInput {
   // Omitted or zero when the calling bot asks about itself.
   int64 bot_user_id = 1;
   int64 user_id = 2;
+  // Several bots at once, about the caller. When set, the fields above are
+  // ignored and the answers come back in `access`. At most 200.
+  repeated int64 bot_user_ids = 3;
 }
 
 message GetAgentAccessResult {
   bool is_owner = 1;
   repeated AgentGrantOperation operations = 2;
+  // One entry per bot asked about with `bot_user_ids`. Deleted and unknown
+  // bots are left out.
+  repeated AgentAccess access = 3;
+}
+
+// What the caller may do with one bot.
+message AgentAccess {
+  int64 bot_user_id = 1;
+  bool is_owner = 2;
+  // From the access list. Empty for an open bot the caller has no grant on.
+  repeated AgentGrantOperation operations = 3;
+  int64 owner_user_id = 4;
+  // Whether the caller may message the bot, add it to chats and find it: the
+  // owner, anyone on its access list, or anyone when the bot is open to
+  // everyone. Clients hide the composer and the bot's mention when false.
+  bool can_message = 5;
+  // The bot wrote to the caller in their direct chat in the last week, so
+  // they can answer it there even without access. Clients keep the composer.
+  bool can_reply = 6;
 }
 
 message DeleteAgentGrantResult { int64 revision = 1; }
@@ -1642,6 +1840,7 @@ message SetAgentParticipationInput {
 message UpdateAgentSettingsInput {
   int64 bot_user_id = 1;
   optional AgentOutputMode default_output_mode = 2;
+  optional bool open_to_everyone = 3;
 }
 
 message UpdateAgentSettingsResult {
@@ -2452,6 +2651,7 @@ enum Method {
   GET_UNREAD_ACTIVITY = 167;
   READ_ACTIVITY = 168;
   SET_FOCUS_STATUS = 169;
+  GET_SPACES = 170;
 }
 
 message RpcCall {
@@ -2626,6 +2826,7 @@ message RpcCall {
     GetUnreadActivityInput getUnreadActivity = 168;
     ReadActivityInput readActivity = 169;
     SetFocusStatusInput setFocusStatus = 170;
+    GetSpacesInput getSpaces = 171;
   }
 }
 
@@ -2802,6 +3003,7 @@ message RpcResult {
     GetUnreadActivityResult getUnreadActivity = 168;
     ReadActivityResult readActivity = 169;
     SetFocusStatusResult setFocusStatus = 170;
+    GetSpacesResult getSpaces = 171;
   }
 }
 
@@ -3557,7 +3759,11 @@ message DeleteBotAgentInput { int64 agent_id = 1; }
 
 message DeleteBotAgentResult { int64 agent_id = 1; }
 
-message ListBotsInput {}
+message ListBotsInput {
+  // Also list the bots the caller manages as an admin, after their own. Each
+  // bot's `bot_info` says who owns it.
+  optional bool include_managed = 1;
+}
 
 message ListBotsResult { repeated User bots = 1; }
 
@@ -4079,9 +4285,69 @@ message DeleteDialogFolderResult {
 }
 
 message GetChatsInput {
-  // Include every accessible linked subthread, regardless of dialog visibility.
-  // Omitted/false preserves the normal chat-list snapshot.
+  // Legacy. true is the same as scope = CHAT_LIST_SCOPE_ACCESSIBLE.
   optional bool include_subthreads = 1;
+
+  // Page size, capped at 100. Absent: legacy unpaged snapshot (deprecated).
+  optional int32 limit = 2;
+
+  // Exclusive start. Pass the previous result's next_offset; absent = first page.
+  optional ChatListOffset offset = 3;
+
+  ChatListOrder order = 4;
+
+  // Predicates, ANDed. Absent fields do not constrain.
+  optional ChatListFilter filter = 5;
+
+  ChatListScope scope = 6;
+}
+
+enum ChatListScope {
+  // Chats the viewer has a dialog with, except dialogs marked chat_list_hidden.
+  CHAT_LIST_SCOPE_DIALOGS = 0;
+  // Every chat the viewer can access, with or without a dialog, including
+  // linked subthreads.
+  CHAT_LIST_SCOPE_ACCESSIBLE = 1;
+}
+
+enum ChatListOrder {
+  // Latest activity first (last message date, else creation date), then chat
+  // ID descending. Pinned chats are not moved to the front.
+  CHAT_LIST_ORDER_RECENT = 0;
+  // Ascending chat ID. Pages never shift and new chats land at the end.
+  // For complete walks, sync and export.
+  CHAT_LIST_ORDER_ID = 1;
+}
+
+message ChatListOffset {
+  int64 chat_id = 1;
+  // Activity date of that chat. RECENT order only.
+  optional int64 date = 2;
+}
+
+enum ChatListKind {
+  CHAT_LIST_KIND_UNSPECIFIED = 0;
+  CHAT_LIST_KIND_DM = 1;
+  CHAT_LIST_KIND_SPACE_THREAD = 2;
+  CHAT_LIST_KIND_HOME_THREAD = 3;
+}
+
+message ChatListFilter {
+  // Empty: all kinds.
+  repeated ChatListKind kinds = 1;
+  // Restrict space threads to these spaces. Empty: all spaces.
+  repeated int64 space_ids = 2;
+  // Unread messages or a manual unread mark.
+  optional bool unread = 3;
+  // The four below are tri-state on stored dialog state:
+  // true = only, false = exclude, absent = both.
+  optional bool archived = 4;
+  optional bool open = 5;
+  optional bool pinned = 6;
+  // Dialogs in this folder.
+  optional int64 folder_id = 7;
+  // Case-insensitive match on the chat title or DM peer name. (Phase 2.)
+  optional string query = 8;
 }
 
 message GetChatsResult {
@@ -4101,7 +4367,18 @@ message GetChatsResult {
   repeated Message messages = 5;
 
   // Personal dialog folders. Dialogs remain present for unsupported clients.
+  // Paged requests: complete, on the first page only.
   repeated DialogFolder folders = 6;
+
+  // Paged requests: pass as `offset` for the next page. Absent: end of list.
+  optional ChatListOffset next_offset = 7;
+}
+
+// Every space the viewer is a member of. Small and unpaged.
+message GetSpacesInput {}
+
+message GetSpacesResult {
+  repeated Space spaces = 1;
 }
 
 message TranslateMessagesInput {
@@ -6030,6 +6307,11 @@ message CreateUploadInput {
     UploadVideoMetadata video = 8;
     UploadVoiceMetadata voice = 9;
   }
+  // The whole file, when it fits in one part (byte_count <= part size). The server saves it as
+  // part 0 and finishes the upload in this call, returning `complete` when it finalizes. Servers
+  // that predate this field ignore it; part 0 is then missing from accepted_parts and the client
+  // uploads it as usual.
+  optional bytes inline_data = 10;
 }
 
 message CreateUploadResult {
@@ -6038,6 +6320,8 @@ message CreateUploadResult {
   uint32 part_count = 3;
   int64 expires_at = 4;
   repeated uint32 accepted_parts = 5;
+  // Set when inline_data finalized the upload in this call.
+  optional UploadComplete complete = 6;
 }
 
 message SaveUploadPartInput {

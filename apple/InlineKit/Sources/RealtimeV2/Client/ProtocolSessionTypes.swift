@@ -45,6 +45,11 @@ struct ProtocolSessionEventEnvelope: Sendable {
     )
   }
 
+  /// True for account events, whose collector acknowledges them after applying them.
+  var awaitsProcessing: Bool {
+    processingReceipt != nil
+  }
+
   func waitUntilProcessed() async {
     await processingReceipt?.wait()
   }
@@ -56,20 +61,24 @@ struct ProtocolSessionEventEnvelope: Sendable {
 
 private actor ProtocolSessionEventProcessingReceipt {
   private var finished = false
-  private var waiter: CheckedContinuation<Void, Never>?
+  // The receive owner and the connection manager's liveness tracking both wait.
+  private var waiters: [CheckedContinuation<Void, Never>] = []
 
   func wait() async {
     guard !finished else { return }
     await withCheckedContinuation { continuation in
-      waiter = continuation
+      waiters.append(continuation)
     }
   }
 
   func finish() {
     guard !finished else { return }
     finished = true
-    waiter?.resume()
-    waiter = nil
+    let resumed = waiters
+    waiters.removeAll()
+    for waiter in resumed {
+      waiter.resume()
+    }
   }
 }
 

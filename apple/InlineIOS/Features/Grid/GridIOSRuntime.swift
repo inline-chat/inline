@@ -21,7 +21,7 @@ enum GridIOSRuntime {
   }
 }
 
-/// The Mac's join, leave and connected cues. System sounds mix with other
+/// The Mac's join, leave, connected and microphone cues. System sounds mix with other
 /// audio, follow the silent switch and never touch the audio session that
 /// Grid owns. The files carry the Mac's playback volume.
 @MainActor
@@ -41,6 +41,8 @@ private enum GridIOSSoundEffects {
       case .join: "grid-maybe-join"
       case .leave: "grid-unlock"
       case .connected: "grid-connected2"
+      case .microphoneOn: "grid-mic-on"
+      case .microphoneOff: "grid-mic-off"
     }
     var soundID: SystemSoundID = 0
     guard let url = Bundle.main.url(forResource: name, withExtension: "caf"),

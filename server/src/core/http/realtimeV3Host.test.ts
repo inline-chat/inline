@@ -1452,6 +1452,60 @@ describe("Inline Protocol WebSocket carrier", () => {
     }
   })
 
+  test("a transfer-only socket verifies its own session and keeps it authorized after the main socket closes", async () => {
+    type Authorizer = (authorization: ServerApplicationAuthorization, options?: { transferOnly: boolean }) => boolean
+    const authorizers: Authorizer[] = []
+    const preparers: Array<((authorization: ServerApplicationAuthorization) => Promise<boolean>) | undefined> = []
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized, prepareTransferAuthority }) => {
+        authorizers.push(onAuthorized)
+        preparers.push(prepareTransferAuthority)
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    // Stands in for the session row lookup: an active session is admitted locally.
+    const verify = spyOn(sessionAuthority, "verifyAndAdmit").mockImplementation(async (identity) =>
+      sessionAuthority.admit(identity))
+    const openSocket = () => {
+      const data = upgrade(transport)
+      const socket = {
+        data,
+        close: (code: number, reason: string) => transport.websocket.close?.(socket, code, reason),
+        sendBinary: (bytes: Uint8Array) => bytes.length,
+      } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      transport.websocket.open?.(socket)
+      return { socket, data, authorize: authorizers.at(-1)!, prepare: preparers.at(-1)! }
+    }
+    const identity = { userId: 4_301, accountSessionId: 8_501 }
+    const authority = { userId: identity.userId, sessionId: identity.accountSessionId }
+    const mainAuthorization: ServerApplicationAuthorization = {
+      authKeyId: Uint8Array.of(3, 3, 3, 3, 3, 3, 3, 3), permanent: false, temporaryBound: true, ...identity,
+    }
+    const transferAuthorization = { ...mainAuthorization, authKeyId: Uint8Array.of(4, 4, 4, 4, 4, 4, 4, 4) }
+    try {
+      // No main socket on this process: the transfer socket verifies the session itself.
+      const transfer = openSocket()
+      expect(await transfer.prepare(transferAuthorization)).toBeTrue()
+      expect(transfer.authorize(transferAuthorization, { transferOnly: true })).toBeTrue()
+      expect(verify).toHaveBeenCalledWith(authority)
+
+      // A main socket comes and goes; the transfer socket keeps the authority alive.
+      const main = openSocket()
+      expect(main.authorize(mainAuthorization)).toBeTrue()
+      transport.websocket.close?.(main.socket, 1000, "bye")
+      expect(sessionAuthority.allows(authority)).toBeTrue()
+      expect(transfer.authorize(transferAuthorization, { transferOnly: true })).toBeTrue()
+
+      // With neither left, the authority is forgotten.
+      transport.websocket.close?.(transfer.socket, 1000, "bye")
+      expect(sessionAuthority.allows(authority)).toBeFalse()
+    } finally {
+      verify.mockRestore()
+      sessionAuthority.forget(authority)
+      await transport.shutdown()
+    }
+  })
+
   test("does not register a compatibility connection after the socket closes", async () => {
     let authorize: ((authorization: ServerApplicationAuthorization) => boolean) | undefined
     const transport = makeInlineProtocolRealtimeTransport(fixture(), {

@@ -1,9 +1,9 @@
 // Note:Mostly AI generated
 
-import { and, eq, inArray, isNull, ne, or } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm"
 import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
 import { userNotDeleted, users } from "@in/server/db/schema/users"
-import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
+import { encrypt, decrypt, keyedFingerprint } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 import { Log } from "@in/server/utils/log"
 import {
@@ -36,8 +36,6 @@ export interface CreateSessionData {
   userId: number
   tokenHash: string
   personalData: SessionPersonalData
-  applePushToken?: string
-  pushNotificationProvider?: SessionPushNotificationProvider
   clientType: SessionClientType
   clientVersion?: string | undefined
   osVersion?: string | undefined
@@ -114,7 +112,19 @@ export const clearedPushNotificationDetails = {
   pushContentKeyId: null,
   pushContentKeyAlgorithm: null,
   pushContentVersion: null,
+  pushTokenFingerprint: null,
 } satisfies Partial<DbNewSession>
+
+/** Keyed fingerprint of a push token. Tokens are stored encrypted with random IVs; this is the lookup key. */
+export const pushTokenFingerprint = (token: string): Buffer => keyedFingerprint("push-token.v1", token)
+
+const isUniqueViolation = (error: unknown): boolean => {
+  for (let cause: unknown = error, depth = 0; cause && depth < 4; depth++) {
+    if (typeof cause === "object" && (cause as { code?: unknown }).code === "23505") return true
+    cause = typeof cause === "object" ? (cause as { cause?: unknown }).cause : undefined
+  }
+  return false
+}
 
 export class SessionsModel {
   // Create a new session
@@ -292,67 +302,141 @@ export class SessionsModel {
       updateData.pushContentVersion = data.pushContentVersion
     }
 
-    const applePushToken = data.applePushToken
-    await db.transaction(async (tx) => {
-      const [owner] = await tx
-        .update(sessions)
-        .set(updateData)
-        .where(and(eq(sessions.id, id), isNull(sessions.revoked)))
-        .returning({ userId: sessions.userId, deviceId: sessions.deviceId, clientType: sessions.clientType })
-      if (!owner) return
-      await this.releasePushTokenFromOtherSessions(tx, { sessionId: id, applePushToken, ...owner })
-    })
+    const fingerprint = pushTokenFingerprint(data.applePushToken)
+    updateData.pushTokenFingerprint = fingerprint
+    // A concurrent registration of the same token by another session can win the unique index
+    // between our release and our update; the retry releases it from that session instead.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await db.transaction((tx) => this.claimPushToken(tx, id, fingerprint, updateData))
+        return
+      } catch (error) {
+        if (attempt === 0 && isUniqueViolation(error)) continue
+        throw error
+      }
+    }
   }
 
   /**
    * A push token addresses one app install, and that install has one signed-in account. Any other
-   * live session still holding this token (an earlier login of the same account, or an account that
-   * left this device without reaching the server) would push with a key or account the device no
-   * longer has, which the notification extension can only show as a generic placeholder.
-   *
-   * Tokens are stored encrypted with random IVs, so candidates are the owner's sessions and
-   * sessions sharing the owner's device ID, compared by decrypted token, not by a token lookup.
+   * live session still holding this token (an earlier login of the same account, or another account
+   * that left this device without reaching the server) would push with a key or account the device
+   * no longer has, and the notification extension can only redact those. The database enforces one
+   * live owner per token (`sessions_push_token_fingerprint_live`); registration takes it over.
    */
-  private static async releasePushTokenFromOtherSessions(
+  private static async claimPushToken(
     tx: Transaction,
-    owner: {
-      sessionId: number
-      applePushToken: string
-      userId: number
-      deviceId: string | null
-      clientType: DbSession["clientType"]
-    },
+    id: number,
+    fingerprint: Buffer,
+    updateData: Partial<DbNewSession>,
   ): Promise<void> {
-    const sameDevice =
-      owner.deviceId && owner.clientType
-        ? and(eq(sessions.deviceId, owner.deviceId), eq(sessions.clientType, owner.clientType))
-        : undefined
-    const candidates = await tx
-      .select()
+    const [owner] = await tx
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.id, id), isNull(sessions.revoked)))
+      .for("update")
+      .limit(1)
+    if (!owner) return
+
+    const released = await tx
+      .update(sessions)
+      .set(clearedPushNotificationDetails)
+      .where(and(eq(sessions.pushTokenFingerprint, fingerprint), ne(sessions.id, id), isNull(sessions.revoked)))
+      .returning({ id: sessions.id })
+    await tx.update(sessions).set(updateData).where(eq(sessions.id, id))
+    if (released.length > 0) {
+      log.info("Released push token from superseded sessions", {
+        ownerSessionId: id,
+        releasedSessionIds: released.map((row) => row.id),
+      })
+    }
+  }
+
+  /**
+   * Fingerprints live tokens registered before fingerprints existed and keeps one owner per token
+   * (an owner registered since, else the newest session). Idempotent; runs once per server start.
+   */
+  static async backfillPushTokenFingerprints(): Promise<{ filled: number; released: number }> {
+    const rows = await db
+      .select({
+        id: sessions.id,
+        applePushToken: sessions.applePushToken,
+        applePushTokenEncrypted: sessions.applePushTokenEncrypted,
+        applePushTokenIv: sessions.applePushTokenIv,
+        applePushTokenTag: sessions.applePushTokenTag,
+        pushTokenFingerprint: sessions.pushTokenFingerprint,
+      })
       .from(sessions)
       .where(
         and(
           isNull(sessions.revoked),
-          ne(sessions.id, owner.sessionId),
-          sameDevice ? or(eq(sessions.userId, owner.userId), sameDevice) : eq(sessions.userId, owner.userId),
+          or(isNotNull(sessions.applePushTokenEncrypted), isNotNull(sessions.applePushToken)),
         ),
       )
+    if (!rows.some((row) => row.pushTokenFingerprint === null)) return { filled: 0, released: 0 }
 
-    // No row locks: a lost race only leaves a stale token until the next registration, while
-    // locking a user's sessions from concurrent device registrations could deadlock.
-    const stale = candidates
-      // Only an identical token proves the same app install. A device ID is shared by every Inline
-      // bundle on the device (release, debug and devbuild share the vendor ID), so a different
-      // token under the same device ID may still be another app's live registration.
-      .filter((candidate) => this.decryptApplePushToken(candidate) === owner.applePushToken)
-      .map((candidate) => candidate.id)
-    if (stale.length === 0) return
+    const groups = new Map<string, { id: number; registered: boolean }[]>()
+    for (const row of rows) {
+      const token = row.pushTokenFingerprint ? undefined : this.decryptApplePushToken(row)
+      const fingerprint = row.pushTokenFingerprint ?? (token ? pushTokenFingerprint(token) : undefined)
+      if (!fingerprint) continue
+      const key = fingerprint.toString("hex")
+      const group = groups.get(key) ?? []
+      group.push({ id: row.id, registered: row.pushTokenFingerprint !== null })
+      groups.set(key, group)
+    }
 
-    await tx.update(sessions).set(clearedPushNotificationDetails).where(inArray(sessions.id, stale))
-    log.info("Released push token from superseded sessions", {
-      ownerSessionId: owner.sessionId,
-      releasedSessionIds: stale,
-    })
+    let filled = 0
+    let released = 0
+    for (const [key, group] of groups) {
+      const owner = group.find((row) => row.registered) ?? group.reduce((a, b) => (b.id > a.id ? b : a))
+      const losers = group.filter((row) => row !== owner).map((row) => row.id)
+      if (losers.length > 0) {
+        const cleared = await db
+          .update(sessions)
+          .set(clearedPushNotificationDetails)
+          .where(and(inArray(sessions.id, losers), isNull(sessions.pushTokenFingerprint)))
+          .returning({ id: sessions.id })
+        released += cleared.length
+      }
+      if (owner.registered) continue
+      try {
+        const updated = await db
+          .update(sessions)
+          .set({ pushTokenFingerprint: Buffer.from(key, "hex") })
+          .where(and(eq(sessions.id, owner.id), isNull(sessions.revoked), isNull(sessions.pushTokenFingerprint)))
+          .returning({ id: sessions.id })
+        filled += updated.length
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+        // A registration claimed this token while we ran; it is the owner now.
+        await db
+          .update(sessions)
+          .set(clearedPushNotificationDetails)
+          .where(and(eq(sessions.id, owner.id), isNull(sessions.pushTokenFingerprint)))
+        released += 1
+      }
+    }
+    log.info("Backfilled push token fingerprints", { filled, released })
+    return { filled, released }
+  }
+
+  /**
+   * Clears a session's push registration after the provider rejected `token`, but only while the
+   * session still holds that token: the device can re-register between the send and the failure.
+   */
+  static async releaseRejectedPushToken(id: number, token: string): Promise<boolean> {
+    const cleared = await db
+      .update(sessions)
+      .set(clearedPushNotificationDetails)
+      .where(
+        and(
+          eq(sessions.id, id),
+          or(eq(sessions.pushTokenFingerprint, pushTokenFingerprint(token)), isNull(sessions.pushTokenFingerprint)),
+        ),
+      )
+      .returning({ id: sessions.id })
+    return cleared.length > 0
   }
 
   static async clearApplePushToken(id: number): Promise<void> {
@@ -440,9 +524,6 @@ export class SessionsModel {
 
   private static makeSessionData(data: CreateSessionData, now: Date): DbNewSession {
     const encryptedPersonalData = encrypt(JSON.stringify(data.personalData))
-    const applePushTokenData: EncryptedData | null = data.applePushToken
-      ? encrypt(data.applePushToken)
-      : null
     return {
       userId: data.userId,
       tokenHash: data.tokenHash,
@@ -452,13 +533,7 @@ export class SessionsModel {
       personalDataEncrypted: encryptedPersonalData.encrypted,
       personalDataIv: encryptedPersonalData.iv,
       personalDataTag: encryptedPersonalData.authTag,
-      ...(applePushTokenData && {
-        applePushTokenEncrypted: applePushTokenData.encrypted,
-        applePushTokenIv: applePushTokenData.iv,
-        applePushTokenTag: applePushTokenData.authTag,
-        pushNotificationProvider:
-          data.pushNotificationProvider ?? this.defaultPushProviderForClientType(data.clientType),
-      }),
+      // Push tokens are only set through updatePushNotificationDetails, which owns token uniqueness.
       clientType: data.clientType,
       clientVersion: data.clientVersion ?? null,
       osVersion: data.osVersion ?? null,
@@ -486,7 +561,9 @@ export class SessionsModel {
   }
 
   // Helper method to decrypt Apple push token
-  private static decryptApplePushToken(session: DbSession): string | null {
+  private static decryptApplePushToken(
+    session: Pick<DbSession, "applePushToken" | "applePushTokenEncrypted" | "applePushTokenIv" | "applePushTokenTag">,
+  ): string | null {
     try {
       if (!session.applePushTokenEncrypted || !session.applePushTokenIv || !session.applePushTokenTag) {
         if (session.applePushToken) return session.applePushToken

@@ -226,23 +226,23 @@ export async function clearSpaceHistoryData(
 }
 
 async function clearChatLastMsgId(tx: Transaction, chatId: number): Promise<void> {
-  await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
+  await tx.update(chats).set({ lastMsgId: null, lastMessageDate: null }).where(eq(chats.id, chatId))
 }
 
 async function clearSpaceChatLastMsgIds(tx: Transaction, spaceId: number): Promise<void> {
-  await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.spaceId, spaceId))
+  await tx.update(chats).set({ lastMsgId: null, lastMessageDate: null }).where(eq(chats.spaceId, spaceId))
 }
 
 async function refreshChatLastMsgId(tx: Transaction, chatId: number): Promise<number | null> {
   const [latestMessage] = await tx
-    .select({ messageId: messages.messageId })
+    .select({ messageId: messages.messageId, date: messages.date })
     .from(messages)
     .where(and(eq(messages.chatId, chatId), messageActivityPredicate()))
     .orderBy(desc(messages.messageId))
     .limit(1)
 
   const lastMsgId = latestMessage?.messageId ?? null
-  await tx.update(chats).set({ lastMsgId }).where(eq(chats.id, chatId))
+  await tx.update(chats).set({ lastMsgId, lastMessageDate: latestMessage?.date ?? null }).where(eq(chats.id, chatId))
   return lastMsgId
 }
 
@@ -791,8 +791,9 @@ async function deleteMessagesForSpace(
 async function refreshSpaceChatLastMsgIds(tx: Transaction, spaceId: number): Promise<void> {
   await tx.execute(sql`
     update chats c
-    set last_msg_id = (
-      select m.message_id
+    -- No message leaves both columns null.
+    set (last_msg_id, last_message_date) = (
+      select m.message_id, m.date
       from messages m
       where m.chat_id = c.id
         and (m.counts_as_unread is true or m.system_message_encrypted is null)

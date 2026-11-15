@@ -55,7 +55,8 @@ public final class ParticipantSearchViewModel: ObservableObject {
 
           guard !Task.isCancelled, let self, self.searchToken == token else { return }
           self.log.debug("Fetched \(spaceMembers.count) space members")
-          self.results = spaceMembers.sorted(by: {
+          // A bot can be added only by someone who can reach it.
+          self.results = spaceMembers.filter { AgentGrantStore.shared.offers($0.user) }.sorted(by: {
             $0.user.displayName < $1.user.displayName
           })
         } else {

@@ -268,8 +268,9 @@ class TipCadenceTests(unittest.TestCase):
                         committed={NEWER_SHA: (NOW - timedelta(minutes=5)).isoformat()})
         main.codeql[NEWER_SHA] = [{**FakeGitHub().codeql[0], "status": "in_progress", "conclusion": None}]
         self.assertEqual(gate.newest_green_main(main, lambda sha: False, NOW), (SHA, NEWER_SHA))
-        self.assertEqual(gate.select_ios(main, "workflow_run", NOW)[:2], (SHA, gate.DEFERRED))
-        self.assertEqual(gate.select_tip(main, "workflow_run", NOW)[:2], (SHA, gate.DEFERRED))
+        self.assertEqual(gate.select_ios(main, "workflow_run", NOW)[:2], (SHA, gate.RELEASE))
+        # The existing tip is current even while a newer candidate awaits CodeQL.
+        self.assertEqual(gate.select_tip(main, "workflow_run", NOW)[:2], (SHA, gate.CURRENT))
         main.codeql[NEWER_SHA] = []
         self.assertEqual(gate.newest_green_main(main, lambda sha: False, NOW), (SHA, NEWER_SHA))
         main.committed[NEWER_SHA] = (NOW - timedelta(hours=2)).isoformat()
@@ -277,14 +278,19 @@ class TipCadenceTests(unittest.TestCase):
         main.codeql[NEWER_SHA] = [{**FakeGitHub().codeql[0], "conclusion": "failure"}]
         self.assertEqual(gate.newest_green_main(main, lambda sha: False, NOW), (SHA, None))
 
-    def test_ci_triggers_wait_for_newer_commits_but_the_sweep_does_not(self):
+    def test_ci_triggers_and_the_sweep_release_green_work_while_newer_ci_runs(self):
         main = FakeMain([(NEWER_SHA, "running"), (OTHER_SHA, "success"), (SHA, "success")])
         feed = {"published_at": NOW - timedelta(hours=2)}
         with patch.object(gate, "public_feed", return_value=feed):
             sha, outcome, reason, _ = gate.select_tip(main, "workflow_run", NOW)
-            self.assertEqual((sha, outcome), (OTHER_SHA, gate.DEFERRED))
-            self.assertIn("still in CI", reason)
+            self.assertEqual((sha, outcome), (OTHER_SHA, gate.RELEASE))
             self.assertEqual(gate.select_tip(main, "schedule", NOW)[:2], (OTHER_SHA, gate.RELEASE))
+
+    def test_no_green_candidate_is_deferred_until_ci_finishes(self):
+        main = FakeMain([(NEWER_SHA, "running"), (SHA, "failure")])
+        for event in ("workflow_run", "schedule", "workflow_dispatch"):
+            self.assertEqual(gate.select_tip(main, event, NOW)[:2], (NEWER_SHA, gate.DEFERRED))
+            self.assertEqual(gate.select_ios(main, event, NOW)[:2], (NEWER_SHA, gate.DEFERRED))
 
     def test_ci_triggers_skip_the_current_tip_without_network(self):
         main = FakeMain([(NEWER_SHA, "failure"), (SHA, "success")])
@@ -362,9 +368,13 @@ class IosSelectionTests(unittest.TestCase):
         main = FakeMain([(NEWER_SHA, "failure"), (SHA, "failure"), (OTHER_SHA, "success")], published=[SHA])
         self.assertEqual(gate.select_ios(main, "schedule", NOW)[:2], (None, gate.BLOCKED))
 
-    def test_ci_events_wait_for_newer_commits(self):
+    def test_ci_events_release_the_newest_green_commit_while_newer_ci_runs(self):
         main = FakeMain([(NEWER_SHA, "running"), (SHA, "success")])
-        self.assertEqual(gate.select_ios(main, "workflow_run", NOW)[:2], (SHA, gate.DEFERRED))
+        self.assertEqual(gate.select_ios(main, "workflow_run", NOW)[:2], (SHA, gate.RELEASE))
+
+    def test_published_commit_is_current_while_newer_ci_runs(self):
+        main = FakeMain([(NEWER_SHA, "running"), (SHA, "success")], published=[SHA])
+        self.assertEqual(gate.select_ios(main, "workflow_run", NOW)[:2], (SHA, gate.CURRENT))
 
 
 if __name__ == "__main__":

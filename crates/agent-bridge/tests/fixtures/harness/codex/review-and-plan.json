@@ -1,0 +1,166 @@
+{
+  "provider": "codex",
+  "harness": "codex app-server 0.164",
+  "recorded": false,
+  "source": "codex-rs app-server-protocol v2 ThreadItem::ExitedReviewMode { review } (review_output_text) and ThreadItem::Plan { text }; turn/plan/updated.",
+  "description": "Native surfaces with their own Inline blocks: a finished review is a review item, a proposed plan a plan item with its text, update_plan a plan item with steps.",
+  "steps": [
+    {
+      "name": "turn started",
+      "native": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "thr-1",
+          "turn": {
+            "id": "turn-r",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "turn",
+          "turn": "turn-r",
+          "phase": {
+            "phase": "started"
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_plan is a plan item with steps",
+      "native": {
+        "method": "turn/plan/updated",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-r",
+          "explanation": "Pin the plan.",
+          "plan": [
+            {
+              "step": "Inspect render.rs",
+              "status": "completed"
+            },
+            {
+              "step": "Add the pinned plan",
+              "status": "inProgress"
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "turn-plan:turn-r",
+          "turn": "turn-r",
+          "kind": "plan",
+          "update": {
+            "op": "updated",
+            "body": {
+              "kind": "plan",
+              "explanation": "Pin the plan.",
+              "steps": [
+                {
+                  "text": "Inspect render.rs",
+                  "status": "completed"
+                },
+                {
+                  "text": "Add the pinned plan",
+                  "status": "in_progress"
+                }
+              ]
+            }
+          },
+          "native": {
+            "threadId": "thr-1",
+            "turnId": "turn-r",
+            "explanation": "Pin the plan.",
+            "plan": [
+              {
+                "step": "Inspect render.rs",
+                "status": "completed"
+              },
+              {
+                "step": "Add the pinned plan",
+                "status": "inProgress"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a proposed plan is a plan item with its text",
+      "native": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-r",
+          "item": {
+            "type": "plan",
+            "id": "item-p1",
+            "text": "## Pin the plan\n\n- Keep the latest steps\n- Write them under the progress"
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "item-p1",
+          "turn": "turn-r",
+          "kind": "plan",
+          "update": {
+            "op": "completed",
+            "body": {
+              "kind": "plan",
+              "steps": [],
+              "text": "## Pin the plan\n\n- Keep the latest steps\n- Write them under the progress"
+            },
+            "status": "completed"
+          },
+          "native": {
+            "type": "plan",
+            "id": "item-p1",
+            "text": "## Pin the plan\n\n- Keep the latest steps\n- Write them under the progress"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the finished review is a review item",
+      "native": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-r",
+          "item": {
+            "type": "exitedReviewMode",
+            "id": "item-r2",
+            "review": "The guard is right, but blank input still throws.\n\nReview comment:\n\n- [P1] Guard the empty slice before indexing — /work/inline/src/parser.ts:42-48\n  `tokens[0]` is read before the length check."
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "item-r2",
+          "turn": "turn-r",
+          "kind": "review",
+          "update": {
+            "op": "completed",
+            "body": {
+              "kind": "review",
+              "text": "The guard is right, but blank input still throws.\n\nReview comment:\n\n- [P1] Guard the empty slice before indexing — /work/inline/src/parser.ts:42-48\n  `tokens[0]` is read before the length check."
+            },
+            "status": "completed"
+          },
+          "native": {
+            "type": "exitedReviewMode",
+            "id": "item-r2",
+            "review": "The guard is right, but blank input still throws.\n\nReview comment:\n\n- [P1] Guard the empty slice before indexing — /work/inline/src/parser.ts:42-48\n  `tokens[0]` is read before the length check."
+          }
+        }
+      ]
+    }
+  ]
+}

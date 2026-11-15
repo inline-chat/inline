@@ -155,7 +155,7 @@ final class AppSettings: ObservableObject {
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
   static let messageWidgetsEnabledKey = "experimental.messageWidgetsEnabled"
-  static let richTextMultiSurfaceSelectionEnabledKey = "experimental.richTextMultiSurfaceSelectionEnabled"
+  static let stableChatRouteEnabledKey = "experimental.stableChatRouteEnabled"
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -445,20 +445,19 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  /// Keeps one chat route (toolbar and AppKit chat host) alive across chat switches instead of
+  /// rebuilding it per chat. Off until it has been checked against the per-chat route.
+  @Published var stableChatRouteEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(stableChatRouteEnabled, forKey: Self.stableChatRouteEnabledKey)
+    }
+  }
+
   @Published var richTextInlineMathEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
         richTextInlineMathEnabled,
         forKey: Self.richTextInlineMathEnabledKey
-      )
-    }
-  }
-
-  @Published var richTextMultiSurfaceSelectionEnabled: Bool {
-    didSet {
-      UserDefaults.standard.set(
-        richTextMultiSurfaceSelectionEnabled,
-        forKey: Self.richTextMultiSurfaceSelectionEnabledKey
       )
     }
   }
@@ -547,11 +546,9 @@ final class AppSettings: ObservableObject {
       forKey: Self.richContentRendererEnabledKey
     ) as? Bool ?? true
     messageWidgetsEnabled = UserDefaults.standard.object(forKey: Self.messageWidgetsEnabledKey) as? Bool ?? false
+    stableChatRouteEnabled = UserDefaults.standard.object(forKey: Self.stableChatRouteEnabledKey) as? Bool ?? false
     richTextInlineMathEnabled = UserDefaults.standard.object(
       forKey: Self.richTextInlineMathEnabledKey
-    ) as? Bool ?? false
-    richTextMultiSurfaceSelectionEnabled = UserDefaults.standard.object(
-      forKey: Self.richTextMultiSurfaceSelectionEnabledKey
     ) as? Bool ?? false
     let storedMode = (persistentDefaults?[Self.sidebarModeKey] as? String)
       .flatMap(SidebarMode.init(rawValue:))

@@ -413,8 +413,13 @@ struct PeerBotCommandsViewModelTests {
 
     _ = try await directory.agents(for: firstPeer)
     now.addTimeInterval(61)
+    // Stale agents stay available for a first frame while they revalidate.
+    #expect(directory.needsRefresh(for: firstPeer))
+    #expect(directory.cachedAgents(for: firstPeer)?.first?.id == 7)
+    #expect(directory.cached(agentId: 7, botUserId: 200, for: firstPeer) == nil)
     _ = try await directory.agents(for: firstPeer)
     #expect(await counter.value == 2)
+    #expect(!directory.needsRefresh(for: firstPeer))
 
     _ = try await directory.agents(for: secondPeer)
     #expect(directory.cached(agentId: 7, botUserId: 200, for: firstPeer) == nil)
@@ -440,8 +445,9 @@ struct PeerBotCommandsViewModelTests {
     directory.clear()
     await release.open()
 
-    #expect(try await fetch.value.isEmpty)
+    await #expect(throws: CancellationError.self) { try await fetch.value }
     #expect(directory.cached(agentId: 7, botUserId: 200, for: peer) == nil)
+    #expect(directory.cachedAgents(for: peer) == nil)
   }
 
   @Test("Agent directory invalidation replaces an in-flight result")
@@ -471,7 +477,8 @@ struct PeerBotCommandsViewModelTests {
     #expect(replacement.first?.id == 8)
 
     await release.open()
-    #expect(try await staleFetch.value.isEmpty)
+    // An overtaken fetch never reports an empty list a composer would apply.
+    await #expect(throws: CancellationError.self) { try await staleFetch.value }
     #expect(directory.cached(agentId: 8, botUserId: 200, for: peer) != nil)
   }
 

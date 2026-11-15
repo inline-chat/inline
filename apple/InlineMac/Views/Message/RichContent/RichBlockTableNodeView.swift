@@ -55,14 +55,6 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
     let indices = Set(cells.indices)
     for index in Array(cellViews.keys) where !indices.contains(index) {
       if let removed = cellViews.removeValue(forKey: index) {
-        removed.configureMultiSurfaceSelection(
-          mouseDown: nil,
-          mouseDragged: nil,
-          mouseUp: nil,
-          trackingEnded: nil,
-          shouldSuppressPlainClick: nil
-        )
-        removed.clearCoordinatedSelection()
         removed.removeFromSuperview()
       }
     }

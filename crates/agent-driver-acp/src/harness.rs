@@ -1078,6 +1078,7 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
                                         .map(|option| FieldOption {
                                             label: option.label.clone(),
                                             description: option.description.clone(),
+                                            preview: None,
                                         })
                                         .collect(),
                                     multiple: item.allows_multiple,

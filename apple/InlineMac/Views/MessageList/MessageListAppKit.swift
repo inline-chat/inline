@@ -2,6 +2,7 @@ import AppKit
 import Auth
 import Combine
 import InlineKit
+import TextProcessing
 import InlineMacUI
 import InlineUI
 import Logger
@@ -184,6 +185,7 @@ class MessageListAppKit: NSViewController {
     self.additionalTopContentInset = additionalTopContentInset
     chatRows = ChatRowListViewModel(
       peer: peerId,
+      chatId: chat.id,
       initialState: initialState,
       collapsedMaxId: collapsedMaxId
     )
@@ -477,6 +479,7 @@ class MessageListAppKit: NSViewController {
   @discardableResult
   func beginMessageSelection(atRow row: Int) -> Bool {
     guard let stableId = selectableStableId(forRow: row) else { return false }
+    textSelection.clear()
     let changed = messageSelection.begin(with: stableId)
     emitMessageSelectionChange(changedStableIds: changed)
     return true
@@ -847,8 +850,11 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  private lazy var textSelection = MessageListTextSelection(host: self)
+
   private lazy var tableView: NSTableView = {
-    let table = NSTableView()
+    let table = MessageListTableView()
+    table.textSelection = textSelection
     table.style = .plain
     table.backgroundColor = .clear
     table.headerView = nil
@@ -977,6 +983,7 @@ class MessageListAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupScrollObserver()
+    textSelection.install()
     setupMessageHoverTracking()
     observeReplyThreadPane()
     hideScrollbars() // until initial scroll is done
@@ -2048,6 +2055,7 @@ class MessageListAppKit: NSViewController {
   }
 
   @objc private func richBlockLayoutStateDidChange(_ notification: Notification) {
+    textSelection.setNeedsRefresh()
     guard !isDisposed,
           AppSettings.shared.richContentRendererEnabled,
           let stableID = notification.userInfo?["messageStableID"] as? Int64,
@@ -3084,6 +3092,7 @@ class MessageListAppKit: NSViewController {
     removeLiveResizeObserver()
     clearHoveredMessage()
     activityNavigator?.clearVisible()
+    textSelection.clear()
   }
 
   override func viewWillLayout() {
@@ -3494,6 +3503,49 @@ class MessageListAppKit: NSViewController {
       }
     }
 
+    /// Reconfigures rows whose content changed. Their cells take the in-place update path
+    /// (`MessageTableCell.configure`) instead of a full table reload.
+    func reloadRowsInPlace(_ rowsToReload: IndexSet, animated: Bool) {
+      if rowsToReload.isEmpty {
+        endTableUpdate()
+        return
+      }
+
+      let movesAnchor = updateAnchor?.hasChangesAbove(rowsToReload) == true
+      if animated, !movesAnchor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
+          context.duration = animationDuration
+          tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
+          tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+          updateHeightsForRows(at: rowsToReload)
+          tableView.layoutSubtreeIfNeeded()
+          if let updateAnchor {
+            viewport.restore(updateAnchor)
+          }
+          syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
+          if shouldScroll {
+            scrollToBottom(animated: true)
+          }
+        } completionHandler: { [weak self] in
+          self?.endTableUpdate()
+        }
+      } else {
+        tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
+        tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
+        updateHeightsForRows(at: rowsToReload)
+        tableView.layoutSubtreeIfNeeded()
+        if let updateAnchor {
+          viewport.restore(updateAnchor)
+        }
+        syncUpdateAvatarOverlayAfterTableLayout(on: self)
+        if shouldScroll {
+          scrollToBottom(animated: false)
+        }
+        endTableUpdate()
+      }
+    }
+
     switch update {
       case let .added(newMessages, _):
         log.trace("applying add changes")
@@ -3540,44 +3592,7 @@ class MessageListAppKit: NSViewController {
 
         switch rowUpdate {
           case let .reloadRows(rowsToReload):
-            if rowsToReload.isEmpty {
-              endTableUpdate()
-              break
-            }
-
-            let movesAnchor = updateAnchor?.hasChangesAbove(rowsToReload) == true
-            if animated == true, !movesAnchor, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-              NSAnimationContext.runAnimationGroup { [weak self] context in
-                guard let self else { return }
-                context.duration = animationDuration
-                tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
-                tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
-                updateHeightsForRows(at: rowsToReload)
-                tableView.layoutSubtreeIfNeeded()
-                if let updateAnchor {
-                  viewport.restore(updateAnchor)
-                }
-                syncUpdateAvatarOverlayAfterTableLayout(on: self, animate: true)
-                if shouldScroll {
-                  scrollToBottom(animated: true)
-                }
-              } completionHandler: { [weak self] in
-                self?.endTableUpdate()
-              }
-            } else {
-              tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
-              tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
-              updateHeightsForRows(at: rowsToReload)
-              tableView.layoutSubtreeIfNeeded()
-              if let updateAnchor {
-                viewport.restore(updateAnchor)
-              }
-              syncUpdateAvatarOverlayAfterTableLayout(on: self)
-              if shouldScroll {
-                scrollToBottom(animated: false)
-              }
-              endTableUpdate()
-            }
+            reloadRowsInPlace(rowsToReload, animated: animated == true)
 
           case .none:
             endTableUpdate()
@@ -3587,8 +3602,22 @@ class MessageListAppKit: NSViewController {
         }
 
       case .reload:
-        log.trace("reloading data")
-        reloadAll(animated: false, preserving: updateAnchor)
+        // Most reloads (the history refetch after open, sync catch-up) return the rows already
+        // shown. Only what changed is touched, so unchanged cells keep their views.
+        switch rowUpdate {
+          case .none:
+            log.trace("reload left the rows unchanged")
+            endTableUpdate()
+          case let .reloadRows(rowsToReload):
+            reloadRowsInPlace(rowsToReload, animated: false)
+          case let .insert(inserted):
+            applyStructuralInsert(animated: false, inserted: inserted)
+          case let .remove(removed):
+            applyStructuralRemove(animated: false, removed: removed)
+          case .reloadAll:
+            log.trace("reloading data")
+            reloadAll(animated: false, preserving: updateAnchor)
+        }
     }
   }
 
@@ -4437,39 +4466,11 @@ extension MessageListAppKit: NSTableViewDelegate {
     return false
   }
 
+  /// Word majority, the rule rich blocks use (`BlockContentDirection`), so a Persian reply
+  /// that opens with a Latin name or an agent's "Working" summary still reads right to left.
   private func isRTLMessage(_ message: FullMessage?) -> Bool {
     guard let text = message?.displayText else { return false }
-    for scalar in text.unicodeScalars {
-      if CharacterSet.whitespacesAndNewlines.contains(scalar)
-        || CharacterSet.punctuationCharacters.contains(scalar)
-        || CharacterSet.symbols.contains(scalar)
-        || CharacterSet.decimalDigits.contains(scalar)
-      {
-        continue
-      }
-
-      if isRTLScalar(scalar) {
-        return true
-      }
-
-      if scalar.properties.isAlphabetic {
-        return false
-      }
-    }
-
-    return false
-  }
-
-  private func isRTLScalar(_ scalar: Unicode.Scalar) -> Bool {
-    switch scalar.value {
-      case 0x0590 ... 0x08FF,
-           0xFB1D ... 0xFDFF,
-           0xFE70 ... 0xFEFF,
-           0x1_0800 ... 0x1_0FFF:
-        true
-      default:
-        false
-    }
+    return BlockContentDirection.isRTL(text) ?? false
   }
 
   private func makeMessageCell(
@@ -4541,6 +4542,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     cell.configure(with: message, props: props, animate: animateUpdates && NSAnimationContext.current.duration > 0)
     configureForwardSelection(cell, row: row)
     configureReplyThreadSourceHighlight(cell, row: row)
+    textSelection.cellDidConfigure(cell, row: row)
     let shouldHover = shouldHoverMessageCell(cell, stableId: stableId)
     cell.setMessageHoverState(shouldHover)
     if shouldHover {
@@ -5099,6 +5101,7 @@ extension MessageListAppKit {
     // before anything is torn down, while the rows and scroll geometry are still the user's.
     captureReadingPlace()
     isDisposed = true
+    textSelection.uninstall()
     cancellables.removeAll()
     clearReplyThreadSourceAnchor()
 
@@ -5187,5 +5190,28 @@ private extension MessagesProgressiveViewModel.MessagesChangeSet {
       case .reload:
         "reload"
     }
+  }
+}
+
+// MARK: - Text selection across blocks and messages
+
+extension MessageListAppKit: MessageListTextSelectionHost {
+  var textSelectionTableView: NSTableView { tableView }
+  var textSelectionRootView: NSView { view }
+
+  func textSelectionStableId(atRow row: Int) -> Int64? {
+    messageStableId(forRow: row)
+  }
+
+  func textSelectionRow(forStableId stableId: Int64) -> Int? {
+    chatRows.rowIndex(forMessageStableId: stableId)
+  }
+
+  func textSelectionMessage(atRow row: Int) -> FullMessage? {
+    message(forRow: row)
+  }
+
+  func clipboardBlocks(for message: FullMessage) -> [MessageClipboardDocument.Block] {
+    textSelection.wholeMessageBlocks(message)
   }
 }

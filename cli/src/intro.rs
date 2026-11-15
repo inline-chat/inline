@@ -289,7 +289,7 @@ impl Example {
     }
 }
 
-fn quote_argument(argument: &str) -> String {
+pub(crate) fn quote_argument(argument: &str) -> String {
     if !argument.is_empty()
         && argument
             .chars()

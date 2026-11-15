@@ -33,6 +33,9 @@ RUN cd server && bun run build
 # Shared runtime: one Bun process; migrations are explicit commands.
 FROM base AS runtime
 ARG SOURCE_COMMIT
+# libcrypto for native AES-IGE decryption of V3 records (src/modules/inlineProtocol/nativeAes.ts).
+# The server falls back to JS without it, at ~10x the event-loop cost per file part.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 LABEL org.opencontainers.image.source="https://github.com/inline-chat/inline" \
       org.opencontainers.image.revision=${SOURCE_COMMIT}
 ENV NODE_ENV=production PORT=8000

@@ -1,0 +1,18 @@
+[
+  {
+    "label": "progress 1",
+    "text": "Worked for 2s",
+    "markdown": false,
+    "blocks": [
+      {
+        "footer": "Worked for 2s"
+      }
+    ]
+  },
+  {
+    "label": "final",
+    "text": "## Review\n\nMostly fine.\n\nFull review comments:\n\n* see parser.ts",
+    "markdown": true,
+    "blocks": []
+  }
+]

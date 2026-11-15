@@ -1,0 +1,16 @@
+# Self-hosted ChatGPT Dots bridge.
+#   docker compose build
+#   docker compose run --rm dots setup   # once, interactive
+#   docker compose up -d                 # relay in the background
+services:
+  dots:
+    build:
+      context: ../../..
+      dockerfile: cli/packaging/dots/Dockerfile
+    image: inline-dots:local
+    restart: unless-stopped
+    volumes:
+      - dots-data:/data
+    # The bridge only makes outbound connections; it opens no ports.
+volumes:
+  dots-data:

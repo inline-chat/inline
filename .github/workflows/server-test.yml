@@ -407,7 +407,20 @@ jobs:
             [[ "$image" =~ ^ghcr\.io/inline-chat/inline-server@sha256:[a-f0-9]{64}$ ]] || exit 1
             # First publication may be private. Stop here until package visibility
             # is public; neither origin should need a long-lived pull credential.
-            DOCKER_CONFIG="$anonymous" docker manifest inspect "$image" > /dev/null
+            manifest=$(DOCKER_CONFIG="$anonymous" docker manifest inspect "$image")
+            # A containerd-store push wraps the image in an index with an
+            # attestation entry. Fly records the platform manifest it pulls, so
+            # emit that digest; release checks compare it with the Machines.
+            platform_digest=$(jq -er --arg arch "$architecture" '
+              if has("manifests") then
+                [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest]
+                | if length == 1 then .[0] else error("Expected one linux/\($arch) manifest") end
+              else "" end' <<< "$manifest") || exit 1
+            if [[ -n "$platform_digest" ]]; then
+              image="$repository@$platform_digest"
+              [[ "$image" =~ ^ghcr\.io/inline-chat/inline-server@sha256:[a-f0-9]{64}$ ]] || exit 1
+              DOCKER_CONFIG="$anonymous" docker manifest inspect "$image" | jq -e 'has("manifests") | not' > /dev/null
+            fi
             outputs+=("$output=$image")
           done <<'IMAGES'
           runtime-amd64 amd64 inline-server:ci runtime_image

@@ -475,6 +475,11 @@ public extension User {
       try UserFocus.save(db, userID: protocolUser.id, status: protocolUser.status.focus)
     }
 
+    // Ownership is present on every bot the server encodes with an owner.
+    if let ownerUserId = BotOwner.ownerUserId(from: protocolUser) {
+      try BotOwner.set(db, botUserId: protocolUser.id, ownerUserId: ownerUserId)
+    }
+
     return user
   }
 }

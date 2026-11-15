@@ -1,0 +1,50 @@
+{
+  "source": "Codex review text in a shape the parser does not read (a hand-written review): it stays Markdown.",
+  "native": {
+    "method": "item/completed",
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-r",
+      "item": {
+        "type": "exitedReviewMode",
+        "id": "item-r2",
+        "review": "## Review\n\nMostly fine.\n\nFull review comments:\n\n* see parser.ts"
+      }
+    }
+  },
+  "input": {
+    "vocabulary": "codex",
+    "agent": "Codex",
+    "events": [
+      {
+        "type": "turn",
+        "turn": "turn-r",
+        "phase": {
+          "phase": "started"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-r2",
+        "turn": "turn-r",
+        "kind": "review",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "review",
+            "text": "## Review\n\nMostly fine.\n\nFull review comments:\n\n* see parser.ts"
+          },
+          "status": "completed"
+        }
+      },
+      {
+        "type": "turn",
+        "turn": "turn-r",
+        "phase": {
+          "phase": "completed",
+          "outcome": "completed"
+        }
+      }
+    ]
+  }
+}

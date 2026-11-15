@@ -1,0 +1,81 @@
+{
+  "source": "Codex app-server v2 Plan mode turn: item/plan/delta streaming, the completed plan item, a short answer; the card follows the answer.",
+  "native": {
+    "method": "item/completed",
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-2",
+      "item": {
+        "type": "plan",
+        "id": "item-p1",
+        "text": "## Pin the plan\n\n- Keep the latest `update_plan` steps on the renderer\n- Write them under the progress disclosure\n- [ ] Golden test for Claude and Codex"
+      }
+    }
+  },
+  "input": {
+    "vocabulary": "codex",
+    "agent": "Codex",
+    "events": [
+      {
+        "type": "turn",
+        "turn": "turn-2",
+        "phase": {
+          "phase": "started"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-p1",
+        "turn": "turn-2",
+        "kind": "plan",
+        "update": {
+          "op": "started",
+          "body": {
+            "kind": "plan",
+            "steps": []
+          }
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-p1",
+        "turn": "turn-2",
+        "kind": "plan",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "plan",
+            "text": "## Pin the plan\n\n- Keep the latest `update_plan` steps on the renderer\n- Write them under the progress disclosure\n- [ ] Golden test for Claude and Codex",
+            "steps": []
+          },
+          "status": "completed"
+        }
+      },
+      {
+        "type": "item",
+        "id": "item-m2",
+        "turn": "turn-2",
+        "kind": "message",
+        "update": {
+          "op": "completed",
+          "body": {
+            "kind": "message",
+            "role": "assistant",
+            "text": "Here is the plan. Approve it to start."
+          },
+          "status": "completed"
+        },
+        "phase": "final_answer"
+      },
+      {
+        "type": "turn",
+        "turn": "turn-2",
+        "phase": {
+          "phase": "completed",
+          "outcome": "completed",
+          "duration_ms": 30000
+        }
+      }
+    ]
+  }
+}

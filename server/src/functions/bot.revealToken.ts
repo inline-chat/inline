@@ -1,3 +1,4 @@
+import { canManageBot } from "@in/server/modules/agents/access"
 import { db } from "@in/server/db"
 import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
@@ -24,7 +25,8 @@ export const revealBotToken = async (
     .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
-  if (!bot || bot.botCreatorId !== context.currentUserId) {
+  // The owner or an admin. Deleting the bot stays with the owner.
+  if (!bot || !(await canManageBot(bot, context.currentUserId))) {
     throw RealtimeRpcError.UserIdInvalid()
   }
 

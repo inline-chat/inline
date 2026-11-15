@@ -95,6 +95,8 @@ struct GeneralSettingsView: View {
         Text("Sync double-tap, hold, and swipe direction across your devices. Turn off to customize this device. Turning it back on uses your synced choices.")
       }
 
+      GridSettingsSection()
+
       Section("Language & Translation") {
         Button {
           TranslationAlertDismiss.shared.resetAllDismissStates()

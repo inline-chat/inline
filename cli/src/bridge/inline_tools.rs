@@ -930,6 +930,7 @@ impl InlineToolHost {
         match self
             .bot
             .edit_message(EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(chat_id),
                 message_id: InlineId::new(message_id),
                 text,
@@ -1155,6 +1156,7 @@ pub(in crate::bridge) async fn return_local_file(
     let idempotency_key =
         return_attachment_idempotency_key(request.idempotency_seed, media_kind.as_str(), &bytes);
     let upload = UploadRequest {
+        entities: Vec::new(),
         peer: PeerRef::Chat {
             chat_id: InlineId::new(request.chat_id),
         },
@@ -1814,7 +1816,15 @@ pub(in crate::bridge) fn validate_tool_arguments(
 fn multiline_field(key: &str) -> bool {
     matches!(
         key,
-        "text" | "initial_message" | "task" | "caption" | "description" | "summary"
+        "text"
+            | "initial_message"
+            | "task"
+            | "caption"
+            | "description"
+            | "summary"
+            | "body"
+            | "brief"
+            | "recap"
     )
 }
 
@@ -1865,6 +1875,24 @@ fn validate_schema_value(
         }
         Some("boolean") => {}
         Some("object") => validate_tool_arguments(value, schema)?,
+        Some("array") => {
+            let items = value.as_array().ok_or(())?;
+            if schema
+                .get("minItems")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|minimum| (items.len() as u64) < minimum)
+                || schema
+                    .get("maxItems")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|maximum| items.len() as u64 > maximum)
+            {
+                return Err(());
+            }
+            let item_schema = schema.get("items").ok_or(())?;
+            for item in items {
+                validate_schema_value(item, item_schema, multiline)?;
+            }
+        }
         _ => return Err(()),
     }
     if schema

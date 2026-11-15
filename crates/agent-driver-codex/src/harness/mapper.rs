@@ -717,6 +717,7 @@ impl CodexMapper {
                                 .map(|label| FieldOption {
                                     label,
                                     description: None,
+                                    preview: None,
                                 })
                                 .collect()
                         })
@@ -1161,6 +1162,7 @@ fn user_input_form(params: &Value) -> Option<QuestionForm> {
                             Some(FieldOption {
                                 label: string(option.get("label"))?,
                                 description: string(option.get("description")),
+                                preview: None,
                             })
                         })
                         .collect()
@@ -1263,6 +1265,7 @@ fn enum_options(property: &Value) -> Vec<FieldOption> {
                             description: titles
                                 .and_then(|titles| titles.get(index))
                                 .and_then(|title| string(Some(title))),
+                            preview: None,
                         })
                     })
                     .collect()
@@ -1280,6 +1283,7 @@ fn enum_options(property: &Value) -> Vec<FieldOption> {
                 Some(FieldOption {
                     label: string(option.get("const"))?,
                     description: string(option.get("title")),
+                    preview: None,
                 })
             })
             .collect();
@@ -1427,7 +1431,10 @@ pub(crate) fn item_body(item: &Value) -> (ItemBody, ItemStatus, Option<AgentMess
             output: string(item.get("revisedPrompt")),
             error: None,
         },
-        "enteredReviewMode" | "exitedReviewMode" => ItemBody::Message {
+        "exitedReviewMode" => ItemBody::Review {
+            text: string(item.get("review")).unwrap_or_default(),
+        },
+        "enteredReviewMode" => ItemBody::Message {
             role: MessageRole::System,
             text: string(item.get("review")).unwrap_or_default(),
             input: None,

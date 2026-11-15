@@ -1,7 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { db, schema } from "@in/server/db"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { encrypt } from "@in/server/modules/encryption/encryption"
+import { alertAllowedByNotificationSettings } from "@in/server/modules/notifications/sendToUser"
+import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { connectionManager } from "@in/server/ws/connections"
 
@@ -144,7 +147,8 @@ describe("SessionsModel push sessions", () => {
     const reinstall = await testUtils.createSessionForUser(user.id, { clientType: "ios", deviceId: "device-a" })
     const otherAccount = await testUtils.createSessionForUser(other.id, { clientType: "ios", deviceId: "device-a" })
     const otherMac = await testUtils.createSessionForUser(macUser.id, { clientType: "macos", deviceId: "device-a" })
-    const unrelated = await testUtils.createSessionForUser(bystander.id, { clientType: "ios" })
+    // Another account that once signed in on this install, before device IDs or under an earlier one.
+    const leftBeforeDeviceIDs = await testUtils.createSessionForUser(bystander.id, { clientType: "ios" })
 
     // Same token on an earlier login and on another account that left this device.
     await SessionsModel.updatePushNotificationDetails(earlier.session.id, { applePushToken: "token-a" })
@@ -157,7 +161,13 @@ describe("SessionsModel push sessions", () => {
       applePushToken: "mac-token",
       pushNotificationProvider: "apns",
     })
-    await SessionsModel.updatePushNotificationDetails(unrelated.session.id, { applePushToken: "token-a" })
+    await SessionsModel.updatePushNotificationDetails(leftBeforeDeviceIDs.session.id, { applePushToken: "token-a" })
+    const elsewhere = await testUtils.createUser("push-token-elsewhere@test.com")
+    const elsewhereSession = await testUtils.createSessionForUser(elsewhere.id, {
+      clientType: "ios",
+      deviceId: "device-b",
+    })
+    await SessionsModel.updatePushNotificationDetails(elsewhereSession.session.id, { applePushToken: "token-b" })
 
     await SessionsModel.updatePushNotificationDetails(reinstall.session.id, { applePushToken: "token-a" })
 
@@ -168,8 +178,10 @@ describe("SessionsModel push sessions", () => {
     expect(await tokens(other.id)).toEqual([])
     expect(await tokens(macUser.id)).toEqual([[otherMac.session.id, "mac-token"]])
     expect(await tokens(debugUser.id)).toEqual([[otherBundle.session.id, "debug-token"]])
-    // Tokens are matched only among the owner's sessions and its device, never globally.
-    expect(await tokens(bystander.id)).toEqual([[unrelated.session.id, "token-a"]])
+    // The token is matched globally: an account that left this install under no or another device
+    // ID would otherwise keep pushing its messages here, redacted to "Open Inline to read it."
+    expect(await tokens(bystander.id)).toEqual([])
+    expect(await tokens(elsewhere.id)).toEqual([[elsewhereSession.session.id, "token-b"]])
   })
 
   test("revoke clears push notification details", async () => {
@@ -221,5 +233,100 @@ describe("SessionsModel push sessions", () => {
     expect(row?.pushContentVersion).toBeNull()
 
     await expect(SessionsModel.getValidIOSPushSessionsByUserId(user.id)).resolves.toEqual([])
+  })
+
+  test("concurrent registrations of one token leave exactly one owner", async () => {
+    const first = await testUtils.createUser("push-race-a@test.com")
+    const second = await testUtils.createUser("push-race-b@test.com")
+    const a = await testUtils.createSessionForUser(first.id, { clientType: "ios" })
+    const b = await testUtils.createSessionForUser(second.id, { clientType: "ios" })
+
+    await Promise.all([
+      SessionsModel.updatePushNotificationDetails(a.session.id, { applePushToken: "raced-token" }),
+      SessionsModel.updatePushNotificationDetails(b.session.id, { applePushToken: "raced-token" }),
+    ])
+
+    const owners = [
+      ...(await SessionsModel.getValidPushSessionsByUserId(first.id)),
+      ...(await SessionsModel.getValidPushSessionsByUserId(second.id)),
+    ]
+    expect(owners.map((session) => session.applePushToken)).toEqual(["raced-token"])
+  })
+
+  test("a rejected token is released only while the session still holds it", async () => {
+    const user = await testUtils.createUser("push-reject@test.com")
+    const session = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+    await SessionsModel.updatePushNotificationDetails(session.session.id, { applePushToken: "old-token" })
+    // The device re-registers between a send and that send's failure.
+    await SessionsModel.updatePushNotificationDetails(session.session.id, { applePushToken: "new-token" })
+
+    expect(await SessionsModel.releaseRejectedPushToken(session.session.id, "old-token")).toBe(false)
+    expect((await SessionsModel.getValidPushSessionsByUserId(user.id))[0]?.applePushToken).toBe("new-token")
+
+    expect(await SessionsModel.releaseRejectedPushToken(session.session.id, "new-token")).toBe(true)
+    expect(await SessionsModel.getValidPushSessionsByUserId(user.id)).toEqual([])
+  })
+
+  test("backfill fingerprints tokens registered before fingerprints and keeps one owner per token", async () => {
+    const users = await Promise.all(
+      ["shared-old", "shared-new", "registered", "legacy-claimer", "unique"].map((name) =>
+        testUtils.createUser(`push-backfill-${name}@test.com`)),
+    )
+    // Sequential: "newest" is the higher session id.
+    const created = []
+    for (const user of users) created.push(await testUtils.createSessionForUser(user.id, { clientType: "ios" }))
+    const [sharedOld, sharedNew, registered, legacyClaimer, unique] = created
+    // Rows written by the previous server: encrypted token, no fingerprint.
+    const legacyToken = async (sessionId: number, token: string) => {
+      const encrypted = encrypt(token)
+      await db
+        .update(schema.sessions)
+        .set({
+          applePushTokenEncrypted: encrypted.encrypted,
+          applePushTokenIv: encrypted.iv,
+          applePushTokenTag: encrypted.authTag,
+          pushNotificationProvider: "apns",
+          pushTokenFingerprint: null,
+        })
+        .where(eq(schema.sessions.id, sessionId))
+    }
+    await legacyToken(sharedOld!.session.id, "shared-token")
+    await legacyToken(sharedNew!.session.id, "shared-token")
+    await legacyToken(legacyClaimer!.session.id, "claimed-token")
+    await legacyToken(unique!.session.id, "unique-token")
+    // A registration through the new server after deploy owns its token over any legacy row.
+    await SessionsModel.updatePushNotificationDetails(registered!.session.id, { applePushToken: "claimed-token" })
+
+    expect(await SessionsModel.backfillPushTokenFingerprints()).toEqual({ filled: 2, released: 2 })
+    expect(await SessionsModel.backfillPushTokenFingerprints()).toEqual({ filled: 0, released: 0 })
+
+    const token = async (index: number) =>
+      (await SessionsModel.getValidPushSessionsByUserId(users[index]!.id))[0]?.applePushToken ?? null
+    // Among legacy rows the newest session keeps the token.
+    expect(await token(0)).toBeNull()
+    expect(await token(1)).toBe("shared-token")
+    expect(await token(2)).toBe("claimed-token")
+    expect(await token(3)).toBeNull()
+    expect(await token(4)).toBe("unique-token")
+    const rows = await db
+      .select({ id: schema.sessions.id, fingerprint: schema.sessions.pushTokenFingerprint })
+      .from(schema.sessions)
+      .where(inArray(schema.sessions.id, [sharedNew!.session.id, unique!.session.id]))
+    expect(rows.every((row) => row.fingerprint !== null)).toBe(true)
+  })
+
+  test("alerts follow the recipient's notification mode", async () => {
+    const settings = (mode: UserSettingsNotificationsMode) =>
+      ({ notifications: { mode, silent: false, disableDmNotifications: false } }) as Parameters<
+        typeof alertAllowedByNotificationSettings
+      >[1]
+    expect(await alertAllowedByNotificationSettings(1, settings(UserSettingsNotificationsMode.All), undefined)).toBe(true)
+    expect(await alertAllowedByNotificationSettings(1, settings(UserSettingsNotificationsMode.Mentions), undefined)).toBe(
+      true,
+    )
+    expect(await alertAllowedByNotificationSettings(1, settings(UserSettingsNotificationsMode.None), undefined)).toBe(
+      false,
+    )
+    expect(await alertAllowedByNotificationSettings(1, undefined, undefined)).toBe(true)
   })
 })

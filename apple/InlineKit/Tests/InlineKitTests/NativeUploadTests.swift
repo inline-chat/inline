@@ -233,6 +233,34 @@ private actor FinishResponseLostUploadRPCMock: NativeUploadRPCTransport {
   func calledMethods() -> [InlineProtocol.Method] { methods }
 }
 
+/// A server that stores a small file sent inline with create and completes it in the same reply.
+private actor InlineCreateRPCMock: NativeUploadRPCTransport {
+  private(set) var methods: [InlineProtocol.Method] = []
+  private(set) var inlineData: Data?
+
+  func callUploadRPC(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout _: Duration?
+  ) async throws -> RpcResult.OneOf_Result? {
+    methods.append(method)
+    guard case let (.createUpload, .createUpload(create)) = (method, input) else {
+      Issue.record("Unexpected upload RPC \(method)")
+      return nil
+    }
+    inlineData = create.hasInlineData ? create.inlineData : nil
+    var complete = UploadComplete()
+    complete.fileUniqueID = "IND_inline"
+    var result = CreateUploadResult()
+    result.uploadID = Data(repeating: 9, count: 16)
+    result.partSize = 524_288
+    result.partCount = 1
+    result.acceptedParts = [0]
+    result.complete = complete
+    return .createUpload(result)
+  }
+}
+
 private actor PassthroughUploadStaging: NativeUploadStaging {
   private var discarded = false
   func stage(logicalID _: String, sourceURL: URL) -> URL { sourceURL }
@@ -563,6 +591,27 @@ struct NativeUploadTests {
     }
     #expect(await transport.calledMethods() == [.createUpload, .saveUploadPart])
     #expect(progress.recordedValues() == [0])
+    #expect(await staging.wasDiscarded())
+  }
+
+  @Test("a single-part file goes inline with create and completes in one call")
+  func inlineCreateCompletes() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-inline-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = InlineCreateRPCMock()
+    let staging = PassthroughUploadStaging()
+    let coordinator = DurableUploadCoordinator(transport: transport, staging: staging, ownerScope: { "test-owner" })
+    let progress = UploadProgressRecorder()
+    let complete = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "document:inline", fileURL: source, fileName: "a.bin", mimeType: "application/octet-stream",
+      kind: .document
+    ), progress: { sent, _ in progress.append(sent) })
+    #expect(complete.fileUniqueID == "IND_inline")
+    #expect(await transport.methods == [.createUpload])
+    #expect(await transport.inlineData == Data([1, 2, 3]))
+    #expect(progress.recordedValues().last == 3)
     #expect(await staging.wasDiscarded())
   }
 

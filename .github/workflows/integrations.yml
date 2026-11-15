@@ -10,8 +10,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: integrations-${{ github.ref }}
-  cancel-in-progress: true
+  # Main commits qualify immutable release candidates. An unrelated push must
+  # not cancel the only CI run that can qualify a CLI change.
+  group: integrations-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   landing:

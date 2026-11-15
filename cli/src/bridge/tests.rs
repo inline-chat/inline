@@ -936,7 +936,7 @@ fn agent_command_catalog_is_stable_and_within_server_limits() {
             "permissions",
             "verbose",
             "threads",
-            "allowlist",
+            "share",
         ]
     );
     assert!(catalog.len() <= 100);

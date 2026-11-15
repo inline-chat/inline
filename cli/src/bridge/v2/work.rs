@@ -124,9 +124,31 @@ pub(crate) struct Agent {
     /// Bound chat → the project its owner chose. Inline pins a bound
     /// thread's sessions to it, so connecting names it.
     pub bound_projects: std::sync::Mutex<HashMap<i64, String>>,
+    /// Decision cards (chat, message) this run is deciding or has decided:
+    /// a plan, task or next-step button press, or a plan card a newer one
+    /// replaced. The first claim wins, so a second press, or a press while
+    /// the first one's edit is still landing, never acts twice.
+    pub decisions: std::sync::Mutex<HashSet<(i64, i64)>>,
 }
 
 impl Agent {
+    /// Claims a decision card; false when it is already being decided or
+    /// was decided.
+    pub(crate) fn claim_decision(&self, chat_id: i64, message_id: i64) -> bool {
+        self.decisions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert((chat_id, message_id))
+    }
+
+    /// Lets a claimed card be decided again, after its action was refused.
+    pub(crate) fn release_decision(&self, chat_id: i64, message_id: i64) {
+        self.decisions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&(chat_id, message_id));
+    }
+
     /// Keeps the latest usage a session reported. Windows merge by name and
     /// length: Claude reports its 5-hour and weekly limits one at a time.
     fn record_usage(&self, chat_id: i64, usage: &UsageUpdate) {
@@ -225,6 +247,16 @@ pub(crate) enum ActionData {
     /// Option `o` of question `f` on a question card asked with buttons.
     #[serde(rename = "q")]
     Pick { i: String, f: usize, o: usize },
+    /// A Codex plan card: approve (leave Plan mode and implement) or keep
+    /// planning.
+    #[serde(rename = "pp")]
+    Plan { approve: bool },
+    /// A suggested task: start it in a task subthread, or dismiss it.
+    #[serde(rename = "ts")]
+    Task { start: bool },
+    /// A next-step answer, `l` its label, given back to the agent as input.
+    #[serde(rename = "ns")]
+    NextStep { l: String },
 }
 
 pub(crate) enum Command {
@@ -491,6 +523,7 @@ pub(crate) fn spawn(
         taken_reports: HashSet::new(),
         lead_inputs: HashSet::new(),
         directed_turns: HashSet::new(),
+        plan_card: None,
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -538,6 +571,10 @@ struct Outgoing {
     /// Already the plain-text form of an item Inline refused once.
     #[serde(default)]
     fallback: bool,
+    /// A Codex plan card: once posted it is the work's latest plan, and the
+    /// one before it is superseded.
+    #[serde(default)]
+    plan: bool,
 }
 
 /// An input the harness may or may not have.
@@ -659,6 +696,9 @@ struct Actor {
     /// steered: only those turns report back.
     lead_inputs: HashSet<InputId>,
     directed_turns: HashSet<TurnId>,
+    /// The latest Codex plan card posted: (chat, message, what it shows).
+    /// A newer plan, or the next turn, supersedes it.
+    plan_card: Option<(i64, i64, Doc)>,
 }
 
 impl Actor {
@@ -1147,7 +1187,11 @@ impl Actor {
         let grants = self.agent.access.grants(actor).await;
         match data {
             // The main loop answers these; they never reach a work.
-            ActionData::ExtendLoop | ActionData::RaiseGateBudget => None,
+            ActionData::ExtendLoop
+            | ActionData::RaiseGateBudget
+            | ActionData::Plan { .. }
+            | ActionData::Task { .. }
+            | ActionData::NextStep { .. } => None,
             ActionData::Pick { i, f, o } => {
                 let label = self
                     .cards
@@ -2111,6 +2155,7 @@ impl Actor {
                     if self.lead_inputs.contains(&pending.id) {
                         self.directed_turns.insert(turn.clone());
                     }
+                    self.supersede_latest_plan().await;
                     self.turn = Some(turn.clone());
                     live.turn.get_or_insert(turn);
                 }
@@ -2728,6 +2773,7 @@ impl Actor {
                     if inputs.iter().any(|input| self.lead_inputs.contains(input)) {
                         self.directed_turns.insert(turn.clone());
                     }
+                    self.supersede_latest_plan().await;
                     self.turn = Some(turn.clone());
                     if let Some(first) = inputs.first() {
                         self.last_turn_input = Some(first.clone());
@@ -3057,6 +3103,14 @@ impl Actor {
                 return;
             }
             self.remember(message_id);
+            if outgoing.plan
+                && let Some(previous) =
+                    self.plan_card
+                        .replace((outgoing.chat, message_id, outgoing.doc.clone()))
+            {
+                self.supersede_plan(previous, "Replaced by a newer plan")
+                    .await;
+            }
             if let Some((interaction, form)) = outgoing.card {
                 self.card_by_interaction
                     .insert(interaction.clone(), message_id);
@@ -3181,6 +3235,7 @@ impl Actor {
                             card: None,
                             closed: false,
                             fallback: false,
+                            plan: false,
                         })
                         .await;
                     }
@@ -3188,6 +3243,27 @@ impl Actor {
                 RenderOp::Notice { doc } => {
                     self.flush_edits(true).await;
                     self.send(&doc, None, Notify::Normal).await;
+                }
+                RenderOp::PlanProposal { doc } => {
+                    self.flush_edits(true).await;
+                    let token = self
+                        .turn
+                        .as_ref()
+                        .or(self.rendering_turn.as_ref())
+                        .map(|turn| format!("{turn}:{}", text_digest(&doc.text)));
+                    let random_id = self.output_id("plan", token.as_deref());
+                    self.publish(Outgoing {
+                        chat: self.chat_id,
+                        doc,
+                        reply_to: None,
+                        actions: plan_actions(),
+                        random_id,
+                        card: None,
+                        closed: false,
+                        fallback: false,
+                        plan: true,
+                    })
+                    .await;
                 }
                 RenderOp::Card {
                     interaction,
@@ -3219,6 +3295,7 @@ impl Actor {
                         card: Some((interaction, form)),
                         closed: false,
                         fallback: false,
+                        plan: false,
                     })
                     .await;
                 }
@@ -3249,6 +3326,7 @@ impl Actor {
                         card: None,
                         closed: true,
                         fallback: false,
+                        plan: false,
                     })
                     .await;
                 }
@@ -3311,6 +3389,43 @@ impl Actor {
     // ---------------------------------------------------------------
     // Inline output and state
     // ---------------------------------------------------------------
+
+    /// The latest plan card no longer stands for what the agent will do:
+    /// its next turn began. Shown superseded unless someone decided it.
+    async fn supersede_latest_plan(&mut self) {
+        if let Some(card) = self.plan_card.take() {
+            self.supersede_plan(card, "No longer current").await;
+        }
+    }
+
+    /// Edits a plan card to superseded, without its buttons, so approving
+    /// an old plan never implements whatever plan the agent holds now. A
+    /// card someone is deciding or decided is left as they decide it.
+    async fn supersede_plan(&self, (chat, message_id, mut doc): (i64, i64, Doc), note: &str) {
+        if !super::blocks::is_pending(&doc) || !self.agent.claim_decision(chat, message_id) {
+            return;
+        }
+        if !super::blocks::resolve(
+            &mut doc,
+            super::blocks::DecisionState::Superseded,
+            None,
+            None,
+            Some(note),
+        ) {
+            return;
+        }
+        if let Err(failure) = self
+            .try_edit(
+                chat,
+                message_id,
+                &doc,
+                Some(proto::MessageActions::default()),
+            )
+            .await
+        {
+            log::warn!(target: "inline::bridge::v2", "chat={chat} superseding a plan failed: {failure:?}");
+        }
+    }
 
     fn remember(&self, message_id: i64) {
         self.agent.sent.lock().expect("sent").insert(message_id);
@@ -3695,6 +3810,7 @@ fn render_kind(op: &RenderOp) -> &'static str {
         RenderOp::EndProgress { .. } => "end_progress",
         RenderOp::Update { .. } => "update",
         RenderOp::Final { .. } => "final",
+        RenderOp::PlanProposal { .. } => "plan_proposal",
         RenderOp::Card { .. } => "card",
         RenderOp::CardClosed { .. } => "card_closed",
         RenderOp::Notice { .. } => "notice",
@@ -3874,7 +3990,7 @@ pub(crate) fn button_rows(
         .filter_map(|(index, (label, data, style))| {
             Some(proto::MessageAction {
                 action_id: format!("v2-{index}"),
-                text: (*label).to_owned(),
+                text: button_text(label),
                 action: Some(proto::message_action::Action::Callback(
                     proto::MessageActionCallback {
                         data: serde_json::to_vec(data).ok()?,
@@ -3890,6 +4006,62 @@ pub(crate) fn button_rows(
     })
 }
 
+/// Buttons under fixed ids, one per row, for blocks that name them in their
+/// `action_ids`.
+pub(crate) fn named_buttons(
+    buttons: &[(
+        &str,
+        &str,
+        ActionStyle,
+        ActionData,
+        proto::AgentGrantRequirement,
+    )],
+) -> Option<proto::MessageActions> {
+    let rows: Vec<proto::MessageActionRow> = buttons
+        .iter()
+        .filter_map(|(id, label, style, data, grant)| {
+            Some(proto::MessageActionRow {
+                actions: vec![proto::MessageAction {
+                    action_id: (*id).to_owned(),
+                    text: button_text(label),
+                    action: Some(proto::message_action::Action::Callback(
+                        proto::MessageActionCallback {
+                            data: serde_json::to_vec(data).ok()?,
+                        },
+                    )),
+                    style: action_style(*style) as i32,
+                    required_grant: *grant as i32,
+                    ..Default::default()
+                }],
+            })
+        })
+        .collect();
+    (!rows.is_empty()).then_some(proto::MessageActions { rows })
+}
+
+/// A Codex plan card's buttons.
+fn plan_actions() -> Option<proto::MessageActions> {
+    use super::blocks::plan_proposal::{
+        APPROVE, APPROVE_LABEL, KEEP_PLANNING, KEEP_PLANNING_LABEL,
+    };
+    named_buttons(&[
+        (
+            APPROVE,
+            APPROVE_LABEL,
+            ActionStyle::Primary,
+            ActionData::Plan { approve: true },
+            proto::AgentGrantRequirement::Steer,
+        ),
+        (
+            KEEP_PLANNING,
+            KEEP_PLANNING_LABEL,
+            ActionStyle::Default,
+            ActionData::Plan { approve: false },
+            proto::AgentGrantRequirement::Steer,
+        ),
+    ])
+}
+
 fn action_style(style: ActionStyle) -> proto::message_action::Style {
     match style {
         ActionStyle::Default => proto::message_action::Style::Default,
@@ -3898,24 +4070,20 @@ fn action_style(style: ActionStyle) -> proto::message_action::Style {
     }
 }
 
-/// Inline's limit on button text, in characters.
-const MAX_BUTTON_CHARS: usize = 64;
+/// Inline's limit on button text, in UTF-16 units (as the server counts:
+/// an emoji outside the BMP is two).
+const MAX_BUTTON_UTF16: usize = 64;
 
-/// The harness's label, shortened to fit a button.
+/// The harness's or agent's label, shortened to fit a button.
 fn button_text(label: &str) -> String {
-    if label.chars().count() <= MAX_BUTTON_CHARS {
-        return label.to_owned();
-    }
-    let mut text: String = label.chars().take(MAX_BUTTON_CHARS - 1).collect();
-    text.push('…');
-    text
+    super::blocks::fit_utf16(label, MAX_BUTTON_UTF16)
 }
 
 /// Labels too long for a button, listed in full in the card text.
 fn long_labels(actions: &[CardAction]) -> Vec<String> {
     actions
         .iter()
-        .filter(|action| action.label.chars().count() > MAX_BUTTON_CHARS)
+        .filter(|action| action.label.encode_utf16().count() > MAX_BUTTON_UTF16)
         .map(|action| action.label.clone())
         .collect()
 }
@@ -3976,7 +4144,8 @@ pub(crate) fn card_actions(
             .ok()?;
             Some(proto::MessageActionRow {
                 actions: vec![proto::MessageAction {
-                    action_id: format!("v2-{index}"),
+                    // The approval block names its buttons by these ids.
+                    action_id: super::blocks::action_id(index),
                     text: button_text(&action.label),
                     action: Some(proto::message_action::Action::Callback(
                         proto::MessageActionCallback { data },
@@ -4207,10 +4376,12 @@ mod tests {
                         FieldOption {
                             label: "Red".into(),
                             description: None,
+                            preview: None,
                         },
                         FieldOption {
                             label: "Blue".into(),
                             description: None,
+                            preview: None,
                         },
                     ],
                     multiple: true,
@@ -4237,6 +4408,33 @@ mod tests {
             answers[0].values,
             vec!["Blue".to_owned(), "Green".to_owned()]
         );
+    }
+
+    #[test]
+    fn button_text_fits_inlines_utf16_limit() {
+        // 40 emoji: 40 characters, 80 UTF-16 units.
+        let label = "🚀".repeat(40);
+        let text = button_text(&label);
+        assert!(text.encode_utf16().count() <= MAX_BUTTON_UTF16, "{text}");
+        assert!(text.ends_with('…'));
+        let action = CardAction {
+            decision: "d".into(),
+            label: label.clone(),
+            style: ActionStyle::Default,
+        };
+        assert_eq!(long_labels(&[action]), [label]);
+        assert_eq!(button_text("Approve"), "Approve");
+        let buttons = named_buttons(&[(
+            "next-0",
+            &"🚀".repeat(64),
+            ActionStyle::Primary,
+            ActionData::NextStep {
+                l: "🚀".repeat(64)
+            },
+            proto::AgentGrantRequirement::Access,
+        )])
+        .expect("buttons");
+        assert!(buttons.rows[0].actions[0].text.encode_utf16().count() <= MAX_BUTTON_UTF16);
     }
 
     #[test]
@@ -4397,7 +4595,40 @@ pub(crate) mod recovery_tests {
             taken_reports: HashSet::new(),
             lead_inputs: HashSet::new(),
             directed_turns: HashSet::new(),
+            plan_card: None,
         }
+    }
+
+    pub(crate) async fn plan_cards_supersede_unless_decided(agent: Arc<Agent>) {
+        use crate::bridge::v2::blocks::{self, plan_proposal};
+        let card = || {
+            plan_proposal::card(
+                "Codex",
+                "# Fix the parser\n\n1. Read it",
+                &[
+                    plan_proposal::APPROVE.to_owned(),
+                    plan_proposal::KEEP_PLANNING.to_owned(),
+                ],
+                &blocks::Resolution::pending(),
+            )
+        };
+        let mut work = actor(agent.clone());
+        // A card someone is deciding (an Approve press claimed it) is left
+        // for that decision when the next turn starts.
+        assert!(agent.claim_decision(9, 40));
+        work.plan_card = Some((9, 40, card()));
+        work.supersede_latest_plan().await;
+        assert!(work.plan_card.is_none());
+        // An undecided card is superseded: claimed, so a press on it finds
+        // nothing to act on.
+        work.plan_card = Some((9, 41, card()));
+        work.supersede_latest_plan().await;
+        assert!(work.plan_card.is_none());
+        assert!(!agent.claim_decision(9, 41));
+        // A plan card goes out marked as the work's plan.
+        work.render(vec![RenderOp::PlanProposal { doc: card() }])
+            .await;
+        assert!(work.outbox.iter().any(|outgoing| outgoing.plan));
     }
 
     pub(crate) async fn pending_output_survives_restart(agent: Arc<Agent>) {

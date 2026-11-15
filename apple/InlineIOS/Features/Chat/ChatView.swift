@@ -74,6 +74,9 @@ struct ChatView: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var realtimeState: RealtimeState
 
+  @ObservedObject private var botAccess = AgentGrantStore.shared
+  @State private var botOwnerLoadedGeneration = 0
+
   @Environment(Router.self) var router
   @Environment(\.scenePhase) var scenePhase
   @Environment(\.realtimeV2) var realtimeV2
@@ -150,6 +153,16 @@ struct ChatView: View {
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
     }
+  }
+
+  /// What replaces the composer when this is a chat with a bot the viewer
+  /// can't message. Nil for everything else, including "not known yet".
+  private var botNoAccessNotice: BotNoAccessNotice? {
+    _ = botOwnerLoadedGeneration
+    guard !preview, case .user = peerId, let bot = fullChatViewModel.peerUser, bot.bot == true else { return nil }
+    let access = botAccess.access(botUserID: bot.id)
+    let owner = access.flatMap { ObjectCache.shared.getCachedUser(id: $0.ownerUserID)?.user }
+    return BotNoAccessNotice.make(bot: bot, access: access, owner: owner)
   }
 
   /// An agent DM's working folder for the header. Compose keeps its own
@@ -398,7 +411,7 @@ struct ChatView: View {
     ) { notification in
       guard canHandleGlobalNavigation else { return }
       if let userId = notification.userInfo?["userId"] as? Int64 {
-        router.openPrimaryDestination(.chat(peer: Peer.user(id: userId)))
+        openUserFromAvatar(userId)
       }
     }
     .onReceive(
@@ -498,6 +511,18 @@ struct ChatView: View {
       type: .error,
       systemImage: "exclamationmark.triangle.fill"
     )
+  }
+
+  /// A bot's avatar opens its chat info, where its status, access and
+  /// settings are. People's avatars, and bots without a local chat, open the chat.
+  private func openUserFromAvatar(_ userId: Int64) {
+    if let item = FullChatViewModel.cachedChatItem(peer: .user(id: userId)),
+       item.userInfo?.user.bot == true
+    {
+      presentedChatInfo = item
+      return
+    }
+    router.openPrimaryDestination(.chat(peer: Peer.user(id: userId)))
   }
 
   private func handleUserGroupMention(_ notification: Notification) {
@@ -684,8 +709,25 @@ struct ChatView: View {
           renameRequested = true
           presentedChatInfo = item
           return true
+        },
+        noAccessNotice: botNoAccessNotice,
+        onMessageBotOwner: { ownerUserID in
+          router.openPrimaryDestination(.chat(peer: .user(id: ownerUserID)))
         }
       )
+      .task(id: fullChatViewModel.peerUser?.bot == true ? fullChatViewModel.peerUser?.id : nil) {
+        // Opening a bot's chat asks again who can reach it; the stored answer shows meanwhile.
+        guard let bot = fullChatViewModel.peerUser, bot.bot == true, !preview else { return }
+        botAccess.refresh(botUserID: bot.id)
+      }
+      .task(id: botAccess.access(botUserID: fullChatViewModel.peerUser?.id ?? 0)?.ownerUserID) {
+        // The notice names the owner; fetch them once if they aren't here yet.
+        guard let ownerUserID = botAccess.access(botUserID: fullChatViewModel.peerUser?.id ?? 0)?.ownerUserID,
+              ownerUserID > 0, ObjectCache.shared.getCachedUser(id: ownerUserID) == nil
+        else { return }
+        await ObjectCache.shared.ensure([.user(ownerUserID)])
+        botOwnerLoadedGeneration &+= 1
+      }
       // Respect the iPad detail column without changing phone or preview
       // safe-area behavior, including the existing keyboard handling.
       .edgesIgnoringSafeArea(IPadNavigationLane.isEnabled && !preview ? .vertical : .all)

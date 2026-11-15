@@ -283,6 +283,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // Sidebar agent badges: reconcile the cached busy sessions across chats.
       await AgentWorkStateStore.shared.refresh()
     }
+    if accountOperationAdmissionIsOpen, Auth.shared.isLoggedIn {
+      // Which bots this person can reach: decides composers, mentions and search.
+      AgentGrantStore.shared.start()
+    }
 
     if !didHandleInitialActivation {
       didHandleInitialActivation = true
@@ -750,8 +754,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await ReservedChatIDPool.shared.pauseAndDrain()
       await Api.realtime.loggedOut()
       try requireLocalDataResetMayContinue()
-      await dependencies.realtime.loggedOut()
-      try requireLocalDataResetMayContinue()
       await FileUploader.shared.cancelAll()
       await FileCache.shared.cancelAllDownloads()
       await FileDownloader.shared.resetSession()
@@ -778,7 +780,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
       await Api.realtime.resumeAfterLocalDataReset()
       await ReservedChatIDPool.shared.resume(realtimeV2: Api.realtime)
-      await dependencies.realtime.start()
       dependencies.viewModel.navigate(restoreRoute)
       throw error
     }
@@ -786,8 +787,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     try requireLocalDataResetMayContinue()
     await Api.realtime.resumeAfterLocalDataReset()
     await ReservedChatIDPool.shared.resume(realtimeV2: Api.realtime)
-    try requireLocalDataResetMayContinue()
-    await dependencies.realtime.start()
     try requireLocalDataResetMayContinue()
     dependencies.appUndo.clear()
 

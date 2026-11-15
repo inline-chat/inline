@@ -443,7 +443,8 @@ pub(super) fn provider_configuration_problem(
 /// A parked agent's runtime looks launchable again (re-probe).
 pub(super) fn provider_runtime_recovered(installation: &ProviderInstallationConfig) -> bool {
     provider_configuration_problem(installation, None).is_none()
-        && ProviderLaunch::from_installation(installation).is_ok()
+        && (installation.provider_id == super::dots::DOTS_PROVIDER_ID
+            || ProviderLaunch::from_installation(installation).is_ok())
 }
 
 /// Agents parked for a missing runtime re-probe; a revoked bot credential

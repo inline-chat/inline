@@ -1,0 +1,120 @@
+[
+  {
+    "label": "open",
+    "text": "Codex's plan\nPin the plan\n• Keep the latest `update_plan` steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex",
+    "markdown": false,
+    "blocks": [
+      {
+        "plan_proposal": {
+          "title": "Codex's plan",
+          "children": [
+            {
+              "heading": {
+                "text": "Pin the plan",
+                "level": 2
+              }
+            },
+            {
+              "list": {
+                "kind": 1,
+                "items": [
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Keep the latest `update_plan` steps on the renderer"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Write them under the progress disclosure"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Golden test for Claude and Codex"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "plan-approve",
+            "plan-keep"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "plan-approve",
+        "label": "Approve",
+        "style": "primary"
+      },
+      {
+        "id": "plan-keep",
+        "label": "Keep planning",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "kept planning",
+    "text": "Codex's plan\nPin the plan\n• Keep the latest `update_plan` steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex\nKept planning (Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "plan_proposal": {
+          "title": "Codex's plan",
+          "children": [
+            {
+              "heading": {
+                "text": "Pin the plan",
+                "level": 2
+              }
+            },
+            {
+              "list": {
+                "kind": 1,
+                "items": [
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Keep the latest `update_plan` steps on the renderer"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Write them under the progress disclosure"
+                      }
+                    ]
+                  },
+                  {
+                    "children": [
+                      {
+                        "paragraph": "Golden test for Claude and Codex"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_DECLINED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Kept planning (Dena)"
+      }
+    ]
+  }
+]

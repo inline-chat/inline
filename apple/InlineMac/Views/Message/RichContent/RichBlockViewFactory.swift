@@ -38,6 +38,14 @@ enum RichBlockViewFactory {
       RichBlockFormNodeView()
     case .widget:
       RichBlockWidgetNodeView()
+    case .agentCard:
+      RichBlockAgentCardNodeView()
+    case .agentActions:
+      RichBlockAgentActionsNodeView()
+    case .review:
+      RichBlockReviewNodeView()
+    case .promptChips:
+      RichBlockPromptChipsNodeView()
     }
   }
 }

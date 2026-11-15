@@ -1,0 +1,78 @@
+[
+  {
+    "label": "open",
+    "text": "Claude wants to edit src/parser.ts\nsrc/parser.ts\n@@\n-  const first = tokens[0]\n+  if (tokens.length === 0) return []\n+  const first = tokens[0]",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_FILE_CHANGE",
+          "title": "Claude wants to edit src/parser.ts",
+          "children": [
+            {
+              "diff": {
+                "path": "src/parser.ts",
+                "text": "@@\n-  const first = tokens[0]\n+  if (tokens.length === 0) return []\n+  const first = tokens[0]",
+                "change": "CHANGE_MODIFIED",
+                "additions": 2,
+                "deletions": 1
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1",
+            "v2-2"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Yes",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "Yes, and auto-accept edits",
+        "style": "default"
+      },
+      {
+        "id": "v2-2",
+        "label": "No, and tell Claude what to do differently",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Claude wants to edit src/parser.ts\nsrc/parser.ts\n@@\n-  const first = tokens[0]\n+  if (tokens.length === 0) return []\n+  const first = tokens[0]\nYes (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_FILE_CHANGE",
+          "title": "Claude wants to edit src/parser.ts",
+          "children": [
+            {
+              "diff": {
+                "path": "src/parser.ts",
+                "text": "@@\n-  const first = tokens[0]\n+  if (tokens.length === 0) return []\n+  const first = tokens[0]",
+                "change": "CHANGE_MODIFIED",
+                "additions": 2,
+                "deletions": 1
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Yes (answered by Dena)"
+      }
+    ]
+  }
+]

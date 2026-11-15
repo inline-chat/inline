@@ -95,6 +95,17 @@ export class RealtimeRpcError extends Error {
     if (wait !== undefined) error.retryAfterSeconds = wait
     return error
   }
+  /** A dependency such as object storage is briefly down. Retryable, with a wait hint. */
+  public static ServiceUnavailable(retryAfterSeconds = 5) {
+    const error = RealtimeRpcError.create(
+      RpcError_Code.INTERNAL_ERROR,
+      "Service temporarily unavailable",
+      503,
+      (): RealtimeRpcError => RealtimeRpcError.ServiceUnavailable(retryAfterSeconds),
+    )
+    error.retryAfterSeconds = Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(1, Math.ceil(retryAfterSeconds)))
+    return error
+  }
   public static RequestTimeout(message = "Request timed out") {
     // Keep the existing wire pair until the protocol has a dedicated enum.
     return RealtimeRpcError.create(
@@ -233,6 +244,15 @@ export class RealtimeRpcError extends Error {
       "You don't have access to this agent action",
       403,
       RealtimeRpcError.AgentGrantRequired,
+    )
+  }
+  /** The caller isn't the bot's owner, on its access list, or the bot isn't open to everyone. */
+  public static BotAccessRequired() {
+    return RealtimeRpcError.create(
+      RpcError_Code.AGENT_GRANT_REQUIRED,
+      "You don't have access to this bot",
+      403,
+      RealtimeRpcError.BotAccessRequired,
     )
   }
   /** Same response for missing and not-owned media, so ids can't be probed. */

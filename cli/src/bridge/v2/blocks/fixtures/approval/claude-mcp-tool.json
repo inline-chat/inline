@@ -1,0 +1,50 @@
+{
+  "source": "Claude Code 2.1 can_use_tool for an MCP tool with a title.",
+  "native": {
+    "type": "control_request",
+    "request_id": "req-mcp-1",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "mcp__linear__create_issue",
+      "display_name": "linear · create_issue",
+      "title": "Create a Linear issue",
+      "tool_use_id": "toolu_mcp1",
+      "input": {
+        "team": "INL",
+        "title": "Parser crashes on blank input"
+      }
+    }
+  },
+  "input": {
+    "agent": "Claude",
+    "interaction": {
+      "id": "req-mcp-1",
+      "item": "toolu_mcp1",
+      "kind": {
+        "kind": "approval",
+        "subject": {
+          "kind": "tool",
+          "name": "linear · create_issue",
+          "input": {
+            "team": "INL",
+            "title": "Parser crashes on blank input"
+          },
+          "reason": "Create a Linear issue"
+        },
+        "decisions": [
+          {
+            "id": "allow",
+            "label": "Yes",
+            "kind": "accept"
+          },
+          {
+            "id": "deny",
+            "label": "No, and tell Claude what to do differently",
+            "kind": "decline",
+            "accepts_message": true
+          }
+        ]
+      }
+    }
+  }
+}

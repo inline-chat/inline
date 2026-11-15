@@ -1,0 +1,67 @@
+{
+  "source": "Claude Code 2.1 can_use_tool control request for ExitPlanMode in plan mode; decisions as the Claude driver builds them (allow, the setMode suggestion, deny with a message).",
+  "native": {
+    "type": "control_request",
+    "request_id": "req-plan-1",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "ExitPlanMode",
+      "input": {
+        "plan": "# Fix empty input in the parser\n\n## Context\nThe tokenizer indexes `tokens[0]` without checking the length.\n\n## Steps\n1. Return early from **tokenize()** on blank input\n2. Add a regression test\n   for whitespace-only input\n3. Run `pnpm test parser`\n\n```ts\nif (input.trim() === \"\") return []\n```"
+      },
+      "tool_use_id": "toolu_plan1",
+      "permission_suggestions": [
+        {
+          "type": "setMode",
+          "mode": "acceptEdits",
+          "destination": "session"
+        }
+      ]
+    }
+  },
+  "input": {
+    "id": "req-plan-1",
+    "item": "toolu_plan1",
+    "kind": {
+      "kind": "approval",
+      "subject": {
+        "kind": "plan",
+        "plan": "# Fix empty input in the parser\n\n## Context\nThe tokenizer indexes `tokens[0]` without checking the length.\n\n## Steps\n1. Return early from **tokenize()** on blank input\n2. Add a regression test\n   for whitespace-only input\n3. Run `pnpm test parser`\n\n```ts\nif (input.trim() === \"\") return []\n```"
+      },
+      "decisions": [
+        {
+          "id": "allow",
+          "label": "Yes",
+          "kind": "accept",
+          "native": {
+            "behavior": "allow"
+          }
+        },
+        {
+          "id": "allow:suggestion:0",
+          "label": "Yes, and auto-accept edits",
+          "kind": "accept_and_remember",
+          "native": {
+            "behavior": "allow",
+            "updatedPermissions": [
+              {
+                "type": "setMode",
+                "mode": "acceptEdits",
+                "destination": "session"
+              }
+            ]
+          }
+        },
+        {
+          "id": "deny",
+          "label": "No, and tell Claude what to do differently",
+          "kind": "decline",
+          "accepts_message": true,
+          "native": {
+            "behavior": "deny"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -92,6 +92,13 @@ public actor InlineProtocolV3Transport: Transport {
   private var transferOpening: Task<InlineProtocolV3Connection?, Never>?
   private var transferIdleTask: Task<Void, Never>?
   private var transferActive = 0
+  /// Transfer connections opened for the current main connection, including closed ones whose
+  /// in-flight replies can still fail. Cleared when the main connection changes.
+  private var transferServedMain: [ObjectIdentifier: ObjectIdentifier] = [:]
+  /// After a failed open, use the main connection until this instant instead of paying a
+  /// handshake for every transfer RPC.
+  private var transferOpenRetryAt: ContinuousClock.Instant?
+  private static let transferOpenBackoff: Duration = .seconds(30)
 
   public nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
@@ -402,6 +409,11 @@ public actor InlineProtocolV3Transport: Transport {
         {
           do {
             try await multiplexer(transfer).dispatch(messageID: message.id, call: call)
+          } catch let error as InlineProtocolV3ConnectionError where error == .requestCapacityExceeded {
+            // Local admission only: the transfer socket is healthy and still carries other
+            // parts, so keep it and send this one on the main connection.
+            await releaseTransfer(transfer)
+            try await multiplexer(connection).dispatch(messageID: message.id, call: call)
           } catch {
             // Transfer RPCs are idempotent; the main connection carries this one instead.
             log.warning("Transfer connection write failed; using the main connection error=\(error)")
@@ -507,6 +519,11 @@ public actor InlineProtocolV3Transport: Transport {
     }
   }
 
+  private func servedCurrentMain(_ source: InlineProtocolV3Connection) -> Bool {
+    guard let connection, source !== connection else { return false }
+    return transferServedMain[ObjectIdentifier(source)] == ObjectIdentifier(connection)
+  }
+
   /// Results from the transfer connection count only while it serves the current main connection.
   private func isCurrentSource(_ source: InlineProtocolV3Connection) -> Bool {
     guard let connection else { return false }
@@ -520,7 +537,16 @@ public actor InlineProtocolV3Transport: Transport {
     method: InlineProtocol.Method,
     startedAt: TimeInterval
   ) async {
-    guard isCurrentSource(source) else { return }
+    guard isCurrentSource(source) else {
+      // A transfer socket that served the current main connection closed under this request.
+      // Its reply can never arrive and its closing emits no disconnect, so fail the request now
+      // instead of leaving the caller to wait for the RPC timeout.
+      if case .failure = completion, servedCurrentMain(source) {
+        await channel.send(.rpcCommitOutcomeUnknown(msgId: requestMessageID))
+        log.debug("Transfer RPC ended with its connection rpc_id=\(requestMessageID) method=\(method)")
+      }
+      return
+    }
     let durationMilliseconds = Int(
       (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
     )
@@ -562,6 +588,18 @@ public actor InlineProtocolV3Transport: Transport {
         log.warning(
           "RPC commit outcome is unknown rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds)"
         )
+        return
+      }
+      if source !== connection {
+        // The transfer socket failed. Unlike the main connection its termination emits no
+        // disconnect, so report this request as unknown (transfer RPCs are idempotent and the
+        // caller checks upload state) and drop the socket.
+        await channel.send(.rpcCommitOutcomeUnknown(msgId: requestMessageID))
+        log.debug(
+          "Transfer RPC failed rpc_id=\(requestMessageID) method=\(method) duration_ms=\(durationMilliseconds) " +
+            "error=\(String(describing: error))"
+        )
+        if transferConnection === source { await closeTransfer() }
         return
       }
       // Connection termination owns the corresponding disconnected event and transaction replay.
@@ -655,6 +693,10 @@ public actor InlineProtocolV3Transport: Transport {
   /// Opens (once) the transfer connection for `main`, or returns nil to use `main` itself.
   private func acquireTransfer(main: InlineProtocolV3Connection) async -> InlineProtocolV3Connection? {
     if transferMain !== main { await closeTransfer() }
+    if transferConnection == nil, transferOpening == nil, let retryAt = transferOpenRetryAt {
+      guard ContinuousClock.now >= retryAt else { return nil }
+      transferOpenRetryAt = nil
+    }
     transferIdleTask?.cancel()
     transferIdleTask = nil
     if let transferConnection {
@@ -675,7 +717,10 @@ public actor InlineProtocolV3Transport: Transport {
     }
     let opened = await opening.value
     if transferOpening == opening { transferOpening = nil }
-    guard let transfer = opened else { return nil }
+    guard let transfer = opened else {
+      transferOpenRetryAt = ContinuousClock.now + Self.transferOpenBackoff
+      return nil
+    }
     // The transport stopped, reconnected or replaced the transfer while it opened: never leak it.
     guard transferMain === main, connection === main,
           transferConnection == nil || transferConnection === transfer
@@ -685,6 +730,7 @@ public actor InlineProtocolV3Transport: Transport {
     }
     if transferConnection == nil {
       transferConnection = transfer
+      transferServedMain[ObjectIdentifier(transfer)] = ObjectIdentifier(main)
       watchTransfer(transfer)
     }
     transferActive += 1
@@ -859,6 +905,8 @@ public actor InlineProtocolV3Transport: Transport {
     connection = nil
     connectionAuthority = nil
     await closeTransfer()
+    transferServedMain.removeAll()
+    transferOpenRetryAt = nil
     await handleConnectionClosure(generation: generation, authority: authority) {
       await endedConnection.terminationError
     }
@@ -995,6 +1043,13 @@ public actor NegotiatingRealtimeTransport: Transport {
 
   public nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
+  /// How long a V3 start may take before an upgraded session falls back to V2 for the cooldown.
+  /// 3 s threw away nearly finished V3 handshakes on slow mobile networks (TCP, TLS, key
+  /// verification, and init are four round trips), then pinned the session to V2 for 5 minutes.
+  /// It must stay well under `ConnectionPolicy.connectTimeout` (10 s): that timeout is cancelled by
+  /// the same `.connected` event, so the V2 fallback needs time left to connect inside it.
+  static let defaultFallbackDeadline: Duration = .seconds(6)
+
   public init(
     auth: AuthHandle,
     rsaPublicKeys: [InlineProtocolRSAPublicKey] = [],
@@ -1010,7 +1065,7 @@ public actor NegotiatingRealtimeTransport: Transport {
     }
     upgrade = automaticallyUpgradeLegacySession
       ? LegacyProtocolUpgradeCoordinator(auth: auth, rsaPublicKeys: rsaPublicKeys) : nil
-    fallbackDeadline = .seconds(3)
+    fallbackDeadline = Self.defaultFallbackDeadline
     fallbackCooldown = .seconds(300)
   }
 
@@ -1021,7 +1076,7 @@ public actor NegotiatingRealtimeTransport: Transport {
     makeInlineProtocolTransport: @escaping TransportFactory,
     upgrade: (any LegacyProtocolUpgrading)? = nil,
     transportPreference: UpgradedSessionTransportPreference = .init(prefersLegacy: { false }, record: { _ in }),
-    fallbackDeadline: Duration = .seconds(3),
+    fallbackDeadline: Duration = NegotiatingRealtimeTransport.defaultFallbackDeadline,
     fallbackCooldown: Duration = .seconds(300)
   ) {
     self.transportPreference = transportPreference

@@ -1,0 +1,18 @@
+{
+  "source": "Codex app-server v2 item/completed with a plan item (Plan mode extracts <proposed_plan> from the answer); Codex's own app then asks \"Implement this plan?\".",
+  "native": {
+    "method": "item/completed",
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-1",
+      "item": {
+        "type": "plan",
+        "id": "item-p1",
+        "text": "## Pin the plan\n\n- Keep the latest `update_plan` steps on the renderer\n- Write them under the progress disclosure\n- [ ] Golden test for Claude and Codex"
+      }
+    }
+  },
+  "input": {
+    "text": "## Pin the plan\n\n- Keep the latest `update_plan` steps on the renderer\n- Write them under the progress disclosure\n- [ ] Golden test for Claude and Codex"
+  }
+}

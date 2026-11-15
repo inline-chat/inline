@@ -18,6 +18,8 @@ export const handleGetChats = async (input: GetChatsInput, context: HandlerConte
     }
     return await getChats(input, functionContext)
   } catch (error) {
+    // Validation errors on paged requests carry a reason the caller can act on.
+    if (error instanceof RealtimeRpcError) throw error
     log.error("Failed to get chats", { error })
     throw RealtimeRpcError.InternalError()
   }

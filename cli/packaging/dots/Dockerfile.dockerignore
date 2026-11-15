@@ -1,0 +1,33 @@
+# Replaces the root ignore for this Rust image; the root excludes cli/.
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!cli/
+!cli/**
+!crates/
+!crates/**
+!vendor/
+!vendor/**
+!proto/
+!proto/**
+!skills/
+!skills/inline/
+!skills/inline/**
+
+**/.*
+**/target
+**/node_modules
+**/dist
+**/coverage*
+**/*.log
+**/*.sqlite*
+**/*.db
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# This checked-in bundle is compiled into the CLI by include_bytes!.
+!cli/src/bridge/adapter_locks/amp/dist/
+!cli/src/bridge/adapter_locks/amp/dist/index.js

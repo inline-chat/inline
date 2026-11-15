@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { eq } from "drizzle-orm"
-import { UploadKind, type UploadComplete } from "@inline-chat/protocol/core"
+import { RpcError_Code, UploadKind, type UploadComplete } from "@inline-chat/protocol/core"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
@@ -182,6 +182,18 @@ class MemoryMultipartStore implements MultipartObjectStore {
 
   async remove(key: string): Promise<void> {
     this.objects.delete(key)
+  }
+}
+
+/** A store that also writes whole objects in one request, like R2's PutObject. */
+class PuttingMultipartStore extends MemoryMultipartStore {
+  putCount = 0
+
+  async put(input: { key: string; bytes: Uint8Array }): Promise<{ etag: string }> {
+    this.putCount += 1
+    const etag = createHash("md5").update(input.bytes).digest("hex")
+    this.objects.set(input.key, { bytes: input.bytes.slice(), etag })
+    return { etag }
   }
 }
 
@@ -850,10 +862,11 @@ describe("native upload multipart worker", () => {
     finalizerFor: (body: Uint8Array) => MediaUploadFinalizer
     body: Uint8Array
     inline?: boolean
+    multipart?: MemoryMultipartStore
   }) => {
     const repository = new InlineUploadRepository()
     const staging = options.staging ?? new BatchingPartStore()
-    const multipart = new MemoryMultipartStore()
+    const multipart = options.multipart ?? new MemoryMultipartStore()
     const buffer = options.buffer ?? new UploadGroupBuffer()
     const finalizer = options.finalizerFor(options.body)
     const worker = createWorker(repository, staging, multipart, finalizer, {
@@ -909,6 +922,110 @@ describe("native upload multipart worker", () => {
     const ops = storageOps(staging, multipart, created.partCount)
     console.log("UPLOAD_STORAGE_OPS inline 3-part", JSON.stringify(ops))
     expect(ops.perGroup).toBeLessThanOrEqual(2)
+  })
+
+  test("writes a single-group upload with one PUT instead of a multipart session", async () => {
+    const user = await testUtils.createUser("native-upload-single-put@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 2 + 99)
+    for (let index = 0; index < body.length; index += 1) body[index] = index % 253
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 140)
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+    expect(multipart.putCount).toBe(1)
+    expect(multipart.createCount).toBe(0)
+    expect(multipart.completeCount).toBe(0)
+    const [stored] = [...multipart.objects.values()]
+    expect(Buffer.from(stored!.bytes).equals(Buffer.from(body))).toBe(true)
+  })
+
+  test("fails a single-group upload whose bytes do not match the declared digest, storing nothing", async () => {
+    const user = await testUtils.createUser("native-upload-single-put-digest@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE + 7).fill(3)
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations, repository } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(142),
+      fileName: "mismatch.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      // The declared digest is for different bytes.
+      sha256: createHash("sha256").update(new Uint8Array(body.byteLength).fill(4)).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    for (let partIndex = 0; partIndex < created.partCount; partIndex += 1) {
+      const offset = partIndex * created.partSize
+      await operations.savePart({
+        uploadId: created.uploadId,
+        partIndex,
+        data: body.subarray(offset, Math.min(offset + created.partSize, body.byteLength)),
+      }, requestContext)
+    }
+    await operations.finish({ uploadId: created.uploadId }, requestContext)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "failed")
+    expect((await repository.get(created.uploadId, owner))?.failureCode).toBe("integrity")
+    expect(multipart.putCount).toBe(0)
+    expect(multipart.objects.size).toBe(0)
+  })
+
+  test("finishes a single-part upload sent inline with create in one call", async () => {
+    const user = await testUtils.createUser("native-upload-inline-create@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(40_000).fill(8)
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const input = {
+      clientUploadId: new Uint8Array(16).fill(150),
+      fileName: "inline.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined } as const,
+      inlineData: body,
+    }
+    const created = await operations.create(input, requestContext)
+    expect(created.complete?.fileUniqueId).toBeString()
+    expect(created.acceptedParts).toEqual([0])
+    expect(multipart.putCount).toBe(1)
+
+    // A retried create (lost reply) returns the same result without storing again.
+    const retried = await operations.create(input, requestContext)
+    expect(retried.complete?.fileUniqueId).toBe(created.complete!.fileUniqueId)
+    expect(multipart.putCount).toBe(1)
+
+    // Inline bytes that are not the whole file are rejected before any upload row is created.
+    const rows = (await db.select().from(inlineUploads)).length
+    await expect(operations.create({ ...input, clientUploadId: new Uint8Array(16).fill(151), inlineData: body.subarray(1) },
+      requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect((await db.select().from(inlineUploads)).length).toBe(rows)
+  })
+
+  test("keeps multipart for uploads larger than one storage group", async () => {
+    const user = await testUtils.createUser("native-upload-two-groups@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 11).fill(9)
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations, repository } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 141)
+    await operations.finish({ uploadId: created.uploadId }, requestContext)
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    expect(multipart.putCount).toBe(0)
+    expect(multipart.createCount).toBe(1)
   })
 
   test("completes a 25-part upload whose buffer was evicted from staging reads and the running digest", async () => {

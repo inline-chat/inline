@@ -334,11 +334,16 @@ final class SidebarViewModel {
       // This source always reads the same SQL region. Pool fetches can run
       // off the writer and coalesce changes while a fetch is in flight.
       .trackingConstantRegion { db in
+        // Rows show neither openedDate nor a timestamp. Leaving openedDate out
+        // of the tracked region keeps opening a chat from re-snapshotting
+        // every row.
         let chats = try ChatListDatabaseQuery.fetchSnapshots(
           db,
           spaceID: source.spaceId,
           includeSpaceChatsInHome: true,
-          translationLanguage: UserLocale.getCurrentLanguage()
+          translationLanguage: UserLocale.getCurrentLanguage(),
+          includeOpenedDate: false,
+          includeTimestampText: false
         )
         let folders = source.spaceId == nil
           ? try DialogFolder.order(DialogFolder.Columns.order, DialogFolder.Columns.id)
@@ -394,7 +399,10 @@ final class SidebarViewModel {
           chatsRetryAttempt = 0
           chatsRetryTask?.cancel()
           chatsRetryTask = nil
-          errorText = nil
+          // Assign only on change so a no-op snapshot notifies no observers.
+          if errorText != nil {
+            errorText = nil
+          }
           refreshItems()
           hasReceivedChatValue = true
           updateChatProjectionReadiness()

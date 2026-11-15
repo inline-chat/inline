@@ -271,6 +271,15 @@ public struct SendMessageTransaction: Transaction2 {
   public func failed(error: TransactionError2) async {
     log.error("Failed to send message", error: error)
 
+    // The server refused the send because this bot isn't shared with the
+    // sender. Learn that now, so the composer gives way to the reason instead
+    // of leaving a failed bubble with no explanation.
+    if case let .rpcError(rpcError) = error, rpcError.errorCode == .agentGrantRequired,
+       case let .user(botUserId) = context.peerId
+    {
+      Task { @MainActor in await AgentGrantStore.shared.resolveAccess(botUserIDs: [botUserId]) }
+    }
+
     guard let currentUserId = Auth.getCurrentUserId() else {
       return
     }

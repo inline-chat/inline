@@ -354,6 +354,7 @@ export const BotRichText: Schema.Codec<NeutralBotRichText> = Schema.suspend(
 
 const BotFormFieldBase = {
   field_id: Schema.String,
+  header: Schema.optionalKey(BotRichText),
   label: BotRichText,
   description: Schema.optionalKey(BotRichText),
   is_required: Schema.optionalKey(Schema.Literal(true)),
@@ -366,6 +367,8 @@ const BotFormFieldSchema = Schema.Union([
       option_id: Schema.String,
       label: BotRichText,
       description: Schema.optionalKey(BotRichText),
+      preview: Schema.optionalKey(BotRichText),
+      is_recommended: Schema.optionalKey(Schema.Literal(true)),
     }))),
     is_multiple: Schema.optionalKey(Schema.Literal(true)),
     default_option_ids: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
@@ -394,6 +397,20 @@ const BotFormFieldSchema = Schema.Union([
 const BotBlockStatusSchema = Schema.Literals(["pending", "running", "waiting", "done", "failed", "cancelled"])
 const BotGrantRequirementSchema = Schema.Literals(["access", "invoke", "steer", "approve", "configure", "owner"])
 const OptionalTrue = Schema.optionalKey(Schema.Literal(true))
+const OptionalDecisionState = Schema.optionalKey(Schema.Literals(["pending", "accepted", "declined", "expired", "superseded"]))
+const OptionalActionIds = Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String)))
+const BotReviewFindingSchema = Schema.Struct({
+  title: BotRichText,
+  body: Schema.optionalKey(BotRichText),
+  priority: Schema.optionalKey(Schema.Literals(["p0", "p1", "p2", "p3"])),
+  path: Schema.optionalKey(BotRichText),
+  start_line: Schema.optionalKey(WireNonNegativeInteger),
+  end_line: Schema.optionalKey(WireNonNegativeInteger),
+  category: OptionalString,
+  confidence: Schema.optionalKey(Schema.Literals(["confirmed", "plausible"])),
+  outcome: Schema.optionalKey(Schema.Literals(["fixed", "skipped", "no_change_needed"])),
+  action_id: OptionalString,
+})
 
 export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
   (): Schema.Codec<NeutralBotRichBlock> => Schema.Union([
@@ -528,6 +545,62 @@ export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
       })))),
       required_grant: Schema.optionalKey(BotGrantRequirementSchema),
     }).annotate({ description: "Sandboxed HTML a bot shows inside the message, with no network access." }),
+    Schema.Struct({
+      type: Schema.Literal("plan_proposal"),
+      title: Schema.optionalKey(BotRichText),
+      blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+      state: OptionalDecisionState,
+      action_ids: OptionalActionIds,
+      decided_by_user_id: Schema.optionalKey(UserId),
+      is_rtl: OptionalTrue,
+    }).annotate({ description: "A plan the agent wants approved before it acts. action_ids name the message's actions drawn as its buttons." }),
+    Schema.Struct({
+      type: Schema.Literal("approval"),
+      subject: Schema.optionalKey(Schema.Literals(["command", "file_change", "tool", "permissions", "network"])),
+      title: BotRichText,
+      command: Schema.optionalKey(BotRichText),
+      cwd: Schema.optionalKey(BotRichText),
+      reason: Schema.optionalKey(BotRichText),
+      blocks: Schema.mutable(Schema.Array(BotRichBlock)),
+      state: OptionalDecisionState,
+      action_ids: OptionalActionIds,
+      decided_by_user_id: Schema.optionalKey(UserId),
+      is_rtl: OptionalTrue,
+    }).annotate({ description: "A request to run a command, change files, use a tool or widen permissions." }),
+    Schema.Struct({
+      type: Schema.Literal("review"),
+      title: Schema.optionalKey(BotRichText),
+      verdict: Schema.optionalKey(Schema.Literals(["correct", "incorrect", "needs_attention"])),
+      summary: Schema.optionalKey(BotRichText),
+      findings: Schema.mutable(Schema.Array(BotReviewFindingSchema)),
+      is_rtl: OptionalTrue,
+    }).annotate({ description: "Code review notes: findings with priority and location, and an overall verdict." }),
+    Schema.Struct({
+      type: Schema.Literal("task_suggestion"),
+      title: BotRichText,
+      brief: Schema.optionalKey(BotRichText),
+      state: OptionalDecisionState,
+      started_peer_id: Schema.optionalKey(BotPeerId),
+      expires_at: Schema.optionalKey(WireNonNegativeInteger),
+      action_ids: OptionalActionIds,
+      is_rtl: OptionalTrue,
+    }).annotate({ description: "Work the agent proposes to run separately, as a new thread." }),
+    Schema.Struct({
+      type: Schema.Literal("next_step"),
+      recap: BotRichText,
+      question: Schema.optionalKey(BotRichText),
+      action_ids: OptionalActionIds,
+      is_blocking: OptionalTrue,
+      is_rtl: OptionalTrue,
+    }).annotate({ description: "The agent's end-of-turn recap and the one decision it waits on." }),
+    Schema.Struct({
+      type: Schema.Literal("prompt_suggestions"),
+      prompts: Schema.mutable(Schema.Array(Schema.Struct({
+        label: BotRichText,
+        text: OptionalString,
+      }))),
+      is_rtl: OptionalTrue,
+    }).annotate({ description: "Chips that put a prompt in the viewer's composer." }),
   ], { mode: "oneOf" }),
 ).annotate({
   identifier: "BotRichBlock",
@@ -722,6 +795,13 @@ export const BotMessageAction: Schema.Codec<NeutralBotMessageAction> = Schema.Un
     callback_data_base64: Schema.optionalKey(Schema.Never),
     ...botMessageActionOptions,
   }),
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("compose"),
+    compose_text: Schema.String,
+    ...botMessageActionOptions,
+  }).annotate({ description: "Puts text in the viewer's composer, client-side; the bot is not notified." }),
   Schema.Struct({
     action_id: Schema.String,
     text: Schema.String,

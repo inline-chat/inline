@@ -7,6 +7,7 @@ import struct InlineProtocol.BlockImage
 import struct InlineProtocol.BlockList
 import struct InlineProtocol.BlockTable
 import struct InlineProtocol.BlockText
+import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageEntity
 import TextProcessing
 import UIKit
@@ -20,17 +21,23 @@ struct MessageRichContent {
   /// Each block's characters in the body text, by path, so a streaming message's revealed
   /// count maps to the block holding it.
   let sources: [RichPath: Range<Int>]
+  /// Message actions blocks draw as their own buttons, or replaced with their decision. The
+  /// message's action rows leave them out.
+  var inlineActionIDs: Set<String> = []
 
   struct Style {
     var baseFont: UIFont
     var textColor: UIColor
     var secondaryColor: UIColor
+    /// Links, toggles and accented glyphs in agent blocks.
+    var accentColor: UIColor
     var traits: UITraitCollection
   }
 
   /// Rich content for `message`, or nil when it has none or it is past the limits.
   ///
   /// `body` is the message text with entities applied; blocks index into it by range.
+  @MainActor
   static func make(
     for message: FullMessage,
     body: NSAttributedString,
@@ -42,15 +49,23 @@ struct MessageRichContent {
       // Direction is decided per block from its own text, replacing the stored flags.
       let content = BlockContentDirection.resolved(stored, text: body.string)
       var builder = Builder(body: body, style: style, expanded: expanded, messageDate: message.message.date)
-      guard builder.withinLimits(content), let blocks = builder.blocks(content.blocks, path: RichPath()),
+      builder.actions = BlockInlineActions.byID(message.message.actions)
+      guard builder.withinLimits(content),
+            let blocks = builder.blocks(content.blocks, path: RichPath(), bounds: 0 ..< body.length),
             !blocks.isEmpty
       else { return nil }
-      return MessageRichContent(blocks: blocks, photos: builder.photos, sources: builder.sources)
+      return MessageRichContent(
+        blocks: blocks,
+        photos: builder.photos,
+        sources: builder.sources,
+        inlineActionIDs: builder.inlineActionIDs
+      )
     }
     return codeFences(in: message, body: body, style: style)
   }
 
   /// Plain text with code entities: the text between them becomes paragraphs.
+  @MainActor
   private static func codeFences(in message: FullMessage, body: NSAttributedString, style: Style) -> MessageRichContent? {
     let entities = (message.translationEntities ?? message.message.entities)?.entities ?? []
     let fences = entities.filter { $0.type == .pre }.sorted { $0.offset < $1.offset }
@@ -85,7 +100,8 @@ struct MessageRichContent {
 
   // MARK: - Builder
 
-  private struct Builder {
+  @MainActor
+  struct Builder {
     let body: NSAttributedString
     let style: Style
     let expanded: [RichPath: Bool]
@@ -94,6 +110,12 @@ struct MessageRichContent {
     var photos: [String: PhotoInfo] = [:]
     /// Text-bearing blocks' ranges in the body, by the path the planner gives their nodes.
     var sources: [RichPath: Range<Int>] = [:]
+    /// The message's actions by ID, for blocks that draw some as buttons.
+    var actions: [String: MessageAction] = [:]
+    var inlineActionIDs: Set<String> = []
+    /// For container blocks by path: the text their children may claim, so an unknown kind
+    /// first or last inside still shows (`BlockContentSpan.childBounds`).
+    var childBounds: [RichPath: Range<Int>] = [:]
 
     init(body: NSAttributedString, style: Style, expanded: [RichPath: Bool], messageDate: Date = .distantPast) {
       self.body = body
@@ -134,6 +156,12 @@ struct MessageRichContent {
             if !visit(quote.children, depth: depth + 1) { return false }
           case let .disclosure(disclosure)?:
             if !visit(disclosure.children, depth: depth + 1) { return false }
+          case let .callout(callout)?:
+            if !visit(callout.children, depth: depth + 1) { return false }
+          case let .planProposal(plan)?:
+            if !visit(plan.children, depth: depth + 1) { return false }
+          case let .approval(approval)?:
+            if !visit(approval.children, depth: depth + 1) { return false }
           default:
             break
           }
@@ -143,11 +171,30 @@ struct MessageRichContent {
       return visit(content.blocks, depth: 0)
     }
 
-    mutating func blocks(_ list: [Block], path: RichPath) -> [RichBlock]? {
+    /// The list's blocks. One this view can't draw, of a kind it doesn't know or malformed,
+    /// shows the fallback text it covers instead, so the rest of the message keeps its
+    /// formatting. `bounds` is the text an unknown kind at either end of the list may claim.
+    mutating func blocks(_ list: [Block], path: RichPath, bounds: Range<Int>? = nil) -> [RichBlock]? {
       var result: [RichBlock] = []
       for (index, block) in list.enumerated() {
-        guard let converted = self.block(block, path: path.appending(index)) else { return nil }
-        result.append(converted)
+        let blockPath = path.appending(index)
+        if let inner = BlockContentSpan.childBounds(at: index, in: list, bounds: bounds) {
+          childBounds[blockPath] = inner
+        }
+        // A block that falls back gives back the buttons it claimed.
+        let claimed = inlineActionIDs
+        if let converted = self.block(block, path: blockPath) {
+          result.append(converted)
+          continue
+        }
+        inlineActionIDs = claimed
+        if let range = BlockContentSpan.fallbackRange(
+          at: index, in: list, text: body.string as NSString, bounds: bounds
+        ) {
+          sources[blockPath] = range
+          let text = body.attributedSubstring(from: NSRange(location: range.lowerBound, length: range.count))
+          result.append(.text(MessageText(text), role: .paragraph))
+        }
       }
       return result
     }
@@ -195,7 +242,7 @@ struct MessageRichContent {
         }
         return .list(RichList(items: items, isRightToLeft: list.hasIsRtl && list.isRtl))
       case let .quote(quote)?:
-        guard let children = blocks(quote.children, path: path) else { return nil }
+        guard let children = blocks(quote.children, path: path, bounds: childBounds[path]) else { return nil }
         return .quote(children: children, isRightToLeft: quote.hasIsRtl && quote.isRtl)
       case let .table(table)?:
         var rows: [[MessageText]] = []
@@ -229,23 +276,49 @@ struct MessageRichContent {
         guard !album.images.isEmpty else { return nil }
         return .album(album.images.enumerated().map { richImage($1, path: path.appending($0)) })
       case let .disclosure(disclosure)?:
+        let isExpanded = expanded[path] ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen)
+        let claimed = inlineActionIDs
         guard disclosure.hasSummary, let summary = slice(disclosure.summary, color: style.secondaryColor, removesLinks: true),
-              let children = blocks(disclosure.children, path: path)
+              let children = blocks(disclosure.children, path: path, bounds: childBounds[path])
         else { return nil }
+        // Buttons inside collapsed content aren't drawn, so they stay in the action rows.
+        if !isExpanded { inlineActionIDs = claimed }
         record(disclosure.summary, at: path)
         let activity = disclosure.activityKind
         return .disclosure(RichDisclosure(
           summary: summary,
           children: children,
-          isExpanded: expanded[path] ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen),
+          isExpanded: isExpanded,
           isInProgress: disclosure.kind == .progress,
           hasActivityIcon: activity != .unspecified && activity != .agent,
           isRightToLeft: disclosure.hasIsRtl && disclosure.isRtl,
           elapsed: elapsed(disclosure)
         ))
-      default:
-        // Kinds this view doesn't draw yet, such as agent steps and forms, fall back to the
-        // message's flat text, as the protocol asks of clients that don't know a kind.
+      case let .steps(steps)?:
+        return self.steps(steps, block: block, path: path)
+      case let .fields(fields)?:
+        return self.fields(fields, block: block, path: path)
+      case let .callout(callout)?:
+        return self.callout(callout, block: block, path: path)
+      case let .meter(meter)?:
+        return self.meter(meter, block: block, path: path)
+      case let .diff(diff)?:
+        return self.diff(diff, block: block, path: path)
+      case let .planProposal(plan)?:
+        return self.plan(plan, block: block, path: path)
+      case let .approval(approval)?:
+        return self.approval(approval, block: block, path: path)
+      case let .review(review)?:
+        return self.review(review, block: block, path: path)
+      case let .taskSuggestion(task)?:
+        return self.taskSuggestion(task, block: block, path: path)
+      case let .nextStep(step)?:
+        return self.nextStep(step, block: block, path: path)
+      case let .promptSuggestions(prompts)?:
+        return self.promptSuggestions(prompts, block: block, path: path)
+      case .form?, .widget?, nil:
+        // Forms and widgets aren't drawn natively here yet; they and kinds newer than this
+        // build show their fallback text in `blocks`.
         return nil
       }
     }

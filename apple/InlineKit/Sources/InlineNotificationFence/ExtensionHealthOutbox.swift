@@ -12,7 +12,8 @@ public struct ExtensionHealthOutbox: Sendable {
   }
 
   public static let shared = ExtensionHealthOutbox(suiteName: "group.chat.inline")
-  static let key = "extension-health-v1"
+  /// Per install, so each build reports its own extension's outcomes.
+  static let key = InlineInstallNamespace.scoped("extension-health-v1")
   /// Distinct outcomes kept between drains; later new outcomes are dropped, counts still grow.
   static let maxEntries = 64
 

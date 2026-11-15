@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path"
 import { app } from "../../src/legacyServer"
 import { makeCandidateHttpApplication } from "../../src/core/http/candidateApplication"
 import { gridTranscriptionWorkerPaths } from "../../src/core/http/gridTranscription.effect"
+import { HTTP_RPC_PATH } from "../../src/realtime/httpRpc"
 import {
   startCoreHttpServer,
   type CoreHttpServerHandle,
@@ -144,6 +145,7 @@ const routesFromOpenApi = (
 
 const candidateRawRoutes: ReadonlyArray<Route> = [
   ...gridTranscriptionWorkerPaths.map((path) => ({ method: "POST", path })),
+  { method: "POST", path: HTTP_RPC_PATH },
   { method: "GET", path: "//" },
   {
     method: "GET",
@@ -209,6 +211,7 @@ const comparableLegacyRoutes =
 const intentionalCandidateOnly =
   new Set([
     ...gridTranscriptionWorkerPaths.map((path) => `POST\t${path}`),
+    `POST\t${HTTP_RPC_PATH}`,
     "DELETE\t/admin/reserved-usernames",
     "GET\t/",
     "GET\t/admin/email-campaigns",

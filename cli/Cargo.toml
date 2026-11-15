@@ -21,6 +21,8 @@ inline-agent-driver-acp = { path = "../crates/agent-driver-acp" }
 inline-agent-driver-codex = { path = "../crates/agent-driver-codex" }
 inline-agent-driver-opencode = { path = "../crates/agent-driver-opencode" }
 inline-agent-driver-claude = { path = "../crates/agent-driver-claude" }
+inline-dots = { path = "../crates/dots" }
+inline-relay = { path = "../crates/relay" }
 inline-client = { path = "../crates/client" }
 inline-protocol = { path = "../crates/protocol" }
 inline-sdk = { path = "../crates/sdk" }

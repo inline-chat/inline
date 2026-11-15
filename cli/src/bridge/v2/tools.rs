@@ -27,10 +27,13 @@ use inline_protocol::proto;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::api;
+use super::api::{self, Notify};
+use super::blocks;
+use super::doc::Doc;
 use super::lead::{LeadRequest, SendMode, SpawnTask};
 use super::limits;
-use super::work::Command;
+use super::render::ActionStyle;
+use super::work::{ActionData, Command, named_buttons};
 use crate::bridge::helpers::interaction_random_id;
 use crate::bridge::inline_tools::{
     HOST_TOOL_EXECUTION_TIMEOUT, RETURN_ATTACHMENT_TIMEOUT, ReturnFile, bool_arg, bounded_limit,
@@ -57,6 +60,8 @@ const SEARCH_THREADS: usize = 15;
 const LEAD_ANSWER_TIMEOUT: Duration = Duration::from_secs(17);
 /// The longest one `wait_tasks` call waits; the lead calls again to wait on.
 const MAX_WAIT_SECONDS: u64 = 15;
+/// An `ask_next_step` recap.
+const MAX_RECAP_CHARS: usize = 2_000;
 
 /// A tool that acts through the work itself, answered by its actor.
 #[derive(Debug)]
@@ -454,6 +459,7 @@ impl Tools {
                     .config
                     .bot
                     .edit_message(EditMessageRequest {
+                        entities: Vec::new(),
                         chat_id: InlineId::new(chat),
                         message_id: InlineId::new(message_id),
                         text: text.clone(),
@@ -595,6 +601,99 @@ impl Tools {
                 })
                 .await
             }
+            "report_findings" => match blocks::review::reported(arguments) {
+                Ok(review) => {
+                    self.post_block(work, call, &blocks::review::doc(&review), None)
+                        .await
+                }
+                Err(error) => HostToolResult::failure(error),
+            },
+            "suggest_thread" => {
+                if self.lead.get().map(|(_, dm)| *dm) != Some(work.chat) {
+                    return HostToolResult::failure(
+                        "Only the session in your owner's DM suggests task subthreads.",
+                    );
+                }
+                let (Some(title), brief) = (
+                    string_arg(arguments, "title", 200),
+                    string_arg(arguments, "brief", MAX_TEXT_CHARS),
+                ) else {
+                    return HostToolResult::failure("title is required.");
+                };
+                let doc = blocks::task::card(
+                    &title,
+                    brief.as_deref(),
+                    &blocks::Resolution::pending(),
+                    None,
+                );
+                let actions = named_buttons(&[
+                    (
+                        blocks::task::START,
+                        blocks::task::START_LABEL,
+                        ActionStyle::Primary,
+                        ActionData::Task { start: true },
+                        proto::AgentGrantRequirement::Invoke,
+                    ),
+                    (
+                        blocks::task::DISMISS,
+                        blocks::task::DISMISS_LABEL,
+                        ActionStyle::Default,
+                        ActionData::Task { start: false },
+                        proto::AgentGrantRequirement::Invoke,
+                    ),
+                ]);
+                self.post_block(work, call, &doc, actions).await
+            }
+            "ask_next_step" => {
+                let Some(recap) = string_arg(arguments, "recap", MAX_RECAP_CHARS) else {
+                    return HostToolResult::failure("recap is required.");
+                };
+                let options: Vec<String> = arguments
+                    .get("options")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|option| !option.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if options.is_empty() || options.len() > blocks::next_step::MAX_OPTIONS {
+                    return HostToolResult::failure("Give one or two options.");
+                }
+                let question = string_arg(arguments, "question", 500);
+                let doc = blocks::next_step::card(&recap, question.as_deref(), &options);
+                let ids: Vec<String> = (0..options.len())
+                    .map(blocks::next_step::option_id)
+                    .collect();
+                let buttons: Vec<_> = options
+                    .iter()
+                    .zip(&ids)
+                    .enumerate()
+                    .map(|(index, (label, id))| {
+                        (
+                            id.as_str(),
+                            label.as_str(),
+                            if index == 0 {
+                                ActionStyle::Primary
+                            } else {
+                                ActionStyle::Default
+                            },
+                            ActionData::NextStep { l: label.clone() },
+                            proto::AgentGrantRequirement::Access,
+                        )
+                    })
+                    .collect();
+                self.post_block(work, call, &doc, named_buttons(&buttons))
+                    .await
+            }
+            "suggest_prompts" => match blocks::prompts::from_arguments(arguments) {
+                Ok(prompts) => {
+                    self.post_block(work, call, &blocks::prompts::card(&prompts), None)
+                        .await
+                }
+                Err(error) => HostToolResult::failure(error),
+            },
             "stop_thread" => {
                 let Some(target) = positive_i64(arguments, "chat_id") else {
                     return HostToolResult::failure("chat_id is required.");
@@ -777,6 +876,43 @@ impl Tools {
             }
             Err(error) => HostToolResult::failure(
                 refusal(text, &error)
+                    .unwrap_or_else(|| "Inline could not send the message.".to_owned()),
+            ),
+        }
+    }
+
+    /// Posts a block message in the work's thread; a retried call posts the
+    /// same message.
+    async fn post_block(
+        &self,
+        work: &Work,
+        call: &HostToolCall,
+        doc: &Doc,
+        actions: Option<proto::MessageActions>,
+    ) -> HostToolResult {
+        let random_id =
+            interaction_random_id(&format!("v2-{}", call.tool_name), &call.call_id).get();
+        match api::send_doc_as(
+            &self.config.bot,
+            work.chat,
+            None,
+            doc,
+            actions,
+            Notify::Normal,
+            random_id,
+        )
+        .await
+        {
+            Ok(message_id) => {
+                self.sent.lock().expect("sent").insert(message_id);
+                HostToolResult::success(
+                    json!({"chat_id": work.chat, "message_id": message_id}).to_string(),
+                )
+            }
+            Err(error) => HostToolResult::failure(
+                error
+                    .server_reason()
+                    .map(|reason| format!("Inline refused the message: {reason}"))
                     .unwrap_or_else(|| "Inline could not send the message.".to_owned()),
             ),
         }
@@ -1434,6 +1570,7 @@ fn text_limit(tool: &str) -> Option<(&'static str, usize, bool)> {
         "notify_owner" => Some(("text", MAX_MESSAGE_UTF16 - NOTIFY_HEADER_UTF16, true)),
         "send_to_thread" => Some(("text", MAX_TEXT_CHARS, false)),
         "spawn_thread" => Some(("task", MAX_TEXT_CHARS, false)),
+        "suggest_thread" => Some(("brief", MAX_TEXT_CHARS, false)),
         _ => None,
     }
 }
@@ -1576,6 +1713,22 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
         (
             "stop_thread",
             "Owner's DM only: stop the running turn in one of your task subthreads or work threads.",
+        ),
+        (
+            "report_findings",
+            "Post code review findings in this work's thread as a review card: each with title, body, priority p0 (most urgent) to p3, path and lines, and once you acted on it an outcome. Use it for a review's results instead of a long message.",
+        ),
+        (
+            "suggest_thread",
+            "Owner's DM only: suggest work to run separately as a card with Start and Dismiss. Start runs it like spawn_thread, with the title and brief. Use it when the work can wait for your owner's go-ahead; spawn_thread starts it at once.",
+        ),
+        (
+            "ask_next_step",
+            "End a turn that needs a decision: a short recap of what you did, the question, and one or two answers as buttons (the first is your recommendation). A press reaches you as your owner's reply. Ask only one question.",
+        ),
+        (
+            "suggest_prompts",
+            "Suggest up to 4 follow-up prompts as chips under your answer; a tap puts its text in the viewer's composer to edit and send. Give text only when it differs from the label.",
         ),
     ];
     read.into_iter()
@@ -1752,6 +1905,73 @@ fn input_schema(name: &str) -> Value {
             &["chat_id", "text"],
         ),
         "stop_thread" => (json!({"chat_id": chat_id}), &["chat_id"]),
+        "report_findings" => (
+            json!({
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "verdict": {"type": "string", "enum": ["correct", "incorrect", "needs_attention"]},
+                "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "findings": {
+                    "type": "array",
+                    "maxItems": blocks::review::MAX_FINDINGS,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                            "body": {"type": "string", "maxLength": blocks::review::MAX_BODY_CHARS},
+                            "priority": {"type": "string", "enum": ["p0", "p1", "p2", "p3"]},
+                            "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+                            "start_line": {"type": "integer", "minimum": 1},
+                            "end_line": {"type": "integer", "minimum": 1},
+                            "category": {"type": "string", "minLength": 1, "maxLength": 40},
+                            "confidence": {"type": "string", "enum": ["confirmed", "plausible"]},
+                            "outcome": {"type": "string", "enum": ["fixed", "skipped", "no_change_needed"]},
+                        },
+                        "required": ["title"],
+                    },
+                },
+            }),
+            &["findings"],
+        ),
+        "suggest_thread" => (
+            json!({
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "brief": text,
+            }),
+            &["title", "brief"],
+        ),
+        "ask_next_step" => (
+            json!({
+                "recap": {"type": "string", "minLength": 1, "maxLength": MAX_RECAP_CHARS},
+                "question": {"type": "string", "minLength": 1, "maxLength": 500},
+                "options": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": blocks::next_step::MAX_OPTIONS,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                },
+            }),
+            &["recap", "options"],
+        ),
+        "suggest_prompts" => (
+            json!({
+                "prompts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": blocks::prompts::MAX_PROMPTS,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "label": {"type": "string", "minLength": 1, "maxLength": blocks::prompts::MAX_LABEL_CHARS},
+                            "text": {"type": "string", "minLength": 1, "maxLength": blocks::prompts::MAX_TEXT_CHARS},
+                        },
+                        "required": ["label"],
+                    },
+                },
+            }),
+            &["prompts"],
+        ),
         _ => (json!({}), &[]),
     };
     json!({

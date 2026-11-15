@@ -1,3 +1,4 @@
+import { canMessageBot } from "@in/server/modules/agents/access"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
@@ -61,6 +62,19 @@ export const handler = async (
 
   const currentUserName = currentUser?.firstName
   const title = isSelfChat ? `${currentUserName} (You)` : null
+
+  // A new DM with a bot needs access to the bot; an existing one stays open to read.
+  if (!isSelfChat) {
+    const peer = await UsersModel.getUserById(peerId)
+    if (peer?.bot === true && !(await canMessageBot(peer, context.currentUserId))) {
+      const [existing] = await db
+        .select({ id: chats.id })
+        .from(chats)
+        .where(and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)))
+        .limit(1)
+      if (!existing) throw new InlineError(InlineError.ApiError.PEER_INVALID)
+    }
+  }
 
   // Insert first so concurrent requests agree on which call created the chat.
   const [insertedChat] = await db.transaction(async (tx) => {

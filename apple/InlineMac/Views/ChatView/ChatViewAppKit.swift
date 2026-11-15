@@ -317,7 +317,7 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func observeChatItem() {
-    chatItemCancellable = viewModel.$chatItem
+    chatItemCancellable = viewModel.chatItemPublisher
       .dropFirst()
       .sink { [weak self] item in
         Task { @MainActor [weak self] in

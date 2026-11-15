@@ -16,13 +16,20 @@ import { notificationSyncOpsTracker, type NotificationSyncOps } from "./notifica
 import { maxNotificationNameBytes, notificationBodyText, notificationText } from "./messagePreview"
 import {
   encryptSendMessagePushContent,
+  PUSH_CONTENT_ALERT_VERSION,
   PUSH_CONTENT_ALGORITHM,
   PUSH_CONTENT_VERSION,
 } from "@in/server/modules/notifications/pushContentEncryption"
+import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
+import { normalizeGlobalNotificationMode } from "./notificationSettingsCompat"
+import { resolveEffectiveNotificationMode } from "./dialogNotificationSettings"
+import { getInheritedDialogNotificationSettings } from "./inheritedDialogNotificationSettings"
 
 type AlertPushPayload = {
   kind: "alert"
   senderUserId: number
+  /** The chat this alert is about, so the recipient's chat mute applies. Absent for account-level alerts. */
+  chatId?: number
   threadId: string
   title: string
   body: string
@@ -185,6 +192,14 @@ type PushContentSession = Pick<
   | "pushContentKeyAlgorithm"
 >
 
+const sessionSupportsEncryptedAlerts = (
+  session: PushContentSession,
+): session is PushContentSession & { pushContentKeyPublic: Uint8Array; pushContentVersion: number } =>
+  sessionSupportsEncryptedPushContent(session) && session.pushContentVersion >= PUSH_CONTENT_ALERT_VERSION
+
+/** Visible pushes older than this are noise; APNs otherwise stores them for an offline device for weeks. */
+const visiblePushLifetimeSeconds = 24 * 60 * 60
+
 const sessionSupportsEncryptedPushContent = (
   session: PushContentSession,
 ): session is PushContentSession & {
@@ -201,7 +216,7 @@ const sessionSupportsEncryptedPushContent = (
  * Why a message push carries only the generic alert, in clear text for the notification
  * extension's health telemetry. Never content: only which server path produced the placeholder.
  */
-export type PushPlaceholderReason = "no_device_key" | "encryption_failed" | "too_large"
+export type PushPlaceholderReason = "no_device_key" | "encryption_failed" | "too_large" | "generic_alert"
 
 export const buildApnNotification = ({
   session,
@@ -238,6 +253,11 @@ export const buildApnNotification = ({
     const bytes = Buffer.byteLength(JSON.stringify(notification), "utf8")
     if (bytes <= 4_096) return notification
     onPayloadTooLarge?.(bytes)
+    if (payload.kind === "alert" && notification.payload?.["encryptedContent"]) {
+      const { encryptedContent: _dropped, ...routing } = notification.payload as Record<string, unknown>
+      notification.payload = routing
+      return Buffer.byteLength(JSON.stringify(notification), "utf8") <= 4_096 ? notification : undefined
+    }
     if (payload.kind !== "send_message") return undefined
     // Never send an oversized envelope or expose encrypted content as plaintext.
     // Existing chat/message identity still lets the app open the original message.
@@ -250,6 +270,14 @@ export const buildApnNotification = ({
     }
     notification.alert = { title: genericEncryptedAlertTitle, body: genericEncryptedAlertBody }
     return Buffer.byteLength(JSON.stringify(notification), "utf8") <= 4_096 ? notification : undefined
+  }
+
+  if (payload.kind === "send_message" || payload.kind === "alert") {
+    notification.expiry = nowSeconds + visiblePushLifetimeSeconds
+  }
+  if (payload.kind === "send_message") {
+    // A retried send of the same message replaces the shown alert instead of stacking a duplicate.
+    notification.collapseId = `${payload.threadId}:${payload.messageId}`.slice(0, 64)
   }
 
   if (payload.kind === "send_message") {
@@ -326,15 +354,43 @@ export const buildApnNotification = ({
   }
 
   if (payload.kind === "alert") {
+    let encryptedContent: ReturnType<typeof encryptSendMessagePushContent> | undefined
+    if (sessionSupportsEncryptedAlerts(session)) {
+      try {
+        encryptedContent = encrypt({
+          recipientPublicKey: session.pushContentKeyPublic,
+          recipientKeyId: session.pushContentKeyId ?? undefined,
+          content: {
+            kind: "alert",
+            title: payload.title,
+            body: payload.body,
+            subtitle: payload.subtitle,
+            threadId: payload.threadId,
+            isThread: payload.isThread ?? false,
+            isReplyThread: payload.isReplyThread ?? false,
+          },
+        })
+      } catch (error) {
+        onEncryptionError?.(error)
+      }
+    }
     notification.payload = {
       kind: "alert",
       userId: payload.senderUserId,
       threadId: payload.threadId,
       isThread: payload.isThread ?? false,
       isReplyThread: payload.isReplyThread ?? false,
+      ...(encryptedContent
+        ? { encryptedContent }
+        : {
+            placeholderReason: (sessionSupportsEncryptedAlerts(session)
+              ? "encryption_failed"
+              : "generic_alert") satisfies PushPlaceholderReason,
+          }),
     }
     notification.contentAvailable = true
-    notification.mutableContent = false
+    // Every visible push passes through the extension, so its account check applies to alerts too.
+    notification.mutableContent = true
     configureAlertNotification(notification)
     configureSound({ notification, silent })
     notification.alert = {
@@ -384,13 +440,18 @@ export const preparePushNotificationToUser = async (
 
     let silent = false
     if (payload.kind === "send_message" || payload.kind === "alert") {
+      let settings: Awaited<ReturnType<typeof getCachedUserSettings>> | undefined
       try {
-        silent = (await getCachedUserSettings(userId))?.notifications.silent ?? false
+        settings = await getCachedUserSettings(userId)
+        silent = settings?.notifications.silent ?? false
       } catch (error) {
         log.error("Failed to load notification sound settings", {
           error,
           userId,
         })
+      }
+      if (payload.kind === "alert" && !(await alertAllowedByNotificationSettings(userId, settings, payload.chatId))) {
+        return
       }
     }
 
@@ -448,10 +509,11 @@ export const preparePushNotificationToUser = async (
       })
       if (!notification) continue
 
+      const token = session.applePushToken
       const sendPush = async () => {
-        if (!session.applePushToken) return
+        if (!token) return
         try {
-          const result = await apnProvider.send(notification, session.applePushToken)
+          const result = await apnProvider.send(notification, token)
           if (result.failed.length > 0) {
             const summaries = result.failed.map((failure) => summarizeApnFailure(failure))
             const suppressed = summaries.filter((s) => isSuppressedApnFailure(s))
@@ -465,17 +527,23 @@ export const preparePushNotificationToUser = async (
                 sessionId: session.id,
                 threadId: payload.threadId,
               })
+            } else if (!apnTokenRejections.record("rejected")) {
+              log.error("APNs is rejecting every device token; keeping tokens (check APNs environment and topic)", {
+                failures: suppressed,
+                sessionId: session.id,
+              })
             } else {
+              const released = await SessionsModel.releaseRejectedPushToken(session.id, token)
               log.debug("Failed to send push notification (expected)", {
                 failures: suppressed,
+                released,
                 userId,
                 sessionId: session.id,
                 threadId: payload.threadId,
               })
-              await SessionsModel.clearApplePushToken(session.id)
             }
-
           } else {
+            apnTokenRejections.record("delivered")
             log.debug("Push notification sent successfully", {
               userId,
               threadId: payload.threadId,
@@ -544,6 +612,54 @@ export function uniquePushSessions<T extends Pick<PushSession, "id" | "applePush
 
 export function shouldClearApplePushTokenForFailures(failures: readonly unknown[]): boolean {
   return failures.length > 0 && failures.every((failure) => isSuppressedApnFailure(summarizeApnFailure(failure)))
+}
+
+/**
+ * A misconfigured provider (sandbox vs production, wrong topic) makes APNs reject every token as
+ * BadDeviceToken. Releasing on those would wipe every device's registration, so token release
+ * pauses while a minute holds many rejections and no delivery.
+ */
+export class ApnTokenRejectionGuard {
+  private events: { at: number; delivered: boolean }[] = []
+
+  constructor(
+    private readonly windowMs = 60_000,
+    private readonly threshold = 20,
+    private readonly now = () => Date.now(),
+  ) {}
+
+  /** Records an outcome. For a rejection, returns whether releasing the token is safe. */
+  record(outcome: "delivered" | "rejected"): boolean {
+    const now = this.now()
+    this.events = this.events.filter((event) => now - event.at < this.windowMs)
+    this.events.push({ at: now, delivered: outcome === "delivered" })
+    if (this.events.length > 4 * this.threshold) this.events.splice(0, this.events.length - 4 * this.threshold)
+    if (outcome === "delivered") return true
+    const rejected = this.events.filter((event) => !event.delivered).length
+    return rejected < this.threshold || this.events.some((event) => event.delivered)
+  }
+}
+
+const apnTokenRejections = new ApnTokenRejectionGuard()
+
+/**
+ * Alerts (invites, integrations, agent attention) follow the same mute settings as messages, as if
+ * the recipient was mentioned: only "no notifications", globally or for the chat, silences them.
+ */
+export async function alertAllowedByNotificationSettings(
+  userId: number,
+  settings: Awaited<ReturnType<typeof getCachedUserSettings>> | undefined,
+  chatId: number | undefined,
+): Promise<boolean> {
+  try {
+    const globalMode = normalizeGlobalNotificationMode(settings)
+    const dialogNotificationSettings =
+      chatId !== undefined ? (await getInheritedDialogNotificationSettings(chatId, [userId])).get(userId) : undefined
+    return resolveEffectiveNotificationMode({ globalMode, dialogNotificationSettings }) !== UserSettingsNotificationsMode.None
+  } catch (error) {
+    log.warn("Alert notification settings unavailable; delivering", { error, userId })
+    return true
+  }
 }
 
 function prepareExpoPush({
@@ -715,7 +831,7 @@ async function handleExpoTickets({
     })
 
     if (ticket.details?.error === "DeviceNotRegistered") {
-      await SessionsModel.clearApplePushToken(session.id)
+      await SessionsModel.releaseRejectedPushToken(session.id, session.applePushToken)
     }
   }
 }

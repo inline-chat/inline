@@ -27,6 +27,9 @@ export const chats = pgTable(
     /** Most recent message id */
     lastMsgId: integer("last_msg_id"),
 
+    /** Date of the message at last_msg_id; null when there is none. Written with last_msg_id. */
+    lastMessageDate: timestamp("last_message_date", { mode: "date", precision: 3 }),
+
     /** Highest message id ever allocated in this chat; never decreases when history is deleted. */
     messageIdCounter: integer("message_id_counter").notNull().default(0),
 

@@ -10,6 +10,7 @@ protocol MentionManagerDelegate: AnyObject {
   func mentionManagerDidDismiss(_ manager: MentionManager)
 }
 
+@MainActor
 class MentionManager: NSObject {
   // Feature flag: enable auto-picking an exact single mention match on whitespace/punctuation.
   // Toggle to false to disable the behavior without removing the code path.
@@ -37,12 +38,9 @@ class MentionManager: NSObject {
   private var mentionCompletionView: MentionCompletionView?
   private var mentionCompletionConstraints: [NSLayoutConstraint] = []
 
-  // Participants
-  private var chatParticipantsViewModel: ChatParticipantsWithMembersViewModel?
+  // Candidates, observed only while a mention session is open.
+  private let mentionSource: MentionCandidatesSource
   private var cancellables = Set<AnyCancellable>()
-  private var mentionCandidates = MentionCompletionCandidates.empty
-  private var mentionAgents: [MentionableBotAgent] = []
-  private var agentLoadTask: Task<Void, Never>?
 
   // Text view reference
   private weak var textView: UITextView?
@@ -52,32 +50,24 @@ class MentionManager: NSObject {
     self.database = database
     self.chatId = chatId
     self.peerId = peerId
+    mentionSource = MentionCandidatesSource(db: database, scope: .chat(chatId: chatId, peer: peerId))
     super.init()
-    setupParticipantsViewModel()
-    observeBotAgentChanges()
-    loadMentionAgents()
+    observeMentionCandidates()
   }
 
   deinit {
-    cleanup()
+    // Owned and released by ComposeView on the main thread.
+    MainActor.assumeIsolated { cleanup() }
   }
 
   // MARK: - Setup
 
-  private func setupParticipantsViewModel() {
-    chatParticipantsViewModel = ChatParticipantsWithMembersViewModel(
-      db: database,
-      chatId: chatId,
-      purpose: .mentionCandidates
-    )
-
-    // Subscribe to mention candidate updates
-    chatParticipantsViewModel?.$mentionCandidates
+  private func observeMentionCandidates() {
+    mentionSource.updates
+      .dropFirst()
       .sink { [weak self] candidates in
-        Log.shared.trace("🔍 Mention candidates updated: \(candidates.users.count + candidates.groups.count) candidates")
         guard let self else { return }
-        mentionCandidates = candidates
-        applyMentionCandidates()
+        mentionCompletionView?.updateCandidates(candidates)
 
         if let mentionCompletionView,
            mentionCompletionView.hasItems,
@@ -89,12 +79,6 @@ class MentionManager: NSObject {
         }
       }
       .store(in: &cancellables)
-
-    // Fetch participants from server
-    Task {
-      Log.shared.trace("🔍 Fetching chat participants from server...")
-      await chatParticipantsViewModel?.refetchParticipants()
-    }
   }
 
   private func setupMentionCompletionView() {
@@ -106,42 +90,7 @@ class MentionManager: NSObject {
 
     mentionCompletionView = completionView
 
-    // Update with current participants
-    if let candidates = chatParticipantsViewModel?.mentionCandidates {
-      mentionCandidates = candidates
-      applyMentionCandidates()
-    }
-  }
-
-  private func loadMentionAgents(forceRefresh: Bool = false) {
-    agentLoadTask?.cancel()
-    agentLoadTask = Task { @MainActor [weak self, peerId = peerId] in
-      guard let self else { return }
-      do {
-        mentionAgents = try await BotAgentDirectory.shared.agents(for: peerId, forceRefresh: forceRefresh)
-      } catch is CancellationError {
-        return
-      } catch {
-        mentionAgents = []
-      }
-      applyMentionCandidates()
-    }
-  }
-
-  private func observeBotAgentChanges() {
-    NotificationCenter.default.publisher(for: .botAgentsChanged)
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in
-          self?.loadMentionAgents(forceRefresh: true)
-        }
-      }
-      .store(in: &cancellables)
-  }
-
-  private func applyMentionCandidates() {
-    var candidates = mentionCandidates
-    candidates.agents = mentionAgents
-    mentionCompletionView?.updateCandidates(candidates)
+    completionView.updateCandidates(mentionSource.candidates)
   }
 
   // MARK: - Public Interface
@@ -279,8 +228,7 @@ class MentionManager: NSObject {
     hideMentionCompletion()
     mentionCompletionView?.removeFromSuperview()
     mentionCompletionView = nil
-    agentLoadTask?.cancel()
-    agentLoadTask = nil
+    mentionSource.endSession()
     cancellables.removeAll()
   }
 
@@ -304,11 +252,12 @@ class MentionManager: NSObject {
     if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText) {
       let isNewMentionSession = currentMentionRange?.range.location != mentionRange.range.location
       currentMentionRange = mentionRange
-      if isNewMentionSession {
-        loadMentionAgents()
-      }
       Log.shared.debug("🔍 Mention detected: queryUTF16Length=\(mentionRange.query.utf16.count), range=\(mentionRange.range)")
       showMentionCompletion(for: mentionRange.query, textView: textView)
+      // After showing, so candidates this delivers re-show the menu only when it is hidden.
+      if isNewMentionSession {
+        mentionSource.beginSession()
+      }
     } else {
       Log.shared.debug("🔍 No mention detected")
       hideMentionCompletion()
@@ -345,6 +294,7 @@ class MentionManager: NSObject {
     Log.shared.debug("🔍 hideMentionCompletion")
     if clearCurrentRange {
       currentMentionRange = nil
+      mentionSource.endSession()
     }
 
     // Use ChatContainerView's method if available

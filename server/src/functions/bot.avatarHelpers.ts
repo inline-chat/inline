@@ -1,3 +1,4 @@
+import { canManageBot } from "@in/server/modules/agents/access"
 import { db } from "@in/server/db"
 import { botAvatarAssets, chatParticipants, chats, files, userNotDeleted, users } from "@in/server/db/schema"
 import { getBotPresenceState } from "@in/server/modules/botPresence/state"
@@ -24,10 +25,9 @@ export async function requireManageableBot(botUserId: number, context: FunctionC
     .where(and(eq(users.id, botUserId), eq(users.bot, true), userNotDeleted()))
     .limit(1)
 
-  const canUpdateAsCreator = bot?.botCreatorId === context.currentUserId
+  // The bot itself, its owner, or an admin the owner appointed.
   const canUpdateAsBotSelf = bot?.id === context.currentUserId
-
-  if (!bot || (!canUpdateAsCreator && !canUpdateAsBotSelf)) {
+  if (!bot || (!canUpdateAsBotSelf && !(await canManageBot(bot, context.currentUserId)))) {
     throw RealtimeRpcError.UserIdInvalid()
   }
 

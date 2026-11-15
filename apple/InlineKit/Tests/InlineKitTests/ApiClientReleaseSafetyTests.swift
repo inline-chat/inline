@@ -14,8 +14,8 @@ struct ApiClientReleaseSafetyTests {
     #endif
   }
 
-  @Test("email code requests keep the address in POST JSON")
-  func emailCodeRequestBoundary() async throws {
+  @Test("invite code checks keep the code in POST JSON")
+  func inviteCodeRequestBoundary() async throws {
     await SuccessfulRequestProbe.shared.reset()
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [SuccessfulURLProtocol.self]
@@ -24,14 +24,13 @@ struct ApiClientReleaseSafetyTests {
 
     _ = try await ApiClient(
       urlSession: session,
-      auth: Auth.mocked(authenticated: false).handle,
-      nativeLoginAvailable: false
-    ).sendCode(email: "release-sentinel@example.com")
+      auth: Auth.mocked(authenticated: false).handle
+    ).checkInviteCode("invite-sentinel")
     let capturedRequest = await SuccessfulRequestProbe.shared.capturedRequest()
     let request = try #require(capturedRequest)
 
     #expect(request.httpMethod == "POST")
-    #expect(request.url?.path == "/v1/sendEmailCode")
+    #expect(request.url?.path == "/v1/checkInviteCode")
     #expect(request.url?.query == nil)
     #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
     #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
@@ -39,67 +38,42 @@ struct ApiClientReleaseSafetyTests {
     // URLSession converts the intercepted body into an internal upload stream on Darwin.
     // Validate the emitted body length here and the exact builder payload below.
     let expectedRequest = try ApiClient.makeJSONPostRequest(
-      .sendCode,
-      body: ["email": "release-sentinel@example.com"],
+      .checkInviteCode,
+      body: ["inviteCode": "invite-sentinel"],
       baseURL: "http://localhost:8000/v1"
     )
     let data = try #require(expectedRequest.httpBody)
     #expect(request.value(forHTTPHeaderField: "Content-Length") == String(data.count))
     let decoded = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
-    #expect(decoded == ["email": "release-sentinel@example.com"])
+    #expect(decoded == ["inviteCode": "invite-sentinel"])
   }
 
-  @Test("email verification credentials stay in POST JSON")
-  func emailVerificationRequestBoundary() throws {
-    let body = ApiClient.makeEmailCodeVerificationBody(
-      code: "otp-sentinel",
-      email: "release-sentinel@example.com",
-      challengeToken: "challenge-sentinel",
-      inviteCode: "invite-sentinel",
-      sessionInfo: SessionInfo(
-        clientType: "ios",
-        clientVersion: "4766",
-        osVersion: "26.0",
-        deviceName: "device-sentinel",
-        timezone: "Asia/Tehran"
-      ),
-      deviceId: "device-id-sentinel"
-    )
-    let request = try ApiClient.makeJSONPostRequest(
-      .verifyCode,
-      body: body,
-      baseURL: "https://release.invalid/v1"
+  @Test("code login never falls back to HTTP when native login is unavailable")
+  func codeLoginFailsClosedWithoutNativeLogin() async throws {
+    await SuccessfulRequestProbe.shared.reset()
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [SuccessfulURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    let client = ApiClient(
+      urlSession: session,
+      auth: Auth.mocked(authenticated: false).handle,
+      nativeLoginAvailable: false
     )
 
-    #expect(request.httpMethod == "POST")
-    #expect(request.url?.absoluteString == "https://release.invalid/v1/verifyEmailCode")
-    #expect(request.url?.query == nil)
-    #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
-    #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
-
-    let data = try #require(request.httpBody)
-    let decoded = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
-    #expect(decoded["code"] == "otp-sentinel")
-    #expect(decoded["email"] == "release-sentinel@example.com")
-    #expect(decoded["challengeToken"] == "challenge-sentinel")
-    #expect(decoded["inviteCode"] == "invite-sentinel")
-    #expect(decoded["deviceId"] == "device-id-sentinel")
-  }
-
-  @Test("email verification omits absent optional metadata")
-  func emailVerificationOmitsAbsentFields() throws {
-    let body = ApiClient.makeEmailCodeVerificationBody(
-      code: "123456",
-      email: "person@example.com",
-      challengeToken: nil,
-      inviteCode: nil,
-      sessionInfo: nil,
-      deviceId: "device-id"
-    )
-    let data = try JSONSerialization.data(withJSONObject: body)
-    let decoded = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
-
-    #expect(Set(decoded.keys) == ["code", "email", "deviceId"])
+    await #expect(throws: InlineProtocolNativeLoginError.unavailable) {
+      _ = try await client.sendCode(email: "person@example.com")
+    }
+    await #expect(throws: InlineProtocolNativeLoginError.unavailable) {
+      _ = try await client.sendSmsCode(phoneNumber: "+15555550100")
+    }
+    await #expect(throws: InlineProtocolNativeLoginError.unavailable) {
+      _ = try await client.verifyCode(code: "123456", email: "person@example.com")
+    }
+    await #expect(throws: InlineProtocolNativeLoginError.unavailable) {
+      _ = try await client.verifySmsCode(code: "123456", phoneNumber: "+15555550100")
+    }
+    #expect(await SuccessfulRequestProbe.shared.capturedRequest() == nil)
   }
 
   @Test("provider redemption and compensating bearer logout have explicit deadlines")
@@ -144,12 +118,11 @@ struct ApiClientReleaseSafetyTests {
     defer { session.invalidateAndCancel() }
     let client = ApiClient(
       urlSession: session,
-      auth: Auth.mocked(authenticated: false).handle,
-      nativeLoginAvailable: false
+      auth: Auth.mocked(authenticated: false).handle
     )
 
     let requestTask = Task {
-      try await client.sendCode(email: "cancel@example.com")
+      try await client.checkInviteCode("cancel-sentinel")
     }
     #expect(await SuspendedRequestProbe.shared.waitForStart())
     requestTask.cancel()
@@ -210,7 +183,7 @@ private final class SuccessfulURLProtocol: URLProtocol, @unchecked Sendable {
       }
 
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-      client?.urlProtocol(self, didLoad: Data(#"{"ok":true,"result":{}}"#.utf8))
+      client?.urlProtocol(self, didLoad: Data(#"{"ok":true,"result":{"valid":true}}"#.utf8))
       client?.urlProtocolDidFinishLoading(self)
     }
   }

@@ -69,13 +69,6 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.messageWidgets)
-      Toggle(isOn: $settings.richTextMultiSurfaceSelectionEnabled) {
-        SettingsRowLabel(
-          .richMessageMultiBlockSelection,
-          description: "Select and copy across text blocks within one rich message."
-        )
-      }
-      .settingsSearchAnchor(.richMessageMultiBlockSelection)
     } header: {
       SettingsSectionHeader("Agents", subtitle: "Prompt workflows, agent controls, and rich responses.")
     }
@@ -97,6 +90,13 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.quickForward)
+      Toggle(isOn: $settings.stableChatRouteEnabled) {
+        SettingsRowLabel(
+          .stableChatRoute,
+          description: "Keep the chat view and its toolbar in place when switching chats instead of rebuilding them."
+        )
+      }
+      .settingsSearchAnchor(.stableChatRoute)
     } header: {
       SettingsSectionHeader("Messages")
     }

@@ -26,6 +26,7 @@ import type { UpdateGroup } from "@in/server/modules/updates"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { Log } from "@in/server/utils/log"
 import { isSubthreadParentMessage } from "@in/server/modules/subthreads"
+import { canMessageBot } from "@in/server/modules/agents/access"
 import { resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
 import { botChainExhausted } from "@in/server/modules/agents/botChain"
 
@@ -157,6 +158,8 @@ export const encodeBotActions = (actions: MessageActions | null | undefined): Bo
         return [{ ...base, type: "copy_text", copy_text: action.action.copyText.text }]
       case "openUrl":
         return [{ ...base, type: "open_url", url: action.action.openUrl.url }]
+      case "compose":
+        return [{ ...base, type: "compose", compose_text: action.action.compose.text }]
       case "openLink": {
         const { peerId, messageId } = action.action.openLink
         return [{
@@ -174,7 +177,10 @@ export const encodeBotActions = (actions: MessageActions | null | undefined): Bo
           ? { ...base, type: "callback", callback_data: text }
           : { ...base, type: "callback", callback_data_base64: bytes.toString("base64") }]
       }
+      case undefined:
+        return []
       default:
+        action.action satisfies never
         return []
     }
   }))
@@ -397,6 +403,14 @@ async function senderCanInvoke(target: DbUser | undefined, sender: DbUser | unde
   return satisfiesGrantRequirement(access, AgentGrantRequirement.INVOKE)
 }
 
+// A DM isn't listed: sending into a bot's DM is already refused without access.
+const ADDRESSING_REASONS: ReadonlySet<BotActivationReason> = new Set(["mention", "command"])
+
+async function senderCanReach(botUserId: number, senderUserId: number): Promise<boolean> {
+  const bot = await UsersModel.getUserById(botUserId)
+  return bot === undefined || canMessageBot(bot, senderUserId)
+}
+
 async function messageCreated(input: {
   chat: DbChat
   messageId: number
@@ -448,6 +462,16 @@ async function messageCreated(input: {
         botUserId: stream.botUserId,
         senderBotUserId: message.fromId,
         chatId: input.chat.id,
+      })
+      continue
+    }
+    // A person addresses a bot (mention, command) only when they can reach it. Replies to the bot and chats it follows still arrive, so someone the
+    // bot asked can answer it.
+    if (!bots && ADDRESSING_REASONS.has(reason) && !(await senderCanReach(stream.botUserId, message.fromId))) {
+      log.info("Not waking a bot for someone without access to it", {
+        botUserId: stream.botUserId,
+        chatId: input.chat.id,
+        reason,
       })
       continue
     }

@@ -2,6 +2,7 @@ import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { chatParticipants, members, userNotDeleted, users, type DbChat } from "@in/server/db/schema"
+import { resolveBotReachForBots } from "@in/server/modules/agents/access"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getChatById } from "@in/server/modules/subthreads"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -74,6 +75,18 @@ export async function getBotUserIdsForChatScope(
   return [...directIds, ...(await getBotUserIdsForChatScope(parentChat, currentUserId, visitedChatIds))]
 }
 
+/** The chat's bots the caller can reach: what discovery lists and what a typed command may target. */
+export async function getReachableBotUserIdsForChatScope(chat: DbChat, currentUserId: number): Promise<number[]> {
+  const botUserIds = Array.from(new Set(await getBotUserIdsForChatScope(chat, currentUserId)))
+  if (botUserIds.length === 0) return []
+  const reachable = new Set(
+    (await resolveBotReachForBots(botUserIds, currentUserId))
+      .filter(({ reach }) => reach.canMessage)
+      .map(({ bot }) => bot.id),
+  )
+  return botUserIds.filter((botUserId) => reachable.has(botUserId))
+}
+
 export async function resolvePeerBotScope(
   peerId: InputPeer | undefined,
   currentUserId: number,
@@ -81,8 +94,9 @@ export async function resolvePeerBotScope(
   if (!peerId?.type.oneofKind) throw RealtimeRpcError.BadRequest()
   const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, { currentUserId })
   await AccessGuards.ensureChatAccess(chat, currentUserId)
-  // `Set` keeps each bot at its first (nearest) scope position.
-  const botUserIdsByProximity = Array.from(new Set(await getBotUserIdsForChatScope(chat, currentUserId)))
+  // Each bot stays at its first (nearest) scope position. Bots the caller
+  // can't reach are left out, so their commands and Agents aren't offered.
+  const botUserIdsByProximity = await getReachableBotUserIdsForChatScope(chat, currentUserId)
   return {
     chat,
     botUserIds: [...botUserIdsByProximity].sort((a, b) => a - b),

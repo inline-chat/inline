@@ -28,7 +28,6 @@ struct PhoneNumberCode: View {
   @EnvironmentObject var mainViewRouter: MainViewRouter
   @Environment(\.appDatabase) var database
   @Environment(\.auth) private var auth
-  @Environment(\.realtime) private var realtime
   #endif
 
   init(phoneNumber: String, inviteCode: String? = nil) {
@@ -86,39 +85,9 @@ extension PhoneNumberCode {
     formState.startLoading()
     Task {
       do {
-        let bearerLoginAttempt = InlineProtocolNativeLogin.shared.isAvailable
-          ? nil
-          : try await auth.beginLoginAttempt()
         let result = try await api.verifySmsCode(code: code, phoneNumber: phoneNumber, inviteCode: inviteCode)
 
-        let accountMutationToken: AuthAccountMutationToken
-        if let token = result.token {
-          do {
-            guard let loginAttempt = bearerLoginAttempt else {
-              throw AuthStorageError.loginSuperseded
-            }
-            let commit = try await LoginStatePreparation.commit(
-              auth: auth.handle,
-              loginAttempt: loginAttempt,
-              targetUserID: result.userId,
-              persistCredentials: {
-                try await auth.saveCredentials(
-                  token: token,
-                  userId: result.userId,
-                  loginAttempt: loginAttempt
-                )
-              }
-            ) { db in
-              try result.user.saveFull(db)
-            }
-            accountMutationToken = commit.accountMutationToken
-          } catch {
-            _ = try? await ApiClient.shared.logout(bearerToken: token)
-            throw error
-          }
-        } else if let nativeToken = result.accountMutationToken {
-          accountMutationToken = nativeToken
-        } else {
+        guard let accountMutationToken = result.accountMutationToken else {
           throw AuthStorageError.loginSuperseded
         }
 

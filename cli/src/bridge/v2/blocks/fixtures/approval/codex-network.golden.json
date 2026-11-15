@@ -1,0 +1,86 @@
+[
+  {
+    "label": "open",
+    "text": "Codex wants network access to registry.npmjs.org\nCommand: curl https://registry.npmjs.org/left-pad\nFolder: /work/inline\nHost: registry.npmjs.org",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_NETWORK",
+          "title": "Codex wants network access to registry.npmjs.org",
+          "command": "curl https://registry.npmjs.org/left-pad",
+          "cwd": "/work/inline",
+          "children": [
+            {
+              "fields": {
+                "fields": [
+                  {
+                    "label": "Host",
+                    "value": "registry.npmjs.org",
+                    "monospace": true
+                  }
+                ]
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1",
+            "v2-2"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Yes, just this once",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "Yes, and allow this host for this session",
+        "style": "default"
+      },
+      {
+        "id": "v2-2",
+        "label": "No",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Codex wants network access to registry.npmjs.org\nCommand: curl https://registry.npmjs.org/left-pad\nFolder: /work/inline\nHost: registry.npmjs.org\nYes, just this once (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_NETWORK",
+          "title": "Codex wants network access to registry.npmjs.org",
+          "command": "curl https://registry.npmjs.org/left-pad",
+          "cwd": "/work/inline",
+          "children": [
+            {
+              "fields": {
+                "fields": [
+                  {
+                    "label": "Host",
+                    "value": "registry.npmjs.org",
+                    "monospace": true
+                  }
+                ]
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Yes, just this once (answered by Dena)"
+      }
+    ]
+  }
+]

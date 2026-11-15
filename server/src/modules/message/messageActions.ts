@@ -11,6 +11,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { findForm } from "@in/server/modules/message/messageForms"
+import { collectBlockActionIds } from "@in/server/modules/message/blockContent"
 
 const maxRows = 8
 const maxActionsPerRow = 8
@@ -18,6 +19,7 @@ const maxActionIdLength = 64
 const maxButtonTextLength = 64
 const maxCallbackBytes = 1024
 const maxCopyTextLength = 4096
+const maxComposeTextLength = 4000
 const maxToastTextLength = 256
 const maxAlertTitleLength = 128
 const maxAlertTextLength = 2048
@@ -85,7 +87,16 @@ function normalizeAction(action: MessageAction): MessageAction["action"] {
       }
       return { oneofKind: "openLink", openLink: { peerId, messageId } }
     }
+    // Client-side, like copy_text: fills the viewer's composer and never reaches the bot.
+    case "compose":
+      return {
+        oneofKind: "compose",
+        compose: { text: boundedText(action.action.compose.text, maxComposeTextLength, true)! },
+      }
+    case undefined:
+      throw RealtimeRpcError.BadRequest()
     default:
+      action.action satisfies never
       throw RealtimeRpcError.BadRequest()
   }
 }
@@ -158,6 +169,21 @@ export function normalizeAndValidateMessageActions(
   return MessageActions.create({
     rows: normalizedRows,
   })
+}
+
+/**
+ * Every action a block draws as its own button (`action_ids`, a review finding's `action_id`)
+ * must be one of the message's actions. Call with what the message will hold after the write.
+ */
+export function validateBlockActionReferences(
+  blockContent: BlockContent | null | undefined,
+  actions: MessageActions | null | undefined,
+): void {
+  if (!blockContent) return
+  const referenced = collectBlockActionIds(blockContent.blocks)
+  if (referenced.length === 0) return
+  const available = new Set(actions?.rows.flatMap((row) => row.actions.map((action) => action.actionId)) ?? [])
+  if (referenced.some((actionId) => !available.has(actionId))) throw RealtimeRpcError.BadRequest()
 }
 
 export function findCallbackActionById(input: {

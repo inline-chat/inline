@@ -1,3 +1,4 @@
+import AppKit
 import GRDB
 import InlineKit
 import InlineProtocol
@@ -27,6 +28,8 @@ final class MentionedParticipantsAutoAddManager {
     let users: [UserInfo]
     let groups: [InlineKit.UserGroup]
     let canRemoveParticipants: Bool
+    /// The user's own mentioned bots that must join the space first.
+    let ownedBotAdmission: OwnedBotSpaceAdmission.Need?
   }
 
   private let dependencies: AppDependencies
@@ -96,8 +99,16 @@ final class MentionedParticipantsAutoAddManager {
           canRemoveParticipants: snapshot.canRemoveParticipants
         )
 
+        // Bots outside the space join it first, before the send, so they
+        // see the message. The usual policy handles everyone else.
+        var policyUserIds = request.reservedUserIds
+        if let need = snapshot.ownedBotAdmission {
+          policyUserIds.subtract(need.botIds)
+          await self?.admitOwnedBots(need, chatId: snapshot.chat.id, users: snapshot.users)
+        }
+
         let action = MentionedParticipantAddPolicy.action(
-          for: request.reservedUserIds,
+          for: policyUserIds,
           context: context
         )
         let groupItems = Self.groupItems(
@@ -179,6 +190,49 @@ final class MentionedParticipantsAutoAddManager {
   @MainActor
   private func presentLinkAccessPrompt(_ gap: LinkedThreadAccessGap) {
     toolbarState?.presentLinkAccessPrompt(gap)
+  }
+
+  @MainActor
+  private func admitOwnedBots(
+    _ need: OwnedBotSpaceAdmission.Need,
+    chatId: Int64,
+    users: [UserInfo]
+  ) async {
+    guard need.canAddMembers else {
+      ToastCenter.shared.showError(OwnedBotSpaceAdmission.failureMessage(need: need))
+      return
+    }
+    let names = Self.userInfos(for: need.botIds, from: users).map(\.user.displayName)
+    guard await Self.confirmAdmission(need: need, names: names) else { return }
+    do {
+      let admitted = try await OwnedBotSpaceAdmission.admit(need, chatId: chatId)
+      let admittedNames = Self.userInfos(for: admitted, from: users).map(\.user.displayName)
+      ToastCenter.shared.showSuccess(
+        admittedNames.count == 1
+          ? "Added \(admittedNames[0]) to \(need.spaceName)"
+          : "Added \(admittedNames.count) agents to \(need.spaceName)"
+      )
+    } catch {
+      log.error("Failed to add owned bots to the space", error: error)
+      ToastCenter.shared.showError(OwnedBotSpaceAdmission.failureMessage(need: need))
+    }
+  }
+
+  @MainActor
+  private static func confirmAdmission(need: OwnedBotSpaceAdmission.Need, names: [String]) async -> Bool {
+    let alert = NSAlert()
+    alert.messageText = OwnedBotSpaceAdmission.confirmationTitle(names: names, need: need)
+    alert.informativeText = OwnedBotSpaceAdmission.confirmationMessage(need: need)
+    alert.addButton(withTitle: "Add and Send")
+    alert.addButton(withTitle: "Send Without Adding")
+    guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+      return alert.runModal() == .alertFirstButtonReturn
+    }
+    return await withCheckedContinuation { continuation in
+      alert.beginSheetModal(for: window) { response in
+        continuation.resume(returning: response == .alertFirstButtonReturn)
+      }
+    }
   }
 
   @MainActor
@@ -316,6 +370,10 @@ final class MentionedParticipantsAutoAddManager {
         .filter(Array(groupIds).contains(InlineKit.UserGroup.Columns.id))
         .fetchAll(db)
 
+      let ownedBotAdmission = try currentUserId.flatMap {
+        try OwnedBotSpaceAdmission.need(db, chat: chat, mentionedUserIds: userIds, currentUserId: $0)
+      }
+
       return Snapshot(
         chat: chat,
         messageCount: messageCount,
@@ -323,7 +381,8 @@ final class MentionedParticipantsAutoAddManager {
         groupParticipantIds: access.groupIds,
         users: users,
         groups: groups,
-        canRemoveParticipants: canRemoveParticipants
+        canRemoveParticipants: canRemoveParticipants,
+        ownedBotAdmission: ownedBotAdmission
       )
     }
   }

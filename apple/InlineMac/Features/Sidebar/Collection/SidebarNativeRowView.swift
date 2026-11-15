@@ -1504,17 +1504,36 @@ private final class SidebarNativeTextButton: NSButton {
   }
 }
 
+/// Single-line sidebar label that fades its overflowing edge instead of
+/// drawing an ellipsis, so more of the text stays readable.
 @MainActor
 private final class SidebarNativeTextField: NSTextField {
+  private static let fadeWidth: CGFloat = 24
+  /// Extra room past an RTL line's measured width, so cell padding never clips its start.
+  private static let rtlOverflowSlack: CGFloat = 16
+
+  private let fadeMask = CAGradientLayer()
+  /// Cached per string and font; measuring on every frame change is wasted work.
+  private var measuredText: (width: CGFloat, isRTL: Bool)?
+  private var restingAlignment: NSTextAlignment?
+
+  override class var cellClass: AnyClass? {
+    get { SidebarNativeTextFieldCell.self }
+    set {}
+  }
+
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
+    wantsLayer = true
     isEditable = false
     isSelectable = false
     isBordered = false
     drawsBackground = false
-    lineBreakMode = .byTruncatingTail
+    lineBreakMode = .byClipping
     maximumNumberOfLines = 1
     cell?.usesSingleLineMode = true
+    fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
+    fadeMask.endPoint = CGPoint(x: 1, y: 0.5)
     setAccessibilityElement(false)
     setAccessibilityHidden(true)
   }
@@ -1524,8 +1543,99 @@ private final class SidebarNativeTextField: NSTextField {
     fatalError("init(coder:) has not been implemented")
   }
 
+  override var stringValue: String {
+    didSet {
+      guard stringValue != oldValue else { return }
+      invalidateMeasuredText()
+    }
+  }
+
+  override var attributedStringValue: NSAttributedString {
+    didSet { invalidateMeasuredText() }
+  }
+
+  override var font: NSFont? {
+    didSet { invalidateMeasuredText() }
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    updateFadeMask()
+  }
+
   override func hitTest(_: NSPoint) -> NSView? {
     nil
+  }
+
+  private func invalidateMeasuredText() {
+    measuredText = nil
+    updateFadeMask()
+  }
+
+  private func updateFadeMask() {
+    guard let layer else { return }
+    let width = bounds.width
+    let measured = measuredText ?? {
+      // AppKit takes a line's direction from its first strong letter; that
+      // decides which end of an overflowing line is its start.
+      let text = stringValue
+      let value = (
+        width: ceil(intrinsicContentSize.width),
+        isRTL: BlockContentDirection.tally(text.unicodeScalars.prefix(64)).firstStrongIsRTL ?? false
+      )
+      measuredText = value
+      return value
+    }()
+    let truncates = width > 0 && measured.width > width + 0.5
+    // A clipped line always shows its left part; a right-to-left line starts
+    // on the right, so shift it until its start meets the trailing edge.
+    let leadingOverflow = truncates && measured.isRTL
+      ? measured.width - width + Self.rtlOverflowSlack
+      : 0
+    if let cell = cell as? SidebarNativeTextFieldCell, cell.leadingOverflow != leadingOverflow {
+      cell.leadingOverflow = leadingOverflow
+      // Right alignment pins the line's start to the trailing edge, whatever padding the cell adds.
+      if leadingOverflow > 0 {
+        if restingAlignment == nil { restingAlignment = alignment }
+        alignment = .right
+      } else if let restingAlignment {
+        alignment = restingAlignment
+        self.restingAlignment = nil
+      }
+      needsDisplay = true
+    }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    defer { CATransaction.commit() }
+    guard truncates else {
+      if layer.mask != nil { layer.mask = nil }
+      return
+    }
+    let fade = min(Self.fadeWidth, width / 2) / width
+    let opaque = NSColor.black.cgColor
+    let clear = NSColor.clear.cgColor
+    if measured.isRTL {
+      fadeMask.colors = [clear, opaque, opaque]
+      fadeMask.locations = [0, NSNumber(value: Double(fade)), 1]
+    } else {
+      fadeMask.colors = [opaque, opaque, clear]
+      fadeMask.locations = [0, NSNumber(value: Double(1 - fade)), 1]
+    }
+    fadeMask.frame = layer.bounds
+    if layer.mask !== fadeMask { layer.mask = fadeMask }
+  }
+}
+
+private final class SidebarNativeTextFieldCell: NSTextFieldCell {
+  /// How far the drawing rect extends past the left edge for an overflowing right-to-left line.
+  var leadingOverflow: CGFloat = 0
+
+  override func drawingRect(forBounds rect: NSRect) -> NSRect {
+    var rect = super.drawingRect(forBounds: rect)
+    guard leadingOverflow > 0 else { return rect }
+    rect.origin.x -= leadingOverflow
+    rect.size.width += leadingOverflow
+    return rect
   }
 }
 
@@ -2353,28 +2463,35 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
     disclosureView.frame = disclosureHitRect(in: painted)
 
-    var availableTrailing = painted.maxX - Theme.sidebarItemOuterSpacing
     newSubthreadButton.frame = newSubthreadButtonRect(in: painted)
     closeButton.frame = closeButtonRect(in: painted)
-    if showsCloseControl {
-      availableTrailing = closeButton.frame.minX
-        - SidebarNativeChatRowMetrics.closeTextSpacing
+    // Trailing badges keep their resting slot; the hover controls replace them
+    // in place instead of pushing them toward the title.
+    let restingTrailing = painted.maxX - Theme.sidebarItemOuterSpacing
+    let hoverControlsTrailing: CGFloat? = if showsCloseControl {
+      closeButton.frame.minX - SidebarNativeChatRowMetrics.closeTextSpacing
     } else if showsNewSubthreadControl {
-      availableTrailing = newSubthreadButton.frame.minX
-        - SidebarNativeChatRowMetrics.closeTextSpacing
+      newSubthreadButton.frame.minX - SidebarNativeChatRowMetrics.closeTextSpacing
+    } else {
+      nil
     }
     // The activity badge sits just before the unread count, so counts stay aligned on the edge.
-    let activityTrailing = availableTrailing
+    let activityTrailing = restingTrailing
     let activityReserve = activityBadge.isShown
       ? SidebarNativeActivityBadgeView.size + SidebarNativeActivityBadgeView.spacing
       : 0
-    availableTrailing -= activityReserve
+    var availableTrailing = restingTrailing - activityReserve
     let showsPreview = configuration.size != .compact
     let badgeBelongsToPreview = configuration.unreadBadgeStyle == .numbered
       && (displayedUnread.count > 0 || displayedUnread.mark)
       && showsPreview
-    let keepsNumberedUnreadNearContent = configuration.indentationLevel > 0
-      && trailingUnreadBadge.occupiesLayout
+    let keepsNumberedUnreadNearContent = self.keepsNumberedUnreadNearContent
+    if keepsNumberedUnreadNearContent, let hoverControlsTrailing {
+      // An inline count stays visible beside the content, so it yields to the controls.
+      availableTrailing = min(availableTrailing, hoverControlsTrailing)
+    }
+    // Text runs up to the controls while they cover the hidden trailing badges.
+    let textTrailing = hoverControlsTrailing ?? availableTrailing
 
     if showsPreview {
       let titleHeight = SidebarNativeChatRowMetrics.titleLineHeight
@@ -2384,10 +2501,10 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       titleField.frame = CGRect(
         x: leading,
         y: top,
-        width: max(availableTrailing - leading, 0),
+        width: max(textTrailing - leading, 0),
         height: titleHeight
       )
-      var previewTrailing = availableTrailing
+      var previewTrailing = textTrailing
       if badgeBelongsToPreview, trailingUnreadBadge.occupiesLayout {
         let width = trailingUnreadBadge.fittingWidth
         let badgeLeading = if keepsNumberedUnreadNearContent {
@@ -2407,7 +2524,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
           width: width,
           height: 16
         )
-        previewTrailing = trailingUnreadBadge.frame.minX - 5
+        if keepsNumberedUnreadNearContent || hoverControlsTrailing == nil {
+          previewTrailing = trailingUnreadBadge.frame.minX - 5
+        }
       }
       previewView.frame = CGRect(
         x: leading,
@@ -2418,7 +2537,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       previewView.isHidden = false
       titleActivityView.frame = .zero
     } else {
-      var titleTrailing = availableTrailing
+      var titleTrailing = textTrailing
       var nestedTitleWidth: CGFloat?
       // The hover controls take over the activity indicator's trailing slot.
       let showsTitleActivity = titleActivityView.isActivityVisible
@@ -2459,12 +2578,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
           )
         } else {
           trailingUnreadBadge.frame = CGRect(
-            x: titleTrailing - badgeWidth,
+            x: availableTrailing - badgeWidth,
             y: painted.midY - 8,
             width: badgeWidth,
             height: 16
           )
-          titleTrailing = trailingUnreadBadge.frame.minX - 8
+          titleTrailing = hoverControlsTrailing ?? trailingUnreadBadge.frame.minX - 8
         }
       }
       if !keepsNumberedUnreadNearContent, showsTitleActivity {
@@ -2870,6 +2989,22 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     configuration?.actions.newSubthread != nil && hasHoverPresentation
   }
 
+  /// Nested threads keep their count beside the title instead of on the trailing edge.
+  private var keepsNumberedUnreadNearContent: Bool {
+    (configuration?.indentationLevel ?? 0) > 0 && trailingUnreadBadge.occupiesLayout
+  }
+
+  /// Hover controls take the trailing slot by swapping out the badges that
+  /// rest there, so nothing slides sideways when the pointer enters a row.
+  private func updateTrailingBadgeVisibility() {
+    let hoverControlsShown = showsCloseControl || showsNewSubthreadControl
+    activityBadge.alphaValue = hoverControlsShown ? 0 : 1
+    trailingUnreadBadge.setObscured(
+      hoverControlsShown && !keepsNumberedUnreadNearContent,
+      animated: false
+    )
+  }
+
   private func updateControlPresentation(animated: Bool) {
     guard let configuration else { return }
     let hasHoverAppearance = hasHoverPresentation
@@ -2882,6 +3017,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     newSubthreadButton.toolTip = configuration.actions.newSubthreadTitle
     // The row's Close accessibility action remains available without hover.
     closeButton.isEnabled = configuration.showsCloseButton
+    updateTrailingBadgeVisibility()
     leadingUnreadBadge.setObscured(
       disclosureVisible,
       animated: animated && allowsAnimations

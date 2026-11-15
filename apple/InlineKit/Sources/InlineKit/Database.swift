@@ -1486,6 +1486,33 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("bot owner") { db in
+      // Who each bot acts for, from the server's `botInfo`. Not on the user row,
+      // so user saves without it never clear it. Listing the current user's
+      // bots fills it for bots saved before this existed.
+      try db.create(table: "botOwner") { table in
+        table.column("botUserId", .integer)
+          .primaryKey()
+          .references("user", column: "id", onDelete: .cascade)
+        table.column("ownerUserId", .integer).notNull().indexed()
+      }
+    }
+
+    migrator.registerMigration("bot access") { db in
+      // Whether the current user can reach each bot (its owner, its access
+      // list, or everyone), as the server resolved it. Kept so a bot the user
+      // can't reach has no composer and no mention on the first frame. No row
+      // means the server hasn't been asked yet.
+      try db.create(table: "botAccess") { table in
+        table.column("botUserId", .integer)
+          .primaryKey()
+          .references("user", column: "id", onDelete: .cascade)
+        table.column("canMessage", .boolean).notNull()
+        table.column("canReply", .boolean).notNull().defaults(to: false)
+        table.column("operations", .integer).notNull().defaults(to: 0)
+      }
+    }
+
     return migrator
   }
 }
@@ -2125,6 +2152,10 @@ public extension AppDatabase {
 
     func admit(_ database: AppDatabase) -> AppDatabase {
       finalAdmission = database.persistentStoreAdmission
+      // Before any view resolves a cached media path under the scoped root.
+      if database.isPersistent {
+        LegacyMediaCacheMigration.runIfNeeded(database: database)
+      }
       return database
     }
 

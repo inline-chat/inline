@@ -20,10 +20,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AuthCredential, ChatParticipantRecord, ClientErrorCategory, ClientEvent, ClientFailure,
-    DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage,
-    DialogsRequest, EventReliability, HistoryPage, HistoryRequest, InlineId, MessageContent,
-    MessageMetadata, MessageRecord, SpaceMemberRecord, SpaceRecord, TransactionEvent,
-    TransactionId, TransactionIdentity, TransactionState, UserRecord, UserSettingsRecord,
+    ConversationKind, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
+    DialogsPage, DialogsRequest, EventReliability, HistoryPage, HistoryRequest, InlineId,
+    MessageContent, MessageMetadata, MessageRecord, SpaceMemberRecord, SpaceRecord,
+    TransactionEvent, TransactionId, TransactionIdentity, TransactionState, UserRecord,
+    UserSettingsRecord,
 };
 
 /// Selects a history page by the monotonic message-ID cursor before applying
@@ -211,6 +212,47 @@ pub struct StoredReadState {
 pub struct AccountStateSnapshot {
     /// Chats that were removed after being observed by this account store.
     pub deleted_chat_ids: Vec<InlineId>,
+    /// Accessible workspaces confirmed for this account, capped at 1000.
+    #[serde(default)]
+    pub spaces: Vec<SpaceRecord>,
+    /// This account's own source membership rows, never inferred from roles.
+    #[serde(default)]
+    pub space_memberships: Vec<SpaceMemberRecord>,
+    /// Confirmed workspace access removals, retained across restarts.
+    #[serde(default)]
+    pub removed_space_ids: Vec<InlineId>,
+    /// A complete successful source workspace refresh has been persisted.
+    #[serde(default)]
+    pub spaces_complete: bool,
+}
+
+/// Durable account directory authority, separate from cached metadata sidecars.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountDirectoryState {
+    /// Current source account identity, learned from getMe.
+    pub account_user_id: Option<InlineId>,
+    /// Monotonic local mutation counter rejecting in-flight stale refreshes.
+    pub revision: u64,
+    /// Workspace access evidence for the account.
+    pub snapshot: AccountStateSnapshot,
+    /// Workspaces whose member cache came from a complete roster response.
+    pub complete_roster_space_ids: Vec<InlineId>,
+    /// Last workspace attempted by bounded detail refresh, for fair continuation.
+    #[serde(default)]
+    pub refresh_cursor: Option<InlineId>,
+}
+
+/// Sidecars published atomically with account directory authority.
+#[derive(Clone, Debug, Default)]
+pub struct AccountDirectoryWrite {
+    /// Fresh display metadata; this alone never grants access.
+    pub spaces: Vec<SpaceRecord>,
+    /// Fresh source public profiles.
+    pub users: Vec<UserRecord>,
+    /// Individual current-user source membership rows.
+    pub members: Vec<SpaceMemberRecord>,
+    /// Complete source rosters, replaced in the same transaction as completeness.
+    pub rosters: Vec<(InlineId, Vec<SpaceMemberRecord>)>,
 }
 
 /// Durable per-chat state that complements paged dialog/history queries during
@@ -444,6 +486,40 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
 
     /// Lists durable chat deletion tombstones.
     fn deleted_chat_ids(&self) -> BoxFuture<'static, StoreResult<Vec<InlineId>>>;
+
+    /// Loads the account-scoped directory authority. Old stores start unknown.
+    fn account_directory(&self) -> BoxFuture<'static, StoreResult<AccountDirectoryState>> {
+        Box::pin(async { Ok(AccountDirectoryState::default()) })
+    }
+
+    /// Atomically replaces directory authority only if no newer mutation won.
+    fn record_account_directory(
+        &self,
+        _expected_revision: u64,
+        _state: AccountDirectoryState,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not support directory authority",
+            ))
+        })
+    }
+
+    /// Atomically publishes directory authority and its associated source rows.
+    fn commit_account_directory(
+        &self,
+        _expected_revision: u64,
+        _state: AccountDirectoryState,
+        _write: AccountDirectoryWrite,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not support atomic directory snapshots",
+            ))
+        })
+    }
 
     /// Records user summaries in local state.
     fn record_users(&self, users: Vec<UserRecord>) -> BoxFuture<'static, StoreResult<()>>;
@@ -714,6 +790,7 @@ struct InMemoryStoreState {
     chat_tombstones: HashSet<i64>,
     users: HashMap<i64, UserRecord>,
     spaces: HashMap<i64, SpaceRecord>,
+    account_directory: AccountDirectoryState,
     space_members: HashMap<(i64, i64), SpaceMemberRecord>,
     user_settings: Option<UserSettingsRecord>,
     participants: HashMap<i64, HashMap<i64, ChatParticipantRecord>>,
@@ -869,9 +946,17 @@ impl ClientStore for InMemoryStore {
             let mut state = store.state.lock().expect("in-memory store poisoned");
             let session = state.session.take();
             let logout_in_progress = state.logout_in_progress;
+            let next_client_event_id = state.next_client_event_id;
+            let directory_revision = state
+                .account_directory
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| StoreError::internal("directory revision overflow"))?;
             *state = InMemoryStoreState::default();
+            state.account_directory.revision = directory_revision;
             state.session = session;
             state.logout_in_progress = logout_in_progress;
+            state.next_client_event_id = next_client_event_id;
             Ok(())
         })
     }
@@ -1226,6 +1311,79 @@ impl ClientStore for InMemoryStore {
                 .collect::<Vec<_>>();
             ids.sort_by_key(|id| id.get());
             Ok(ids)
+        })
+    }
+
+    fn account_directory(&self) -> BoxFuture<'static, StoreResult<AccountDirectoryState>> {
+        let store = self.clone();
+        Box::pin(async move {
+            Ok(store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .account_directory
+                .clone())
+        })
+    }
+
+    fn record_account_directory(
+        &self,
+        expected_revision: u64,
+        directory: AccountDirectoryState,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        self.commit_account_directory(
+            expected_revision,
+            directory,
+            AccountDirectoryWrite::default(),
+        )
+    }
+
+    fn commit_account_directory(
+        &self,
+        expected_revision: u64,
+        mut directory: AccountDirectoryState,
+        write: AccountDirectoryWrite,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut state = store.state.lock().expect("in-memory store poisoned");
+            if state.account_directory.revision != expected_revision {
+                return Ok(false);
+            }
+            directory.revision = expected_revision
+                .checked_add(1)
+                .ok_or_else(|| StoreError::internal("directory revision overflow"))?;
+            for (space_id, members) in &write.rosters {
+                if members.iter().any(|member| member.space_id != *space_id) {
+                    return Err(StoreError::new(
+                        ClientErrorCategory::InvalidInput,
+                        "workspace roster contains a mismatched ID",
+                    ));
+                }
+            }
+            for space in write.spaces {
+                state.spaces.insert(space.space_id.get(), space);
+            }
+            for user in write.users {
+                state.users.insert(user.user_id.get(), user);
+            }
+            for member in write.members {
+                state
+                    .space_members
+                    .insert((member.space_id.get(), member.user_id.get()), member);
+            }
+            for (space_id, members) in write.rosters {
+                state
+                    .space_members
+                    .retain(|(stored, _), _| *stored != space_id.get());
+                for member in members {
+                    state
+                        .space_members
+                        .insert((space_id.get(), member.user_id.get()), member);
+                }
+            }
+            state.account_directory = directory;
+            Ok(true)
         })
     }
 
@@ -1916,8 +2074,12 @@ impl SqliteStore {
 
     /// Inserts or replaces a dialog.
     pub fn upsert_dialog(&self, dialog: DialogRecord) -> StoreResult<()> {
-        let connection = self.connection.lock().expect("sqlite store poisoned");
-        upsert_sqlite_dialog(&connection, dialog)
+        let mut connection = self.connection.lock().expect("sqlite store poisoned");
+        let transaction = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+        upsert_sqlite_dialog(&transaction, dialog)?;
+        transaction.commit().map_err(sqlite_error)
     }
 
     /// Inserts or replaces a user summary.
@@ -2030,6 +2192,26 @@ impl SqliteStore {
     fn clear_account_data_sync(&self) -> StoreResult<()> {
         let mut connection = self.connection.lock().expect("sqlite store poisoned");
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        let previous_revision = transaction
+            .query_row(
+                "SELECT revision FROM account_directory WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .unwrap_or_default();
+        let revision = previous_revision
+            .checked_add(1)
+            .ok_or_else(|| StoreError::internal("directory revision overflow"))?;
+        let empty_directory = AccountDirectoryState {
+            revision: revision as u64,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&empty_directory).map_err(|error| {
+            StoreError::internal(format!("encode empty account directory: {error}"))
+        })?;
+        transaction.execute("INSERT INTO account_directory (id, revision, record_json) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, record_json = excluded.record_json", params![revision, json]).map_err(sqlite_error)?;
         for table in [
             "sync_state",
             "sync_buckets",
@@ -2358,7 +2540,7 @@ impl SqliteStore {
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                             d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                            d.parent_chat_id, d.parent_message_id, d.agent_context_json
+                            d.parent_chat_id, d.parent_message_id, d.agent_context_json, d.structure_json
                      FROM dialogs d
                      ORDER BY COALESCE(last_message_id, 0) DESC, chat_id ASC
                      LIMIT ?1 OFFSET ?2",
@@ -2379,7 +2561,7 @@ impl SqliteStore {
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                             d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                            d.parent_chat_id, d.parent_message_id, d.agent_context_json
+                            d.parent_chat_id, d.parent_message_id, d.agent_context_json, d.structure_json
                      FROM dialogs d
                      WHERE d.chat_id > ?1
                      ORDER BY d.chat_id ASC
@@ -2424,7 +2606,7 @@ impl SqliteStore {
                         d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                         d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                         d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                        d.parent_chat_id, d.parent_message_id, d.agent_context_json
+                        d.parent_chat_id, d.parent_message_id, d.agent_context_json, d.structure_json
                  FROM dialogs d WHERE d.chat_id = ?1",
                 params![chat_id.get()],
                 sqlite_dialog_from_row,
@@ -3576,6 +3758,111 @@ impl ClientStore for SqliteStore {
         Box::pin(async move { store.deleted_chat_ids_sync() })
     }
 
+    fn account_directory(&self) -> BoxFuture<'static, StoreResult<AccountDirectoryState>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let connection = store.connection.lock().expect("sqlite store poisoned");
+            let value = connection
+                .query_row(
+                    "SELECT record_json FROM account_directory WHERE id = 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            value
+                .map(|json| {
+                    serde_json::from_str(&json).map_err(|error| {
+                        StoreError::internal(format!("decode account directory: {error}"))
+                    })
+                })
+                .transpose()
+                .map(Option::unwrap_or_default)
+        })
+    }
+
+    fn record_account_directory(
+        &self,
+        expected_revision: u64,
+        directory: AccountDirectoryState,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        self.commit_account_directory(
+            expected_revision,
+            directory,
+            AccountDirectoryWrite::default(),
+        )
+    }
+
+    fn commit_account_directory(
+        &self,
+        expected_revision: u64,
+        mut directory: AccountDirectoryState,
+        write: AccountDirectoryWrite,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            directory.revision = expected_revision
+                .checked_add(1)
+                .ok_or_else(|| StoreError::internal("directory revision overflow"))?;
+            let json = serde_json::to_string(&directory).map_err(|error| {
+                StoreError::internal(format!("encode account directory: {error}"))
+            })?;
+            let mut connection = store.connection.lock().expect("sqlite store poisoned");
+            let transaction = connection.transaction().map_err(sqlite_error)?;
+            let current: Option<i64> = transaction
+                .query_row(
+                    "SELECT revision FROM account_directory WHERE id = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            if current.unwrap_or_default()
+                != i64::try_from(expected_revision)
+                    .map_err(|_| StoreError::internal("directory revision overflow"))?
+            {
+                return Ok(false);
+            }
+            transaction.execute("INSERT INTO account_directory (id, revision, record_json) VALUES (1, ?1, ?2) ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, record_json = excluded.record_json", params![i64::try_from(directory.revision).map_err(|_| StoreError::internal("directory revision overflow"))?, json]).map_err(sqlite_error)?;
+            for space in write.spaces {
+                let json = serde_json::to_string(&space)
+                    .map_err(|error| StoreError::internal(format!("encode space: {error}")))?;
+                transaction.execute("INSERT INTO spaces (space_id, record_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(space_id) DO UPDATE SET record_json = excluded.record_json, updated_at = excluded.updated_at", params![space.space_id.get(), json, now_seconds()]).map_err(sqlite_error)?;
+            }
+            for user in write.users {
+                upsert_sqlite_user(&transaction, user)?;
+            }
+            for (space_id, members) in write.rosters {
+                if members.iter().any(|member| member.space_id != space_id) {
+                    return Err(StoreError::new(
+                        ClientErrorCategory::InvalidInput,
+                        "workspace roster contains a mismatched ID",
+                    ));
+                }
+                transaction
+                    .execute(
+                        "DELETE FROM space_members WHERE space_id = ?1",
+                        params![space_id.get()],
+                    )
+                    .map_err(sqlite_error)?;
+                for member in members {
+                    let json = serde_json::to_string(&member).map_err(|error| {
+                        StoreError::internal(format!("encode space member: {error}"))
+                    })?;
+                    transaction.execute("INSERT INTO space_members (space_id, user_id, record_json, updated_at) VALUES (?1, ?2, ?3, ?4)", params![space_id.get(), member.user_id.get(), json, now_seconds()]).map_err(sqlite_error)?;
+                }
+            }
+            for member in write.members {
+                let json = serde_json::to_string(&member).map_err(|error| {
+                    StoreError::internal(format!("encode space member: {error}"))
+                })?;
+                transaction.execute("INSERT INTO space_members (space_id, user_id, record_json, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(space_id,user_id) DO UPDATE SET record_json = excluded.record_json, updated_at = excluded.updated_at", params![member.space_id.get(), member.user_id.get(), json, now_seconds()]).map_err(sqlite_error)?;
+            }
+            transaction.commit().map_err(sqlite_error)?;
+            Ok(true)
+        })
+    }
+
     fn record_users(&self, users: Vec<UserRecord>) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move { store.record_users_sync(users) })
@@ -4058,6 +4345,13 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
             ",
         )
         .map_err(sqlite_error)?;
+    connection.execute_batch("CREATE TABLE IF NOT EXISTS account_directory (id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL, record_json TEXT NOT NULL);").map_err(sqlite_error)?;
+    ensure_sqlite_column(
+        connection,
+        "dialogs",
+        "structure_json",
+        "TEXT NOT NULL DEFAULT '{}' ",
+    )?;
     ensure_sqlite_column(connection, "sessions", "account_namespace", "TEXT")?;
     ensure_sqlite_column(
         connection,
@@ -4255,8 +4549,16 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
             })
         })
         .transpose()?;
+    let structure: DialogStructure =
+        serde_json::from_str(&row.get::<_, String>(21)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(21, Type::Text, Box::new(error))
+        })?;
     Ok(DialogRecord {
         chat_id: InlineId::new(row.get(0)?),
+        kind: structure.kind,
+        structure_known: structure.known,
+        structure_seq: structure.seq,
+        description: structure.description,
         peer_user_id: row.get::<_, Option<i64>>(1)?.map(InlineId::new),
         title: row.get(2)?,
         emoji: row.get(3)?,
@@ -4289,6 +4591,67 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
 }
 
 fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreResult<()> {
+    let structure_json = connection
+        .query_row(
+            "SELECT structure_json FROM dialogs WHERE chat_id = ?1",
+            params![dialog.chat_id.get()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let mut dialog = dialog;
+    if let Some(json) = structure_json {
+        let existing: DialogStructure = serde_json::from_str(&json)
+            .map_err(|error| StoreError::internal(format!("decode dialog structure: {error}")))?;
+        let stale =
+            matches!((existing.seq, dialog.structure_seq), (Some(old), Some(new)) if new < old);
+        if stale || !dialog.structure_known {
+            let fields = connection
+                .query_row(
+                    "SELECT title, emoji, last_message_id FROM dialogs WHERE chat_id = ?1",
+                    params![dialog.chat_id.get()],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<i64>>(2)?,
+                        ))
+                    },
+                )
+                .map_err(sqlite_error)?;
+            if stale || dialog.title.is_none() {
+                dialog.title = fields.0;
+            }
+            if stale || dialog.emoji.is_none() {
+                dialog.emoji = fields.1;
+            }
+            if stale || dialog.last_message_id.is_none() {
+                dialog.last_message_id = fields.2.map(InlineId::new);
+            }
+        }
+        if preserve_structure(&existing, &dialog) {
+            let fields = connection.query_row("SELECT peer_user_id, space_id, parent_chat_id, parent_message_id, is_public, agent_context_json FROM dialogs WHERE chat_id = ?1", params![dialog.chat_id.get()], |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?, row.get::<_, Option<i64>>(2)?, row.get::<_, Option<i64>>(3)?, row.get::<_, Option<bool>>(4)?, row.get::<_, Option<String>>(5)?))).map_err(sqlite_error)?;
+            dialog.kind = existing.kind;
+            dialog.structure_known = existing.known;
+            dialog.structure_seq = existing.seq;
+            dialog.description = existing.description;
+            dialog.peer_user_id = fields.0.map(InlineId::new);
+            dialog.space_id = fields.1.map(InlineId::new);
+            dialog.parent_chat_id = fields.2.map(InlineId::new);
+            dialog.parent_message_id = fields.3.map(InlineId::new);
+            dialog.is_public = fields.4;
+            dialog.agent_context = fields
+                .5
+                .map(|json| {
+                    serde_json::from_str(&json).map_err(|error| {
+                        StoreError::internal(format!("decode Agent context: {error}"))
+                    })
+                })
+                .transpose()?;
+        }
+    }
+    let structure_json = serde_json::to_string(&DialogStructure::from(&dialog))
+        .map_err(|error| StoreError::internal(format!("encode dialog structure: {error}")))?;
     let chat_id = dialog.chat_id;
     let pinned_message_ids_json = serde_json::to_string(&dialog.pinned_message_ids)
         .map_err(|error| StoreError::internal(format!("encode pinned message IDs: {error}")))?;
@@ -4305,10 +4668,10 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                space_id, is_public, archived, pinned, open, chat_list_hidden,
                list_order, pinned_order, notification_mode, follow_mode,
                pinned_message_ids_json, parent_chat_id, parent_message_id,
-               agent_context_json, updated_at
+               agent_context_json, updated_at, structure_json
              ) VALUES (
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-               ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
+               ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
              )
              ON CONFLICT(chat_id) DO UPDATE SET
                peer_user_id = excluded.peer_user_id,
@@ -4330,6 +4693,7 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                parent_chat_id = excluded.parent_chat_id,
                parent_message_id = excluded.parent_message_id,
                agent_context_json = excluded.agent_context_json,
+               structure_json = excluded.structure_json,
                updated_at = excluded.updated_at",
             params![
                 dialog.chat_id.get(),
@@ -4355,6 +4719,7 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                 dialog.parent_message_id.map(InlineId::get),
                 agent_context_json,
                 now_seconds(),
+                structure_json,
             ],
         )
         .map_err(sqlite_error)?;
@@ -4642,11 +5007,68 @@ fn users_for_messages_from_memory(
         .collect()
 }
 
-fn upsert_dialog(dialogs: &mut Vec<DialogRecord>, dialog: DialogRecord) {
+#[derive(Default, Serialize, Deserialize)]
+struct DialogStructure {
+    #[serde(default)]
+    kind: ConversationKind,
+    #[serde(default)]
+    known: bool,
+    #[serde(default)]
+    seq: Option<i32>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+impl From<&DialogRecord> for DialogStructure {
+    fn from(dialog: &DialogRecord) -> Self {
+        Self {
+            kind: dialog.kind,
+            known: dialog.structure_known,
+            seq: dialog.structure_seq,
+            description: dialog.description.clone(),
+        }
+    }
+}
+
+fn preserve_structure(existing: &DialogStructure, incoming: &DialogRecord) -> bool {
+    existing.known
+        && (!incoming.structure_known
+            || match (existing.seq, incoming.structure_seq) {
+                (Some(old), Some(new)) => new < old,
+                (Some(_), None) => true,
+                _ => false,
+            })
+}
+
+fn upsert_dialog(dialogs: &mut Vec<DialogRecord>, mut dialog: DialogRecord) {
     if let Some(existing) = dialogs
         .iter_mut()
         .find(|existing| existing.chat_id == dialog.chat_id)
     {
+        let stale = matches!((existing.structure_seq, dialog.structure_seq), (Some(old), Some(new)) if new < old);
+        if stale || !dialog.structure_known {
+            if stale || dialog.title.is_none() {
+                dialog.title = existing.title.clone();
+            }
+            if stale || dialog.emoji.is_none() {
+                dialog.emoji = existing.emoji.clone();
+            }
+            if stale || dialog.last_message_id.is_none() {
+                dialog.last_message_id = existing.last_message_id;
+            }
+        }
+        if preserve_structure(&DialogStructure::from(&*existing), &dialog) {
+            dialog.kind = existing.kind;
+            dialog.structure_known = existing.structure_known;
+            dialog.structure_seq = existing.structure_seq;
+            dialog.description = existing.description.clone();
+            dialog.peer_user_id = existing.peer_user_id;
+            dialog.space_id = existing.space_id;
+            dialog.parent_chat_id = existing.parent_chat_id;
+            dialog.parent_message_id = existing.parent_message_id;
+            dialog.is_public = existing.is_public;
+            dialog.agent_context = existing.agent_context.clone();
+        }
         *existing = dialog;
         return;
     }
@@ -5152,6 +5574,7 @@ mod tests {
                 notification_mode: Some(DialogNotificationMode::Mentions),
                 follow_mode: Some(DialogFollowMode::Following),
                 pinned_message_ids: vec![InlineId::new(99), InlineId::new(98)],
+                ..DialogRecord::new(InlineId::new(7))
             })
             .unwrap();
         store
@@ -6066,6 +6489,7 @@ mod tests {
             attachments: Vec::new(),
             actions: Vec::new(),
             agent_session: None,
+            extra: Default::default(),
         };
         store.record_message(message.clone()).await.unwrap();
         assert_eq!(
@@ -6085,6 +6509,61 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(history.messages, vec![message]);
+    }
+
+    #[tokio::test]
+    async fn sqlite_unknown_message_metadata_survives_reopen_and_event_replay() {
+        let path = sqlite_temp_path("future-message-metadata");
+        let mut message = test_message(12);
+        message.metadata = serde_json::from_value(serde_json::json!({
+            "future_metadata": {"source": "newer-client", "values": [1, true, null]}
+        }))
+        .unwrap();
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            store.record_message(message.clone()).await.unwrap();
+            store
+                .append_client_events(vec![ClientEvent::MessageStored {
+                    message: message.clone(),
+                }])
+                .await
+                .unwrap();
+        }
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            assert_eq!(
+                store
+                    .message(message.chat_id, message.message_id)
+                    .await
+                    .unwrap(),
+                Some(message.clone())
+            );
+            let pending = store.pending_client_events().await.unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].event, ClientEvent::MessageStored { message });
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn account_clear_does_not_reuse_delivery_ids_for_late_acknowledgements() {
+        let store = InMemoryStore::new();
+        let event = |id| ClientEvent::MessageDeleted {
+            chat_id: InlineId::new(7),
+            message_id: InlineId::new(id),
+        };
+        let first = store.append_client_events(vec![event(1)]).await.unwrap()[0]
+            .delivery_id
+            .unwrap();
+        store.clear_account_data().await.unwrap();
+        let second = store.append_client_events(vec![event(2)]).await.unwrap()[0]
+            .delivery_id
+            .unwrap();
+        assert!(second > first);
+        store.acknowledge_client_event(first).await.unwrap();
+        let pending = store.pending_client_events().await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].delivery_id, Some(second));
     }
 
     #[tokio::test]
@@ -6153,6 +6632,176 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![InlineId::new(2), InlineId::new(3)]
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_structure_move_detach_partial_and_stale_snapshot_survive_reopen() {
+        let path = sqlite_temp_path("structure-contract");
+        let mut original = DialogRecord::new(InlineId::new(7));
+        original.kind = ConversationKind::Chat;
+        original.structure_known = true;
+        original.structure_seq = Some(10);
+        original.space_id = Some(InlineId::new(5));
+        original.parent_chat_id = Some(InlineId::new(2));
+        original.parent_message_id = Some(InlineId::new(3));
+        original.description = Some("source description".into());
+        original.title = Some("Old title".into());
+        original.emoji = Some("old".into());
+        original.last_message_id = Some(InlineId::new(1));
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            store.record_dialog(original.clone()).await.unwrap();
+            let mut moved = original.clone();
+            moved.structure_seq = Some(11);
+            moved.space_id = Some(InlineId::new(6));
+            moved.parent_chat_id = Some(InlineId::new(4));
+            moved.parent_message_id = None;
+            moved.title = Some("Moved title".into());
+            moved.emoji = Some("moved".into());
+            moved.last_message_id = Some(InlineId::new(2));
+            store.record_dialog(moved).await.unwrap();
+        }
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            let moved = store.dialog(original.chat_id).await.unwrap().unwrap();
+            assert_eq!(moved.space_id, Some(InlineId::new(6)));
+            assert_eq!(moved.parent_chat_id, Some(InlineId::new(4)));
+            assert_eq!(moved.parent_message_id, None);
+            store
+                .record_dialog(DialogRecord::new(original.chat_id))
+                .await
+                .unwrap();
+            assert_eq!(
+                store
+                    .dialog(original.chat_id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .space_id,
+                moved.space_id
+            );
+            let partial = store.dialog(original.chat_id).await.unwrap().unwrap();
+            assert_eq!(
+                (partial.title, partial.emoji, partial.last_message_id),
+                (
+                    moved.title.clone(),
+                    moved.emoji.clone(),
+                    moved.last_message_id
+                )
+            );
+            let mut detached = moved;
+            detached.structure_seq = Some(12);
+            detached.space_id = None;
+            detached.parent_chat_id = None;
+            detached.description = None;
+            detached.title = Some("Current title".into());
+            detached.emoji = None;
+            detached.last_message_id = Some(InlineId::new(3));
+            store.record_dialog(detached).await.unwrap();
+        }
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            store.record_dialog(original.clone()).await.unwrap();
+            let current = store.dialog(original.chat_id).await.unwrap().unwrap();
+            assert_eq!(current.kind, ConversationKind::Chat);
+            assert!(current.structure_known);
+            assert_eq!(current.structure_seq, Some(12));
+            assert_eq!(
+                (current.title, current.emoji, current.last_message_id),
+                (Some("Current title".into()), None, Some(InlineId::new(3)))
+            );
+            assert_eq!(
+                (
+                    current.space_id,
+                    current.parent_chat_id,
+                    current.parent_message_id,
+                    current.description
+                ),
+                (None, None, None, None)
+            );
+            // A pre-migration record remains unknown until a source peer arrives.
+            store
+                .record_dialog(DialogRecord::new(InlineId::new(8)))
+                .await
+                .unwrap();
+            assert_eq!(
+                store.dialog(InlineId::new(8)).await.unwrap().unwrap().kind,
+                ConversationKind::Unknown
+            );
+            let mut dm = DialogRecord::new(InlineId::new(9));
+            dm.kind = ConversationKind::DirectMessage;
+            dm.structure_known = true;
+            dm.peer_user_id = Some(InlineId::new(42));
+            store.record_dialog(dm).await.unwrap();
+        }
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            assert_eq!(
+                store.dialog(InlineId::new(9)).await.unwrap().unwrap().kind,
+                ConversationKind::DirectMessage
+            );
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sqlite_directory_revocation_and_account_clear_reject_stale_refresh_after_reopen() {
+        let path = sqlite_temp_path("directory-contract");
+        let mut active = AccountDirectoryState {
+            account_user_id: Some(InlineId::new(42)),
+            ..Default::default()
+        };
+        active.snapshot.spaces_complete = true;
+        active.snapshot.spaces.push(SpaceRecord {
+            space_id: InlineId::new(5),
+            name: "Workspace".into(),
+            creator: false,
+            date: 1,
+            is_public: Some(false),
+            seq: Some(10),
+            grid_enabled: None,
+        });
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            assert!(
+                store
+                    .record_account_directory(0, active.clone())
+                    .await
+                    .unwrap()
+            );
+            let mut revoked = store.account_directory().await.unwrap();
+            revoked.snapshot.spaces.clear();
+            revoked.snapshot.removed_space_ids.push(InlineId::new(5));
+            assert!(store.record_account_directory(1, revoked).await.unwrap());
+        }
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            assert!(
+                !store
+                    .record_account_directory(1, active.clone())
+                    .await
+                    .unwrap()
+            );
+            let revoked = store.account_directory().await.unwrap();
+            assert!(revoked.snapshot.spaces.is_empty());
+            assert_eq!(revoked.snapshot.removed_space_ids, vec![InlineId::new(5)]);
+            store.clear_account_data().await.unwrap();
+            assert!(
+                !store
+                    .record_account_directory(revoked.revision, active.clone())
+                    .await
+                    .unwrap()
+            );
+        }
+        {
+            let store = SqliteStore::open(&path).unwrap();
+            let cleared = store.account_directory().await.unwrap();
+            assert!(cleared.account_user_id.is_none());
+            assert!(cleared.snapshot.spaces.is_empty());
+            assert!(!cleared.snapshot.spaces_complete);
+            assert!(!store.record_account_directory(0, active).await.unwrap());
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     fn sqlite_temp_path(label: &str) -> std::path::PathBuf {

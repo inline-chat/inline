@@ -99,6 +99,12 @@ function visitWidgets(blocks: readonly Block[], visit: (widget: BlockWidget) => 
       case "callout":
         visitWidgets(block.kind.callout.children, visit)
         break
+      case "planProposal":
+        visitWidgets(block.kind.planProposal.children, visit)
+        break
+      case "approval":
+        visitWidgets(block.kind.approval.children, visit)
+        break
       case "list":
         for (const item of block.kind.list.items) visitWidgets(item.children, visit)
         break
@@ -282,6 +288,12 @@ export function attachMarkdownWidget(content: BlockContent, start: number, end: 
           break
         case "callout":
           if (replace(block.kind.callout.children)) return true
+          break
+        case "planProposal":
+          if (replace(block.kind.planProposal.children)) return true
+          break
+        case "approval":
+          if (replace(block.kind.approval.children)) return true
           break
         case "list":
           for (const item of block.kind.list.items) if (replace(item.children)) return true

@@ -114,7 +114,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
   func snapshot() -> ([GetFilePartInput], Int, Int) { (requests, maxActive, active) }
 }
 
-@Suite("Native download session ownership", .serialized)
+@Suite("Native download session ownership", .serialized, .timeLimit(.minutes(1)))
 @MainActor private struct NativeDownloadSessionTests {
   @Test(arguments: [false, true])
   func smallBearerDocumentsUseCDNWithoutOptIn(includeMessage: Bool) async throws {
@@ -302,7 +302,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
     }
     var completions = 0
     var persisted = false
-    owner.downloadFile(id: "doc_99003", url: nil, localUrl: destination, expectedBytes: 1, nativeDownload: { url, progress in
+    owner.downloadFile(id: "doc_99003", url: nil, localUrl: destination, expectedBytes: 1, nativeFile: { url, progress in
       try Data([1]).write(to: url)
       progress(1, 1)
       return url
@@ -339,7 +339,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
     let destination = downloadDestination()
     defer { try? FileManager.default.removeItem(at: destination) }
     var completions = 0
-    owner.downloadFile(id: "doc_99001", url: nil, localUrl: destination, nativeDownload: { url, progress in
+    owner.downloadFile(id: "doc_99001", url: nil, localUrl: destination, nativeFile: { url, progress in
       try await NativeFileDownloader(transport: transport).download(
         fileUniqueID: "IND_wire", to: url, progress: progress
       )
@@ -358,7 +358,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
 
     let next = DownloadPartMock(bytes: Data([5, 6, 7]))
     let completed = AsyncStream<Void>.makeStream()
-    owner.downloadFile(id: "doc_99001", url: nil, localUrl: destination, nativeDownload: { url, progress in
+    owner.downloadFile(id: "doc_99001", url: nil, localUrl: destination, nativeFile: { url, progress in
       try await NativeFileDownloader(transport: next).download(fileUniqueID: "IND_wire", to: url, progress: progress)
     }) { _, result in
       if case .failure = result { Issue.record("Next download failed") }
@@ -379,7 +379,7 @@ private actor DownloadPartMock: NativeFilePartFetching {
       if owner.isDocumentDownloadActive(documentId: 99002) { owner.cancelDocumentDownload(documentId: 99002) }
     }
     var completions = 0
-    owner.downloadFile(id: "doc_99002", url: nil, localUrl: destination, nativeDownload: { url, progress in
+    owner.downloadFile(id: "doc_99002", url: nil, localUrl: destination, nativeFile: { url, progress in
       try await NativeFileDownloader(transport: transport).download(fileUniqueID: "IND_wire", to: url, progress: progress)
     }) { _, result in
       completions += 1
@@ -397,7 +397,7 @@ private func downloadDestination() -> URL {
   FileManager.default.temporaryDirectory.appendingPathComponent("inline-native-download-test-\(UUID().uuidString)")
 }
 
-@Suite private struct NativeDownloadTests {
+@Suite(.timeLimit(.minutes(1))) private struct NativeDownloadTests {
   @Test func crossLanguageWireVectorsAndLegacyMedia() throws {
     // Shared with packages/protocol/tests/downloads.test.ts.
     let callHex = "088801ca081e0a08494e445f77697265108180808080808010188080202205087b10c803"
@@ -521,8 +521,10 @@ private func downloadDestination() -> URL {
     message.chatID = 11
     message.messageID = 12
     let provenance = message
+    // A fixed window keeps the slot count exact; adaptation has its own test.
+    let manager = NativeDownloadManager(window: 4 ... 4)
     let download = Task {
-      try await NativeFileDownloader(transport: transport).download(
+      try await NativeFileDownloader(transport: transport, manager: manager).download(
         fileUniqueID: "INP_download", message: provenance, to: destination
       )
     }
@@ -530,16 +532,19 @@ private func downloadDestination() -> URL {
     // parts remain beyond this window, so the assertion also checks admission.
     for offset in window { await transport.waitForRequest(offset) }
     let (pending, maximum, inFlight) = await transport.snapshot()
-    #expect(pending.map(\.offset).sorted() == [0] + window)
+    #expect(pending.map(\.offset).sorted() == [0] + window, "requests: \(pending.map(\.offset))")
     #expect(maximum == 4)
     #expect(inFlight == 4)
-    // Return the later ranges in reverse order while the next writable range
-    // remains blocked, then verify the published file still has exact bytes.
+    // Return the later ranges in reverse order while the first range remains
+    // blocked, then verify the published file still has exact bytes.
     for offset in window.dropFirst().reversed() {
       await transport.release(offset)
       await transport.waitForResponse(offset)
     }
-    #expect(await transport.responseOffsets() == [0] + window.dropFirst().reversed())
+    // Ranges are written as they arrive, so the window moves past the stalled range and the
+    // rest of the file is served before it returns: no head-of-line blocking.
+    for offset in [UInt64(partSize * 5), UInt64(partSize * 6)] { await transport.waitForResponse(offset) }
+    #expect(Set(await transport.responseOffsets()) == Set([0] + window.dropFirst() + [UInt64(partSize * 5), UInt64(partSize * 6)]))
     await transport.release(window[0])
     let result = try await download.value
     #expect(result == destination)
@@ -829,7 +834,7 @@ private func nativeRecord(
   try JSONSerialization.data(withJSONObject: values).write(to: nativePartial(directory, file: file).appendingPathExtension("json"))
 }
 
-@Suite("Native download manager", .serialized)
+@Suite("Native download manager", .serialized, .timeLimit(.minutes(1)))
 private struct NativeDownloadManagerTests {
   @Test func duplicatesShareOneOwnerWithIndependentDestinations() async throws {
     let manager = NativeDownloadManager()
@@ -884,8 +889,8 @@ private struct NativeDownloadManagerTests {
     #expect(await transport.snapshot().0.count == 2)
   }
 
-  @Test func fifoAdmissionAndRepeatedCancellationNeverExceedSixRanges() async throws {
-    let manager = NativeDownloadManager()
+  @Test func sharedWindowBoundsRangesAcrossFilesAndCanceledRequestsKeepTheirSlots() async throws {
+    let manager = NativeDownloadManager(window: 6 ... 6)
     let directory = try nativeCacheDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     for cycle in 0 ..< 3 {
@@ -900,52 +905,147 @@ private struct NativeDownloadManagerTests {
             validateAccount: { admitted.mark(file) }, transport: transport))
         })
         await admitted.wait(for: file)
+        // Each of the first three files ends up holding two ranges: all six slots.
         if index < 3 { await transport.waitForRequest(file, offset: 1_048_576) }
       }
       #expect(await transport.snapshot().2 == 6)
       #expect(await transport.snapshot().0.filter { $0.offset == 0 }.map(\.fileUniqueID) == (0 ..< 3).map { "INP_\(cycle)_\($0)" })
       tasks[0].cancel()
       await transport.waitForCancellation("INP_\(cycle)_0")
-      // A canceled task's uncooperative RPCs still hold its two range permits.
+      // A canceled task's uncooperative RPCs still hold their slots.
       #expect(await transport.snapshot().2 == 6)
       #expect(await transport.snapshot().0.filter { $0.offset == 0 }.count == 3)
       await transport.release("INP_\(cycle)_0")
       await #expect(throws: CancellationError.self) { try await tasks[0].value }
-      await transport.waitForRequest("INP_\(cycle)_3", offset: 1_048_576)
-      #expect(await transport.snapshot().0.filter { $0.offset == 0 }.map(\.fileUniqueID) == (0 ..< 4).map { "INP_\(cycle)_\($0)" })
-      tasks[1].cancel()
-      await transport.release("INP_\(cycle)_1")
-      await #expect(throws: CancellationError.self) { try await tasks[1].value }
-      await transport.waitForRequest("INP_\(cycle)_4", offset: 1_048_576)
-      for index in 2 ..< 5 { tasks[index].cancel(); await transport.release("INP_\(cycle)_\(index)") }
-      for index in 2 ..< 5 { await #expect(throws: CancellationError.self) { try await tasks[index].value } }
+      // The freed slots go to the files that were waiting.
+      await transport.waitForRequest("INP_\(cycle)_3", offset: 0)
+      await transport.waitForRequest("INP_\(cycle)_4", offset: 0)
+      for index in 1 ..< 5 { tasks[index].cancel(); await transport.release("INP_\(cycle)_\(index)") }
+      for index in 1 ..< 5 { await #expect(throws: CancellationError.self) { try await tasks[index].value } }
       let (_, maximum, active) = await transport.snapshot()
       #expect(maximum == 6 && active == 0)
     }
   }
 
-  @Test func stopThenNewManagerResumesOnlyContiguousPrefix() async throws {
+  @Test func freedSlotsGoToTheHighestPriorityFileFirst() async throws {
+    let manager = NativeDownloadManager(window: 1 ... 1)
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let transport = HeldDownloadTransport(bytes: Data([1, 2, 3]), holdAt: 0)
+    let admitted = DownloadAdmissionProbe()
+    func start(_ file: String, _ priority: NativeDownloadPriority) -> Task<URL, any Error> {
+      Task {
+        try await manager.download(.init(accountID: 1, fileUniqueID: file, destination: directory.appendingPathComponent(file),
+          validateAccount: { admitted.mark(file) }, priority: priority, transport: transport))
+      }
+    }
+    let first = start("INP_first", .visible)
+    await transport.waitForRequest("INP_first", offset: 0)
+    let prefetch = start("INP_prefetch", .prefetch)
+    await admitted.wait(for: "INP_prefetch")
+    let tapped = start("INP_tapped", .userInitiated)
+    await admitted.wait(for: "INP_tapped")
+    // Both must be queued for the one slot before it frees, or the first to queue would win.
+    while await manager.waitingParts < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    await transport.release("INP_first")
+    _ = try await first.value
+    await transport.waitForRequest("INP_tapped", offset: 0)
+    #expect(await transport.snapshot().0.map(\.fileUniqueID) == ["INP_first", "INP_tapped"])
+    await transport.release("INP_tapped")
+    _ = try await tapped.value
+    await transport.release("INP_prefetch")
+    _ = try await prefetch.value
+    #expect(await transport.snapshot().0.map(\.fileUniqueID) == ["INP_first", "INP_tapped", "INP_prefetch"])
+  }
+
+  @Test func aRangeInRetryBackoffLendsItsSlotToOtherFiles() async throws {
+    // One slot; the first file's only range fails once and then backs off for two seconds.
+    let manager = NativeDownloadManager(retryBaseDelay: .seconds(2), window: 1 ... 1)
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let flaky = DownloadPartMock(bytes: Data([1, 2, 3]), failureOffset: 0, failuresRemaining: 1)
+    let flakyTask = Task {
+      try await manager.download(.init(accountID: 1, fileUniqueID: "INP_flaky", destination: directory.appendingPathComponent("flaky"), transport: flaky))
+    }
+    await flaky.waitForRequest(0)
+    let other = DownloadPartMock(bytes: Data([4, 5, 6]))
+    let clock = ContinuousClock()
+    let started = clock.now
+    _ = try await manager.download(.init(accountID: 1, fileUniqueID: "INP_other", destination: directory.appendingPathComponent("other"), transport: other))
+    // Served during the backoff, not after it.
+    #expect(clock.now - started < .seconds(1))
+    #expect(await flaky.snapshot().0.count == 1)
+    _ = try await flakyTask.value
+    #expect(await flaky.snapshot().0.count == 2)
+  }
+
+  @Test func windowGrowsOnFastPartsAndHalvesOnSlowOrFailingOnes() async {
+    let manager = NativeDownloadManager(window: 2 ... 12, initialWindow: 4)
+    for _ in 0 ..< 20 { await manager.adaptWindow(after: .milliseconds(200)) }
+    #expect(await manager.window == 12)
+    await manager.adaptWindow(after: .milliseconds(1_500))
+    #expect(await manager.window == 12)
+    await manager.adaptWindow(after: .seconds(3))
+    #expect(await manager.window == 6)
+    await manager.partFailedTransiently()
+    #expect(await manager.window == 3)
+    await manager.partFailedTransiently()
+    await manager.partFailedTransiently()
+    #expect(await manager.window == 2)
+  }
+
+  @Test func stoppedDownloadKeepsOutOfOrderPartsAndResumesOnlyMissingOnes() async throws {
     let directory = try nativeCacheDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let bytes = Data((0 ..< 524_288 * 4 + 17).map { UInt8($0 % 251) })
     let transport = DownloadPartMock(bytes: bytes, stallOffset: 524_288)
     let destination = directory.appendingPathComponent("finished")
-    let manager = NativeDownloadManager()
-    let task = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport)) }
-    await transport.waitForRequest(1_048_576)
+    let manager = NativeDownloadManager(window: 4 ... 4)
+    let written = DownloadAdmissionProbe()
+    let task = Task {
+      try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport),
+        progress: { received, total in
+          // Everything except the stalled second part.
+          if received == total - 524_288 { written.mark("sparse") }
+        })
+    }
+    await written.wait(for: "sparse")
     await manager.stop(.init(accountID: 1, fileUniqueID: "INP_resume"))
     await #expect(throws: CancellationError.self) { try await task.value }
-    #expect(try Data(contentsOf: nativePartial(directory)) == bytes.prefix(524_288))
+    let partial = try Data(contentsOf: nativePartial(directory))
+    #expect(partial.count == bytes.count)
+    #expect(partial.prefix(524_288) == bytes.prefix(524_288))
+    #expect(partial.suffix(from: 1_048_576) == bytes.suffix(from: 1_048_576))
+    let map = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: nativePartial(directory).appendingPathExtension("json"))) as? [String: Any])
+    #expect(map["v"] as? Int == 2)
+    #expect(map["parts"] as? [[Int]] == [[0, 1], [2, 5]])
     #expect(await transport.snapshot().2 == 0)
     let next = DownloadPartMock(bytes: bytes)
     _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: next))
-    #expect(await next.snapshot().0.first?.offset == 524_288)
+    #expect(await next.snapshot().0.map(\.offset) == [524_288])
     #expect(try Data(contentsOf: destination) == bytes)
     #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
     #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).appendingPathExtension("json").path))
   }
 
-  @Test func byteProgressRenewsTheRetryBudget() async throws {
+  @Test func mapClaimingPartsPastTheBodyIsDistrusted() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data((0 ..< 524_288 * 3).map { UInt8($0 % 251) })
+    // The map says all three parts are present, but only the first reached the disk.
+    try bytes.prefix(524_288).write(to: nativePartial(directory))
+    let record: [String: Any] = ["v": 2, "accountID": 1, "fileUniqueID": "INP_resume", "totalSize": bytes.count, "parts": [[0, 3]]]
+    try JSONSerialization.data(withJSONObject: record).write(to: nativePartial(directory).appendingPathExtension("json"))
+    let transport = DownloadPartMock(bytes: bytes)
+    let destination = directory.appendingPathComponent("finished")
+    _ = try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: destination, transport: transport))
+    #expect(await transport.snapshot().0.map(\.offset).sorted() == [524_288, 1_048_576])
+    #expect(try Data(contentsOf: destination) == bytes)
+  }
+
+  /// The budget is renewed when a range is first served and as bytes land; a retry's re-acquired
+  /// slot does not renew it.
+  @Test func servingANewRangeRenewsTheRetryBudget() async throws {
     let directory = try nativeCacheDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let progress = DownloadAdmissionProbe()
@@ -1007,7 +1107,12 @@ private struct NativeDownloadManagerTests {
       total: mismatch == "oversize" ? 500_000_001 : mismatch == "remoteTotal" ? 524_400 : bytes.count)
     let recordURL = nativePartial(directory).appendingPathExtension("json")
     if mismatch == "badJSON" { try Data("{".utf8).write(to: recordURL) }
-    if mismatch == "oversizedJSON" { try Data(repeating: 0x20, count: 2_049).write(to: recordURL) }
+    // Past the reader's 16 KiB cap, even though the leading bytes alone would decode.
+    if mismatch == "oversizedJSON" {
+      var oversized = try Data(contentsOf: recordURL)
+      oversized.append(Data(repeating: 0x20, count: 16_385 - oversized.count))
+      try oversized.write(to: recordURL)
+    }
     if mismatch == "identity" {
       var record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: recordURL)) as? [String: Any])
       record["fileUniqueID"] = "INP_other"

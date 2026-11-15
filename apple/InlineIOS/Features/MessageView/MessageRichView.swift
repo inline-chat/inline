@@ -32,6 +32,8 @@ final class MessageRichView: UIView {
   private(set) var leavingNodes: [UIView] = []
 
   var onDisclosureToggle: ((RichPath, Bool) -> Void)?
+  /// The message whose actions agent blocks draw as buttons. Set before `apply`.
+  var actionContext: MessageRichActionContext?
 
   /// Read before the body: the sender and the blocks above it.
   var accessibilityLead: String? {
@@ -97,10 +99,14 @@ final class MessageRichView: UIView {
     }
     order = keys
     accessibilityNodes = nil
-    // Decorations behind content: quotes first, in tree order.
+    // Decorations behind content, outer ones furthest back: quotes and cards with children.
+    var decorations: [UIView] = []
     for key in order {
       guard let view = views[key] else { continue }
-      if view is RichQuoteView { sendSubviewToBack(view) } else { bringSubviewToFront(view) }
+      if view is RichQuoteView || view is RichCardView { decorations.append(view) } else { bringSubviewToFront(view) }
+    }
+    for view in decorations.reversed() {
+      sendSubviewToBack(view)
     }
   }
 
@@ -165,6 +171,10 @@ final class MessageRichView: UIView {
                 let hit = table.textHit(at: convert(point, to: table))
       {
         return hit
+      } else if let card = view as? RichCardView, card.frame.contains(point),
+                let hit = card.textHit(at: convert(point, to: card))
+      {
+        return hit
       }
     }
     return nil
@@ -203,7 +213,7 @@ final class MessageRichView: UIView {
     }
     for key in order {
       guard let view = views[key] else { continue }
-      if view.isAccessibilityElement || view is RichCodeView {
+      if view.isAccessibilityElement || view is RichCodeView || view is RichCardView || view is RichDiffView {
         elements.append(view)
       }
     }
@@ -238,6 +248,8 @@ final class MessageRichView: UIView {
     case .image: 6
     case .album: 7
     case .disclosure: 8
+    case .card: 10
+    case .diff: 11
     }
   }
 
@@ -252,6 +264,8 @@ final class MessageRichView: UIView {
     case .image: RichImageView()
     case .album: RichAlbumView()
     case .disclosure: RichDisclosureView()
+    case .card: RichCardView()
+    case .diff: RichDiffView()
     }
     addSubview(view)
     return view
@@ -300,6 +314,14 @@ final class MessageRichView: UIView {
       disclosureView?.onToggle = { [weak self] in
         self?.onDisclosureToggle?(path, !disclosure.isExpanded)
       }
+    case let .card(card):
+      let cardView = view as? RichCardView
+      cardView?.configure(card, palette: palette, context: actionContext)
+      cardView?.onToggle = { [weak self] path, isExpanded in
+        self?.onDisclosureToggle?(path, isExpanded)
+      }
+    case let .diff(diff):
+      (view as? RichDiffView)?.configure(diff, palette: palette)
     }
   }
 }
@@ -307,7 +329,7 @@ final class MessageRichView: UIView {
 // MARK: - Node views
 
 /// Node views that scroll sideways and start over for new content.
-private protocol RichScrollResetting: UIView {
+protocol RichScrollResetting: UIView {
   var needsScrollReset: Bool { get set }
 }
 

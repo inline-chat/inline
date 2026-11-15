@@ -8,9 +8,10 @@ import {
   type ConnectionInit,
   ServerProtocolMessage,
 } from "@inline-chat/protocol/core"
-import type { Method, RpcCall } from "@inline-chat/protocol/core"
+import type { Method } from "@inline-chat/protocol/core"
 import { AsyncChannel } from "../utils/async-channel.js"
 import { PingPongService } from "./ping-pong.js"
+import { normalizeRpcInput, type RpcInput } from "./rpc-input.js"
 import { TransportError, type Transport } from "./transport.js"
 import type { ClientEvent, ClientState } from "./types.js"
 import type { InlineSdkLogger } from "../sdk/logger.js"
@@ -48,7 +49,7 @@ type PendingRpcRequest = {
   sending: boolean
 }
 
-const emptyRpcInput: RpcCall["input"] = { oneofKind: undefined }
+const emptyRpcInput: RpcInput = { oneofKind: undefined }
 const defaultRpcTimeoutMs = 30_000
 const defaultMaxPendingRpcRequests = 64
 const maximumQueuedEventBytes = 8 * 1024 * 1024
@@ -155,13 +156,13 @@ export class ProtocolClient {
     })
   }
 
-  async sendRpc(method: Method, input: RpcCall["input"] = emptyRpcInput): Promise<bigint> {
+  async sendRpc(method: Method, input: RpcInput = emptyRpcInput): Promise<bigint> {
     if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
     this.ensureOpenForRpc()
     assertValidRpcMethod(method)
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
-      rpcCall: { method, input },
+      rpcCall: { method, input: normalizeRpcInput(method, input) },
     })
 
     await this.transport.send(message)
@@ -170,7 +171,7 @@ export class ProtocolClient {
 
   async callRpc(
     method: Method,
-    input: RpcCall["input"] = emptyRpcInput,
+    input: RpcInput = emptyRpcInput,
     options?: RpcCallOptions,
   ): Promise<RpcResult["result"]> {
     if (this.terminalAuthenticationError) throw this.terminalAuthenticationError
@@ -183,7 +184,7 @@ export class ProtocolClient {
     }
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
-      rpcCall: { method, input },
+      rpcCall: { method, input: normalizeRpcInput(method, input) },
     })
 
     return await new Promise<RpcResult["result"]>((resolve, reject) => {

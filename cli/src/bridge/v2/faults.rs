@@ -73,6 +73,8 @@ struct FakeSession {
     sends: AtomicUsize,
     received: Mutex<Vec<Input>>,
     unknown_first: bool,
+    /// Modes the work switched the session to, in order.
+    modes: Mutex<Vec<String>>,
 }
 
 impl Session for FakeSession {
@@ -110,7 +112,10 @@ impl Session for FakeSession {
         })
     }
 
-    fn control<'a>(&'a self, _: Op) -> HarnessFuture<'a, OpOutcome, OpError> {
+    fn control<'a>(&'a self, op: Op) -> HarnessFuture<'a, OpOutcome, OpError> {
+        if let Op::Mode { mode } = &op {
+            self.modes.lock().unwrap().push(mode.as_str().to_owned());
+        }
         Box::pin(async { Ok(OpOutcome::accepted()) })
     }
 
@@ -233,6 +238,7 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         sends: AtomicUsize::new(0),
         received: Mutex::new(Vec::new()),
         unknown_first,
+        modes: Mutex::new(Vec::new()),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -1912,6 +1918,178 @@ async fn a_waiting_lead_takes_a_finished_task_in_its_turn() {
     if let Some(work) = runtime.works.remove(&9) {
         work.task.abort();
     }
+}
+
+/// A pending Codex plan card on message 40, as Inline holds it, in a thread
+/// whose work has a session open.
+async fn plan_card_fixture() -> (Runtime, Arc<FakeHarness>, Cleanup) {
+    let (mut runtime, harness, cleanup) = fixture(false);
+    runtime.agent.names.remember(1, "Owner".into()).await;
+    runtime.agent.sent.lock().unwrap().insert(40);
+    runtime.cards.insert(
+        (9, 40),
+        crate::bridge::v2::blocks::plan_proposal::card(
+            "Codex",
+            "# Fix the parser\n\n1. Read it",
+            &[
+                crate::bridge::v2::blocks::plan_proposal::APPROVE.to_owned(),
+                crate::bridge::v2::blocks::plan_proposal::KEEP_PLANNING.to_owned(),
+            ],
+            &crate::bridge::v2::blocks::Resolution::pending(),
+        ),
+    );
+    let handle = work::spawn(
+        runtime.agent.clone(),
+        9,
+        Known {
+            agent_session_id: Some(1),
+            native: Some(ProviderSessionId::new("fault-session").unwrap()),
+            from_v1: false,
+            fork_from: None,
+            fork_at: None,
+        },
+        OutputMode::Detailed,
+        SettingsChange::default(),
+    );
+    let (_, command) = input(&runtime, 30);
+    handle.tx.send(command).await.unwrap();
+    runtime.works.insert(9, handle);
+    until(|| harness.session.received.lock().unwrap().len() == 1).await;
+    (runtime, harness, cleanup)
+}
+
+fn implement_inputs(harness: &FakeHarness) -> usize {
+    harness
+        .session
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|input| {
+            input
+                .content
+                .text
+                .contains(crate::bridge::v2::blocks::plan_proposal::IMPLEMENT_MESSAGE)
+        })
+        .count()
+}
+
+#[tokio::test]
+async fn a_plan_card_is_approved_once_however_often_it_is_pressed() {
+    let (mut runtime, harness, _cleanup) = plan_card_fixture().await;
+    let first = tokio::time::timeout(Duration::from_secs(3), runtime.on_plan(77, 9, 40, 1, true))
+        .await
+        .expect("approve");
+    assert_eq!(first, None);
+    until(|| implement_inputs(&harness) == 1).await;
+    // Inline still shows the card pending (the edit has not landed here):
+    // a second Approve, or a Keep planning, is answered and does nothing.
+    for (interaction, approve) in [(78, true), (79, false)] {
+        let again = tokio::time::timeout(
+            Duration::from_secs(3),
+            runtime.on_plan(interaction, 9, 40, 1, approve),
+        )
+        .await
+        .expect("again");
+        assert_eq!(again, None);
+        assert!(
+            state(
+                &runtime,
+                &input_id(2, 9, 40, &format!("widget-{interaction}"))
+            )
+            .is_none()
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(implement_inputs(&harness), 1);
+    assert_eq!(*harness.session.modes.lock().unwrap(), ["default"]);
+}
+
+#[tokio::test]
+async fn a_decided_plan_card_does_nothing() {
+    let (mut runtime, harness, _cleanup) = plan_card_fixture().await;
+    let card = runtime.cards.get_mut(&(9, 40)).unwrap();
+    assert!(crate::bridge::v2::blocks::resolve(
+        card,
+        crate::bridge::v2::blocks::DecisionState::Superseded,
+        None,
+        None,
+        Some("Replaced by a newer plan"),
+    ));
+    let toast = tokio::time::timeout(Duration::from_secs(3), runtime.on_plan(77, 9, 40, 1, true))
+        .await
+        .expect("approve");
+    assert_eq!(toast, None);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(implement_inputs(&harness), 0);
+    assert!(harness.session.modes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_refused_approval_returns_the_session_to_plan_mode() {
+    let (runtime, harness, cleanup) = plan_card_fixture().await;
+    // v1 already took this message, so intake refuses the approval.
+    let legacy = Arc::new(
+        inline_agent_bridge::BridgeStore::open(cleanup.dir.join("bridge.sqlite")).unwrap(),
+    );
+    legacy.claim_event("inline-message-9-40", 1).unwrap();
+    let mut runtime = runtime.with_legacy_store(legacy);
+    let toast = tokio::time::timeout(Duration::from_secs(3), runtime.on_plan(77, 9, 40, 1, true))
+        .await
+        .expect("approve");
+    assert!(toast.is_some(), "the press is refused with a toast");
+    assert_eq!(*harness.session.modes.lock().unwrap(), ["default", "plan"]);
+    assert_eq!(implement_inputs(&harness), 0);
+    // The card stays open for another try.
+    assert!(runtime.agent.claim_decision(9, 40));
+}
+
+#[tokio::test]
+async fn a_dismissed_task_suggestion_never_starts_and_a_next_step_answers_once() {
+    let (mut runtime, harness, _cleanup) = plan_card_fixture().await;
+    runtime.cards.insert(
+        (9, 41),
+        crate::bridge::v2::blocks::task::card(
+            "Profile the sidebar",
+            Some("Find why it lags"),
+            &crate::bridge::v2::blocks::Resolution::pending(),
+            None,
+        ),
+    );
+    assert_eq!(runtime.on_task(9, 41, 1, false).await, None);
+    // Start after Dismiss: nothing to start (with no Inline server here, a
+    // start would answer with a failure).
+    assert_eq!(runtime.on_task(9, 41, 1, true).await, None);
+    assert!(runtime.own_threads.is_empty());
+
+    runtime.agent.sent.lock().unwrap().insert(42);
+    runtime.cards.insert(
+        (9, 42),
+        crate::bridge::v2::blocks::next_step::card(
+            "Fixed the parser.",
+            Some("Commit it?"),
+            &["Commit".to_owned(), "Not now".to_owned()],
+        ),
+    );
+    for interaction in [80, 81] {
+        let toast = tokio::time::timeout(
+            Duration::from_secs(3),
+            runtime.on_next_step(interaction, 9, 42, 1, "Commit"),
+        )
+        .await
+        .expect("answer");
+        assert_eq!(toast, None);
+    }
+    until(|| harness.session.received.lock().unwrap().len() == 2).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(harness.session.received.lock().unwrap().len(), 2);
+    assert!(state(&runtime, &input_id(2, 9, 42, "widget-81")).is_none());
+}
+
+#[tokio::test]
+async fn plan_cards_are_superseded_unless_someone_decided_them() {
+    let (runtime, _, _cleanup) = fixture(false);
+    work::recovery_tests::plan_cards_supersede_unless_decided(runtime.agent.clone()).await;
 }
 
 #[tokio::test]

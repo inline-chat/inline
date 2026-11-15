@@ -1,0 +1,50 @@
+{
+  "source": "Codex app-server v2 item/commandExecution/requestApproval with an execpolicy amendment (see crates/agent-bridge/tests/fixtures/harness/codex/turn-approval-steer.json).",
+  "native": {
+    "method": "item/commandExecution/requestApproval",
+    "id": 41,
+    "params": {
+      "threadId": "thr_1",
+      "turnId": "turn-1",
+      "itemId": "item-c1",
+      "command": "cargo test",
+      "cwd": "/work/inline",
+      "reason": "Run the test suite"
+    }
+  },
+  "input": {
+    "agent": "Codex",
+    "folder": "/work/inline",
+    "interaction": {
+      "id": "41",
+      "item": "item-c1",
+      "kind": {
+        "kind": "approval",
+        "subject": {
+          "kind": "command",
+          "command": "cargo test",
+          "cwd": "/work/inline",
+          "reason": "Run the test suite"
+        },
+        "decisions": [
+          {
+            "id": "accept",
+            "label": "Yes, proceed",
+            "kind": "accept"
+          },
+          {
+            "id": "acceptWithExecpolicyAmendment:1",
+            "label": "Yes, and don't ask again for commands that start with `cargo test`",
+            "kind": "accept_and_remember"
+          },
+          {
+            "id": "cancel",
+            "label": "No, and tell Codex what to do differently",
+            "kind": "cancel",
+            "accepts_message": true
+          }
+        ]
+      }
+    }
+  }
+}

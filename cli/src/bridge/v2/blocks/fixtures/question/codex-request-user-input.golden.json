@@ -1,0 +1,78 @@
+[
+  {
+    "label": "card",
+    "text": "Codex has 2 questions\n1/2. Scope · Which packages should the fix cover?\n• CLI only: Smallest change\n• CLI and server: Also fixes the API\nOr reply to this message with your own answer.",
+    "markdown": false,
+    "blocks": [
+      {
+        "paragraph": "Codex has 2 questions"
+      },
+      {
+        "paragraph": "1/2. Scope · Which packages should the fix cover?"
+      },
+      {
+        "paragraph": "• CLI only: Smallest change"
+      },
+      {
+        "paragraph": "• CLI and server: Also fixes the API"
+      },
+      {
+        "footer": "Or reply to this message with your own answer."
+      }
+    ]
+  },
+  {
+    "label": "form",
+    "text": "Scope\nWhich packages should the fix cover?\n• CLI only\nSmallest change\n• CLI and server\nAlso fixes the API\nTests\nAdd tests?\n• Yes\n• No",
+    "markdown": false,
+    "blocks": [
+      {
+        "form": {
+          "form_id": "q",
+          "fields": [
+            {
+              "field_id": "f0",
+              "label": "Which packages should the fix cover?",
+              "required": true,
+              "header": "Scope",
+              "select": {
+                "options": [
+                  {
+                    "option_id": "o0",
+                    "label": "CLI only",
+                    "description": "Smallest change"
+                  },
+                  {
+                    "option_id": "o1",
+                    "label": "CLI and server",
+                    "description": "Also fixes the API"
+                  }
+                ],
+                "allow_other": true
+              }
+            },
+            {
+              "field_id": "f1",
+              "label": "Add tests?",
+              "required": true,
+              "header": "Tests",
+              "select": {
+                "options": [
+                  {
+                    "option_id": "o0",
+                    "label": "Yes"
+                  },
+                  {
+                    "option_id": "o1",
+                    "label": "No"
+                  }
+                ]
+              }
+            }
+          ],
+          "required_grant": "AGENT_GRANT_REQUIREMENT_ACCESS"
+        }
+      }
+    ]
+  }
+]

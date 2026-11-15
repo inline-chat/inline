@@ -77,16 +77,24 @@ public enum BlockContentDirection {
   /// `content` with every text block's direction derived on this device from `text`, which
   /// the block ranges index in UTF-16.
   ///
-  /// Prose leaves carry their own direction everywhere, list items included. A container
-  /// (list, quote, table, disclosure, callout, agent blocks) takes the majority of the text
-  /// inside it. Stored and older messages carry the server's first-letter flags; this replaces
-  /// them so both read the same.
+  /// Prose leaves carry their own direction everywhere, list items included. A leaf that leads
+  /// by fewer than `decisiveWordLead` words is ambiguous ("Sources:", a reply streaming in as
+  /// "Claude Code حداقل") and follows the whole message instead, so a Persian reply doesn't
+  /// start left to right and jump once enough words arrive. A container (list, quote, table,
+  /// disclosure, callout, agent blocks) takes the majority of the text inside it. Stored and
+  /// older messages carry the server's first-letter flags; this replaces them so both read the
+  /// same.
   public static func resolved(_ content: InlineProtocol.BlockContent, text: String) -> InlineProtocol.BlockContent {
     var resolver = Resolver(text: text as NSString)
+    var probe = content
+    resolver.messageIsRTL = resolver.resolve(&probe.blocks).isRTL
     var content = content
     _ = resolver.resolve(&content.blocks)
     return content
   }
+
+  /// Words one direction must lead by for a leaf to keep its own direction within a message.
+  static let decisiveWordLead = 3
 
   /// Direction a block declares after `resolved(_:text:)`, nil for blocks without text.
   public static func declaredDirection(of block: InlineProtocol.Block) -> Bool? {
@@ -111,6 +119,18 @@ public enum BlockContentDirection {
       steps.hasIsRtl ? steps.isRtl : nil
     case let .form(form)?:
       form.hasIsRtl ? form.isRtl : nil
+    case let .planProposal(plan)?:
+      plan.hasIsRtl ? plan.isRtl : nil
+    case let .approval(approval)?:
+      approval.hasIsRtl ? approval.isRtl : nil
+    case let .review(review)?:
+      review.hasIsRtl ? review.isRtl : nil
+    case let .taskSuggestion(task)?:
+      task.hasIsRtl ? task.isRtl : nil
+    case let .nextStep(step)?:
+      step.hasIsRtl ? step.isRtl : nil
+    case let .promptSuggestions(prompts)?:
+      prompts.hasIsRtl ? prompts.isRtl : nil
     default:
       nil
     }
@@ -123,6 +143,8 @@ public enum BlockContentDirection {
 
   private struct Resolver {
     let text: NSString
+    /// The whole message's direction, for leaves too short to decide; nil on the first pass.
+    var messageIsRTL: Bool?
 
     func tally(_ range: InlineProtocol.BlockText) -> Tally {
       let location = Int(range.offset)
@@ -140,7 +162,12 @@ public enum BlockContentDirection {
     /// Resolves `range` in place and returns its tally.
     func leaf(_ range: inout InlineProtocol.BlockText) -> Tally {
       let tally = tally(range)
-      range.setDirection(tally.isRTL)
+      let lead = abs(tally.rightToLeftWords - tally.leftToRightWords)
+      if let messageIsRTL, tally.isRTL != nil, lead < BlockContentDirection.decisiveWordLead {
+        range.setDirection(messageIsRTL)
+      } else {
+        range.setDirection(tally.isRTL)
+      }
       return tally
     }
 
@@ -215,6 +242,42 @@ public enum BlockContentDirection {
         form.setDirection(total.isRTL)
         block.kind = .form(form)
         return total
+      case var .planProposal(plan)?:
+        var total = plan.hasTitle ? tally(plan.title) : Tally()
+        total.add(resolve(&plan.children))
+        plan.setDirection(total.isRTL)
+        block.kind = .planProposal(plan)
+        return total
+      case var .approval(approval)?:
+        // The command and folder are code; the title and reason are prose.
+        var total = tally([approval.title] + (approval.hasReason ? [approval.reason] : []))
+        total.add(resolve(&approval.children))
+        approval.setDirection(total.isRTL)
+        block.kind = .approval(approval)
+        return total
+      case var .review(review)?:
+        var ranges = review.hasTitle ? [review.title] : []
+        if review.hasSummary { ranges.append(review.summary) }
+        ranges += review.findings.flatMap { [$0.title] + ($0.hasBody ? [$0.body] : []) }
+        let total = tally(ranges)
+        review.setDirection(total.isRTL)
+        block.kind = .review(review)
+        return total
+      case var .taskSuggestion(task)?:
+        let total = tally([task.title] + (task.hasBrief ? [task.brief] : []))
+        task.setDirection(total.isRTL)
+        block.kind = .taskSuggestion(task)
+        return total
+      case var .nextStep(step)?:
+        let total = tally([step.recap] + (step.hasQuestion ? [step.question] : []))
+        step.setDirection(total.isRTL)
+        block.kind = .nextStep(step)
+        return total
+      case var .promptSuggestions(prompts)?:
+        let total = tally(prompts.prompts.map(\.label))
+        prompts.setDirection(total.isRTL)
+        block.kind = .promptSuggestions(prompts)
+        return total
       default:
         // Code, math, diffs, meters, media and widgets render left to right and don't sway
         // the prose around them.
@@ -245,3 +308,9 @@ extension InlineProtocol.BlockCallout: BlockDirectionCarrying {}
 extension InlineProtocol.BlockFields: BlockDirectionCarrying {}
 extension InlineProtocol.BlockSteps: BlockDirectionCarrying {}
 extension InlineProtocol.BlockForm: BlockDirectionCarrying {}
+extension InlineProtocol.BlockPlanProposal: BlockDirectionCarrying {}
+extension InlineProtocol.BlockApproval: BlockDirectionCarrying {}
+extension InlineProtocol.BlockReview: BlockDirectionCarrying {}
+extension InlineProtocol.BlockTaskSuggestion: BlockDirectionCarrying {}
+extension InlineProtocol.BlockNextStep: BlockDirectionCarrying {}
+extension InlineProtocol.BlockPromptSuggestions: BlockDirectionCarrying {}

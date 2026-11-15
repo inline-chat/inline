@@ -7,9 +7,10 @@ import type {
   CreateHttpUploadResult,
   FinishHttpUploadRequest,
   FinishHttpUploadResult,
-  RpcCall,
+  Method,
   RpcResult,
 } from "@inline-chat/protocol/core"
+import type { RpcInput } from "./rpc-input.js"
 import {
   InlineProtocolV3Connection,
   InlineProtocolV3Error,
@@ -120,7 +121,7 @@ export class InlineRealtimeV3Client {
     await this.connect(credentials)
   }
 
-  async callRpc(rpc: RpcCall): Promise<RpcResult["result"]> {
+  async callRpc(rpc: { method: Method; input: RpcInput }): Promise<RpcResult["result"]> {
     return await this.#withSessionCall((session) => session.callRpc(rpc))
   }
 

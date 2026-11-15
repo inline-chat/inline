@@ -190,6 +190,8 @@ struct ChatOpeningTests {
     let state = try await fixture.prepare(saved: nil)
     #expect(state.openAnchor == .latest)
     #expect(state.unreadBoundary == 1_000)
+    // The list fetches around the line from this, as macOS does.
+    #expect(state.uncachedUnreadBoundary == 1_000)
     #expect(state.messages.map(\.id) == latest.map(\.id))
   }
 

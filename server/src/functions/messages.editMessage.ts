@@ -1,3 +1,4 @@
+import { dropUnreachableBotMentions } from "@in/server/modules/agents/access"
 import type { BlockContent } from "@inline-chat/protocol/core"
 import { MessageEntity_Type, type InputPeer, type MessageActions, type MessageEntities, type Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -13,7 +14,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
-import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
+import { normalizeAndValidateMessageActions, validateBlockActionReferences } from "@in/server/modules/message/messageActions"
 import { validateBotBlockContent } from "@in/server/modules/message/botBlockContent"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
@@ -95,6 +96,13 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     input.actions,
     input.text === undefined ? fullMessage.blockContent : botBlockContent,
   )
+  // Blocks' buttons must name actions the edited message still has.
+  if (input.text !== undefined || input.actions !== undefined) {
+    validateBlockActionReferences(
+      input.text === undefined ? fullMessage.blockContent : botBlockContent,
+      normalizedActions ?? fullMessage.actions,
+    )
+  }
   if (normalizedActions !== undefined) {
     const sender = await UsersModel.getUserById(currentUserId)
     if (!sender?.bot) {
@@ -123,6 +131,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
       chat,
       currentUserId,
     })
+    entities = await dropUnreachableBotMentions(entities, currentUserId)
     entities = await validateGroupMentions({ text: outgoingText.text, entities, chat, currentUserId })
   }
 

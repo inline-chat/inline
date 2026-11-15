@@ -102,6 +102,8 @@ fn operations_label(operations: &[i32]) -> String {
         .collect();
     if labels.is_empty() {
         "-".to_string()
+    } else if labels.contains(&"configure") {
+        format!("admin ({})", labels.join(", "))
     } else {
         labels.join(", ")
     }
@@ -191,7 +193,11 @@ async fn find_owned_bot(
     realtime: &mut AuthenticatedRealtime,
     bot_user_id: i64,
 ) -> CliResult<proto::User> {
-    let payload = realtime.call(proto::ListBotsInput {}).await?;
+    let payload = realtime
+        .call(proto::ListBotsInput {
+            include_managed: Some(true),
+        })
+        .await?;
     payload
         .bots
         .into_iter()
@@ -220,9 +226,11 @@ fn print_profile_result(
     Ok(())
 }
 
-fn print_grants(grants: &[proto::AgentGrant]) {
+fn print_grants(grants: &[proto::AgentGrant], open_to_everyone: bool) {
     if grants.is_empty() {
-        println!("Access: owner only");
+        if !open_to_everyone {
+            println!("Access: owner only");
+        }
         return;
     }
     println!("Access:");
@@ -262,6 +270,46 @@ fn access_subject(args: &crate::BotsAccessSubjectArgs) -> CliResult<proto::Acces
     Ok(proto::AccessSubject {
         subject: Some(subject),
     })
+}
+
+/// Opens a bot to everyone on Inline, or limits it to its owner and access list again.
+async fn set_open_to_everyone(
+    config: &Config,
+    auth_store: &AuthStore,
+    bot_user_id: i64,
+    open: bool,
+    json: bool,
+    json_format: JsonFormat,
+) -> CliResult {
+    let bot_user_id = validate_positive_id_arg("--bot-user-id", bot_user_id)?;
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let payload = realtime
+        .call(proto::UpdateAgentSettingsInput {
+            bot_user_id,
+            default_output_mode: None,
+            open_to_everyone: Some(open),
+        })
+        .await?;
+    if json {
+        return Ok(output::print_json(&payload, json_format)?);
+    }
+    // A server that predates the setting accepts the call and changes nothing.
+    let applied = payload
+        .settings
+        .as_ref()
+        .is_some_and(|settings| settings.open_to_everyone == open);
+    if !applied {
+        return Err(CliError::invalid_args(
+            "This server doesn't support opening a bot to everyone yet.".to_string(),
+        )
+        .into());
+    }
+    if open {
+        println!("Anyone on Inline can now message bot {bot_user_id}.");
+    } else {
+        println!("Only you and the people on its access list can message bot {bot_user_id}.");
+    }
+    Ok(())
 }
 
 /// Handles every bots subcommand except list, create, and reveal-token.
@@ -313,7 +361,13 @@ pub(crate) async fn handle_bot_management(
                     .map(|settings| settings.default_output_mode)
                     .unwrap_or_default();
                 println!("Output mode: {}", output_mode_label(mode));
-                print_grants(&grants);
+                let open = settings
+                    .as_ref()
+                    .is_some_and(|settings| settings.open_to_everyone);
+                if open {
+                    println!("Anyone on Inline can message this bot.");
+                }
+                print_grants(&grants, open);
             }
         }
         BotsCommand::Update(args) => {
@@ -511,6 +565,7 @@ pub(crate) async fn handle_bot_management(
                         .call(proto::UpdateAgentSettingsInput {
                             bot_user_id,
                             default_output_mode: Some(mode.protocol_value() as i32),
+                            open_to_everyone: None,
                         })
                         .await
                     {
@@ -563,14 +618,52 @@ pub(crate) async fn handle_bot_management(
                 if json {
                     output::print_json(&payload, json_format)?;
                 } else {
-                    print_grants(&payload.grants);
+                    // Servers before this setting report every bot as not open.
+                    let open = read_agent_settings(&mut realtime, bot_user_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some_and(|settings| settings.open_to_everyone);
+                    if open {
+                        println!("Anyone on Inline can message this bot.");
+                    }
+                    print_grants(&payload.grants, open);
                 }
+            }
+            BotsAccessCommand::Open(args) => {
+                set_open_to_everyone(
+                    config,
+                    auth_store,
+                    args.bot_user_id,
+                    true,
+                    json,
+                    json_format,
+                )
+                .await?;
+            }
+            BotsAccessCommand::Close(args) => {
+                set_open_to_everyone(
+                    config,
+                    auth_store,
+                    args.bot_user_id,
+                    false,
+                    json,
+                    json_format,
+                )
+                .await?;
             }
             BotsAccessCommand::Grant(args) => {
                 let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
                 let subject = access_subject(&args.subject)?;
                 let label = subject_label(Some(&subject), 0);
-                let operations = grant_operations(&args.operations);
+                let operations = if args.admin {
+                    crate::bot_sharing::ADMIN_OPERATIONS
+                        .iter()
+                        .map(|operation| *operation as i32)
+                        .collect()
+                } else {
+                    grant_operations(&args.operations)
+                };
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
                 let payload = realtime
                     .call(proto::SetAgentGrantInput {
@@ -664,7 +757,11 @@ mod tests {
                 proto::AgentGrantOperation::Invoke as i32,
                 proto::AgentGrantOperation::Configure as i32
             ]),
-            "invoke, configure"
+            "admin (invoke, configure)"
+        );
+        assert_eq!(
+            operations_label(&[proto::AgentGrantOperation::Invoke as i32]),
+            "invoke"
         );
         assert_eq!(operations_label(&[]), "-");
     }

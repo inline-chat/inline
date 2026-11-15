@@ -6,6 +6,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from "@aws-sdk/client-s3"
@@ -43,6 +44,16 @@ export interface MultipartObjectStore {
     signal?: AbortSignal
   }): Promise<{ etag: string }>
   abort(key: string, uploadId: string, signal?: AbortSignal): Promise<void>
+  /**
+   * Writes a whole object in one request. Resolves only when the provider's ETag equals the
+   * body's MD5, which proves the stored bytes. Optional: stores without it use multipart.
+   */
+  put?(input: {
+    key: string
+    bytes: Uint8Array
+    contentType: string
+    signal?: AbortSignal
+  }): Promise<{ etag: string }>
   head(key: string, signal?: AbortSignal): Promise<MultipartObjectHead | undefined>
   stream(key: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>>
   remove(key: string, signal?: AbortSignal): Promise<void>
@@ -272,6 +283,33 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
       if (isNoSuchUpload(cause) || isInvalidMultipartManifest(cause)) {
         throw new MultipartUploadNotFoundError({ cause })
       }
+      throw new MultipartStorageUnavailableError({ cause })
+    }
+  }
+
+  async put(input: {
+    key: string
+    bytes: Uint8Array
+    contentType: string
+    signal?: AbortSignal
+  }): Promise<{ etag: string }> {
+    recordStorageOperation("put")
+    const md5 = createHash("md5").update(input.bytes).digest()
+    try {
+      const { bucket, client } = this.#requireConfiguration()
+      const result = await client.send(new PutObjectCommand({
+        Body: input.bytes,
+        Bucket: bucket,
+        ContentLength: input.bytes.byteLength,
+        ContentMD5: md5.toString("base64"),
+        ContentType: input.contentType,
+        Key: input.key,
+      }), { abortSignal: storageDeadlineSignal(input.signal, this.#operationTimeoutMs) })
+      const etag = normalizeEtag(result.ETag)
+      if (etag !== md5.toString("hex")) throw new MultipartIntegrityError()
+      return { etag }
+    } catch (cause) {
+      if (cause instanceof MultipartIntegrityError) throw cause
       throw new MultipartStorageUnavailableError({ cause })
     }
   }

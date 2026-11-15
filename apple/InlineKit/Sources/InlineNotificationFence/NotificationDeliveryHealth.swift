@@ -25,7 +25,10 @@ public enum NotificationDeliveryHealth {
   }
 
   /// Values the server sends as `placeholderReason` on generic message alerts.
-  public static let placeholderReasons: Set<String> = ["no_device_key", "encryption_failed", "too_large"]
+  /// `generic_alert`: a non-message alert to a client registered before encrypted alerts.
+  public static let placeholderReasons: Set<String> = [
+    "no_device_key", "encryption_failed", "too_large", "generic_alert",
+  ]
 
   public static func placeholderReason(in userInfo: [AnyHashable: Any]) -> String {
     guard let reason = userInfo["placeholderReason"] as? String, placeholderReasons.contains(reason)

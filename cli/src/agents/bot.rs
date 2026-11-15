@@ -27,6 +27,34 @@ impl ManagedBot {
     }
 }
 
+/// Mirrors the harness access choice into Inline, which now decides who can
+/// message a bot at all. Without this, "allowlist" or "open" in the harness
+/// would still leave everyone but the owner locked out of a new, private bot.
+async fn apply_inline_access(
+    owner: &mut crate::owner_session::OwnerSession,
+    bot_user_id: i64,
+    args: &AgentsSetupArgs,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sharing = args.sharing.clone();
+    if args.access == super::AccessMode::Allowlist {
+        sharing.share_users.extend(args.allow_users.iter().copied());
+    }
+    for grant in sharing.grants(bot_user_id)? {
+        owner.call(grant).await?;
+    }
+    if args.access == super::AccessMode::Open {
+        // Best effort: an older server has no such setting and leaves the bot as it was.
+        let _ = owner
+            .call(proto::UpdateAgentSettingsInput {
+                bot_user_id,
+                default_output_mode: None,
+                open_to_everyone: Some(true),
+            })
+            .await;
+    }
+    Ok(())
+}
+
 pub(super) async fn ensure_gateway_bot(
     config: &Config,
     owner_auth: inline_client::AuthCredential,
@@ -46,7 +74,12 @@ pub(super) async fn ensure_gateway_bot(
     }
 
     let mapping = agent_setup_installation(target.id, instance)?;
-    let bots = owner.call(proto::ListBotsInput {}).await?.bots;
+    let bots = owner
+        .call(proto::ListBotsInput {
+            include_managed: None,
+        })
+        .await?
+        .bots;
     let requested_username = args
         .bot_username
         .as_deref()
@@ -176,6 +209,8 @@ pub(super) async fn ensure_gateway_bot(
                 )
             })?;
     }
+
+    apply_inline_access(&mut owner, bot.id, args).await?;
 
     let action = if created_token.is_some() {
         "created"

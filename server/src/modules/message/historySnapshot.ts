@@ -4,6 +4,7 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { UsersModel } from "@in/server/db/models/users"
 import { chats, type DbChat } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
+import { ensureCanMessageBot } from "@in/server/modules/agents/access"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { InputPeer } from "@inline-chat/protocol/core"
@@ -67,6 +68,7 @@ export async function withHistorySnapshot<T>(
       const peerUserId = peer.type.oneofKind === "self" ? currentUserId : Number(peer.type.user.userId)
       const user = await UsersModel.getUserById(peerUserId)
       if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
+      await ensureCanMessageBot(user, currentUserId)
       await ChatModel.createUserChatAndDialog({ peerUserId, currentUserId })
       await ChatModel.createUserChatAndDialog({ peerUserId: currentUserId, currentUserId: peerUserId })
       chat = await ChatModel.getChatFromInputPeerUnchecked(peer, { currentUserId })

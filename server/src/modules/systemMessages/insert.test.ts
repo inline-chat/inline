@@ -10,6 +10,7 @@ const chat: DbChat = {
   title: "Roadmap",
   description: null,
   lastMsgId: 7,
+  lastMessageDate: null,
   messageIdCounter: 7,
   spaceId: null,
   publicThread: null,

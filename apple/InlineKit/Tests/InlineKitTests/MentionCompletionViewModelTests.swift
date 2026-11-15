@@ -60,7 +60,7 @@ struct MentionCompletionViewModelTests {
   func bareAtShowsParticipantsAndSpaceMembersBeforeDirectChats() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
-      candidate(3, firstName: "Charlie", source: .directChat, lastMsgId: 12),
+      candidate(3, firstName: "Charlie", source: .directChat, lastDM: 12),
       candidate(2, firstName: "Bob", source: .spaceMember),
       candidate(1, firstName: "Alice", source: .participant),
     ])
@@ -71,24 +71,24 @@ struct MentionCompletionViewModelTests {
     #expect(userIds(model.items) == [3])
   }
 
-  @Test("direct chat candidates require a last message")
-  func directChatCandidatesRequireLastMessage() {
+  @Test("direct chat candidates require DM history and order by its latest message")
+  func directChatCandidatesRequireHistory() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
-      candidate(1, firstName: "Alice", source: .directChat, lastMsgId: nil),
-      candidate(2, firstName: "Alan", source: .directChat, lastMsgId: 0),
-      candidate(3, firstName: "Alana", source: .directChat, lastMsgId: 42),
+      candidate(1, firstName: "Alana", source: .directChat, lastDM: nil),
+      candidate(2, firstName: "Alan", source: .directChat, lastDM: 10),
+      candidate(3, firstName: "Alana", source: .directChat, lastDM: 42),
     ])
 
     model.filter(with: "ala")
-    #expect(userIds(model.items) == [3])
+    #expect(userIds(model.items) == [3, 2])
   }
 
   @Test("participant source wins over lower priority duplicates")
   func participantSourceWinsOverLowerPriorityDuplicates() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
-      candidate(1, firstName: "Alice", source: .directChat, lastMsgId: 12),
+      candidate(1, firstName: "Alice", source: .directChat, lastDM: 12),
       candidate(1, firstName: "Alice", source: .participant),
     ])
 
@@ -121,10 +121,10 @@ struct MentionCompletionViewModelTests {
   func exactNameTokensBeatGenericPrefixes() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
-      candidate(1, firstName: "Moein", source: .participant, lastMsgId: 1_600, isPinned: true),
-      candidate(2, firstName: "Mo's Codex", source: .directChat, lastMsgId: 20),
-      candidate(3, firstName: "Hermes", username: "mo_Hermes_bot", source: .directChat, lastMsgId: 900),
-      candidate(4, firstName: "Mo's Claude", source: .directChat, lastMsgId: 10),
+      candidate(1, firstName: "Moein", source: .participant, lastDM: 1_600, isPinned: true),
+      candidate(2, firstName: "Mo's Codex", source: .directChat, lastDM: 20),
+      candidate(3, firstName: "Hermes", username: "mo_Hermes_bot", source: .directChat, lastDM: 900),
+      candidate(4, firstName: "Mo's Claude", source: .directChat, lastDM: 10),
     ])
 
     model.filter(with: "mo")
@@ -137,10 +137,10 @@ struct MentionCompletionViewModelTests {
   func apostropheVariantsMatch() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
-      candidate(1, firstName: "Moein", source: .participant, lastMsgId: 1_600, isPinned: true),
-      candidate(2, firstName: "Mo's Codex", source: .directChat, lastMsgId: 20),
-      candidate(3, firstName: "Hermes", username: "mo_Hermes_bot", source: .directChat, lastMsgId: 900),
-      candidate(4, firstName: "Mo's Claude", source: .directChat, lastMsgId: 10),
+      candidate(1, firstName: "Moein", source: .participant, lastDM: 1_600, isPinned: true),
+      candidate(2, firstName: "Mo's Codex", source: .directChat, lastDM: 20),
+      candidate(3, firstName: "Hermes", username: "mo_Hermes_bot", source: .directChat, lastDM: 900),
+      candidate(4, firstName: "Mo's Claude", source: .directChat, lastDM: 10),
     ])
 
     for query in ["mo's", "mo’s", "mos"] {
@@ -190,9 +190,9 @@ struct MentionCompletionViewModelTests {
   func denaScreenshot() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
-      candidate(1, firstName: "Aden", username: "aden", source: .directChat, lastMsgId: 999, isPinned: true),
-      candidate(2, firstName: "Dena", username: "denaa", source: .participant, lastMsgId: 800, isPinned: true),
-      candidate(3, firstName: "Dena", lastName: "Sohrabi", username: "dena", source: .directChat, lastMsgId: 1),
+      candidate(1, firstName: "Aden", username: "aden", source: .directChat, lastDM: 999, isPinned: true),
+      candidate(2, firstName: "Dena", username: "denaa", source: .participant, lastDM: 800, isPinned: true),
+      candidate(3, firstName: "Dena", lastName: "Sohrabi", username: "dena", source: .directChat, lastDM: 1),
     ])
 
     model.filter(with: "dena")
@@ -202,13 +202,13 @@ struct MentionCompletionViewModelTests {
     #expect(userIds(model.items) == [2, 3, 1])
   }
 
-  @Test("pinned Danny wins equal prefixes regardless of name or message ID")
+  @Test("pinned Danny wins equal prefixes regardless of name or DM recency")
   func dannyScreenshot() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
       candidate(1, firstName: "Daniel Edrisian", username: "dedrisian", source: .spaceMember),
-      candidate(2, firstName: "Daniel Kovacs", username: "daniel.kovacs", source: .directChat, lastMsgId: 900),
-      candidate(3, firstName: "Danny", username: "dan_bot", source: .directChat, lastMsgId: 10, isPinned: true),
+      candidate(2, firstName: "Daniel Kovacs", username: "daniel.kovacs", source: .directChat, lastDM: 900),
+      candidate(3, firstName: "Danny", username: "dan_bot", source: .directChat, lastDM: 10, isPinned: true),
     ])
 
     model.filter(with: "dan")
@@ -216,21 +216,21 @@ struct MentionCompletionViewModelTests {
     #expect(model.selectedUser?.id == 3)
   }
 
-  @Test("relevance wins over pins and activity; ties use pins then descending message IDs")
+  @Test("relevance wins over access, pins and activity; ties put chat members first, then pins and recent DMs")
   func relevanceAndChatPriority() {
     let inputs = [
-      candidate(1, firstName: "Exact Handle", username: "dan", source: .directChat, lastMsgId: 1),
-      candidate(2, firstName: "Dan", source: .participant, lastMsgId: 2),
-      candidate(3, firstName: "Danny", source: .spaceMember, lastMsgId: 3, isPinned: true),
-      candidate(4, firstName: "Daniel", source: .directChat, lastMsgId: 20),
-      candidate(5, firstName: "Danielle", source: .participant, lastMsgId: 10),
-      candidate(6, firstName: "Jordan", source: .participant, lastMsgId: 999, isPinned: true),
+      candidate(1, firstName: "Exact Handle", username: "dan", source: .directChat, lastDM: 1),
+      candidate(2, firstName: "Dan", source: .participant, lastDM: 2),
+      candidate(3, firstName: "Danny", source: .spaceMember, lastDM: 3, isPinned: true),
+      candidate(4, firstName: "Daniel", source: .directChat, lastDM: 20),
+      candidate(5, firstName: "Danielle", source: .participant, lastDM: 10),
+      candidate(6, firstName: "Jordan", source: .participant, lastDM: 999, isPinned: true),
     ]
     let model = MentionCompletionViewModel(currentUserId: { nil })
     for input in [inputs, inputs.reversed().map(\.self)] {
       model.updateCandidates(input)
       model.filter(with: "dan")
-      #expect(userIds(model.items) == [1, 2, 3, 4, 5, 6])
+      #expect(userIds(model.items) == [1, 2, 5, 3, 4, 6])
     }
   }
 
@@ -247,12 +247,12 @@ struct MentionCompletionViewModelTests {
     #expect(userIds(model.items) == [1, 2, 3, 4])
   }
 
-  @Test("deduplication keeps participant identity and merges pin and maximum message ID")
+  @Test("deduplication keeps participant identity and merges pin, latest DM and best sender rank")
   func duplicateSignalsSurvive() throws {
     let inputs = [
-      candidate(1, firstName: "Danny", source: .participant),
-      candidate(1, firstName: "Danny", source: .spaceMember, lastMsgId: 500),
-      candidate(1, firstName: "Danny", source: .directChat, lastMsgId: 10, isPinned: true),
+      candidate(1, firstName: "Danny", source: .participant, recentSenderRank: 4),
+      candidate(1, firstName: "Danny", source: .spaceMember, lastDM: 500, recentSenderRank: 2),
+      candidate(1, firstName: "Danny", source: .directChat, lastDM: 10, isPinned: true),
     ]
     let model = MentionCompletionViewModel(currentUserId: { nil })
     for input in [inputs, inputs.reversed().map(\.self)] {
@@ -265,20 +265,60 @@ struct MentionCompletionViewModelTests {
       }
       #expect(user.source == .participant)
       #expect(user.isPinned)
-      #expect(user.lastMsgId == 500)
+      #expect(user.lastDirectMessageDate == Date(timeIntervalSince1970: 500))
+      #expect(user.recentSenderRank == 2)
     }
   }
 
-  @Test("bare at reorders eligible users but does not admit direct-chat fallbacks")
+  @Test("bare at lists chat members first, then pins and recent DMs, without direct-chat fallbacks")
   func bareAtChatPriority() {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates([
       candidate(1, firstName: "Alice", source: .participant),
-      candidate(2, firstName: "Bob", source: .spaceMember, lastMsgId: 100),
-      candidate(3, firstName: "Zoe", source: .spaceMember, lastMsgId: 10, isPinned: true),
-      candidate(4, firstName: "Dora", source: .directChat, lastMsgId: 999, isPinned: true),
+      candidate(2, firstName: "Bob", source: .spaceMember, lastDM: 100),
+      candidate(3, firstName: "Zoe", source: .spaceMember, lastDM: 10, isPinned: true),
+      candidate(4, firstName: "Dora", source: .directChat, lastDM: 999, isPinned: true),
+    ])
+    #expect(userIds(model.items) == [1, 3, 2])
+  }
+
+  @Test("whoever spoke last in the chat leads its members, ahead of pins and DMs")
+  func recentSendersLeadChatMembers() {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    model.updateCandidates([
+      candidate(1, firstName: "Dana", source: .participant, lastDM: 900, isPinned: true),
+      candidate(2, firstName: "Dante", source: .participant, recentSenderRank: 3),
+      candidate(3, firstName: "Danny", source: .participant, recentSenderRank: 0),
+      candidate(4, firstName: "Danielle", source: .spaceMember, recentSenderRank: 1),
+    ])
+    model.filter(with: "dan")
+    // Danielle left the chat: speaking there doesn't lift her above its members.
+    #expect(userIds(model.items) == [3, 2, 1, 4])
+  }
+
+  @Test("a user's own bot outranks other non-members on ties but not chat members")
+  func ownedBotPriority() {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    model.updateCandidates([
+      candidate(1, firstName: "Claude Member", source: .spaceMember),
+      candidate(2, firstName: "Claude", lastName: "Bot", source: .ownedBot),
+      candidate(3, firstName: "Claude Person", source: .participant),
     ])
     #expect(userIds(model.items) == [3, 2, 1])
+    model.filter(with: "cla")
+    #expect(userIds(model.items) == [3, 2, 1])
+  }
+
+  @Test("groups already in the chat rank with its members")
+  func groupsWithAccessRankFirst() {
+    let model = MentionCompletionViewModel(currentUserId: { nil })
+    model.updateCandidates(.init(
+      users: [candidate(1, firstName: "Design Lead", source: .spaceMember)],
+      groups: [group(10, name: "Design"), group(11, name: "Design Ops")],
+      groupIdsWithAccess: [11]
+    ))
+    model.filter(with: "des")
+    #expect(model.items.map(\.id) == ["group:11", "group:10", "user:1"])
   }
 
   @Test("refresh preserves selected identity across reordering; typing selects the best row")
@@ -351,8 +391,8 @@ struct MentionCompletionViewModelTests {
     let model = MentionCompletionViewModel(currentUserId: { nil })
     model.updateCandidates(.init(
       users: [
-        candidate(100, firstName: "Bot", source: .directChat, lastMsgId: 999),
-        candidate(200, firstName: "Bot", source: .directChat, lastMsgId: 1, isPinned: true),
+        candidate(100, firstName: "Bot", source: .directChat, lastDM: 999),
+        candidate(200, firstName: "Bot", source: .directChat, lastDM: 1, isPinned: true),
       ],
       groups: [],
       agents: [
@@ -370,7 +410,7 @@ struct MentionCompletionViewModelTests {
     model.updateCandidates((1 ... 5_000).map { id in
       candidate(
         Int64(id), firstName: "Daniel \(id)", username: "person_\(id)",
-        source: .directChat, lastMsgId: Int64(id), isPinned: id == 4_999
+        source: .directChat, lastDM: Int64(id), isPinned: id == 4_999
       )
     })
     for query in ["d", "da", "dan", "dani", "danie", "daniel"] {
@@ -429,13 +469,15 @@ struct MentionCompletionViewModelTests {
     lastName: String? = nil,
     username: String? = nil,
     source: MentionCompletionSource,
-    lastMsgId: Int64? = nil,
+    lastDM: Int64? = nil,
+    recentSenderRank: Int? = nil,
     isPinned: Bool = false
   ) -> MentionCompletionUser {
     MentionCompletionUser(
       userInfo: user(id, firstName: firstName, lastName: lastName, username: username),
       source: source,
-      lastMsgId: lastMsgId,
+      lastDirectMessageDate: lastDM.map { Date(timeIntervalSince1970: TimeInterval($0)) },
+      recentSenderRank: recentSenderRank,
       isPinned: isPinned
     )
   }

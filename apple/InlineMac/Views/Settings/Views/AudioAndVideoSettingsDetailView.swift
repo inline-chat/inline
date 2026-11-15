@@ -149,6 +149,14 @@ private struct GridAudioSettingsSection: View {
         )
       }
       .settingsSearchAnchor(.autoMuteWhenAlone)
+
+      Toggle(isOn: $grid.playsMicrophoneSounds) {
+        SettingsRowLabel(
+          .microphoneSounds,
+          description: "Play a short sound when you mute or unmute your microphone."
+        )
+      }
+      .settingsSearchAnchor(.microphoneSounds)
     } header: {
       SettingsSectionHeader("Grid")
     }

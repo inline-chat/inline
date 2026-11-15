@@ -183,7 +183,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Shared/Bridge.swift,
-				Shared/SharedApiClient.swift,
 			);
 			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 		};

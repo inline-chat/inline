@@ -1,0 +1,61 @@
+{
+  "source": "Inline tool report_findings arguments, after Claude's ReportFindings tool.",
+  "native": {
+    "type": "tool_use",
+    "name": "mcp__inline__report_findings",
+    "input": {
+      "title": "Review of the parser fix",
+      "verdict": "needs_attention",
+      "summary": "One blocking issue; the rest is cleanup.",
+      "findings": [
+        {
+          "title": "Blank input still throws",
+          "body": "`tokens[0]` is read before the length check.",
+          "priority": "p1",
+          "path": "src/parser.ts",
+          "start_line": 42,
+          "end_line": 48,
+          "category": "correctness",
+          "confidence": "confirmed",
+          "outcome": "fixed"
+        },
+        {
+          "title": "Typo in the error message",
+          "priority": "p3",
+          "path": "src/errors.ts",
+          "start_line": 7,
+          "category": "style",
+          "confidence": "plausible",
+          "outcome": "skipped"
+        }
+      ]
+    }
+  },
+  "input": {
+    "title": "Review of the parser fix",
+    "verdict": "needs_attention",
+    "summary": "One blocking issue; the rest is cleanup.",
+    "findings": [
+      {
+        "title": "Blank input still throws",
+        "body": "`tokens[0]` is read before the length check.",
+        "priority": "p1",
+        "path": "src/parser.ts",
+        "start_line": 42,
+        "end_line": 48,
+        "category": "correctness",
+        "confidence": "confirmed",
+        "outcome": "fixed"
+      },
+      {
+        "title": "Typo in the error message",
+        "priority": "p3",
+        "path": "src/errors.ts",
+        "start_line": 7,
+        "category": "style",
+        "confidence": "plausible",
+        "outcome": "skipped"
+      }
+    ]
+  }
+}

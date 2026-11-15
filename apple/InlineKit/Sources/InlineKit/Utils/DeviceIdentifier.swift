@@ -1,4 +1,5 @@
 import Foundation
+import InlineNotificationFence
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -28,8 +29,11 @@ public actor DeviceIdentifier {
       UIDevice.current.identifierForVendor?.uuidString
     }
     if let idfv {
-      defaults.set(idfv, forKey: idKey)
-      return idfv
+      // The vendor ID is shared by every Inline build on the device. The server replaces a
+      // session on the same device and account, so a Debug login must not sign Release out.
+      let identifier = InlineInstallNamespace.scoped(idfv)
+      defaults.set(identifier, forKey: idKey)
+      return identifier
     }
     #endif
 

@@ -1,0 +1,48 @@
+[
+  {
+    "label": "open",
+    "text": "Fixed the empty-input crash in tokenize() and added a regression test; parser tests pass. Nothing is committed yet.\nCommit the fix?",
+    "markdown": false,
+    "blocks": [
+      {
+        "next_step": {
+          "recap": "Fixed the empty-input crash in tokenize() and added a regression test; parser tests pass. Nothing is committed yet.",
+          "question": "Commit the fix?",
+          "action_ids": [
+            "next-0",
+            "next-1"
+          ],
+          "blocking": true
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "next-0",
+        "label": "Yes, commit",
+        "style": "primary"
+      },
+      {
+        "id": "next-1",
+        "label": "Not yet",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "answered",
+    "text": "Fixed the empty-input crash in tokenize() and added a regression test; parser tests pass. Nothing is committed yet.\nCommit the fix?\nYes, commit (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "next_step": {
+          "recap": "Fixed the empty-input crash in tokenize() and added a regression test; parser tests pass. Nothing is committed yet.",
+          "question": "Commit the fix?"
+        }
+      },
+      {
+        "footer": "Yes, commit (answered by Dena)"
+      }
+    ]
+  }
+]

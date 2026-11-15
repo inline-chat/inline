@@ -21,7 +21,7 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { and, desc, eq, inArray, lt, ne } from "drizzle-orm"
+import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm"
 
 const log = new Log("Agents.runtime")
 
@@ -122,6 +122,18 @@ export async function reportAgentRuntime(
           defaultOutputMode: await settingsOutputMode(tx, bot.id),
         }).returning()
     if (!saved) throw RealtimeRpcError.InternalError()
+    // A bridge answers only its owner and access list, so a bot whose bridge
+    // comes up stops being open to everyone: nobody should see a composer for
+    // an agent that will refuse them. Checked when a bridge starts, not on
+    // every heartbeat.
+    const wasRunning = previous !== undefined &&
+      effectiveRuntimeStatus(previous, now.getTime()) !== AgentRuntimeStatus.OFFLINE
+    if (!wasRunning && input.status !== AgentRuntimeStatus.OFFLINE) {
+      await tx
+        .update(agentSettings)
+        .set({ openToEveryone: false, revision: sql`${agentSettings.revision} + 1`, updatedAt: now })
+        .where(and(eq(agentSettings.botUserId, bot.id), eq(agentSettings.openToEveryone, true)))
+    }
     const changed = !previous ||
       effectiveRuntimeStatus(previous, now.getTime()) !== saved.status ||
       previous.setupReason !== saved.setupReason ||

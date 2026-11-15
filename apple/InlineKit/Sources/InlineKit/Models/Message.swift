@@ -710,8 +710,13 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
           for image in widget.images {
             try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
           }
+        case let .planProposal(plan):
+          try materializeBlockPhotos(db, blocks: plan.children, materializedPhotoIDs: &materializedPhotoIDs)
+        case let .approval(approval):
+          try materializeBlockPhotos(db, blocks: approval.children, materializedPhotoIDs: &materializedPhotoIDs)
         case .paragraph, .heading, .code, .separator, .footer, .table, .math,
-             .diff, .fields, .steps, .meter, .form, nil:
+             .diff, .fields, .steps, .meter, .form, .review, .taskSuggestion,
+             .nextStep, .promptSuggestions, nil:
           break
       }
     }

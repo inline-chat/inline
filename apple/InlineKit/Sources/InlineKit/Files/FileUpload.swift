@@ -248,10 +248,9 @@ public actor FileUploader {
       return
     }
 
-    Log.shared.error(
-      "[FileUploader] Upload task failed for \(uploadId)",
-      error: error
-    )
+    // One attempt failing is not a failed send: the send retries or waits for the connection,
+    // and reports a terminal failure itself.
+    Log.shared.warning("[FileUploader] Upload attempt failed for \(uploadId): \(error.localizedDescription)")
     publishProgress(uploadId: uploadId, progress: .failed(id: uploadId, error: error))
     uploadTasks.removeValue(forKey: uploadId)
     cleanupTasks.removeValue(forKey: uploadId)
@@ -423,7 +422,8 @@ public actor FileUploader {
     let fileName = localPath.components(separatedBy: "/").last ?? "" + ext
     let mimeType = format.toMimeType()
 
-    let uploadId = getUploadId(photoId: photoInfo.photo.id!)
+    guard let localPhotoId = photoInfo.photo.id else { throw FileUploadError.invalidPhotoId }
+    let uploadId = getUploadId(photoId: localPhotoId)
 
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
 
@@ -572,7 +572,10 @@ public actor FileUploader {
 
     switch media {
       case let .photo(photoInfo):
-        uploadId = getUploadId(photoId: photoInfo.photo.id!)
+        guard let localPhotoId = photoInfo.photo.id else {
+          throw FileUploadError.invalidPhotoId
+        }
+        uploadId = getUploadId(photoId: localPhotoId)
         type = .photo
       case let .video(videoInfo):
         guard let localVideoId = videoInfo.video.id else {
@@ -582,7 +585,10 @@ public actor FileUploader {
         uploadId = getUploadId(videoId: localVideoId)
         type = .video
       case let .document(documentInfo):
-        uploadId = getUploadId(documentId: documentInfo.document.id!)
+        guard let localDocumentId = documentInfo.document.id else {
+          throw FileUploadError.invalidDocumentId
+        }
+        uploadId = getUploadId(documentId: localDocumentId)
         type = .document
       case let .voice(voiceContent):
         uploadId = getUploadId(voiceId: voiceContent.voiceID)
@@ -658,6 +664,11 @@ public actor FileUploader {
     switch media {
     case .photo:
       publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+      // A retry or resume reuses the body staged by the first attempt, so compressing again
+      // would only burn CPU and battery on output that is thrown away.
+      if await FileNativeUploadStagingStore.shared.hasStagedBody(logicalID: uploadId) {
+        break
+      }
       do {
         let options = mimeType.lowercased().contains("png")
           ? ImageCompressionOptions.defaultPNG

@@ -1,0 +1,73 @@
+[
+  {
+    "label": "card",
+    "text": "Claude has a question\nEmpty state · How should the empty state look?\n• Inline hint (Recommended): One muted line under the composer\n┌──────────────────┐\n│  No messages yet │\n└──────────────────┘\n• Illustration: A centered image with a title\n   ( ◕ ‿ ◕ )\n  Say hello!\nOr reply to this message with your own answer.",
+    "markdown": false,
+    "blocks": [
+      {
+        "paragraph": "Claude has a question"
+      },
+      {
+        "paragraph": "Empty state · How should the empty state look?"
+      },
+      {
+        "paragraph": "• Inline hint (Recommended): One muted line under the composer"
+      },
+      {
+        "code": {
+          "text": "┌──────────────────┐\n│  No messages yet │\n└──────────────────┘"
+        }
+      },
+      {
+        "paragraph": "• Illustration: A centered image with a title"
+      },
+      {
+        "code": {
+          "text": "   ( ◕ ‿ ◕ )\n  Say hello!"
+        }
+      },
+      {
+        "footer": "Or reply to this message with your own answer."
+      }
+    ]
+  },
+  {
+    "label": "form",
+    "text": "Empty state\nHow should the empty state look?\n• Inline hint (Recommended)\nOne muted line under the composer\n┌──────────────────┐\n│  No messages yet │\n└──────────────────┘\n• Illustration\nA centered image with a title\n   ( ◕ ‿ ◕ )\n  Say hello!",
+    "markdown": false,
+    "blocks": [
+      {
+        "form": {
+          "form_id": "q",
+          "fields": [
+            {
+              "field_id": "f0",
+              "label": "How should the empty state look?",
+              "required": true,
+              "header": "Empty state",
+              "select": {
+                "options": [
+                  {
+                    "option_id": "o0",
+                    "label": "Inline hint (Recommended)",
+                    "description": "One muted line under the composer",
+                    "preview": "┌──────────────────┐\n│  No messages yet │\n└──────────────────┘",
+                    "recommended": true
+                  },
+                  {
+                    "option_id": "o1",
+                    "label": "Illustration",
+                    "description": "A centered image with a title",
+                    "preview": "   ( ◕ ‿ ◕ )\n  Say hello!"
+                  }
+                ],
+                "allow_other": true
+              }
+            }
+          ],
+          "required_grant": "AGENT_GRANT_REQUIREMENT_ACCESS"
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,56 @@
+[
+  {
+    "label": "open",
+    "text": "Suggested task: Profile the sidebar scroll\nThe sidebar drops frames while scrolling 2k chats. Profile ChatListDatabaseQuery and the row cache, find the main-thread work, and report the top three costs with numbers.",
+    "markdown": false,
+    "blocks": [
+      {
+        "task_suggestion": {
+          "title": "Profile the sidebar scroll",
+          "brief": "The sidebar drops frames while scrolling 2k chats. Profile ChatListDatabaseQuery and the row cache, find the main-thread work, and report the top three costs with numbers.",
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "task-start",
+            "task-dismiss"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "task-start",
+        "label": "Start",
+        "style": "primary"
+      },
+      {
+        "id": "task-dismiss",
+        "label": "Dismiss",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "started",
+    "text": "Suggested task: Profile the sidebar scroll\nThe sidebar drops frames while scrolling 2k chats. Profile ChatListDatabaseQuery and the row cache, find the main-thread work, and report the top three costs with numbers.\nStarted by Dena",
+    "markdown": false,
+    "blocks": [
+      {
+        "task_suggestion": {
+          "title": "Profile the sidebar scroll",
+          "brief": "The sidebar drops frames while scrolling 2k chats. Profile ChatListDatabaseQuery and the row cache, find the main-thread work, and report the top three costs with numbers.",
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "started_peer": {
+            "type": {
+              "chat": {
+                "chat_id": 4242
+              }
+            }
+          }
+        }
+      },
+      {
+        "footer": "Started by Dena"
+      }
+    ]
+  }
+]

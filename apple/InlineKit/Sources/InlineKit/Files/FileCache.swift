@@ -25,15 +25,35 @@ public actor FileCache: Sendable {
   private var downloadingPhotos: [Int64: Task<URL?, Never>] = [:]
   private var downloadGenerations: [Int64: UUID] = [:]
   private var downloadSources: [Int64: PhotoDownloadSourceKey] = [:]
+  private var recentFailures: [Int64: (source: PhotoDownloadSourceKey, until: Date)] = [:]
+  private let linkRefresher: MediaLinkRefresher
   private var resetTask: Task<Void, Never>?
   // TODO: Create a message asset downloader middleware over the file cache which tracks messages and downloads, but for now we do it in this file directly
   var messagesToReload: [Int64: Set<Message>] = [:]
 
-  init(database: AppDatabase = .shared, photoDataLoader: @escaping PhotoDataLoader = {
-    try await URLSession.shared.data(from: $0)
-  }) {
+  init(
+    database: AppDatabase = .shared,
+    linkRefresher: MediaLinkRefresher = .shared,
+    photoDataLoader: @escaping PhotoDataLoader = {
+      try await URLSession.shared.data(from: $0)
+    }
+  ) {
     self.database = database
+    self.linkRefresher = linkRefresher
     self.photoDataLoader = photoDataLoader
+  }
+
+  /// A different variant of the photo always replaces the running transfer. For the same
+  /// variant, a re-signed link replaces it only when it expires later; links that carry no
+  /// expiry keep the newest-wins behavior.
+  static func shouldReplace(running: PhotoDownloadSourceKey, with incoming: PhotoDownloadSourceKey) -> Bool {
+    guard running.photoID == incoming.photoID, running.sizeType == incoming.sizeType,
+          running.format == incoming.format
+    else { return true }
+    guard let runningExpiry = MediaLinkExpiry.expiryDate(URL(string: running.cdnURL)),
+          let incomingExpiry = MediaLinkExpiry.expiryDate(URL(string: incoming.cdnURL))
+    else { return running.cdnURL != incoming.cdnURL }
+    return incomingExpiry > runningExpiry
   }
 
   deinit {
@@ -81,6 +101,7 @@ public actor FileCache: Sendable {
     downloadingPhotos.removeAll()
     downloadGenerations.removeAll()
     downloadSources.removeAll()
+    recentFailures.removeAll()
     messagesToReload.removeAll()
 
     let reset = Task {
@@ -233,8 +254,18 @@ public actor FileCache: Sendable {
       log.debug("Registered message \(message.id) for reload when photo \(photoID) downloads")
     }
 
+    // A photo that just failed is not retried until its link changes or the cooldown ends.
+    if let failure = recentFailures[photoID] {
+      if failure.until > Date(), failure.source == source { return nil }
+      recentFailures[photoID] = nil
+    }
+
     let previousTask = downloadingPhotos[photoID]
-    if previousTask != nil, downloadSources[photoID] == source {
+    if previousTask != nil, let running = downloadSources[photoID],
+       running == source || !Self.shouldReplace(running: running, with: source)
+    {
+      // Same file with an older or equal link: views holding a stale snapshot join the
+      // running transfer instead of cancelling it.
       log.debug("Photo \(photoID) is already being downloaded")
       return previousTask
     }
@@ -253,12 +284,11 @@ public actor FileCache: Sendable {
         finishDownload(photoID, generation: generation)
         return nil
       }
-      // TODO: make it smarter about max retries
       return await downloadWithRetries(
         photo: photo,
         photoID: photoID,
         remoteURL: remoteURL,
-        maxRetries: 20,
+        reloadMessage: reloadMessageOnFinish,
         generation: generation
       )
     }
@@ -266,72 +296,158 @@ public actor FileCache: Sendable {
     return task
   }
 
+  /// Network errors, 408, 429 and 5xx get this many attempts. Other client errors stop at once.
+  static let maxTransientAttempts = 4
+  /// A photo whose link was rejected or is missing is not retried for this long unless its
+  /// link changes, so a view that keeps reappearing cannot restart the whole cycle each time.
+  static let terminalFailureCooldown: TimeInterval = 5 * 60
+  /// After transient failures run out (for example while offline), wait briefly instead.
+  static let transientFailureCooldown: TimeInterval = 30
+
+  private enum AttemptFailure: Error {
+    case http(status: Int, retryAfter: TimeInterval?)
+    case empty
+  }
+
+  private enum FailureClass: Equatable {
+    case transient(retryAfter: TimeInterval?)
+    case linkRejected(status: Int)
+    case notFound
+    case permanent
+  }
+
+  private static func classify(_ error: Error) -> FailureClass {
+    if let failure = error as? AttemptFailure {
+      switch failure {
+        case .empty:
+          return .transient(retryAfter: nil)
+        case let .http(status, retryAfter):
+          if MediaLinkExpiry.isLinkRejection(statusCode: status) { return .linkRejected(status: status) }
+          if status == 404 { return .notFound }
+          if status == 408 || status == 429 || (500 ... 599).contains(status) {
+            return .transient(retryAfter: retryAfter)
+          }
+          return .permanent
+      }
+    }
+    if let urlError = error as? URLError {
+      switch urlError.code {
+        case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet,
+             .cannotFindHost, .dnsLookupFailed, .badServerResponse, .dataNotAllowed,
+             .internationalRoamingOff, .callIsActive:
+          return .transient(retryAfter: nil)
+        default:
+          return .permanent
+      }
+    }
+    return .permanent
+  }
+
+  /// 1, 2, 4, 8 … seconds with ±20% jitter, capped at 30.
+  static func retryDelay(afterAttempt attempt: Int) -> TimeInterval {
+    let base = min(30, pow(2, Double(max(0, attempt - 1))))
+    return base * Double.random(in: 0.8 ... 1.2)
+  }
+
+  private static func retryAfter(_ response: HTTPURLResponse) -> TimeInterval? {
+    guard let value = response.value(forHTTPHeaderField: "Retry-After"),
+          let seconds = TimeInterval(value.trimmingCharacters(in: .whitespaces)), seconds >= 0
+    else { return nil }
+    return min(seconds, 60)
+  }
+
+  private func recordFailure(_ photoID: Int64, cooldown: TimeInterval) {
+    guard let source = downloadSources[photoID] else { return }
+    recentFailures[photoID] = (source, Date().addingTimeInterval(cooldown))
+  }
+
+  /// Re-fetches the photo's message and returns the photo again if a newer link arrived.
+  private func refreshedPhoto(
+    photoID: Int64,
+    reloadMessage: Message?,
+    staleURL: URL
+  ) async -> (photo: PhotoInfo, url: URL, source: PhotoDownloadSourceKey)? {
+    let database = database
+    let owner: (peer: Peer, messageId: Int64)?
+    if let reloadMessage, reloadMessage.photoId == photoID, reloadMessage.messageId > 0 {
+      owner = (reloadMessage.peerId, reloadMessage.messageId)
+    } else {
+      owner = try? await database.dbWriter.read { db in
+        try Message
+          .filter(Message.Columns.photoId == photoID)
+          .filter(Message.Columns.messageId > 0)
+          .order(Message.Columns.date.desc)
+          .fetchOne(db)
+          .map { ($0.peerId, $0.messageId) }
+      }
+    }
+    guard let owner, await linkRefresher.refresh(peer: owner.peer, messageId: owner.messageId) else {
+      return nil
+    }
+    let fresh = try? await database.dbWriter.read { db in
+      try Photo
+        .filter(Photo.Columns.photoId == photoID)
+        .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+        .asRequest(of: PhotoInfo.self)
+        .fetchOne(db)
+    }
+    guard let fresh, let source = fresh.downloadSourceKey(),
+          let url = URL(string: source.cdnURL), url != staleURL
+    else { return nil }
+    return (fresh, url, source)
+  }
+
   private func downloadWithRetries(
     photo: PhotoInfo,
     photoID: Int64,
-    remoteURL: URL,
-    maxRetries: Int,
+    remoteURL initialURL: URL,
+    reloadMessage: Message?,
     generation: UUID
   ) async -> URL? {
     let startedAt = Date()
     var attempt = 0
     var outcome = DownloadTelemetry.Outcome.canceled
-    var receivedBytes: Int64 = 0
+    var current = photo
+    var remoteURL = initialURL
+    var refreshedLink = false
+    let expectedBytes = Int64(photo.bestPhotoSize()?.size ?? 0)
     defer {
       finishDownload(photoID, generation: generation)
       DownloadTelemetry.record(
-        outcome, transport: .cdn, downloadID: "photo_\(photoID)", expectedBytes: receivedBytes,
+        outcome, transport: .cdn, downloadID: "photo_\(photoID)", expectedBytes: expectedBytes,
         startedAt: startedAt, attempts: attempt
       )
     }
 
-    while attempt < maxRetries {
-      attempt += 1
+    while true {
+      guard !Task.isCancelled, downloadGenerations[photoID] == generation else { return nil }
 
-      // Check for cancellation before each attempt
-      guard !Task.isCancelled else {
-        log.debug("Downloading photo \(photoID) was cancelled before attempt \(attempt)")
-        break
+      // An expired link cannot succeed; get a fresh one before spending a request on it.
+      if !refreshedLink, MediaLinkExpiry.isExpired(remoteURL) {
+        refreshedLink = true
+        if let fresh = await refreshedPhoto(photoID: photoID, reloadMessage: reloadMessage, staleURL: remoteURL) {
+          guard downloadGenerations[photoID] == generation else { return nil }
+          current = fresh.photo
+          remoteURL = fresh.url
+          downloadSources[photoID] = fresh.source
+          log.debug("Refreshed expired link for photo \(photoID) before downloading")
+        }
+        continue
       }
-      guard downloadGenerations[photoID] == generation else { return nil }
 
+      attempt += 1
       do {
         log.debug("Downloading photo \(photoID), attempt \(attempt)")
-
         let (data, response) = try await photoDataLoader(remoteURL)
-
-        // Validate response
-        if let httpResponse = response as? HTTPURLResponse {
-          guard 200 ... 299 ~= httpResponse.statusCode else {
-            if httpResponse.statusCode == 404 {
-              log.error("Photo \(photoID) not found (404) - will not retry")
-              outcome = .notFound
-              break
-            }
-            throw URLError(.badServerResponse)
-          }
+        if let httpResponse = response as? HTTPURLResponse, !(200 ... 299).contains(httpResponse.statusCode) {
+          throw AttemptFailure.http(status: httpResponse.statusCode, retryAfter: Self.retryAfter(httpResponse))
         }
-
-        // Validate data
-        guard !data.isEmpty else {
-          log.error("Empty data received for photo \(photoID)")
-          if attempt < maxRetries {
-            try? await Task.sleep(for: .seconds(Double(attempt)))
-            continue
-          }
-          outcome = .failed(.init(name: "empty", code: nil))
-          break
-        }
-        receivedBytes = Int64(data.count)
-
-        // Success - same logic as original
-        log.debug("Successfully downloaded photo \(photoID) (\(data.count) bytes)")
+        guard !data.isEmpty else { throw AttemptFailure.empty }
 
         try Task.checkCancellation()
         guard downloadGenerations[photoID] == generation else { return nil }
 
-        // Generate a new file name (same as original)
-        let localPath = Self.photoLocalPath(photo)
+        let localPath = Self.photoLocalPath(current)
         let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
         let createdLocalFile = !FileManager.default.fileExists(atPath: localUrl.path)
         var shouldRemoveLocalFile = createdLocalFile
@@ -341,82 +457,88 @@ public actor FileCache: Sendable {
           }
         }
 
-        // Ensure directory exists
         let directory = localUrl.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        do {
-          try data.write(to: localUrl, options: .atomic)
-        } catch {
-          if Self.isCancellation(error) || Task.isCancelled {
-            log.debug("Downloading photo \(photoID) was cancelled")
-            break
-          }
-          log.error("Error saving downloaded image locally", error: error)
-          throw error
-        }
+        try data.write(to: localUrl, options: .atomic)
 
         try Task.checkCancellation()
         guard downloadGenerations[photoID] == generation else { return nil }
+        let persisted = current
         try await database.dbWriter.write { db in
-          try Self.persistDownloadedPhotoPath(localPath, for: photo, in: db)
+          try Self.persistDownloadedPhotoPath(localPath, for: persisted, in: db)
         }
         // Once persistence commits, the cache file is referenced state even if
         // cancellation wins before the UI reload notification.
         shouldRemoveLocalFile = false
+        recentFailures[photoID] = nil
         guard downloadGenerations[photoID] == generation else { return nil }
-        log.debug("Saved downloaded photo size for \(photoID)")
+        log.debug("Saved downloaded photo \(photoID) (\(data.count) bytes)")
 
         await reloadAllMessagesForPhoto(photoID, generation: generation)
         guard !Task.isCancelled, downloadGenerations[photoID] == generation else { return nil }
         outcome = .success
         return localUrl
-
       } catch {
-        if Self.isCancellation(error) || Task.isCancelled {
-          log.debug("Downloading photo \(photoID) was cancelled during attempt \(attempt)")
-          break
-        }
+        if Self.isCancellation(error) || Task.isCancelled { return nil }
+        guard downloadGenerations[photoID] == generation else { return nil }
 
-        log.error("Failed to download photo \(photoID), attempt \(attempt)", error: error)
+        switch Self.classify(error) {
+          case let .linkRejected(status):
+            if !refreshedLink {
+              refreshedLink = true
+              if let fresh = await refreshedPhoto(photoID: photoID, reloadMessage: reloadMessage, staleURL: remoteURL) {
+                guard downloadGenerations[photoID] == generation else { return nil }
+                current = fresh.photo
+                remoteURL = fresh.url
+                downloadSources[photoID] = fresh.source
+                log.debug("Photo \(photoID) link was rejected (HTTP \(status)); retrying with a fresh link")
+                continue
+              }
+            }
+            log.warning("Photo \(photoID) link was rejected (HTTP \(status)) and no fresher link is available")
+            outcome = .failed(.init(name: "http", code: status))
+            recordFailure(photoID, cooldown: Self.terminalFailureCooldown)
+            return nil
 
-        // Check if we should retry based on error type
-        if attempt < maxRetries, shouldRetryError(error) {
-          let delay = Double(attempt) // 1s, 2s, 3s
-          log.debug("Retrying photo \(photoID) in \(delay) seconds")
-          try? await Task.sleep(for: .seconds(delay))
-        } else if attempt >= maxRetries {
-          log.error("Failed to download photo \(photoID) after \(maxRetries) attempts")
-          outcome = .failed(DownloadTelemetry.errorClass(error))
-          break
-        } else {
-          log.error("Photo \(photoID) download failed with non-recoverable error", error: error)
-          outcome = .failed(DownloadTelemetry.errorClass(error))
-          break
+          case .notFound:
+            log.warning("Photo \(photoID) not found (404); not retrying")
+            outcome = .notFound
+            recordFailure(photoID, cooldown: Self.terminalFailureCooldown)
+            return nil
+
+          case .permanent:
+            log.error("Photo \(photoID) download failed", error: error)
+            outcome = .failed(Self.telemetryClass(error))
+            recordFailure(photoID, cooldown: Self.terminalFailureCooldown)
+            return nil
+
+          case let .transient(retryAfter):
+            guard attempt < Self.maxTransientAttempts else {
+              log.error("Failed to download photo \(photoID) after \(attempt) attempts", error: error)
+              outcome = .failed(Self.telemetryClass(error))
+              recordFailure(photoID, cooldown: Self.transientFailureCooldown)
+              return nil
+            }
+            let delay = retryAfter ?? Self.retryDelay(afterAttempt: attempt)
+            log.debug("Retrying photo \(photoID) in \(delay) seconds")
+            try? await Task.sleep(for: .seconds(delay))
         }
       }
     }
-    return nil
+  }
+
+  private static func telemetryClass(_ error: Error) -> DownloadTelemetry.ErrorClass {
+    switch error as? AttemptFailure {
+      case let .http(status, _)?: .init(name: "http", code: status)
+      case .empty?: .init(name: "empty", code: nil)
+      case nil: DownloadTelemetry.errorClass(error)
+    }
   }
 
   private static func isCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     let nsError = error as NSError
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
-  }
-
-  private func shouldRetryError(_ error: Error) -> Bool {
-    if let urlError = error as? URLError {
-      switch urlError.code {
-        case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet:
-          return true
-        case .badServerResponse, .cannotFindHost, .dnsLookupFailed:
-          return true
-        default:
-          return false
-      }
-    }
-    return false
   }
 
   private func triggerMessageReload(message: Message) async {

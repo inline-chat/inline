@@ -7,6 +7,8 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod entities;
+
 /// Backend/store boundary for client runtime operations.
 pub mod backend;
 
@@ -56,9 +58,10 @@ pub use runtime::{
 };
 pub use sdk_backend::{SdkBackend, SdkBackendBuildError, SdkBackendBuilder};
 pub use store::{
-    AccountStateSnapshot, ChatStateSnapshot, ClientEventDelivery, ClientStore, InMemoryStore,
-    PendingSyncBatch, SqliteStore, StoreError, StoreResult, StoredReaction, StoredReadState,
-    StoredSession, StoredTransaction, SyncBucketKey, SyncBucketPeer, SyncBucketState, SyncState,
+    AccountDirectoryState, AccountDirectoryWrite, AccountStateSnapshot, ChatStateSnapshot,
+    ClientEventDelivery, ClientStore, InMemoryStore, PendingSyncBatch, SqliteStore, StoreError,
+    StoreResult, StoredReaction, StoredReadState, StoredSession, StoredTransaction, SyncBucketKey,
+    SyncBucketPeer, SyncBucketState, SyncState,
 };
 pub use sync::SyncConfig;
 pub use types::{
@@ -66,18 +69,19 @@ pub use types::{
     AgentThreadContext, AnswerMessageActionRequest, AuthContactKind, AuthCredential,
     AuthStartRequest, AuthStartResult, AuthToken, AuthVerifyRequest, AuthVerifyResult,
     ChatCreateParticipant, ChatParticipantRecord, ChatParticipantsPage, ChatParticipantsRequest,
-    ClientStatusSnapshot, ConnectRequest, CreateDmRequest, CreateReplyThreadRequest,
-    CreateThreadRequest, CreatedChat, DeleteChatRequest, DeleteMessageRequest, DialogFollowMode,
-    DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage, DialogsRequest,
-    EditInteractiveMessageRequest, EditMessageRequest, HistoryPage, HistoryRequest,
-    InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind, MessageActionRecord,
-    MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent, MessageEntityRecord,
-    MessageMetadata, MessageMutation, MessageRecord, NotificationMode, PeerRef, PinMessageRequest,
-    ReactRequest, ReadRequest, RemoveChatParticipantRequest, SendInteractiveTextRequest,
-    SendNotificationMode, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord,
-    SpaceMemberRole, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
+    ClientStatusSnapshot, ConnectRequest, ConversationKind, CreateDmRequest,
+    CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
+    DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
+    DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage,
+    HistoryRequest, InitialEventPolicy, MediaKind, MessageActionButton, MessageActionKind,
+    MessageActionRecord, MessageActionRow, MessageActions, MessageAttachmentRecord, MessageContent,
+    MessageEntityRecord, MessageMetadata, MessageMutation, MessageRecord, NotificationMode,
+    PeerRef, PinMessageRequest, ReactRequest, ReadRequest, RemoveChatParticipantRequest,
+    SearchUsersRequest, SendInteractiveTextRequest, SendNotificationMode, SendTextRequest,
+    SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole, SpaceMembersPage,
+    SpaceMembersRequest, SpaceRecord, TypingRequest, UpdateChatInfoRequest,
     UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest, UploadHandle, UploadRequest,
-    UploadThumbnail, UserRecord, UserSettingsRecord,
+    UploadThumbnail, UserRecord, UserSettingsRecord, UsersPage, UsersRequest,
 };
 
 /// Published package version.
