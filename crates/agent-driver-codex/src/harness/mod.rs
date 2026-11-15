@@ -9,6 +9,7 @@ mod decisions;
 mod delivery;
 mod manifest;
 mod mapper;
+mod suggestion;
 
 pub use connection::{CodexHarness, CodexHarnessConfig, CodexSession};
 

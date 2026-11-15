@@ -107,6 +107,8 @@ pub struct ClaudeMapper {
     compacting: bool,
     /// The running turn is a native command (`/compact`, `/clear`).
     command_turn: bool,
+    /// The turn the latest `result` ended: what a prompt suggestion follows.
+    ended_turn: Option<TurnId>,
 }
 
 impl ClaudeMapper {
@@ -334,6 +336,18 @@ impl ClaudeMapper {
                 None,
                 &message.raw,
             )],
+            MessageKind::PromptSuggestion(suggestion) => {
+                let text = suggestion.suggestion.trim();
+                // It follows the turn that just ended; one arriving after a
+                // newer turn started is stale.
+                if text.is_empty() || self.turn.is_some() {
+                    return Vec::new();
+                }
+                vec![Event::PromptSuggestion {
+                    turn: self.ended_turn.clone(),
+                    text: text.to_owned(),
+                }]
+            }
             MessageKind::Other { message_type } => {
                 vec![notice(NoticeLevel::Info, message_type, None, &message.raw)]
             }
@@ -866,6 +880,7 @@ impl ClaudeMapper {
         }
         self.turn_inputs.clear();
         self.streaming.clear();
+        self.ended_turn = Some(turn.clone());
         let outcome = turn_outcome(result);
         let superseded = std::mem::take(&mut self.superseded);
         self.tool_call_starting = false;
@@ -1878,6 +1893,40 @@ mod tests {
         };
         assert_eq!(inputs_consumed, &[input]);
         assert_eq!(*outcome, TurnOutcome::Completed);
+    }
+
+    #[test]
+    fn prompt_suggestions_follow_the_ended_turn() {
+        let mut mapper = ClaudeMapper::new(None);
+        let input = InputId::new("0d6a7c1e-1111-4a00-8000-000000000002").unwrap();
+        mapper.sent(&input, true);
+        mapper.message(&message(json!({"type": "assistant", "uuid": "a1",
+            "message": {"id": "m1", "content": [{"type": "text", "text": "fixed"}]}})));
+        mapper.message(&message(json!({"type": "result", "subtype": "success",
+            "is_error": false, "duration_ms": 5})));
+        let events = mapper.message(&message(json!({"type": "prompt_suggestion",
+            "suggestion": " run the tests ", "uuid": "s1", "session_id": "x"})));
+        let [Event::PromptSuggestion { turn, text }] = events.as_slice() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(turn.as_ref().map(TurnId::as_str), Some(input.as_str()));
+        assert_eq!(text, "run the tests");
+        assert!(
+            mapper
+                .message(&message(json!({"type": "prompt_suggestion", "suggestion": "  "})))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prompt_suggestions_during_a_newer_turn_are_stale() {
+        let mut mapper = ClaudeMapper::new(None);
+        let input = InputId::new("0d6a7c1e-1111-4a00-8000-000000000003").unwrap();
+        mapper.sent(&input, true);
+        mapper.message(&message(json!({"type": "assistant", "uuid": "a1",
+            "message": {"id": "m1", "content": [{"type": "text", "text": "working"}]}})));
+        let events = mapper.message(&message(json!({"type": "prompt_suggestion", "suggestion": "yes"})));
+        assert!(events.is_empty(), "{events:?}");
     }
 
     #[test]

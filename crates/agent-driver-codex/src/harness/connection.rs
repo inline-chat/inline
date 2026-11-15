@@ -733,6 +733,41 @@ impl SessionInner {
         }
     }
 
+    /// Predicts the user's next message after `turn`, like the Codex app's
+    /// composer predictions. Silent when the app-server has no
+    /// `thread/sample`, the sample fails, or a newer turn started meanwhile.
+    async fn suggest_prompt(self: &Arc<Self>, turn: TurnId) {
+        let Some(connection) = self.connection.upgrade() else {
+            return;
+        };
+        if !connection
+            .availability
+            .op(inline_agent_bridge::harness::OpKind::Sample)
+            .is_supported()
+        {
+            return;
+        }
+        let Ok(response) = connection
+            .request(super::suggestion::request(&self.thread, &turn))
+            .await
+        else {
+            return;
+        };
+        let Some(text) = super::suggestion::parse(&response) else {
+            return;
+        };
+        let current = {
+            let mapper = self.mapper.lock().expect("mapper poisoned");
+            mapper.active_turn().is_none() && mapper.last_finished_turn() == Some(&turn)
+        };
+        if current {
+            self.emit_all(vec![Event::PromptSuggestion {
+                turn: Some(turn),
+                text,
+            }]);
+        }
+    }
+
     /// Lists the thread's running background terminals and reports the ones
     /// that started or ended as child updates.
     async fn refresh_terminals(self: &Arc<Self>) {
@@ -920,7 +955,12 @@ async fn dispatch(
                         .lock()
                         .expect("mapper poisoned")
                         .notification(&method, &params);
+                    let follow = super::suggestion::turn_to_follow(&mapped.events);
                     session.emit_all(mapped.events);
+                    if let Some(turn) = follow {
+                        let session = session.clone();
+                        tokio::spawn(async move { session.suggest_prompt(turn).await });
+                    }
                     if mapped.refresh_queue {
                         let session = session.clone();
                         tokio::spawn(async move {

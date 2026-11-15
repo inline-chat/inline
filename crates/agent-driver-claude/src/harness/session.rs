@@ -680,6 +680,9 @@ impl HarnessDriver for ClaudeHarness {
                 // Subagent text arrives under its parent tool call, so
                 // Detailed mode nests a subagent's work like Claude Code.
                 forward_subagent_text: true,
+                // Claude Code's own next-prompt guess (same model, warm
+                // cache), shown as the gray placeholder of Inline's composer.
+                prompt_suggestions: true,
                 ..InitializeRequest::default()
             };
             let servers = self.config.session_servers(&key.session);

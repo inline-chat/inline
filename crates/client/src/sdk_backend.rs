@@ -4579,6 +4579,7 @@ pub(crate) fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::UpdateMessageId(_) => "update_message_id",
         Update::DeleteMessages(_) => "delete_messages",
         Update::UpdateComposeAction(_) => "update_compose_action",
+        Update::ComposeSuggestion(_) => "compose_suggestion",
         Update::UpdateUserStatus(_) => "update_user_status",
         Update::MessageAttachment(_) => "message_attachment",
         Update::UpdateReaction(_) => "update_reaction",
