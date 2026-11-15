@@ -40,6 +40,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private let textLayoutCache = TextLayoutCache()
   private var plans: [ChatRowID: Plan] = [:]
   private var legacyHeights: [ChatRowID: (revision: UInt64, width: CGFloat, height: CGFloat)] = [:]
+  /// Every row's height at the width it was measured at. The list asks for the height of each placed
+  /// row on every frame of a fling, so this answers before the row itself is looked at. A row leaves
+  /// it when its content changes (the row diff), when it is planned again, and on an environment change.
+  private var heights: [ChatRowID: (width: CGFloat, height: CGFloat)] = [:]
   private var environmentRevision: UInt64 = 0
   private var rowPool: [TimelineRowView] = []
 
@@ -216,6 +220,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func row(_ id: ChatRowID) -> ChatRow? { snapshot?.row(for: id) }
 
   private func height(of id: ChatRowID, width: CGFloat) -> CGFloat {
+    if let cached = heights[id], abs(cached.width - width) < 0.5 { return cached.height }
+    let height = measure(id, width: width)
+    heights[id] = (width, height)
+    return height
+  }
+
+  private func measure(_ id: ChatRowID, width: CGFloat) -> CGFloat {
     guard let row = row(id) else { return 0 }
     switch row.content {
       case let .message(message, grouping):
@@ -252,15 +263,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func plan(
     _ row: ChatRow, _ message: FullMessage, _ grouping: ChatRowGrouping, isThreadAnchor: Bool, width: CGFloat
   ) -> Plan? {
-    guard width > 0, MessageViewContent.supports(message, displayMode: isThreadAnchor ? .threadAnchor : .normal)
-    else { return nil }
     let pacer = MessageStreamPacer.shared
     let streamLength = pacer.revealedLength(for: message.id)
+    // A cached plan means the kind is supported; checking that walks the message, so it comes after.
     if let plan = plans[row.id], plan.revision == row.revision, plan.environment == environmentRevision,
        abs(plan.width - width) < 0.5, plan.streamLength == streamLength
     {
       return plan
     }
+    guard width > 0, MessageViewContent.supports(message, displayMode: isThreadAnchor ? .threadAnchor : .normal)
+    else { return nil }
     let avatar: MessageLayoutInput.Avatar = grouping.showsAvatar
       ? (grouping.isLastInGroup || isThreadAnchor ? .visible : .reserved)
       : .none
@@ -341,6 +353,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func replan(_ id: ChatRowID, timing: TimelineTiming) {
     plans[id] = nil
+    heights[id] = nil
     list.apply(TimelineTransaction(changed: [id], timing: timing))
   }
 
@@ -365,6 +378,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     environmentRevision &+= 1
     plans.removeAll()
     legacyHeights.removeAll()
+    heights.removeAll()
     guard let snapshot else { return }
     list.apply(TimelineTransaction(changed: Set(snapshot.ids)))
   }
@@ -411,8 +425,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     for change in diff.removals {
       plans[change.id] = nil
       legacyHeights[change.id] = nil
+      heights[change.id] = nil
     }
     let changed = Set(diff.updates.map(\.id))
+    for id in changed { heights[id] = nil }
 
     var timing = TimelineTiming.none
     var scroll = TimelineScroll<ChatRowID>.preserve
