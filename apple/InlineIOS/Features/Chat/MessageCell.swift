@@ -1579,7 +1579,8 @@ extension MessageCollectionViewCell {
       message,
       context: context,
       footer: pacer.isStreaming(message.id) ? .reserved : .visible,
-      revealedLength: pacer.revealedLength(for: message.id)
+      revealedLength: pacer.revealedLength(for: message.id),
+      cache: Self.nextTextLayoutCache
     )
   }
 

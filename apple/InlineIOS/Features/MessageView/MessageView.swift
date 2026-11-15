@@ -78,6 +78,36 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     layout?.size ?? .zero
   }
 
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    scheduleExpiry()
+  }
+
+  // MARK: - Expiry
+
+  /// Fires once when a task card on screen lapses, so the row replans with it expired.
+  private var expiryTimer: Timer?
+
+  /// Arms the timer for the soonest open task card while the view is in a window. One that
+  /// lapsed off screen replans on the next turn of the run loop.
+  private func scheduleExpiry() {
+    expiryTimer?.invalidate()
+    expiryTimer = nil
+    guard window != nil, let content, let expiry = content.rich?.nextExpiry else { return }
+    let messageID = content.message.id
+    // Just past the expiry, so the replan sees it lapsed.
+    let timer = Timer(timeInterval: max(0, expiry.timeIntervalSinceNow) + 0.05, repeats: false) { [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self, let message = self.content?.message, message.id == messageID else { return }
+        self.expiryTimer = nil
+        self.onContentStateChange?(message)
+      }
+    }
+    timer.tolerance = 0.5
+    RunLoop.main.add(timer, forMode: .common)
+    expiryTimer = timer
+  }
+
   /// Installs `layout`. With an animated `motion`, every node moves on one curve; when the
   /// caller is inside a matching animation block (the list resizing the row), the row moves too.
   func apply(_ content: MessageViewContent, layout: MessageLayout, motion: MessageMotion) {
@@ -92,6 +122,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     let previousText = self.layout?.text
     self.content = content
     self.layout = layout
+    scheduleExpiry()
 
     // Content and starting states change without animation; geometry moves below.
     var appearing: [UIView] = []

@@ -103,7 +103,8 @@ struct MessageViewContent {
     _ message: FullMessage,
     context: MessageRowContext,
     footer: MessageLayoutInput.Footer.Visibility = .visible,
-    revealedLength: Int? = nil
+    revealedLength: Int? = nil,
+    cache: TextLayoutCache? = nil
   ) -> MessageViewContent? {
     // A captionless voice note's display text is its "Voice message" preview; it has no caption.
     let text = message.message.hasVoice && message.message.text?.isEmpty != false ? "" : message.displayText ?? ""
@@ -112,11 +113,8 @@ struct MessageViewContent {
     let model = message.message
     let outgoing = model.out == true
     let grid = PixelGrid(scale: context.displayScale)
-    var blocks = MessageBlock.blocks(
-      for: message,
-      context: context,
-      maximumContentWidth: maximumContentWidth(context: context, outgoing: outgoing)
-    )
+    let contentWidth = maximumContentWidth(context: context, outgoing: outgoing)
+    var blocks = MessageBlock.blocks(for: message, context: context, maximumContentWidth: contentWidth)
     guard !text.isEmpty || !blocks.isEmpty else { return nil }
     let isEmoji = blocks.isEmpty && text.containsOnlyEmojis
     // Captionless media carries its time in a dark pill over its corner, and fills the bubble.
@@ -145,7 +143,7 @@ struct MessageViewContent {
       ? MessageText(NSAttributedString())
       : bodyText(text, message: message, isEmoji: isEmoji, textColor: textColor, context: context)
     let richSecondary: UIColor = outgoing ? UIColor.white.withAlphaComponent(0.7) : theme.incomingSecondaryText.uiColor
-    let rich = isEmoji ? nil : MessageRichContent.make(
+    var rich = isEmoji ? nil : MessageRichContent.make(
       for: message,
       body: body.attributedString,
       style: .init(
@@ -157,7 +155,20 @@ struct MessageViewContent {
       ),
       expanded: MessageRichState.shared.expanded(for: message.id)
     )
-    // Buttons drawn inside blocks leave the rows under the bubble.
+    // Buttons drawn inside blocks leave the rows under the bubble. Which blocks draw is known
+    // once laid out: a collapsed plan cuts its later children, and past the node cap nothing
+    // draws. The planner's own pass then finds this one's text measured.
+    if var claiming = rich, !claiming.inlineActionIDs.isEmpty {
+      let layout = RichLayoutPlanner.layout(
+        claiming.blocks,
+        maximumWidth: contentWidth,
+        grid: grid,
+        layoutDirection: context.isRightToLeft ? .rightToLeft : .leftToRight,
+        cache: cache
+      )
+      claiming.inlineActionIDs = claiming.drawnActionIDs(in: layout)
+      rich = claiming
+    }
     if let inline = rich?.inlineActionIDs, !inline.isEmpty {
       blocks = MessageBlock.excludingActions(inline, from: blocks, message: model, traits: traits)
     }

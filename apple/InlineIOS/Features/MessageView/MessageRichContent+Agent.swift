@@ -456,8 +456,12 @@ extension MessageRichContent.Builder {
   mutating func taskSuggestion(_ task: BlockTaskSuggestion, block: Block, path: RichPath) -> RichBlock? {
     guard let title = slice(task.title, font: titleFont), title.length > 0 else { return nil }
     let brief = present(task.brief, when: task.hasBrief) ? slice(task.brief, font: secondaryFont, color: style.secondaryColor) : nil
-    let lapsed = task.hasExpiresAt && task.expiresAt > 0 && Date(timeIntervalSince1970: TimeInterval(task.expiresAt)) < Date()
-    let state: BlockDecisionState = (task.state == .pending || task.state == .unspecified) && lapsed ? .expired : task.state
+    let expiry = task.hasExpiresAt && task.expiresAt > 0 ? Date(timeIntervalSince1970: TimeInterval(task.expiresAt)) : nil
+    let lapsed = expiry.map { $0 < Date() } ?? false
+    let isOpen = task.state == .pending || task.state == .unspecified
+    let state: BlockDecisionState = isOpen && lapsed ? .expired : task.state
+    // A visible row replans when the card lapses (`MessageView`).
+    if isOpen, !lapsed, let expiry { nextExpiry = min(nextExpiry ?? expiry, expiry) }
     var status: RichStatusLine?
     if state == .accepted, task.hasStartedPeer {
       let tap: RichTap? = switch task.startedPeer.type {
