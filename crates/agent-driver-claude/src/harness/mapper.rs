@@ -1615,6 +1615,7 @@ fn question_form(permission: &PermissionRequest) -> QuestionForm {
                             .map(|option| FieldOption {
                                 label: option.label.clone(),
                                 description: option.description.clone(),
+                                preview: option.preview.clone(),
                             })
                             .collect(),
                         multiple: question.multi_select,
@@ -1652,6 +1653,10 @@ fn approval_subject(
         .or_else(|| permission.description.clone());
     let input = &permission.input;
     match permission.tool_name.as_str() {
+        // Claude's plan approval: the plan itself, not a tool call.
+        "ExitPlanMode" if input["plan"].is_string() => ApprovalSubject::Plan {
+            plan: input["plan"].as_str().unwrap_or_default().to_string(),
+        },
         "Bash" => ApprovalSubject::Command {
             command: input["command"].as_str().unwrap_or("").to_string(),
             cwd: cwd.map(PathBuf::from),

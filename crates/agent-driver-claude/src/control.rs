@@ -266,6 +266,8 @@ pub struct AskQuestion {
 pub struct AskOption {
     pub label: String,
     pub description: Option<String>,
+    /// Monospaced content shown while the option is focused.
+    pub preview: Option<String>,
 }
 
 /// The host's answer to `can_use_tool`.

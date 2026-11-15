@@ -97,6 +97,13 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     write("spawn_thread", ToolTarget::None, false),
     write("send_to_thread", ToolTarget::Accessible, false),
     write("stop_thread", ToolTarget::Accessible, false),
+    // Cards the desktop apps draw for agents, posted in the work's thread:
+    // review findings, a suggested task (owner's DM), the next-step box,
+    // suggested prompts.
+    write("report_findings", ToolTarget::CurrentWork, false),
+    write("suggest_thread", ToolTarget::CurrentWork, false),
+    write("ask_next_step", ToolTarget::CurrentWork, false),
+    write("suggest_prompts", ToolTarget::CurrentWork, false),
 ];
 
 pub fn tool(name: &str) -> Option<&'static ToolDescriptor> {

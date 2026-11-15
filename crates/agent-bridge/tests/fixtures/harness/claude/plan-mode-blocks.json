@@ -1,0 +1,373 @@
+{
+  "provider": "claude",
+  "harness": "claude-code 2.1.292",
+  "recorded": false,
+  "source": "Agent SDK 0.3.288 tool and control types: TodoWrite input.todos, ExitPlanMode input.plan behind can_use_tool, AskUserQuestion options with preview.",
+  "description": "A plan mode turn: the todo list becomes a plan item, ExitPlanMode a plan approval with Claude's choices, and AskUserQuestion keeps each option's preview.",
+  "steps": [
+    {
+      "name": "init reports the resolved model and the effective permission mode",
+      "native": {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "cwd": "/work/inline",
+        "model": "claude-sonnet-5-5",
+        "permissionMode": "default",
+        "claude_code_version": "2.1.292",
+        "tools": [
+          "Bash",
+          "Read",
+          "Edit",
+          "AskUserQuestion"
+        ],
+        "slash_commands": [
+          "compact",
+          "review"
+        ],
+        "uuid": "a0000000-0000-4000-8000-000000000001"
+      },
+      "events": [
+        {
+          "type": "settings",
+          "effective": {
+            "model": {
+              "value": "claude-sonnet-5-5",
+              "label": "claude-sonnet-5-5",
+              "disabled": false
+            },
+            "permission_mode": "default",
+            "folder": "/work/inline"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the owner's input starts the turn",
+      "native": {
+        "type": "system",
+        "subtype": "command_lifecycle",
+        "command_uuid": "0d6a7c1e-1111-4a00-8000-000000000001",
+        "state": "started",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70"
+      },
+      "events": [
+        {
+          "type": "turn",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "phase": {
+            "phase": "started",
+            "inputs": [
+              "0d6a7c1e-1111-4a00-8000-000000000001"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "TodoWrite becomes a plan item with its steps",
+      "native": {
+        "type": "assistant",
+        "uuid": "a0000000-0000-4000-8000-000000000011",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {
+          "id": "msg_02A",
+          "role": "assistant",
+          "model": "claude-sonnet-5-5",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_todo1",
+              "name": "TodoWrite",
+              "input": {
+                "todos": [
+                  {
+                    "content": "Read the parser and its tests",
+                    "status": "in_progress",
+                    "activeForm": "Read the parser and its tests"
+                  },
+                  {
+                    "content": "Handle empty input in tokenize()",
+                    "status": "pending",
+                    "activeForm": "Handle empty input in tokenize()"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "toolu_todo1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "plan",
+          "update": {
+            "op": "started",
+            "body": {
+              "kind": "plan",
+              "steps": [
+                {
+                  "text": "Read the parser and its tests",
+                  "status": "in_progress"
+                },
+                {
+                  "text": "Handle empty input in tokenize()",
+                  "status": "pending"
+                }
+              ]
+            }
+          },
+          "native": {
+            "type": "tool_use",
+            "id": "toolu_todo1",
+            "name": "TodoWrite",
+            "input": {
+              "todos": [
+                {
+                  "content": "Read the parser and its tests",
+                  "status": "in_progress",
+                  "activeForm": "Read the parser and its tests"
+                },
+                {
+                  "content": "Handle empty input in tokenize()",
+                  "status": "pending",
+                  "activeForm": "Handle empty input in tokenize()"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ExitPlanMode's call carries the plan text",
+      "native": {
+        "type": "assistant",
+        "uuid": "a0000000-0000-4000-8000-000000000012",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {
+          "id": "msg_02B",
+          "role": "assistant",
+          "model": "claude-sonnet-5-5",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_plan1",
+              "name": "ExitPlanMode",
+              "input": {
+                "plan": "# Fix empty input in the parser\n\n1. Return early from tokenize() on blank input\n2. Add a regression test"
+              }
+            }
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "toolu_plan1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "plan",
+          "update": {
+            "op": "started",
+            "body": {
+              "kind": "plan",
+              "steps": [],
+              "text": "# Fix empty input in the parser\n\n1. Return early from tokenize() on blank input\n2. Add a regression test"
+            }
+          },
+          "native": {
+            "type": "tool_use",
+            "id": "toolu_plan1",
+            "name": "ExitPlanMode",
+            "input": {
+              "plan": "# Fix empty input in the parser\n\n1. Return early from tokenize() on blank input\n2. Add a regression test"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ExitPlanMode's permission request is a plan approval",
+      "native": {
+        "type": "control_request",
+        "request_id": "req-plan-1",
+        "request": {
+          "subtype": "can_use_tool",
+          "tool_name": "ExitPlanMode",
+          "input": {
+            "plan": "# Fix empty input in the parser\n\n1. Return early from tokenize() on blank input\n2. Add a regression test"
+          },
+          "permission_suggestions": [
+            {
+              "type": "setMode",
+              "mode": "acceptEdits",
+              "destination": "session"
+            }
+          ],
+          "tool_use_id": "toolu_plan1"
+        }
+      },
+      "events": [
+        {
+          "type": "interaction",
+          "id": "req-plan-1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "item": "toolu_plan1",
+          "kind": {
+            "kind": "approval",
+            "subject": {
+              "kind": "plan",
+              "plan": "# Fix empty input in the parser\n\n1. Return early from tokenize() on blank input\n2. Add a regression test"
+            },
+            "decisions": [
+              {
+                "id": "allow",
+                "label": "Yes",
+                "kind": "accept",
+                "native": {
+                  "behavior": "allow"
+                }
+              },
+              {
+                "id": "allow:suggestion:0",
+                "label": "Yes, and auto-accept edits",
+                "kind": "accept_and_remember",
+                "native": {
+                  "behavior": "allow",
+                  "updatedPermissions": [
+                    {
+                      "type": "setMode",
+                      "mode": "acceptEdits",
+                      "destination": "session"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "deny",
+                "label": "No, and tell Claude what to do differently",
+                "kind": "decline",
+                "accepts_message": true,
+                "native": {
+                  "behavior": "deny"
+                }
+              }
+            ]
+          },
+          "native": {
+            "subtype": "can_use_tool",
+            "tool_name": "ExitPlanMode",
+            "input": {
+              "plan": "# Fix empty input in the parser\n\n1. Return early from tokenize() on blank input\n2. Add a regression test"
+            },
+            "permission_suggestions": [
+              {
+                "type": "setMode",
+                "mode": "acceptEdits",
+                "destination": "session"
+              }
+            ],
+            "tool_use_id": "toolu_plan1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "AskUserQuestion keeps option previews",
+      "native": {
+        "type": "control_request",
+        "request_id": "req-ask-2",
+        "request": {
+          "subtype": "can_use_tool",
+          "tool_name": "AskUserQuestion",
+          "input": {
+            "questions": [
+              {
+                "question": "How should the empty state look?",
+                "header": "Empty state",
+                "multiSelect": false,
+                "options": [
+                  {
+                    "label": "Inline hint (Recommended)",
+                    "description": "One muted line",
+                    "preview": "│ No messages yet │"
+                  },
+                  {
+                    "label": "Illustration",
+                    "description": "A centered image"
+                  }
+                ]
+              }
+            ]
+          },
+          "tool_use_id": "toolu_ask2"
+        }
+      },
+      "events": [
+        {
+          "type": "interaction",
+          "id": "req-ask-2",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "item": "toolu_ask2",
+          "kind": {
+            "kind": "question",
+            "form": {
+              "fields": [
+                {
+                  "id": "How should the empty state look?",
+                  "header": "Empty state",
+                  "prompt": "How should the empty state look?",
+                  "input": {
+                    "kind": "select",
+                    "options": [
+                      {
+                        "label": "Inline hint (Recommended)",
+                        "description": "One muted line",
+                        "preview": "│ No messages yet │"
+                      },
+                      {
+                        "label": "Illustration",
+                        "description": "A centered image"
+                      }
+                    ],
+                    "allow_other": true
+                  },
+                  "required": true
+                }
+              ]
+            }
+          },
+          "native": {
+            "subtype": "can_use_tool",
+            "tool_name": "AskUserQuestion",
+            "input": {
+              "questions": [
+                {
+                  "question": "How should the empty state look?",
+                  "header": "Empty state",
+                  "multiSelect": false,
+                  "options": [
+                    {
+                      "label": "Inline hint (Recommended)",
+                      "description": "One muted line",
+                      "preview": "│ No messages yet │"
+                    },
+                    {
+                      "label": "Illustration",
+                      "description": "A centered image"
+                    }
+                  ]
+                }
+              ]
+            },
+            "tool_use_id": "toolu_ask2"
+          }
+        }
+      ]
+    }
+  ]
+}

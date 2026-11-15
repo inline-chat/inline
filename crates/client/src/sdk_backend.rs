@@ -6540,6 +6540,7 @@ fn message_action_from_proto(action: &proto::MessageAction) -> crate::MessageAct
         Some(proto::message_action::Action::CopyText(_)) => "copy_text",
         Some(proto::message_action::Action::OpenUrl(_)) => "open_url",
         Some(proto::message_action::Action::OpenLink(_)) => "open_link",
+        Some(proto::message_action::Action::Compose(_)) => "compose",
         None => "unknown",
     };
     crate::MessageActionRecord {
