@@ -134,8 +134,17 @@ class MessageTextView: NSTextView {
   var listSelectionRange: NSRange? {
     didSet {
       guard listSelectionRange != oldValue else { return }
+      cachedSelectionRects = nil
       needsDisplay = true
     }
+  }
+
+  /// The last computed selection bands, so redraws that don't change the selection, text or
+  /// size (other dirty rects, tiles) skip the layout walk. One entry, dropped on any change.
+  private var cachedSelectionRects: (range: NSRange, size: NSSize, length: Int, rects: [NSRect])?
+
+  func invalidateListSelectionRects() {
+    cachedSelectionRects = nil
   }
 
   /// A press inside the list that may still end as a plain click on mouse-up.
@@ -534,39 +543,169 @@ class MessageTextView: NSTextView {
       location: selection.location,
       length: min(selection.length, textStorage.length - selection.location)
     )
+    let rects: [NSRect]
+    if let cached = cachedSelectionRects, cached.range == range, cached.size == bounds.size,
+       cached.length == textStorage.length
+    {
+      rects = cached.rects
+    } else {
+      rects = selectionRects(for: range)
+      cachedSelectionRects = (range, bounds.size, textStorage.length, rects)
+    }
     NSColor.selectedTextBackgroundColor.setFill()
-    for rect in selectionRects(for: range) where rect.intersects(dirtyRect) {
+    for rect in rects where rect.intersects(dirtyRect) {
       rect.fill()
     }
   }
 
-  /// Line-by-line selection rectangles in view coordinates, like the native highlight.
+  /// Line-by-line selection rectangles in view coordinates, one band per line that hugs that
+  /// line's text, like Telegram. The native highlight runs a selected line break out to the
+  /// container edge (and merges full middle lines into one segment), which reads as one block.
   func selectionRects(for range: NSRange) -> [NSRect] {
-    var rects: [NSRect] = []
-    let inset = textContainerInset
+    // Selection segments give the vertical extent (full line height, contiguous); the text's own
+    // segments, measured between line breaks, give each line's horizontal extent.
+    var segments: [NSRect] = []
+    var text: [NSRect] = []
+    let pieces = textStorage.map { Self.lineBreakPieces(in: range, of: $0.string as NSString) }
+      ?? (runs: [], emptyLines: [])
     if let textLayoutManager, let textContentManager = textLayoutManager.textContentManager {
-      guard let textRange = textRange(for: range, in: textContentManager) else { return [] }
+      // Resolve locations by walking forward from the previous piece, not from the document
+      // start each time, so long selections stay linear.
+      guard let rangeStart = textContentManager.location(
+        textContentManager.documentRange.location,
+        offsetBy: range.location
+      ),
+        let rangeEnd = textContentManager.location(rangeStart, offsetBy: range.length),
+        let textRange = NSTextRange(location: rangeStart, end: rangeEnd)
+      else { return [] }
       textLayoutManager.enumerateTextSegments(
         in: textRange,
         type: .selection,
         options: [.rangeNotRequired]
       ) { _, segmentRect, _, _ in
-        rects.append(segmentRect.offsetBy(dx: inset.width, dy: inset.height))
+        segments.append(segmentRect)
         return true
       }
-      return rects
+      var cursor = (offset: range.location, location: rangeStart)
+      func standardRects(_ range: NSRange) -> [NSRect] {
+        guard let start = textContentManager.location(cursor.location, offsetBy: range.location - cursor.offset),
+              let end = textContentManager.location(start, offsetBy: range.length),
+              let pieceRange = NSTextRange(location: start, end: end)
+        else { return [] }
+        cursor = (range.location, start)
+        var rects: [NSRect] = []
+        textLayoutManager.enumerateTextSegments(
+          in: pieceRange,
+          type: .standard,
+          options: [.rangeNotRequired]
+        ) { _, segmentRect, _, _ in
+          rects.append(segmentRect)
+          return true
+        }
+        return rects
+      }
+      // Pieces in document order so the cursor only moves forward.
+      let ordered = (pieces.runs.map { ($0, false) } + pieces.emptyLines.map { ($0, true) })
+        .sorted { $0.0.location < $1.0.location }
+      for (piece, isBlankLine) in ordered {
+        let rects = standardRects(piece)
+        text += isBlankLine ? rects.prefix(1).map { Self.sliver(at: $0) } : rects
+      }
+    } else if let layoutManager, let textContainer {
+      let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+      guard glyphRange.length > 0 else { return [] }
+      layoutManager.enumerateEnclosingRects(
+        forGlyphRange: glyphRange,
+        withinSelectedGlyphRange: glyphRange,
+        in: textContainer
+      ) { rect, _ in
+        segments.append(rect)
+      }
+      for run in pieces.runs {
+        let runGlyphs = layoutManager.glyphRange(forCharacterRange: run, actualCharacterRange: nil)
+        layoutManager.enumerateLineFragments(forGlyphRange: runGlyphs) { _, _, container, lineRange, _ in
+          let selected = NSIntersectionRange(lineRange, runGlyphs)
+          guard selected.length > 0 else { return }
+          text.append(layoutManager.boundingRect(forGlyphRange: selected, in: container))
+        }
+      }
+      for lineBreak in pieces.emptyLines {
+        let glyphs = layoutManager.glyphRange(forCharacterRange: lineBreak, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { continue }
+        let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+        let location = layoutManager.location(forGlyphAt: glyphs.location)
+        text.append(Self.sliver(at: NSRect(x: fragment.minX + location.x, y: fragment.minY, width: 0, height: fragment.height)))
+      }
     }
-    guard let layoutManager, let textContainer else { return [] }
-    let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-    guard glyphRange.length > 0 else { return [] }
-    layoutManager.enumerateEnclosingRects(
-      forGlyphRange: glyphRange,
-      withinSelectedGlyphRange: glyphRange,
-      in: textContainer
-    ) { rect, _ in
-      rects.append(rect.offsetBy(dx: inset.width, dy: inset.height))
+    let inset = textContainerInset
+    return Self.lineBands(segments: segments, text: text)
+      .map { $0.offsetBy(dx: inset.width, dy: inset.height) }
+  }
+
+  /// Width a selected blank line keeps, so a selection through it reads as continuous.
+  private static let blankLineWidth: CGFloat = 4
+
+  private static func sliver(at rect: NSRect) -> NSRect {
+    NSRect(x: rect.minX, y: rect.minY, width: blankLineWidth, height: rect.height)
+  }
+
+  /// The parts of `range` between line breaks, and the line breaks that make up a blank line
+  /// (a break right after another break or at the start of the range).
+  static func lineBreakPieces(in range: NSRange, of string: NSString) -> (runs: [NSRange], emptyLines: [NSRange]) {
+    let upper = min(NSMaxRange(range), string.length)
+    var runs: [NSRange] = []
+    var emptyLines: [NSRange] = []
+    var start = range.location
+    var index = range.location
+    while index < upper {
+      let unit = string.character(at: index)
+      if unit == 0x0A || unit == 0x0D || unit == 0x2028 || unit == 0x2029 || unit == 0x85 {
+        if index > start {
+          runs.append(NSRange(location: start, length: index - start))
+        } else if unit != 0x0A || index == 0 || string.character(at: index - 1) != 0x0D {
+          emptyLines.append(NSRange(location: index, length: 1))
+        }
+        start = index + 1
+      }
+      index += 1
     }
-    return rects
+    if upper > start { runs.append(NSRange(location: start, length: upper - start)) }
+    return (runs, emptyLines)
+  }
+
+  /// Splits selection segments into one band per line of text. Bands span the segment's height
+  /// without gaps (neighbors meet halfway) and hug their line's text horizontally.
+  static func lineBands(segments: [NSRect], text: [NSRect]) -> [NSRect] {
+    var bands: [NSRect] = []
+    let text = text.sorted { $0.minY < $1.minY }
+    for segment in segments {
+      // The text in this segment, grouped into lines by vertical overlap.
+      var lines: [NSRect] = []
+      for rect in text
+        where rect.midY > segment.minY && rect.midY < segment.maxY
+          && rect.maxX > segment.minX && rect.minX < segment.maxX
+      {
+        if let last = lines.last, rect.minY < last.maxY - 0.5 {
+          lines[lines.count - 1] = last.union(rect)
+        } else {
+          lines.append(rect)
+        }
+      }
+      guard !lines.isEmpty else {
+        // A selected line break on a line with text elsewhere (RTL puts it at the far edge).
+        if text.contains(where: { $0.midY > segment.minY && $0.midY < segment.maxY }) { continue }
+        bands.append(NSRect(x: segment.minX, y: segment.minY, width: min(blankLineWidth, segment.width), height: segment.height))
+        continue
+      }
+      for (index, line) in lines.enumerated() {
+        let top = index == 0 ? segment.minY : (lines[index - 1].maxY + line.minY) / 2
+        let bottom = index == lines.count - 1 ? segment.maxY : (line.maxY + lines[index + 1].minY) / 2
+        let left = max(segment.minX, line.minX)
+        let right = min(segment.maxX, line.maxX)
+        bands.append(NSRect(x: left, y: top, width: max(right - left, blankLineWidth), height: bottom - top))
+      }
+    }
+    return bands
   }
 
   func codeBlockRange(at point: NSPoint) -> NSRange? {
@@ -1035,6 +1174,7 @@ extension NSTextView {
     )
 
     textStorage?.setAttributedString(displayedString)
+    (self as? MessageTextView)?.invalidateListSelectionRects()
     self.alignment = alignment
 
     let fullRange = NSRange(location: 0, length: displayedString.length)
