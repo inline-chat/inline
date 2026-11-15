@@ -85,6 +85,7 @@ use allowlist_ui::*;
 use approval_ui::*;
 use copy::{BridgeNotice, failure_message, session_open_notice};
 use inline_tools::*;
+pub(crate) use dots::{DOTS_DISPLAY_NAME, DOTS_PROVIDER_ID, available as dots_available};
 pub(crate) use provider::bridge_provider_setup_descriptors;
 pub(crate) use provider::opencode_startup_version;
 pub(crate) use provider::opencode_version;

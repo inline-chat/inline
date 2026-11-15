@@ -140,6 +140,7 @@ pub(crate) fn provider_host_target(provider_id: &str) -> &'static str {
         "claude" => "claude",
         "opencode" => "opencode",
         "amp" => "amp",
+        "dots" => "dots",
         _ => "unknown",
     }
 }

@@ -3397,7 +3397,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             }
             Command::Agents { command } => match command {
                 agents::AgentsCommand::Discover => {
-                    agents::discover(cli.json, json_format)?;
+                    agents::discover(cli.json, json_format).await?;
                 }
                 agents::AgentsCommand::Setup(args) => {
                     run_agents_setup_command(
