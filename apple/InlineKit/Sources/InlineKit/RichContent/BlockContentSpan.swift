@@ -135,6 +135,39 @@ public enum BlockContentSpan {
     return trimmed(range, in: text)
   }
 
+  /// The text the children of `blocks[index]` may claim, for an unknown kind first or last
+  /// among them: after the container's own leading text (title, summary, command…) and the
+  /// sibling before it, up to the sibling after it. `bounds` stands in for missing siblings.
+  /// Nil for blocks that hold no child blocks.
+  public static func childBounds(at index: Int, in blocks: [Block], bounds: Range<Int>?) -> Range<Int>? {
+    guard blocks.indices.contains(index) else { return nil }
+    var own = Accumulator()
+    switch blocks[index].kind {
+    case let .planProposal(plan)?:
+      own.add(plan.title)
+    case let .approval(approval)?:
+      own.add(approval.title)
+      own.add(approval.command)
+      own.add(approval.cwd)
+      own.add(approval.reason)
+    case let .callout(callout)?:
+      own.add(callout.title)
+    case let .disclosure(disclosure)?:
+      own.add(disclosure.summary)
+      own.add(disclosure.meta)
+    case .quote?:
+      break
+    default:
+      return nil
+    }
+    let previous = blocks[..<index].reversed().lazy.compactMap { span(of: $0) }.first
+    let next = blocks[(index + 1)...].lazy.compactMap { span(of: $0) }.first
+    let lowers = [own.range?.upperBound, previous?.upperBound, bounds?.lowerBound].compactMap { $0 }
+    guard let lower = lowers.max(), let upper = next?.lowerBound ?? bounds?.upperBound, lower < upper
+    else { return nil }
+    return lower ..< upper
+  }
+
   /// `range` clamped to the text and without leading or trailing whitespace and newlines.
   static func trimmed(_ range: Range<Int>, in text: NSString) -> Range<Int>? {
     var lower = max(0, range.lowerBound)

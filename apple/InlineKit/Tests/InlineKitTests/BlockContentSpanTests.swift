@@ -80,6 +80,24 @@ struct BlockContentSpanTests {
     #expect(string(bounded, in: text) == "Review notes")
   }
 
+  @Test("An unknown kind first or last inside a container shows its text, not the title's")
+  func nestedEdges() throws {
+    let text = "Plan title\nnew kind before\nStep one\nnew kind after\nOutro"
+    let children: [Block] = try [unknownBlock(), .with { $0.paragraph = range(text, of: "Step one") }, unknownBlock()]
+    let plan = Block.with {
+      $0.planProposal = .with {
+        $0.title = range(text, of: "Plan title")
+        $0.children = children
+      }
+    }
+    let blocks: [Block] = [plan, .with { $0.paragraph = range(text, of: "Outro") }]
+    let nsText = text as NSString
+    let bounds = BlockContentSpan.childBounds(at: 0, in: blocks, bounds: 0 ..< nsText.length)
+    #expect(string(BlockContentSpan.fallbackRange(at: 0, in: children, text: nsText, bounds: bounds), in: text) == "new kind before")
+    #expect(string(BlockContentSpan.fallbackRange(at: 2, in: children, text: nsText, bounds: bounds), in: text) == "new kind after")
+    #expect(BlockContentSpan.childBounds(at: 1, in: blocks, bounds: bounds) == nil)
+  }
+
   @Test("A plan proposal's Show full plan state is kept, and follows its title across edits")
   func planOpenState() {
     let text = "Ship the fallback\nStep one"
