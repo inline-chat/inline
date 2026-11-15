@@ -53,6 +53,9 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
   public var bytes: Data?
   public var cdnUrl: String?
   public var localPath: String?
+  /// The server identity of this exact stored size, for native downloads. Nil for stripped
+  /// bytes and for rows saved before the server sent it.
+  public var fileUniqueId: String?
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -64,6 +67,7 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
     static let bytes = Column(CodingKeys.bytes)
     static let cdnUrl = Column(CodingKeys.cdnUrl)
     static let localPath = Column(CodingKeys.localPath)
+    static let fileUniqueId = Column(CodingKeys.fileUniqueId)
   }
 
   public init(
@@ -75,7 +79,8 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
     size: Int? = nil,
     bytes: Data? = nil,
     cdnUrl: String? = nil,
-    localPath: String? = nil
+    localPath: String? = nil,
+    fileUniqueId: String? = nil
   ) {
     self.id = id
     self.photoId = photoId
@@ -86,6 +91,7 @@ public struct PhotoSize: Codable, Sendable, Equatable, Hashable, Identifiable, F
     self.bytes = bytes
     self.cdnUrl = cdnUrl
     self.localPath = localPath
+    self.fileUniqueId = fileUniqueId
   }
 }
 
@@ -227,7 +233,8 @@ public extension PhotoSize {
       height: proto.h > 0 ? Int(proto.h) : nil,
       size: proto.size > 0 ? Int(proto.size) : nil,
       bytes: proto.bytes.isEmpty ? nil : proto.bytes,
-      cdnUrl: proto.cdnURL.isEmpty ? nil : proto.cdnURL
+      cdnUrl: proto.cdnURL.isEmpty ? nil : proto.cdnURL,
+      fileUniqueId: proto.hasFileUniqueID && !proto.fileUniqueID.isEmpty ? proto.fileUniqueID : nil
     )
   }
 }
@@ -759,7 +766,9 @@ public extension PhotoSize {
         size: Int(protoSize.size),
         bytes: protoSize.bytes.isEmpty ? nil : protoSize.bytes,
         cdnUrl: protoSize.hasCdnURL ? protoSize.cdnURL : nil,
-        localPath: existingSize.localPath // Preserve local path
+        localPath: existingSize.localPath, // Preserve local path
+        fileUniqueId: protoSize.hasFileUniqueID && !protoSize.fileUniqueID.isEmpty
+          ? protoSize.fileUniqueID : existingSize.fileUniqueId
       )
 
       try updatedSize.update(db)

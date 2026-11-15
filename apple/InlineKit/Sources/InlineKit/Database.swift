@@ -1513,6 +1513,15 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("photo size file identity") { db in
+      // The server identity of each stored photo size, so a photo downloads natively by its
+      // message without first re-fetching that message. Existing rows fill in as their
+      // messages are fetched again; until then they download from the CDN as before.
+      try db.alter(table: "photoSize") { table in
+        table.add(column: "fileUniqueId", .text)
+      }
+    }
+
     return migrator
   }
 }
