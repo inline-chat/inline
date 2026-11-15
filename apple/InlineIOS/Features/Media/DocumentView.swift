@@ -487,7 +487,8 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     progressLayer.strokeColor = progressBarColor.cgColor
   }
 
-  func downloadFile() {
+  /// A tap downloads at user priority; automatic downloads pass `.visible`.
+  func downloadFile(priority: NativeDownloadPriority = .userInitiated) {
     guard let documentInfo, let document, let fullMessage else {
       return
     }
@@ -501,7 +502,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     startMonitoringProgress()
 
     let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
-    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message, priority: priority) { [weak self] result in
       guard let self else { return }
 
       DispatchQueue.main.async {
@@ -1011,7 +1012,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     let sizeBytes = document.size.map(Int64.init)
     guard AutoDownloadPolicy.shouldDownload(kind: .file, sizeBytes: sizeBytes) else { return }
 
-    downloadFile()
+    downloadFile(priority: .visible)
   }
 }
 
