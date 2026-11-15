@@ -343,13 +343,21 @@ public final class FileDownloader: NSObject, Sendable {
       completion(.failure(URLError(.cancelled)))
       return
     }
+    let url = document.document.cdnUrl.flatMap(URL.init(string:))
+    let refreshLink = message.map { message in
+      let documentID = document.document.documentId
+      return Self.linkRefresh(peer: message.peerId, messageId: message.messageId) { db in
+        try Document.filter(Document.Columns.documentId == documentID).fetchOne(db)?.cdnUrl
+      }
+    }
     let nativeDownload: NativeDownloadOperation?
     do {
       if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth), let message {
         let source = try NativeMessageFileDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
-            media: .document(document.document.documentId), message: message, to: destination, progress: progress
+            media: .document(document.document.documentId), message: message, to: destination,
+            fallback: url.map { CDNLink($0, refresh: refreshLink) }, progress: progress
           )
         }
       } else {
@@ -359,7 +367,6 @@ public final class FileDownloader: NSObject, Sendable {
       completion(.failure(error))
       return
     }
-    let url = document.document.cdnUrl.flatMap(URL.init(string:))
     guard url != nil || nativeDownload != nil else {
       let error = NSError(
         domain: "FileDownloader",
@@ -389,12 +396,7 @@ public final class FileDownloader: NSObject, Sendable {
       accountToken: accountToken,
       messageLocation: message.map(Self.location(for:)),
       nativeDownload: nativeDownload,
-      refreshLink: message.map { message in
-        let documentID = document.document.documentId
-        return Self.linkRefresh(peer: message.peerId, messageId: message.messageId) { db in
-          try Document.filter(Document.Columns.documentId == documentID).fetchOne(db)?.cdnUrl
-        }
-      },
+      refreshLink: refreshLink,
       completion: { [weak self] token, result in
         guard let self else { return }
 
@@ -431,13 +433,21 @@ public final class FileDownloader: NSObject, Sendable {
       completion(.failure(URLError(.cancelled)))
       return
     }
+    let url = video.video.cdnUrl.flatMap(URL.init(string:))
+    let refreshLink: CDNLinkRefresh = {
+      let videoID = video.video.videoId
+      return Self.linkRefresh(peer: message.peerId, messageId: message.messageId) { db in
+        try Video.filter(Video.Columns.videoId == videoID).fetchOne(db)?.cdnUrl
+      }
+    }()
     let nativeDownload: NativeDownloadOperation?
     do {
       if ExperimentalFeatureFlags.nativeFileDownloadsEnabled(auth: auth) {
         let source = try NativeMessageFileDownload(auth: auth)
         nativeDownload = { destination, progress in
           try await source.download(
-            media: .video(video.video.videoId), message: message, to: destination, progress: progress
+            media: .video(video.video.videoId), message: message, to: destination,
+            fallback: url.map { CDNLink($0, refresh: refreshLink) }, progress: progress
           )
         }
       } else {
@@ -447,7 +457,6 @@ public final class FileDownloader: NSObject, Sendable {
       completion(.failure(error))
       return
     }
-    let url = video.video.cdnUrl.flatMap(URL.init(string:))
     guard url != nil || nativeDownload != nil else {
       let error = NSError(
         domain: "FileDownloader",
@@ -477,12 +486,7 @@ public final class FileDownloader: NSObject, Sendable {
       accountToken: accountToken,
       messageLocation: Self.location(for: message),
       nativeDownload: nativeDownload,
-      refreshLink: {
-        let videoID = video.video.videoId
-        return Self.linkRefresh(peer: message.peerId, messageId: message.messageId) { db in
-          try Video.filter(Video.Columns.videoId == videoID).fetchOne(db)?.cdnUrl
-        }
-      }(),
+      refreshLink: refreshLink,
       completion: { [weak self] token, result in
         guard let self else { return }
 
@@ -910,9 +914,11 @@ public final class FileDownloader: NSObject, Sendable {
     }
   }
 
+  /// Downloads natively into the given destination. It may finish through the CDN range
+  /// fallback itself, which the outcome reports.
   typealias NativeDownloadOperation = @Sendable (
     URL, @escaping @Sendable (Int64, Int64) -> Void
-  ) async throws -> URL
+  ) async throws -> NativeDownloadOutcome
 
   /// Refreshes the parent message and returns a link newer than `stale`, or nil.
   typealias CDNLinkRefresh = @Sendable (_ stale: URL) async -> URL?
@@ -1061,18 +1067,26 @@ public final class FileDownloader: NSObject, Sendable {
     let record: @Sendable (DownloadTelemetry.Outcome) -> Void = { outcome in
       DownloadTelemetry.record(outcome, transport: .native, downloadID: id, expectedBytes: expectedBytes, startedAt: startedAt)
     }
+    // The CDN range fallback runs inside the native operation, on the same partial.
+    let recordRangeFallback: @Sendable (_ native: any Error, _ cdn: DownloadTelemetry.Outcome) -> Void = { native, cdn in
+      record(.fallback(DownloadTelemetry.errorClass(native)))
+      DownloadTelemetry.record(
+        cdn, transport: .cdn, downloadID: id, expectedBytes: expectedBytes, startedAt: startedAt, afterFallback: true
+      )
+    }
     nativeTasks[token] = Task { [weak self] in
       guard let self else { return }
       defer { self.nativeTasks[token] = nil }
       do {
         try Task.checkCancellation()
-        let sharedFile = try await operation(localUrl) { [weak self] received, total in
+        let outcome = try await operation(localUrl) { [weak self] received, total in
           guard throttler.shouldPublish(id: id) else { return }
           Task { @MainActor [weak self] in
             guard let self, self.isActiveDownload(id: id, token: token), self.nativeTasks[token] != nil else { return }
             self.publishProgress(.transferring(id: id, bytesReceived: received, totalBytes: total))
           }
         }
+        let sharedFile = outcome.file
         var file = sharedFile
         var ownsFile = sharedFile == localUrl
         do {
@@ -1092,10 +1106,21 @@ public final class FileDownloader: NSObject, Sendable {
         }
         self.nativeTasks[token] = nil
         self.finishTransfer(id: id, token: token, result: .success(file))
-        record(.success)
+        if let native = outcome.fallback { recordRangeFallback(native, .success) } else { record(.success) }
       } catch {
         guard self.activeDownloadTokens[id] == token else {
           record(.canceled)
+          return
+        }
+        if let failure = error as? NativeRangeFallbackFailure {
+          // Both transports already worked on this file's partial; a whole-file CDN restart
+          // would only download the same bytes again.
+          self.nativeTasks[token] = nil
+          let canceled = Task.isCancelled || !self.isActiveDownload(id: id, token: token) || Self.isCancellation(failure.cdn)
+          recordRangeFallback(failure.native, canceled ? .canceled : .failed(DownloadTelemetry.errorClass(failure.cdn)))
+          self.finishTransfer(id: id, token: token, result: .failure(
+            self.isActiveDownload(id: id, token: token) ? failure.cdn : URLError(.cancelled)
+          ))
           return
         }
         // The operation has returned only after its child ranges and file handle

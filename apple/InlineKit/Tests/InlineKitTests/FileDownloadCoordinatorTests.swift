@@ -54,7 +54,7 @@ struct FileDownloadCoordinatorTests {
     defer { try? FileManager.default.removeItem(at: destination) }
     var results: [URL] = []
     var tokens: [UUID] = []
-    owner.downloadFile(id: "doc_801", url: nil, localUrl: destination, nativeDownload: { url, _ in
+    owner.downloadFile(id: "doc_801", url: nil, localUrl: destination, nativeFile: { url, _ in
       await started.open()
       await release.wait()
       try Data([1]).write(to: url)
@@ -66,7 +66,7 @@ struct FileDownloadCoordinatorTests {
       done.continuation.yield()
     }
     await started.wait()
-    owner.downloadFile(id: "doc_801", url: nil, localUrl: temporaryFile(), nativeDownload: { _, _ in
+    owner.downloadFile(id: "doc_801", url: nil, localUrl: temporaryFile(), nativeFile: { _, _ in
       Issue.record("Duplicate admission started a second operation")
       throw URLError(.badURL)
     }) { token, result in
@@ -94,7 +94,7 @@ struct FileDownloadCoordinatorTests {
     let destination = temporaryFile()
     defer { try? FileManager.default.removeItem(at: destination) }
     var cancellations = 0
-    owner.downloadFile(id: "doc_802", url: nil, localUrl: destination, nativeDownload: { _, _ in
+    owner.downloadFile(id: "doc_802", url: nil, localUrl: destination, nativeFile: { _, _ in
       await firstStarted.open()
       // Deliberately retain a file owner after cancellation until its cleanup
       // settles; the coordinator must never race a replacement with this work.
@@ -107,7 +107,7 @@ struct FileDownloadCoordinatorTests {
     }
     await firstStarted.wait()
     owner.cancelDocumentDownload(documentId: 802)
-    owner.downloadFile(id: "doc_802", url: nil, localUrl: destination, nativeDownload: { url, _ in
+    owner.downloadFile(id: "doc_802", url: nil, localUrl: destination, nativeFile: { url, _ in
       await secondStarted.open()
       try Data([2]).write(to: url)
       return url
@@ -132,7 +132,7 @@ struct FileDownloadCoordinatorTests {
     let done = AsyncStream<Void>.makeStream()
     var completions = 0
     owner.downloadFile(id: "video_803", url: URL(string: "unsupported-fallback://file")!,
-                       localUrl: temporaryFile(), nativeDownload: { _, _ in
+                       localUrl: temporaryFile(), nativeFile: { _, _ in
       await settled.open()
       throw NativeFileDownloadError.integrity
     }) { _, result in
@@ -161,7 +161,7 @@ struct FileDownloadCoordinatorTests {
     let destination = temporaryFile()
     defer { try? FileManager.default.removeItem(at: destination) }
     owner.downloadFile(id: "doc_804", url: URL(string: "unsupported-fallback://file")!,
-                       localUrl: destination, accountToken: token, nativeDownload: { url, _ in
+                       localUrl: destination, accountToken: token, nativeFile: { url, _ in
       await started.open()
       await release.wait()
       try Data([1]).write(to: url)
@@ -185,7 +185,7 @@ struct FileDownloadCoordinatorTests {
     let owner = FileDownloader(auth: Auth.mocked(authenticated: true).handle)
     let done = AsyncStream<Void>.makeStream()
     owner.downloadFile(id: "doc_805", url: URL(string: "unsupported-fallback://file")!,
-                       localUrl: temporaryFile(), nativeDownload: { _, _ in
+                       localUrl: temporaryFile(), nativeFile: { _, _ in
       // The server deliberately uses 400 for both absent and inaccessible files.
       throw RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: nil, code: status)
     }) { _, result in
@@ -209,7 +209,7 @@ struct FileDownloadCoordinatorTests {
     let release = TransferTestGate()
     var completions = 0
     owner.downloadFile(id: "doc_806", url: URL(string: "unsupported-fallback://file")!,
-                       localUrl: temporaryFile(), nativeDownload: { _, _ in
+                       localUrl: temporaryFile(), nativeFile: { _, _ in
       await started.open()
       await release.wait()
       throw NativeFileDownloadError.integrity
@@ -236,7 +236,7 @@ struct FileDownloadCoordinatorTests {
       try? FileManager.default.removeItem(at: destination)
     }
     let done = AsyncStream<Void>.makeStream()
-    owner.downloadFile(id: "doc_807", url: nil, localUrl: destination, nativeDownload: { _, _ in firstOwnerFile }) { _, result in
+    owner.downloadFile(id: "doc_807", url: nil, localUrl: destination, nativeFile: { _, _ in firstOwnerFile }) { _, result in
       if case let .success(url) = result { #expect(url == destination) }
       else { Issue.record("Shared result failed to materialize") }
       done.continuation.yield()
@@ -265,7 +265,7 @@ struct FileDownloadCoordinatorTests {
     let done = AsyncStream<Void>.makeStream()
     var cancellations = 0
 
-    owner.downloadFile(id: "doc_808", url: nil, localUrl: original, nativeDownload: { destination, _ in
+    owner.downloadFile(id: "doc_808", url: nil, localUrl: original, nativeFile: { destination, _ in
       let result = try await manager.download(.init(accountID: 1, fileUniqueID: "IND_publication",
                                                    destination: destination, transport: transport))
       await originalPublished.open()
@@ -276,7 +276,7 @@ struct FileDownloadCoordinatorTests {
       else { Issue.record("Canceled original completed") }
     }
     await transport.started.wait()
-    owner.downloadFile(id: "doc_809", url: nil, localUrl: duplicate, nativeDownload: { destination, _ in
+    owner.downloadFile(id: "doc_809", url: nil, localUrl: duplicate, nativeFile: { destination, _ in
       let result = try await manager.download(.init(accountID: 1, fileUniqueID: "IND_publication",
         destination: destination, validateAccount: { admitted.continuation.yield() }, transport: transport))
       await duplicatePublished.open()
@@ -363,7 +363,7 @@ struct FileDownloadCoordinatorTests {
     await #expect(throws: (any Error).self) { try await cache.clearCache(downloadCoordinator: owner) }
     let destination = directory.appendingPathComponent("after-error")
     let done = AsyncStream<Void>.makeStream()
-    owner.downloadFile(id: "doc_808", url: nil, localUrl: destination, nativeDownload: { url, _ in
+    owner.downloadFile(id: "doc_808", url: nil, localUrl: destination, nativeFile: { url, _ in
       try Data([9]).write(to: url)
       return url
     }) { _, result in
@@ -383,7 +383,7 @@ struct FileDownloadCoordinatorTests {
     let resetStarted = AsyncStream<Void>.makeStream()
     var restarts = 0
     var cancellations = 0
-    owner.downloadFile(id: "doc_809", url: nil, localUrl: temporaryFile(), nativeDownload: { _, _ in
+    owner.downloadFile(id: "doc_809", url: nil, localUrl: temporaryFile(), nativeFile: { _, _ in
       await started.open()
       await cleanup.wait()
       try Task.checkCancellation()
@@ -393,7 +393,7 @@ struct FileDownloadCoordinatorTests {
     }
     await started.wait()
     owner.cancelDocumentDownload(documentId: 809)
-    owner.downloadFile(id: "doc_809", url: nil, localUrl: temporaryFile(), nativeDownload: { _, _ in
+    owner.downloadFile(id: "doc_809", url: nil, localUrl: temporaryFile(), nativeFile: { _, _ in
       Issue.record("A pre-reset restart escaped the reset fence")
       throw URLError(.badURL)
     }) { _, result in
@@ -436,5 +436,25 @@ struct FileDownloadCoordinatorTests {
 
   private func temporaryFile() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("inline-download-coordinator-\(UUID())")
+  }
+}
+
+extension FileDownloader {
+  /// Test shorthand for a native operation that finishes without the CDN range fallback.
+  func downloadFile(
+    id: String, url: URL?, localUrl: URL, expectedBytes: Int64 = 0,
+    accountToken: AuthAccountMutationToken? = nil, messageLocation: FileMessageLocation? = nil,
+    nativeFile: @escaping @Sendable (URL, @escaping @Sendable (Int64, Int64) -> Void) async throws -> URL,
+    refreshLink: CDNLinkRefresh? = nil,
+    completion: @escaping (UUID, Result<URL, Error>) -> Void
+  ) {
+    downloadFile(
+      id: id, url: url, localUrl: localUrl, expectedBytes: expectedBytes, accountToken: accountToken,
+      messageLocation: messageLocation,
+      nativeDownload: { destination, progress in
+        NativeDownloadOutcome(file: try await nativeFile(destination, progress), fallback: nil)
+      },
+      refreshLink: refreshLink, completion: completion
+    )
   }
 }

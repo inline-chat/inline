@@ -23,6 +23,11 @@ public enum NativeFileDownloadError: Error, LocalizedError, Sendable {
   }
 }
 
+/// Sidecar of a resumable partial (`<file>.inline-partial.json`).
+/// v1 described a contiguous prefix: the body's length, rounded down to a part.
+/// v2 lists the parts present in a sparse body as half-open `[start, end)` part-index ranges.
+/// The body is fsynced before every map write, and the map is replaced atomically, so it never
+/// claims bytes that are not on disk; parts past the body's length are distrusted on open.
 private struct NativeDownloadRecord: Codable {
   let v: Int
   let accountID: Int64
@@ -30,10 +35,20 @@ private struct NativeDownloadRecord: Codable {
   let totalSize: UInt64
   var chatID: Int64?
   var messageID: Int64?
+  var parts: [[UInt32]]?
 }
 
-/// One owner for native downloads: three files in FIFO order, two ranges each.
-/// A slot remains owned until canceled requests and their staging handle drain.
+/// Who is waiting for a file. Part slots go to the highest priority first, then round-robin.
+public enum NativeDownloadPriority: Int, Comparable, Sendable {
+  case background, prefetch, visible, userInitiated
+  public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+/// One owner for native downloads. Every file shares one window of part slots: it adapts to
+/// per-part latency (grow by one under 1 s, halve over 2 s or on a transient failure) and is
+/// granted by priority, then round-robin, so a small file is never stuck behind a large one.
+/// Parts land at their own offsets in a sparse partial whose map survives relaunch.
+/// A slot remains owned until its request returns, including after cancellation.
 public actor NativeDownloadManager {
   public static let shared = NativeDownloadManager()
   public struct Key: Hashable, Sendable {
@@ -52,17 +67,23 @@ public actor NativeDownloadManager {
     public let accountToken: AuthAccountMutationToken?
     public let validateAccount: @Sendable () throws -> Void
     public let transport: any NativeFilePartFetching
+    public let priority: NativeDownloadPriority
+    /// How long the file may go without progress before failing; the manager's default if nil.
+    public let stallBudget: Duration?
     var key: Key { Key(accountID: accountID, fileUniqueID: fileUniqueID) }
     public init(
       accountID: Int64, fileUniqueID: String, message: FileMessageLocation? = nil,
       destination: URL, maximumByteCount: UInt64 = 500_000_000,
       accountToken: AuthAccountMutationToken? = nil,
       validateAccount: @escaping @Sendable () throws -> Void = {},
+      priority: NativeDownloadPriority = .visible,
+      stallBudget: Duration? = nil,
       transport: any NativeFilePartFetching
     ) {
       self.accountID = accountID; self.fileUniqueID = fileUniqueID; self.message = message
       self.destination = destination; self.maximumByteCount = maximumByteCount
-      self.accountToken = accountToken; self.validateAccount = validateAccount; self.transport = transport
+      self.accountToken = accountToken; self.validateAccount = validateAccount
+      self.priority = priority; self.stallBudget = stallBudget; self.transport = transport
     }
   }
   private struct Publication: Sendable {
@@ -73,29 +94,51 @@ public actor NativeDownloadManager {
     let request: Request
     let task: Task<Publication, any Error>
     var destinations: [UUID: URL]
-    var running = false
+    var priority: NativeDownloadPriority
     var lastProgress = ContinuousClock.now
     var received: Int64 = 0
     var total: Int64 = 0
     var locations: [FileMessageLocation]
     var observers: [UUID: @Sendable (Int64, Int64) -> Void]
+    /// Missing parts in ascending order, handed out one per granted slot.
+    var pendingParts: [Int] = []
+    var nextPending = 0
   }
-  private struct Waiter {
+  private enum SlotGrant { case denied, granted(part: Int?) }
+  private struct PartWaiter {
     let key: Key
     let id: UUID
-    let continuation: CheckedContinuation<Bool, Never>
+    let ticket: UInt64
+    let wantsPart: Bool
+    let renewsBudget: Bool
+    let continuation: CheckedContinuation<SlotGrant, Never>
   }
   private var entries: [Key: Entry] = [:]
-  private var waiters: [Waiter] = []
-  private var activeFiles = 0
+  private var partWaiters: [PartWaiter] = []
+  private var activeParts = 0
+  private var nextTicket: UInt64 = 0
+  /// When each file last got a slot; the least recent goes next among equal priorities.
+  private var lastGrant: [Key: UInt64] = [:]
   private var stoppedAccounts: [Int64: Int] = [:]
   private var stoppedKeys: [Key: Int] = [:]
   private var knownDirectories: [Int64: Set<URL>] = [:]
   private let retryBudget: Duration
   private let retryBaseDelay: Duration
-  public init() { retryBudget = .seconds(180); retryBaseDelay = .seconds(1) }
-  init(retryBudget: Duration, retryBaseDelay: Duration = .seconds(1)) {
+  /// Part slots shared by every file. The server admits 16 ranges per session; the cap leaves
+  /// room for ranges it is still serving after the client has given up on them.
+  private let windowLimits: ClosedRange<Int>
+  private(set) var window: Int
+  /// Ranges a file keeps queued for slots; more would only hold memory for nothing.
+  static let maximumQueuedParts = 16
+  /// Ranges waiting for a slot (tests).
+  var waitingParts: Int { partWaiters.count }
+  public init() {
+    retryBudget = .seconds(180); retryBaseDelay = .seconds(1); windowLimits = 2 ... 12; window = 4
+  }
+  init(retryBudget: Duration = .seconds(180), retryBaseDelay: Duration = .seconds(1),
+       window limits: ClosedRange<Int> = 2 ... 12, initialWindow: Int = 4) {
     self.retryBudget = retryBudget; self.retryBaseDelay = retryBaseDelay
+    windowLimits = limits; window = min(max(initialWindow, limits.lowerBound), limits.upperBound)
   }
 
   public func download(
@@ -119,6 +162,7 @@ public actor NativeDownloadManager {
     if var entry = entries[key] {
       entry.observers[observerID] = progress
       entry.destinations[observerID] = request.destination
+      entry.priority = max(entry.priority, request.priority)
       if let message = request.message, !entry.locations.contains(message) {
         entry.locations.append(message)
       }
@@ -129,7 +173,7 @@ public actor NativeDownloadManager {
       let id = UUID()
       task = Task {
         do {
-          try await self.acquire(key, id: id)
+          try Task.checkCancellation()
           let result = try await Self.materialize(request, owner: self, id: id)
           let publication = self.publishDestinations(result, key: key, id: id)
           self.finished(key, id: id)
@@ -139,7 +183,8 @@ public actor NativeDownloadManager {
           throw error
         }
       }
-      entries[key] = Entry(id: id, request: request, task: task, destinations: [observerID: request.destination], locations: request.message.map { [$0] } ?? [], observers: [observerID: progress])
+      entries[key] = Entry(id: id, request: request, task: task, destinations: [observerID: request.destination],
+        priority: request.priority, locations: request.message.map { [$0] } ?? [], observers: [observerID: progress])
       if key.accountID > 0 { knownDirectories[key.accountID, default: []].insert(request.destination.deletingLastPathComponent()) }
     }
     defer {
@@ -196,7 +241,7 @@ public actor NativeDownloadManager {
   private func drain(_ key: Key) async {
     guard let entry = entries[key] else { return }
     entry.task.cancel()
-    cancelQueued(key, id: entry.id)
+    cancelWaiters(id: entry.id)
     _ = await entry.task.result
   }
 
@@ -207,7 +252,7 @@ public actor NativeDownloadManager {
       else { stoppedAccounts[accountID, default: 1] -= 1 }
     }
     let owned = entries.filter { $0.key.accountID == accountID }
-    for (key, entry) in owned { entry.task.cancel(); cancelQueued(key, id: entry.id) }
+    for entry in owned.values { entry.task.cancel(); cancelWaiters(id: entry.id) }
     for entry in owned.values { _ = await entry.task.result }
     let directories = (knownDirectories.removeValue(forKey: accountID) ?? []).union(cacheDirectories)
     for directory in directories { purge(accountID: accountID, directory: directory) }
@@ -234,7 +279,7 @@ public actor NativeDownloadManager {
     let owned = entries.filter { $0.key.accountID == accountID && $0.value.locations.contains(message) }
     for key in owned.keys { block(key) }
     defer { for key in owned.keys { unblock(key) } }
-    for (key, entry) in owned { entry.task.cancel(); cancelQueued(key, id: entry.id) }
+    for entry in owned.values { entry.task.cancel(); cancelWaiters(id: entry.id) }
     for entry in owned.values { _ = await entry.task.result }
     for entry in owned.values {
       Self.removePartial(fileUniqueID: entry.request.fileUniqueID, directory: entry.request.destination.deletingLastPathComponent(), accountID: accountID)
@@ -296,7 +341,7 @@ public actor NativeDownloadManager {
     guard descriptor >= 0 else { return nil }
     let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     defer { try? handle.close() }
-    guard let data = try? handle.read(upToCount: 2_049), data.count <= 2_048 else { return nil }
+    guard let data = try? handle.read(upToCount: 16_385), data.count <= 16_384 else { return nil }
     return try? JSONDecoder().decode(NativeDownloadRecord.self, from: data)
   }
   private static func removePartial(fileUniqueID: String, directory: URL, accountID: Int64) {
@@ -316,41 +361,125 @@ public actor NativeDownloadManager {
     try? FileManager.default.removeItem(at: body)
     try? FileManager.default.removeItem(at: metadata)
   }
-  private func acquire(_ key: Key, id: UUID) async throws {
+  /// Waits for a slot for a range the caller already chose: the file's first range, or a retry.
+  /// A retry's slot does not renew the retry budget, so a range that keeps failing still runs
+  /// out of time. The caller must release it.
+  fileprivate func acquirePart(_ key: Key, id: UUID, renewsBudget: Bool) async throws {
+    _ = try await waitForSlot(key, id: id, wantsPart: false, renewsBudget: renewsBudget)
+  }
+
+  /// Waits for a slot and takes the file's next missing part with it, so slots reach a file's
+  /// parts in ascending order whatever order its requests queued in. Returns nil, holding no
+  /// slot, once every part has been handed out.
+  fileprivate func acquireNextPart(_ key: Key, id: UUID) async throws -> Int? {
+    try await waitForSlot(key, id: id, wantsPart: true, renewsBudget: true)
+  }
+
+  fileprivate func setPendingParts(_ parts: [Int], key: Key, id: UUID) {
+    guard entries[key]?.id == id else { return }
+    entries[key]?.pendingParts = parts
+    entries[key]?.nextPending = 0
+  }
+
+  private func waitForSlot(_ key: Key, id: UUID, wantsPart: Bool, renewsBudget: Bool) async throws -> Int? {
     try Task.checkCancellation()
-    if activeFiles < 3, waiters.isEmpty {
-      activeFiles += 1
-      entries[key]?.running = true
-      entries[key]?.lastProgress = .now
-      return
+    guard entries[key]?.id == id else { throw CancellationError() }
+    if activeParts < window, partWaiters.isEmpty {
+      return grant(key, wantsPart: wantsPart, renewsBudget: renewsBudget)
     }
+    nextTicket += 1
+    let ticket = nextTicket
     let granted = await withTaskCancellationHandler {
-      await withCheckedContinuation { continuation in
-        guard !Task.isCancelled else { continuation.resume(returning: false); return }
-        waiters.append(Waiter(key: key, id: id, continuation: continuation))
+      await withCheckedContinuation { (continuation: CheckedContinuation<SlotGrant, Never>) in
+        guard !Task.isCancelled else { continuation.resume(returning: .denied); return }
+        partWaiters.append(PartWaiter(key: key, id: id, ticket: ticket, wantsPart: wantsPart,
+          renewsBudget: renewsBudget, continuation: continuation))
       }
-    } onCancel: { Task { await self.cancelQueued(key, id: id) } }
-    guard granted else { throw CancellationError() }
-    try Task.checkCancellation()
+    } onCancel: { Task { await self.cancelWaiter(ticket: ticket) } }
+    guard case let .granted(part) = granted else { throw CancellationError() }
+    return part
   }
-  private func cancelQueued(_ key: Key, id: UUID) {
-    guard let index = waiters.firstIndex(where: { $0.key == key && $0.id == id }) else { return }
-    waiters.remove(at: index).continuation.resume(returning: false)
+
+  /// Returns a slot, adapting the window to the latency of a part that succeeded.
+  fileprivate func releasePart(latency: Duration?) {
+    activeParts -= 1
+    if let latency { adaptWindow(after: latency) }
+    grantWaiting()
   }
+
+  /// A part under 1 s grows the window by one; one over 2 s halves it.
+  func adaptWindow(after latency: Duration) {
+    if latency < .seconds(1) { window = min(window + 1, windowLimits.upperBound) }
+    else if latency > .seconds(2) { window = max(window / 2, windowLimits.lowerBound) }
+  }
+
+  /// A transient failure is congestion until proven otherwise.
+  func partFailedTransiently() {
+    window = max(window / 2, windowLimits.lowerBound)
+  }
+
+  /// Takes a slot, plus the next pending part when asked. A file with nothing left to hand out
+  /// takes no slot.
+  private func grant(_ key: Key, wantsPart: Bool, renewsBudget: Bool) -> Int? {
+    var part: Int?
+    if wantsPart {
+      guard var entry = entries[key], entry.nextPending < entry.pendingParts.count else { return nil }
+      part = entry.pendingParts[entry.nextPending]
+      entry.nextPending += 1
+      entries[key] = entry
+    }
+    activeParts += 1
+    nextTicket += 1
+    lastGrant[key] = nextTicket
+    // Waiting for a new range's slot is not a stall: the budget runs from when it is served.
+    if renewsBudget { entries[key]?.lastProgress = .now }
+    return part
+  }
+
+  private func grantWaiting() {
+    partWaiters.removeAll { waiter in
+      guard entries[waiter.key]?.id != waiter.id else { return false }
+      waiter.continuation.resume(returning: .denied)
+      return true
+    }
+    while activeParts < window, !partWaiters.isEmpty {
+      // Highest priority first; among equals, the file served least recently; then arrival.
+      let index = partWaiters.indices.max { lhs, rhs in
+        let left = partWaiters[lhs], right = partWaiters[rhs]
+        let leftPriority = entries[left.key]?.priority ?? .background
+        let rightPriority = entries[right.key]?.priority ?? .background
+        if leftPriority != rightPriority { return leftPriority < rightPriority }
+        let leftGrant = lastGrant[left.key] ?? 0, rightGrant = lastGrant[right.key] ?? 0
+        if leftGrant != rightGrant { return leftGrant > rightGrant }
+        return left.ticket > right.ticket
+      }!
+      let next = partWaiters.remove(at: index)
+      next.continuation.resume(returning: .granted(
+        part: grant(next.key, wantsPart: next.wantsPart, renewsBudget: next.renewsBudget)
+      ))
+    }
+  }
+
+  private func cancelWaiter(ticket: UInt64) {
+    guard let index = partWaiters.firstIndex(where: { $0.ticket == ticket }) else { return }
+    partWaiters.remove(at: index).continuation.resume(returning: .denied)
+  }
+
+  private func cancelWaiters(id: UUID) {
+    partWaiters.removeAll { waiter in
+      guard waiter.id == id else { return false }
+      waiter.continuation.resume(returning: .denied)
+      return true
+    }
+  }
+
   private func finished(_ key: Key, id: UUID) {
     guard let entry = entries[key], entry.id == id else { return }
-    if entry.running { activeFiles -= 1 }
-    cancelQueued(key, id: id)
+    cancelWaiters(id: id)
     entries.removeValue(forKey: key)
-    while activeFiles < 3, !waiters.isEmpty {
-      let next = waiters.removeFirst()
-      guard entries[next.key]?.id == next.id else { next.continuation.resume(returning: false); continue }
-      activeFiles += 1
-      entries[next.key]?.running = true
-      entries[next.key]?.lastProgress = .now
-      next.continuation.resume(returning: true)
-    }
+    lastGrant.removeValue(forKey: key)
   }
+
   private func received(_ count: Int64, total: Int64, key: Key, id: UUID) {
     guard var entry = entries[key], entry.id == id else { return }
     if count > entry.received { entry.lastProgress = .now }
@@ -360,7 +489,7 @@ public actor NativeDownloadManager {
   }
   private func remaining(_ key: Key, id: UUID) -> Duration {
     guard let entry = entries[key], entry.id == id else { return .zero }
-    return ContinuousClock.now.duration(to: entry.lastProgress.advanced(by: retryBudget))
+    return ContinuousClock.now.duration(to: entry.lastProgress.advanced(by: entry.request.stallBudget ?? retryBudget))
   }
   private func retryDelay(_ attempt: Int) -> Duration { min(retryBaseDelay * (1 << min(attempt, 3)), .seconds(8)) }
 
@@ -375,6 +504,51 @@ public actor NativeDownloadManager {
     (6 ... 128).contains(file.utf8.count) && file.utf8.allSatisfy {
       (48 ... 57).contains($0) || (65 ... 90).contains($0) || (97 ... 122).contains($0) || $0 == 45 || $0 == 95
     }
+  }
+
+  private static var partSize: UInt64 { UInt64(NativeFileDownloader.partSize) }
+  static func partCount(total: UInt64) -> Int { Int((total + partSize - 1) / partSize) }
+  private static func partEnd(_ index: Int, total: UInt64) -> UInt64 { min(UInt64(index + 1) * partSize, total) }
+  private static func presentBytes(_ parts: IndexSet, total: UInt64) -> UInt64 {
+    parts.reduce(0) { $0 + partEnd($1, total: total) - UInt64($1) * partSize }
+  }
+
+  /// Parts a saved record vouches for, distrusting any that the body does not fully hold.
+  private static func restoredParts(_ saved: NativeDownloadRecord?, request: Request, bodyLength: UInt64) -> IndexSet? {
+    guard let saved, saved.v == 1 || saved.v == 2, saved.accountID == request.accountID,
+          saved.fileUniqueID == request.fileUniqueID, saved.totalSize > 0,
+          saved.totalSize <= request.maximumByteCount, bodyLength <= saved.totalSize
+    else { return nil }
+    let total = saved.totalSize
+    let count = partCount(total: total)
+    var claimed = IndexSet()
+    if saved.v == 1 {
+      // A v1 body is a contiguous prefix of whole parts.
+      claimed.insert(integersIn: 0 ..< count)
+    } else {
+      for range in saved.parts ?? [] {
+        guard range.count == 2, range[0] < range[1], Int(range[1]) <= count else { return nil }
+        claimed.insert(integersIn: Int(range[0]) ..< Int(range[1]))
+      }
+    }
+    return claimed.filteredIndexSet { partEnd($0, total: total) <= bodyLength }
+  }
+
+  /// Flushes the body to stable storage, past the drive cache that a plain fsync leaves on Darwin.
+  private static func fullSync(_ descriptor: Int32) throws {
+    if fcntl(descriptor, F_FULLFSYNC) == 0 { return }
+    guard fsync(descriptor) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+  }
+
+  /// At most this many ranges are recorded; a pathological map keeps its first ranges.
+  private static let maximumRecordedRanges = 512
+
+  private static func encodeRecord(_ request: Request, total: UInt64, parts: IndexSet) throws -> Data {
+    let ranges = parts.rangeView.prefix(maximumRecordedRanges).map { [UInt32($0.lowerBound), UInt32($0.upperBound)] }
+    return try JSONEncoder().encode(NativeDownloadRecord(
+      v: 2, accountID: request.accountID, fileUniqueID: request.fileUniqueID, totalSize: total,
+      chatID: request.message?.chatID, messageID: request.message?.messageID, parts: ranges
+    ))
   }
 
   @concurrent
@@ -394,87 +568,100 @@ public actor NativeDownloadManager {
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { try? handle.close(); throw POSIXError(.EBUSY) }
     var retain = false
     var complete = false
-    var written: UInt64 = 0
+    var present = IndexSet()
     var total: UInt64 = 0
-    var metadataData: Data?
     defer {
       if !complete && !retain { try? FileManager.default.removeItem(at: metadata) }
       if !complete && !retain { try? FileManager.default.removeItem(at: body) }
       // Keep the original staging flock until cleanup has relinquished paths.
       try? handle.close()
     }
+    func reset() throws {
+      present = IndexSet(); total = 0
+      try handle.truncate(atOffset: 0)
+    }
     do {
       let saved = persistent ? record(at: metadata) : nil
       let length = try handle.seekToEnd()
-      if let saved, saved.v == 1, saved.accountID == request.accountID,
-         saved.fileUniqueID == request.fileUniqueID, saved.totalSize > 0,
-         saved.totalSize <= request.maximumByteCount, length <= saved.totalSize {
-        written = length / UInt64(NativeFileDownloader.partSize) * UInt64(NativeFileDownloader.partSize)
-        total = saved.totalSize
+      if let restored = restoredParts(saved, request: request, bodyLength: length), let saved {
+        present = restored; total = saved.totalSize
+      } else {
+        try reset()
       }
-      try handle.truncate(atOffset: written)
-      try handle.seek(toOffset: written)
-      var input = GetFilePartInput()
-      input.fileUniqueID = request.fileUniqueID; input.limit = NativeFileDownloader.partSize
-      if let message = request.message { input.message = message }
-      // An aligned complete prefix has no range at EOF. Re-authorize its last
-      // range instead, then publish the already verified complete prefix.
-      input.offset = total > 0 && written == total ? total - min(total, UInt64(input.limit)) : written
+      var base = GetFilePartInput()
+      base.fileUniqueID = request.fileUniqueID; base.limit = NativeFileDownloader.partSize
+      if let message = request.message { base.message = message }
+      func input(_ index: Int) -> GetFilePartInput {
+        var input = base; input.offset = UInt64(index) * partSize; return input
+      }
+      // The first range authorizes the file and confirms its size before saved bytes are trusted.
+      // With every part present, it re-reads the last one, then publishes the verified body.
+      let count = total > 0 ? partCount(total: total) : 0
+      var firstIndex = total > 0 ? ((0 ..< count).first { !present.contains($0) } ?? count - 1) : 0
       var first: GetFilePartResult
       do {
-        first = try await fetch(input, request: request, owner: owner, id: id)
+        first = try await fetchWithSlot(input(firstIndex), request: request, owner: owner, id: id)
       } catch {
-        guard written > 0, isGeometryFailure(error) else { throw error }
-        written = 0; total = 0
-        try handle.truncate(atOffset: 0); try handle.seek(toOffset: 0)
-        input.offset = 0
-        first = try await fetch(input, request: request, owner: owner, id: id)
+        guard !present.isEmpty, isGeometryFailure(error) else { throw error }
+        try reset(); firstIndex = 0
+        first = try await fetchWithSlot(input(0), request: request, owner: owner, id: id)
       }
       if total > 0 && first.totalSize != total {
-        written = 0; try handle.truncate(atOffset: 0); try handle.seek(toOffset: 0)
-        input.offset = 0
-        first = try await fetch(input, request: request, owner: owner, id: id)
+        try reset(); firstIndex = 0
+        first = try await fetchWithSlot(input(0), request: request, owner: owner, id: id)
       }
       total = first.totalSize
-      if persistent {
-        let data = try JSONEncoder().encode(NativeDownloadRecord(v: 1, accountID: request.accountID,
-          fileUniqueID: request.fileUniqueID, totalSize: total, chatID: request.message?.chatID, messageID: request.message?.messageID))
-        metadataData = data
-        try data.write(to: metadata, options: .atomic)
+      var lastMapWrite = ContinuousClock.now
+      func writeMap() throws {
+        guard persistent else { return }
+        try encodeRecord(request, total: total, parts: present).write(to: metadata, options: .atomic)
+        lastMapWrite = .now
       }
-      await owner.received(Int64(written), total: Int64(total), key: request.key, id: id)
+      try writeMap()
+      await owner.received(Int64(presentBytes(present, total: total)), total: Int64(total), key: request.key, id: id)
       func write(_ part: GetFilePartResult) async throws {
         try Task.checkCancellation(); try request.validateAccount()
-        guard part.offset == written, part.totalSize == total else { throw NativeFileDownloadError.invalidResponse }
+        guard part.totalSize == total, part.offset % partSize == 0, part.offset < total else {
+          throw NativeFileDownloadError.invalidResponse
+        }
+        let index = Int(part.offset / partSize)
+        guard !present.contains(index) else { return }
+        try handle.seek(toOffset: part.offset)
         try handle.write(contentsOf: part.data)
-        written += UInt64(part.data.count)
-        await owner.received(Int64(written), total: Int64(total), key: request.key, id: id)
+        present.insert(index)
+        // Bytes reach disk before the map that claims them; at most one map write a second.
+        if persistent, ContinuousClock.now - lastMapWrite >= .seconds(1) {
+          try fullSync(descriptor)
+          try writeMap()
+        }
+        await owner.received(Int64(presentBytes(present, total: total)), total: Int64(total), key: request.key, id: id)
       }
-      if written < total { try await write(first) }
-      input.offset = 0
-      let base = input
-      try await withThrowingTaskGroup(of: GetFilePartResult.self) { group in
-        var next = written
-        var active = 0
-        var ready: [UInt64: GetFilePartResult] = [:]
+      try await write(first)
+      let missing = (0 ..< partCount(total: total)).filter { !present.contains($0) }
+      await owner.setPendingParts(missing, key: request.key, id: id)
+      let template = base
+      try await withThrowingTaskGroup(of: GetFilePartResult?.self) { group in
+        // Each request takes whichever part the scheduler hands it when its slot is granted.
+        var spawned = 0
+        var queued = 0
         func refill() {
-          // Four ranges per file (at most three files): 12 per client, under the server's 16.
-          while active + ready.count < 4, next < total {
-            var nextInput = base; nextInput.offset = next
-            let scheduled = nextInput
-            next += UInt64(base.limit); active += 1
-            group.addTask { try await fetch(scheduled, request: request, owner: owner, id: id) }
+          while queued < maximumQueuedParts, spawned < missing.count {
+            spawned += 1; queued += 1
+            group.addTask { try await fetchNextPart(template, request: request, owner: owner, id: id) }
           }
         }
         refill()
-        while let part = try await group.next() {
-          active -= 1; ready[part.offset] = part
-          while let part = ready.removeValue(forKey: written) { try await write(part) }
+        // Each range is written as it arrives, in any order, so nothing waits in memory.
+        while let result = try await group.next() {
+          queued -= 1
+          if let part = result { try await write(part) }
           try Task.checkCancellation(); try request.validateAccount()
           refill()
         }
       }
-      guard written == total, try handle.seekToEnd() == total else { throw NativeFileDownloadError.invalidResponse }
+      guard present.count == partCount(total: total), try handle.seekToEnd() == total else {
+        throw NativeFileDownloadError.invalidResponse
+      }
       try handle.synchronize()
       try Task.checkCancellation(); try request.validateAccount()
       if persistent {
@@ -492,17 +679,68 @@ public actor NativeDownloadManager {
       complete = true
       return destination
     } catch {
-      retain = persistent && written > 0 && (try? request.validateAccount()) != nil &&
-        (error is CancellationError || NativeFileDownloader.isRetryableTransportFailure(error) || (error as? POSIXError)?.code == .EEXIST)
+      // Stopping never discards verified bytes; only a file the server refuses or corrupts goes.
+      // A CDN failure says nothing about bytes already verified, so those stay too.
+      retain = persistent && !present.isEmpty && total > 0 && (try? request.validateAccount()) != nil &&
+        (error is CancellationError || error is CDNRangeError ||
+         NativeFileDownloader.isRetryableTransportFailure(error) || (error as? POSIXError)?.code == .EEXIST)
       if retain {
-        try? handle.synchronize()
-        if (error as? POSIXError)?.code == .EEXIST, let metadataData {
-          // Rename did not free the body pathname, so its original flock still
-          // protects restoring the known record for complete-prefix recovery.
-          try? metadataData.write(to: metadata, options: .atomic)
+        // Rename did not free the body pathname on EEXIST, so the original flock still protects
+        // restoring the map for complete-body recovery. A map is written only over synced bytes;
+        // if the sync fails the previous map stays, claiming less.
+        if (try? fullSync(descriptor)) != nil {
+          try? encodeRecord(request, total: total, parts: present).write(to: metadata, options: .atomic)
         }
       }
       throw error
+    }
+  }
+
+  /// The next part the scheduler hands this file, under its slot; nil when none remain.
+  @concurrent
+  private static func fetchNextPart(
+    _ base: GetFilePartInput, request: Request, owner: NativeDownloadManager, id: UUID
+  ) async throws -> GetFilePartResult? {
+    guard let index = try await owner.acquireNextPart(request.key, id: id) else { return nil }
+    var input = base
+    input.offset = UInt64(index) * partSize
+    return try await fetchHoldingSlot(input, request: request, owner: owner, id: id)
+  }
+
+  /// One range under a freshly acquired slot.
+  @concurrent
+  private static func fetchWithSlot(
+    _ input: GetFilePartInput, request: Request, owner: NativeDownloadManager, id: UUID
+  ) async throws -> GetFilePartResult {
+    try await owner.acquirePart(request.key, id: id, renewsBudget: true)
+    return try await fetchHoldingSlot(input, request: request, owner: owner, id: id)
+  }
+
+  /// Fetches a range under a slot the caller holds and always releases it. Transient failures
+  /// retry within the file's budget; the slot goes back during each backoff, so a flaky range
+  /// never keeps other files waiting while it sleeps.
+  @concurrent
+  private static func fetchHoldingSlot(
+    _ input: GetFilePartInput, request: Request, owner: NativeDownloadManager, id: UUID
+  ) async throws -> GetFilePartResult {
+    var attempt = 0
+    while true {
+      do {
+        let (part, latency) = try await attemptPart(input, request: request, owner: owner, id: id)
+        await owner.releasePart(latency: latency)
+        return part
+      } catch {
+        await owner.releasePart(latency: nil)
+        try Task.checkCancellation(); try request.validateAccount()
+        guard NativeFileDownloader.isRetryableTransportFailure(error) else { throw error }
+        await owner.partFailedTransiently()
+        let delay = await owner.retryDelay(attempt)
+        let remaining = await owner.remaining(request.key, id: id)
+        guard remaining > .zero else { throw error }
+        attempt += 1
+        try await Task.sleep(for: min(delay, remaining))
+        try await owner.acquirePart(request.key, id: id, renewsBudget: false)
+      }
     }
   }
 
@@ -517,34 +755,26 @@ public actor NativeDownloadManager {
     return false
   }
 
+  /// One verified attempt at a range within the file's remaining budget, with its latency.
   @concurrent
-  private static func fetch(_ input: GetFilePartInput, request: Request, owner: NativeDownloadManager, id: UUID) async throws -> GetFilePartResult {
-    var attempt = 0
-    while true {
-      try Task.checkCancellation(); try request.validateAccount()
-      let remaining = await owner.remaining(request.key, id: id)
-      guard remaining > .zero else { throw RealtimeDirectRpcError.timeout }
-      do {
-        let part = try await request.transport.fetchFilePart(input, timeout: min(.seconds(30), remaining))
-        try Task.checkCancellation(); try request.validateAccount()
-        guard part.offset == input.offset, part.totalSize > 0, part.totalSize <= UInt64(Int64.max), part.totalSize >= input.offset else {
-          throw NativeFileDownloadError.invalidResponse
-        }
-        guard part.totalSize <= request.maximumByteCount else { throw NativeFileDownloadError.fileTooLarge }
-        let expected = min(UInt64(input.limit), part.totalSize - input.offset)
-        guard UInt64(part.data.count) == expected, part.sha256.count == 32 else { throw NativeFileDownloadError.invalidResponse }
-        guard Data(SHA256.hash(data: part.data)) == part.sha256 else { throw NativeFileDownloadError.integrity }
-        return part
-      } catch {
-        try Task.checkCancellation(); try request.validateAccount()
-        guard NativeFileDownloader.isRetryableTransportFailure(error) else { throw error }
-        let delay = await owner.retryDelay(attempt)
-        let remaining = await owner.remaining(request.key, id: id)
-        guard remaining > .zero else { throw error }
-        attempt += 1
-        try await Task.sleep(for: min(delay, remaining))
-      }
+  private static func attemptPart(
+    _ input: GetFilePartInput, request: Request, owner: NativeDownloadManager, id: UUID
+  ) async throws -> (GetFilePartResult, Duration) {
+    try Task.checkCancellation(); try request.validateAccount()
+    let remaining = await owner.remaining(request.key, id: id)
+    guard remaining > .zero else { throw RealtimeDirectRpcError.timeout }
+    let started = ContinuousClock.now
+    let part = try await request.transport.fetchFilePart(input, timeout: min(.seconds(30), remaining))
+    let latency = ContinuousClock.now - started
+    try Task.checkCancellation(); try request.validateAccount()
+    guard part.offset == input.offset, part.totalSize > 0, part.totalSize <= UInt64(Int64.max), part.totalSize >= input.offset else {
+      throw NativeFileDownloadError.invalidResponse
     }
+    guard part.totalSize <= request.maximumByteCount else { throw NativeFileDownloadError.fileTooLarge }
+    let expected = min(UInt64(input.limit), part.totalSize - input.offset)
+    guard UInt64(part.data.count) == expected, part.sha256.count == 32 else { throw NativeFileDownloadError.invalidResponse }
+    guard Data(SHA256.hash(data: part.data)) == part.sha256 else { throw NativeFileDownloadError.integrity }
+    return (part, latency)
   }
 }
 
@@ -562,6 +792,7 @@ public struct NativeFileDownloader: Sendable {
       message: message, destination: destination, maximumByteCount: maximumByteCount, transport: transport), progress: progress)
   }
   static func isRetryableTransportFailure(_ error: any Error) -> Bool {
+    if let error = error as? CDNRangeError { return error.isTransient }
     if let error = error as? RealtimeDirectRpcError {
       switch error {
       case .notConnected, .timeout, .commitOutcomeUnknown: return true
@@ -654,10 +885,14 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
     return errorCode == .rateLimit && code == 429 && message == freshRequestReplayMessage
   }
 
+  /// How long native may stall before the CDN takes over: the fallback resumes the same
+  /// partial, so leaving early costs nothing.
+  static let fallbackStallBudget: Duration = .seconds(30)
+
   func download(
-    media: Media, message: Message, to destination: URL,
+    media: Media, message: Message, to destination: URL, fallback link: CDNLink? = nil,
     progress: @escaping @Sendable (Int64, Int64) -> Void
-  ) async throws -> URL {
+  ) async throws -> NativeDownloadOutcome {
     var location = FileMessageLocation()
     location.chatID = message.chatId
     location.messageID = message.messageId
@@ -675,10 +910,47 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
     try auth.validateAccountMutation(accountToken)
     guard case let .getMessages(messages)? = response else { throw NativeFileDownloadError.invalidResponse }
     let fileID = try Self.fileID(in: messages, media: media, location: location)
-    return try await NativeDownloadManager.shared.download(.init(
-      accountID: accountToken.userID, fileUniqueID: fileID, message: location, destination: destination,
-      accountToken: accountToken, validateAccount: { try auth.validateAccountMutation(accountToken) }, transport: self
-    ), progress: progress)
+    let auth = auth
+    let accountToken = accountToken
+    let provenance = location
+    return try await Self.downloadWithRangeFallback(
+      manager: .shared, native: self, link: link, progress: progress,
+      validateAccount: { try auth.validateAccountMutation(accountToken) }
+    ) { transport, stallBudget in
+      .init(
+        accountID: accountToken.userID, fileUniqueID: fileID, message: provenance, destination: destination,
+        accountToken: accountToken, validateAccount: { try auth.validateAccountMutation(accountToken) },
+        stallBudget: stallBudget, transport: transport
+      )
+    }
+  }
+
+  /// Downloads natively, and if that fails for a reason the CDN could get past, lets the CDN
+  /// fill the same partial with range requests. Permission failures and cancellation never fall
+  /// back, and a changed account stops both.
+  static func downloadWithRangeFallback(
+    manager: NativeDownloadManager,
+    native: any NativeFilePartFetching,
+    link: CDNLink?,
+    progress: @escaping @Sendable (Int64, Int64) -> Void,
+    validateAccount: @Sendable () throws -> Void,
+    request: @Sendable (any NativeFilePartFetching, Duration?) -> NativeDownloadManager.Request
+  ) async throws -> NativeDownloadOutcome {
+    do {
+      let file = try await manager.download(request(native, link == nil ? nil : fallbackStallBudget), progress: progress)
+      return NativeDownloadOutcome(file: file, fallback: nil)
+    } catch {
+      guard let link, !Task.isCancelled, !(error is CancellationError), !isPermissionFailure(error),
+            (error as? POSIXError)?.code != .EEXIST, (try? validateAccount()) != nil
+      else { throw error }
+      do {
+        let file = try await manager.download(request(CDNRangeSource(link: link), nil), progress: progress)
+        return NativeDownloadOutcome(file: file, fallback: error)
+      } catch let cdnError {
+        if Task.isCancelled || cdnError is CancellationError { throw cdnError }
+        throw NativeRangeFallbackFailure(native: error, cdn: cdnError)
+      }
+    }
   }
 
   static func isPermissionFailure(_ error: any Error) -> Bool {
