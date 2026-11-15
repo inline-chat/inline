@@ -130,6 +130,7 @@ private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
     "amp",
     "claude",
     "codex",
+    "dots",
     "hermes",
     "openclaw",
     "opencode",

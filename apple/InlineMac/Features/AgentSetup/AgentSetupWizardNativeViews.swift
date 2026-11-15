@@ -318,7 +318,7 @@ private struct AgentSetupHarnessRow: View {
               .foregroundStyle(.secondary)
           }
         }
-        Text(target.family == .gateway ? "Gateway integration" : "Local coding harness")
+        Text(subtitle)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -333,9 +333,14 @@ private struct AgentSetupHarnessRow: View {
     .padding(.vertical, 5)
   }
 
+  private var subtitle: LocalizedStringResource {
+    if target.id == "dots" { return "Your Dot from ChatGPT" }
+    return target.family == .gateway ? "Gateway integration" : "Local coding harness"
+  }
+
   private var maturityLabel: LocalizedStringResource? {
     switch target.id {
-      case "codex":
+      case "codex", "dots":
         "(Alpha)"
       case "hermes", "opencode", "claude":
         "(Beta)"
@@ -469,6 +474,7 @@ private struct AgentSetupHarnessIcon: View {
     case "opencode": "AgentHarnessOpenCode"
     case "claude": "AgentHarnessClaude"
     case "amp": "AgentHarnessAmp"
+    case "dots": "AgentHarnessDots"
     default: nil
     }
   }
