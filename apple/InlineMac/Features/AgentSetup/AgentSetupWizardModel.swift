@@ -143,8 +143,6 @@ private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
 final class AgentSetupWizardModel {
   enum Phase: Equatable {
     case idle
-    case choosingLocation
-    case remoteSetup
     case installingCLI
     case signingIn
     case discovering
@@ -160,7 +158,7 @@ final class AgentSetupWizardModel {
     case targetSetup
   }
 
-  private(set) var phase: Phase = .choosingLocation
+  private(set) var phase: Phase = .idle
   private(set) var discovery: AgentHarnessDiscovery?
   private(set) var result: AgentSetupResult?
   private(set) var failure: AgentSetupFailure?
@@ -202,7 +200,7 @@ final class AgentSetupWizardModel {
     switch phase {
     case .installingCLI, .signingIn, .discovering, .settingUp:
       true
-    case .idle, .choosingLocation, .remoteSetup, .choosing, .noHarnesses, .completed, .failed:
+    case .idle, .choosing, .noHarnesses, .completed, .failed:
       false
     }
   }
@@ -216,14 +214,9 @@ final class AgentSetupWizardModel {
     failure?.supportsConfirmedReplacement == true && selectedTarget?.family == .gateway
   }
 
+  /// Only a failed harness setup has a page to return to: the picker.
   var canGoBack: Bool {
-    switch phase {
-    case .remoteSetup, .choosing, .noHarnesses, .failed:
-      true
-    case .idle, .choosingLocation, .installingCLI, .signingIn, .discovering, .settingUp,
-         .completed:
-      false
-    }
+    phase == .failed && failureOperation == .targetSetup
   }
 
   var canRetryFailure: Bool {
@@ -237,11 +230,9 @@ final class AgentSetupWizardModel {
 
   var showsActionFooter: Bool {
     switch phase {
-    case .idle, .choosingLocation, .remoteSetup:
-      false
     case .failed:
       canRepairSelectedSetup || canRetryFailure
-    case .installingCLI, .signingIn, .discovering, .choosing, .noHarnesses, .settingUp,
+    case .idle, .installingCLI, .signingIn, .discovering, .choosing, .noHarnesses, .settingUp,
          .completed:
       true
     }
@@ -257,49 +248,24 @@ final class AgentSetupWizardModel {
     URL(string: "https://inline.chat/docs/agents.md")!
   }
 
+  var remoteSetup: AgentSetupRemoteSetup {
+    AgentSetupRemoteSetup(
+      prompt: remoteSetupPrompt,
+      guideURL: URL(string: "https://inline.chat/docs/agents")!
+    )
+  }
+
   var remoteSetupPrompt: String {
     "Set up this agent as a bot in Inline by following \(agentInstructionsURL.absoluteString)"
   }
 
-  func chooseLocalSetup() {
-    start()
-  }
-
-  func chooseRemoteSetup() {
-    guard !isBusy else { return }
-    phase = .remoteSetup
-  }
-
-  func returnToLocationChoice() {
-    guard !isBusy else { return }
-    discovery = nil
-    result = nil
-    failure = nil
-    failureOperation = nil
-    progressItems = []
-    selectedTargetID = nil
-    phase = .choosingLocation
-  }
-
   func goBack() {
     guard canGoBack, !isBusy else { return }
-    switch phase {
-    case .remoteSetup, .noHarnesses:
-      returnToLocationChoice()
-    case .choosing:
-      returnToLocationChoice()
-    case .failed where failureOperation == .targetSetup:
-      failure = nil
-      failureOperation = nil
-      result = nil
-      progressItems = []
-      phase = .choosing
-    case .failed:
-      returnToLocationChoice()
-    case .idle, .choosingLocation, .installingCLI, .signingIn, .discovering, .settingUp,
-         .completed:
-      break
-    }
+    failure = nil
+    failureOperation = nil
+    result = nil
+    progressItems = []
+    phase = .choosing
   }
 
   func start() {
@@ -490,7 +456,7 @@ final class AgentSetupWizardModel {
     } catch is CancellationError {
       isCancelling = false
       progressItems = []
-      phase = .choosingLocation
+      phase = .idle
     } catch {
       failureOperation = .preparation
       fail(error)
