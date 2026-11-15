@@ -139,7 +139,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         guard let row = view as? TimelineRowView, rowPool.count < 24 else { return }
         row.prepareForReuse()
         rowPool.append(row)
-      }
+      },
+      // The sender's avatar stays in sight beside its group, as the collection view's overlay keeps it.
+      pin: { [unowned self] id, view in
+        guard let avatar = (view as? TimelineRowView)?.pinnedAvatar else { return nil }
+        return TimelinePin(view: avatar.view, bottom: avatar.bottom, height: avatar.height, spanStart: groupStart(of: id))
+      },
+      spanTop: { _, view in (view as? TimelineRowView)?.bubbleTop ?? 0 }
     )
     list.onDemand = { [weak self] edges in edges.forEach { self?.loadHistory($0) } }
     list.onLayout = { [weak self] _ in self?.layoutChanged() }
@@ -315,6 +321,17 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   // MARK: - Rows
 
   private func row(_ id: ChatRowID) -> ChatRow? { snapshot?.row(for: id) }
+
+  /// The first row of the sender group a message row ends.
+  private func groupStart(of id: ChatRowID) -> ChatRowID {
+    guard let snapshot, var index = snapshot.index(of: id) else { return id }
+    while index > 0, case let .message(_, grouping) = snapshot.rows[index].content, !grouping.isFirstInGroup,
+          case .message = snapshot.rows[index - 1].content
+    {
+      index -= 1
+    }
+    return snapshot.rows[index].id
+  }
 
   private func height(of id: ChatRowID, width: CGFloat) -> CGFloat {
     if let cached = heights[id], abs(cached.width - width) < 0.5 { return cached.height }

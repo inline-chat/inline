@@ -262,7 +262,8 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           view = avatarView
         } else {
           view = avatarView ?? makeAvatarView()
-          view.frame = frame
+          // The list lifts the avatar with its transform to keep it in sight (sticky avatar).
+          view.untransformedFrame = frame
           if animated { view.alpha = 0 }
           appearing.append(view)
         }
@@ -324,7 +325,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         acknowledgementView.isHidden = false
       }
       if let avatarView, let frame = layout.frame(.avatar) {
-        avatarView.frame = frame
+        avatarView.untransformedFrame = frame
       }
       if let uploadProgressView {
         uploadProgressView.frame = uploadProgressFrame(layout, content: content)

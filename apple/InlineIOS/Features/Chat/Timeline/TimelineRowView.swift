@@ -79,6 +79,27 @@ final class TimelineRowView: UIView {
     source.isHidden = isMenuSourceHidden
   }
 
+  /// The sender's avatar beside the message, where the row shows one: the view, and its bottom and
+  /// height at rest in the row. The list keeps it in sight while the group is (sticky avatar).
+  var pinnedAvatar: (view: UIView, bottom: CGFloat, height: CGFloat)? {
+    if let messageView, !messageView.isHidden, let avatar = messageView.avatarView, !avatar.isHidden {
+      let frame = avatar.untransformedFrame
+      return (avatar, messageView.untransformedFrame.minY + frame.maxY, frame.height)
+    }
+    if let legacyAvatar {
+      // Pinned to the row's bottom by its constraints.
+      return (legacyAvatar, bounds.height, 28)
+    }
+    return nil
+  }
+
+  /// Where the bubble starts, the top of a group for its avatar.
+  var bubbleTop: CGFloat {
+    if let messageView, !messageView.isHidden { return messageView.bubbleContentView.frame.minY }
+    if legacyView != nil { return legacyConstraints.first?.constant ?? 0 }
+    return 0
+  }
+
   /// The production message view, filling the row. The caller applies a plan to it.
   func showMessage() -> MessageView {
     removeLegacy()
