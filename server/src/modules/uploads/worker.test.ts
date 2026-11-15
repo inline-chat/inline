@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { eq } from "drizzle-orm"
-import { UploadKind, type UploadComplete } from "@inline-chat/protocol/core"
+import { RpcError_Code, UploadKind, type UploadComplete } from "@inline-chat/protocol/core"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
@@ -975,6 +975,41 @@ describe("native upload multipart worker", () => {
     expect((await repository.get(created.uploadId, owner))?.failureCode).toBe("integrity")
     expect(multipart.putCount).toBe(0)
     expect(multipart.objects.size).toBe(0)
+  })
+
+  test("finishes a single-part upload sent inline with create in one call", async () => {
+    const user = await testUtils.createUser("native-upload-inline-create@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(40_000).fill(8)
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const input = {
+      clientUploadId: new Uint8Array(16).fill(150),
+      fileName: "inline.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined } as const,
+      inlineData: body,
+    }
+    const created = await operations.create(input, requestContext)
+    expect(created.complete?.fileUniqueId).toBeString()
+    expect(created.acceptedParts).toEqual([0])
+    expect(multipart.putCount).toBe(1)
+
+    // A retried create (lost reply) returns the same result without storing again.
+    const retried = await operations.create(input, requestContext)
+    expect(retried.complete?.fileUniqueId).toBe(created.complete!.fileUniqueId)
+    expect(multipart.putCount).toBe(1)
+
+    // Inline bytes that are not the whole file are rejected before any upload row is created.
+    const rows = (await db.select().from(inlineUploads)).length
+    await expect(operations.create({ ...input, clientUploadId: new Uint8Array(16).fill(151), inlineData: body.subarray(1) },
+      requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect((await db.select().from(inlineUploads)).length).toBe(rows)
   })
 
   test("keeps multipart for uploads larger than one storage group", async () => {

@@ -103,6 +103,10 @@ const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
       (input.thumbnailFileUniqueId.length < 1 || input.thumbnailFileUniqueId.length > 128 ||
        (kind !== "video" && kind !== "document"))) return badRequest()
   if (kind === "photo" && mimeType !== "image/jpeg" && mimeType !== "image/png") return badRequest()
+  // Inline bytes must be the whole single-part file; reject before any row is created.
+  if (input.inlineData !== undefined &&
+      (BigInt(input.inlineData.byteLength) !== input.byteCount ||
+       input.byteCount > BigInt(INLINE_TRANSFER_PART_SIZE))) return badRequest()
 
   let metadata: InlineUploadMetadata = {
     clientUploadId: input.clientUploadId.slice(),
@@ -230,12 +234,41 @@ export class NativeUploadOperations {
         acceptedParts: result.upload.acceptedParts,
       })
     }
-    return {
+    const created: CreateUploadResult = {
       uploadId: Uint8Array.from(result.upload.uploadId),
       partSize: result.upload.partSize,
       partCount: result.upload.partCount,
       expiresAt: BigInt(Math.floor(result.upload.expiresAt.getTime() / 1_000)),
       acceptedParts: result.upload.acceptedParts,
+    }
+    return input.inlineData === undefined ? created : await this.#finishInlineData(created, input.inlineData, context)
+  }
+
+  /**
+   * Saves a whole single-part file sent with CREATE_UPLOAD and finishes it in the same call, so a
+   * small photo costs one round trip instead of create, part and finish. On any failure the
+   * upload still exists and the client continues with the ordinary part and finish calls.
+   */
+  async #finishInlineData(
+    created: CreateUploadResult,
+    data: Uint8Array,
+    context: HandlerContext,
+  ): Promise<CreateUploadResult> {
+    if (created.partCount !== 1) return created
+    try {
+      if (!created.acceptedParts.includes(0)) {
+        await this.savePart({ uploadId: created.uploadId, partIndex: 0, data }, context)
+      }
+      const finished = await this.finish({ uploadId: created.uploadId }, context)
+      switch (finished.state.oneofKind) {
+        case "complete": return { ...created, acceptedParts: [0], complete: finished.state.complete }
+        case "missing": return created
+        default: return { ...created, acceptedParts: [0] }
+      }
+    } catch (error) {
+      if (context.signal?.aborted) throw error
+      log.warn("Inline upload data was not finished in create", { error })
+      return created
     }
   }
 
