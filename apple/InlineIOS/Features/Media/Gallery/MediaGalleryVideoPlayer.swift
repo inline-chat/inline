@@ -12,6 +12,8 @@ import UIKit
 final class MediaGalleryVideoPlayer {
   let player: AVPlayer
   let url: URL
+  /// Serves the player from the video's native download; nil when it plays `url` directly.
+  let stream: NativeVideoStream?
   /// Called when play state, time, or readiness changes.
   var onUpdate: (() -> Void)?
 
@@ -25,9 +27,10 @@ final class MediaGalleryVideoPlayer {
   private var endObserver: NSObjectProtocol?
   private var timeObserver: Any?
 
-  init(url: URL) {
+  init(url: URL, stream: NativeVideoStream? = nil) {
     self.url = url
-    let asset = AVURLAsset(url: url)
+    self.stream = stream
+    let asset = stream?.asset ?? AVURLAsset(url: url)
     player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
     player.actionAtItemEnd = .pause
     observe()
@@ -114,6 +117,7 @@ final class MediaGalleryVideoPlayer {
     }
     player.pause()
     player.replaceCurrentItem(with: nil)
+    stream?.close()
     releaseSession()
   }
 

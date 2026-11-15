@@ -470,8 +470,9 @@ final class MediaGalleryViewController: UIViewController {
     source.pageDidChange(to: currentIndex)
     if currentItem?.id != playerItemID {
       stopVideo()
-    } else if let player, let item = currentItem, Self.playableURL(for: item) != player.url {
-      // Fresh links arrived for the video on screen.
+    } else if let player, player.stream == nil, let item = currentItem, Self.playableURL(for: item) != player.url {
+      // Fresh links arrived for the video on screen. A native stream needs no link, and keeps
+      // playing when its download lands on disk.
       let wasPlaying = player.isPlaying
       stopVideo()
       startVideoIfNeeded(autoplay: wasPlaying)
@@ -820,7 +821,13 @@ final class MediaGalleryViewController: UIViewController {
     }
     guard let url = Self.playableURL(for: item) else { return }
     stopVideo()
-    let player = MediaGalleryVideoPlayer(url: url)
+    // A video that is not on disk plays from its native download, which the chat then keeps,
+    // instead of streaming a second copy from the CDN.
+    var stream: NativeVideoStream?
+    if !url.isFileURL, let video = item.video, let message = item.message {
+      stream = FileDownloader.shared.videoStream(video: video, for: message)
+    }
+    let player = MediaGalleryVideoPlayer(url: url, stream: stream)
     player.onUpdate = { [weak self] in self?.updateVideoControls() }
     self.player = player
     playerItemID = item.id
