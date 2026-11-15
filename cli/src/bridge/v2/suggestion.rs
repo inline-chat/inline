@@ -81,9 +81,15 @@ fn clean(raw: &str) -> String {
 }
 
 fn is_wrapped(text: &str) -> bool {
-    [('(', ')'), ('[', ']'), ('（', '）'), ('［', '］'), ('【', '】')]
-        .iter()
-        .any(|(open, close)| text.starts_with(*open) && text.ends_with(*close))
+    [
+        ('(', ')'),
+        ('[', ']'),
+        ('（', '）'),
+        ('［', '］'),
+        ('【', '】'),
+    ]
+    .iter()
+    .any(|(open, close)| text.starts_with(*open) && text.ends_with(*close))
 }
 
 /// Whitespace words; a run of CJK characters counts half a word per character.
@@ -117,7 +123,10 @@ mod tests {
 
     #[test]
     fn strips_wrappers_labels_and_quotes() {
-        assert_eq!(screen("<suggestion>try it out</suggestion>").as_deref(), Some("try it out"));
+        assert_eq!(
+            screen("<suggestion>try it out</suggestion>").as_deref(),
+            Some("try it out")
+        );
         assert_eq!(screen("Suggestion: push it").as_deref(), Some("push it"));
         assert_eq!(screen("\"go ahead\"").as_deref(), Some("go ahead"));
     }

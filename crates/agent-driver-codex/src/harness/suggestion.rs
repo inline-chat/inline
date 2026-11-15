@@ -88,8 +88,14 @@ mod tests {
             turn_to_follow(&[completed(TurnOutcome::Completed, 1)]),
             Some(TurnId::new("turn-1").unwrap())
         );
-        assert_eq!(turn_to_follow(&[completed(TurnOutcome::Completed, 0)]), None);
-        assert_eq!(turn_to_follow(&[completed(TurnOutcome::Interrupted, 1)]), None);
+        assert_eq!(
+            turn_to_follow(&[completed(TurnOutcome::Completed, 0)]),
+            None
+        );
+        assert_eq!(
+            turn_to_follow(&[completed(TurnOutcome::Interrupted, 1)]),
+            None
+        );
         assert_eq!(turn_to_follow(&[completed(TurnOutcome::Failed, 1)]), None);
     }
 
@@ -100,7 +106,12 @@ mod tests {
         assert_eq!(request.params["threadId"], "thread-1");
         assert_eq!(request.params["expectedTurnId"], "turn-9");
         assert_eq!(request.params["disableMcp"], true);
-        assert!(request.params["prompt"].as_str().unwrap().contains("Return only JSON"));
+        assert!(
+            request.params["prompt"]
+                .as_str()
+                .unwrap()
+                .contains("Return only JSON")
+        );
     }
 
     #[test]
@@ -109,7 +120,10 @@ mod tests {
             parse(&json!({"text": "{\"suggestion\": \" run the tests \"}"})),
             Some("run the tests".to_owned())
         );
-        assert_eq!(parse(&json!({"text": "```json\n{\"suggestion\":\"yes\"}\n```"})), Some("yes".to_owned()));
+        assert_eq!(
+            parse(&json!({"text": "```json\n{\"suggestion\":\"yes\"}\n```"})),
+            Some("yes".to_owned())
+        );
         assert_eq!(parse(&json!({"text": "{\"suggestion\": null}"})), None);
         assert_eq!(parse(&json!({"text": "{\"suggestion\": \"\"}"})), None);
         assert_eq!(parse(&json!({"text": null})), None);

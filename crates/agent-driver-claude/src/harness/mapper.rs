@@ -1913,7 +1913,9 @@ mod tests {
         assert_eq!(text, "run the tests");
         assert!(
             mapper
-                .message(&message(json!({"type": "prompt_suggestion", "suggestion": "  "})))
+                .message(&message(
+                    json!({"type": "prompt_suggestion", "suggestion": "  "})
+                ))
                 .is_empty()
         );
     }
@@ -1925,7 +1927,9 @@ mod tests {
         mapper.sent(&input, true);
         mapper.message(&message(json!({"type": "assistant", "uuid": "a1",
             "message": {"id": "m1", "content": [{"type": "text", "text": "working"}]}})));
-        let events = mapper.message(&message(json!({"type": "prompt_suggestion", "suggestion": "yes"})));
+        let events = mapper.message(&message(
+            json!({"type": "prompt_suggestion", "suggestion": "yes"}),
+        ));
         assert!(events.is_empty(), "{events:?}");
     }
 
