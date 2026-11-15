@@ -145,7 +145,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         guard let avatar = (view as? TimelineRowView)?.pinnedAvatar else { return nil }
         return TimelinePin(view: avatar.view, bottom: avatar.bottom, height: avatar.height, spanStart: groupStart(of: id))
       },
-      spanTop: { _, view in (view as? TimelineRowView)?.bubbleTop ?? 0 }
+      spanTop: { _, view in (view as? TimelineRowView)?.bubbleTop ?? 0 },
+      // The bubble gradient spans the screen, as the collection view's per-frame sync lays it.
+      screen: { _, view, screen in (view as? TimelineRowView)?.followScreen(screen) }
     )
     list.onDemand = { [weak self] edges in edges.forEach { self?.loadHistory($0) } }
     list.onLayout = { [weak self] _ in self?.layoutChanged() }

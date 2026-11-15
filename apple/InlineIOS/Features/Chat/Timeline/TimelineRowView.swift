@@ -93,6 +93,32 @@ final class TimelineRowView: UIView {
     return nil
   }
 
+  /// Lays the continuous bubble gradient over the list's whole height: the bubble shows the slice
+  /// of it where it is on screen, following the row's motion on the render server.
+  func followScreen(_ screen: TimelineRowScreen) {
+    if let messageView, !messageView.isHidden, let target = messageView.continuousGradient(in: self) {
+      messageView.updateContinuousBubbleGradient(
+        bubbleMinY: screen.y + target.frame.minY, bubbleHeight: target.frame.height, viewportHeight: screen.height
+      )
+      Self.follow(screen, target)
+    } else if let legacyView, let target = legacyView.continuousGradient(in: self) {
+      legacyView.updateContinuousBubbleGradient(
+        bubbleMinY: screen.y + target.frame.minY, bubbleHeight: target.frame.height, viewportHeight: screen.height
+      )
+      Self.follow(screen, target)
+    }
+  }
+
+  /// The gradient's ends are in unit coordinates of the bubble: a point of the row's travel moves
+  /// both by `-1 / height`.
+  private static func follow(_ screen: TimelineRowScreen, _ target: (layer: CALayer, frame: CGRect)) {
+    guard target.frame.height > 1 else { return }
+    let scale = -1 / target.frame.height
+    for keyPath in ["startPoint", "endPoint"] {
+      screen.follow(target.layer, keyPath: keyPath) { NSValue(cgPoint: CGPoint(x: 0, y: $0 * scale)) }
+    }
+  }
+
   /// Where the bubble starts, the top of a group for its avatar.
   var bubbleTop: CGFloat {
     if let messageView, !messageView.isHidden { return messageView.bubbleContentView.frame.minY }

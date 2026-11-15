@@ -156,6 +156,9 @@ final class MessageBubbleView: UIView {
     updateGradientColors()
   }
 
+  /// The layer drawing the continuous gradient, when the bubble has one.
+  var continuousGradientLayer: CALayer? { lightingAlphas != nil ? lightingLayer : nil }
+
   func updateContinuousGradient(startY: CGFloat, endY: CGFloat) {
     guard lightingAlphas != nil else { return }
     if let lightingVector,

@@ -699,18 +699,31 @@ class UIMessageView: UIView {
 
     let bubbleFrame = bubbleView.convert(bubbleView.bounds, to: viewport).standardized
     let viewportBounds = viewport.bounds.standardized
-    guard bubbleFrame.height > 0, viewportBounds.height > 0 else { return }
-
-    guard let vector = ThemeCatalog.bubbleGradientVector(
-      bubbleMinY: Double(bubbleFrame.minY),
-      bubbleHeight: Double(bubbleFrame.height),
-      viewportMinY: Double(viewportBounds.minY),
-      viewportHeight: Double(viewportBounds.height)
-    ) else { return }
-    bubbleView.updateContinuousGradient(
-      startY: CGFloat(vector.startY),
-      endY: CGFloat(vector.endY)
+    updateContinuousBubbleGradient(
+      bubbleMinY: bubbleFrame.minY - viewportBounds.minY,
+      bubbleHeight: bubbleFrame.height,
+      viewportHeight: viewportBounds.height
     )
+  }
+
+  /// The continuous gradient's layer and the bubble's frame in `view`, when the bubble shows one.
+  func continuousGradient(in view: UIView) -> (layer: CALayer, frame: CGRect)? {
+    guard supportsContinuousBubbleGradient, let layer = bubbleView.continuousGradientLayer else { return nil }
+    return (layer, bubbleView.convert(bubbleView.bounds, to: view).standardized)
+  }
+
+  /// Positions the continuous gradient for a bubble `bubbleMinY` below the top of a viewport
+  /// `viewportHeight` tall.
+  func updateContinuousBubbleGradient(bubbleMinY: CGFloat, bubbleHeight: CGFloat, viewportHeight: CGFloat) {
+    guard supportsContinuousBubbleGradient, bubbleHeight > 0, viewportHeight > 0,
+          let vector = ThemeCatalog.bubbleGradientVector(
+            bubbleMinY: Double(bubbleMinY),
+            bubbleHeight: Double(bubbleHeight),
+            viewportMinY: 0,
+            viewportHeight: Double(viewportHeight)
+          )
+    else { return }
+    bubbleView.updateContinuousGradient(startY: CGFloat(vector.startY), endY: CGFloat(vector.endY))
   }
 
   func reset() {

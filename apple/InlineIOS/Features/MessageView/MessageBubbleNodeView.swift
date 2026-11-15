@@ -64,6 +64,9 @@ final class MessageBubbleNodeView: UIView {
     MessageBubbleGeometry.path(in: bounds, side: side)
   }
 
+  /// The layer drawing the continuous lighting gradient, when the bubble has one.
+  var lightingLayer: CALayer? { lighting != nil ? fill.layer : nil }
+
   /// Positions the continuous lighting gradient for where the bubble sits in the viewport.
   func updateLightingVector(startY: CGFloat, endY: CGFloat) {
     guard lighting != nil else { return }

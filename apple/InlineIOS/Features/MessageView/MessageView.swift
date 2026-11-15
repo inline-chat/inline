@@ -435,12 +435,24 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     guard content?.lighting != nil, !bubbleView.isHidden else { return }
     let frame = bubbleView.convert(bubbleView.bounds, to: viewport).standardized
     let bounds = viewport.bounds.standardized
-    guard frame.height > 0, bounds.height > 0,
+    updateContinuousBubbleGradient(bubbleMinY: frame.minY - bounds.minY, bubbleHeight: frame.height, viewportHeight: bounds.height)
+  }
+
+  /// The continuous gradient's layer and the bubble's frame in `view`, when the bubble shows one.
+  func continuousGradient(in view: UIView) -> (layer: CALayer, frame: CGRect)? {
+    guard content?.lighting != nil, !bubbleView.isHidden, let layer = bubbleView.lightingLayer else { return nil }
+    return (layer, bubbleView.convert(bubbleView.bounds, to: view).standardized)
+  }
+
+  /// Positions the continuous bubble gradient for a bubble `bubbleMinY` below the top of a viewport
+  /// `viewportHeight` tall.
+  func updateContinuousBubbleGradient(bubbleMinY: CGFloat, bubbleHeight: CGFloat, viewportHeight: CGFloat) {
+    guard content?.lighting != nil, !bubbleView.isHidden,
           let vector = ThemeCatalog.bubbleGradientVector(
-            bubbleMinY: Double(frame.minY),
-            bubbleHeight: Double(frame.height),
-            viewportMinY: Double(bounds.minY),
-            viewportHeight: Double(bounds.height)
+            bubbleMinY: Double(bubbleMinY),
+            bubbleHeight: Double(bubbleHeight),
+            viewportMinY: 0,
+            viewportHeight: Double(viewportHeight)
           )
     else { return }
     bubbleView.updateLightingVector(startY: CGFloat(vector.startY), endY: CGFloat(vector.endY))
