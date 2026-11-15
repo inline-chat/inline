@@ -3,7 +3,7 @@ import { sendComposeSuggestion } from "@in/server/functions/messages.sendCompose
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { setupTestLifecycle, testUtils } from "../setup"
 
-const mockPushToUser = mock(async () => {})
+const mockPushToUser = mock(async (..._args: Parameters<typeof RealtimeUpdates.pushToUser>) => {})
 let restorePushToUser: (() => void) | undefined
 let emailCounter = 0
 const nextEmail = (label: string) => `${label}-suggest-${++emailCounter}@example.com`
