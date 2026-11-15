@@ -516,6 +516,7 @@ pub(crate) fn spawn(
         outbox,
         rendering_turn: None,
         last_turn_input: None,
+        turn_origin: None,
         lead_reports: Vec::new(),
         turn_ended: None,
         final_text: None,
@@ -668,6 +669,9 @@ struct Actor {
     rendering_turn: Option<TurnId>,
     /// The first input of the latest turn: what `/undo` rewinds to.
     last_turn_input: Option<InputId>,
+    /// Who started the latest turn and with which message: where its prompt
+    /// suggestion goes. `None` for turns no Inline message started.
+    turn_origin: Option<(TurnId, UserId, i64)>,
     /// Inputs whose delivery was unknown, until the session settles them.
     uncertain: HashMap<InputId, Uncertain>,
     /// Ledger states not saved yet, written again with the next update.
@@ -2773,6 +2777,10 @@ impl Actor {
                     if let Some(first) = inputs.first() {
                         self.last_turn_input = Some(first.clone());
                     }
+                    self.turn_origin = inputs.first().and_then(|first| {
+                        let (_, pending, message_id) = self.inputs.get(first)?;
+                        Some((turn.clone(), pending.sender, *message_id))
+                    });
                     self.turn_started = Some(now_ms() as i64 / 1000);
                     // Running again: whatever limit it waited on has reset.
                     self.waiting = None;
@@ -2860,6 +2868,9 @@ impl Actor {
             Event::Held { by: Some(by) } => {
                 self.event(HoldEvent::AcquireConflict { by: by.clone() })
                     .await;
+            }
+            Event::PromptSuggestion { turn, text } => {
+                self.suggest(turn.as_ref(), text).await;
             }
             Event::Gap { expected, actual } => {
                 log::warn!(target: "inline::bridge::v2", "session events skipped expected={expected} actual={actual}");
@@ -3500,6 +3511,32 @@ impl Actor {
         self.send(&paragraph(text), actions, Notify::Normal).await
     }
 
+    /// Puts the harness's guess at the next message in the composer of whoever
+    /// started the turn it follows, as a gray placeholder. Ephemeral and best
+    /// effort: a newer turn, or a turn no Inline message started, gets none.
+    async fn suggest(&self, turn: Option<&TurnId>, text: &str) {
+        let Some((origin_turn, sender, message_id)) = &self.turn_origin else {
+            return;
+        };
+        if self.turn.is_some() || turn.is_some_and(|turn| turn != origin_turn) {
+            return;
+        }
+        let Some(text) = super::suggestion::screen(text) else {
+            return;
+        };
+        if let Err(error) = api::send_compose_suggestion(
+            &self.agent.bot,
+            self.chat_id,
+            sender.0,
+            &text,
+            Some(*message_id),
+        )
+        .await
+        {
+            log::debug!(target: "inline::bridge::v2", "compose suggestion failed: {error}");
+        }
+    }
+
     async fn reply(&self, message_id: i64, text: &str) {
         self.reply_in(self.chat_id, message_id, text).await;
     }
@@ -3782,6 +3819,7 @@ fn event_kind(event: &Event) -> &'static str {
         Event::Child { .. } => "child",
         Event::Held { .. } => "held",
         Event::Renamed { .. } => "renamed",
+        Event::PromptSuggestion { .. } => "prompt_suggestion",
         Event::Notice(_) => "notice",
         Event::Gap { .. } => "gap",
     }
@@ -4571,6 +4609,7 @@ pub(crate) mod recovery_tests {
             outbox,
             rendering_turn: None,
             last_turn_input: None,
+            turn_origin: None,
             lead_reports: Vec::new(),
             turn_ended: None,
             final_text: None,

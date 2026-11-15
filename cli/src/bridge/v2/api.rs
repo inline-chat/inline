@@ -211,6 +211,28 @@ pub(crate) async fn send_working(bot: &InlineClient, chat_id: i64, working: bool
     Ok(())
 }
 
+/// A suggested next message for `user_id`'s composer in this chat, shown as
+/// its gray placeholder until they type, send or another message arrives.
+pub(crate) async fn send_compose_suggestion(
+    bot: &InlineClient,
+    chat_id: i64,
+    user_id: i64,
+    text: &str,
+    after_message_id: Option<i64>,
+) -> ApiResult<()> {
+    call!(
+        bot,
+        SendComposeSuggestion,
+        proto::SendComposeSuggestionInput {
+            peer_id: Some(chat_peer(chat_id)),
+            user_id,
+            text: text.to_owned(),
+            after_message_id,
+        }
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn list_grants(bot: &InlineClient) -> ApiResult<proto::ListAgentGrantsResult> {
     call!(
         bot,
