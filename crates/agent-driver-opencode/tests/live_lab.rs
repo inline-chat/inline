@@ -82,6 +82,7 @@ fn kind(event: &Event) -> String {
         Event::Usage { .. } => "usage".into(),
         Event::Child { .. } => "child".into(),
         Event::Renamed { .. } => "renamed".into(),
+        Event::PromptSuggestion { .. } => "prompt_suggestion".into(),
         Event::Notice(notice) => format!("notice:{}", notice.code),
         Event::State { .. } => "state".into(),
         Event::Held { .. } => "held".into(),
