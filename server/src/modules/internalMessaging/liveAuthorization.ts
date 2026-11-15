@@ -67,6 +67,8 @@ export function liveRequirements(updates: readonly Update[], recipient: number):
       case "chatPermissions": chat(u.chatPermissions.chatId); break
       case "messageActionInvoked": chat(u.messageActionInvoked.chatId); break
       case "deleteMessages": peer(u.deleteMessages.peerId); break
+      // A bot's suggestion for one composer: the recipient must still see the chat.
+      case "composeSuggestion": peer(u.composeSuggestion.peerId); break
       case "pinnedMessages": peer(u.pinnedMessages.peerId); break
       case "agentSessionState": peer(u.agentSessionState.agentSession?.peerId); break
       case "agentParticipation": peer(u.agentParticipation.participation?.peerId); break
