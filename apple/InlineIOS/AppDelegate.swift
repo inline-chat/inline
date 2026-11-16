@@ -80,6 +80,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     )
 
     TimeZoneSyncCoordinator.shared.start()
+    BackgroundSends.shared.start()
     Task.detached { await PendingServerLogouts.shared.drain() }
 
     return true
