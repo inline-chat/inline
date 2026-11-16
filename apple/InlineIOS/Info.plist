@@ -25,6 +25,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).upload.*</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>$(DISPLAY_NAME)</string>
 	<key>CFBundleURLTypes</key>
