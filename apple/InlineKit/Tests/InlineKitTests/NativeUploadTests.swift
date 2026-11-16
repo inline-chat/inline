@@ -369,11 +369,11 @@ private actor PipelinedPartUploadRPCMock: NativeUploadRPCTransport {
   ) async throws -> RpcResult.OneOf_Result? {
     switch (method, input) {
     case let (.createUpload, .createUpload(create)):
-      #expect(create.byteCount == 4 * 524_288)
+      #expect(create.byteCount == 6 * 524_288)
       var result = CreateUploadResult()
       result.uploadID = create.clientUploadID
       result.partSize = 524_288
-      result.partCount = 4
+      result.partCount = 6
       return .createUpload(result)
     case let (.saveUploadPart, .saveUploadPart(save)):
       startedParts.append(save.partIndex)
@@ -384,7 +384,7 @@ private actor PipelinedPartUploadRPCMock: NativeUploadRPCTransport {
       return .saveUploadPart(SaveUploadPartResult())
     case (.finishUpload, .finishUpload):
       finishCalls += 1
-      #expect(completedParts == Set(0 ..< 4))
+      #expect(completedParts == Set(0 ..< 6))
       var complete = UploadComplete()
       complete.fileUniqueID = "INP_pipeline"
       var finish = FinishUploadResult()
@@ -1507,7 +1507,8 @@ struct NativeUploadTests {
       staging: PassthroughUploadStaging(),
       ownerScope: { "test-owner" }
     )
-    let sources = try (1 ... 4).map { value in
+    let window = DurableUploadCoordinator.initialPartWindow
+    let sources = try (1 ... window + 1).map { value in
       let url = directory.appendingPathComponent("source-\(value)")
       try Data([UInt8(value)]).write(to: url)
       return url
@@ -1529,7 +1530,7 @@ struct NativeUploadTests {
     }
 
     var tasks: [Task<UploadComplete, Error>] = []
-    for index in 0 ..< 3 {
+    for index in 0 ..< window {
       tasks.append(makeTask(index))
       for _ in 0 ..< 200 {
         if (await transport.startedValues()).contains(UInt8(index + 1)) { break }
@@ -1537,16 +1538,16 @@ struct NativeUploadTests {
       }
       #expect((await transport.startedValues()).contains(UInt8(index + 1)))
     }
-    #expect(await transport.startedValues().count == 3)
+    #expect(await transport.startedValues().count == window)
 
-    let fourthTask = makeTask(3)
+    let fourthTask = makeTask(window)
     tasks.append(fourthTask)
     for _ in 0 ..< 200 {
-      if await transport.createCount() == 4 { break }
+      if await transport.createCount() == window + 1 { break }
       try await Task.sleep(for: .milliseconds(5))
     }
-    #expect(await transport.createCount() == 4)
-    #expect(await transport.startedValues().count == 3)
+    #expect(await transport.createCount() == window + 1)
+    #expect(await transport.startedValues().count == window)
     for _ in 0 ..< 10 { await Task.yield() }
 
     let fourthCompletion = CompletionProbe()
@@ -1562,7 +1563,7 @@ struct NativeUploadTests {
     #expect(await fourthCompletion.isCompleted())
 
     await transport.releaseAllParts()
-    for task in tasks.prefix(3) {
+    for task in tasks.prefix(window) {
       _ = try await task.value
     }
     let result = await fourthResult.value
@@ -1571,16 +1572,16 @@ struct NativeUploadTests {
       return
     }
     #expect(error is CancellationError)
-    #expect(!(await transport.startedValues()).contains(4))
+    #expect(!(await transport.startedValues()).contains(UInt8(window + 1)))
     #expect(await transport.cancelCount() == 1)
-    #expect(await transport.finishCount() == 3)
+    #expect(await transport.finishCount() == window)
   }
 
-  @Test("pipelines two parts per upload, refills out of order, and finishes after every part")
+  @Test("starts with the part window, grows it on fast parts, refills out of order, and finishes after every part")
   func pipelinesParts() async throws {
     let source = FileManager.default.temporaryDirectory
       .appendingPathComponent("inline-native-upload-pipeline-\(UUID().uuidString)")
-    try Data(repeating: 7, count: 4 * 524_288).write(to: source)
+    try Data(repeating: 7, count: 6 * 524_288).write(to: source)
     defer { try? FileManager.default.removeItem(at: source) }
 
     let transport = PipelinedPartUploadRPCMock()
@@ -1603,34 +1604,40 @@ struct NativeUploadTests {
       )
     }
 
-    for _ in 0 ..< 200 {
-      if await transport.started().count == 2 { break }
-      try await Task.sleep(for: .milliseconds(5))
+    func waitForStarted(_ count: Int) async throws {
+      for _ in 0 ..< 200 {
+        if await transport.started().count == count { break }
+        try await Task.sleep(for: .milliseconds(5))
+      }
     }
-    #expect(Set(await transport.started()) == Set(0 ..< 2))
-    #expect(await transport.finishCount() == 0)
 
-    await transport.release(1)
-    for _ in 0 ..< 200 {
-      if await transport.started().count == 3 { break }
-      try await Task.sleep(for: .milliseconds(5))
-    }
-    #expect(Set(await transport.started()) == Set(0 ..< 3))
-    #expect(await transport.finishCount() == 0)
-
-    await transport.release(2)
-    for _ in 0 ..< 200 {
-      if await transport.started().count == 4 { break }
-      try await Task.sleep(for: .milliseconds(5))
-    }
+    // The window starts at four parts.
+    try await waitForStarted(4)
     #expect(Set(await transport.started()) == Set(0 ..< 4))
     #expect(await transport.finishCount() == 0)
 
-    await transport.release(3)
+    // A fast part grows the window to five: two parts take its place.
+    await transport.release(1)
+    try await waitForStarted(6)
+    #expect(Set(await transport.started()) == Set(0 ..< 6))
+    #expect(await transport.finishCount() == 0)
+
+    for part: UInt32 in [3, 2, 5, 4] {
+      await transport.release(part)
+    }
     await transport.release(0)
     let complete = try await upload.value
     #expect(complete.fileUniqueID == "INP_pipeline")
     #expect(await transport.finishCount() == 1)
-    #expect(progress.recordedValues() == (0 ... 4).map { Int64($0 * 524_288) })
+    #expect(progress.recordedValues() == (0 ... 6).map { Int64($0 * 524_288) })
+  }
+
+  @Test("the part window grows under 1 s, halves over 2 s, and stays within its limits")
+  func partWindowRule() {
+    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .milliseconds(300)) == 5)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(8, after: .milliseconds(300)) == 8)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .milliseconds(1_500)) == 4)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .seconds(3)) == 2)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(2, after: .seconds(3)) == 2)
   }
 }
