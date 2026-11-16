@@ -79,6 +79,87 @@ final class TimelineRowView: UIView {
     source.isHidden = isMenuSourceHidden
   }
 
+  // Message actions button
+  /// What the row's actions button does. It shows when the user gave the hold another action, so
+  /// the message's menu stays one tap away, as `MessageCell` shows it.
+  enum MessageActions {
+    /// Opens the list's own message menu for this row.
+    case open(() -> Void)
+    /// UIKit's pull-down menu, while the list uses the system menu.
+    case menu(() -> UIMenu)
+  }
+
+  var messageActions: MessageActions? {
+    didSet { updateActionsButton() }
+  }
+
+  private var actionsButton: TimelineMessageActionsButton?
+
+  /// Whether a point in this row is on the actions button, which keeps its own touches.
+  func isActionsButton(at point: CGPoint) -> Bool {
+    guard let actionsButton, !actionsButton.isHidden else { return false }
+    return actionsButton.bounds.contains(actionsButton.convert(point, from: self))
+  }
+
+  private func updateActionsButton() {
+    guard let messageActions else {
+      actionsButton?.isHidden = true
+      return
+    }
+    let button = actionsButton ?? {
+      let button = TimelineMessageActionsButton(type: .system)
+      button.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(
+        pointSize: 17, weight: .medium
+      )), for: .normal)
+      button.tintColor = .secondaryLabel
+      button.accessibilityLabel = "Message actions"
+      button.accessibilityIdentifier = "messageActions"
+      button.addAction(UIAction { [weak self] _ in
+        guard case let .open(open)? = self?.messageActions else { return }
+        open()
+      }, for: .primaryActionTriggered)
+      // The menu is read on each open, so a reused row or an update never shows old actions.
+      button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
+        guard case let .menu(menu)? = self?.messageActions else { return completion([]) }
+        completion(menu().children)
+      }])
+      addSubview(button)
+      actionsButton = button
+      return button
+    }()
+    var showsMenu = false
+    if case .menu = messageActions { showsMenu = true }
+    button.showsMenuAsPrimaryAction = showsMenu
+    setNeedsLayout()
+  }
+
+  /// On the empty side of the bubble, its bottom with the bubble's, a 44 pt target where the gutter
+  /// allows, as `MessageCell` places it.
+  private func layoutActionsButton() {
+    guard let actionsButton, messageActions != nil else { return }
+    // The message view's bubble-sized container also holds a bubbleless (large emoji) message.
+    let bubbleView: UIView? = shownMessageView?.bubbleContentView ?? legacyView.map { legacy in
+      legacy.fullMessage.message.isServiceMessage ? legacy.serviceContainerView : legacy.bubbleView
+    }
+    guard let bubbleView else {
+      actionsButton.isHidden = true
+      return
+    }
+    let outgoing = (shownMessageView?.content?.message ?? legacyView?.fullMessage)?.message.out == true
+    let bubble = bubbleView.convert(bubbleView.bounds, to: self)
+    let gutter = outgoing ? bubble.minX : bounds.width - bubble.maxX
+    let width = min(44, max(0, gutter))
+    let height = min(44, bounds.height)
+    actionsButton.frame = CGRect(
+      x: outgoing ? bubble.minX - width : bubble.maxX,
+      y: min(max(0, bubble.maxY - height), max(0, bounds.height - height)),
+      width: width,
+      height: height
+    )
+    actionsButton.isHidden = width < 1
+    bringSubviewToFront(actionsButton)
+  }
+
   /// The sender's avatar beside the message, where the row shows one: the view, and its bottom and
   /// height at rest in the row. The list keeps it in sight while the group is (sticky avatar).
   var pinnedAvatar: (view: UIView, bottom: CGFloat, height: CGFloat)? {
@@ -290,6 +371,7 @@ final class TimelineRowView: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    layoutActionsButton()
     if let pill, !pill.isHidden { pill.frame = bounds }
     guard let label, !label.isHidden else { return }
     let size = label.sizeThatFits(CGSize(width: bounds.width - 32, height: bounds.height))
@@ -325,6 +407,7 @@ final class TimelineRowView: UIView {
     isMenuSourceHidden = false
     isSendTargetHidden = false
     replyMessage = nil
+    messageActions = nil
     onAvatarTap = nil
     onLabelTap = nil
     label?.isUserInteractionEnabled = false
@@ -434,7 +517,7 @@ final class TimelineRowView: UIView {
 extension TimelineRowView: UIGestureRecognizerDelegate {
   override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
     guard gesture === swipe else { return super.gestureRecognizerShouldBegin(gesture) }
-    guard replyMessage != nil else { return false }
+    guard replyMessage != nil, !isActionsButton(at: gesture.location(in: self)) else { return false }
     // Code blocks and tables scroll sideways under the finger.
     if let messageView = shownMessageView, messageView.scrollsHorizontally(at: gesture.location(in: messageView)) {
       return false
@@ -459,3 +542,6 @@ extension TimelineRowView: UIGestureRecognizerDelegate {
     gesture === swipe && other is UIScreenEdgePanGestureRecognizer
   }
 }
+
+/// The row's message actions button; the container's tap that puts the keyboard away leaves it alone.
+final class TimelineMessageActionsButton: UIButton {}

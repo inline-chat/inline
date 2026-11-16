@@ -103,6 +103,17 @@ public class ChatContainerView: UIView {
       collapsedMaxId: collapsedMaxId, theme: theme
     )
     timeline.sendAnimationCoordinator = sendAnimationCoordinator
+    // As for the collection view: the composer gets its focus back after the menu, and a tap that
+    // puts the keyboard away waits while it is open.
+    timeline.onContextMenuWillDisplay = { [weak self] in
+      guard let self else { return }
+      restoresComposeFocusAfterContextMenu = restoresComposeFocusAfterContextMenu
+        || composeView.textView.isFirstResponder
+      keyboardDismissTapGestureRecognizer.isEnabled = false
+    }
+    timeline.onContextMenuDidEnd = { [weak self] in
+      self?.restoreComposeFocusAfterContextMenu()
+    }
     timeline.onScrollAffordanceChanged = { [weak self] state in
       self?.setScrollButtonShown(state.isVisible)
       self?.scrollButton.setCount(state.unreadCount)
@@ -1283,6 +1294,9 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
       }
       if let cell = view as? MessageCollectionViewCell,
          cell.isMessageActionsButton(at: touch.location(in: cell)) {
+        return false
+      }
+      if view is TimelineMessageActionsButton {
         return false
       }
       if view === messageList {

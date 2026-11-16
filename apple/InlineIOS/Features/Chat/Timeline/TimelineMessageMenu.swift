@@ -6,6 +6,10 @@ import UIKit
 /// The custom message menu on the timeline list: a hold on a bubble shrinks it under the finger,
 /// then lifts it into `MessageContextMenuController` with the reaction bar and the actions from
 /// `MessageMenuActions`, the same ones the collection view list offers.
+///
+/// As the collection view does, the list uses UIKit's menu instead (a `UIContextMenuInteraction`
+/// with the same actions and reaction bar) when the custom menu is turned off, while VoiceOver runs
+/// (`MessageContextMenuRollout.prefersSystemMenuNow`), and after two holds in a row failed to open it.
 @MainActor
 final class TimelineMessageMenu: NSObject {
   let actions: MessageMenuActions
@@ -17,6 +21,36 @@ final class TimelineMessageMenu: NSObject {
   private(set) var controller: MessageContextMenuController?
   private var sourceID: ChatRowID?
   private let feedback = UIImpactFeedbackGenerator(style: .medium)
+  /// The menu this chat picked when it opened; `.system` after the custom one kept failing.
+  private var implementation = MessageContextMenuRollout.implementation(isPreview: false)
+  private var failures = 0
+  private var systemInteraction: UIContextMenuInteraction?
+  /// The open system menu: its configuration, the row it is for, and the preview taken when it
+  /// was asked for (before UIKit hides the bubble).
+  private var system: (configuration: UIContextMenuConfiguration, id: ChatRowID, preview: UITargetedPreview?)?
+  private var systemPresented = false
+
+  #if DEBUG
+  /// The harness's stand-ins for the user's hold action and for VoiceOver, never stored.
+  static var debugHoldAction: MessageGestureAction?
+  static var debugPrefersSystemMenu = false
+  #endif
+
+  /// The hold action the user picked; anything but the menu shows the rows' actions button.
+  static var holdAction: MessageGestureAction {
+    #if DEBUG
+    if let debugHoldAction { return debugHoldAction }
+    #endif
+    return INUserSettings.current.messageGestures.holdAction
+  }
+
+  /// A hold opens UIKit's menu instead of the custom one.
+  var usesSystemMenu: Bool {
+    #if DEBUG
+    if Self.debugPrefersSystemMenu { return true }
+    #endif
+    return implementation == .system || MessageContextMenuRollout.prefersSystemMenuNow
+  }
 
   /// The menu is about to show; the container notes whether the composer has focus.
   var onWillDisplay: (() -> Void)?
@@ -41,8 +75,8 @@ final class TimelineMessageMenu: NSObject {
     super.init()
     gesture.addTarget(self, action: #selector(handleHold(_:)))
     gesture.acceptsTouch = { [weak self] point in
-      guard let self, let list = self.list, controller == nil, !list.isDecelerating, !list.isTracking,
-            CACurrentMediaTime() - list.lastFlightCatch > 0.15
+      guard let self, let list = self.list, controller == nil, !systemPresented, !usesSystemMenu,
+            !list.isDecelerating, !list.isTracking, CACurrentMediaTime() - list.lastFlightCatch > 0.15
       else { return false }
       return target(at: point) != nil
     }
@@ -50,9 +84,16 @@ final class TimelineMessageMenu: NSObject {
     gesture.onPressProgress = { [weak self] progress in self?.updatePress(progress: progress) }
     gesture.onPressCancelled = { [weak self] in self?.endPress(animated: true) }
     list.addGestureRecognizer(gesture)
+    UIContextMenuInteraction.swizzle_delegate_getAccessoryViewsForConfigurationIfNeeded()
+    updateSystemInteraction()
+    // VoiceOver can start or stop while the chat is open.
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(updateSystemInteraction), name: UIAccessibility.voiceOverStatusDidChangeNotification,
+      object: nil
+    )
   }
 
-  var isActive: Bool { controller != nil }
+  var isActive: Bool { controller != nil || systemPresented }
 
   /// Whether a row view is the one the open menu lifted out, so it stays hidden when reconfigured.
   func isSource(_ id: ChatRowID) -> Bool { sourceID == id }
@@ -61,10 +102,12 @@ final class TimelineMessageMenu: NSObject {
     endPress(animated: false)
     gesture.cancelPress()
     controller?.dismiss(animated: false)
+    systemInteraction?.dismissMenu()
   }
 
   func dismiss() {
     controller?.dismiss()
+    systemInteraction?.dismissMenu()
   }
 
   // MARK: - Targeting
@@ -84,6 +127,8 @@ final class TimelineMessageMenu: NSObject {
             case let .message(message, _)? = row(placement.id)?.content,
             let rowView = list.view(for: placement.id) as? TimelineRowView
       else { continue }
+      // The actions button keeps its own touches.
+      if rowView.isActionsButton(at: list.convert(point, to: rowView)) { return nil }
       let host: UIView
       if let messageView = rowView.shownMessageView {
         if messageView.linkURL(at: list.convert(point, to: messageView)) != nil { return nil }
@@ -106,7 +151,12 @@ final class TimelineMessageMenu: NSObject {
 
   /// The hold action the user picked instead of the menu, when there is one.
   private func customHoldAction(for message: FullMessage) -> MessageGestureAction? {
-    let action = INUserSettings.current.messageGestures.holdAction
+    Self.customHoldAction(for: message)
+  }
+
+  /// The hold action the user picked instead of the menu for a message, as `MessageCell` decides it.
+  static func customHoldAction(for message: FullMessage) -> MessageGestureAction? {
+    let action = holdAction
     guard action != .reactionsMenu, action != .none, message.canReply else { return nil }
     return action
   }
@@ -207,9 +257,48 @@ final class TimelineMessageMenu: NSObject {
     let pressedScale = press.scale
     // The frame and the bitmap are taken at full size.
     endPress(animated: false)
-    guard present(id: press.id, message: message, rowView: rowView, pressedScale: pressedScale) else { return }
+    guard present(id: press.id, message: message, rowView: rowView, pressedScale: pressedScale) else {
+      failures += 1
+      if failures >= 2 { fallBackToSystemMenu() }
+      return
+    }
+    failures = 0
     controller?.beginHold(at: gesture.location(in: nil))
     feedback.impactOccurred()
+  }
+
+  /// The row's actions button: the menu a hold opens on the row's message, without the hold.
+  func open(_ id: ChatRowID) {
+    guard controller == nil, !systemPresented, let list, let rowView = list.view(for: id) as? TimelineRowView,
+          case let .message(message, _)? = row(id)?.content
+    else { return }
+    endPress(animated: false)
+    gesture.cancelPress()
+    _ = present(id: id, message: message, rowView: rowView, pressedScale: 1)
+  }
+
+  /// UIKit's pull-down menu for the actions button while the list uses the system menu: the
+  /// message's actions with a Reactions item, as the collection view's cells offer them.
+  func pullDownMenu(_ id: ChatRowID) -> UIMenu {
+    guard case let .message(message, _)? = row(id)?.content else { return UIMenu(children: []) }
+    if message.message.isServiceMessage { return actions.serviceMenu(for: message.message) }
+    return actions.actionsMenu(
+      for: message,
+      photo: { [weak self] in (self?.list?.view(for: id) as? TimelineRowView)?.shownMessageView?.contextMenuPhotoImage },
+      openDocument: { [weak self] in
+        (self?.list?.view(for: id) as? TimelineRowView)?.shownMessageView?.openContextMenuDocument()
+      },
+      includeReactionsAction: true
+    )
+  }
+
+  /// Hands this chat to UIKit's menu after holds keep failing to open the custom one, so a hold
+  /// always opens a menu.
+  private func fallBackToSystemMenu() {
+    guard implementation == .custom else { return }
+    implementation = .system
+    updateSystemInteraction()
+    MessageContextMenuRollout.didFallBack(reason: "\(failures) holds in a row didn't open (timeline)")
   }
 
   private func cancel(_ recognizer: UIGestureRecognizer) {
@@ -362,5 +451,194 @@ final class TimelineMessageMenu: NSObject {
       guard let self, let controller, self.controller === controller else { return }
       controller.dismiss()
     }
+  }
+}
+
+// MARK: - UIKit's menu
+
+extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
+  /// The interaction is on the list only while the system menu is in use, so it never competes
+  /// with the custom menu's hold.
+  @objc private func updateSystemInteraction() {
+    guard let list else { return }
+    if usesSystemMenu, systemInteraction == nil {
+      let interaction = UIContextMenuInteraction(delegate: self)
+      list.addInteraction(interaction)
+      systemInteraction = interaction
+    } else if !usesSystemMenu, let interaction = systemInteraction, !systemPresented {
+      list.removeInteraction(interaction)
+      systemInteraction = nil
+    }
+  }
+
+  private static func photo(in rowView: TimelineRowView?) -> UIImage? {
+    rowView?.shownMessageView?.contextMenuPhotoImage ?? rowView?.shownLegacyView?.newPhotoView.getCurrentImage()
+  }
+
+  private static func openDocument(in rowView: TimelineRowView?) {
+    if let messageView = rowView?.shownMessageView {
+      messageView.openContextMenuDocument()
+    } else {
+      rowView?.shownLegacyView?.documentView.openFile()
+    }
+  }
+
+  func contextMenuInteraction(
+    _: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    // A configuration UIKit asked for but never showed (the finger moved off) is let go.
+    if let stale = system, !systemPresented {
+      (stale.configuration.identifier as? ContextMenuIdentifierUIView)?.removeFromSuperview()
+      system = nil
+    }
+    guard usesSystemMenu, controller == nil, system == nil, let list, !list.isTracking, !list.isDecelerating,
+          let target = target(at: location)
+    else { return nil }
+    if let action = customHoldAction(for: target.message) {
+      if let messageView = target.row.shownMessageView {
+        messageView.performMessageGestureAction(action)
+      } else {
+        MessageViewActions.perform(action, on: target.message, onReactionsMenu: { [weak self] in
+          self?.actions.showReactionEmojiPicker(for: $0)
+        })
+      }
+      return nil
+    }
+    let id = target.id
+    let fullMessage = target.message
+    let message = fullMessage.message
+    let menu: UIMenu
+    var identifier: ContextMenuIdentifierUIView?
+    if message.isServiceMessage {
+      menu = actions.serviceMenu(for: message)
+    } else {
+      menu = actions.actionsMenu(
+        for: fullMessage,
+        photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView) },
+        openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) }
+      )
+      // The reaction bar under the preview, as the collection view's system menu shows it.
+      let view = ContextMenuIdentifierUIView(
+        accessoryView: actions.reactionPicker(for: fullMessage),
+        configuration: ContextMenuAccessoryConfiguration(
+          location: .below, trackingAxis: .vertical, attachment: .center,
+          alignment: message.out == true ? .trailing : .leading,
+          attachmentOffset: -16, alignmentOffset: 0, gravity: 0
+        )
+      )
+      list.addSubview(view)
+      identifier = view
+    }
+    // The bitmap is taken now, before UIKit starts hiding the bubble; a late capture can be empty.
+    let preview = bitmapPreview(for: target.row)
+    let image = (preview?.view as? UIImageView)?.image
+    let visiblePath = preview?.parameters.visiblePath
+    let configuration = UIContextMenuConfiguration(identifier: identifier, previewProvider: {
+      guard let image, let visiblePath else { return nil }
+      let controller = UIViewController()
+      controller.view = MessageContextMenuPreviewView(image: image, visiblePath: visiblePath)
+      controller.preferredContentSize = image.size
+      return controller
+    }, actionProvider: { _ in menu })
+    system = (configuration, id, preview)
+    systemPresented = false
+    return configuration
+  }
+
+  func contextMenuInteraction(
+    _: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
+    highlightPreviewForItemWithIdentifier _: any NSCopying
+  ) -> UITargetedPreview? {
+    guard let system, system.configuration === configuration else { return nil }
+    // The press and lift animate the bubble itself while it is on screen.
+    return livePreview(for: system.id) ?? system.preview
+  }
+
+  func contextMenuInteraction(
+    _: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
+    dismissalPreviewForItemWithIdentifier _: any NSCopying
+  ) -> UITargetedPreview? {
+    guard let system, system.configuration === configuration else { return nil }
+    // The menu returns to the row's bubble where it is now; never to another row.
+    setSourceHidden(false, id: system.id)
+    return livePreview(for: system.id)
+  }
+
+  func contextMenuInteraction(
+    _: UIContextMenuInteraction, willDisplayMenuFor configuration: UIContextMenuConfiguration,
+    animator _: (any UIContextMenuInteractionAnimating)?
+  ) {
+    guard let system, system.configuration === configuration else { return }
+    systemPresented = true
+    // The menu draws its own preview from here on.
+    setSourceHidden(true, id: system.id)
+    onWillDisplay?()
+  }
+
+  func contextMenuInteraction(
+    _: UIContextMenuInteraction, willEndFor configuration: UIContextMenuConfiguration,
+    animator: (any UIContextMenuInteractionAnimating)?
+  ) {
+    (configuration.identifier as? ContextMenuIdentifierUIView)?.removeFromSuperview()
+    guard let system, system.configuration === configuration else { return }
+    let id = system.id
+    let presented = systemPresented
+    let finish = { [weak self] in
+      guard let self, self.system?.configuration === configuration else { return }
+      setSourceHidden(false, id: id)
+      self.system = nil
+      systemPresented = false
+      updateSystemInteraction()
+      if presented { onDidEnd?() }
+    }
+    if let animator {
+      animator.addAnimations { [weak self] in self?.setSourceHidden(false, id: id) }
+      animator.addCompletion(finish)
+    } else {
+      finish()
+    }
+  }
+
+  private func setSourceHidden(_ hidden: Bool, id: ChatRowID) {
+    sourceID = hidden ? id : nil
+    (list?.view(for: id) as? TimelineRowView)?.isMenuSourceHidden = hidden
+  }
+
+  /// The row's bubble itself, shaped by its outline, for the lift and the return.
+  private func livePreview(for id: ChatRowID) -> UITargetedPreview? {
+    guard let rowView = list?.view(for: id) as? TimelineRowView, let geometry = geometry(for: rowView),
+          let window = geometry.view.window else { return nil }
+    let parameters = UIPreviewParameters()
+    parameters.backgroundColor = .clear
+    let path = geometry.path
+    path.apply(CGAffineTransform(translationX: geometry.rect.minX, y: geometry.rect.minY))
+    parameters.visiblePath = path
+    parameters.shadowPath = path
+    let target = UIPreviewTarget(
+      container: window,
+      center: geometry.view.convert(CGPoint(x: geometry.view.bounds.midX, y: geometry.view.bounds.midY), to: window)
+    )
+    return Self.unmasked(UITargetedPreview(view: geometry.view, parameters: parameters, target: target))
+  }
+
+  /// A bitmap of the bubble, independent of the row, for when the row is gone or reused.
+  private func bitmapPreview(for rowView: TimelineRowView) -> UITargetedPreview? {
+    guard let geometry = geometry(for: rowView), let window = geometry.view.window,
+          let snapshot = snapshot(of: geometry.view, in: geometry.rect) else { return nil }
+    let parameters = UIPreviewParameters()
+    parameters.backgroundColor = .clear
+    parameters.visiblePath = geometry.path
+    parameters.shadowPath = geometry.path
+    let target = UIPreviewTarget(
+      container: window,
+      center: geometry.view.convert(CGPoint(x: geometry.rect.midX, y: geometry.rect.midY), to: window)
+    )
+    return Self.unmasked(UITargetedPreview(view: snapshot, parameters: parameters, target: target))
+  }
+
+  /// The unmasked platter style used for chat bubbles' irregular outlines (UIKit's KVC key).
+  private static func unmasked(_ preview: UITargetedPreview) -> UITargetedPreview {
+    preview.setValue(true, forKey: "prefersUnmaskedPlatterStyle")
+    return preview
   }
 }

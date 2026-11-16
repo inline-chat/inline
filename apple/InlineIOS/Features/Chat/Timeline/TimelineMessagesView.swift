@@ -30,7 +30,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private let peer: Peer
   private let chatId: Int64?
   private let spaceId: Int64?
-  private let openAnchor: ChatOpenAnchor
+  /// Where the chat opens. Becomes the unread line once history around an uncached line arrives.
+  private var openAnchor: ChatOpenAnchor
   private var theme: IOSThemeSnapshot
   private var snapshot: ChatRowSnapshot?
   private var hasOpened = false
@@ -102,6 +103,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private let translation: TranslationViewModel
   private var hasDetectedLanguages = false
 
+  // Uncached unread line
+  /// The unread line was not cached when the chat opened: the list stays empty and hidden while
+  /// history around the line is fetched, then opens at the line, or at the latest messages when the
+  /// fetch fails, the app is offline or the connection drops. As the collection view does.
+  private var unreadFetchBoundary: Int64?
+  private var unreadFetchTask: Task<Void, Never>?
+  private var unreadFetchConnection: AnyCancellable?
+  private var unreadFetchSpinner: UIActivityIndicatorView?
+
   private struct Plan {
     var revision: UInt64
     var environment: UInt64
@@ -114,6 +124,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   #if DEBUG
   /// The harness's signed-out stand-in for the current user.
   static var debugCurrentUserId: Int64?
+  /// The harness's stand-in for the server when an uncached unread line is fetched: it brings the
+  /// history around a message into the fixture, or throws.
+  static var debugLoadAround: ((Int64) async throws -> Void)?
   private var probe: TimelineProbe?
   #endif
 
@@ -132,6 +145,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     self.spaceId = spaceId
     self.theme = theme
     openAnchor = initialState?.openAnchor ?? .latest
+    unreadFetchBoundary = initialState?.uncachedUnreadBoundary
     var currentUserId = Auth.shared.getCurrentUserId()
     #if DEBUG
     currentUserId = Self.debugCurrentUserId ?? currentUserId
@@ -188,6 +202,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       self, selector: #selector(applicationDidBecomeActive), name: UIApplication.didBecomeActiveNotification,
       object: nil
     )
+    // The actions button follows the hold action, and VoiceOver picks UIKit's menu.
+    INUserSettings.current.messageGestures.objectWillChange
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] in self?.refreshMessageActions() }
+      .store(in: &cancellables)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(refreshMessageActions), name: UIAccessibility.voiceOverStatusDidChangeNotification,
+      object: nil
+    )
     viewModel.ensureThreadAnchorCached()
   }
 
@@ -227,6 +250,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     jumpTask?.cancel()
     returnToLatestTask?.cancel()
     warmupTask?.cancel()
+    unreadFetchTask?.cancel()
+    unreadFetchSpinner?.removeFromSuperview()
     let warmups = warmups
     let prefetched = Array(prefetched.values)
     Task {
@@ -467,6 +492,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       } else {
         view.replyMessage = nil
       }
+      view.messageActions = messageActions(for: row)
     }
     switch row.content {
       case let .message(message, grouping):
@@ -523,6 +549,26 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     messageView.onContentStateChange = { [weak self] _ in self?.replan(id, timing: Self.rowTiming) }
     messageView.onRevealLineChange = { [weak self] _ in self?.replan(id, timing: .streamingLine) }
     messageView.apply(plan.content, layout: plan.layout, motion: Self.motion(for: timing))
+  }
+
+  /// The actions button of a message row, shown when the user gave the hold another action; it opens
+  /// the menu a hold would. Never on the thread's parent, as the collection view's cells.
+  private func messageActions(for row: ChatRow) -> TimelineRowView.MessageActions? {
+    guard case let .message(message, _) = row.content, TimelineMessageMenu.customHoldAction(for: message) != nil
+    else { return nil }
+    let id = row.id
+    if menu.usesSystemMenu {
+      return .menu { [weak self] in self?.menu.pullDownMenu(id) ?? UIMenu(children: []) }
+    }
+    return .open { [weak self] in self?.menu.open(id) }
+  }
+
+  /// The hold action changed or VoiceOver started or stopped: the rows on screen update their button.
+  @objc private func refreshMessageActions() {
+    for placement in list.layout.placements {
+      guard let view = list.view(for: placement.id) as? TimelineRowView, let row = row(placement.id) else { continue }
+      view.messageActions = messageActions(for: row)
+    }
   }
 
   private func replan(_ id: ChatRowID, timing: TimelineTiming) {
@@ -662,6 +708,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func openIfNeeded() {
     guard !hasOpened, bounds.width > 0, bounds.height > 0, window != nil,
           let snapshot = viewModel.rowFeed.snapshot else { return }
+    // Nothing is placed until the fetch ends, so no frame shows the latest messages first.
+    if unreadFetchBoundary != nil {
+      beginUnreadFetchIfNeeded()
+      if unreadFetchBoundary != nil { return }
+    }
     hasOpened = true
     self.snapshot = snapshot
     rebuildDayRows()
@@ -688,7 +739,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   private func apply(_ update: ChatRowUpdate) {
-    guard hasOpened else { return }
+    guard hasOpened else {
+      // A send while the unread line is fetched opens at the latest messages, with the sent one.
+      if unreadFetchBoundary != nil, update.snapshot.reason == .localSend { endUnreadFetch(placesLine: false) }
+      return
+    }
     // Read before the rows on screen leave with the old snapshot.
     let shownMessageId = messageIdOnScreen()
     let snapshot = update.snapshot
@@ -791,6 +846,90 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         else { return .latest }
         return .to(row.id, .center)
     }
+  }
+
+  // MARK: - Uncached unread line
+
+  /// Offline (the realtime connection is still connecting), the chat opens at the latest cached
+  /// messages rather than waiting on a fetch.
+  private var isOfflineForUnreadFetch: Bool {
+    #if DEBUG
+    if Self.debugLoadAround != nil { return false }
+    #endif
+    return Api.realtime.stateObject.connectionState == .connecting
+  }
+
+  private func beginUnreadFetchIfNeeded() {
+    guard let boundary = unreadFetchBoundary, unreadFetchTask == nil else { return }
+    guard !isOfflineForUnreadFetch else {
+      unreadFetchBoundary = nil
+      return
+    }
+    alpha = 0
+    let peer = peer
+    unreadFetchTask = Task { @MainActor [weak self] in
+      var placesLine = false
+      do {
+        #if DEBUG
+        if let load = Self.debugLoadAround {
+          try await load(boundary)
+        } else {
+          _ = try await MessageHistoryRepairCoordinator.shared.loadAround(
+            peer: peer, anchorID: max(1, boundary), limit: ChatUnreadOpening.windowLimit
+          )
+        }
+        #else
+        _ = try await MessageHistoryRepairCoordinator.shared.loadAround(
+          peer: peer, anchorID: max(1, boundary), limit: ChatUnreadOpening.windowLimit
+        )
+        #endif
+        guard let self, unreadFetchBoundary == boundary, !Task.isCancelled else { return }
+        placesLine = try await viewModel.loadUnreadOpeningWindowAsync(boundary: boundary)
+      } catch {
+        Log.shared.error("Unread history fetch failed; opening at the latest messages", error: error)
+      }
+      guard let self, unreadFetchBoundary == boundary, !Task.isCancelled else { return }
+      endUnreadFetch(placesLine: placesLine)
+    }
+    #if DEBUG
+    let watchesConnection = Self.debugLoadAround == nil
+    #else
+    let watchesConnection = true
+    #endif
+    if watchesConnection {
+      // A lost connection would keep the list hidden until it returns.
+      unreadFetchConnection = Api.realtime.stateObject.$connectionState
+        .sink { [weak self] state in
+          guard state == .connecting else { return }
+          DispatchQueue.main.async { self?.endUnreadFetch(placesLine: false) }
+        }
+    }
+    // A fast fetch shows the chat before any spinner does.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+      guard let self, unreadFetchBoundary == boundary, unreadFetchSpinner == nil, let superview else { return }
+      let spinner = UIActivityIndicatorView(style: .medium)
+      spinner.center = CGPoint(x: frame.midX, y: frame.midY)
+      spinner.autoresizingMask = [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+      superview.addSubview(spinner)
+      spinner.startAnimating()
+      unreadFetchSpinner = spinner
+    }
+  }
+
+  /// Ends the fetch once: the list opens at the line when its window loaded, else at the latest
+  /// messages, and fades in.
+  private func endUnreadFetch(placesLine: Bool) {
+    guard let boundary = unreadFetchBoundary else { return }
+    unreadFetchBoundary = nil
+    unreadFetchTask?.cancel()
+    unreadFetchTask = nil
+    unreadFetchConnection = nil
+    unreadFetchSpinner?.removeFromSuperview()
+    unreadFetchSpinner = nil
+    if placesLine { openAnchor = .unread(boundary: boundary) }
+    setNeedsLayout()
+    layoutIfNeeded()
+    UIView.animate(withDuration: 0.15) { self.alpha = 1 }
   }
 
   // MARK: - History
@@ -902,6 +1041,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   func scrollToBottom() {
+    endUnreadFetch(placesLine: false)
     ChatReadingPlaceStore.shared.clear(for: peer)
     jumpTask?.cancel()
     pendingFocusMessageId = nil
@@ -936,6 +1076,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   func scrollToMessageWhenAvailable(_ messageID: Int64, requiresExactMessage _: Bool) {
+    // An explicit focus wins over the unread line still being fetched.
+    endUnreadFetch(placesLine: false)
     jumpTask?.cancel()
     returnToLatestTask?.cancel()
     pendingFocusMessageId = messageID
