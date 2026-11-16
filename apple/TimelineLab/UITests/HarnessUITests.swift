@@ -289,6 +289,18 @@ final class HarnessUITests: XCTestCase {
     shot("pill-after-tap-catch-4s")
   }
 
+  /// A finger on the floating date pill while a fling runs catches the fling, as anywhere else on the
+  /// list, instead of jumping to the day's first message. The pill floats at y 78 on the SE.
+  func testDatePillTouchMidFling() {
+    launch()
+    drag(190, 180, 190, 560, v: 6000)
+    coord(187, 78).press(forDuration: 0.05)
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("pill-touch-caught")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("pill-touch-caught-3s")
+  }
+
   /// Translation on and off keeps the newest row on the bottom edge; scrolled up, the reading row.
   func testTranslation() {
     launch()
