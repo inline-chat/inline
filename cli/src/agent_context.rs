@@ -67,6 +67,28 @@ fn detect_from(env: impl Fn(&str) -> Option<String>) -> Option<AgentHarness> {
     Some(AgentHarness { id })
 }
 
+/// How recipients see an agent id on a signed message ("Sent via Claude Code").
+/// Mirrors the server's known agents; the server has the final say.
+pub(crate) fn via_display_name(id: &str) -> &'static str {
+    match id {
+        "claude-code" => "Claude Code",
+        "codex" => "Codex",
+        "cursor-agent" => "Cursor",
+        "gemini-cli" => "Gemini CLI",
+        "amp" => "Amp",
+        "opencode" => "OpenCode",
+        "auggie" => "Auggie",
+        "crush" => "Crush",
+        "copilot" => "GitHub Copilot",
+        "qwen-code" => "Qwen Code",
+        "pi" => "Pi",
+        "warp" => "Warp",
+        "chatgpt" => "ChatGPT",
+        "claude" => "Claude",
+        _ => "an AI agent",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
