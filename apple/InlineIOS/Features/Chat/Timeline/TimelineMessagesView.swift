@@ -36,6 +36,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private let peer: Peer
   private let chatId: Int64?
   private let spaceId: Int64?
+  /// The chat list's preview, as the collection view showed it: the latest messages without the unread
+  /// line, nothing read, saved, loaded or offered for translation, no status notice. It takes no touches
+  /// (the container turns them off).
+  private let isPreview: Bool
   /// Where the chat opens. Becomes the unread line once history around an uncached line arrives.
   private var openAnchor: ChatOpenAnchor
   private var theme: IOSThemeSnapshot
@@ -193,14 +197,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   init(
     peer: Peer, chatId: Int64?, spaceId: Int64?, initialState: MessagesProgressiveViewModel.InitialState?,
-    collapsedMaxId: Int64?, theme: IOSThemeSnapshot
+    collapsedMaxId: Int64?, theme: IOSThemeSnapshot, isPreview: Bool = false
   ) {
     self.peer = peer
     self.chatId = chatId
     self.spaceId = spaceId
     self.theme = theme
-    openAnchor = initialState?.openAnchor ?? .latest
-    unreadFetchBoundary = initialState?.uncachedUnreadBoundary
+    self.isPreview = isPreview
+    openAnchor = isPreview ? .latest : initialState?.openAnchor ?? .latest
+    unreadFetchBoundary = isPreview ? nil : initialState?.uncachedUnreadBoundary
     var currentUserId = Auth.shared.getCurrentUserId()
     #if DEBUG
     currentUserId = Self.debugCurrentUserId ?? currentUserId
@@ -249,7 +254,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     datePill.passesTouches = { [weak self] in self.map { $0.list.isTracking || $0.list.isDecelerating } ?? false }
     addSubview(datePill)
 
-    observeStatusNotice()
+    if isPreview {
+      viewModel.rowFeed.setUnreadBoundary(nil)
+    } else {
+      observeStatusNotice()
+    }
     viewModel.rowFeed.isPublishing = true
     viewModel.rowFeed.updates.sink { [weak self] update in self?.apply(update) }.store(in: &cancellables)
     TranslationState.shared.subject.sink { [weak self] peer, enabled in
@@ -273,7 +282,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       self, selector: #selector(refreshMessageActions), name: UIAccessibility.voiceOverStatusDidChangeNotification,
       object: nil
     )
-    viewModel.ensureThreadAnchorCached()
+    if !isPreview { viewModel.ensureThreadAnchorCached() }
     #if DEBUG
     NotificationCenter.default.addObserver(
       self, selector: #selector(debugAccessibility(_:)), name: Self.debugAccessibilityNotification, object: nil
@@ -802,7 +811,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// Messages loaded or changed are offered for translation, as the collection view offers them; the
   /// translations arrive as message updates. The first batch also detects the chat's languages.
   private func offerForTranslation(_ ids: some Sequence<ChatRowID>) {
-    guard let snapshot else { return }
+    guard !isPreview, let snapshot else { return }
     let messages = ids.compactMap { snapshot.row(for: $0)?.content.message }.filter { !$0.message.isServiceMessage }
     guard !messages.isEmpty else { return }
     translation.messagesDisplayed(messages: messages)
@@ -970,7 +979,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     retargetSendFlights(excluding: Set(inserted))
     if let landed { focusResolved(landed, opening: false) }
     menu.rowsDidUpdate(changed)
-    viewModel.ensureThreadAnchorCached()
+    if !isPreview { viewModel.ensureThreadAnchorCached() }
     readPass(force: true)
     warmMedia()
     offerForTranslation(diff.insertions.map(\.id) + diff.updates.map(\.id))
@@ -1116,7 +1125,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   // MARK: - History
 
   private func loadHistory(_ edge: TimelineEdge) {
-    guard !loadingEdges.contains(edge), !blockedEdges.contains(edge), window != nil else { return }
+    guard !isPreview, !loadingEdges.contains(edge), !blockedEdges.contains(edge), window != nil else { return }
     loadingEdges.insert(edge)
     historyTasks[edge] = Task { @MainActor [weak self] in
       guard let self else { return }
@@ -1630,7 +1639,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let now = CACurrentMediaTime()
     guard force || now - lastReadPass > 0.3 else { return }
     lastReadPass = now
-    guard hasOpened, let window, !isHidden, alpha > 0.01,
+    guard !isPreview, hasOpened, let window, !isHidden, alpha > 0.01,
           window.windowScene?.activationState == .foregroundActive,
           UIApplication.shared.applicationState == .active,
           unreadFetchBoundary == nil, pendingFocus == nil, let chatId
@@ -1670,7 +1679,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   /// Saves where the reader is when the newest message is off screen, and clears it otherwise.
   private func saveReadingPlace() {
-    guard hasOpened, let snapshot else { return }
+    guard !isPreview, hasOpened, let snapshot else { return }
     if !viewModel.canLoadNewerFromLocal, distanceFromBottom <= 12 {
       ChatReadingPlaceStore.shared.clear(for: peer)
       return

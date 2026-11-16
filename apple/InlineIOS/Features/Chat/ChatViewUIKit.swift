@@ -100,7 +100,7 @@ public class ChatContainerView: UIView {
     guard usesTimeline else { return messagesCollectionView }
     let timeline = TimelineMessagesView(
       peer: peerId, chatId: chatId, spaceId: spaceId, initialState: initialMessages,
-      collapsedMaxId: collapsedMaxId, theme: theme
+      collapsedMaxId: collapsedMaxId, theme: theme, isPreview: isPreview
     )
     timeline.sendAnimationCoordinator = sendAnimationCoordinator
     timeline.isKeyboardVisible = { [weak self] in (self?.keyboardCoordinator?.height ?? 0) > 0 }
@@ -201,9 +201,10 @@ public class ChatContainerView: UIView {
 
   private func reportComposeArea(_ timing: TimelineTiming, isInteractive: Bool = false) {
     guard usesTimeline, bounds.height > 0 else { return }
+    // A preview has no composer: the list rests on the safe area.
+    let composeTop = isPreview ? bounds.maxY - safeAreaInsets.bottom : composeContainerView.frame.minY
     messageList.composeAreaDidChange(
-      bottomInset: max(0, bounds.maxY - composeContainerView.frame.minY), timing: timing,
-      isInteractive: isInteractive
+      bottomInset: max(0, bounds.maxY - composeTop), timing: timing, isInteractive: isInteractive
     )
   }
 
@@ -359,7 +360,7 @@ public class ChatContainerView: UIView {
     theme: IOSThemeSnapshot,
     usesTimeline: Bool = false
   ) {
-    self.usesTimeline = usesTimeline && !isPreview
+    self.usesTimeline = usesTimeline
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId

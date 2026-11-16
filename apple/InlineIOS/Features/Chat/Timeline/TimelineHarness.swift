@@ -22,6 +22,7 @@ import UIKit
 ///   (never stored), which shows the rows' actions button.
 /// - `--timeline-harness-system-menu` stands in for VoiceOver: the list uses UIKit's menu.
 /// - `--timeline-harness-focus ID` asks for a message as the chat opens.
+/// - `--timeline-harness-preview` shows the chat as the chat list's preview does (no composer, no touches).
 /// - `--timeline-harness-receive-every MS` receives a message every MS milliseconds, so one can arrive
 ///   mid-fling or mid-jump without a touch on the Script menu.
 struct TimelineHarnessRootView: View {
@@ -244,7 +245,8 @@ private struct TimelineHarnessChat: UIViewRepresentable {
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(
-      peerId: fixture.peer, chatId: fixture.chatId, spaceId: nil, initialMessages: initialState, theme: theme,
+      peerId: fixture.peer, chatId: fixture.chatId, spaceId: nil, initialMessages: initialState,
+      isPreview: CommandLine.arguments.contains("--timeline-harness-preview"), theme: theme,
       usesTimeline: !CommandLine.arguments.contains("--timeline-harness-collection")
     )
     box.container = view
