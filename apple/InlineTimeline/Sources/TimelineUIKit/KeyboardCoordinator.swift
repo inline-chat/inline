@@ -34,10 +34,15 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   public var allowsInteractiveDismissal: (CGPoint) -> Bool = { _ in true }
   /// What the coordinator decided and why, for probes.
   public var onDebug: ((String) -> Void)?
+  /// A floating (undocked or split) keyboard counts up to its top, so what rides on it sits on it, as
+  /// `UIKeyboardLayoutGuide.followsUndockedKeyboard` does. Off: a floating keyboard covers nothing.
+  public var followsUndockedKeyboard = false
 
   public private(set) var height: CGFloat = 0
   public private(set) var isInteractive = false
   public private(set) var isSuspended = false
+  /// The keyboard floats above the view's bottom edge (undocked or split, on iPad).
+  public private(set) var isFloating = false
 
   private weak var view: UIView?
   private let pan = KeyboardPanGestureRecognizer()
@@ -105,9 +110,16 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   /// keyboard covers is measured again from its last frame: a rotation can post the keyboard's new frame
   /// while the view still has its old size, and posts nothing after it takes the new one.
   public func viewDidLayout() {
-    guard let view, view.bounds.size != measuredSize else { return }
-    measuredSize = view.bounds.size
-    guard !isSuspended, !isInteractive, let keyboardFrame else { return }
+    guard let view, let window = view.window, view.bounds.size != measuredSize else { return }
+    guard !isSuspended, !isInteractive, let keyboardFrame else {
+      measuredSize = view.bounds.size
+      return
+    }
+    // A docked keyboard spans the screen it was laid out for: a frame from the old orientation (its new
+    // one not posted yet) would read as beside or floating, so wait for that notification instead.
+    let screen = window.screen.coordinateSpace.bounds
+    let docked = keyboardFrame.height >= 1 && keyboardFrame.maxY >= screen.maxY - 1
+    guard !docked || abs(keyboardFrame.width - screen.width) < 1 else { return }
     deliver(keyboardFrame, duration: 0)
   }
 
@@ -116,7 +128,9 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
     measuredSize = view.bounds.size
     let frame = view.convert(end, from: window.screen.coordinateSpace)
     var covered = max(0, view.bounds.maxY - frame.minY)
-    if frame.height < 1 || frame.maxX <= view.bounds.minX || frame.minX >= view.bounds.maxX || frame.maxY < view.bounds.maxY - 1 {
+    let closed = frame.height < 1 || frame.maxX <= view.bounds.minX || frame.minX >= view.bounds.maxX
+    isFloating = !closed && frame.maxY < view.bounds.maxY - 1
+    if closed || (isFloating && !followsUndockedKeyboard) {
       // Closed, beside the view, or floating above its bottom edge.
       covered = 0
     }
@@ -147,7 +161,8 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
 
   private func fingerBegan(_ point: CGPoint) {
     isEligible = false
-    guard !isSuspended, !isInteractive, height > 0, let view, view.window != nil else { return }
+    // A floating keyboard is not dragged away, as UIKit's interactive dismissal leaves it.
+    guard !isSuspended, !isInteractive, height > 0, !isFloating, let view, view.window != nil else { return }
     let composerTop = view.convert(view.bounds, to: nil).maxY - height - ridingHeight()
     isEligible = point.y < composerTop && allowsInteractiveDismissal(point)
     onDebug?("finger began y=\(point.y) composerTop=\(composerTop) eligible=\(isEligible)")
