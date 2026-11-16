@@ -66,6 +66,10 @@ public final class ChatRowFeed {
     self.collapsedMaxId = collapsedMaxId
   }
 
+  /// Where the unread line and a day's badge meet, the line goes under the badge, as the iOS
+  /// collection view drew it. Set before publishing.
+  public var unreadLineFollowsDay = false
+
   /// Hides cleared history behind the collapsed-history marker.
   public func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     guard self.collapsedMaxId != collapsedMaxId else { return }
@@ -124,7 +128,8 @@ public final class ChatRowFeed {
       statusNotice: source.coverage.canLoadNewerFromLocal ? nil : statusNotice,
       chatKind: chatKind,
       reachesOldest: source.coverage.reachesOldest,
-      calendar: calendar
+      calendar: calendar,
+      unreadLineFollowsDay: unreadLineFollowsDay
     ))
     if let placed = output.unreadLineMessageId, unreadLine != nil {
       unreadLine?.pinnedMessageId = placed

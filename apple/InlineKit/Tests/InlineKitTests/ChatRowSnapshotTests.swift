@@ -84,6 +84,10 @@ struct ChatRowSnapshotTests {
     #expect(inside.unreadLineMessageId == 2)
     let atDay = Self.snapshot(Self.input(messages, unread: .init(boundary: 3)))
     #expect(Self.describe(atDay) == ["day0", "m1", "m2", "m3", "unread", "day1", "m4", "m5"])
+    // iOS draws the line under the day's badge.
+    var under = Self.input(messages, unread: .init(boundary: 3))
+    under.unreadLineFollowsDay = true
+    #expect(Self.describe(Self.snapshot(under)) == ["day0", "m1", "m2", "m3", "day1", "unread", "m4", "m5"])
   }
 
   @Test func `unread line skips own messages, needs a read message, and can be removed`() {

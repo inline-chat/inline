@@ -44,6 +44,8 @@ public enum ChatRowBuilder {
   public struct Input: Sendable {
     /// The window, in any order.
     public var messages: [FullMessage]
+    /// Where the unread line and a day's badge meet, the line goes under the badge (iOS), not above it.
+    public var unreadLineFollowsDay = false
     public var threadParent: FullMessage?
     public var unreadLine: UnreadLine?
     /// Messages with `0 < messageId <= collapsedMaxId` are hidden behind the
@@ -59,9 +61,10 @@ public enum ChatRowBuilder {
     public init(
       messages: [FullMessage], threadParent: FullMessage? = nil, unreadLine: UnreadLine? = nil,
       collapsedMaxId: Int64? = nil, statusNotice: String? = nil, chatKind: ChatRowChatKind = .group,
-      reachesOldest: Bool = false, calendar: Calendar = .autoupdatingCurrent
+      reachesOldest: Bool = false, calendar: Calendar = .autoupdatingCurrent, unreadLineFollowsDay: Bool = false
     ) {
       self.messages = messages
+      self.unreadLineFollowsDay = unreadLineFollowsDay
       self.threadParent = threadParent
       self.unreadLine = unreadLine
       self.collapsedMaxId = collapsedMaxId
@@ -158,11 +161,15 @@ public enum ChatRowBuilder {
     var placedUnread: Int64?
     for index in visible.indices {
       let message = visible[index]
+      let startsDay = index == 0 || days[index] != days[index - 1]
+      if startsDay, input.unreadLineFollowsDay {
+        rows.append(.init(id: .daySeparator(days[index]), content: .daySeparator(dayStart: days[index])))
+      }
       if index == unreadIndex {
         placedUnread = message.message.messageId
         rows.append(.init(id: .unreadLine, content: .unreadLine(firstUnreadMessageId: message.message.messageId)))
       }
-      if index == 0 || days[index] != days[index - 1] {
+      if startsDay, !input.unreadLineFollowsDay {
         rows.append(.init(id: .daySeparator(days[index]), content: .daySeparator(dayStart: days[index])))
       }
       let joinsNext = index + 1 < visible.count && joinsPrevious(index + 1)
