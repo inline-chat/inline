@@ -83,7 +83,7 @@ final class HarnessUITests: XCTestCase {
     drag(190, 200, 190, 500, v: 250, hold: 0.3)
     shot("slow-drag")
     for (i, v) in [3000.0, 6000, 6000, 6000, 6000, 6000, 6000].enumerated() {
-      drag(190, 560, 190, 180, v: CGFloat(v))
+      drag(190, 480, 190, 100, v: CGFloat(v))
       Thread.sleep(forTimeInterval: 2.5)
       shot("newer-\(i)-rest")
     }
@@ -233,7 +233,9 @@ final class HarnessUITests: XCTestCase {
     coord(240, 200).press(forDuration: 1.2)
     Thread.sleep(forTimeInterval: 0.8)
     shot("menu-open-kb")
-    coord(187, 70).tap()
+    // With the keyboard up the menu sits high and its reaction bar covers the top, so tap the dimmed
+    // area to the left of the action list instead.
+    coord(40, 600).tap()
     Thread.sleep(forTimeInterval: 1.2)
     shot("menu-closed-kb-up=\(keyboardUp)")
   }
@@ -256,13 +258,14 @@ final class HarnessUITests: XCTestCase {
       Thread.sleep(forTimeInterval: 2.5)
       shot("sticky-older-\(i)-rest")
     }
-    // Catch a fling with a held finger, then fling back.
-    drag(190, 560, 190, 180, v: 4000)
+    // Catch a fling with a held finger, then fling back. Upward drags start above the composer (its
+    // top is at 595 on the SE, 537 with a reply bar); a touch that starts on it never reaches the list.
+    drag(190, 480, 190, 100, v: 4000)
     Thread.sleep(forTimeInterval: 0.3)
     drag(190, 300, 190, 305, v: 100, hold: 0.6)
     shot("sticky-caught")
     for i in 0 ..< 4 {
-      drag(190, 560, 190, 180, v: 6000)
+      drag(190, 480, 190, 100, v: 6000)
       Thread.sleep(forTimeInterval: 2.5)
       shot("sticky-newer-\(i)-rest")
     }
@@ -325,11 +328,14 @@ final class HarnessUITests: XCTestCase {
     shot("flight-composer-mid")
     Thread.sleep(forTimeInterval: 1.5)
     shot("flight-composer-end")
-    // Reply by swipe to the incoming row above, then send: the reply bar goes away with the send.
-    drag(280, 400, 150, 402, v: 700, hold: 0.1)
+    // Reply by swipe to the message just sent (the keyboard covers everything below y 350 on the SE),
+    // then send: the reply bar goes away with the send.
+    drag(280, 250, 150, 252, v: 700, hold: 0.1)
     Thread.sleep(forTimeInterval: 1)
+    shot("flight-reply-bar")
     composer.typeText("Reply flight")
     Thread.sleep(forTimeInterval: 0.5)
+    print("[UITEST] send exists=\(send.exists) hittable=\(send.exists && send.isHittable)")
     if send.exists { send.tap() }
     Thread.sleep(forTimeInterval: 0.05)
     shot("flight-reply-mid")
