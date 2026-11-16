@@ -1,7 +1,7 @@
 import CoreGraphics
 
-/// Places rows around the viewport for a position. Pure: the only input it does not own is the
-/// height of a row, asked for placed rows only.
+/// Places rows around the viewport for a position. Pure: the only inputs it does not own are the
+/// height of a row, asked for placed rows only, and where the span of the lowest visible row ends.
 public enum TimelineSolver {
   public static func layout<ID: Hashable & Sendable>(
     rows: [ID],
@@ -10,6 +10,7 @@ public enum TimelineSolver {
     position: TimelinePosition<ID>,
     margins: TimelineMargins = .standard,
     allowsOverscroll: Bool = false,
+    spanEnd: (ID) -> ID? = { _ in nil },
     height: (ID) -> CGFloat
   ) -> TimelineLayout<ID> {
     guard !rows.isEmpty else { return .empty(viewport: viewport) }
@@ -51,9 +52,25 @@ public enum TimelineSolver {
       restShift = window.shiftIntoBounds()
       return window.placements
     }
-    // Drop rows wholly outside the margins, keeping at least one.
+    // Drop rows wholly outside the margins, keeping at least one, and keeping the span of the lowest
+    // visible row to its end (within `margins.span`), so the row holding what pins to it stays placed.
+    var keepThrough = -1
+    if let visible = placements.last(where: { $0.y < viewport.usableBottom && $0.maxY > viewport.usableTop }),
+       let end = spanEnd(visible.id), let endIndex = index[end], endIndex > visible.index
+    {
+      keepThrough = endIndex
+      var last = placements[placements.count - 1]
+      while last.index < endIndex, last.maxY < viewport.height + margins.span {
+        let next = last.index + 1
+        let rowHeight = max(0, height(rows[next]))
+        last = TimelinePlacement(id: rows[next], index: next, y: last.maxY, height: rowHeight)
+        placements.append(last)
+      }
+    }
     while placements.count > 1, placements[0].maxY < -margins.above { placements.removeFirst() }
-    while placements.count > 1, placements[placements.count - 1].y > viewport.height + margins.below {
+    while placements.count > 1, placements[placements.count - 1].y > viewport.height + margins.below,
+          placements[placements.count - 1].index > keepThrough
+    {
       placements.removeLast()
     }
     let first = placements[0]

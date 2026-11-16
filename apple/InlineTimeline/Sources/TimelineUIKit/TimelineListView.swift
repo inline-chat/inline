@@ -20,6 +20,9 @@ public struct TimelineRows<ID: Hashable & Sendable> {
   public var pin: (ID, UIView) -> TimelinePin<ID>?
   /// Where a pin's span starting at this row begins, in the row's coordinates.
   public var spanTop: (ID, UIView) -> CGFloat
+  /// The last row of the span this row belongs to (a sender's group), when that row holds the span's
+  /// pin: the list keeps it placed while any of the span is in sight. Nil costs nothing.
+  public var spanEnd: ((ID) -> ID?)?
   /// Where a placed row is on screen, for what in it follows the screen rather than the row. Called
   /// for every placed row when that changes, and when a fling starts or stops. Nil costs nothing.
   public var screen: ((ID, UIView, TimelineRowScreen) -> Void)?
@@ -31,6 +34,7 @@ public struct TimelineRows<ID: Hashable & Sendable> {
     recycle: @escaping (ID, UIView) -> Void = { _, _ in },
     pin: @escaping (ID, UIView) -> TimelinePin<ID>? = { _, _ in nil },
     spanTop: @escaping (ID, UIView) -> CGFloat = { _, _ in 0 },
+    spanEnd: ((ID) -> ID?)? = nil,
     screen: ((ID, UIView, TimelineRowScreen) -> Void)? = nil
   ) {
     self.height = height
@@ -39,6 +43,7 @@ public struct TimelineRows<ID: Hashable & Sendable> {
     self.recycle = recycle
     self.pin = pin
     self.spanTop = spanTop
+    self.spanEnd = spanEnd
     self.screen = screen
   }
 }
@@ -469,7 +474,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     isApplying = true
     let width = update.viewport?.width ?? state.viewport.width
     let extentBefore = indicatorExtent()
-    let change = state.apply(update) { rows.height($0, width) }
+    let spanEnd = rows.spanEnd
+    let change = state.apply(update, spanEnd: { spanEnd?($0) }) { rows.height($0, width) }
     var scrolled: CGFloat = 0
     if case let .by(delta) = update.scroll { scrolled = delta }
     commit(

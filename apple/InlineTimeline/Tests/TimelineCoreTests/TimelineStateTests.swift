@@ -48,6 +48,29 @@ private func checkInvariants(_ layout: TimelineLayout<Int>, rows: [Int], sourceL
 }
 
 @Suite struct TimelineStateTests {
+  @Test func `the span of the lowest visible row stays placed to its end, within the span margin`() {
+    var state = TimelineState<Int>(
+      viewport: TimelineViewport(width: 320, height: 600, topInset: 50, bottomInset: 60),
+      margins: TimelineMargins(above: 100, below: 100, span: 1_000)
+    )
+    let rows = Array(0 ..< 200)
+    // Row 10 sits at the bottom of the usable area; its span runs to row 30 (20 rows, 1,000 pt below).
+    state.apply(.init(rows: rows, scroll: .to(10, .bottom(0))), spanEnd: { $0 >= 5 && $0 < 30 ? 30 : nil }) { _ in 50 }
+    #expect(state.layout.placement(for: 30) != nil)
+    #expect(state.layout.placement(for: 31) == nil)
+    let placements = state.layout.placements
+    for (previous, next) in zip(placements, placements.dropFirst()) {
+      #expect(next.index == previous.index + 1)
+    }
+    // Beyond the span margin, the span is placed only as far as the margin reaches.
+    state.apply(.init(scroll: .to(10, .bottom(0))), spanEnd: { $0 >= 5 && $0 < 100 ? 100 : nil }) { _ in 50 }
+    #expect(state.layout.placement(for: 100) == nil)
+    #expect((state.layout.placements.last?.maxY ?? 0) >= 600 + 1_000)
+    // Without a span, the usual margins.
+    state.apply(.init(scroll: .to(10, .bottom(0)))) { _ in 50 }
+    #expect(state.layout.placement(for: 30) == nil)
+  }
+
   @Test func `latest rests the newest row on the usable bottom and places only the window`() {
     var fixture = Fixture()
     fixture.apply(.init(rows: Array(0 ..< 10_000), scroll: .latest))

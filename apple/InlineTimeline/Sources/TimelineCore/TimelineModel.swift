@@ -104,10 +104,14 @@ public struct TimelineLayout<ID: Hashable & Sendable>: Equatable, Sendable {
 public struct TimelineMargins: Equatable, Sendable {
   public var above: CGFloat
   public var below: CGFloat
+  /// How far below the view the span of the lowest visible row is still placed to its end, so what
+  /// pins to that end (a sender's avatar) is there while any of the span is in sight.
+  public var span: CGFloat
 
-  public init(above: CGFloat, below: CGFloat) {
+  public init(above: CGFloat, below: CGFloat, span: CGFloat = 2400) {
     self.above = above
     self.below = below
+    self.span = span
   }
 
   public static let standard = TimelineMargins(above: 200, below: 200)

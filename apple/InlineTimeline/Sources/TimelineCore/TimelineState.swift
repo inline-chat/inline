@@ -104,7 +104,9 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
   public var position: TimelinePosition<ID> { layout.position }
 
   @discardableResult
-  public mutating func apply(_ update: TimelineUpdate<ID>, height: (ID) -> CGFloat) -> TimelineChange<ID> {
+  public mutating func apply(
+    _ update: TimelineUpdate<ID>, spanEnd: (ID) -> ID? = { _ in nil }, height: (ID) -> CGFloat
+  ) -> TimelineChange<ID> {
     let previous = layout
     let previousIndex = index
     var position = previous.position
@@ -156,7 +158,7 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
 
     layout = TimelineSolver.layout(
       rows: rows, index: index, viewport: viewport, position: position, margins: margins,
-      allowsOverscroll: update.allowsOverscroll, height: height
+      allowsOverscroll: update.allowsOverscroll, spanEnd: spanEnd, height: height
     )
     return Self.change(from: previous, previousIndex: previousIndex, to: layout, index: index, coverage: coverage,
                        demandThreshold: demandThreshold)
