@@ -66,6 +66,11 @@ class MessageSizeCalculator {
   static let acknowledgementFooterSpacing: CGFloat = 5
   static let acknowledgementTrailingInset: CGFloat = 6
   static let acknowledgementStandaloneFooterHeight: CGFloat = 20
+
+  /// Minimal rows close an agent's run with a "Sent via …" footer line.
+  static func showsMinimalViaFooter(for message: FullMessage, props: MessageViewInputProps) -> Bool {
+    props.lastInGroup && props.interactionMode != .threadAnchor && message.message.via != nil
+  }
   static var minimalContentLeadingInset: CGFloat {
     ChatLayoutMetrics.avatarLeadingInset(size: minimalAvatarSize)
   }
@@ -683,7 +688,7 @@ class MessageSizeCalculator {
     let entities = message.translationEntities ?? message.message.entities
     // Hash-based approach is faster than string concatenation
     let hashValue =
-      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(entities?.hashValue ?? 0)_\(actionRowsSignature(for: actionRows))"
+      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(entities?.hashValue ?? 0)_\(actionRowsSignature(for: actionRows))_\(message.viaPresentation?.label.hashValue ?? 0)"
     return NSString(string: "\(hashValue)")
   }
 
@@ -789,9 +794,13 @@ class MessageSizeCalculator {
       && !message.message.isServiceMessage
     let isOutgoing = message.message.out == true
     let acknowledgementWidth = hasAcknowledgement ? message.acknowledgementPillWidth : 0
-    let timeWidth = isOutgoing
+    // The last message of an agent's run carries "Sent via …" before the time.
+    let timeViaPrefixWidth = props.lastInGroup
+      ? MessageTimeAndState.viaPrefixWidth(message.viaPresentation.map(MessageTimeAndState.viaPrefix(for:)))
+      : 0
+    let timeWidth = (isOutgoing
       ? MessageTimeAndState.timeWidth + MessageTimeAndState.symbolWidth
-      : MessageTimeAndState.timeWidth
+      : MessageTimeAndState.timeWidth) + timeViaPrefixWidth
     var isSingleLine = false
     var isSticker = message.message.isSticker == true
     var textSize: CGSize?
@@ -1072,7 +1081,7 @@ class MessageSizeCalculator {
     }
 
     // Re-evaluate if we are single line based on space left after the text width
-    if isSingleLine, textWidth > availableWidth - MessageTimeAndState.timeWidth {
+    if isSingleLine, textWidth > availableWidth - MessageTimeAndState.timeWidth - timeViaPrefixWidth {
       isSingleLine = false
     }
 
@@ -2341,7 +2350,8 @@ class MessageSizeCalculator {
     plan.bubble.size.height += plan.topMostContentTopSpacing
     plan.wrapper.size.height += plan.topMostContentTopSpacing
 
-    if hasAcknowledgement, !hasReactions {
+    // The standalone Ack pill and "Sent via …" share one footer row.
+    if (hasAcknowledgement && !hasReactions) || Self.showsMinimalViaFooter(for: message, props: props) {
       plan.wrapper.size.height += Self.acknowledgementStandaloneFooterHeight
     }
     let size = NSSize(width: plan.totalWidth, height: plan.totalHeight)

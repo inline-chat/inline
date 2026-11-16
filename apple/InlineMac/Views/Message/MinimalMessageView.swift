@@ -37,6 +37,8 @@ class MinimalMessageViewAppKit: NSView {
   private let log = Log.scoped("MinimalMessageView", enableTracing: false)
   static let avatarSize: CGFloat = MessageSizeCalculator.minimalAvatarSize
   private let acknowledgementView = MessageAcknowledgementView()
+  /// "Sent via Codex" under the last message of an agent's run.
+  private var viaFooterLabel: NSTextField?
   private(set) var fullMessage: FullMessage
   private let dependencies: AppDependencies?
   private var props: MessageViewProps
@@ -182,6 +184,11 @@ class MinimalMessageViewAppKit: NSView {
 
   private var hasAcknowledgement: Bool {
     props.layout.hasAcknowledgement
+  }
+
+  /// Matches MessageSizeCalculator.showsMinimalViaFooter, which reserves the row.
+  private var showsViaFooter: Bool {
+    props.lastInGroup && props.interactionMode != .threadAnchor && fullMessage.message.via != nil
   }
 
   private var textWidth: CGFloat {
@@ -343,7 +350,7 @@ class MinimalMessageViewAppKit: NSView {
   private var shineEffectView: ShineEffectView?
 
   private lazy var avatarView: UserAvatarView = {
-    let view = UserAvatarView(userInfo: avatarUserInfo, size: Self.avatarSize)
+    let view = UserAvatarView(userInfo: avatarUserInfo, size: Self.avatarSize, viaMark: fullMessage.viaPresentation?.mark)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -1042,7 +1049,39 @@ class MinimalMessageViewAppKit: NSView {
   override func layout() {
     super.layout()
     layoutAcknowledgement()
+    layoutViaFooter()
     layoutUploadProgressView()
+  }
+
+  private func layoutViaFooter() {
+    guard showsViaFooter, let via = fullMessage.viaPresentation else {
+      viaFooterLabel?.isHidden = true
+      return
+    }
+    let label = viaFooterLabel ?? makeViaFooterLabel()
+    if label.stringValue != via.label {
+      label.stringValue = via.label
+    }
+    label.toolTip = via.detail(senderName: fullMessage.senderInfo?.user.shortDisplayName)
+    label.isHidden = false
+    let content = contentView.convert(contentView.bounds, to: self)
+    let height: CGFloat = 16
+    let width = min(ceil(label.intrinsicContentSize.width), max(0, content.width))
+    // Bottom row of the wrapper, the same row a standalone Ack pill uses.
+    let top = props.layout.wrapper.spacing.top + props.layout.wrapper.size.height - height
+    let y = isFlipped ? top : bounds.height - top - height
+    label.frame = CGRect(x: content.minX, y: y, width: width, height: height)
+  }
+
+  private func makeViaFooterLabel() -> NSTextField {
+    let label = NSTextField(labelWithString: "")
+    label.font = .systemFont(ofSize: 11)
+    label.textColor = .tertiaryLabelColor
+    label.lineBreakMode = .byTruncatingTail
+    label.translatesAutoresizingMaskIntoConstraints = true
+    addSubview(label)
+    viaFooterLabel = label
+    return label
   }
 
   private func layoutAcknowledgement() {
@@ -2133,7 +2172,8 @@ class MinimalMessageViewAppKit: NSView {
       stableId: fullMessage.id,
       userInfo: avatarUserInfo,
       frame: frame,
-      sticky: nil
+      sticky: nil,
+      viaMark: fullMessage.viaPresentation?.mark
     ) { [weak self] in
       if let self {
         MessageGestureTrace.debug("MinimalMessageView.avatarOverlayClick messageId=\(self.message.messageId)")
@@ -4193,7 +4233,10 @@ class MinimalMessageViewAppKit: NSView {
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
 
     if showsInlineAvatar {
-      avatarView.update(userInfo: avatarUserInfo)
+      avatarView.update(userInfo: avatarUserInfo, viaMark: fullMessage.viaPresentation?.mark)
+    }
+    if showsViaFooter || viaFooterLabel?.isHidden == false {
+      needsLayout = true
     }
 
     // Reactions

@@ -7,6 +7,8 @@ struct MessageAvatarOverlayItem {
   let userInfo: UserInfo
   let frame: CGRect
   var sticky: MessageAvatarOverlaySticky?
+  /// Agent badge when an agent sent this group for the user.
+  var viaMark: MessageViaPresentation.Mark? = nil
   let onClick: () -> Void
 }
 
@@ -181,7 +183,7 @@ final class MessageAvatarOverlayView: NSView {
     let entry: Entry
     let canAnimateFrame: Bool
     if let current = active[item.stableId] {
-      current.view.update(userInfo: item.userInfo, size: avatarSize)
+      current.view.update(userInfo: item.userInfo, size: avatarSize, viaMark: item.viaMark)
       current.reuseKey = key
       entry = current
       canAnimateFrame = animate
@@ -192,12 +194,12 @@ final class MessageAvatarOverlayView: NSView {
         } else {
           detached[key] = entries
         }
-        reused.view.update(userInfo: item.userInfo, size: avatarSize)
+        reused.view.update(userInfo: item.userInfo, size: avatarSize, viaMark: item.viaMark)
         reused.reuseKey = key
         entry = reused
         stats.reused += 1
       } else {
-        let view = dequeueAvatar(for: item.userInfo, key: key, size: avatarSize)
+        let view = dequeueAvatar(for: item.userInfo, key: key, size: avatarSize, viaMark: item.viaMark)
         addSubview(view)
         entry = Entry(view: view, reuseKey: key)
         stats.created += 1
@@ -258,7 +260,12 @@ final class MessageAvatarOverlayView: NSView {
     )
   }
 
-  private func dequeueAvatar(for userInfo: UserInfo, key: ReuseKey, size: CGFloat) -> UserAvatarView {
+  private func dequeueAvatar(
+    for userInfo: UserInfo,
+    key: ReuseKey,
+    size: CGFloat,
+    viaMark: MessageViaPresentation.Mark?
+  ) -> UserAvatarView {
     if var views = pool[key], let view = views.popLast() {
       pooledViewCount = max(0, pooledViewCount - 1)
       if views.isEmpty {
@@ -266,11 +273,11 @@ final class MessageAvatarOverlayView: NSView {
       } else {
         pool[key] = views
       }
-      view.update(userInfo: userInfo, size: size)
+      view.update(userInfo: userInfo, size: size, viaMark: viaMark)
       return view
     }
 
-    let view = UserAvatarView(userInfo: userInfo, size: size)
+    let view = UserAvatarView(userInfo: userInfo, size: size, viaMark: viaMark)
     view.translatesAutoresizingMaskIntoConstraints = true
     return view
   }

@@ -445,7 +445,7 @@ class MessageViewAppKit: NSView {
   private var shineEffectView: ShineEffectView?
 
   private lazy var avatarView: UserAvatarView = {
-    let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted)
+    let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted, viaMark: fullMessage.viaPresentation?.mark)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -485,11 +485,17 @@ class MessageViewAppKit: NSView {
     return view
   }()
 
+  /// "Sent via …" rides the time on the last message of an agent's run.
+  private var timeViaPresentation: MessageViaPresentation? {
+    props.lastInGroup ? fullMessage.viaPresentation : nil
+  }
+
   private lazy var timeAndStateView: MessageTimeAndState = {
     let view = MessageTimeAndState(
       fullMessage: fullMessage,
       overlay: isTimeOverlay,
-      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle,
+      via: timeViaPresentation
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
@@ -2242,7 +2248,8 @@ class MessageViewAppKit: NSView {
       stableId: fullMessage.id,
       userInfo: fullMessage.senderInfo ?? .deleted,
       frame: frame,
-      sticky: nil
+      sticky: nil,
+      viaMark: fullMessage.viaPresentation?.mark
     ) { [weak self] in
       if let self {
         MessageGestureTrace.debug("MessageView.avatarOverlayClick messageId=\(self.message.messageId)")
@@ -2492,6 +2499,7 @@ class MessageViewAppKit: NSView {
       let timeWidthConstraint = timeAndStateView.widthAnchor.constraint(
         equalToConstant: time.size.width
       )
+      timeViewWidthConstraint = timeWidthConstraint
       let timeHeightConstraint = timeAndStateView.heightAnchor.constraint(
         equalToConstant: time.size.height
       )
@@ -2717,6 +2725,7 @@ class MessageViewAppKit: NSView {
   private var reactionViewTrailingConstraint: NSLayoutConstraint?
 
   private var timeViewTopConstraint: NSLayoutConstraint?
+  private var timeViewWidthConstraint: NSLayoutConstraint?
   private var timeViewBottomConstraint: NSLayoutConstraint?
   private var timeViewTrailingConstraint: NSLayoutConstraint?
 
@@ -3123,6 +3132,10 @@ class MessageViewAppKit: NSView {
       let trailingConstant = -time.spacing.right
       if timeViewTrailingConstraint?.constant != trailingConstant {
         timeViewTrailingConstraint?.constant = trailingConstant
+      }
+      // A "Sent via …" prefix comes and goes with the end of an agent's run.
+      if let timeViewWidthConstraint, timeViewWidthConstraint.constant != time.size.width {
+        timeViewWidthConstraint.constant = time.size.width
       }
       if props.layout.placesTimeAboveReactions {
         if let timeViewTopConstraint {
@@ -4332,7 +4345,8 @@ class MessageViewAppKit: NSView {
     timeAndStateView.updateMessage(
       fullMessage,
       overlay: isTimeOverlay,
-      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle
+      usesOutgoingBubbleStyle: usesOutgoingBubbleStyle,
+      via: timeViaPresentation
     )
 
     // Ensure swipe UI is reset if message cannot be replied to
