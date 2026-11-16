@@ -46,6 +46,9 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   private var offset: CGFloat = 0
   private var isEligible = false
   private var settle: Task<Void, Never>?
+  /// The keyboard's last frame, in the screen's coordinates, read again when the view changes size.
+  private var keyboardFrame: CGRect?
+  private var measuredSize: CGSize = .zero
 
   /// Tracks the keyboard against the bottom of `view`.
   public init(view: UIView) {
@@ -91,9 +94,26 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   // MARK: - Animated changes
 
   @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-    guard !isSuspended, !isInteractive, let view, let window = view.window,
-          let end = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-    else { return }
+    guard let end = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+    keyboardFrame = end
+    guard !isSuspended, !isInteractive else { return }
+    let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+    deliver(end, duration: duration)
+  }
+
+  /// Call from the tracked view's layout. When its size changed (a rotation, a window resize), what the
+  /// keyboard covers is measured again from its last frame: a rotation can post the keyboard's new frame
+  /// while the view still has its old size, and posts nothing after it takes the new one.
+  public func viewDidLayout() {
+    guard let view, view.bounds.size != measuredSize else { return }
+    measuredSize = view.bounds.size
+    guard !isSuspended, !isInteractive, let keyboardFrame else { return }
+    deliver(keyboardFrame, duration: 0)
+  }
+
+  private func deliver(_ end: CGRect, duration: Double) {
+    guard let view, let window = view.window else { return }
+    measuredSize = view.bounds.size
     let frame = view.convert(end, from: window.screen.coordinateSpace)
     var covered = max(0, view.bounds.maxY - frame.minY)
     if frame.height < 1 || frame.maxX <= view.bounds.minX || frame.minX >= view.bounds.maxX || frame.maxY < view.bounds.maxY - 1 {
@@ -103,7 +123,6 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
     covered = min(covered, view.bounds.height)
     guard abs(covered - height) > 0.01 else { return }
 
-    let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
     let timing: TimelineTiming
     if duration > 0 {
       timing = Self.spring(duration: duration)
