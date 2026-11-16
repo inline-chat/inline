@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use inline_agent_bridge::group::{ToolBinding, ToolBindings, ToolRejection};
-use inline_agent_bridge::harness::{ChatId, SessionKey, UserId, WorkRef};
+use inline_agent_bridge::harness::{ChatId, MessageEnvelope, SessionKey, UserId, WorkRef};
 use inline_agent_bridge::{
     HostToolCall, HostToolConfiguration, HostToolFuture, HostToolHandler, HostToolResult,
     HostToolSpec, ProviderId, ProviderSessionId,
@@ -102,6 +102,9 @@ pub(crate) struct Tools {
     /// Session → the message (chat, message) that started its latest turn,
     /// for `reply_thread: "current"`.
     requests: Mutex<HashMap<String, (i64, i64)>>,
+    /// Session → Inline's envelope on the input it is handling, for
+    /// `get_current_context`.
+    messages: Mutex<HashMap<String, MessageEnvelope>>,
 }
 
 impl Tools {
@@ -115,6 +118,7 @@ impl Tools {
             follows: Mutex::new(HashMap::new()),
             lead: std::sync::OnceLock::new(),
             requests: Mutex::new(HashMap::new()),
+            messages: Mutex::new(HashMap::new()),
         })
     }
 
@@ -146,6 +150,14 @@ impl Tools {
             .lock()
             .expect("tool requests")
             .insert(session.as_str().to_owned(), (chat, message));
+    }
+
+    /// Records the envelope of the input a session was just given.
+    pub(crate) fn record_message(&self, session: &ProviderSessionId, envelope: MessageEnvelope) {
+        self.messages
+            .lock()
+            .expect("tool messages")
+            .insert(session.as_str().to_owned(), envelope);
     }
 
     pub(crate) fn configuration(self: &Arc<Self>) -> HostToolConfiguration {
@@ -225,6 +237,10 @@ impl Tools {
         self.requests
             .lock()
             .expect("tool requests")
+            .remove(session.as_str());
+        self.messages
+            .lock()
+            .expect("tool messages")
             .remove(session.as_str());
     }
 
@@ -311,7 +327,7 @@ impl Tools {
     async fn run(&self, call: &HostToolCall, work: &Work, chat: i64) -> HostToolResult {
         let arguments = &call.arguments;
         match call.tool_name.as_str() {
-            "get_current_context" => self.current_context(work.chat).await,
+            "get_current_context" => self.current_context(work).await,
             "get_chat" => match api::get_chat(&self.config.bot, chat).await {
                 Ok(result) => json_value_result(&project_chat(&result)),
                 Err(_) => HostToolResult::failure("Inline chat is unavailable to this agent."),
@@ -776,10 +792,18 @@ impl Tools {
         HostToolResult::success(json!({"chat_id": chat, "follow_mode": state}).to_string())
     }
 
-    async fn current_context(&self, chat: i64) -> HostToolResult {
+    async fn current_context(&self, work: &Work) -> HostToolResult {
+        let chat = work.chat;
         let thread = api::get_chat(&self.config.bot, chat).await.ok();
+        let current = self
+            .messages
+            .lock()
+            .expect("tool messages")
+            .get(work.session.as_str())
+            .map(current_message);
         json_value_result(&json!({
             "chat_id": chat,
+            "current_message": current,
             "thread": thread.as_ref().map(project_chat),
             "agent_user_id": self.config.bot_user_id,
             "agent_name": self.config.agent_name,
@@ -1625,12 +1649,26 @@ HTML up to 256 KiB with no `vh` units, nested iframe/frame/object/embed or passw
     ))
 }
 
+/// The message a session is handling, from Inline's envelope on it.
+fn current_message(envelope: &MessageEnvelope) -> Value {
+    json!({
+        "chat_id": envelope.chat_id,
+        "message_id": envelope.message_id,
+        "from_user_id": envelope.from_user_id,
+        "from": envelope.from,
+        "role": envelope.role.as_str(),
+        "place": envelope.place.as_str(),
+        "reply_to_message_id": envelope.reply_to_message_id,
+        "reply_to_user_id": envelope.reply_to_user_id,
+    })
+}
+
 /// The v2 catalog (spec §4.8). Names served by v1 keep their names.
 pub(crate) fn specs() -> Vec<HostToolSpec> {
     let read = [
         (
             "get_current_context",
-            "Get this work's Inline thread, your identity as an agent, your owner, and the mention and link syntax.",
+            "Get this work's Inline thread, the message you are handling (who sent it, their role, where), your identity as an agent, your owner, and the mention and link syntax.",
         ),
         ("get_chat", "Get one Inline chat you can access."),
         (

@@ -1403,8 +1403,14 @@ impl Actor {
                     let input = Input {
                         id: InputId::new(uuid::Uuid::new_v4().to_string()).ok()?,
                         content: inline_agent_bridge::harness::InputContent::text(text),
-                        origin: inline_agent_bridge::harness::Origin::Teammate {
-                            user: UserId(actor),
+                        origin: if actor == self.agent.owner_user_id {
+                            inline_agent_bridge::harness::Origin::Owner {
+                                user: UserId(actor),
+                            }
+                        } else {
+                            inline_agent_bridge::harness::Origin::Teammate {
+                                user: UserId(actor),
+                            }
                         },
                         delivery: match live_turn(&session) {
                             Some(turn) => Delivery::Steer {
@@ -2145,6 +2151,9 @@ impl Actor {
                 // `send_message` with `reply_thread: "current"` anchors here.
                 if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
                     tools.record_request(native, self.chat_id, message_id);
+                    if let Some(envelope) = &input.content.envelope {
+                        tools.record_message(native, envelope.clone());
+                    }
                 }
                 // The harness may report the turn a moment later. Until then
                 // the delivery itself is live work, so an idle tick never

@@ -17,7 +17,7 @@ use inline_agent_bridge::group::{
     DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage,
     IntakeDecision, IntakeFacts, LoopGuards, LoopVerdict, ObserveReason, Operation,
     ParticipationMode, PendingInput, ReleaseCause, WorkPhase, decide_intake, direct_input,
-    origin_of, required_operation,
+    envelope_of, origin_of, required_operation,
 };
 use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
@@ -2741,8 +2741,10 @@ impl Runtime {
                 id: InputId::new(id.clone())?,
                 content: InputContent {
                     text,
-                    attachments: Vec::new(),
-                    context: None,
+                    envelope: Some(envelope_of(group, self.config.owner_user_id)),
+                    // A skill activation is a request in words, not a command.
+                    native_command: skill.is_none(),
+                    ..InputContent::default()
                 },
                 origin: origin_of(group, self.config.owner_user_id),
                 delivery: Delivery::Turn,
@@ -3249,7 +3251,11 @@ impl Runtime {
         }
         let input = Input {
             id: InputId::new(id)?,
-            content: InputContent::text(task),
+            content: InputContent {
+                text: task,
+                envelope: Some(envelope_of(group, self.config.owner_user_id)),
+                ..InputContent::default()
+            },
             origin: origin_of(group, self.config.owner_user_id),
             delivery: Delivery::Turn,
         };
@@ -3998,6 +4004,17 @@ impl Runtime {
             .await
             .map_err(|error| error.to_string())?;
         let mut content = InputContent::text(text);
+        content.envelope = Some(inline_agent_bridge::harness::MessageEnvelope {
+            chat_id: chat,
+            message_id: Some(message_id),
+            from_user_id: Some(self.config.bot_user_id),
+            from: Some(self.config.agent_name.clone()),
+            role: inline_agent_bridge::harness::SenderRole::Lead,
+            place: inline_agent_bridge::harness::Place::WorkThread,
+            reply_to_message_id: None,
+            reply_to_user_id: None,
+            sent_at: None,
+        });
         if let Some(instructions) = instructions {
             content.context = Some(inline_agent_bridge::TurnContext {
                 instructions: instructions.to_owned(),
