@@ -54,6 +54,10 @@ the 6-digit code the command printed to confirm the CLI. Keep the command
 running until approval completes, then run `inline me --json` on the server. Never copy
 session files or print tokens to move authentication between hosts.
 
+## Agent signature
+
+When a coding agent like Claude Code or Codex sends a message through the CLI, people see "Sent via Claude Code" under it. Add `--as-me` to send without it. Messages you send yourself from a plain terminal aren't signed.
+
 ## Update
 
 ```bash
