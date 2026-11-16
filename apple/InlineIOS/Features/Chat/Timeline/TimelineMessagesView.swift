@@ -183,6 +183,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     list.onDemand = { [weak self] edges in edges.forEach { self?.loadHistory($0) } }
     list.onLayout = { [weak self] _ in self?.layoutChanged() }
     list.onScrollEnded = { [weak self] in self?.scrollEnded() }
+    list.onScrollToTop = { [weak self] in self?.statusBarTapped() }
+    list.accessibilityPageDescription = { [weak self] _ in self?.accessibilityPageDescription() }
     addSubview(list)
     datePill.alpha = 0
     datePill.onTap = { [weak self] in self?.jumpToDatePillDay() }
@@ -212,6 +214,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       object: nil
     )
     viewModel.ensureThreadAnchorCached()
+    #if DEBUG
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(debugAccessibility(_:)), name: Self.debugAccessibilityNotification, object: nil
+    )
+    #endif
   }
 
   @available(*, unavailable)
@@ -1122,6 +1129,88 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
           let noteChatId = note.userInfo?["chatId"] as? Int64, noteChatId == chatId, window != nil else { return }
     scrollToMessageWhenAvailable(messageId, requiresExactMessage: false)
   }
+
+  // MARK: - Status bar, VoiceOver
+
+  /// The status bar's tap, as the collection view took it: UIKit scrolls that inverted scroll view
+  /// to its content's top, which is the newest message at the bottom of the screen.
+  private func statusBarTapped() {
+    #if DEBUG
+    debugLog("TIMELINE_DEBUG status bar tap")
+    #endif
+    guard hasOpened, !menu.isActive else { return }
+    scrollToBottom()
+  }
+
+  /// What VoiceOver says after a page: when the messages on screen were sent, and whether the page
+  /// reached an end of the chat.
+  private func accessibilityPageDescription() -> String? {
+    guard let snapshot else { return nil }
+    let dates = list.layout.visible.compactMap { snapshot.row(for: $0.id)?.content.message?.message.date }
+    guard let first = dates.min(), let last = dates.max() else { return nil }
+    let calendar = Calendar.autoupdatingCurrent
+    let time = { (date: Date) in date.formatted(date: .omitted, time: .shortened) }
+    var words = "\(Self.dayTitle(calendar.startOfDay(for: first))) \(time(first))"
+    if last.timeIntervalSince(first) >= 60 {
+      words += calendar.isDate(first, inSameDayAs: last)
+        ? " to \(time(last))"
+        : " to \(Self.dayTitle(calendar.startOfDay(for: last))) \(time(last))"
+    }
+    if distanceFromBottom <= 12, viewModel.historyCoverage.isAtCertifiedLiveEnd {
+      words += ", latest messages"
+    } else if list.layout.distanceToOldest.map({ $0 <= 0.5 }) == true, snapshot.coverage.reachesOldest {
+      words += ", start of the conversation"
+    }
+    return words
+  }
+
+  #if DEBUG
+  /// The harness's stand-in for VoiceOver, which the simulator cannot drive: the object names what
+  /// to do ("older", "newer", "dump", "focusTop", "focusBottom"); results go to standard output.
+  static let debugAccessibilityNotification = Notification.Name("TimelineDebugAccessibility")
+
+  /// Unbuffered, so a harness run's output is there while the app still runs.
+  private func debugLog(_ line: String) {
+    FileHandle.standardError.write(Data((line + "\n").utf8))
+  }
+
+  @objc private func debugAccessibility(_ note: Notification) {
+    guard window != nil, let action = note.object as? String else { return }
+    let rows = (list.accessibilityElements ?? []).compactMap { $0 as? UIView }
+    func describe(_ row: UIView) -> String {
+      var labels: [String] = []
+      func walk(_ object: Any, depth: Int) {
+        guard depth < 8, labels.count < 2 else { return }
+        if let element = object as? NSObject, element.isAccessibilityElement, let label = element.accessibilityLabel,
+           !label.isEmpty
+        {
+          labels.append(String(label.prefix(40)))
+          return
+        }
+        if let view = object as? UIView, view.isHidden || view.accessibilityElementsHidden { return }
+        let children = (object as? NSObject)?.accessibilityElements ?? (object as? UIView)?.subviews ?? []
+        for child in children { walk(child, depth: depth + 1) }
+      }
+      walk(row, depth: 0)
+      let y = row.convert(row.bounds, to: list).minY
+      return "y=\(Int(y)) \(labels.joined(separator: " | "))"
+    }
+    switch action {
+      case "older", "newer":
+        let moved = list.accessibilityScroll(action == "older" ? .down : .up)
+        debugLog("TIMELINE_DEBUG a11y page \(action) moved=\(moved) says=\(accessibilityPageDescription() ?? "nil") rows=\(list.layout.placements.first?.index ?? -1)...\(list.layout.placements.last?.index ?? -1) of \(snapshot?.rows.count ?? 0)")
+      case "dump":
+        debugLog("TIMELINE_DEBUG a11y elements \(rows.count):")
+        for row in rows { debugLog("TIMELINE_DEBUG   \(describe(row))") }
+      case "focusTop", "focusBottom":
+        guard let row = action == "focusTop" ? rows.first : rows.last else { return }
+        let revealed = list.revealAccessibilityElement(row)
+        debugLog("TIMELINE_DEBUG a11y focus \(action) revealed=\(revealed) \(describe(row)) rows=\(list.layout.placements.first?.index ?? -1)...\(list.layout.placements.last?.index ?? -1) of \(snapshot?.rows.count ?? 0)")
+      default:
+        break
+    }
+  }
+  #endif
 
   // MARK: - Read state, reading place, scroll button
 

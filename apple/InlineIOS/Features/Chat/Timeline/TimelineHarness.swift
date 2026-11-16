@@ -167,6 +167,12 @@ private struct TimelineHarnessScreen: View {
           Button("Jump far up") {
             model.box.container?.focusMessage(40, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
           }
+          // VoiceOver stand-ins (the simulator cannot drive VoiceOver); results go to standard output.
+          ForEach(["older", "newer", "dump", "focusTop", "focusBottom"], id: \.self) { action in
+            Button("VoiceOver \(action)") {
+              NotificationCenter.default.post(name: TimelineMessagesView.debugAccessibilityNotification, object: action)
+            }
+          }
         }
       }
     }
