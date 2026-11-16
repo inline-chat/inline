@@ -46,11 +46,16 @@ actor TransactionsActor {
 
   /// Waits for the realtime connection. Injected so tests never touch the shared realtime client.
   private let waitForConnection: ConnectionWaiter
+  private let pendingMediaSends: PendingMediaSends
   /// A send whose connection wait keeps returning without the error clearing is bounded, so a
   /// misclassified error cannot spin forever.
   static let maxConnectionWaits = 1_000
 
-  init(waitForConnection: @escaping ConnectionWaiter = TransactionsActor.waitForRealtimeConnection) {
+  init(
+    waitForConnection: @escaping ConnectionWaiter = TransactionsActor.waitForRealtimeConnection,
+    pendingMediaSends: PendingMediaSends = .shared
+  ) {
+    self.pendingMediaSends = pendingMediaSends
     let stream = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
     workSignals = stream.stream
     workContinuation = stream.continuation
@@ -101,7 +106,7 @@ actor TransactionsActor {
     queue.removeAll()
     for transaction in queued {
       await transaction.rollback()
-      completionHandler?(transaction)
+      finish(transaction)
     }
 
     let activeTasks = activeTransactions.values.map(\.task)
@@ -121,6 +126,12 @@ actor TransactionsActor {
     completionHandler = handler
   }
 
+  /// Every transaction leaves through here, whatever its outcome.
+  private func finish(_ transaction: any Transaction) {
+    pendingMediaSends.remove(transactionId: transaction.id)
+    completionHandler?(transaction)
+  }
+
   func cancel(transactionId: String) async {
     let queuedTransactions = queue.filter { $0.id == transactionId }
     if !queuedTransactions.isEmpty {
@@ -128,7 +139,7 @@ actor TransactionsActor {
       insertCancelMarker(transactionId)
       for transaction in queuedTransactions {
         await transaction.rollback()
-        completionHandler?(transaction)
+        finish(transaction)
       }
       return
     }
@@ -150,17 +161,18 @@ actor TransactionsActor {
     if consumeCancelMarker(transaction.id) {
       let rejectedTransaction = consume transaction
       await rejectedTransaction.rollback()
-      completionHandler?(rejectedTransaction)
+      finish(rejectedTransaction)
       return
     }
 
     if isClearing {
       let rejectedTransaction = consume transaction
       await rejectedTransaction.rollback()
-      completionHandler?(rejectedTransaction)
+      finish(rejectedTransaction)
       return
     }
 
+    if let send = transaction.pendingMediaSend { pendingMediaSends.insert(send) }
     queue.append(consume transaction)
     signalWorkAvailable()
   }
@@ -171,16 +183,16 @@ actor TransactionsActor {
       let result = try await executeWithRetry(transaction)
 
       await transaction.didSucceed(result: result)
-      completionHandler?(transaction)
+      finish(transaction)
     } catch TransactionError.canceled {
       await transaction.rollback()
-      completionHandler?(transaction)
+      finish(transaction)
     } catch is CancellationError {
       await transaction.rollback()
-      completionHandler?(transaction)
+      finish(transaction)
     } catch {
       await transaction.didFail(error: error)
-      completionHandler?(transaction)
+      finish(transaction)
     }
   }
 

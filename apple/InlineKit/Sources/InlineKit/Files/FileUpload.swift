@@ -960,6 +960,17 @@ public actor FileUploader {
     }
   }
 
+  /// How far a media item's upload has come, from 0 to 1; nil before its upload reports.
+  public func uploadFraction(for media: FileMediaItem) -> Double? {
+    let uploadId: String? = switch media {
+    case let .photo(photo): photo.photo.id.map { getUploadId(photoId: $0) }
+    case let .video(video): video.video.id.map { getUploadId(videoId: $0) }
+    case let .document(document): document.document.id.map { getUploadId(documentId: $0) }
+    case let .voice(voice): getUploadId(voiceId: voice.voiceID)
+    }
+    return uploadId.flatMap { currentProgress(for: $0)?.fractionCompleted }
+  }
+
   public func cancelAll() async {
     if let uploadResetTask {
       await uploadResetTask.value
