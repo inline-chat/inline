@@ -224,6 +224,8 @@ struct RichBlockFormNode: Codable, Hashable {
     var preview: RichBlockTextRange? = nil
     /// Where the "Recommended" tag sits, in the option's coordinates; nil when not recommended.
     var tagFrame: CGRect? = nil
+    /// Height of the option's title, which wraps; its description sits under it.
+    var labelHeight: CGFloat = 18
   }
 
   enum Control: Codable, Hashable {
@@ -272,17 +274,24 @@ enum RichBlockAgentCardKind: String, Codable, Hashable {
 }
 
 enum RichBlockDecisionState: String, Codable, Hashable {
+  /// The sender set no state: no chip or note, and any buttons stay live. Bridges
+  /// close a card this way when it was answered outside Inline.
+  case unspecified
   case pending, accepted, declined, expired, superseded
 
   init(_ state: InlineProtocol.BlockDecisionState) {
     switch state {
+    case .pending: self = .pending
     case .accepted: self = .accepted
     case .declined: self = .declined
     case .expired: self = .expired
     case .superseded: self = .superseded
-    case .pending, .unspecified, .UNRECOGNIZED: self = .pending
+    case .unspecified, .UNRECOGNIZED: self = .unspecified
     }
   }
+
+  /// Not decided yet, so the card's buttons are drawn.
+  var isOpen: Bool { self == .pending || self == .unspecified }
 }
 
 enum RichBlockChipTone: String, Codable, Hashable {

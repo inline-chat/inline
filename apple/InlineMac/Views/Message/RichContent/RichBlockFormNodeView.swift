@@ -155,17 +155,12 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
         headerChips[headers].isHidden = false
         headers += 1
       }
-      let label = NSMutableAttributedString(attributedString: context.text(field.label, role: .paragraph, isRTL: form.isRTL))
-      PlatformFontTraits.applyBaseFont(
-        ChatTypography.current.font(sized: context.baseFontSize, weight: .medium),
-        to: label
+      let label = RichBlockLayoutPlanner.Builder.formFieldLabel(
+        context.text(field.label, role: .paragraph, isRTL: form.isRTL),
+        required: field.required,
+        baseFontSize: context.baseFontSize,
+        asteriskColor: context.palette.tertiary
       )
-      if field.required {
-        label.append(NSAttributedString(string: " *", attributes: [
-          .font: ChatTypography.current.font(sized: context.baseFontSize),
-          .foregroundColor: context.palette.tertiary,
-        ]))
-      }
       surface().apply(text: label, linkColor: context.palette.link, onEntityClick: context.interactions.onTextEntityClick)
       if let description = field.description {
         surface().apply(
@@ -279,6 +274,10 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
           let button = multiple
             ? NSButton(checkboxWithTitle: title, target: self, action: #selector(choiceChanged(_:)))
             : NSButton(radioButtonWithTitle: title, target: self, action: #selector(choiceChanged(_:)))
+          // The planner measured the title wrapping in the chat font; draw it that way.
+          button.font = ChatTypography.current.font(sized: context.baseFontSize)
+          button.cell?.wraps = true
+          button.cell?.lineBreakMode = .byWordWrapping
           button.state = selected.contains(option.id) ? .on : .off
           button.identifier = NSUserInterfaceItemIdentifier(field.id)
           container.addSubview(button)
@@ -491,7 +490,7 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
         var tags = built.tags.makeIterator()
         for (option, entry) in zip(options, built.buttons) {
           let optionFrame = option.frame
-          entry.button.frame = CGRect(x: optionFrame.minX, y: optionFrame.minY, width: optionFrame.width, height: 18)
+          entry.button.frame = CGRect(x: optionFrame.minX, y: optionFrame.minY, width: optionFrame.width, height: option.labelHeight)
           if let tagFrame = option.tagFrame, let tag = tags.next() {
             // Narrow the button so its title can't run under the tag.
             entry.button.frame.size.width = max(0, tagFrame.minX - 4)
@@ -500,9 +499,9 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
           if let description = option.description, description.length > 0 {
             descriptions.next()?.frame = CGRect(
               x: optionFrame.minX + RichBlockAgentMetrics.formChoiceIndent,
-              y: optionFrame.minY + 18,
+              y: optionFrame.minY + option.labelHeight,
               width: max(1, optionFrame.width - RichBlockAgentMetrics.formChoiceIndent),
-              height: max(0, optionFrame.height - 18)
+              height: max(0, optionFrame.height - option.labelHeight)
             )
           }
         }
@@ -703,7 +702,11 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
         // The account changed while sending: nothing here belongs to it.
         guard MessageFormDraftStore.shared.generation == generation else { return }
         MessageActionInteractionState.shared.attachInteractionId(interactionID, for: loadingKey)
-        MessageFormDraftStore.shared.setPhase(.submitted, key: draftKey)
+        // Keeps the sent answers, secrets excepted, so a rebuilt row shows them.
+        MessageFormDraftStore.shared.markSubmitted(
+          draftKey,
+          secretFieldIDs: MessageFormAnswers.form(node.formID, in: message).map(MessageFormAnswers.secretFieldIDs)
+        )
       } catch {
         guard MessageFormDraftStore.shared.generation == generation else { return }
         MessageActionInteractionState.shared.fail(key: loadingKey)

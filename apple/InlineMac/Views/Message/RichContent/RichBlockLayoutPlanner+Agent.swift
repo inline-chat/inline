@@ -105,6 +105,25 @@ extension RichBlockLayoutPlanner.Builder {
     return range
   }
 
+  /// A form field's label as drawn: medium weight, with a dimmed " *" when the field is
+  /// required. The planner measures this and the view draws it, so they agree.
+  static func formFieldLabel(
+    _ label: NSAttributedString,
+    required: Bool,
+    baseFontSize: CGFloat,
+    asteriskColor: NSColor = .tertiaryLabelColor
+  ) -> NSAttributedString {
+    let text = NSMutableAttributedString(attributedString: label)
+    PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize, weight: .medium), to: text)
+    if required {
+      text.append(NSAttributedString(string: " *", attributes: [
+        .font: ChatTypography.current.font(sized: baseFontSize),
+        .foregroundColor: asteriskColor,
+      ]))
+    }
+    return text
+  }
+
   private func measure(_ text: NSAttributedString, width: CGFloat) -> CGSize {
     let measurement = measureText(text, width: max(1, width))
     return CGSize(width: min(width, measurement.maxLineUsedWidth), height: measurement.height)
@@ -525,8 +544,10 @@ extension RichBlockLayoutPlanner.Builder {
         headerFrame = CGRect(x: isRTL ? width - padX - size.width : padX, y: y + padY, width: size.width, height: size.height)
         y += size.height + padY * 2 + 4
       }
-      let labelSize = measure(label, width: width - 12)
-      let labelFrame = CGRect(x: isRTL ? width - labelSize.width : 0, y: y, width: labelSize.width + 12, height: labelSize.height)
+      // Measured as the view draws it: medium weight, with " *" when required.
+      let labelSize = measure(Self.formFieldLabel(label, required: field.required, baseFontSize: baseFontSize), width: width)
+      let labelWidth = min(width, ceil(labelSize.width) + 1)
+      let labelFrame = CGRect(x: isRTL ? width - labelWidth : 0, y: y, width: labelWidth, height: labelSize.height)
       y += labelSize.height
       var descriptionRange: RichBlockTextRange?
       var descriptionFrame: CGRect?
@@ -625,21 +646,27 @@ extension RichBlockLayoutPlanner.Builder {
           continue
         }
         if index > 0 { y += RichBlockAgentMetrics.formChoiceSpacing }
-        var optionHeight = max(18, measure(label, width: optionWidth).height)
+        var tagFrame: CGRect?
+        // The width the button's title wraps in: narrowed to leave room for the tag.
+        var titleWidth = optionWidth
+        if option.recommended {
+          let tag = ceil(Self.recommendedTag.size(withAttributes: [.font: RichBlockAgentMetrics.formTagFont]).width) + 10
+          let room = optionWidth - tag - 6
+          if room > 40 {
+            let used = ceil(measure(label, width: room).width)
+            let x = RichBlockAgentMetrics.formChoiceIndent + min(used, room) + 6
+            tagFrame = CGRect(x: isRTL ? width - x - tag : x, y: 1, width: tag, height: 16)
+            titleWidth = room
+          }
+        }
+        // A few points narrower than the title gets, so the button's own inset can't
+        // wrap it onto a line this height doesn't have.
+        let labelHeight = max(18, ceil(measure(label, width: titleWidth - 4).height))
+        var optionHeight = labelHeight
         if let description, description.length > 0,
            let text = styled(description, role: .footer, isRTL: isRTL, maximumWidth: optionWidth)
         {
           optionHeight += measure(text, width: optionWidth).height
-        }
-        var tagFrame: CGRect?
-        if option.recommended {
-          let tag = ceil(Self.recommendedTag.size(withAttributes: [.font: RichBlockAgentMetrics.formTagFont]).width) + 10
-          let titleWidth = ceil(measure(label, width: optionWidth).width)
-          let room = optionWidth - tag - 6
-          if room > 40 {
-            let x = RichBlockAgentMetrics.formChoiceIndent + min(titleWidth, room) + 6
-            tagFrame = CGRect(x: isRTL ? width - x - tag : x, y: 1, width: tag, height: 16)
-          }
         }
         options.append(.init(
           id: optionID,
@@ -647,7 +674,8 @@ extension RichBlockLayoutPlanner.Builder {
           description: description,
           frame: CGRect(x: 0, y: y, width: width, height: optionHeight),
           preview: preview,
-          tagFrame: tagFrame
+          tagFrame: tagFrame,
+          labelHeight: labelHeight
         ))
         y += optionHeight
       }

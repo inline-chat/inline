@@ -188,7 +188,7 @@ extension RichBlockLayoutPlanner.Builder {
 
   private func decisionNote(_ state: RichBlockDecisionState, kind: RichBlockAgentCardKind) -> String? {
     switch (kind, state) {
-    case (_, .pending): nil
+    case (_, .pending), (_, .unspecified): nil
     case (.planProposal, .accepted), (.approval, .accepted): String(localized: "Approved")
     case (.planProposal, .declined): String(localized: "Kept planning")
     case (.approval, .declined): String(localized: "Denied")
@@ -292,6 +292,7 @@ extension RichBlockLayoutPlanner.Builder {
     let isRTL = plan.hasIsRtl ? plan.isRtl : (inheritedDirection ?? false)
     let state = RichBlockDecisionState(plan.state)
     let chip: (String, RichBlockChipTone)? = switch state {
+    case .unspecified: nil
     case .pending: (String(localized: "Awaiting approval"), .accent)
     case .accepted: (String(localized: "Approved"), .success)
     case .declined: (String(localized: "Kept planning"), .neutral)
@@ -383,7 +384,7 @@ extension RichBlockLayoutPlanner.Builder {
         ) else { return false }
       }
     }
-    var actions = state == .pending ? buttons(for: plan.actionIds) : []
+    var actions = state.isOpen ? buttons(for: plan.actionIds) : []
     if isLong {
       actions.append(.init(
         title: expanded ? String(localized: "Show less") : String(localized: "Show full plan"),
@@ -419,6 +420,7 @@ extension RichBlockLayoutPlanner.Builder {
     default: "hand.raised"
     }
     let chip: (String, RichBlockChipTone)? = switch state {
+    case .unspecified: nil
     case .pending: (String(localized: "Needs approval"), .warning)
     case .accepted: (String(localized: "Approved"), .success)
     case .declined: (String(localized: "Denied"), .danger)
@@ -469,7 +471,7 @@ extension RichBlockLayoutPlanner.Builder {
       ) else { return false }
     }
     appendActions(
-      state == .pending ? buttons(for: approval.actionIds) : [],
+      state.isOpen ? buttons(for: approval.actionIds) : [],
       note: decisionNote(state, kind: .approval),
       path: path,
       card: card,
@@ -493,11 +495,11 @@ extension RichBlockLayoutPlanner.Builder {
     let isRTL = task.hasIsRtl ? task.isRtl : (inheritedDirection ?? false)
     var state = RichBlockDecisionState(task.state)
     let expiresAt = task.hasExpiresAt && task.expiresAt > 0 ? TimeInterval(task.expiresAt) : nil
-    if state == .pending, let expiresAt, Date().timeIntervalSince1970 > expiresAt {
+    if state.isOpen, let expiresAt, Date().timeIntervalSince1970 > expiresAt {
       state = .expired
     }
     let chip: (String, RichBlockChipTone)? = switch state {
-    case .pending: nil
+    case .pending, .unspecified: nil
     case .accepted: (String(localized: "Started"), .success)
     case .declined: (String(localized: "Dismissed"), .neutral)
     case .expired: (String(localized: "Expired"), .neutral)
@@ -515,12 +517,12 @@ extension RichBlockLayoutPlanner.Builder {
       isRTL: isRTL
     )
     // The card's view replans the row when it lapses; the plan cache drops it then too.
-    if state == .pending, let expiresAt, case var .agentCard(node) = nodes[card.decorationIndex].kind {
+    if state.isOpen, let expiresAt, case var .agentCard(node) = nodes[card.decorationIndex].kind {
       node.expiresAt = expiresAt
       nodes[card.decorationIndex].kind = .agentCard(node)
     }
     if task.hasBrief, !appendPart(task.brief, index: 0, role: .paragraph, path: path, card: card, isRTL: isRTL) { return false }
-    var actions = state == .pending ? buttons(for: task.actionIds) : []
+    var actions = state.isOpen ? buttons(for: task.actionIds) : []
     if state == .accepted, task.hasStartedPeer {
       let peer = task.startedPeer
       let effect: RichBlockAgentActionsNode.Effect? = switch peer.type {
