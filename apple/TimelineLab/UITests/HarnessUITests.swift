@@ -237,4 +237,103 @@ final class HarnessUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 1.2)
     shot("menu-closed-kb-up=\(keyboardUp)")
   }
+
+  /// Sticky avatars and the continuous bubble gradient under flings, catches and page prepends.
+  /// The video is the evidence: an avatar stays inside its group, a bubble's colour at a fixed
+  /// screen height stays constant while bubbles pass.
+  func testStickyFlings() {
+    launch()
+    shot("sticky-start")
+    // Slow held drag across a group edge, then let go without velocity.
+    drag(190, 250, 190, 450, v: 200, hold: 0.5)
+    shot("sticky-held")
+    Thread.sleep(forTimeInterval: 1)
+    // Flings toward older history, far enough to prepend pages mid-fling.
+    for (i, v) in [2000.0, 4000, 6000, 6000].enumerated() {
+      drag(190, 180, 190, 560, v: CGFloat(v))
+      Thread.sleep(forTimeInterval: 0.2)
+      shot("sticky-older-\(i)-moving")
+      Thread.sleep(forTimeInterval: 2.5)
+      shot("sticky-older-\(i)-rest")
+    }
+    // Catch a fling with a held finger, then fling back.
+    drag(190, 560, 190, 180, v: 4000)
+    Thread.sleep(forTimeInterval: 0.3)
+    drag(190, 300, 190, 305, v: 100, hold: 0.6)
+    shot("sticky-caught")
+    for i in 0 ..< 4 {
+      drag(190, 560, 190, 180, v: 6000)
+      Thread.sleep(forTimeInterval: 2.5)
+      shot("sticky-newer-\(i)-rest")
+    }
+  }
+
+  /// A tap that stops a fling, with no drag after it: the floating date pill should fade as it does
+  /// after a fling comes to rest by itself.
+  func testDatePillCatch() {
+    launch()
+    drag(190, 180, 190, 560, v: 4000)
+    Thread.sleep(forTimeInterval: 3)
+    shot("pill-rest-after-fling")
+    drag(190, 180, 190, 560, v: 4000)
+    Thread.sleep(forTimeInterval: 0.3)
+    shot("pill-moving")
+    // A short press: touch down and up, no movement, so the list's pan never begins.
+    coord(187, 380).press(forDuration: 0.05)
+    Thread.sleep(forTimeInterval: 2)
+    shot("pill-after-tap-catch")
+    Thread.sleep(forTimeInterval: 2)
+    shot("pill-after-tap-catch-4s")
+  }
+
+  /// Translation on and off keeps the newest row on the bottom edge; scrolled up, the reading row.
+  func testTranslation() {
+    launch()
+    script("Translate newest")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("tr-stored")
+    script("Toggle translation")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("tr-on")
+    script("Toggle translation")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("tr-off")
+    drag(190, 200, 190, 420, v: 400, hold: 0.3)
+    Thread.sleep(forTimeInterval: 1)
+    shot("tr-scrolled")
+    script("Toggle translation")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("tr-scrolled-on")
+    script("Toggle translation")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("tr-scrolled-off")
+  }
+
+  /// Send flights: the harness's send and ack, a composer send, and a reply send that collapses the
+  /// reply bar. The bubble flies from the composer and the list does not drop.
+  func testSendFlight() {
+    launch()
+    script("Send and ack")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("flight-script")
+    openKeyboard()
+    composer.typeText("Flight check on the SE")
+    Thread.sleep(forTimeInterval: 0.5)
+    let send = app.buttons["Up"]
+    if send.exists { send.tap() } else { print("[UITEST] no send button") }
+    Thread.sleep(forTimeInterval: 0.05)
+    shot("flight-composer-mid")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("flight-composer-end")
+    // Reply by swipe to the incoming row above, then send: the reply bar goes away with the send.
+    drag(280, 400, 150, 402, v: 700, hold: 0.1)
+    Thread.sleep(forTimeInterval: 1)
+    composer.typeText("Reply flight")
+    Thread.sleep(forTimeInterval: 0.5)
+    if send.exists { send.tap() }
+    Thread.sleep(forTimeInterval: 0.05)
+    shot("flight-reply-mid")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("flight-reply-end")
+  }
 }
