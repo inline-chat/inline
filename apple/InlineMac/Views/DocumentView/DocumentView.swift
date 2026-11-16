@@ -1035,10 +1035,11 @@ class DocumentView: NSView {
     uploadProgressSnapshot = progress
     documentState = determineDocumentState(documentInfo)
 
+    // A failed attempt is followed by a retry on the same stream; only completion ends it.
     switch progress.stage {
-    case .failed, .completed:
+    case .completed:
       clearUploadProgressBinding(resetState: false)
-    case .processing, .uploading:
+    case .processing, .uploading, .failed:
       break
     }
   }
