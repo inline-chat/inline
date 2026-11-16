@@ -238,6 +238,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         return TimelinePin(view: avatar.view, bottom: avatar.bottom, height: avatar.height, spanStart: groupStart(of: id))
       },
       spanTop: { _, view in (view as? TimelineRowView)?.bubbleTop ?? 0 },
+      // The group's last row holds its avatar: it stays placed while any of the group is in sight, as the
+      // collection view's overlay drew the avatar for any visible row of a group.
+      spanEnd: { [unowned self] id in avatarGroupEnd(of: id) },
       // The bubble gradient spans the screen, as the collection view's per-frame sync lays it.
       screen: { _, view, screen in (view as? TimelineRowView)?.followScreen(screen) }
     )
@@ -337,7 +340,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       guard let self, !menu.isActive else { return }
       onContextMenuDidEnd?()
     }
-    menuActions.loadIntegrations()
+    if !isPreview { menuActions.loadIntegrations() }
   }
 
   isolated deinit {
@@ -370,7 +373,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     super.didMoveToWindow()
     if window == nil {
       for task in historyTasks.values { task.cancel() }
-      jumpTask?.cancel()
+      // A jump still loading lands when the chat is back, as the collection view's did.
       returnToLatestTask?.cancel()
       // The menu's overlay belongs to the window and would outlive the chat.
       menu.dismissImmediately()
@@ -493,6 +496,27 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func row(_ id: ChatRowID) -> ChatRow? { snapshot?.row(for: id) }
 
+  /// The thread's parent message stands alone; when someone else wrote it, it shows their avatar and
+  /// name, as the collection view's thread layout did.
+  private static func threadParentGrouping(_ message: FullMessage) -> ChatRowGrouping {
+    let incoming = message.message.out != true && !message.message.isServiceMessage && message.senderInfo != nil
+    return ChatRowGrouping(isFirstInGroup: true, isLastInGroup: true, showsSenderName: incoming, showsAvatar: incoming)
+  }
+
+  /// The last row of the avatar group a message row belongs to, when that is another row.
+  private func avatarGroupEnd(of id: ChatRowID) -> ChatRowID? {
+    guard let snapshot, var index = snapshot.index(of: id),
+          case let .message(_, grouping) = snapshot.rows[index].content, grouping.showsAvatar, !grouping.isLastInGroup
+    else { return nil }
+    let rows = snapshot.rows
+    while index + 1 < rows.count, case let .message(_, grouping) = rows[index].content, !grouping.isLastInGroup,
+          case .message = rows[index + 1].content
+    {
+      index += 1
+    }
+    return rows[index].id
+  }
+
   /// The first row of the sender group a message row ends.
   private func groupStart(of id: ChatRowID) -> ChatRowID {
     guard let snapshot, var index = snapshot.index(of: id) else { return id }
@@ -517,12 +541,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case let .message(message, grouping):
         return messageHeight(row, message, grouping, isThreadAnchor: false, width: width)
       case let .threadParent(message):
-        return messageHeight(row, message, ChatRowGrouping(), isThreadAnchor: true, width: width)
+        return messageHeight(row, message, Self.threadParentGrouping(message), isThreadAnchor: true, width: width)
       case .daySeparator: return 44
       case .unreadLine: return 34
       case .statusNotice: return 30
       case .collapsedHistory: return 44
-      case .threadRepliesHeader: return 34
+      // The collection view showed the parent alone, without a header.
+      case .threadRepliesHeader: return 0
     }
   }
 
@@ -620,7 +645,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case let .message(message, grouping):
         configureMessage(view, row, message, grouping, isThreadAnchor: false, width: width, timing: timing)
       case let .threadParent(message):
-        configureMessage(view, row, message, ChatRowGrouping(), isThreadAnchor: true, width: width, timing: timing)
+        configureMessage(
+          view, row, message, Self.threadParentGrouping(message), isThreadAnchor: true, width: width, timing: timing
+        )
       case let .daySeparator(dayStart):
         // As the collection view's day badges: a tap puts the day's first message at the top.
         view.showLabel(Self.dayTitle(dayStart), style: .pill, theme: theme) { [weak self] in
@@ -644,7 +671,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
           }
         }
       case .threadRepliesHeader:
-        view.showLabel("Replies", style: .plain, theme: theme)
+        view.showLabel("", style: .plain, theme: theme)
     }
   }
 
@@ -688,7 +715,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// The actions button of a message row, shown when the user gave the hold another action; it opens
   /// the menu a hold would. Never on the thread's parent, as the collection view's cells.
   private func messageActions(for row: ChatRow) -> TimelineRowView.MessageActions? {
-    guard case let .message(message, _) = row.content, TimelineMessageMenu.customHoldAction(for: message) != nil
+    guard !isPreview, case let .message(message, _) = row.content, TimelineMessageMenu.customHoldAction(for: message) != nil
     else { return nil }
     let id = row.id
     if menu.usesSystemMenu {
@@ -724,7 +751,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     if calendar.isDateInToday(day) { return "Today" }
     if calendar.isDateInYesterday(day) { return "Yesterday" }
     let sameYear = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
-    return day.formatted(sameYear ? .dateTime.month(.wide).day() : .dateTime.month(.wide).day().year())
+    // "Mon, November 16", as the collection view's sections read.
+    let format = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.wide).day()
+    return day.formatted(sameYear ? format : format.year())
   }
 
   /// Theme, text size or direction changed: every row is planned again where it stands.
@@ -926,6 +955,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     switch snapshot.reason {
       case .liveAdd, .liveUpdate, .delete, .sendAck:
         timing = Self.rowTiming
+        // Resting just above the newest message (within 44 pt), a new or growing message brings the list
+        // to it, as the collection view followed from there.
+        if snapshot.reason == .liveAdd || snapshot.reason == .liveUpdate, !list.isTracking,
+           distanceFromBottom > 0.5, distanceFromBottom <= 44, viewModel.historyCoverage.isAtCertifiedLiveEnd
+        {
+          scroll = .latest
+        }
       case .localSend:
         timing = Self.rowTiming
         scroll = .latest

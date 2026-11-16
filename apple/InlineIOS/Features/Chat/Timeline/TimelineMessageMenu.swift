@@ -64,6 +64,8 @@ final class TimelineMessageMenu: NSObject {
   var navigationInset: () -> CGFloat = { 0 }
   /// A reaction picked from UIKit's menu: the menu closes once the row shows it, or after a while.
   private var pendingSystemReaction: (id: ChatRowID, timeout: DispatchWorkItem)?
+  /// A reaction picked from the custom menu: it closes once the row shows it, or after 0.25 s.
+  private var pendingCustomReaction: ChatRowID?
 
   /// The menu is about to show; the container notes whether the composer has focus.
   var onWillDisplay: (() -> Void)?
@@ -429,10 +431,17 @@ final class TimelineMessageMenu: NSObject {
           }
       )
     )
+    // While the bubble flies back onto its row, the row keeps its shape (`liveSourceID`).
+    controller.onWillDismiss = { [weak self, weak controller] in
+      guard let self, self.controller === controller else { return }
+      pendingCustomReaction = nil
+      liveSourceID = id
+    }
     controller.onDidDismiss = { [weak self, weak controller] in
       MessageContextMenuRollout.didDismiss()
       guard let self, self.controller === controller else { return }
       self.controller = nil
+      releaseLiveSource()
       onDidEnd?()
     }
     self.controller = controller
@@ -470,10 +479,11 @@ final class TimelineMessageMenu: NSObject {
       toggle()
       return
     }
+    pendingCustomReaction = controller == nil ? nil : sourceID
     toggle()
     guard let controller else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak controller] in
-      guard let self, let controller, self.controller === controller else { return }
+      guard let self, let controller, self.controller === controller, !controller.isDismissing else { return }
       controller.dismiss()
     }
   }
@@ -484,6 +494,14 @@ final class TimelineMessageMenu: NSObject {
 extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   /// Rows changed: a row that now shows the reaction picked from UIKit's menu closes it.
   func rowsDidUpdate(_ ids: Set<ChatRowID>) {
+    if let id = pendingCustomReaction, ids.contains(id), let controller {
+      // The row has the reaction: the bubble flies back onto its new shape now.
+      pendingCustomReaction = nil
+      DispatchQueue.main.async { [weak controller] in
+        guard let controller, !controller.isDismissing else { return }
+        controller.dismiss()
+      }
+    }
     guard let pending = pendingSystemReaction, ids.contains(pending.id) else { return }
     pending.timeout.cancel()
     pendingSystemReaction = nil
