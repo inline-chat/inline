@@ -1089,6 +1089,7 @@ class MessageListAppKit: NSViewController {
     if scrollView.contentInsets.top != topInset {
       log.trace("Adjusting view's insets")
 
+      parkInitialClipAtBottomIfNeeded()
       let wasAtBottom = canFollowBottom && viewport.distanceFromBottom <= Self.exactBottomTolerance
       let topAnchor = captureTopAnchor()
       suppressResizeScrollMaintenance = true
@@ -1124,6 +1125,22 @@ class MessageListAppKit: NSViewController {
         self?.suppressResizeScrollMaintenance = false
       }
     }
+  }
+
+  private var didParkInitialClip = false
+
+  /// The first insets change scrolls the clip, and the table configures the rows under it. Until
+  /// then the clip sits at the top of the loaded window, which a chat almost never opens on, so a
+  /// long chat configured a screen of rows only to replace them when it scrolled to the bottom.
+  /// The initial placement still decides the final position; this only moves the first rows the
+  /// table builds to where that placement usually lands.
+  private func parkInitialClipAtBottomIfNeeded() {
+    guard needsInitialScroll, !didParkInitialClip else { return }
+    didParkInitialClip = true
+    guard initialTargetMessageId == nil, readingHold == nil else { return }
+    beginProgrammaticScroll()
+    tableView.scrollToBottomWithInset(cancel: true)
+    endProgrammaticScroll()
   }
 
   private struct TopAnchorSnapshot {
