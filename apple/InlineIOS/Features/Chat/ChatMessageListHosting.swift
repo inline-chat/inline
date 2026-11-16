@@ -33,6 +33,16 @@ protocol ChatMessageListHosting: UIView {
   func composeAreaDidChange(bottomInset: CGFloat, timing: TimelineTiming, isInteractive: Bool)
 }
 
+/// A message list that opens the chat's media gallery: every photo and video of the chat, paged from
+/// cache and server. Media views inside a row find it among their superviews.
+@MainActor
+protocol ChatMediaGalleryPresenting: UIView {
+  /// Opens the gallery at `message`. False when it can't open now.
+  func presentMediaGallery(for message: FullMessage, sourceImage: UIImage?) -> Bool
+}
+
+extension MessagesCollectionView: ChatMediaGalleryPresenting {}
+
 extension ChatMessageListHosting {
   func scrollToMessageWhenAvailable(_ messageID: Int64) {
     scrollToMessageWhenAvailable(messageID, requiresExactMessage: false)

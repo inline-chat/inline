@@ -103,6 +103,7 @@ public class ChatContainerView: UIView {
       collapsedMaxId: collapsedMaxId, theme: theme
     )
     timeline.sendAnimationCoordinator = sendAnimationCoordinator
+    timeline.isKeyboardVisible = { [weak self] in (self?.keyboardCoordinator?.height ?? 0) > 0 }
     // As for the collection view: the composer gets its focus back after the menu, and a tap that
     // puts the keyboard away waits while it is open.
     timeline.onContextMenuWillDisplay = { [weak self] in
@@ -390,6 +391,8 @@ public class ChatContainerView: UIView {
 
   override public func layoutSubviews() {
     super.layoutSubviews()
+    // A new size (a rotation) can follow the keyboard's last notification: the keyboard is measured again.
+    keyboardCoordinator?.viewDidLayout()
     reportComposeBottomOffsetIfNeeded()
     if usesTimeline, !isApplyingKeyboard {
       // The composer grew or the size changed: the list follows inside whatever animation this
@@ -481,6 +484,13 @@ public class ChatContainerView: UIView {
     lastRequestedFocus = (messageID, requestRevision, requiresExactMessage)
     messageList.scrollToMessageWhenAvailable(messageID, requiresExactMessage: requiresExactMessage)
   }
+
+  #if DEBUG
+  /// The harness's stand-in for a DM peer's focus status: the line under the newest message.
+  func debugSetStatusNotice(_ text: String?) {
+    (messageList as? TimelineMessagesView)?.viewModel.rowFeed.setStatusNotice(text)
+  }
+  #endif
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     guard self.collapsedMaxId != collapsedMaxId else { return }
@@ -1289,7 +1299,7 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
     // change the list's insets and cancel the scroll started by the button.
     var touchedView = touch.view
     while let view = touchedView {
-      if view is DateSeparatorView {
+      if view is DateSeparatorView || view is TimelineDatePill {
         return false
       }
       if let cell = view as? MessageCollectionViewCell,

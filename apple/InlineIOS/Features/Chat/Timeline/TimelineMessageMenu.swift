@@ -52,6 +52,11 @@ final class TimelineMessageMenu: NSObject {
     return implementation == .system || MessageContextMenuRollout.prefersSystemMenuNow
   }
 
+  /// The keyboard is up, so the menu draws in its window over it.
+  var isKeyboardVisible: () -> Bool = { false }
+  /// A reaction picked from UIKit's menu: the menu closes once the row shows it, or after a while.
+  private var pendingSystemReaction: (id: ChatRowID, timeout: DispatchWorkItem)?
+
   /// The menu is about to show; the container notes whether the composer has focus.
   var onWillDisplay: (() -> Void)?
   /// The menu is gone; the container gives the composer its focus back.
@@ -284,10 +289,8 @@ final class TimelineMessageMenu: NSObject {
     if message.message.isServiceMessage { return actions.serviceMenu(for: message.message) }
     return actions.actionsMenu(
       for: message,
-      photo: { [weak self] in (self?.list?.view(for: id) as? TimelineRowView)?.shownMessageView?.contextMenuPhotoImage },
-      openDocument: { [weak self] in
-        (self?.list?.view(for: id) as? TimelineRowView)?.shownMessageView?.openContextMenuDocument()
-      },
+      photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView) },
+      openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) },
       includeReactionsAction: true
     )
   }
@@ -404,8 +407,8 @@ final class TimelineMessageMenu: NSObject {
           if message.isServiceMessage { return actions.serviceMenu(for: message) }
           return actions.actionsMenu(
             for: fullMessage,
-            photo: { [weak rowView] in rowView?.shownMessageView?.contextMenuPhotoImage },
-            openDocument: { [weak rowView] in rowView?.shownMessageView?.openContextMenuDocument() },
+            photo: { [weak rowView] in Self.photo(in: rowView) },
+            openDocument: { [weak rowView] in Self.openDocument(in: rowView) },
             includesTextCopy: !hasTextSelection,
             offersSelectText: selectableText == nil
           )
@@ -429,8 +432,9 @@ final class TimelineMessageMenu: NSObject {
     // With the keyboard up the menu draws inside the keyboard's window, over the keyboard, and the
     // composer keeps focus, as in Telegram. Without that window it puts the keyboard away, and the
     // container brings it back when the menu closes.
-    let keyboardWindow = KeyboardHostWindow.find(covering: window)
-    if keyboardWindow == nil { window.endEditing(true) }
+    let keyboardVisible = isKeyboardVisible()
+    let keyboardWindow = keyboardVisible ? KeyboardHostWindow.find(covering: window) : nil
+    if keyboardVisible, keyboardWindow == nil { window.endEditing(true) }
     controller.present(from: window, overKeyboardIn: keyboardWindow)
     MessageContextMenuRollout.didPresent(
       overKeyboard: controller.isOverKeyboard,
@@ -446,6 +450,17 @@ final class TimelineMessageMenu: NSObject {
   /// the reacted row instead of the reaction popping in after it lands.
   func react(_ toggle: () -> Void) {
     toggle()
+    if systemPresented, let id = system?.id {
+      // UIKit's menu returns its preview to the row once it shows the reaction (`rowsDidUpdate`).
+      pendingSystemReaction?.timeout.cancel()
+      let timeout = DispatchWorkItem { [weak self] in
+        self?.pendingSystemReaction = nil
+        self?.systemInteraction?.dismissMenu()
+      }
+      pendingSystemReaction = (id, timeout)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
+      return
+    }
     guard let controller else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak controller] in
       guard let self, let controller, self.controller === controller else { return }
@@ -457,6 +472,31 @@ final class TimelineMessageMenu: NSObject {
 // MARK: - UIKit's menu
 
 extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
+  /// Rows changed: a row that now shows the reaction picked from UIKit's menu closes it.
+  func rowsDidUpdate(_ ids: Set<ChatRowID>) {
+    guard let pending = pendingSystemReaction, ids.contains(pending.id) else { return }
+    pending.timeout.cancel()
+    pendingSystemReaction = nil
+    DispatchQueue.main.async { [weak self] in self?.systemInteraction?.dismissMenu() }
+  }
+
+  /// UIKit's menu stays below the navigation bar and off the screen's sides, as the collection view
+  /// asked for it (UIKit's private style hook).
+  @objc func _contextMenuInteraction(
+    _: UIContextMenuInteraction, styleForMenuWithConfiguration _: UIContextMenuConfiguration
+  ) -> Any? {
+    guard let list, let window = list.window else { return nil }
+    let barHeight = list.navigationBarHeight()
+    let styleClass = NSClassFromString("_UIContextMenuStyle") as? NSObject.Type
+    guard let style = styleClass?.perform(NSSelectorFromString("defaultStyle"))?.takeUnretainedValue() as? NSObject
+    else { return nil }
+    style.setValue(
+      UIEdgeInsets(top: window.safeAreaInsets.top + barHeight, left: 30, bottom: 0, right: 30),
+      forKey: "preferredEdgeInsets"
+    )
+    return style
+  }
+
   /// The interaction is on the list only while the system menu is in use, so it never competes
   /// with the custom menu's hold.
   @objc private func updateSystemInteraction() {
@@ -581,6 +621,8 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   ) {
     (configuration.identifier as? ContextMenuIdentifierUIView)?.removeFromSuperview()
     guard let system, system.configuration === configuration else { return }
+    pendingSystemReaction?.timeout.cancel()
+    pendingSystemReaction = nil
     let id = system.id
     let presented = systemPresented
     let finish = { [weak self] in
@@ -640,5 +682,19 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   private static func unmasked(_ preview: UITargetedPreview) -> UITargetedPreview {
     preview.setValue(true, forKey: "prefersUnmaskedPlatterStyle")
     return preview
+  }
+}
+
+private extension UIView {
+  /// The navigation bar's height of the controller this view is in, or 0.
+  func navigationBarHeight() -> CGFloat {
+    var responder: UIResponder? = self
+    while let next = responder?.next {
+      if let controller = next as? UIViewController {
+        return controller.navigationController?.navigationBar.frame.height ?? 0
+      }
+      responder = next
+    }
+    return 0
   }
 }

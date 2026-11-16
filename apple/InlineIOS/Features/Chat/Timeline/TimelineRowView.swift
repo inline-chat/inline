@@ -16,6 +16,8 @@ final class TimelineRowView: UIView {
     case plain
     /// Tappable text, as the line without its rules (the collapsed-history row).
     case action
+    /// A quiet line under the newest message with a moon, as `StatusNoticeCell` draws it.
+    case notice
   }
 
   private var messageView: MessageView?
@@ -229,10 +231,25 @@ final class TimelineRowView: UIView {
 
   /// A message kind the production view does not support: the older view, pinned as its cell
   /// pins it.
+  /// What the older view was built for, so a change it can take in place reaches it in place.
+  private struct LegacyShown {
+    var message: FullMessage
+    var grouping: ChatRowGrouping
+    var isThreadAnchor: Bool
+    var width: CGFloat
+    var theme: IOSThemeSnapshot
+    var spaceId: Int64?
+  }
+
+  private var legacyShown: LegacyShown?
+
   func showLegacy(
     _ message: FullMessage, grouping: ChatRowGrouping, isThreadAnchor: Bool, width: CGFloat,
     theme: IOSThemeSnapshot, spaceId: Int64?
   ) {
+    if updateLegacyInPlace(message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId) {
+      return
+    }
     removeLegacy()
     messageView?.isHidden = true
     label?.isHidden = true
@@ -298,6 +315,50 @@ final class TimelineRowView: UIView {
       view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
     ] + constraints
     NSLayoutConstraint.activate(legacyConstraints)
+    legacyShown = LegacyShown(
+      message: message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme,
+      spaceId: spaceId
+    )
+  }
+
+  /// As the collection view's cell: the send's acknowledgement, acknowledgements, reactions (the changed
+  /// one pops) and an outgoing bubble's tail change in place and animate; anything else rebuilds.
+  private func updateLegacyInPlace(
+    _ message: FullMessage, grouping: ChatRowGrouping, isThreadAnchor: Bool, width: CGFloat,
+    theme: IOSThemeSnapshot, spaceId: Int64?
+  ) -> Bool {
+    guard let view = legacyView, let shown = legacyShown, !view.isHidden, shown.message.id == message.id,
+          shown.isThreadAnchor == isThreadAnchor, abs(shown.width - width) <= 0.5, shown.theme == theme,
+          shown.spaceId == spaceId,
+          shown.message.message.out == message.message.out
+    else { return false }
+    let current = shown.message
+    if shown.grouping == grouping {
+      if current == message {
+        // Nothing the view shows changed.
+      } else if current.isDeliveryAcknowledgementUpdate(to: message) {
+        view.updateDeliveryAcknowledgement(to: message)
+      } else if current.isAcknowledgementOnlyUpdate(to: message), view.canUpdateAcknowledgementInPlace(to: message) {
+        view.updateAcknowledgement(to: message)
+      } else if current.isReactionOnlyUpdate(to: message), view.canUpdateReactionsInPlace(to: message) {
+        view.updateReactions(to: message, animatedEmoji: current.changedReactionEmoji(to: message))
+      } else {
+        return false
+      }
+    } else {
+      // Only the tail: the same message ends or stops ending a group, with no avatar or name to move.
+      var tailOnly = shown.grouping
+      tailOnly.isLastInGroup = grouping.isLastInGroup
+      let isService = message.message.isServiceMessage
+      guard current == message, tailOnly == grouping, !isService,
+            message.message.out == true || !grouping.showsAvatar
+      else { return false }
+      let outgoing = message.message.out == true
+      view.updateBubbleTail(side: grouping.isLastInGroup ? (outgoing ? .trailing : .leading) : .none, animated: true)
+    }
+    legacyShown?.message = message
+    legacyShown?.grouping = grouping
+    return true
   }
 
   @objc private func handleAvatarTap() {
@@ -334,8 +395,23 @@ final class TimelineRowView: UIView {
       // As `MessageListSeparatorCell` draws it.
       case .line, .action: label.font = .systemFont(ofSize: 12, weight: .semibold)
       case .plain: label.font = .preferredFont(forTextStyle: .caption1)
+      case .notice: label.font = .systemFont(ofSize: 12)
     }
+    label.adjustsFontForContentSizeCategory = style != .notice
     label.textColor = .secondaryLabel
+    label.accessibilityLabel = nil
+    if style == .notice {
+      let line = NSMutableAttributedString()
+      if let moon = UIImage(
+        systemName: "moon.fill", withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 10))
+      )?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal) {
+        line.append(NSAttributedString(attachment: NSTextAttachment(image: moon)))
+        line.addAttribute(.kern, value: 4, range: NSRange(location: 0, length: line.length))
+      }
+      line.append(NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 12)]))
+      label.attributedText = line
+      label.accessibilityLabel = text
+    }
     if style == .line, rules.isEmpty {
       rules = (0 ..< 2).map { _ in
         let rule = UIView()
@@ -345,9 +421,10 @@ final class TimelineRowView: UIView {
       }
     }
     for rule in rules { rule.isHidden = style != .line }
-    onLabelTap = onTap
-    label.isUserInteractionEnabled = onTap != nil
-    if onTap != nil, labelTap == nil {
+    // A pill takes its own tap; the label is hidden behind it.
+    onLabelTap = style == .pill ? nil : onTap
+    label.isUserInteractionEnabled = onLabelTap != nil
+    if onLabelTap != nil, labelTap == nil {
       let tap = UITapGestureRecognizer(target: self, action: #selector(handleLabelTap))
       label.addGestureRecognizer(tap)
       labelTap = tap
@@ -361,8 +438,10 @@ final class TimelineRowView: UIView {
       }()
       pill.isHidden = false
       pill.configure(title: text)
+      pill.onTap = onTap
     } else {
       pill?.isHidden = true
+      pill?.onTap = nil
     }
     setNeedsLayout()
   }
@@ -390,32 +469,30 @@ final class TimelineRowView: UIView {
     }
   }
 
-  private var flashOverlay: UIView?
+  static let focusHighlightFadeIn: TimeInterval = 0.18
+  static let focusHighlightHold: TimeInterval = 1.0
 
-  /// A short highlight for the row a jump landed on.
-  func flash(theme: IOSThemeSnapshot) {
-    removeFlash()
-    let overlay = UIView(frame: bounds)
-    flashOverlay = overlay
-    overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    overlay.isUserInteractionEnabled = false
-    overlay.backgroundColor = theme.primary.uiColor.withAlphaComponent(0.18)
-    overlay.alpha = 0
-    addSubview(overlay)
-    UIView.animate(withDuration: 0.18, animations: { overlay.alpha = 1 }) { _ in
-      UIView.animate(withDuration: 0.4, delay: 1.0, options: [], animations: { overlay.alpha = 0 }) { [weak self] _ in
-        overlay.removeFromSuperview()
-        if self?.flashOverlay === overlay { self?.flashOverlay = nil }
-      }
+  /// The highlight of the message a jump landed on, on its bubble (and media) as the collection view's
+  /// cell draws it: an outgoing bubble lightens, an incoming one takes the primary colour. A row shown
+  /// again while the highlight runs gets what is left of it, without the fade in.
+  func highlightBubble(outgoing: Bool, theme: IOSThemeSnapshot, hold: TimeInterval, fadeIn: Bool) {
+    let color = outgoing
+      ? theme.outgoingBubble.uiColor.lighten(by: 0.3)
+      : theme.primary.uiColor.withAlphaComponent(0.4)
+    let fade = fadeIn ? Self.focusHighlightFadeIn : 0
+    if let messageView = shownMessageView {
+      messageView.bubbleView.highlight(color: color, fadeIn: fade, hold: hold)
+    } else if let legacyView {
+      legacyView.bubbleView.highlight(color: color, fadeIn: fade, hold: hold)
+      legacyView.highlightMediaOverlay()
     }
   }
 
-  /// A row reused for another message must not carry the last one's highlight.
-  private func removeFlash() {
-    guard let overlay = flashOverlay else { return }
-    flashOverlay = nil
-    overlay.layer.removeAllAnimations()
-    overlay.removeFromSuperview()
+  /// A row reused for another message, or another row highlighted, must not carry this highlight.
+  func clearHighlight() {
+    messageView?.bubbleView.clearHighlight()
+    legacyView?.bubbleView.clearHighlight()
+    legacyView?.clearMediaHighlight()
   }
 
   func prepareForReuse() {
@@ -432,11 +509,12 @@ final class TimelineRowView: UIView {
     messageView?.onReactionsMenu = nil
     messageView?.onContentStateChange = nil
     messageView?.onRevealLineChange = nil
-    removeFlash()
+    clearHighlight()
     layer.removeAllAnimations()
   }
 
   private func removeLegacy() {
+    legacyShown = nil
     NSLayoutConstraint.deactivate(legacyConstraints)
     legacyConstraints = []
     legacyView?.removeFromSuperview()

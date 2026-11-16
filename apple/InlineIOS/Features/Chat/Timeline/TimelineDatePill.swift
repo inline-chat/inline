@@ -2,7 +2,7 @@ import UIKit
 
 /// The day badge of the timeline list, drawn like `DateSeparatorView` (which is built for the
 /// inverted collection view): a 12 pt label in a 20 pt capsule, glass while it floats over the
-/// messages, plain text inline. The floating one is tappable.
+/// messages, plain text inline. Both take a tap when given one, as every collection view badge did.
 @MainActor
 final class TimelineDatePill: UIView {
   static let height: CGFloat = 44
@@ -10,7 +10,10 @@ final class TimelineDatePill: UIView {
   private let effectView: UIVisualEffectView
   private let label = UILabel()
   private var title = ""
-  var onTap: (() -> Void)?
+  var onTap: (() -> Void)? {
+    didSet { isUserInteractionEnabled = onTap != nil }
+  }
+
   /// True while the pill should let touches through to the list behind it.
   var passesTouches: (() -> Bool)?
 
@@ -34,13 +37,10 @@ final class TimelineDatePill: UIView {
     label.textAlignment = .center
     addSubview(effectView)
     effectView.contentView.addSubview(label)
-    if floating {
-      addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
-      isAccessibilityElement = true
-      accessibilityTraits = .button
-    } else {
-      isUserInteractionEnabled = false
-    }
+    addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+    isAccessibilityElement = true
+    accessibilityTraits = .button
+    isUserInteractionEnabled = false
   }
 
   @available(*, unavailable)

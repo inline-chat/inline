@@ -21,6 +21,9 @@ import UIKit
 /// - `--timeline-harness-hold-action reply|toggleAck|...` stands in for the user's hold action
 ///   (never stored), which shows the rows' actions button.
 /// - `--timeline-harness-system-menu` stands in for VoiceOver: the list uses UIKit's menu.
+/// - `--timeline-harness-focus ID` asks for a message as the chat opens.
+/// - `--timeline-harness-receive-every MS` receives a message every MS milliseconds, so one can arrive
+///   mid-fling or mid-jump without a touch on the Script menu.
 struct TimelineHarnessRootView: View {
   static var isRequested: Bool { CommandLine.arguments.contains("--chatlist-harness") }
 
@@ -71,6 +74,7 @@ final class TimelineHarnessModel {
   var fixture: DebugChatFixture?
   var initialState: MessagesProgressiveViewModel.InitialState?
   var failure: String?
+  @ObservationIgnored var statusNotice: String?
   @ObservationIgnored let box = TimelineHarnessBox()
 
   func setUp(count: Int, opening: DebugChatFixture.Opening) async {
@@ -115,6 +119,14 @@ final class TimelineHarnessModel {
       }
       initialState = try await fixture.initialState(for: opening)
       self.fixture = fixture
+      if let every = TimelineHarnessRootView.argument("--timeline-harness-receive-every").flatMap(Int.init) {
+        Task { @MainActor [weak fixture] in
+          while let fixture {
+            try? await Task.sleep(for: .milliseconds(every))
+            try? fixture.receive()
+          }
+        }
+      }
     } catch {
       failure = "Harness failed: \(error)"
     }
@@ -189,6 +201,24 @@ private struct TimelineHarnessScreen: View {
           Button("Jump far up") {
             model.box.container?.focusMessage(40, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
           }
+          // Jumps the collection view handled specially: a deleted message lands on its nearest
+          // neighbour; a cleared one asked for exactly is unavailable; one not synced yet waits at the
+          // live end for the update that brings it (Receive).
+          Button("Jump to deleted 200") {
+            model.run { try $0.delete(messageId: 200) }
+            model.box.container?.focusMessage(200, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
+          }
+          Button("Jump exact to 100") {
+            model.box.container?.focusMessage(100, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: true)
+          }
+          Button("Jump to next incoming") {
+            guard let id = model.fixture?.upcomingMessageId else { return }
+            model.box.container?.focusMessage(id, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
+          }
+          Button("Toggle status notice") {
+            model.statusNotice = model.statusNotice == nil ? "Dana has notifications silenced" : nil
+            model.box.container?.debugSetStatusNotice(model.statusNotice)
+          }
           // VoiceOver stand-ins (the simulator cannot drive VoiceOver); results go to standard output.
           ForEach(["older", "newer", "dump", "focusTop", "focusBottom"], id: \.self) { action in
             Button("VoiceOver \(action)") {
@@ -218,6 +248,10 @@ private struct TimelineHarnessChat: UIViewRepresentable {
       usesTimeline: !CommandLine.arguments.contains("--timeline-harness-collection")
     )
     box.container = view
+    // A focus asked for as the chat opens, as a notification or search result opens it.
+    if let id = TimelineHarnessRootView.argument("--timeline-harness-focus").flatMap(Int64.init) {
+      view.focusMessage(id, requestRevision: 1, requiresExactMessage: false)
+    }
     return view
   }
 

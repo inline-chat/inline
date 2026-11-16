@@ -15,7 +15,9 @@ import UIKit
 /// exactly as the collection view's cell plans it. The container owns the keyboard and the composer
 /// and reports one compose area; this view turns it into the list's bottom inset in the same call.
 @MainActor
-final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAnimationListGate {
+final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAnimationListGate,
+  ChatMediaGalleryPresenting
+{
   let viewModel: MessagesProgressiveViewModel
   let list: TimelineListView<ChatRowID>
 
@@ -26,6 +28,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   var onVisibleMessagesChanged: (([Int64]?) -> Void)?
+  /// The container's keyboard is up; the message menu draws over it only then.
+  var isKeyboardVisible: () -> Bool = { false } {
+    didSet { menu.isKeyboardVisible = isKeyboardVisible }
+  }
 
   private let peer: Peer
   private let chatId: Int64?
@@ -73,11 +79,17 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var holdsComposeInsetForSend = false
   private var composeInsetHoldTask: Task<Void, Never>?
   private var pinnedHeaderHeight: CGFloat = 0
+  /// The chat opened at the unread line or a saved place and the reader hasn't moved since: a pinned
+  /// header that appears later keeps that place the same distance below it, as the collection view did.
+  private var holdsOpeningPlace = false
   private var lastNavigationInset: CGFloat = 0
   private static let bottomPadding: CGFloat = 12
 
   // History, jumps, read state
   private var loadingEdges: Set<TimelineEdge> = []
+  /// Edges whose last page failed or brought nothing: the list asks again after the reader's next drag,
+  /// not on every layout pass near the edge, as the collection view's pagination waited for a gesture.
+  private var blockedEdges: Set<TimelineEdge> = []
   private var historyTasks: [TimelineEdge: Task<Void, Never>] = [:]
   /// A trim that waits for the scroll to end (`trimWindow(keeping:)`).
   private var pendingTrimEdge: TimelineEdge?
@@ -85,8 +97,17 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var reportedPlace: (atBottom: Bool, messageId: Int64?)?
   private var jumpTask: Task<Void, Never>?
   private var returnToLatestTask: Task<Void, Never>?
-  private var pendingFocusMessageId: Int64?
+  /// A drag during a return to latest: its fetch finishes, but it no longer moves the list.
+  private var returnToLatestInterrupted = false
+  private var returnToLatestGeneration = 0
+  private var pendingFocus: PendingFocus?
+  /// Bumped by every new focus or cancel, so a highlight still waiting for its jump to land is dropped.
+  private var focusRevision = 0
+  /// The message a jump highlighted and when its highlight ends, so a row shown again gets the rest.
+  private var focusHighlight: (messageId: Int64, endsAt: CFTimeInterval)?
   private var lastReadCandidate: Int64 = 0
+  /// The coverage the last read was sent under; a new window reads its messages again.
+  private var lastReadCoverage: MessageHistoryCoverageProjection?
   private var readFrontier: Int64 = 0
   private var unreadState: ChatActivityNavigator.State = .empty
   private var affordance = MessagesCollectionView.ScrollAffordanceState()
@@ -112,6 +133,18 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var unreadFetchConnection: AnyCancellable?
   private var unreadFetchSpinner: UIActivityIndicatorView?
 
+  /// A message the list was asked to show (a reply, the pinned header, search, a notification).
+  private struct PendingFocus {
+    var messageId: Int64
+    /// Only this message will do: no nearby one when it is gone.
+    var requiresExact: Bool
+    /// Asked for before the list was on screen: it is placed without motion, as the chat opens.
+    var animated: Bool
+    /// A message newer than the synced history: the list stays at the live end until an update
+    /// brings it.
+    var awaitsArrival = false
+  }
+
   private struct Plan {
     var revision: UInt64
     var environment: UInt64
@@ -131,10 +164,20 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   #endif
 
   /// Rows changing in place move like `MessageMotion.standard` (a critically damped 0.27 s spring).
-  private static let rowTiming = TimelineTiming.spring(mass: 1, stiffness: 541.5, damping: 46.54, duration: 0.4)
+  /// With Reduce Motion they change at once, as the collection view skipped its animated updates.
+  private static var rowTiming: TimelineTiming {
+    UIAccessibility.isReduceMotionEnabled
+      ? .none
+      : .spring(mass: 1, stiffness: 541.5, damping: 46.54, duration: 0.4)
+  }
+
   /// A jump beyond the placed rows: Telegram's jump curve, UIKit's critically damped scroll-to-top
-  /// spring played over 1.15 s (response 0.43).
-  private static let jumpTiming = TimelineTiming.spring(mass: 1, stiffness: 212.3, damping: 29.14, duration: 1.15)
+  /// spring played over 1.15 s (response 0.43). With Reduce Motion the list goes there at once.
+  private static var jumpTiming: TimelineTiming {
+    UIAccessibility.isReduceMotionEnabled
+      ? .none
+      : .spring(mass: 1, stiffness: 212.3, damping: 29.14, duration: 1.15)
+  }
 
   init(
     peer: Peer, chatId: Int64?, spaceId: Int64?, initialState: MessagesProgressiveViewModel.InitialState?,
@@ -184,6 +227,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     list.onDemand = { [weak self] edges in edges.forEach { self?.loadHistory($0) } }
     list.onLayout = { [weak self] _ in self?.layoutChanged() }
     list.onScrollEnded = { [weak self] in self?.scrollEnded() }
+    list.onDragBegan = { [weak self] in self?.dragBegan() }
     list.onScrollToTop = { [weak self] in self?.statusBarTapped() }
     list.accessibilityPageDescription = { [weak self] _ in self?.accessibilityPageDescription() }
     addSubview(list)
@@ -193,6 +237,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     datePill.passesTouches = { [weak self] in self.map { $0.list.isTracking || $0.list.isDecelerating } ?? false }
     addSubview(datePill)
 
+    observeStatusNotice()
     viewModel.rowFeed.isPublishing = true
     viewModel.rowFeed.updates.sink { [weak self] update in self?.apply(update) }.store(in: &cancellables)
     TranslationState.shared.subject.sink { [weak self] peer, enabled in
@@ -246,8 +291,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       guard let self else { return toggle() }
       menu.react(toggle)
     }
-    // Over the open menu's own window, so the sheet shows above it.
-    menuActions.emojiSheetOverWindow = { [weak self] in self?.menu.controller?.moveToOwnWindow() }
+    // Over the open menu's own window, so the sheet shows above it; over UIKit's menu, the list's window.
+    menuActions.emojiSheetOverWindow = { [weak self] in
+      guard let self else { return nil }
+      return menu.controller?.moveToOwnWindow() ?? (menu.isActive ? window : nil)
+    }
     menuActions.onEmojiSheetDismissed = { [weak self] in
       guard let self, !menu.isActive else { return }
       onContextMenuDidEnd?()
@@ -296,6 +344,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       probe = nil
       #endif
     } else {
+      // Back on screen: what it shows is read again, as the collection view's did.
+      lastReadCandidate = 0
       setNeedsLayout()
       #if DEBUG
       if TimelineProbe.isRequested, probe == nil { probe = TimelineProbe(list: list, host: self) }
@@ -373,9 +423,22 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   func updatePinnedHeaderHeight(_ height: CGFloat) {
-    guard height != pinnedHeaderHeight else { return }
+    guard abs(height - pinnedHeaderHeight) > 0.5 else { return }
     pinnedHeaderHeight = height
-    applyInsets(UIView.inheritedAnimationDuration > 0 ? Self.rowTiming : .none)
+    guard holdsOpeningPlace, hasOpened, !list.layout.isAtBottom, let anchor = topRowPlace() else {
+      applyInsets(UIView.inheritedAnimationDuration > 0 ? Self.rowTiming : .none)
+      return
+    }
+    applyInsets(.none)
+    list.apply(TimelineTransaction(scroll: .to(anchor.id, .top(anchor.offset))))
+  }
+
+  /// The topmost row on screen and how far its top sits below the usable top (negative when cut off).
+  private func topRowPlace() -> (id: ChatRowID, offset: CGFloat)? {
+    let layout = list.layout
+    let top = layout.viewport.usableTop
+    guard let placement = layout.placements.first(where: { $0.maxY > top + 0.5 }) else { return nil }
+    return (placement.id, placement.y - top)
   }
 
   // The container reports the whole compose area; these older, partial reports are not needed.
@@ -503,6 +566,14 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         view.replyMessage = nil
       }
       view.messageActions = messageActions(for: row)
+      if case let .message(message, _) = row.content,
+         let remaining = focusHighlightRemaining(for: message.message.messageId)
+      {
+        view.highlightBubble(
+          outgoing: message.message.out == true, theme: theme,
+          hold: max(0, remaining - TimelineRowView.focusHighlightFadeIn), fadeIn: false
+        )
+      }
     }
     switch row.content {
       case let .message(message, grouping):
@@ -510,11 +581,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case let .threadParent(message):
         configureMessage(view, row, message, ChatRowGrouping(), isThreadAnchor: true, width: width, timing: timing)
       case let .daySeparator(dayStart):
-        view.showLabel(Self.dayTitle(dayStart), style: .pill, theme: theme)
+        // As the collection view's day badges: a tap puts the day's first message at the top.
+        view.showLabel(Self.dayTitle(dayStart), style: .pill, theme: theme) { [weak self] in self?.jumpToDay(dayStart) }
       case .unreadLine:
         view.showLabel("Unread messages", style: .line, theme: theme)
       case let .statusNotice(text):
-        view.showLabel(text, style: .plain, theme: theme)
+        view.showLabel(text, style: .notice, theme: theme)
       case .collapsedHistory:
         // As the collection view: tapping brings the hidden history back.
         view.showLabel("Cleared", style: .action, theme: theme) { [weak self] in
@@ -547,6 +619,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       view.showLegacy(
         message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId
       )
+      // As the collection view's cell wired the older view: photos open the gallery, and a double tap
+      // set to the reactions menu opens the emoji sheet.
+      view.shownLegacyView?.onPhotoTap = { [weak self] message, _, image, url in
+        self?.presentPhoto(message, image: image, url: url)
+      }
+      view.shownLegacyView?.onReactionsMenu = { [weak self] message in self?.menuActions.showReactionEmojiPicker(for: message) }
       return
     }
     let messageView = view.showMessage()
@@ -727,6 +805,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     self.snapshot = snapshot
     rebuildDayRows()
     var scroll = TimelineScroll<ChatRowID>.latest
+    // A focus asked for as the chat opened wins over the opening place, placed without motion. Only its
+    // own message: a nearby one stands in only after the window around it loaded (`apply`).
+    if let focus = resolveFocus(in: snapshot, exactOnly: true) {
+      list.apply(TimelineTransaction(rows: snapshot.ids, coverage: coverage(snapshot), scroll: .to(focus.row, .center)))
+      focusResolved(focus, opening: true)
+      readPass(force: true)
+      warmMedia()
+      offerForTranslation(snapshot.ids)
+      return
+    }
     switch openAnchor {
       case .latest:
         break
@@ -739,6 +827,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         }
     }
     list.apply(TimelineTransaction(rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll))
+    if case .to = scroll, !list.layout.isAtBottom { holdsOpeningPlace = true }
     readPass(force: true)
     warmMedia()
     offerForTranslation(snapshot.ids)
@@ -756,10 +845,18 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     // Read before the rows on screen leave with the old snapshot.
     let shownMessageId = messageIdOnScreen()
+    let previous = self.snapshot
     let snapshot = update.snapshot
     self.snapshot = snapshot
     rebuildDayRows()
     let diff = update.diff
+    // An edit that extends a placed row's text streams: the pacer reveals it over the next frames and
+    // keeps the time hidden until edits stop, as the collection view feeds it. Before the row is planned.
+    for change in diff.updates where list.layout.placement(for: change.id) != nil {
+      guard let new = snapshot.row(for: change.id)?.content.message,
+            let old = previous?.row(for: change.id)?.content.message else { continue }
+      MessageStreamPacer.shared.messageChanged(new.id, from: old.displayText, to: new.displayText)
+    }
     for change in diff.removals {
       plans[change.id] = nil
       legacyHeights[change.id] = nil
@@ -771,18 +868,47 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     var timing = TimelineTiming.none
     var scroll = TimelineScroll<ChatRowID>.preserve
     var towards: TimelineEdge?
+    var landed: (row: ChatRowID, messageId: Int64, exact: Bool)?
     switch snapshot.reason {
       case .liveAdd, .liveUpdate, .delete, .sendAck:
         timing = Self.rowTiming
+        // A focused message newer than the synced history arrived.
+        if pendingFocus?.awaitsArrival == true, let focus = resolveFocus(in: snapshot) {
+          landed = focus
+          scroll = .to(focus.row, .center)
+        }
       case .localSend:
         timing = Self.rowTiming
         scroll = .latest
+        holdsOpeningPlace = false
         ChatReadingPlaceStore.shared.clear(for: peer)
       case let .jump(target):
-        scroll = jumpScroll(for: target, in: snapshot)
-        timing = Self.jumpTiming
+        // A new window has new edges.
+        blockedEdges.removeAll()
         towards = direction(of: target, from: shownMessageId)
-      case .initialOpen, .olderPage, .newerPage, .refresh, .presentation, .trim:
+        if pendingFocus != nil, case .message = target {
+          landed = resolveFocus(in: snapshot)
+          scroll = landed.map { .to($0.row, .center) } ?? .latest
+          timing = pendingFocus?.animated == false ? .none : Self.jumpTiming
+          if landed == nil {
+            pendingFocus = nil
+            ToastManager.shared.showToast(
+              "Message unavailable", type: .error, systemImage: "exclamationmark.triangle.fill"
+            )
+          }
+        } else if case .latest = target, list.isTracking {
+          // The reader took the list during a return to latest: the new window keeps their place.
+          scroll = .preserve
+        } else {
+          scroll = jumpScroll(for: target, in: snapshot)
+          timing = Self.jumpTiming
+        }
+      case .presentation:
+        // The notice comes and goes under the newest message as rows do; a pinned list follows it.
+        if diff.insertions.contains(where: { $0.id == .statusNotice }) || diff.removals.contains(where: { $0.id == .statusNotice }) {
+          timing = Self.rowTiming
+        }
+      case .initialOpen, .olderPage, .newerPage, .refresh, .trim:
         break
     }
     // The sent row and the composer's shrink move as one.
@@ -792,8 +918,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       bottomInset: releasedInset.map { $0 + Self.bottomPadding }, changed: changed, timing: timing,
       towards: towards
     ))
-    if !diff.insertions.isEmpty { beginSendFlights(diff.insertions.map(\.id)) }
-    if case .jump = snapshot.reason { highlightPendingFocus() }
+    let inserted = diff.insertions.map(\.id)
+    if !inserted.isEmpty { beginSendFlights(inserted) }
+    retargetSendFlights(excluding: Set(inserted))
+    if let landed { focusResolved(landed, opening: false) }
+    menu.rowsDidUpdate(changed)
     viewModel.ensureThreadAnchorCached()
     readPass(force: true)
     warmMedia()
@@ -833,7 +962,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let destination: Int64
     switch target {
       case .latest: return .newer
-      case let .message(id): destination = pendingFocusMessageId ?? id
+      case let .message(id): destination = pendingFocus?.messageId ?? id
       case let .unreadLine(boundary): destination = boundary
     }
     guard let shown else { return nil }
@@ -841,11 +970,6 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   private func jumpScroll(for target: ChatRowJumpTarget, in snapshot: ChatRowSnapshot) -> TimelineScroll<ChatRowID> {
-    if let messageId = pendingFocusMessageId,
-       let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == messageId })
-    {
-      return .to(row.id, .center)
-    }
     switch target {
       case .latest:
         return .latest
@@ -945,7 +1069,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   // MARK: - History
 
   private func loadHistory(_ edge: TimelineEdge) {
-    guard !loadingEdges.contains(edge), window != nil else { return }
+    guard !loadingEdges.contains(edge), !blockedEdges.contains(edge), window != nil else { return }
     loadingEdges.insert(edge)
     historyTasks[edge] = Task { @MainActor [weak self] in
       guard let self else { return }
@@ -962,13 +1086,19 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
           let outcome = edge == .older
             ? try await MessageHistoryRepairCoordinator.shared.loadOlder(peer: peer, beforeID: boundary)
             : try await MessageHistoryRepairCoordinator.shared.loadNewer(peer: peer, afterID: boundary)
-          if outcome == .empty { return }
+          if outcome == .empty {
+            blockedEdges.insert(edge)
+            return
+          }
         } catch {
+          blockedEdges.insert(edge)
           return
         }
       }
       if await viewModel.loadBatchAsync(at: direction, allowUnavailableLocal: !local) {
         trimWindow(keeping: edge)
+      } else {
+        blockedEdges.insert(edge)
       }
     }
   }
@@ -1001,38 +1131,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// A new row the composer prepared a flight for: its bubble lands where the row settles, and the
   /// row shows once it has.
   private func beginSendFlights(_ inserted: [ChatRowID]) {
-    guard let coordinator = sendAnimationCoordinator, let window else { return }
+    guard let coordinator = sendAnimationCoordinator else { return }
     for id in inserted {
       guard case let .message(message, _)? = row(id)?.content,
             let identity = coordinator.pendingIdentity(for: message),
             !coordinator.isAnimating(identity: identity)
       else { continue }
-      guard let rowView = list.view(for: id) as? TimelineRowView, let messageView = rowView.shownMessageView,
-            let frames = messageView.sendAnimationTargetFrames(),
-            let snapshot = messageView.sendAnimationBubbleSnapshot()
-      else {
+      guard let (target, rowView) = flightTarget(for: id, message: message, identity: identity) else {
         coordinator.cancel(identity: identity)
         continue
       }
-      // The row and the list are at their settled places in the model; the motion is additive tracks.
-      let bubbleFrame = messageView.convert(frames.bubble, to: window)
-      let textFrame = messageView.convert(frames.text, to: window)
-      let baseline = messageView.convert(CGPoint(x: 0, y: frames.firstBaseline), to: window).y
-      guard bubbleFrame.isFiniteAndVisible, textFrame.isFiniteAndVisible, baseline.isFinite else {
-        coordinator.cancel(identity: identity)
-        continue
-      }
-      let target = SendMessageAnimationTarget(
-        identity: identity,
-        messageStableId: message.id,
-        bubbleFrameInWindow: bubbleFrame,
-        textFrameInWindow: textFrame,
-        bubbleSnapshotView: snapshot,
-        textFrameInBubble: frames.text.offsetBy(dx: -frames.bubble.minX, dy: -frames.bubble.minY),
-        textFirstBaselineYInWindow: baseline,
-        textFirstBaselineYInBubble: frames.firstBaseline - frames.bubble.minY,
-        bubbleTailSide: message.message.out == true ? .trailing : .leading
-      )
       flightTargets.insert(id)
       rowView.isSendTargetHidden = true
       let began = SendMessageAnimationActions.performWithAnimationsEnabled(reason: "timeline-begin-flight") {
@@ -1045,6 +1153,52 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
   }
 
+  /// Flights already in the air land where their rows are now: a second send or a message arriving
+  /// mid-flight moves the row, as the collection view retargeted them.
+  private func retargetSendFlights(excluding begun: Set<ChatRowID>) {
+    guard let coordinator = sendAnimationCoordinator, !flightTargets.isEmpty else { return }
+    for (stableId, identity) in coordinator.activeAnimatingIdentitiesByStableMessageId() {
+      let id = ChatRowID.message(stableId)
+      guard flightTargets.contains(id), !begun.contains(id) else { continue }
+      guard case let .message(message, _)? = row(id)?.content,
+            let (target, _) = flightTarget(for: id, message: message, identity: identity)
+      else {
+        endFlight(id)
+        coordinator.cancel(identity: identity)
+        continue
+      }
+      let duration = coordinator.retargetDuration(for: identity) ?? SendMessageAnimationTiming.duration
+      coordinator.retargetIfPossible(target: target, duration: duration) { [weak self] _ in self?.endFlight(id) }
+    }
+  }
+
+  /// Where a sent row's bubble and text settle, in window coordinates. The row and the list are at their
+  /// settled places in the model; the motion on screen is additive tracks.
+  private func flightTarget(
+    for id: ChatRowID, message: FullMessage, identity: SendMessageAnimationIdentity
+  ) -> (SendMessageAnimationTarget, TimelineRowView)? {
+    guard let window, let rowView = list.view(for: id) as? TimelineRowView, let messageView = rowView.shownMessageView,
+          let frames = messageView.sendAnimationTargetFrames(),
+          let snapshot = messageView.sendAnimationBubbleSnapshot()
+    else { return nil }
+    let bubbleFrame = messageView.convert(frames.bubble, to: window)
+    let textFrame = messageView.convert(frames.text, to: window)
+    let baseline = messageView.convert(CGPoint(x: 0, y: frames.firstBaseline), to: window).y
+    guard bubbleFrame.isFiniteAndVisible, textFrame.isFiniteAndVisible, baseline.isFinite else { return nil }
+    let target = SendMessageAnimationTarget(
+      identity: identity,
+      messageStableId: message.id,
+      bubbleFrameInWindow: bubbleFrame,
+      textFrameInWindow: textFrame,
+      bubbleSnapshotView: snapshot,
+      textFrameInBubble: frames.text.offsetBy(dx: -frames.bubble.minX, dy: -frames.bubble.minY),
+      textFirstBaselineYInWindow: baseline,
+      textFirstBaselineYInBubble: frames.firstBaseline - frames.bubble.minY,
+      bubbleTailSide: message.message.out == true ? .trailing : .leading
+    )
+    return (target, rowView)
+  }
+
   private func endFlight(_ id: ChatRowID) {
     flightTargets.remove(id)
     (list.view(for: id) as? TimelineRowView)?.isSendTargetHidden = false
@@ -1053,78 +1207,218 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   func scrollToBottom() {
     endUnreadFetch(placesLine: false)
     ChatReadingPlaceStore.shared.clear(for: peer)
-    jumpTask?.cancel()
-    pendingFocusMessageId = nil
     if viewModel.historyCoverage.isAtCertifiedLiveEnd {
+      cancelPendingMessageFocus()
       // Near: the rows travel there. Far: the screen slides out and the newest rows in.
       let near = distanceFromBottom < bounds.height * 3
       list.apply(TimelineTransaction(scroll: .latest, timing: near ? Self.rowTiming : Self.jumpTiming, towards: .newer))
       return
     }
-    guard returnToLatestTask == nil else { return }
+    if let running = returnToLatestTask {
+      // A tap after the reader scrolled away from the first landing starts over.
+      guard returnToLatestInterrupted else { return }
+      running.cancel()
+      returnToLatestTask = nil
+    }
+    cancelPendingMessageFocus()
+    returnToLatestInterrupted = false
+    returnToLatestGeneration &+= 1
+    let generation = returnToLatestGeneration
     let account = try? Auth.shared.handle.beginAccountMutation()
     returnToLatestTask = Task { @MainActor [weak self] in
-      defer { self?.returnToLatestTask = nil }
       guard let self else { return }
+      defer { if returnToLatestGeneration == generation { returnToLatestTask = nil } }
       do {
+        // The cached latest window first (its publish moves the list), then the server's.
         _ = try await viewModel.loadLatestWindowAsync()
+        try Task.checkCancellation()
         var transaction = GetChatHistoryTransaction(peer: peer, mode: .historyModeLatest)
         transaction.type = .ephemeral()
         _ = try await Api.realtime.send(transaction, expectedAccount: account)
+        try Task.checkCancellation()
+        // A reader who scrolled since landing keeps their place: replacing the window would move it.
+        guard !returnToLatestInterrupted else { return }
         _ = try await viewModel.loadLatestWindowAsync()
       } catch is CancellationError {
         return
       } catch {
+        if !returnToLatestInterrupted, !Task.isCancelled {
+          // A useful cached latest window, with the coverage still unknown.
+          _ = try? await viewModel.loadLatestWindowAsync()
+        }
         ToastManager.shared.showToast("Could not load latest history", type: .error)
       }
     }
   }
 
-  func cancelPendingMessageFocus() {
-    jumpTask?.cancel()
-    pendingFocusMessageId = nil
+  /// A finger on the list: a focus still waiting for its message to sync no longer moves the list,
+  /// and a return to latest still fetching stops moving it, as the collection view's drag did.
+  private func dragBegan() {
+    holdsOpeningPlace = false
+    blockedEdges.removeAll()
+    if pendingFocus?.awaitsArrival == true, jumpTask == nil { pendingFocus = nil }
+    if returnToLatestTask != nil { returnToLatestInterrupted = true }
   }
 
-  func scrollToMessageWhenAvailable(_ messageID: Int64, requiresExactMessage _: Bool) {
-    // An explicit focus wins over the unread line still being fetched.
-    endUnreadFetch(placesLine: false)
+  func cancelPendingMessageFocus() {
+    // A move the reader asked for (a focus, the latest messages, a day) leaves the opening place.
+    holdsOpeningPlace = false
     jumpTask?.cancel()
+    jumpTask = nil
+    pendingFocus = nil
+    focusRevision &+= 1
+  }
+
+  func scrollToMessageWhenAvailable(_ messageID: Int64, requiresExactMessage: Bool) {
+    // An explicit focus wins over the unread line still being fetched and a return to latest.
+    endUnreadFetch(placesLine: false)
+    cancelPendingMessageFocus()
     returnToLatestTask?.cancel()
-    pendingFocusMessageId = messageID
-    if let row = snapshot?.rows.first(where: { $0.content.message?.message.messageId == messageID }) {
-      let near = list.layout.placement(for: row.id) != nil
-      list.apply(TimelineTransaction(scroll: .to(row.id, .center), timing: near ? Self.rowTiming : Self.jumpTiming))
-      highlightPendingFocus()
+    returnToLatestTask = nil
+    guard !requiresExactMessage || !isHiddenByCollapsedHistory(messageID) else {
+      #if DEBUG
+      debugLog("TIMELINE_DEBUG focus unavailable (cleared) \(messageID)")
+      #endif
+      ToastManager.shared.showToast("Message unavailable", type: .error, systemImage: "exclamationmark.triangle.fill")
       return
     }
+    pendingFocus = PendingFocus(messageId: messageID, requiresExact: requiresExactMessage, animated: hasOpened)
+    // A row already loaded: there now, or where the chat opens (the first layout places it).
+    if viewModel.historyCoverage.isCertifiedMessage(messageID) {
+      if hasOpened, let snapshot, let focus = resolveFocus(in: snapshot, exactOnly: true) {
+        let near = list.layout.placement(for: focus.row) != nil
+        list.apply(TimelineTransaction(
+          scroll: .to(focus.row, .center), timing: near ? Self.rowTiming : Self.jumpTiming,
+          towards: direction(of: .message(messageID), from: messageIdOnScreen())
+        ))
+        focusResolved(focus, opening: false)
+        return
+      }
+      if !hasOpened, let snapshot = viewModel.rowFeed.snapshot, messageRow(messageID, in: snapshot) != nil { return }
+    }
+    let unavailable = requiresExactMessage ? "Message unavailable" : "Could not load that message"
+    let limit = MessagesProgressiveViewModel.defaultInitialLimit()
+    let peer = peer
     jumpTask = Task { @MainActor [weak self] in
-      guard let self else { return }
       do {
-        if !viewModel.historyCoverage.isCertifiedMessage(messageID) {
-          _ = try await MessageHistoryRepairCoordinator.shared.loadAround(
-            peer: peer, anchorID: messageID, limit: MessagesProgressiveViewModel.defaultInitialLimit()
+        // Certified history is already in the cache: no round trip.
+        var outcome: MessageHistoryRepairCoordinator.Outcome?
+        if self?.viewModel.historyCoverage.isCertifiedMessage(messageID) != true {
+          outcome = try await MessageHistoryRepairCoordinator.shared.loadAround(
+            peer: peer, anchorID: messageID, limit: limit
           )
         }
-        guard !Task.isCancelled else { return }
-        if !viewModel.loadLocalWindowAroundMessage(messageId: messageID) {
-          pendingFocusMessageId = nil
-          ToastManager.shared.showToast("Message unavailable", type: .info)
+        guard let self, !Task.isCancelled, pendingFocus?.messageId == messageID else { return }
+        jumpTask = nil
+        if !requiresExactMessage, isAheadOfLoadedLiveEnd(messageID) {
+          // A pushed message can precede sync: stay at the live end until the update that brings it.
+          pendingFocus?.awaitsArrival = true
+          #if DEBUG
+          debugLog("TIMELINE_DEBUG focus awaits arrival \(messageID)")
+          #endif
+          if hasOpened {
+            list.apply(TimelineTransaction(scroll: .latest, timing: Self.rowTiming, towards: .newer))
+          }
+          return
+        }
+        // The window's publish places the message, or its nearest neighbour (`apply`).
+        guard !requiresExactMessage || !isHiddenByCollapsedHistory(messageID), outcome != .empty,
+              viewModel.loadLocalWindowAroundMessage(messageId: messageID)
+        else {
+          pendingFocus = nil
+          ToastManager.shared.showToast(unavailable, type: .error, systemImage: "exclamationmark.triangle.fill")
+          return
         }
       } catch is CancellationError {
         return
       } catch {
-        pendingFocusMessageId = nil
-        ToastManager.shared.showToast("Could not load that message", type: .error)
+        guard let self, !Task.isCancelled, pendingFocus?.messageId == messageID else { return }
+        jumpTask = nil
+        pendingFocus = nil
+        Log.shared.error("Failed to load focused message", error: error)
+        ToastManager.shared.showToast(unavailable, type: .error, systemImage: "exclamationmark.triangle.fill")
       }
     }
   }
 
-  private func highlightPendingFocus() {
-    guard let messageId = pendingFocusMessageId,
-          let row = snapshot?.rows.first(where: { $0.content.message?.message.messageId == messageId }),
-          let view = list.view(for: row.id) as? TimelineRowView else { return }
-    pendingFocusMessageId = nil
-    view.flash(theme: theme)
+  private func isHiddenByCollapsedHistory(_ messageID: Int64) -> Bool {
+    guard let boundary = viewModel.rowFeed.collapsedMaxId else { return false }
+    return messageID > 0 && messageID <= boundary
+  }
+
+  private func isAheadOfLoadedLiveEnd(_ messageID: Int64) -> Bool {
+    viewModel.historyCoverage.isAtCertifiedLiveEnd && messageID > (highestPositiveMessageId ?? 0)
+  }
+
+  private func messageRow(_ messageID: Int64, in snapshot: ChatRowSnapshot) -> ChatRow? {
+    snapshot.rows.first { row in
+      if case let .message(message, _) = row.content { message.message.messageId == messageID } else { false }
+    }
+  }
+
+  /// The row a pending focus lands on: its message, or (unless only that message will do) the nearest
+  /// loaded one across certified history, newer first, as the collection view picked it.
+  private func resolveFocus(
+    in snapshot: ChatRowSnapshot, exactOnly: Bool = false
+  ) -> (row: ChatRowID, messageId: Int64, exact: Bool)? {
+    guard let focus = pendingFocus else { return nil }
+    if let row = messageRow(focus.messageId, in: snapshot) { return (row.id, focus.messageId, true) }
+    guard !exactOnly, !focus.requiresExact, !focus.awaitsArrival else { return nil }
+    let ids = snapshot.rows.compactMap { row -> Int64? in
+      if case let .message(message, _) = row.content, message.message.messageId > 0 { message.message.messageId } else { nil }
+    }
+    let target = focus.messageId
+    guard let neighbour = ids.filter({ $0 > target }).min() ?? ids.filter({ $0 < target }).max(),
+          viewModel.historyCoverage.isCertifiedContinuation(between: target, and: neighbour),
+          let row = messageRow(neighbour, in: snapshot)
+    else { return nil }
+    return (row.id, neighbour, false)
+  }
+
+  /// The list is on its way to a focused message: the focus ends, and once the motion has mostly landed
+  /// the message is highlighted. A nearby message stands in without a highlight, and says so unless it
+  /// is simply the newest one.
+  private func focusResolved(_ focus: (row: ChatRowID, messageId: Int64, exact: Bool), opening: Bool) {
+    let requested = pendingFocus?.messageId
+    let animated = pendingFocus?.animated ?? true
+    pendingFocus = nil
+    jumpTask = nil
+    #if DEBUG
+    debugLog("TIMELINE_DEBUG focus requested=\(requested ?? -1) landed=\(focus.messageId) exact=\(focus.exact) opening=\(opening)")
+    #endif
+    guard focus.exact else {
+      if let requested, !(focus.messageId < requested && focus.messageId == highestPositiveMessageId) {
+        ToastManager.shared.showToast("Message unavailable. Showing nearby history.", type: .info)
+      }
+      return
+    }
+    focusRevision &+= 1
+    let revision = focusRevision
+    // An opening waits out the push so the highlight is seen.
+    let delay = opening || !animated ? 0.55 : 0.35
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+      guard let self, focusRevision == revision else { return }
+      let hold = TimelineRowView.focusHighlightHold
+      focusHighlight = (focus.messageId, CACurrentMediaTime() + TimelineRowView.focusHighlightFadeIn + hold)
+      for placement in list.layout.placements {
+        (list.view(for: placement.id) as? TimelineRowView)?.clearHighlight()
+      }
+      guard let snapshot, let row = messageRow(focus.messageId, in: snapshot),
+            let message = row.content.message,
+            let view = list.view(for: row.id) as? TimelineRowView else { return }
+      view.highlightBubble(outgoing: message.message.out == true, theme: theme, hold: hold, fadeIn: true)
+    }
+  }
+
+  /// What is left of a running jump highlight, for a row that is shown again.
+  private func focusHighlightRemaining(for messageId: Int64) -> TimeInterval? {
+    guard let focusHighlight, focusHighlight.messageId == messageId else { return nil }
+    let remaining = focusHighlight.endsAt - CACurrentMediaTime()
+    guard remaining > 0.05 else {
+      self.focusHighlight = nil
+      return nil
+    }
+    return remaining
   }
 
   @objc private func scrollToRepliedMessage(_ note: Notification) {
@@ -1218,6 +1512,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   // MARK: - Read state, reading place, scroll button
 
   func setUnreadState(_ state: ChatActivityNavigator.State) {
+    // Marking the chat unread supersedes what this list read before; only when newly marked, or every
+    // later emission while the mark is set would undo scroll reads.
+    if state.unreadMark, !unreadState.unreadMark {
+      readFrontier = 0
+      lastReadCandidate = 0
+    }
     unreadState = state
     updateAffordance(force: true)
   }
@@ -1240,6 +1540,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   @objc private func applicationDidBecomeActive() {
+    lastReadCandidate = 0
     readPass(force: true)
   }
 
@@ -1249,28 +1550,47 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       .filter { $0.message.messageId > 0 }
   }
 
-  /// Marks what the reader has seen. Only for a list that is on screen in an active app.
+  /// Marks what the reader has seen: only for a list on screen in an active, foreground scene, placed,
+  /// and not on its way to a focused message. While the list moves only the scroll button's count goes
+  /// down; the read is sent when it stops, as the collection view did (each read rewrites the dialog,
+  /// and every dialog observer re-rendering mid-scroll hitched it).
   private func readPass(force: Bool) {
     let now = CACurrentMediaTime()
     guard force || now - lastReadPass > 0.3 else { return }
     lastReadPass = now
-    guard hasOpened, window != nil, UIApplication.shared.applicationState == .active, !list.isTracking,
-          let chatId
+    guard hasOpened, let window, !isHidden, alpha > 0.01,
+          window.windowScene?.activationState == .foregroundActive,
+          UIApplication.shared.applicationState == .active,
+          unreadFetchBoundary == nil, pendingFocus == nil, let chatId
     else {
       if window == nil || UIApplication.shared.applicationState != .active { onVisibleMessagesChanged?(nil) }
       return
     }
     let visible = visibleMessages()
-    if distanceFromBottom <= 12, viewModel.historyCoverage.isAtCertifiedLiveEnd {
-      UnreadManager.shared.readAll(peer, chatId: chatId)
-    } else if let candidate = visible.filter({ $0.message.out != true && !$0.message.isServiceMessage })
-      .map(\.message.messageId).max(), candidate > lastReadCandidate
-    {
-      lastReadCandidate = candidate
-      UnreadManager.shared.readVisible(peerId: peer, chatId: chatId, highestVisibleIncomingID: candidate)
-      if candidate > readFrontier {
+    let candidate = visible.filter { $0.message.out != true && !$0.message.isServiceMessage }
+      .map(\.message.messageId).max()
+    if list.isTracking || list.isDecelerating {
+      if let candidate, candidate > readFrontier {
         readFrontier = candidate
         updateAffordance(force: true)
+      }
+      return
+    }
+    if distanceFromBottom <= 12, viewModel.historyCoverage.isAtCertifiedLiveEnd {
+      // Only the real live end stands for every message; a window's bottom does not.
+      UnreadManager.shared.readAll(peer, chatId: chatId)
+    } else {
+      if viewModel.historyCoverage != lastReadCoverage {
+        lastReadCoverage = viewModel.historyCoverage
+        lastReadCandidate = 0
+      }
+      if let candidate, candidate > lastReadCandidate {
+        lastReadCandidate = candidate
+        UnreadManager.shared.readVisible(peerId: peer, chatId: chatId, highestVisibleIncomingID: candidate)
+        if candidate > readFrontier {
+          readFrontier = candidate
+          updateAffordance(force: true)
+        }
       }
     }
     onVisibleMessagesChanged?(visible.map(\.message.messageId))
@@ -1362,10 +1682,31 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// The day's first message at the top, as the collection view's badge does.
   private func jumpToDatePillDay() {
     guard let day = datePillDay else { return }
+    jumpToDay(day)
+  }
+
+  private func jumpToDay(_ day: Date) {
+    cancelPendingMessageFocus()
     let id = ChatRowID.daySeparator(day)
     let near = list.layout.placement(for: id) != nil
     list.apply(TimelineTransaction(scroll: .to(id, .top(0)), timing: near ? Self.rowTiming : Self.jumpTiming))
     scheduleDatePillHide()
+  }
+
+  // MARK: - Status notice
+
+  /// "Sam has notifications silenced" under the newest message of a DM, as the collection view shows it:
+  /// seeded from memory for the first frame, then following the user's focus status.
+  private func observeStatusNotice() {
+    guard let userId = peer.asUserId(), userId != Auth.shared.getCurrentUserId() else { return }
+    viewModel.rowFeed.setStatusNotice(ObjectCache.shared.getCachedUser(id: userId)?.notificationsSilencedNotice())
+    ObjectCache.shared.getUserPublisher(id: userId)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] userInfo in
+        guard let userInfo else { return }
+        self?.viewModel.rowFeed.setStatusNotice(userInfo.notificationsSilencedNotice())
+      }
+      .store(in: &cancellables)
   }
 
   // MARK: - The rest of the container's contract
@@ -1388,21 +1729,65 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     setCollapsedMaxId(effectiveMaxID)
   }
 
+  // MARK: - Media gallery
+
+  private var isPresentingGallery = false
+
   private func presentPhoto(_ message: FullMessage, image: UIImage?, url: URL) {
-    guard let viewController = findViewController(), viewController.presentedViewController == nil,
-          let chatId else { return }
     let anchor = MediaGalleryItem(message: message.message, photo: message.photoInfo, video: message.videoInfo)
       ?? MediaGalleryItem.photo(url: url, id: message.message.messageId)
+    presentMediaGallery(anchor: anchor, sourceImage: image)
+  }
+
+  /// A video bubble opens the chat's gallery here (`NewVideoView`), so it streams while it plays.
+  func presentMediaGallery(for message: FullMessage, sourceImage: UIImage?) -> Bool {
+    guard let anchor = MediaGalleryItem(message: message.message, photo: message.photoInfo, video: message.videoInfo)
+    else { return false }
+    return presentMediaGallery(anchor: anchor, sourceImage: sourceImage)
+  }
+
+  /// Every photo and video in the chat, paged from cache and server, starting at `anchor`, with the
+  /// collection view's actions: show in chat, forward, delete.
+  @discardableResult
+  private func presentMediaGallery(anchor: MediaGalleryItem, sourceImage: UIImage?) -> Bool {
+    guard anchor.message?.isSticker != true, !isPresentingGallery, let chatId,
+          let viewController = findViewController(), viewController.presentedViewController == nil,
+          !viewController.isBeingPresented, !viewController.isBeingDismissed
+    else { return false }
     var actions = MediaGalleryViewController.Actions()
     actions.showInChat = { [weak self] item in self?.scrollToMessageWhenAvailable(item.id) }
+    actions.forward = { [weak self] item in
+      guard let self, let message = item.message,
+            let fullMessage = try? FullMessage.get(messageId: message.messageId, chatId: chatId)
+      else { return }
+      menuActions.presentForwardSheet(fullMessage)
+    }
+    actions.delete = { item in
+      guard let message = item.message else { return }
+      MessageViewActions.sendDeleteMessage(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
+    }
     let viewer = MediaGalleryViewController(
       source: ChatMediaGallerySource(chatId: chatId, peer: peer, anchor: anchor),
-      initialItemID: anchor.id, sourceImage: image, actions: actions,
+      initialItemID: anchor.id, sourceImage: sourceImage, actions: actions,
+      // The zoom starts from and returns to the photo or the video's thumbnail, not the whole row.
       sourceViewProvider: { [weak self] item in
-        item.messageStableId.flatMap { self?.list.view(for: .message($0)) }
+        item.messageStableId.flatMap { self?.list.view(for: .message($0)) }.flatMap(Self.galleryMediaView(in:))
       }
     )
+    viewer.onDismiss = { [weak self] in self?.isPresentingGallery = false }
+    isPresentingGallery = true
     viewController.present(viewer, animated: false)
+    return true
+  }
+
+  /// The photo or video thumbnail inside a row, for gallery transitions.
+  private static func galleryMediaView(in view: UIView) -> UIView? {
+    for subview in view.subviews where !subview.isHidden {
+      if let photoView = subview as? NewPhotoView { return photoView.imageView }
+      if let videoView = subview as? NewVideoView { return videoView.gallerySourceView }
+      if let found = galleryMediaView(in: subview) { return found }
+    }
+    return nil
   }
 
   private func findViewController() -> UIViewController? {

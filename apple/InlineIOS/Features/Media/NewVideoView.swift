@@ -765,7 +765,7 @@ final class NewVideoView: UIView {
 
   @objc private func handleTap() {
     // In a chat, open the chat's media gallery, which streams the video while it plays.
-    if let messagesView = enclosingMessagesCollectionView(),
+    if let messagesView = enclosingMediaGalleryPresenter(),
        messagesView.presentMediaGallery(for: fullMessage, sourceImage: snapshotThumbnail())
     {
       return
@@ -807,10 +807,10 @@ final class NewVideoView: UIView {
     viewController.present(controller, animated: false)
   }
 
-  private func enclosingMessagesCollectionView() -> MessagesCollectionView? {
+  private func enclosingMediaGalleryPresenter() -> ChatMediaGalleryPresenting? {
     var view = superview
     while let current = view {
-      if let messagesView = current as? MessagesCollectionView {
+      if let messagesView = current as? ChatMediaGalleryPresenting {
         return messagesView
       }
       view = current.superview
