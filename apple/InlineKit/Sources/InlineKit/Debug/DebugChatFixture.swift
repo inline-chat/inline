@@ -316,6 +316,29 @@ public final class DebugChatFixture {
     publisher.messagesDeleted(messageIds: [message.message.messageId], peer: peer)
   }
 
+  /// Translations of the newest `count` messages arrive, stored and published as `TranslationViewModel`
+  /// stores and publishes them. They show once translation is on for the chat.
+  public func translateNewest(count: Int = 12, language: String) throws {
+    let chatId = chatId
+    let ids = try database.dbWriter.write { db -> [Int64] in
+      let messages = try Message.filter(Column("chatId") == chatId && Column("messageId") > 0)
+        .order(Column("messageId").desc).limit(count).fetchAll(db)
+      for message in messages {
+        try Translation(
+          messageId: message.messageId, chatId: chatId,
+          translation: "Translated (\(language)): " + (message.text ?? "") + " — and a few more words.",
+          entities: nil, language: language, date: Date(), msgRev: 0
+        ).insert(db, onConflict: .replace)
+      }
+      return messages.compactMap(\.globalId)
+    }
+    for id in ids {
+      if let message = try fetch(globalId: id) {
+        publisher.publisher.send(.update(.init(message: message, animated: false, peer: peer)))
+      }
+    }
+  }
+
   /// A reload whose content is unchanged.
   public func refreshIdentical() {
     publisher.messagesReload(peer: peer, animated: false)
