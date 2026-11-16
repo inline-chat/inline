@@ -8,7 +8,7 @@
 //!   `Passive` input with an `Ambient` origin.
 
 use super::context::PassiveContext;
-use super::envelope::{GroupMessage, MessageEntity, origin_of};
+use super::envelope::{GroupMessage, MessageEntity, envelope_of, origin_of};
 use super::intake::IntakeDecision;
 use super::permissions::Operation;
 use crate::TurnContext;
@@ -51,6 +51,8 @@ pub fn direct_input(
             text,
             attachments: Vec::new(),
             context,
+            envelope: Some(envelope_of(message, owner_user_id)),
+            native_command: false,
         },
         origin: origin_of(message, owner_user_id),
         delivery,
@@ -146,6 +148,9 @@ mod tests {
         assert_eq!(input.delivery, Delivery::Turn);
         assert_eq!(input.origin, Origin::Teammate { user: UserId(8) });
         assert_eq!(input.content.text, "@claude fix the tests");
+        let envelope = input.content.envelope.as_ref().expect("envelope");
+        assert_eq!(envelope.from_user_id, Some(8));
+        assert_eq!(envelope.role, crate::harness::SenderRole::Teammate);
 
         let turn = TurnId::new("turn-4").unwrap();
         let input = direct_input(&act(Operation::Steer), &message, 7, id(), Some(&turn), None)

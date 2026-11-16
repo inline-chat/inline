@@ -35,9 +35,8 @@ pub use context::{
     JoinContextInput, LinkedThread, PassiveBatch, PassiveContext,
 };
 pub use envelope::{
-    Author, AuthorKind, ClaudeInputFields, ClaudeOrigin, CodexPlacement, Conversation,
-    GroupMessage, INLINE_CHANNEL_SERVER, Mention, MessageEntity, ReplyRef, SentVia, claude_input,
-    codex_placement, origin_of,
+    Author, AuthorKind, Conversation, GroupMessage, Mention, MessageEntity, ReplyRef, SentVia,
+    envelope_of, origin_of,
 };
 pub use guide::{GuideFacts, trusted_guide};
 pub use handoff::{HandoffInstruction, HandoffProvider, HandoffTarget, handoff_instruction};

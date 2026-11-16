@@ -30,7 +30,7 @@ use inline_agent_bridge::{
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::delivery::{OpPlan, op_plan, user_message};
+use super::delivery::{OpPlan, input_messages, op_plan};
 use super::mapper::{ClaudeMapper, RequestMapped};
 use super::{CORE_FLOOR, setup_reason};
 use crate::agents::{LiveSession, holder, list_live_sessions};
@@ -1244,7 +1244,7 @@ impl Session for ClaudeSession {
                 }
                 _ => {}
             }
-            let mut message = user_message(&self.inner.session_id, &input);
+            let (note, mut message) = input_messages(&self.inner.session_id, &input);
             // Typing while Claude works: a person's steer cuts the model at
             // once, as Codex does, and otherwise clears the way once written.
             let person_steer =
@@ -1271,6 +1271,14 @@ impl Session for ClaudeSession {
                 }
             }
             let wait_on_tools = person_steer && message.priority == Some(Priority::Next);
+            // Inline's note goes first, so Claude folds it into this input.
+            if let Some(note) = &note {
+                self.inner.mapper().sent_note(&note.uuid);
+                if let Err(error) = self.write(note).await {
+                    self.inner.mapper().forget_sent(&input.id);
+                    return Err(error);
+                }
+            }
             let (ack, acked) = oneshot::channel();
             self.inner
                 .acks

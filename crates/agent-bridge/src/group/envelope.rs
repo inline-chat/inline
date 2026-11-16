@@ -7,10 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::harness::{ChatId, Origin, UserId, WorkRef};
-
-/// Channel server name stamped on Claude `origin` for teammate input.
-pub const INLINE_CHANNEL_SERVER: &str = "inline";
+use crate::harness::{ChatId, MessageEnvelope, Origin, Place, SenderRole, UserId, WorkRef};
 
 /// Who wrote a message, as resolved by the transport from Inline user state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,86 +189,35 @@ pub fn origin_of(message: &GroupMessage, owner_user_id: i64) -> Origin {
     }
 }
 
-/// Claude Code's `SDKMessageOrigin`, as the installed CLI reads it:
-/// `{kind:"human"}`, `{kind:"channel",server}`,
-/// `{kind:"peer",from,name?,fromSession?}`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ClaudeOrigin {
-    Human,
-    Channel {
-        server: String,
-    },
-    Peer {
-        from: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        name: Option<String>,
-        #[serde(
-            rename = "fromSession",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
-        from_session: Option<String>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ClaudeInputFields {
-    pub origin: ClaudeOrigin,
-    #[serde(rename = "shouldQuery")]
-    pub should_query: bool,
-}
-
-/// Claude's native fields for an input with this origin. `agent_name` is the
-/// sending agent's display name (untrusted, informational). Ambient context
-/// never queries (`shouldQuery: false`).
-pub fn claude_input(origin: &Origin, agent_name: Option<&str>) -> ClaudeInputFields {
-    let channel = || ClaudeOrigin::Channel {
-        server: INLINE_CHANNEL_SERVER.to_string(),
+/// The Inline facts drivers deliver beside the text: who sent it, where, and
+/// what it replies to.
+pub fn envelope_of(message: &GroupMessage, owner_user_id: i64) -> MessageEnvelope {
+    let author = &message.author;
+    let role = match &author.kind {
+        AuthorKind::Agent { .. } => SenderRole::Agent,
+        AuthorKind::Human if author.user_id == owner_user_id => SenderRole::Owner,
+        AuthorKind::Human => SenderRole::Teammate,
     };
-    let claude_origin = match origin {
-        Origin::Owner { .. } => ClaudeOrigin::Human,
-        Origin::Teammate { .. } | Origin::Ambient { .. } | Origin::Scheduled => channel(),
-        Origin::Agent { bot, work } => ClaudeOrigin::Peer {
-            from: format!("inline:user/{}", bot.0),
-            name: agent_name
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_string),
-            from_session: Some(match &work.session {
-                Some(session) => session.as_str().to_string(),
-                None => format!("inline:chat/{}", work.chat.0),
-            }),
+    MessageEnvelope {
+        chat_id: message.chat_id,
+        message_id: Some(message.message_id),
+        from_user_id: Some(author.user_id),
+        from: Some(author.display_name.clone()).filter(|name| !name.trim().is_empty()),
+        role,
+        place: match message.conversation {
+            Conversation::Dm => Place::Dm,
+            Conversation::WorkThread => Place::WorkThread,
+            Conversation::Group => Place::Group,
         },
-    };
-    ClaudeInputFields {
-        origin: claude_origin,
-        should_query: !matches!(origin, Origin::Ambient { .. }),
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CodexPlacement {
-    /// `input` carries the message; sender metadata goes in an `untrusted`
-    /// `additionalContext` entry.
-    UserInputWithUntrustedSender,
-    /// Only an `untrusted` `additionalContext` entry (or `thread/inject_items`).
-    UntrustedContextOnly,
-}
-
-/// Where Codex receives an input with this origin.
-pub const fn codex_placement(origin: &Origin) -> CodexPlacement {
-    match origin {
-        Origin::Ambient { .. } => CodexPlacement::UntrustedContextOnly,
-        _ => CodexPlacement::UserInputWithUntrustedSender,
+        reply_to_message_id: message.reply_to.map(|reply| reply.message_id),
+        reply_to_user_id: message.reply_to.map(|reply| reply.author_user_id),
+        sent_at: Some(message.sent_at).filter(|sent_at| *sent_at > 0),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     fn message(user_id: i64, kind: AuthorKind) -> GroupMessage {
         GroupMessage {
@@ -326,70 +272,36 @@ mod tests {
     }
 
     #[test]
-    fn claude_origin_matches_the_native_wire_shape() {
-        let fields =
-            |origin: Origin, name| serde_json::to_value(claude_input(&origin, name)).unwrap();
+    fn envelope_names_role_place_and_reply() {
+        let mut owner = message(7, AuthorKind::Human);
+        owner.conversation = Conversation::Dm;
+        owner.sent_at = 1_700_000_000;
+        owner.reply_to = Some(ReplyRef {
+            message_id: 1,
+            author_user_id: 41,
+            mentions_author: false,
+        });
+        let envelope = envelope_of(&owner, 7);
+        assert_eq!(envelope.role, SenderRole::Owner);
+        assert_eq!(envelope.place, Place::Dm);
         assert_eq!(
-            fields(Origin::Owner { user: UserId(7) }, None),
-            json!({"origin": {"kind": "human"}, "shouldQuery": true})
+            envelope.header(),
+            "<inline-message chat_id=\"3\" message_id=\"2\" from_user_id=\"7\" from=\"user 7\" \
+role=\"owner\" place=\"dm\" reply_to_message_id=\"1\" reply_to_user_id=\"41\" sent_at=\"1700000000\"/>"
         );
         assert_eq!(
-            fields(Origin::Teammate { user: UserId(8) }, None),
-            json!({"origin": {"kind": "channel", "server": "inline"}, "shouldQuery": true})
+            envelope_of(&message(8, AuthorKind::Human), 7).role,
+            SenderRole::Teammate
         );
-        assert_eq!(
-            fields(
-                Origin::Agent {
-                    bot: UserId(41),
-                    work: WorkRef {
-                        chat: ChatId(9),
-                        session: Some(crate::ProviderSessionId::new("thr_1").unwrap())
-                    }
-                },
-                Some("Mo's Codex · MacBook")
-            ),
-            json!({
-                "origin": {
-                    "kind": "peer",
-                    "from": "inline:user/41",
-                    "name": "Mo's Codex · MacBook",
-                    "fromSession": "thr_1"
-                },
-                "shouldQuery": true
-            })
+        // A bot is an agent even with the owner's number.
+        let bot = message(
+            7,
+            AuthorKind::Agent {
+                owner_user_id: Some(7),
+                work: None,
+            },
         );
-        assert_eq!(
-            fields(
-                Origin::Agent {
-                    bot: UserId(41),
-                    work: WorkRef {
-                        chat: ChatId(9),
-                        session: None
-                    }
-                },
-                Some("  ")
-            ),
-            json!({
-                "origin": {"kind": "peer", "from": "inline:user/41", "fromSession": "inline:chat/9"},
-                "shouldQuery": true
-            })
-        );
-        assert_eq!(
-            fields(Origin::Ambient { chat: ChatId(3) }, None),
-            json!({"origin": {"kind": "channel", "server": "inline"}, "shouldQuery": false})
-        );
-    }
-
-    #[test]
-    fn codex_keeps_ambient_traffic_out_of_user_input() {
-        assert_eq!(
-            codex_placement(&Origin::Owner { user: UserId(7) }),
-            CodexPlacement::UserInputWithUntrustedSender
-        );
-        assert_eq!(
-            codex_placement(&Origin::Ambient { chat: ChatId(3) }),
-            CodexPlacement::UntrustedContextOnly
-        );
+        assert_eq!(envelope_of(&bot, 7).role, SenderRole::Agent);
     }
 
     #[test]

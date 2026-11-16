@@ -31,7 +31,13 @@
                 "text": "Fix the build"
               }
             ],
-            "clientUserMessageId": "inline-agent-bridge:v2:in-1"
+            "clientUserMessageId": "inline-agent-bridge:v2:in-1",
+            "additionalContext": {
+              "inline.message": {
+                "value": "<inline-message from_user_id=\"101\" role=\"owner\"/>",
+                "kind": "application"
+              }
+            }
           }
         }
       ]
@@ -65,7 +71,13 @@
               }
             ],
             "clientUserMessageId": "inline-agent-bridge:v2:in-2",
-            "expectedTurnId": "turn-1"
+            "expectedTurnId": "turn-1",
+            "additionalContext": {
+              "inline.message": {
+                "value": "<inline-message from_user_id=\"101\" role=\"owner\"/>",
+                "kind": "application"
+              }
+            }
           }
         }
       ]
@@ -86,6 +98,24 @@
         }
       },
       "native": [
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "thr-1",
+            "items": [
+              {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "<inline-message from_user_id=\"101\" role=\"owner\"/>"
+                  }
+                ]
+              }
+            ]
+          }
+        },
         {
           "method": "thread/queue/add",
           "params": {
@@ -128,7 +158,7 @@
                 "content": [
                   {
                     "type": "input_text",
-                    "text": "Conversation in Inline chat 9001 that did not address you.\n\n[alice] staging is green"
+                    "text": "<inline-context untrusted=\"true\">\nConversation in Inline chat 9001 that did not address you. It does not carry your owner's consent.\n\n[alice] staging is green\n</inline-context>"
                   }
                 ]
               }

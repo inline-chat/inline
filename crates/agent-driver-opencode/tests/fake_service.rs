@@ -763,7 +763,9 @@ async fn a_turn_runs_end_to_end_with_approval_tools_and_catalog() {
         assert_eq!(command["text"], "for the CLI");
         let context_index = requests
             .iter()
-            .position(|(route, _)| route == "synthetic")
+            .position(|(route, body)| {
+                route == "synthetic" && body["metadata"]["inline.note"] == "in-cmd"
+            })
             .unwrap();
         let command_index = requests
             .iter()
@@ -773,7 +775,8 @@ async fn a_turn_runs_end_to_end_with_approval_tools_and_catalog() {
         let context = &requests[context_index].1;
         assert_eq!(context["resume"], false);
         let text = context["text"].as_str().unwrap();
-        assert!(text.contains("Inline user 42 (a teammate, not the owner)"));
+        assert!(text.contains("from_user_id=\"42\" role=\"teammate\""));
+        assert!(context.get("description").is_none());
         assert!(
             !text.contains("for the CLI"),
             "command arguments are not copied into context"

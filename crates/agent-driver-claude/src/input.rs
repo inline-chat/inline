@@ -34,9 +34,10 @@ impl Priority {
 pub enum Origin {
     /// The session's owner typing.
     Human,
-    /// Input relayed from a channel such as an Inline thread.
+    /// Input relayed from a channel. Claude Code reserves it for its own
+    /// channel servers and drops it from stdin (2.1.319).
     Channel { server: String },
-    /// Another agent.
+    /// Another agent. Dropped from stdin like [`Self::Channel`].
     Peer {
         from: String,
         name: Option<String>,
@@ -136,6 +137,10 @@ pub struct UserMessage {
     /// dispatch (Claude Code ≥ 2.1.248). Leave off for typed input so the
     /// harness behaves as in its own CLI.
     pub client_composed: bool,
+    /// Text the user did not write (`isSynthetic`). With `origin` unset,
+    /// Claude frames it to the model as a non-user source and stores it as
+    /// meta input its own apps do not show.
+    pub is_synthetic: bool,
     pub parent_tool_use_id: Option<String>,
     /// The session the message is for (`""` lets the CLI fill it in).
     pub session_id: String,
@@ -157,6 +162,7 @@ impl UserMessage {
             should_query: None,
             origin: None,
             client_composed: false,
+            is_synthetic: false,
             parent_tool_use_id: None,
             session_id: String::new(),
             extra: Map::new(),
@@ -211,6 +217,9 @@ impl UserMessage {
         }
         if self.client_composed {
             map.insert("client_composed".into(), json!(true));
+        }
+        if self.is_synthetic {
+            map.insert("isSynthetic".into(), json!(true));
         }
         for (key, value) in &self.extra {
             map.entry(key.clone()).or_insert_with(|| value.clone());
