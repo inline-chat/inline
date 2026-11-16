@@ -785,7 +785,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       // Newer rows are below: the destination's top starts at the bottom of what was on screen.
       case .newer: min(height, oldLast.maxY) - newFirst.y
       // Older rows are above: the destination's bottom starts at the top of what was on screen.
-      case .older: max(0, oldFirst.y) - newLast.maxY
+      // A span kept placed below the view (`TimelineMargins.span`) is not part of the strip that slides.
+      case .older: max(0, oldFirst.y) - min(newLast.maxY, height + state.margins.below)
     }
     // A strip already past the edge would overlap the screen: start a screen away instead.
     switch towards {

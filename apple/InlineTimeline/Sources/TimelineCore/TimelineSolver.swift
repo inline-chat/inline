@@ -54,18 +54,31 @@ public enum TimelineSolver {
     }
     // Drop rows wholly outside the margins, keeping at least one, and keeping the span of the lowest
     // visible row to its end (within `margins.span`), so the row holding what pins to it stays placed.
+    // Only a span whose end is within reach is extended (measured first, so a longer one places nothing
+    // extra): the rows it adds are rows that will show something.
     var keepThrough = -1
     if let visible = placements.last(where: { $0.y < viewport.usableBottom && $0.maxY > viewport.usableTop }),
-       let end = spanEnd(visible.id), let endIndex = index[end], endIndex > visible.index
+       let end = spanEnd(visible.id), let endIndex = index[end], endIndex > visible.index,
+       let last = placements.last, last.index < endIndex
     {
-      keepThrough = endIndex
-      var last = placements[placements.count - 1]
-      while last.index < endIndex, last.maxY < viewport.height + margins.span {
-        let next = last.index + 1
+      var extra: [TimelinePlacement<ID>] = []
+      var y = last.maxY
+      var next = last.index + 1
+      while next <= endIndex, y < viewport.height + margins.span {
         let rowHeight = max(0, height(rows[next]))
-        last = TimelinePlacement(id: rows[next], index: next, y: last.maxY, height: rowHeight)
-        placements.append(last)
+        extra.append(TimelinePlacement(id: rows[next], index: next, y: y, height: rowHeight))
+        y += rowHeight
+        next += 1
       }
+      if next > endIndex {
+        placements += extra
+        keepThrough = endIndex
+      }
+    } else if let visible = placements.last(where: { $0.y < viewport.usableBottom && $0.maxY > viewport.usableTop }),
+              let end = spanEnd(visible.id), let endIndex = index[end], endIndex > visible.index
+    {
+      // The end is already placed: keep it.
+      keepThrough = endIndex
     }
     while placements.count > 1, placements[0].maxY < -margins.above { placements.removeFirst() }
     while placements.count > 1, placements[placements.count - 1].y > viewport.height + margins.below,

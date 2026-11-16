@@ -62,10 +62,10 @@ private func checkInvariants(_ layout: TimelineLayout<Int>, rows: [Int], sourceL
     for (previous, next) in zip(placements, placements.dropFirst()) {
       #expect(next.index == previous.index + 1)
     }
-    // Beyond the span margin, the span is placed only as far as the margin reaches.
+    // A span ending beyond the span margin places nothing extra.
     state.apply(.init(scroll: .to(10, .bottom(0))), spanEnd: { $0 >= 5 && $0 < 100 ? 100 : nil }) { _ in 50 }
     #expect(state.layout.placement(for: 100) == nil)
-    #expect((state.layout.placements.last?.maxY ?? 0) >= 600 + 1_000)
+    #expect((state.layout.placements.last?.maxY ?? 0) <= 600 + 100 + 50)
     // Without a span, the usual margins.
     state.apply(.init(scroll: .to(10, .bottom(0)))) { _ in 50 }
     #expect(state.layout.placement(for: 30) == nil)

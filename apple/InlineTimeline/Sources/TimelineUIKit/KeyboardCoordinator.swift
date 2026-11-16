@@ -53,6 +53,8 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   private var settle: Task<Void, Never>?
   /// The keyboard's last frame, in the screen's coordinates, read again when the view changes size.
   private var keyboardFrame: CGRect?
+  /// The screen's bounds when that frame was posted: a frame from another orientation is not re-measured.
+  private var keyboardScreen: CGRect?
   private var measuredSize: CGSize = .zero
 
   /// Tracks the keyboard against the bottom of `view`.
@@ -101,6 +103,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   @objc private func keyboardWillChangeFrame(_ notification: Notification) {
     guard let end = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
     keyboardFrame = end
+    keyboardScreen = view?.window?.screen.coordinateSpace.bounds
     guard !isSuspended, !isInteractive else { return }
     let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
     deliver(end, duration: duration)
@@ -115,11 +118,12 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
       measuredSize = view.bounds.size
       return
     }
-    // A docked keyboard spans the screen it was laid out for: a frame from the old orientation (its new
-    // one not posted yet) would read as beside or floating, so wait for that notification instead.
+    // A frame posted for another orientation (its new one not posted yet) would read as beside or
+    // floating: wait for that notification instead.
     let screen = window.screen.coordinateSpace.bounds
     let docked = keyboardFrame.height >= 1 && keyboardFrame.maxY >= screen.maxY - 1
-    guard !docked || abs(keyboardFrame.width - screen.width) < 1 else { return }
+    let stale = keyboardScreen.map { $0 != screen } == true && docked && abs(keyboardFrame.width - screen.width) >= 1
+    guard !stale else { return }
     deliver(keyboardFrame, duration: 0)
   }
 

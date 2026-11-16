@@ -105,10 +105,11 @@ public struct TimelineMargins: Equatable, Sendable {
   public var above: CGFloat
   public var below: CGFloat
   /// How far below the view the span of the lowest visible row is still placed to its end, so what
-  /// pins to that end (a sender's avatar) is there while any of the span is in sight.
+  /// pins to that end (a sender's avatar) is there while any of the span is in sight. A span ending
+  /// farther away places nothing extra. About a screen, so the rows it adds at once stay few.
   public var span: CGFloat
 
-  public init(above: CGFloat, below: CGFloat, span: CGFloat = 2400) {
+  public init(above: CGFloat, below: CGFloat, span: CGFloat = 900) {
     self.above = above
     self.below = below
     self.span = span
