@@ -303,6 +303,8 @@ struct MessageViewContent {
     let contentSizeCategory: UIContentSizeCategory
     let isOutgoing: Bool
     let isFailed: Bool
+    /// The same text is a large emoji alone and body-sized beside a reply or other block.
+    let isEmoji: Bool
     private let hashValueCache: Int
 
     init(
@@ -312,7 +314,8 @@ struct MessageViewContent {
       variant: String,
       contentSizeCategory: UIContentSizeCategory,
       isOutgoing: Bool,
-      isFailed: Bool
+      isFailed: Bool,
+      isEmoji: Bool
     ) {
       self.text = text
       self.entities = entities
@@ -321,6 +324,7 @@ struct MessageViewContent {
       self.contentSizeCategory = contentSizeCategory
       self.isOutgoing = isOutgoing
       self.isFailed = isFailed
+      self.isEmoji = isEmoji
       var hasher = Hasher()
       hasher.combine(text)
       hasher.combine(entities)
@@ -329,6 +333,7 @@ struct MessageViewContent {
       hasher.combine(contentSizeCategory.rawValue)
       hasher.combine(isOutgoing)
       hasher.combine(isFailed)
+      hasher.combine(isEmoji)
       hashValueCache = hasher.finalize()
       super.init()
     }
@@ -340,6 +345,7 @@ struct MessageViewContent {
       return hashValueCache == other.hashValueCache
         && isOutgoing == other.isOutgoing
         && isFailed == other.isFailed
+        && isEmoji == other.isEmoji
         && preset == other.preset
         && variant == other.variant
         && contentSizeCategory == other.contentSizeCategory
@@ -365,7 +371,8 @@ struct MessageViewContent {
       variant: theme.variant.rawValue,
       contentSizeCategory: context.contentSizeCategory,
       isOutgoing: outgoing,
-      isFailed: message.message.status == .failed
+      isFailed: message.message.status == .failed,
+      isEmoji: isEmoji
     )
     if let cached = bodyCache.object(forKey: key) {
       return MessageText(cached)
