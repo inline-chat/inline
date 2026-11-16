@@ -23,6 +23,10 @@ type IntrospectionSuccess = {
   allow_dms: boolean
   allow_home_threads: boolean
   inline_token: string
+  /** Known agent id for "Sent via <name>"; absent from older servers. */
+  via_app?: string
+  /** Absent from older servers, which never allow unsigned sends. */
+  allow_unsigned?: boolean
 }
 
 function json(status: number, body: unknown, headers?: HeadersInit): Response {
@@ -83,6 +87,8 @@ function parseIntrospectionPayload(raw: unknown): IntrospectionSuccess | null {
     allow_dms: data["allow_dms"],
     allow_home_threads: data["allow_home_threads"],
     inline_token: data["inline_token"],
+    ...(typeof data["via_app"] === "string" && data["via_app"].trim().length > 0 ? { via_app: data["via_app"] } : {}),
+    ...(data["allow_unsigned"] === true ? { allow_unsigned: true } : {}),
   }
 }
 
@@ -227,6 +233,8 @@ async function buildAuthInfo(
     spaceIds: introspectionRes.introspection.space_ids.map((spaceId) => BigInt(spaceId)),
     allowDms: introspectionRes.introspection.allow_dms,
     allowHomeThreads: introspectionRes.introspection.allow_home_threads,
+    viaApp: introspectionRes.introspection.via_app,
+    allowUnsigned: introspectionRes.introspection.allow_unsigned === true,
   }
 
   const auth: AuthInfo = {
@@ -300,6 +308,8 @@ export const Mcp = {
                   inline = createInlineApi({
                     baseUrl: params.config.inlineApiBaseUrl,
                     token: authRes.inlineToken,
+                    viaApp: authRes.grant.viaApp,
+                    allowUnsigned: authRes.grant.allowUnsigned,
                     allowed: {
                       allowedSpaceIds: authRes.grant.spaceIds,
                       allowDms: authRes.grant.allowDms,
@@ -349,6 +359,8 @@ export const Mcp = {
           const inline = createInlineApi({
             baseUrl: params.config.inlineApiBaseUrl,
             token: authRes.inlineToken,
+            viaApp: authRes.grant.viaApp,
+            allowUnsigned: authRes.grant.allowUnsigned,
             allowed: {
               allowedSpaceIds: authRes.grant.spaceIds,
               allowDms: authRes.grant.allowDms,

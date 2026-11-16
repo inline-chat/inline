@@ -335,7 +335,9 @@ export type InlineApi = {
     replyToMsgId?: bigint
     sendMode: "normal" | "silent"
     parseMarkdown: boolean
-  }): Promise<{ messageId: bigint | null; spaceId?: bigint | null }>
+    /** Leave off "Sent via <app>"; honored only when the grant allows it. */
+    unsigned?: boolean
+  }): Promise<{ messageId: bigint | null; spaceId?: bigint | null; signed?: boolean }>
   sendMediaMessage(params: {
     chatId?: bigint
     userId?: bigint
@@ -344,7 +346,9 @@ export type InlineApi = {
     replyToMsgId?: bigint
     sendMode: "normal" | "silent"
     parseMarkdown: boolean
-  }): Promise<{ messageId: bigint | null; spaceId?: bigint | null }>
+    /** Leave off "Sent via <app>"; honored only when the grant allows it. */
+    unsigned?: boolean
+  }): Promise<{ messageId: bigint | null; spaceId?: bigint | null; signed?: boolean }>
 }
 
 export function createInlineApi(params: {
@@ -353,6 +357,10 @@ export function createInlineApi(params: {
   allowed: InlineAllowedContext
   /** Defaults to the stateless HTTP RPC endpoint. */
   rpc?: InlineRpcInvoker
+  /** Known agent id this connection sends as; recipients see "Sent via <name>". */
+  viaApp?: string
+  /** The user let this app send without "Sent via <name>" when they ask. */
+  allowUnsigned?: boolean
 }): InlineApi {
   // Every supported read and write is one stateless HTTP RPC: no realtime
   // socket, so the server does no connection, presence or sync work for it.
@@ -443,9 +451,12 @@ export function createInlineApi(params: {
     replyToMsgId?: bigint
     silent: boolean
     parseMarkdown?: boolean
-  }): Promise<{ messageId: bigint | null }> => {
+    unsigned?: boolean
+  }): Promise<{ messageId: bigint | null; signed: boolean }> => {
     const text = message.text
     const hasText = typeof text === "string" && text.length > 0
+    // Unsigned only when the user allowed it for this app; otherwise the label stays.
+    const signed = !(message.unsigned === true && params.allowUnsigned === true)
     if (!hasText && message.media == null) throw new Error("sendMessage: provide `text` and/or `media`")
     if (message.parseMarkdown != null && !hasText) throw new Error("sendMessage: `parseMarkdown` requires non-empty `text`")
 
@@ -472,6 +483,7 @@ export function createInlineApi(params: {
           ...(message.replyToMsgId != null ? { replyToMsgId: message.replyToMsgId } : {}),
           ...(message.parseMarkdown != null ? { parseMarkdown: message.parseMarkdown } : {}),
           ...(message.silent ? { sendMode: MessageSendMode.MODE_SILENT } : {}),
+          ...(signed && params.viaApp ? { via: { source: { oneofKind: "app" as const, app: params.viaApp } } } : {}),
         }),
       })
     } catch (error) {
@@ -482,7 +494,7 @@ export function createInlineApi(params: {
         { cause: error as Error },
       )
     }
-    return { messageId: firstMessageId(result.sendMessage.updates) }
+    return { messageId: firstMessageId(result.sendMessage.updates), signed: signed && params.viaApp != null }
   }
 
   const normalizeContentFilter = (content?: InlineMessageContentFilter): InlineMessageContentFilter => {
@@ -1800,7 +1812,7 @@ export function createInlineApi(params: {
       }
     },
 
-    async sendMessage({ chatId, userId, text, replyToMsgId, sendMode, parseMarkdown }) {
+    async sendMessage({ chatId, userId, text, replyToMsgId, sendMode, parseMarkdown, unsigned }) {
       const target = resolveTarget({ chatId, userId }, "sendMessage")
       if (target.kind === "user" && !allowDms) {
         throw new InlineAccessDeniedError("DM access is not allowed for this grant")
@@ -1814,11 +1826,12 @@ export function createInlineApi(params: {
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         silent: sendMode === "silent",
         parseMarkdown,
+        ...(unsigned ? { unsigned } : {}),
       })
-      return { messageId: res.messageId, spaceId: chat?.spaceId ?? null }
+      return { messageId: res.messageId, spaceId: chat?.spaceId ?? null, signed: res.signed }
     },
 
-    async sendMediaMessage({ chatId, userId, media, text, replyToMsgId, sendMode, parseMarkdown }) {
+    async sendMediaMessage({ chatId, userId, media, text, replyToMsgId, sendMode, parseMarkdown, unsigned }) {
       const target = resolveTarget({ chatId, userId }, "sendMediaMessage")
       if (target.kind === "user" && !allowDms) {
         throw new InlineAccessDeniedError("DM access is not allowed for this grant")
@@ -1834,8 +1847,9 @@ export function createInlineApi(params: {
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         silent: sendMode === "silent",
         ...(caption ? { parseMarkdown } : {}),
+        ...(unsigned ? { unsigned } : {}),
       })
-      return { messageId: res.messageId, spaceId: chat?.spaceId ?? null }
+      return { messageId: res.messageId, spaceId: chat?.spaceId ?? null, signed: res.signed }
     },
 
   }

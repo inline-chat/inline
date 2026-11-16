@@ -261,6 +261,50 @@ describe("createInlineApi", () => {
     }
   })
 
+  it("signs sends with the connection's agent", async () => {
+    realtimeSdk.client.invoke.mockResolvedValue({ oneofKind: "sendMessage", sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: 300n, randomId: 1n } } }] } })
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: { allowedSpaceIds: [], allowDms: true, allowHomeThreads: false },
+      viaApp: "chatgpt",
+    })
+    try {
+      await api.sendMessage({ userId: 2n, text: "Booked the room", sendMode: "normal", parseMarkdown: true })
+      await api.sendMediaMessage({ userId: 2n, text: "", sendMode: "normal", parseMarkdown: true, media: { kind: "photo", id: 501n } })
+      for (const call of sendCalls()) {
+        expect(call[1].sendMessage.via).toEqual({ source: { oneofKind: "app", app: "chatgpt" } })
+      }
+      expect(sendCalls()).toHaveLength(2)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it("leaves the signature off only when asked and allowed", async () => {
+    realtimeSdk.client.invoke.mockResolvedValue({ oneofKind: "sendMessage", sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: 300n, randomId: 1n } } }] } })
+    const send = async (allowUnsigned: boolean, unsigned: boolean) => {
+      realtimeSdk.client.invoke.mockClear()
+      const api = createInlineApi({
+        baseUrl: "https://api.inline.test",
+        token: "test-token",
+        allowed: { allowedSpaceIds: [], allowDms: true, allowHomeThreads: false },
+        viaApp: "chatgpt",
+        allowUnsigned,
+      })
+      try {
+        const sent = await api.sendMessage({ userId: 2n, text: "hi", sendMode: "normal", parseMarkdown: true, unsigned })
+        return { signed: sent.signed, via: sendCalls()[0]![1].sendMessage.via }
+      } finally {
+        await api.close()
+      }
+    }
+
+    expect(await send(true, true)).toEqual({ signed: false, via: undefined })
+    expect(await send(false, true)).toEqual({ signed: true, via: { source: { oneofKind: "app", app: "chatgpt" } } })
+    expect(await send(true, false)).toEqual({ signed: true, via: { source: { oneofKind: "app", app: "chatgpt" } } })
+  })
+
   it("wraps a failed send like the SDK so tool errors are unchanged", async () => {
     const failure = new Error("Peer ID is invalid")
     realtimeSdk.client.invoke.mockImplementation(async (method) => {
