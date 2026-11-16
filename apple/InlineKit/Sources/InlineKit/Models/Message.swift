@@ -813,11 +813,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
-  private static func mergedVoiceContent(
+  static func mergedVoiceContent(
     incoming: Client_MessageVoiceContent,
     existing: Client_MessageVoiceContent?
   ) -> Client_MessageVoiceContent {
-    guard let existing, incoming.voiceID == 0 || incoming.voiceID == existing.voiceID else { return incoming }
+    // Our own upload keeps its temporary negative id until the server's copy of the message
+    // arrives with the real one; that is the same voice, so its local file stays attached.
+    guard let existing,
+          incoming.voiceID == 0 || incoming.voiceID == existing.voiceID || (existing.voiceID < 0 && incoming.voiceID > 0)
+    else { return incoming }
 
     var merged = incoming
     if merged.voiceID == 0 {
