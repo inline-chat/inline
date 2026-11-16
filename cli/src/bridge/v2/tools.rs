@@ -2081,8 +2081,8 @@ mod tests {
     fn create_chat_message_is_cut_in_utf16_units() {
         // Each crab is one character but two UTF-16 units.
         let crabs = "🦀".repeat(MAX_MESSAGE_UTF16);
-        let cut = message_arg(&json!({"initial_message": crabs}), "initial_message")
-            .expect("message");
+        let cut =
+            message_arg(&json!({"initial_message": crabs}), "initial_message").expect("message");
         assert_eq!(cut.encode_utf16().count(), MAX_MESSAGE_UTF16);
         assert_eq!(cut.chars().count(), MAX_MESSAGE_UTF16 / 2);
         let short = message_arg(&json!({"initial_message": " Hi 🦀 "}), "initial_message");

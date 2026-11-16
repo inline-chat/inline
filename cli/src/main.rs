@@ -2275,19 +2275,29 @@ fn message_via_input(
     }
     if let Some(bot_id) = args.via_bot {
         if bot_id <= 0 {
-            return Err(CliError::invalid_args("--via-bot must be a positive bot user id"));
+            return Err(CliError::invalid_args(
+                "--via-bot must be a positive bot user id",
+            ));
         }
-        return Ok(Some(proto::InputMessageVia { source: Some(Source::BotUserId(bot_id)) }));
+        return Ok(Some(proto::InputMessageVia {
+            source: Some(Source::BotUserId(bot_id)),
+        }));
     }
     let app = match args.via.as_deref().map(str::trim) {
-        Some("") => return Err(CliError::invalid_args("--via needs an agent name, e.g. codex")),
+        Some("") => {
+            return Err(CliError::invalid_args(
+                "--via needs an agent name, e.g. codex",
+            ));
+        }
         Some(app) => app.to_ascii_lowercase(),
         None => match detected {
             Some(id) => id.to_string(),
             None => return Ok(None),
         },
     };
-    Ok(Some(proto::InputMessageVia { source: Some(Source::App(app)) }))
+    Ok(Some(proto::InputMessageVia {
+        source: Some(Source::App(app)),
+    }))
 }
 
 /// "Sent via Claude Code" for human output, or None for a plain message.
@@ -9321,7 +9331,11 @@ mod cli_parsing_tests {
             via_source(message_via_input(&plain, Some("claude-code")).unwrap()),
             Some(Source::App("claude-code".into()))
         );
-        assert_eq!(message_via_input(&plain, None).unwrap(), None, "a person in a plain terminal");
+        assert_eq!(
+            message_via_input(&plain, None).unwrap(),
+            None,
+            "a person in a plain terminal"
+        );
 
         let as_me = send_signature(&["--as-me"]).unwrap();
         assert_eq!(message_via_input(&as_me, Some("codex")).unwrap(), None);
@@ -9351,9 +9365,19 @@ mod cli_parsing_tests {
     #[test]
     fn labels_signed_sends_for_people() {
         use proto::input_message_via::Source;
-        let app = |app: &str| Some(proto::InputMessageVia { source: Some(Source::App(app.into())) });
-        assert_eq!(message_via_label(&app("claude-code")).as_deref(), Some("Sent via Claude Code"));
-        assert_eq!(message_via_label(&app("mystery")).as_deref(), Some("Sent via an AI agent"));
+        let app = |app: &str| {
+            Some(proto::InputMessageVia {
+                source: Some(Source::App(app.into())),
+            })
+        };
+        assert_eq!(
+            message_via_label(&app("claude-code")).as_deref(),
+            Some("Sent via Claude Code")
+        );
+        assert_eq!(
+            message_via_label(&app("mystery")).as_deref(),
+            Some("Sent via an AI agent")
+        );
         assert_eq!(message_via_label(&None), None);
     }
 
