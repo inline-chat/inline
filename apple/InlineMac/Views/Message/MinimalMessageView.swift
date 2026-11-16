@@ -36,7 +36,9 @@ class MinimalMessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MinimalMessageView", enableTracing: false)
   static let avatarSize: CGFloat = MessageSizeCalculator.minimalAvatarSize
-  private let acknowledgementView = MessageAcknowledgementView()
+  /// Built the first time this cell shows a message with an Ack. Most messages never have one,
+  /// and the pill (symbol image, label, layer) was a fixed part of every cell's construction.
+  private var acknowledgementView: MessageAcknowledgementView?
   /// "Sent via Codex" under the last message of an agent's run.
   private var viaFooterLabel: NSTextField?
   private(set) var fullMessage: FullMessage
@@ -1084,9 +1086,32 @@ class MinimalMessageViewAppKit: NSView {
     return label
   }
 
+  private func configureAcknowledgement(animated: Bool) {
+    let message = isAnchorMessage ? fullMessage.withoutAcknowledgements : fullMessage
+    let view: MessageAcknowledgementView
+    if let acknowledgementView {
+      view = acknowledgementView
+    } else {
+      guard !message.acknowledgementActors.isEmpty else { return }
+      view = MessageAcknowledgementView()
+      view.onToggle = { [weak self] in
+        self?.acknowledgeMessage()
+      }
+      // Bottom-most, where setup used to add it before every other subview.
+      addSubview(view, positioned: .below, relativeTo: subviews.first)
+      acknowledgementView = view
+    }
+    view.configure(
+      message,
+      fallbackRTL: props.isRtl || userInterfaceLayoutDirection == .rightToLeft,
+      action: currentAcknowledgementAction(),
+      animated: animated
+    )
+  }
+
   private func layoutAcknowledgement() {
-    guard hasAcknowledgement else {
-      if !acknowledgementView.isAnimatingRemoval {
+    guard hasAcknowledgement, let acknowledgementView else {
+      if let acknowledgementView, !acknowledgementView.isAnimatingRemoval {
         acknowledgementView.isHidden = true
       }
       return
@@ -1199,15 +1224,7 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func setupView() {
-    addSubview(acknowledgementView)
-    acknowledgementView.onToggle = { [weak self] in
-      self?.acknowledgeMessage()
-    }
-    acknowledgementView.configure(
-      isAnchorMessage ? fullMessage.withoutAcknowledgements : fullMessage,
-      fallbackRTL: props.isRtl || userInterfaceLayoutDirection == .rightToLeft,
-      action: currentAcknowledgementAction()
-    )
+    configureAcknowledgement(animated: false)
     // For performance of animations
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -4183,12 +4200,7 @@ class MinimalMessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
-    acknowledgementView.configure(
-      isAnchorMessage ? fullMessage.withoutAcknowledgements : fullMessage,
-      fallbackRTL: props.isRtl || userInterfaceLayoutDirection == .rightToLeft,
-      action: currentAcknowledgementAction(),
-      animated: animate
-    )
+    configureAcknowledgement(animated: animate)
     needsLayout = true
     if prev.message.chatId != fullMessage.message.chatId {
       didResolveMessageSpaceId = false
