@@ -13,12 +13,21 @@
 //! | `session.model.selected`, `session.agent.selected` | `Settings` |
 //! | `session.renamed` | `Renamed` |
 //! | events of a sub-agent session | `Child` updates and items under that child |
+//! | a sub-agent's report (`synthetic`, `metadata.source = "subagent"`) | `Child` update and a system `Message` under that child |
 //! | anything else | `Notice` (never dropped) |
 //!
 //! A turn is one OpenCode execution. It is named after the inbox entry that
 //! started it, so the id Inline gave a prompt is also the id of the turn it
 //! starts; an execution started from another client is named after that
 //! client's prompt the same way.
+//!
+//! Since 2.3.0 sub-agents always run in the background: the `subagent` tool
+//! returns the child's session at once, the parent's execution ends while
+//! the child works, and the child reports to the parent's inbox each time it
+//! goes idle. A report that finds the parent idle wakes it into a new
+//! execution. That run is a turn of its own, named after the report, with no
+//! Inline input: a continuation the agent started, like a turn started from
+//! another client. The report itself is the child's, never a user prompt.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -54,6 +63,39 @@ struct InboxEntry {
     queued: bool,
     /// A person's prompt (`user`), not synthetic context, a compaction or a move.
     user: bool,
+    /// A sub-agent reporting back to this session.
+    report: Option<Report>,
+}
+
+/// A sub-agent's report to its parent (`<subagent>` synthetic input).
+#[derive(Clone, Debug)]
+struct Report {
+    /// The child's session.
+    child: String,
+    /// `completed`, `error` or `cancelled` for the busy period reported.
+    state: Option<String>,
+    description: Option<String>,
+}
+
+impl Report {
+    /// The report a synthetic payload (or synthetic message) carries.
+    fn of(payload: &Value) -> Option<Self> {
+        let metadata = payload.get("metadata")?;
+        if metadata.get("source").and_then(Value::as_str) != Some("subagent") {
+            return None;
+        }
+        Some(Self {
+            child: metadata.get("childID").and_then(Value::as_str)?.to_owned(),
+            state: metadata
+                .get("state")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            description: payload
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+    }
 }
 
 /// The execution in progress.
@@ -283,9 +325,18 @@ impl Mapper {
         }
     }
 
-    /// Pending inbox ids, steers and queued alike.
+    /// Pending inbox ids, steers and queued alike. Sub-agent reports are the
+    /// children's results, not Inline's input, and are never withdrawn.
     pub fn pending_inbox(&self) -> Vec<String> {
-        self.inbox_order.clone().into()
+        self.inbox_order
+            .iter()
+            .filter(|id| {
+                self.inbox
+                    .get(*id)
+                    .is_none_or(|entry| entry.report.is_none())
+            })
+            .cloned()
+            .collect()
     }
 
     /// Records a command Inline sent: OpenCode turns it into a prompt with
@@ -598,6 +649,10 @@ impl Mapper {
                 )));
                 events
             }
+            "session.synthetic" if Report::of(&data).is_some() => {
+                let report = Report::of(&data).expect("checked");
+                self.report(&report, &format!("synthetic:{}", event_id(event)), event)
+            }
             "session.synthetic" => vec![Event::Item(Item::new(
                 item_id(&format!("synthetic:{}", event_id(event))),
                 self.turn().cloned(),
@@ -672,9 +727,11 @@ impl Mapper {
             "form.replied" | "form.cancelled" => self.interaction_settled(data.get("id")),
             // Bookkeeping with no user-visible meaning: this session's own
             // creation, Inline's guide being attached, compaction streaming
-            // (its summary arrives whole), and the deprecated idle signal.
+            // (its summary arrives whole), the deprecated idle signal, and
+            // the first streamed token of a step (2.3.0, throughput timing).
             "session.idle"
             | "session.step.streamed"
+            | "session.step.first-token"
             | "session.created"
             | "session.instructions.updated"
             | "session.compaction.delta"
@@ -705,7 +762,8 @@ impl Mapper {
             ));
         }
         // Named after the oldest person's prompt waiting to run (synthetic
-        // context and compactions do not start turns); otherwise the event.
+        // context and compactions do not start turns), then a sub-agent
+        // report that woke the session; otherwise the event.
         let first = self
             .inbox_order
             .iter()
@@ -713,6 +771,13 @@ impl Mapper {
                 self.inbox
                     .get(*id)
                     .is_some_and(|entry| entry.user && !entry.queued)
+            })
+            .or_else(|| {
+                self.inbox_order.iter().find(|id| {
+                    self.inbox
+                        .get(*id)
+                        .is_some_and(|entry| entry.report.is_some())
+                })
             })
             .or_else(|| {
                 self.inbox_order
@@ -826,6 +891,9 @@ impl Mapper {
                 text,
                 queued,
                 user: kind == "user",
+                report: (kind == "synthetic")
+                    .then(|| item.get("payload").and_then(Report::of))
+                    .flatten(),
             },
         );
         self.inbox_order.push_back(id.to_owned());
@@ -851,7 +919,9 @@ impl Mapper {
             .as_ref()
             .and_then(|entry| entry.input.clone())
             .or_else(|| self.sent.remove(id));
-        if let Some(entry) = &entry
+        if let Some(report) = entry.as_ref().and_then(|entry| entry.report.clone()) {
+            events.extend(self.report(&report, id, event));
+        } else if let Some(entry) = &entry
             && !entry.text.is_empty()
         {
             events.push(Event::Item(Item::new(
@@ -1585,6 +1655,69 @@ impl Mapper {
 
     // MARK: sub-agents
 
+    /// A sub-agent's report reaching this session: the child's own result
+    /// (already shown as its work), so it closes the child if its end was
+    /// missed and shows as a system note under it, never as a user prompt.
+    fn report(&mut self, report: &Report, id: &str, event: &Value) -> Vec<Event> {
+        let mut events = Vec::new();
+        let status = match report.state.as_deref() {
+            Some("error") => ChildStatus::Failed,
+            Some("cancelled") => ChildStatus::Stopped,
+            _ => ChildStatus::Completed,
+        };
+        let child = match self.children.get_mut(&report.child) {
+            Some(state) => {
+                // A report whose child is still marked running ends it; a
+                // child already woken again keeps running (its next start
+                // arrives before this report only when events reorder).
+                if state.running {
+                    state.running = false;
+                    events.push(Event::Child {
+                        update: ChildUpdate {
+                            child: state.child.clone(),
+                            status,
+                            title: state.title.clone(),
+                            accepts_direct_input: false,
+                            native: event.clone(),
+                        },
+                    });
+                }
+                Some(state.child.clone())
+            }
+            None => ChildId::new(report.child.as_str()).ok().map(|id| ChildRef {
+                id,
+                kind: ChildKind::Subagent,
+            }),
+        };
+        let label = report
+            .description
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .unwrap_or("Sub-agent");
+        let text = match status {
+            ChildStatus::Failed => format!("{label} failed"),
+            ChildStatus::Stopped => format!("{label} was cancelled"),
+            _ => format!("{label} reported back"),
+        };
+        events.push(Event::Item(
+            Item::new(
+                item_id(id),
+                self.turn().cloned(),
+                ItemUpdate::Completed {
+                    body: ItemBody::Message {
+                        role: MessageRole::System,
+                        text: bounded(&text, MAX_PREVIEW_CHARS),
+                        input: None,
+                    },
+                    status: ItemStatus::Completed,
+                },
+                event.clone(),
+            )
+            .with_parent(child),
+        ));
+        events
+    }
+
     fn apply_child(
         &mut self,
         kind: &str,
@@ -1912,6 +2045,28 @@ impl Mapper {
                         data["reason"] = json!("user");
                     }
                     events.extend(self.apply(&synthetic(kind, data)));
+                }
+                // A sub-agent report: it woke the session into a run of its
+                // own when no turn was running.
+                "synthetic" if Report::of(message).is_some() => {
+                    if !self.inbox.contains_key(&id) {
+                        events.extend(self.apply(&synthetic(
+                            "session.inbox.enqueued",
+                            json!({"inboxID": id, "item": {"type": "synthetic", "delivery": "steer", "payload": {
+                                "text": message.get("text").cloned().unwrap_or_default(),
+                                "description": message.get("description").cloned().unwrap_or_default(),
+                                "metadata": message.get("metadata").cloned().unwrap_or_default(),
+                            }}}),
+                        )));
+                    }
+                    if self.turn.is_none() {
+                        events
+                            .extend(self.apply(&synthetic("session.execution.started", json!({}))));
+                    }
+                    events.extend(self.apply(&synthetic(
+                        "session.inbox.delivered",
+                        json!({"inboxID": id}),
+                    )));
                 }
                 // A background shell that finished while the stream was down.
                 "synthetic"

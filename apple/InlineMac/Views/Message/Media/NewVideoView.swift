@@ -1447,7 +1447,7 @@ final class NewVideoView: NSView {
     let sizeBytes = videoInfo.video.size.map(Int64.init)
     guard AutoDownloadPolicy.shouldDownload(kind: .media, sizeBytes: sizeBytes) else { return }
 
-    ensureVideoAvailable { result in
+    ensureVideoAvailable(priority: .visible) { result in
       if case let .failure(error) = result {
         Log.shared.error("Failed to auto-download video", error: error)
       }
@@ -1566,7 +1566,11 @@ extension NewVideoView: QLPreviewItem {
 // MARK: - Save Support
 
 extension NewVideoView {
-  func ensureVideoAvailable(completion: @escaping (Result<URL, Error>) -> Void) {
+  /// A click downloads at user priority; automatic downloads pass `.visible`.
+  func ensureVideoAvailable(
+    priority: NativeDownloadPriority = .userInitiated,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
     if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
       completion(.success(local))
       return
@@ -1639,7 +1643,7 @@ extension NewVideoView {
     downloadProgressSnapshot = currentDownloadProgressSnapshot()
     updateDurationLabel()
     updateOverlay()
-    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
+    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message, priority: priority) { [weak self] result in
       // Capture any local file presence before hopping to main to avoid type resolution issues.
       let localUrl: URL?
       let localPath: String?

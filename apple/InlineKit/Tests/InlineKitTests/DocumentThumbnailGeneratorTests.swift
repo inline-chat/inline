@@ -65,6 +65,7 @@ struct DocumentThumbnailGeneratorTests {
         table.column("bytes", .blob)
         table.column("cdnUrl", .text)
         table.column("localPath", .text)
+        table.column("fileUniqueId", .text)
       }
       try db.create(table: "document") { table in
         table.autoIncrementedPrimaryKey("id")

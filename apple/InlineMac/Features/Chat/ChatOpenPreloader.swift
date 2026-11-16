@@ -15,6 +15,31 @@ struct PreparedChatPayload: Sendable {
   /// The list holds a loading state over these latest messages until the fetch lands, then
   /// opens at the line. Nil when nothing is fetched, including offline.
   let unreadFetchBoundary: Int64?
+  /// The title bar's first snapshot, so the toolbar doesn't read the database on the main thread.
+  let titleSnapshot: ChatRouteToolbarTitleModel.Snapshot?
+}
+
+/// What a chat open needs from the main actor, captured when the open is requested, so preparing
+/// the payload never queues behind the main thread (a busy main would otherwise delay the very
+/// read that lets it commit).
+struct ChatOpenContext: Sendable {
+  let initialLimit: Int
+  /// The saved reading place; nil when there is none or an explicit target owns the first viewport.
+  let savedPlace: ChatReadingPlace?
+  let isConnecting: Bool
+  /// Taken before any read, so updates published while the payload is prepared are reconciled by
+  /// the view model.
+  let publicationRevision: UInt64
+
+  @MainActor
+  static func capture(peer: Peer, targetMessageId: Int64?) -> ChatOpenContext {
+    ChatOpenContext(
+      initialLimit: MessagesProgressiveViewModel.defaultInitialLimit(),
+      savedPlace: targetMessageId == nil ? ChatReadingPlaceStore.shared.place(for: peer) : nil,
+      isConnecting: Api.realtime.stateObject.connectionState == .connecting,
+      publicationRevision: MessagesPublisher.shared.publicationRevision(for: peer)
+    )
+  }
 }
 
 struct PreparedPinnedMessage: Sendable, Equatable {
@@ -35,6 +60,18 @@ actor ChatOpenPreloader {
   func prepare(
     peer: Peer,
     targetMessageId: Int64? = nil,
+    database: AppDatabase
+  ) async throws -> PreparedChatPayload {
+    let context = await MainActor.run {
+      ChatOpenContext.capture(peer: peer, targetMessageId: targetMessageId)
+    }
+    return try await prepare(peer: peer, targetMessageId: targetMessageId, context: context, database: database)
+  }
+
+  func prepare(
+    peer: Peer,
+    targetMessageId: Int64? = nil,
+    context: ChatOpenContext,
     database: AppDatabase
   ) async throws -> PreparedChatPayload {
     let prepareSignpostID = OSSignpostID(log: Self.signpostLog)
@@ -58,9 +95,7 @@ actor ChatOpenPreloader {
       )
     }
 
-    let initialLimit = await MainActor.run {
-      MessagesProgressiveViewModel.defaultInitialLimit()
-    }
+    let initialLimit = context.initialLimit
     try Task.checkCancellation()
 
     if let targetMessageId {
@@ -86,15 +121,12 @@ actor ChatOpenPreloader {
       : nil
     // An explicit target owns the first viewport; without one the saved reading place comes
     // before the unread line.
-    let savedPlace: ChatReadingPlace? = if targetMessageId == nil {
-      await MainActor.run { ChatReadingPlaceStore.shared.place(for: peer) }
-    } else {
-      nil
-    }
+    let savedPlace: ChatReadingPlace? = targetMessageId == nil ? context.savedPlace : nil
     let opening: (resolution: ChatOpening.Resolution, publicationRevision: UInt64)? =
       if savedPlace != nil || unreadBoundary != nil {
         try await localOpening(
           peer: peer,
+          publicationRevision: context.publicationRevision,
           savedPlace: savedPlace,
           unreadCount: chatItem?.dialog.unreadCount,
           readInboxMaxId: chatItem?.dialog.readInboxMaxId,
@@ -105,8 +137,9 @@ actor ChatOpenPreloader {
         nil
       }
     if opening?.resolution.droppedSavedPlace == true {
-      // A saved place is never fetched; the chat opens by the next rule and forgets it.
-      await MainActor.run { ChatReadingPlaceStore.shared.clear(for: peer) }
+      // A saved place is never fetched; the chat opens by the next rule and forgets it. Nothing
+      // here depends on the store, so the clear doesn't hold the payload behind the main thread.
+      Task { @MainActor in ChatReadingPlaceStore.shared.clear(for: peer) }
     }
     // The saved place's or the unread line's cached window. Nil opens on the latest messages,
     // read below with the rest of the payload.
@@ -120,21 +153,16 @@ actor ChatOpenPreloader {
     // Opening never waits on the network. Uncached history is fetched behind a loading state, but
     // only when a fetch can actually run: offline, the latest cached messages open as they are.
     let unreadFetchBoundary: Int64?
-    if let uncachedBoundary = opening?.resolution.uncachedUnreadBoundary,
-       await MainActor.run(body: { Api.realtime.stateObject.connectionState != .connecting })
-    {
+    if let uncachedBoundary = opening?.resolution.uncachedUnreadBoundary, !context.isConnecting {
       unreadFetchBoundary = uncachedBoundary
     } else {
       unreadFetchBoundary = nil
     }
     try Task.checkCancellation()
 
-    // Taken before the read, so updates published while it runs are reconciled by the view model.
-    // An opening window was read earlier, after its own revision.
-    let currentRevision = await MainActor.run {
-      MessagesPublisher.shared.publicationRevision(for: peer)
-    }
-    let publicationRevision = openingWindow?.publicationRevision ?? currentRevision
+    // Taken when the open was requested, before every read here, so updates published since are
+    // reconciled by the view model.
+    let publicationRevision = openingWindow?.publicationRevision ?? context.publicationRevision
     let payload = try await database.reader.read { db in
       let readSignpostID = OSSignpostID(log: Self.signpostLog)
       os_signpost(
@@ -231,6 +259,9 @@ actor ChatOpenPreloader {
         )
       }
 
+      // Optional: without it the title bar reads its own snapshot, as before.
+      let titleSnapshot = try? ChatRouteToolbarTitleModel.fetchSnapshot(peer: peer, db: db)
+
       let messagesInitialState = MessagesProgressiveViewModel.InitialState(
         messages: messages,
         threadAnchor: .resolved(threadAnchor),
@@ -246,7 +277,8 @@ actor ChatOpenPreloader {
         chatItem: chatItem,
         messagesInitialState: messagesInitialState,
         pinnedMessage: pinnedMessage,
-        unreadFetchBoundary: unreadFetchBoundary
+        unreadFetchBoundary: unreadFetchBoundary,
+        titleSnapshot: titleSnapshot
       )
     }
     try Task.checkCancellation()
@@ -333,13 +365,13 @@ actor ChatOpenPreloader {
   /// (`ChatOpening.resolve`), read with the publication revision taken before it.
   private func localOpening(
     peer: Peer,
+    publicationRevision revision: UInt64,
     savedPlace: ChatReadingPlace?,
     unreadCount: Int?,
     readInboxMaxId: Int64?,
     latestLimit: Int,
     database: AppDatabase
   ) async throws -> (resolution: ChatOpening.Resolution, publicationRevision: UInt64) {
-    let revision = await MainActor.run { MessagesPublisher.shared.publicationRevision(for: peer) }
     let resolution = try await database.reader.read { db in
       let latest = try Self.fetchLatestMessages(peer: peer, limit: latestLimit, db: db)
       return try ChatOpening.resolve(

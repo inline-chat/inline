@@ -85,7 +85,8 @@ public final class SharedAudioPlayer: ObservableObject {
     center: AudioPlaybackCenter = .shared,
     auth: AuthHandle = Auth.shared.handle,
     downloadVoice: @escaping (Message, @escaping (Result<URL, Error>) -> Void) -> Void = {
-      FileDownloader.shared.downloadVoice(message: $0, completion: $1)
+      // Playback is always something the user asked for.
+      FileDownloader.shared.downloadVoice(message: $0, priority: .userInitiated, completion: $1)
     },
     cancelVoiceDownload: @escaping (Int64) -> Void = { FileDownloader.shared.cancelVoiceDownload(voiceId: $0) },
     voiceProgressPublisher: @escaping (Int64) -> AnyPublisher<DownloadProgress, Never> = {

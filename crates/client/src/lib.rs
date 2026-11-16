@@ -385,6 +385,29 @@ pub enum ClientErrorCategory {
     Internal,
 }
 
+impl ClientErrorCategory {
+    /// A stable `snake_case` name for logs and error reports: never carries
+    /// ids, paths or server text.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::InvalidInput => "invalid_input",
+            Self::AuthRequired => "auth_required",
+            Self::AuthExpired => "auth_expired",
+            Self::ReloginRequired => "relogin_required",
+            Self::Network => "network",
+            Self::Timeout => "timeout",
+            Self::CommitOutcomeUnknown => "commit_outcome_unknown",
+            Self::RateLimited => "rate_limited",
+            Self::ProtocolMismatch => "protocol_mismatch",
+            Self::NotFound => "not_found",
+            Self::PermissionDenied => "permission_denied",
+            Self::Unsupported => "unsupported",
+            Self::Conflict => "conflict",
+            Self::Internal => "internal",
+        }
+    }
+}
+
 /// Redacted failure value suitable for status endpoints and bridge errors.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientFailure {

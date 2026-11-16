@@ -82,6 +82,7 @@ fn kind(event: &Event) -> String {
         Event::Usage { .. } => "usage".into(),
         Event::Child { .. } => "child".into(),
         Event::Renamed { .. } => "renamed".into(),
+        Event::PromptSuggestion { .. } => "prompt_suggestion".into(),
         Event::Notice(notice) => format!("notice:{}", notice.code),
         Event::State { .. } => "state".into(),
         Event::Held { .. } => "held".into(),
@@ -182,6 +183,64 @@ async fn until_done(
     }
     eprintln!("  events: {} (+{deltas} deltas)", out.kinds.join(" "));
     out
+}
+
+fn approve_once(interaction: &Interaction) -> Option<InteractionResponse> {
+    match &interaction.kind {
+        InteractionKind::Approval { decisions, .. } => decisions
+            .iter()
+            .find(|decision| decision.id.as_str() == "once")
+            .map(|decision| InteractionResponse::Decision {
+                decision: decision.id.clone(),
+                message: None,
+            }),
+        _ => None,
+    }
+}
+
+/// The next turn the session starts by itself (a sub-agent's report waking
+/// it), while a sub-agent still runs or shortly after the last one ended.
+async fn continuation(session: &dyn Session, events: &mut EventStream) -> Option<Outcome> {
+    let wait = if session.live_work().children.is_empty() {
+        Duration::from_secs(10)
+    } else {
+        STEP_TIMEOUT
+    };
+    let turn = tokio::time::timeout(wait, async {
+        while let Some(envelope) = events.next().await {
+            match envelope.event {
+                Event::Turn {
+                    turn,
+                    phase: TurnPhase::Started { .. },
+                } => return Some(turn),
+                // A background sub-agent asks for approval after its
+                // parent's turn ended.
+                Event::Interaction(interaction) => {
+                    eprintln!("  approval outside a turn: {:?}", interaction.parent);
+                    let response =
+                        approve_once(&interaction).unwrap_or(InteractionResponse::Cancel);
+                    if let Err(error) = session
+                        .control(Op::Answer {
+                            interaction: interaction.id.clone(),
+                            response,
+                            by: UserId(1),
+                        })
+                        .await
+                    {
+                        eprintln!("  answer failed: {error}");
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()?;
+    let mut out = until_done(session, events, approve_once).await;
+    out.turn = Some(turn);
+    Some(out)
 }
 
 fn spec(folder: &std::path::Path, mode: OpenMode, permission: Option<&str>) -> OpenSpec {
@@ -448,11 +507,30 @@ async fn live_lab() {
         ))
         .await
         .unwrap();
-    let out = until_done(session.as_ref(), &mut events, |_| None).await;
+    let out = until_done(session.as_ref(), &mut events, approve_once).await;
     report.push(format!(
         "sub-agent: {:?} child updates={} answer={:?}",
         out.outcome, out.children, out.answer
     ));
+    // Since 2.3.0 sub-agents run in the background: the turn may end with
+    // the child still working, and its report wakes the session into a
+    // continuation turn of its own, with no Inline input.
+    let first = out.turn.clone();
+    while let Some(next) = continuation(session.as_ref(), &mut events).await {
+        report.push(format!(
+            "sub-agent report run {}: {:?} consumed={} answer={:?}",
+            next.turn.as_ref().map(TurnId::as_str).unwrap_or("?"),
+            next.outcome,
+            next.consumed.len(),
+            next.answer
+        ));
+        assert_ne!(next.turn, first, "a report runs as its own turn");
+        assert!(
+            next.consumed.is_empty(),
+            "a report run consumes no Inline input"
+        );
+    }
+    assert!(session.live_work().children.is_empty());
 
     // 7. Settings, plan mode, rename, side call.
     eprintln!("7. settings");

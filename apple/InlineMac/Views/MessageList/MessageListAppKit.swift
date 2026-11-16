@@ -607,14 +607,8 @@ class MessageListAppKit: NSViewController {
         viewport.restore(anchor)
       }
       maintainReadingHoldIfNeeded()
+      // The checkbox column opens on the trailing side, so leading avatars stay where they are.
       syncAvatarOverlayAfterTableLayout()
-      // Avatars live in one overlay; they all move with the message column, so slide it as a whole.
-      if usesAvatarOverlay {
-        SelectionMotion.slide(
-          avatarOverlayView.layer,
-          fromX: active ? -MessageTableCell.forwardSelectionInset : MessageTableCell.forwardSelectionInset
-        )
-      }
     }
   }
 

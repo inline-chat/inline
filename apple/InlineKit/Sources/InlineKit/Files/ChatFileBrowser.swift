@@ -238,13 +238,13 @@ public enum ChatFileBrowser {
         url = downloaded
       case let .document(document):
         url = try await withCheckedThrowingContinuation { continuation in
-          FileDownloader.shared.downloadDocument(document: document, for: localMessage) {
+          FileDownloader.shared.downloadDocument(document: document, for: localMessage, priority: .userInitiated) {
             continuation.resume(with: $0)
           }
         }
       case let .video(video):
         url = try await withCheckedThrowingContinuation { continuation in
-          FileDownloader.shared.downloadVideo(video: video, for: localMessage) {
+          FileDownloader.shared.downloadVideo(video: video, for: localMessage, priority: .userInitiated) {
             continuation.resume(with: $0)
           }
         }

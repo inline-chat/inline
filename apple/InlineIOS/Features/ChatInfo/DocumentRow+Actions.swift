@@ -57,7 +57,7 @@ extension DocumentRow {
     )
 
     let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
-    FileDownloader.shared.downloadDocument(document: documentInfo, for: msg) { result in
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: msg, priority: .userInitiated) { result in
       DispatchQueue.main.async {
         Log.shared.debug("UI downloadFile completion: docId=\(documentInfo.id) result=\(result)")
         switch result {

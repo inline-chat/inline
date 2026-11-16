@@ -964,6 +964,15 @@ pub(crate) async fn preflight(codex: &Path) -> Result<inline_dots::DotRoom, Stri
         .map_err(|error| error.to_string())
 }
 
+/// Whether this Codex/ChatGPT login has a Dot to bridge. Bounded so agent
+/// discovery stays quick; a slow or failed check counts as unavailable.
+pub(crate) async fn available(codex: &Path, timeout: Duration) -> bool {
+    matches!(
+        tokio::time::timeout(timeout, preflight(codex)).await,
+        Ok(Ok(_))
+    )
+}
+
 pub(crate) struct DotsLaunch<'a> {
     pub(crate) installation: &'a ProviderInstallationConfig,
     pub(crate) owner_user_id: i64,

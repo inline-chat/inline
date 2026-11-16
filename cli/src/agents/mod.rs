@@ -303,11 +303,30 @@ fn setup_retry_command(args: &AgentsSetupArgs) -> String {
     command
 }
 
-pub(crate) fn discover(
+/// Upper bound for the Dot check, well inside the Mac app's discovery timeout.
+const DOTS_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub(crate) async fn discover(
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let output = discovery_output(&installed_targets());
+    let mut installed = installed_targets();
+    // A Codex/ChatGPT install alone doesn't mean the account has a Dot, so
+    // offer Dots only once its check passes.
+    let mut dots_available = false;
+    if let Some(dots) = installed_target(AgentTarget::Dots) {
+        dots_available = bridge::dots_available(&dots.executable, DOTS_DISCOVERY_TIMEOUT).await;
+        if dots_available {
+            installed.push(dots);
+        }
+    }
+    let mut output = discovery_output(&installed);
+    if !dots_available {
+        // Not a separate install, so don't list it as missing either.
+        output
+            .targets
+            .retain(|target| target.id != bridge::DOTS_PROVIDER_ID);
+    }
     if json {
         crate::output::print_json(&output, json_format)?;
     } else {
@@ -451,6 +470,13 @@ pub(crate) fn resolve_setup(
         args.access = prompt_access(installed.descriptor.family, args.access)?;
     }
     validate_target_args(&args, installed.descriptor.family)?;
+    if installed.descriptor.target == AgentTarget::Dots && args.folder.is_some() {
+        return Err(cli_error(
+            "unsupported_option",
+            "--folder is not used by ChatGPT Dots; it runs no local tools",
+        )
+        .into());
+    }
     if !non_interactive && !args.dry_run {
         println!();
         println!("Target: {}", installed.descriptor.display_name);
@@ -551,7 +577,8 @@ pub(crate) async fn setup(
                     .map(|_| ())
                     .map_err(Into::into)
             }
-            AgentTarget::Codex | AgentTarget::Amp => Ok(()),
+            // The Dot itself is checked in the integration phase.
+            AgentTarget::Codex | AgentTarget::Amp | AgentTarget::Dots => Ok(()),
         };
         if let Err(error) = preflight {
             return report_setup_failure(error, target, &progress, false, json, json_format);
@@ -560,7 +587,11 @@ pub(crate) async fn setup(
     }
     let owner_auth = owner_auth.ok_or_else(CliError::not_authenticated)?;
     match target {
-        AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Claude | AgentTarget::Amp => {
+        AgentTarget::Codex
+        | AgentTarget::Opencode
+        | AgentTarget::Claude
+        | AgentTarget::Amp
+        | AgentTarget::Dots => {
             let outcome = match bridge::setup_provider_core_with_progress(
                 config,
                 owner_auth,

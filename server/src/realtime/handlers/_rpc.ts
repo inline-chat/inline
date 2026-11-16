@@ -38,6 +38,7 @@ import { handleGetSpaces } from "./space.getSpaces"
 import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
+import { sendComposeSuggestionHandler } from "./messages.sendComposeSuggestion"
 import { createBotHandler } from "./createBot"
 import { listBotsHandler } from "./listBots"
 import { deleteBotHandler } from "./deleteBot"
@@ -824,6 +825,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await sendComposeActionHandler(call.input.sendComposeAction, handlerContext)
       return { oneofKind: "sendComposeAction", sendComposeAction: result }
+    }
+
+    case Method.SEND_COMPOSE_SUGGESTION: {
+      if (call.input.oneofKind !== "sendComposeSuggestion") throw RealtimeRpcError.BadRequest()
+      const result = await sendComposeSuggestionHandler(call.input.sendComposeSuggestion, handlerContext)
+      return { oneofKind: "sendComposeSuggestion", sendComposeSuggestion: result }
     }
 
     case Method.CREATE_BOT: {

@@ -81,13 +81,47 @@ pub struct StartThreadParams {
     pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
 }
 
+/// A `thread/start` dynamic tool, in the tagged shape every supported Codex
+/// (0.146.0 and later) accepts. Codex normalizes the older flat
+/// `{name, namespace, ...}` shape into a namespace with an empty description.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum DynamicToolSpec {
+    Function(DynamicFunctionTool),
+    Namespace {
+        name: String,
+        description: String,
+        tools: Vec<DynamicNamespaceTool>,
+    },
+}
+
+impl DynamicToolSpec {
+    /// The `inline` namespace holding `tools`.
+    pub fn inline_namespace(tools: impl IntoIterator<Item = DynamicFunctionTool>) -> Self {
+        Self::Namespace {
+            name: "inline".to_string(),
+            description: String::new(),
+            tools: tools
+                .into_iter()
+                .map(DynamicNamespaceTool::Function)
+                .collect(),
+        }
+    }
+}
+
+/// A tool inside a [`DynamicToolSpec::Namespace`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum DynamicNamespaceTool {
+    Function(DynamicFunctionTool),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DynamicToolSpec {
+pub struct DynamicFunctionTool {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
-    pub namespace: String,
     pub defer_loading: bool,
 }
 
@@ -1999,7 +2033,7 @@ mod tests {
     const FIRST_VERIFIED_COMPATIBILITY_FIXTURE: &str =
         include_str!("../tests/fixtures/app-server-0.146.0.json");
     const LATEST_VERIFIED_COMPATIBILITY_FIXTURE: &str =
-        include_str!("../tests/fixtures/app-server-0.150.0-alpha.8.json");
+        include_str!("../tests/fixtures/app-server-0.169.0.json");
 
     #[test]
     fn initialize_identifies_inline() {
@@ -2019,7 +2053,7 @@ mod tests {
             ),
             (
                 LATEST_VERIFIED_COMPATIBILITY_FIXTURE,
-                semver::Version::parse("0.150.0-alpha.8").expect("fixture version"),
+                semver::Version::parse("0.169.0").expect("fixture version"),
             ),
         ] {
             verify_compatibility_fixture(contents, expected_version);

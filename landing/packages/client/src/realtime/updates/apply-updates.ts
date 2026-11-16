@@ -762,6 +762,7 @@ const applyUpdate = (
       return "deferred"
 
     case "updateComposeAction":
+    case "composeSuggestion":
     case "updateUserStatus":
     case "newMessageNotification":
     case "messageActionInvoked":

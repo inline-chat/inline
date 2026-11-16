@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
   private static var shared: AgentSetupWindowController?
-  private static let contentSize = NSSize(width: 560, height: 460)
+  private static let contentSize = NSSize(width: 560, height: 540)
   private static let minimumContentSize = NSSize(width: 540, height: 420)
 
   private let model: AgentSetupWizardModel
@@ -51,6 +51,9 @@ final class AgentSetupWindowController: NSWindowController, NSWindowDelegate {
     window.contentViewController = hostingController
     window.setContentSize(Self.contentSize)
     window.center()
+    // Opening the window starts checking this Mac; another machine is one
+    // more row in the harness list.
+    model.start()
   }
 
   @available(*, unavailable)

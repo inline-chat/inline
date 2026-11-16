@@ -10,7 +10,7 @@ struct ChatToolbarShareButton: View {
   let dependencies: AppDependencies
   let toolbarState: ChatToolbarState
 
-  @StateObject private var model: ChatToolbarShareModel
+  @StateObject private var modelHost: PeerBoundObject<ChatToolbarShareModel>
   @State private var isVisibilityPickerPresented = false
   @State private var isMakePublicConfirmationPresented = false
   @State private var selectedParticipantIds: Set<Int64> = []
@@ -22,14 +22,28 @@ struct ChatToolbarShareButton: View {
     self.peer = peer
     self.dependencies = dependencies
     self.toolbarState = toolbarState
-    _model = StateObject(wrappedValue: ChatToolbarShareModel(
+    _modelHost = StateObject(wrappedValue: PeerBoundObject(
       peer: peer,
-      currentUserId: dependencies.auth.currentUserId,
-      db: dependencies.database
+      model: ChatToolbarShareModel(
+        peer: peer,
+        currentUserId: dependencies.auth.currentUserId,
+        db: dependencies.database
+      )
     ))
   }
 
+  private var model: ChatToolbarShareModel {
+    modelHost.model(for: peer) { peer in
+      ChatToolbarShareModel(
+        peer: peer,
+        currentUserId: dependencies.auth.currentUserId,
+        db: dependencies.database
+      )
+    }
+  }
+
   var body: some View {
+    let model = model
     Menu {
       Button("Copy Markdown", systemImage: "doc.on.doc") {
         prepareTranscript()
@@ -138,6 +152,16 @@ struct ChatToolbarShareButton: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("This chat has more messages than the default transcript.")
+    }
+    .onChange(of: peer) { _, _ in
+      // A stable route keeps this button for the next chat; nothing started here carries over.
+      transcriptTask?.cancel()
+      transcriptTask = nil
+      pendingTranscript = nil
+      showTranscriptScope = false
+      isVisibilityPickerPresented = false
+      isMakePublicConfirmationPresented = false
+      selectedParticipantIds = []
     }
     .onDisappear {
       transcriptTask?.cancel()

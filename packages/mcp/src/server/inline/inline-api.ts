@@ -357,8 +357,13 @@ export function createInlineApi(params: {
   // Every supported read and write is one stateless HTTP RPC: no realtime
   // socket, so the server does no connection, presence or sync work for it.
   const rpc = params.rpc ?? createHttpRpcInvoker({ baseUrl: params.baseUrl, token: params.token })
-  const invoke = async <K extends RpcInputKind>(method: Method, input: RpcInputOf<K>, options?: InlineRpcCallOptions): Promise<RpcResultOf<K>> =>
-    await rpc.invoke(method, input, options) as RpcResultOf<K>
+  // close() ends this API's lifetime: an interrupted MCP request must not
+  // leave its in-flight RPCs running upstream until their own deadline.
+  const lifetime = new AbortController()
+  const invoke = async <K extends RpcInputKind>(method: Method, input: RpcInputOf<K>, options?: InlineRpcCallOptions): Promise<RpcResultOf<K>> => {
+    const signal = options?.signal ? AbortSignal.any([options.signal, lifetime.signal]) : lifetime.signal
+    return await rpc.invoke(method, input, { ...options, signal }) as RpcResultOf<K>
+  }
 
   // Native uploads stream parts over the realtime transfer path, which the
   // HTTP endpoint deliberately does not carry. Only uploadFile opens a socket.
@@ -1161,6 +1166,7 @@ export function createInlineApi(params: {
 
   return {
     async close() {
+      lifetime.abort()
       const entry = uploadClient
       uploadClient = null
       if (!entry) return

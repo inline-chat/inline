@@ -84,6 +84,7 @@ mod v2;
 use allowlist_ui::*;
 use approval_ui::*;
 use copy::{BridgeNotice, failure_message, session_open_notice};
+pub(crate) use dots::{DOTS_DISPLAY_NAME, DOTS_PROVIDER_ID, available as dots_available};
 use inline_tools::*;
 pub(crate) use provider::bridge_provider_setup_descriptors;
 pub(crate) use provider::opencode_startup_version;
@@ -3632,6 +3633,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         api_base_url,
         bot_token,
     };
+    let agent_name_for_health = agent_name.clone();
     let runtime = v2::runtime::Runtime::new(
         v2::runtime::V2Config {
             vocabulary,
@@ -3670,9 +3672,26 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
     .with_startup_activity(startup_activity)
     .with_skills(skill_publisher)
     .with_agent_profiles(bot_agent_resolver, bot_store);
-    if let Some(readiness) = readiness {
-        readiness.mark_ready(&installation.installation_id);
-    }
+    let runtime = match readiness {
+        Some(readiness) => {
+            readiness.mark_ready(&installation.installation_id);
+            let readiness = readiness.clone();
+            let installation_id = installation.installation_id.clone();
+            let agent_name = agent_name_for_health.clone();
+            // `inline bridge status` follows the harness: a Claude sign-in
+            // that expired after startup shows as needing setup, not ready.
+            // Other setup states already stop startup or show in the apps.
+            runtime.with_health_observer(move |health| {
+                if v2::runtime::needs_sign_in(health) {
+                    let text = v2::runtime::setup_text(health, &agent_name).unwrap_or_default();
+                    readiness.mark_needs_setup(&installation_id, &text);
+                } else {
+                    readiness.mark_ready(&installation_id);
+                }
+            })
+        }
+        None => runtime,
+    };
     eprintln!(
         "{} bridge v2 ready for @{}.",
         installation.provider_id, installation.bot_username

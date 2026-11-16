@@ -1,5 +1,7 @@
 import Foundation
 import GRDB
+import InlineProtocol
+import RealtimeV2
 import Testing
 @testable import InlineKit
 
@@ -79,6 +81,114 @@ struct FileCachePhotoRetryTests {
     #expect(FileCache.shouldReplace(running: key("https://a/1.jpg"), with: key("https://a/2.jpg")))
   }
 
+  // MARK: - Native photos
+
+  private static let unexpiring = "https://cdn.example.com/native.jpg"
+
+  // Each native test uses its own photo id: the cache file is named after it, in a folder
+  // that tests running in parallel share.
+  private func nativeDatabase(fileID: String?, photoID: Int64) throws -> AppDatabase {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let database = try AppDatabase(queue)
+    try queue.write { db in
+      try Photo(id: 9, photoId: photoID, format: .jpeg).insert(db)
+      try PhotoSize(photoId: 9, type: "f", width: 100, height: 100, size: 200, cdnUrl: Self.unexpiring, fileUniqueId: fileID).insert(db)
+    }
+    return database
+  }
+
+  private func nativePhoto(fileID: String?, photoID: Int64) -> PhotoInfo {
+    PhotoInfo(photo: Photo(id: 9, photoId: photoID, format: .jpeg), sizes: [
+      PhotoSize(photoId: 9, type: "f", width: 100, height: 100, size: 200, cdnUrl: Self.unexpiring, fileUniqueId: fileID),
+    ])
+  }
+
+  private func sentMessage(photoID: Int64) -> InlineKit.Message {
+    var message = message()
+    message.photoId = photoID
+    message.messageId = 44
+    message.chatId = 5
+    return message
+  }
+
+  @Test("a stored photo identity downloads natively by its message, with no CDN request")
+  func nativePhotoSkipsCDN() async throws {
+    let database = try nativeDatabase(fileID: "INP_photo", photoID: 7_171)
+    let loader = Loader(responses: [:])
+    let native = NativePhotoProbe(result: .data(Data([0xFF, 0xD8, 0xFF, 0xE0])))
+    let cache = FileCache(database: database, linkRefresher: MediaLinkRefresher { _, _ in },
+      photoDataLoader: { try await loader.load($0) }, nativePhotoLoader: { try await native.load($0, $1, $2) })
+    let url = await cache.downloadAndWait(photo: nativePhoto(fileID: "INP_photo", photoID: 7_171),
+      reloadMessageOnFinish: sentMessage(photoID: 7_171))
+    defer { if let url { try? FileManager.default.removeItem(at: url) } }
+    let stored = try #require(url)
+    #expect(try Data(contentsOf: stored) == Data([0xFF, 0xD8, 0xFF, 0xE0]))
+    #expect(await loader.requested.isEmpty)
+    let calls = await native.calls
+    #expect(calls.count == 1 && calls.first?.fileID == "INP_photo")
+    #expect(calls.first?.chatID == 5 && calls.first?.messageID == 44)
+    let localPath = try await database.dbWriter.read { db in try PhotoSize.fetchOne(db)?.localPath }
+    #expect(localPath != nil)
+  }
+
+  @Test("any native failure, a refusal included, falls back to the photo's signed CDN link")
+  func nativePhotoFailures() async throws {
+    let refusal = RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: "Bad request", code: 400)
+    for (failure, photoID) in [(NativePhotoProbe.Result.fail(refusal), Int64(7_181)),
+                               (.fail(RealtimeDirectRpcError.timeout), 7_182)] {
+      let database = try nativeDatabase(fileID: "INP_photo", photoID: photoID)
+      let loader = Loader(responses: [Self.unexpiring: .data])
+      let native = NativePhotoProbe(result: failure)
+      let cache = FileCache(database: database, linkRefresher: MediaLinkRefresher { _, _ in },
+        photoDataLoader: { try await loader.load($0) }, nativePhotoLoader: { try await native.load($0, $1, $2) })
+      let url = await cache.downloadAndWait(photo: nativePhoto(fileID: "INP_photo", photoID: photoID),
+        reloadMessageOnFinish: sentMessage(photoID: photoID))
+      defer { if let url { try? FileManager.default.removeItem(at: url) } }
+      #expect(url != nil)
+      #expect(await loader.requested == [Self.unexpiring])
+      #expect(await native.calls.count == 1)
+    }
+  }
+
+  @Test("without a stored identity, the photo's own message, or native enabled, the photo uses the CDN")
+  func nativePhotoNeedsIdentityAndMessage() async throws {
+    // The last case is a reply preview: the parent message, which does not own this photo.
+    for (photoID, fileID, sendsMessage, native) in [(Int64(7_191), nil as String?, true, NativePhotoProbe.Result.data(Data([1]))),
+                                                    (7_192, "INP_photo", false, .data(Data([1]))),
+                                                    (7_193, "INP_photo", true, .disabled),
+                                                    (7_195, "INP_photo", true, .data(Data([1])))] {
+      var message = sendsMessage ? sentMessage(photoID: photoID) : nil
+      if photoID == 7_195 { message?.photoId = 99 }
+      let database = try nativeDatabase(fileID: fileID, photoID: photoID)
+      let loader = Loader(responses: [Self.unexpiring: .data])
+      let probe = NativePhotoProbe(result: native)
+      let cache = FileCache(database: database, linkRefresher: MediaLinkRefresher { _, _ in },
+        photoDataLoader: { try await loader.load($0) }, nativePhotoLoader: { try await probe.load($0, $1, $2) })
+      let url = await cache.downloadAndWait(photo: nativePhoto(fileID: fileID, photoID: photoID), reloadMessageOnFinish: message)
+      defer { if let url { try? FileManager.default.removeItem(at: url) } }
+      #expect(url != nil)
+      #expect(await loader.requested == [Self.unexpiring])
+    }
+  }
+
+  @Test("photo sizes keep the server identity from the wire, and an update without one keeps it")
+  func photoSizeIdentityFromProtocol() throws {
+    var proto = InlineProtocol.PhotoSize()
+    proto.type = "f"
+    proto.w = 10
+    proto.h = 10
+    proto.fileUniqueID = "INP_wire"
+    #expect(PhotoSize.from(proto: proto, photoId: 1).fileUniqueId == "INP_wire")
+    proto.clearFileUniqueID()
+    #expect(PhotoSize.from(proto: proto, photoId: 1).fileUniqueId == nil)
+
+    let database = try nativeDatabase(fileID: "INP_stored", photoID: 7_194)
+    try database.dbWriter.write { db in
+      try PhotoSize.updateFromProtocol(db, protoSize: proto, photoId: 9)
+    }
+    #expect(try database.dbWriter.read { db in try PhotoSize.fetchOne(db)?.fileUniqueId } == "INP_stored")
+  }
+
   // MARK: - Helpers
 
   private func photo(_ url: String) -> PhotoInfo {
@@ -87,8 +197,8 @@ struct FileCachePhotoRetryTests {
     ])
   }
 
-  private func message() -> Message {
-    var message = Message.preview
+  private func message() -> InlineKit.Message {
+    var message = InlineKit.Message.preview
     message.photoId = 71
     return message
   }
@@ -163,5 +273,38 @@ struct MediaLinkRefresherTests {
   private actor Counter {
     private(set) var value = 0
     func increment() { value += 1 }
+  }
+}
+
+/// Stands in for the native photo download: writes the given bytes or fails.
+private actor NativePhotoProbe {
+  enum Result: Sendable {
+    case data(Data)
+    case fail(any Error & Sendable)
+    case disabled
+  }
+
+  struct Call: Sendable {
+    let fileID: String
+    let chatID: Int64
+    let messageID: Int64
+  }
+
+  private let result: Result
+  private(set) var calls: [Call] = []
+
+  init(result: Result) { self.result = result }
+
+  func load(_ fileID: String, _ location: FileMessageLocation, _ destination: URL) throws -> URL? {
+    calls.append(Call(fileID: fileID, chatID: location.chatID, messageID: location.messageID))
+    switch result {
+    case let .data(data):
+      try data.write(to: destination)
+      return destination
+    case let .fail(error):
+      throw error
+    case .disabled:
+      return nil
+    }
   }
 }

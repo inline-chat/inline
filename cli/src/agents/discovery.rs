@@ -11,9 +11,12 @@ pub(crate) struct InstalledTarget {
     pub(crate) opencode_installations: Vec<super::opencode::OpenCodeInstallation>,
 }
 
+/// Local harnesses found on this machine. Dots is left out: it rides on the
+/// Codex/ChatGPT login, needs a network check, and is set up only by name.
 pub(crate) fn installed_targets() -> Vec<InstalledTarget> {
     TARGETS
         .iter()
+        .filter(|descriptor| descriptor.target != AgentTarget::Dots)
         .filter_map(|descriptor| installed_target(descriptor.target))
         .collect()
 }
@@ -41,7 +44,7 @@ pub(crate) fn installed_target(target: AgentTarget) -> Option<InstalledTarget> {
 fn find_target_executable(descriptor: &'static TargetDescriptor) -> Option<PathBuf> {
     find_executable(descriptor.executable).or_else(|| {
         match descriptor.target {
-            AgentTarget::Codex => find_chatgpt_codex_executable(),
+            AgentTarget::Codex | AgentTarget::Dots => find_chatgpt_codex_executable(),
             // `docker exec` may omit Umbrel's Hermes directories from PATH.
             // Prefer its supervisor wrapper over the raw virtualenv entry point.
             AgentTarget::Hermes => find_executable_in(

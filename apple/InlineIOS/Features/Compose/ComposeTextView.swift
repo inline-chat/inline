@@ -52,6 +52,10 @@ class ComposeTextView: UITextView {
     if pastedLinkSessionStorage?.canRevert == true {
       commands.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(revertPastedLink(_:))))
     }
+    // Enabled only while a suggestion shows (`canPerformAction`); otherwise Tab types as usual.
+    let tab = UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(acceptSuggestion(_:)))
+    tab.wantsPriorityOverSystemBehavior = true
+    commands.append(tab)
     return commands
   }
 
@@ -98,9 +102,55 @@ class ComposeTextView: UITextView {
   var placeholderText: String = "Message" {
     didSet {
       guard placeholderText != oldValue else { return }
-      placeholderLabel?.text = placeholderText
-      placeholderLabel?.invalidateIntrinsicContentSize()
+      updatePlaceholderContent()
     }
+  }
+
+  /// A bot's suggested next message, shown in place of the placeholder while
+  /// the editor is empty. A tap on it, or Tab, inserts it.
+  var suggestionText: String? {
+    didSet {
+      guard suggestionText != oldValue else { return }
+      updatePlaceholderContent()
+    }
+  }
+
+  private func updatePlaceholderContent() {
+    guard let label = placeholderLabel else { return }
+    if let suggestionText {
+      let text = NSMutableAttributedString(string: suggestionText + " ", attributes: [
+        .font: label.font as Any,
+        .foregroundColor: UIColor.secondaryLabel,
+      ])
+      let symbol = UIImage(
+        systemName: "arrow.right.to.line.compact",
+        withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 13, weight: .medium))
+      )?.withTintColor(.tertiaryLabel, renderingMode: .alwaysOriginal)
+      if let symbol {
+        text.append(NSAttributedString(attachment: NSTextAttachment(image: symbol)))
+      }
+      label.attributedText = text
+      label.accessibilityLabel = suggestionText
+      label.accessibilityHint = "Inserts the suggested message"
+    } else {
+      label.attributedText = nil
+      label.text = placeholderText
+      label.accessibilityLabel = nil
+      label.accessibilityHint = nil
+    }
+    // Only a suggestion takes taps; the plain placeholder lets them reach the editor.
+    label.isUserInteractionEnabled = suggestionText != nil
+    label.isAccessibilityElement = suggestionText != nil
+    label.accessibilityTraits = suggestionText != nil ? .button : .staticText
+    label.invalidateIntrinsicContentSize()
+  }
+
+  @objc private func acceptSuggestion(_ sender: Any?) {
+    composeView?.acceptSuggestion()
+  }
+
+  private var canAcceptSuggestion: Bool {
+    suggestionText != nil && text.isEmpty && markedTextRange == nil
   }
 
   init(composeView: ComposeView) {
@@ -148,14 +198,18 @@ class ComposeTextView: UITextView {
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
     label.textAlignment = .left
+    label.numberOfLines = 1
+    label.lineBreakMode = .byTruncatingTail
+    label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(acceptSuggestion(_:))))
+    label.isUserInteractionEnabled = false
     addSubview(label)
 
+    let inset = textContainer.lineFragmentPadding + textContainerInset.left
     NSLayoutConstraint.activate([
-      label.leadingAnchor.constraint(
-        equalTo: leadingAnchor,
-        constant: textContainer.lineFragmentPadding + textContainerInset.left
-      ),
+      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
       label.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.top),
+      // A long suggestion truncates inside the editor instead of running past it.
+      label.widthAnchor.constraint(lessThanOrEqualTo: frameLayoutGuide.widthAnchor, constant: -inset * 2),
     ])
 
     placeholderLabel = label
@@ -208,6 +262,9 @@ class ComposeTextView: UITextView {
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
     if action == #selector(sendWithHardwareReturn(_:)) || action == #selector(insertHardwareNewline(_:)) {
       return canHandleHardwareReturn
+    }
+    if action == #selector(acceptSuggestion(_:)) {
+      return canAcceptSuggestion
     }
     if action == #selector(paste(_:)), isEditable,
        ExperimentalFeatureFlags.richMessageCopyEditingEnabled, MessageTextPasteboard.containsFormattedText() {

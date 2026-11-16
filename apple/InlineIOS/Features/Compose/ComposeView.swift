@@ -49,6 +49,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var voicePhaseObserver: AnyCancellable?
   /// Text messages ask to put in this chat's composer: compose actions and prompt suggestions.
   var composeRequestObserver: AnyCancellable?
+  var suggestionObserver: AnyCancellable?
   /// Installed on the compose view, not the mic button, so the hold survives the
   /// button hiding when the recorder UI takes its place.
   private lazy var voiceHoldGesture: UILongPressGestureRecognizer = {
@@ -173,6 +174,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       updateEmbedState(animated: false)
       updateVoiceAvailability(animated: false)
       configureAgentChain()
+      refreshSuggestion()
     }
   }
   var chatId: Int64? {
@@ -297,6 +299,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     setupStickerObserver()
     setupVoicePhaseObserver()
     setupComposeRequestObserver()
+    setupSuggestionObserver()
   }
 
   @available(*, unavailable)
@@ -1665,6 +1668,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     autocompleteManager?.dismissCompletion()
     let isEditing = ChatState.shared.getState(peer: peerId).editingMessageId != nil
     updateSendButtonForEditing(isEditing)
+    refreshSuggestion()
 
     if isEditing {
       // Stop draft timer when editing a message

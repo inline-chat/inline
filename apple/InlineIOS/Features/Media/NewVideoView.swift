@@ -322,7 +322,7 @@ final class NewVideoView: UIView {
     let sizeBytes = videoInfo.video.size.map(Int64.init)
     guard AutoDownloadPolicy.shouldDownload(kind: .media, sizeBytes: sizeBytes) else { return }
 
-    startDownloadIfNeeded()
+    startDownloadIfNeeded(priority: .visible)
   }
 
   // MARK: - Setup
@@ -818,7 +818,8 @@ final class NewVideoView: UIView {
     return nil
   }
 
-  private func startDownloadIfNeeded() {
+  /// A tap downloads at user priority; automatic downloads pass `.visible`.
+  private func startDownloadIfNeeded(priority: NativeDownloadPriority = .userInitiated) {
     guard let videoInfo = fullMessage.videoInfo else { return }
     guard videoInfo.video.cdnUrl != nil else { return }
 
@@ -839,7 +840,7 @@ final class NewVideoView: UIView {
     transferProgressView.setProgress(downloadProgress)
     updateDurationLabel()
     updateOverlay()
-    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
+    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message, priority: priority) { [weak self] result in
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         switch result {

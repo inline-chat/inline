@@ -80,6 +80,11 @@ public actor UpdatesEngine: Sendable {
           }
           // Someone wrote to this person in a DM. If it is a bot whose chat
           // had no composer, the store asks again whether they can answer.
+          deferredEffects.append(.messageArrived(
+            peer: newMessageUpdate.message.peerID.toPeer(),
+            fromUserID: newMessageUpdate.message.fromID,
+            messageID: newMessageUpdate.message.id
+          ))
           if !newMessageUpdate.message.out, case .user = newMessageUpdate.message.peerID.toPeer() {
             deferredEffects.append(.incomingDirectMessage(fromUserID: newMessageUpdate.message.fromID))
           }
@@ -94,6 +99,11 @@ public actor UpdatesEngine: Sendable {
         case let .updateComposeAction(updateComposeAction):
           if source != .syncCatchup {
             deferredEffects.append(.composeAction(updateComposeAction))
+          }
+
+        case let .composeSuggestion(composeSuggestion):
+          if source != .syncCatchup {
+            deferredEffects.append(.composeSuggestion(composeSuggestion))
           }
 
         case let .deleteMessages(deleteMessages):
@@ -1828,6 +1838,7 @@ enum RealtimeUpdateDiagnostics {
       case .agentSessionControl: return "agentSessionControl"
       case .agentSettings: return "agentSettings"
       case .unreadActivity: return "unreadActivity"
+      case .composeSuggestion: return "composeSuggestion"
     }
   }
 }
@@ -2194,6 +2205,9 @@ enum DurableUpdateApplyError: Error, PrivacySafeErrorCategoryProviding {
 
 enum DeferredUpdateEffect: Sendable {
   case composeAction(InlineProtocol.UpdateComposeAction)
+  case composeSuggestion(InlineProtocol.UpdateComposeSuggestion)
+  /// A new message ends any composer suggestion it makes stale.
+  case messageArrived(peer: Peer, fromUserID: Int64, messageID: Int64)
   case messageActionAnswered(InlineProtocol.UpdateMessageActionAnswered)
   case botPresence(InlineProtocol.UpdateBotPresence)
   /// Agent rows changed in the committed transaction.
@@ -2206,6 +2220,10 @@ enum DeferredUpdateEffect: Sendable {
     switch self {
       case let .composeAction(update):
         update.apply()
+      case let .composeSuggestion(update):
+        Task { @MainActor in ComposeSuggestions.shared.apply(update) }
+      case let .messageArrived(peer, fromUserID, messageID):
+        Task { @MainActor in ComposeSuggestions.shared.noteMessage(peer: peer, fromUserID: fromUserID, messageID: messageID) }
       case let .messageActionAnswered(update):
         update.apply()
       case let .botPresence(update):

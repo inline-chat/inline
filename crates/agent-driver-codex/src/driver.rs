@@ -23,7 +23,7 @@ use crate::INLINE_CLIENT_MESSAGE_ID_PREFIX;
 use crate::peer::{CodexPeer, IncomingMessage, PeerError, PeerResult, RemoteError};
 use crate::protocol::{
     AdditionalContextEntry, AdditionalContextKind, CodexNotification, CompactThreadParams,
-    DynamicToolSpec, InterruptTurnParams, ModelListParams, ModelListResponse,
+    DynamicFunctionTool, DynamicToolSpec, InterruptTurnParams, ModelListParams, ModelListResponse,
     PermissionProfileListParams, PermissionProfileListResponse, ResumeThreadParams,
     StartThreadParams, StartTurnParams, SteerTurnParams, UserInput, approval_result,
     normalize_notification, normalize_question_request, normalize_server_request,
@@ -1139,17 +1139,14 @@ where
                 .expect("Codex host tools poisoned")
                 .as_ref()
                 .map(|configuration| {
-                    configuration
-                        .specs
-                        .iter()
-                        .map(|tool| DynamicToolSpec {
+                    vec![DynamicToolSpec::inline_namespace(
+                        configuration.specs.iter().map(|tool| DynamicFunctionTool {
                             name: tool.name.clone(),
                             description: tool.description.clone(),
                             input_schema: tool.input_schema.clone(),
-                            namespace: "inline".to_string(),
                             defer_loading: false,
-                        })
-                        .collect()
+                        }),
+                    )]
                 });
             let params = StartThreadParams {
                 config: Some(self.thread_config(&spec.cwd).await?),
@@ -2900,11 +2897,14 @@ mod tests {
                 serde_json::from_str(&lines.next_line().await.unwrap().expect("thread start"))
                     .expect("thread start json");
             assert_eq!(request["method"], "thread/start");
-            assert_eq!(
-                request["params"]["dynamicTools"][0]["name"],
-                "search_messages"
-            );
-            assert_eq!(request["params"]["dynamicTools"][0]["namespace"], "inline");
+            let namespace = &request["params"]["dynamicTools"][0];
+            assert_eq!(namespace["type"], "namespace");
+            assert_eq!(namespace["name"], "inline");
+            assert_eq!(namespace["description"], "");
+            assert_eq!(namespace["tools"][0]["type"], "function");
+            assert_eq!(namespace["tools"][0]["name"], "search_messages");
+            assert_eq!(namespace["tools"][0]["deferLoading"], false);
+            assert!(namespace["tools"][0].get("namespace").is_none());
             writer
                 .write_all(
                     format!(

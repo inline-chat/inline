@@ -226,6 +226,52 @@ public actor NativeDownloadManager {
     return Publication(destinations: destinations)
   }
 
+  /// Moves every running download of this message up to `priority`, for a caller that joins a
+  /// download already under way (a tap on a file that started as an auto-download).
+  public func raisePriority(accountID: Int64, message: FileMessageLocation, to priority: NativeDownloadPriority) {
+    for (key, entry) in entries where key.accountID == accountID && entry.locations.contains(message) {
+      entries[key]?.priority = max(entry.priority, priority)
+    }
+  }
+
+  /// A stopped download's verified bytes, read from its sidecar.
+  public struct SavedPartial: Equatable, Sendable {
+    public let chatID: Int64
+    public let messageID: Int64
+    public let bytesReceived: Int64
+    public let totalBytes: Int64
+  }
+
+  /// The resumable partials this account keeps in `directories` that name their message, except
+  /// files downloading now (they report live progress). Lists the directories off this actor, so
+  /// running downloads never wait on the scan.
+  @concurrent
+  public nonisolated func savedPartials(accountID: Int64, in directories: [URL]) async -> [SavedPartial] {
+    let running = await runningBodies()
+    return directories.flatMap { directory in
+      Self.partialFiles(in: directory).compactMap { body -> SavedPartial? in
+        guard !running.contains(body), let record = Self.record(at: body.appendingPathExtension("json")),
+              record.accountID == accountID,
+              let chatID = record.chatID, let messageID = record.messageID, chatID > 0, messageID > 0,
+              record.totalSize > 0, record.totalSize <= UInt64(Int64.max)
+        else { return nil }
+        let length = (try? body.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { UInt64(max(0, $0)) } ?? 0
+        guard let parts = Self.restoredParts(record, accountID: accountID, fileUniqueID: record.fileUniqueID,
+                                             maximumByteCount: record.totalSize, bodyLength: length)
+        else { return nil }
+        // A partial holding every part (kept when publication found its destination taken) is
+        // not progress toward anything.
+        let bytes = Self.presentBytes(parts, total: record.totalSize)
+        guard bytes > 0, bytes < record.totalSize else { return nil }
+        return SavedPartial(chatID: chatID, messageID: messageID, bytesReceived: Int64(bytes), totalBytes: Int64(record.totalSize))
+      }
+    }
+  }
+
+  private func runningBodies() -> Set<URL> {
+    Set(entries.values.map { Self.partial($0.request.fileUniqueID, in: $0.request.destination.deletingLastPathComponent()) })
+  }
+
   public func stop(_ key: Key) async {
     block(key)
     defer { unblock(key) }
@@ -514,10 +560,12 @@ public actor NativeDownloadManager {
   }
 
   /// Parts a saved record vouches for, distrusting any that the body does not fully hold.
-  private static func restoredParts(_ saved: NativeDownloadRecord?, request: Request, bodyLength: UInt64) -> IndexSet? {
-    guard let saved, saved.v == 1 || saved.v == 2, saved.accountID == request.accountID,
-          saved.fileUniqueID == request.fileUniqueID, saved.totalSize > 0,
-          saved.totalSize <= request.maximumByteCount, bodyLength <= saved.totalSize
+  private static func restoredParts(
+    _ saved: NativeDownloadRecord?, accountID: Int64, fileUniqueID: String, maximumByteCount: UInt64, bodyLength: UInt64
+  ) -> IndexSet? {
+    guard let saved, saved.v == 1 || saved.v == 2, saved.accountID == accountID,
+          saved.fileUniqueID == fileUniqueID, saved.totalSize > 0,
+          saved.totalSize <= maximumByteCount, bodyLength <= saved.totalSize
     else { return nil }
     let total = saved.totalSize
     let count = partCount(total: total)
@@ -583,7 +631,8 @@ public actor NativeDownloadManager {
     do {
       let saved = persistent ? record(at: metadata) : nil
       let length = try handle.seekToEnd()
-      if let restored = restoredParts(saved, request: request, bodyLength: length), let saved {
+      if let restored = restoredParts(saved, accountID: request.accountID, fileUniqueID: request.fileUniqueID,
+                                      maximumByteCount: request.maximumByteCount, bodyLength: length), let saved {
         present = restored; total = saved.totalSize
       } else {
         try reset()
@@ -821,6 +870,7 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
   enum Media: Sendable {
     case document(Int64)
     case video(Int64)
+    case voice(Int64)
   }
 
   let auth: AuthHandle
@@ -891,11 +941,18 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
 
   func download(
     media: Media, message: Message, to destination: URL, fallback link: CDNLink? = nil,
+    priority: NativeDownloadPriority = .visible,
     progress: @escaping @Sendable (Int64, Int64) -> Void
   ) async throws -> NativeDownloadOutcome {
     var location = FileMessageLocation()
     location.chatID = message.chatId
     location.messageID = message.messageId
+    // Like Telegram, a stopped file looks like any remote file until it is asked for again;
+    // then its progress starts at what it already holds, not at zero until the first round trip.
+    await Self.reportSavedProgress(
+      manager: .shared, accountID: accountToken.userID, location: location,
+      directory: destination.deletingLastPathComponent(), progress: progress
+    )
     let response = try await Api.realtime.withUserInitiatedConnection(
       accountToken: accountToken, timeout: .seconds(60)
     ) { realtime in
@@ -920,9 +977,36 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
       .init(
         accountID: accountToken.userID, fileUniqueID: fileID, message: provenance, destination: destination,
         accountToken: accountToken, validateAccount: { try auth.validateAccountMutation(accountToken) },
-        stallBudget: stallBudget, transport: transport
+        priority: priority, stallBudget: stallBudget, transport: transport
       )
     }
+  }
+
+  /// Reports the bytes a stopped download of this message already holds, so a resumed file's
+  /// progress starts where it left off. Reports nothing for a fresh, finished or running file.
+  static func reportSavedProgress(
+    manager: NativeDownloadManager, accountID: Int64, location: FileMessageLocation, directory: URL,
+    progress: @Sendable (Int64, Int64) -> Void
+  ) async {
+    let saved = await manager.savedPartials(accountID: accountID, in: [directory])
+      .first { $0.chatID == location.chatID && $0.messageID == location.messageID }
+    if let saved { progress(saved.bytesReceived, saved.totalBytes) }
+  }
+
+  /// Downloads a file whose identity the caller already holds, such as a stored photo size,
+  /// without re-fetching its message. The message location still authorizes every range.
+  func download(
+    fileID: String, location: FileMessageLocation, to destination: URL,
+    priority: NativeDownloadPriority = .visible, stallBudget: Duration? = fallbackStallBudget,
+    progress: @escaping @Sendable (Int64, Int64) -> Void = { _, _ in }
+  ) async throws -> URL {
+    let auth = auth
+    let accountToken = accountToken
+    return try await NativeDownloadManager.shared.download(.init(
+      accountID: accountToken.userID, fileUniqueID: fileID, message: location, destination: destination,
+      accountToken: accountToken, validateAccount: { try auth.validateAccountMutation(accountToken) },
+      priority: priority, stallBudget: stallBudget, transport: self
+    ), progress: progress)
   }
 
   /// Downloads natively, and if that fails for a reason the CDN could get past, lets the CDN
@@ -973,6 +1057,8 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
       fileID = value.document.fileUniqueID
     case let (.video(id), .video(value)?) where id > 0 && value.video.id == id:
       fileID = value.video.fileUniqueID
+    case let (.voice(id), .voice(value)?) where id > 0 && value.voice.id == id:
+      fileID = value.voice.fileUniqueID
     default:
       throw NativeFileDownloadError.inaccessible
     }

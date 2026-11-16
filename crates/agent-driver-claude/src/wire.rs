@@ -155,12 +155,15 @@ pub enum MessageKind {
     CommandLifecycle(CommandLifecycle),
     StreamEvent(StreamEvent),
     RateLimit(RateLimitEvent),
+    /// The CLI's guess at the user's next prompt, sent after a turn's
+    /// `result` when initialize asked for `promptSuggestions`.
+    PromptSuggestion(PromptSuggestionMessage),
     /// A `system` message whose subtype this crate does not model.
     System {
         subtype: String,
     },
     /// A top-level type this crate does not model (`active_goal`,
-    /// `tool_progress`, `prompt_suggestion`, newer kinds …).
+    /// `tool_progress`, newer kinds …).
     Other {
         message_type: String,
     },
@@ -175,6 +178,7 @@ impl MessageKind {
             "result" => lenient(raw).map(Self::Result),
             "stream_event" => lenient(raw).map(Self::StreamEvent),
             "rate_limit_event" => lenient(raw).map(Self::RateLimit),
+            "prompt_suggestion" => lenient(raw).map(Self::PromptSuggestion),
             "command_lifecycle" => lenient(raw).map(Self::CommandLifecycle),
             "system" => {
                 let subtype = raw.get("subtype").and_then(Value::as_str).unwrap_or("");
@@ -203,6 +207,13 @@ impl MessageKind {
             message_type: message_type.to_string(),
         })
     }
+}
+
+/// `{"type":"prompt_suggestion","suggestion":…}`. Any other shape stays an
+/// unknown frame (a notice).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct PromptSuggestionMessage {
+    pub suggestion: String,
 }
 
 fn lenient<T: DeserializeOwned>(raw: &Value) -> Option<T> {

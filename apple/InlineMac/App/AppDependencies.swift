@@ -627,6 +627,9 @@ final class Nav3ChatOpenPreloadBridge {
   @ObservationIgnored private var pendingTargetMessageId: Int64?
   @ObservationIgnored private var requestID: UUID?
   @ObservationIgnored private var payloads: [Peer: PreparedChatPayload] = [:]
+  /// The last committed chat's title snapshot. Kept apart from its payload because the toolbar's
+  /// title bar and the chat view take theirs at different points of the same update.
+  @ObservationIgnored private var preparedTitle: (peer: Peer, snapshot: ChatRouteToolbarTitleModel.Snapshot)?
 
   init() {}
 
@@ -646,8 +649,33 @@ final class Nav3ChatOpenPreloadBridge {
       return
     }
 
+    startPreparedOpen(peer: peer, targetMessageId: targetMessageId, nav: nav, database: database) {
+      nav.open(.chat(peer: peer), tracksChatNavigation: false)
+    }
+  }
+
+  /// Back, forward or the history menu moving to `peer`: prepared like a click, then `commit` moves
+  /// the history. Always supersedes a pending open, even of the same chat, since the history entry
+  /// it lands on may differ.
+  func openHistoryChat(
+    peer: Peer,
+    nav: Nav3,
+    database: AppDatabase,
+    commit: @escaping @MainActor () -> Void
+  ) {
+    startPreparedOpen(peer: peer, targetMessageId: nil, nav: nav, database: database, commit: commit)
+  }
+
+  private func startPreparedOpen(
+    peer: Peer,
+    targetMessageId: Int64?,
+    nav: Nav3,
+    database: AppDatabase,
+    commit: @escaping @MainActor () -> Void
+  ) {
     pendingTask?.cancel()
     payloads.removeAll(keepingCapacity: true)
+    preparedTitle = nil
 
     let id = UUID()
     requestID = id
@@ -672,6 +700,9 @@ final class Nav3ChatOpenPreloadBridge {
       String(describing: peer)
     )
 
+    // Read now, while this click is being handled, so the preload never waits for the main thread.
+    let context = ChatOpenContext.capture(peer: peer, targetMessageId: targetMessageId)
+
     pendingTask = Task(priority: .userInitiated) { @MainActor [weak self] in
       guard let self else { return }
 
@@ -679,6 +710,7 @@ final class Nav3ChatOpenPreloadBridge {
         let payload = try await ChatOpenPreloader.shared.prepare(
           peer: peer,
           targetMessageId: targetMessageId,
+          context: context,
           database: database
         )
         // A burst of clicks queues the later clicks behind the chat being built. Let a queued click
@@ -700,6 +732,7 @@ final class Nav3ChatOpenPreloadBridge {
           return
         }
         self.payloads[peer] = payload
+        self.preparedTitle = payload.titleSnapshot.map { (peer, $0) }
         self.clearPending(cancelTask: false)
         os_signpost(
           .event,
@@ -716,7 +749,7 @@ final class Nav3ChatOpenPreloadBridge {
           "%{public}s",
           "success"
         )
-        nav.open(.chat(peer: peer), tracksChatNavigation: false)
+        commit()
       } catch is CancellationError {
         guard self.requestID == id, Auth.shared.getHasPendingAccountTransition() == false else {
           os_signpost(
@@ -766,7 +799,7 @@ final class Nav3ChatOpenPreloadBridge {
           "%{public}s",
           "error"
         )
-        nav.open(.chat(peer: peer), tracksChatNavigation: false)
+        commit()
         if targetMessageId != nil {
           ToastCenter.shared.showError("Could not load that message")
         }
@@ -784,6 +817,14 @@ final class Nav3ChatOpenPreloadBridge {
       inMode: .default,
       dequeue: false
     ) != nil
+  }
+
+  /// The title snapshot read with the chat that was just opened, handed out once so a later visit
+  /// to the chat never starts from an old title.
+  func consumePreparedTitleSnapshot(for peer: Peer) -> ChatRouteToolbarTitleModel.Snapshot? {
+    guard let preparedTitle, preparedTitle.peer == peer else { return nil }
+    self.preparedTitle = nil
+    return preparedTitle.snapshot
   }
 
   func consumePreparedPayload(for peer: Peer) -> PreparedChatPayload? {

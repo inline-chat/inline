@@ -115,21 +115,29 @@ pub async fn read(api: &Api, folder: Option<&Path>) -> Result<Catalog, ApiError>
     // The model list is the one part a catalog cannot do without.
     let models = models?;
     // A folder OpenCode has not loaded yet answers before its plugins
-    // (which define commands, built-ins included) activate.
+    // (which define commands, built-ins included) and its agents activate.
     let mut commands = commands.map(data).unwrap_or_default();
+    let mut agents = agents.map(data).unwrap_or_default();
+    let empty = |list: &Value| list.as_array().is_none_or(Vec::is_empty);
     for _ in 0..3 {
-        if commands
-            .as_array()
-            .is_some_and(|commands| !commands.is_empty())
-        {
+        if !empty(&commands) && !empty(&agents) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-        commands = api
-            .get("api/command", query())
-            .await
-            .map(data)
-            .unwrap_or_default();
+        if empty(&commands) {
+            commands = api
+                .get("api/command", query())
+                .await
+                .map(data)
+                .unwrap_or_default();
+        }
+        if empty(&agents) {
+            agents = api
+                .get("api/agent", query())
+                .await
+                .map(data)
+                .unwrap_or_default();
+        }
     }
     let default = default.ok().map(data).and_then(|model| {
         Some(format!(
@@ -138,7 +146,6 @@ pub async fn read(api: &Api, folder: Option<&Path>) -> Result<Catalog, ApiError>
             model.get("id")?.as_str()?
         ))
     });
-    let agents = agents.map(data).unwrap_or_default();
     Ok(Catalog {
         models: models_from(&data(models), default.as_deref()),
         speeds: Vec::new(),

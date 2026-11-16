@@ -29,7 +29,7 @@ export async function answerBotChatSettings(
   }
   const outcome = botChatSettingsBroker.answer(input.requestId, bot.id, response)
   if (outcome === "wrong_bot") {
-    throw RealtimeRpcError.BadRequest()
+    throw RealtimeRpcError.BadRequestWithReason("settings_request_other_bot")
   }
   if (outcome === "missing") {
     // An already-expired local request historically accepts a late valid
@@ -40,7 +40,11 @@ export async function answerBotChatSettings(
       actualSessionId: context.currentSessionId,
       botUserId: bot.id,
       payload: { kind: "botSettings", response: Buffer.from(BotChatSettingsResponse.toBinary(response)).toString("base64") },
-    })) throw RealtimeRpcError.BadRequest()
+    })) {
+      // Delivered to another connection of this bot (it reconnected while
+      // answering), or the reply could not reach the asking server.
+      throw RealtimeRpcError.BadRequestWithReason("settings_reply_undeliverable")
+    }
   }
   return {}
 }

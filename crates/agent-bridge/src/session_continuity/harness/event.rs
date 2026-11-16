@@ -100,6 +100,16 @@ pub enum Event {
         /// New title.
         title: String,
     },
+    /// The harness's guess at the next message from whoever started `turn`
+    /// (Claude Code `prompt_suggestion`, Codex `thread/sample`). Shown as the
+    /// composer's placeholder; never sent on its own.
+    PromptSuggestion {
+        /// The ended turn it follows, when known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn: Option<TurnId>,
+        /// The suggested message.
+        text: String,
+    },
     /// Anything else the harness said, kept whole.
     Notice(Notice),
     /// Events were lost between two sequence numbers. The consumer repairs

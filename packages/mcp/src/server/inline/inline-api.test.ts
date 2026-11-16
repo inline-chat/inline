@@ -288,6 +288,30 @@ describe("createInlineApi", () => {
     expect(realtimeSdk.client.close).not.toHaveBeenCalled()
   })
 
+  it("aborts in-flight RPCs when closed so an interrupted request stops upstream work", async () => {
+    let started!: () => void
+    const dispatched = new Promise<void>((resolve) => { started = resolve })
+    let seen: AbortSignal | undefined
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: { allowedSpaceIds: [] },
+      rpc: {
+        invoke: (_method, _input, options) => new Promise((_resolve, reject) => {
+          seen = options?.signal
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true })
+          started()
+        }),
+      },
+    })
+    const profile = api.getProfile().catch((error: unknown) => error)
+    await dispatched
+    expect(seen?.aborted).toBe(false)
+    await api.close()
+    expect(seen?.aborted).toBe(true)
+    expect(await profile).toBeInstanceOf(Error)
+  })
+
   it("opens one lazy upload socket, acknowledges its event stream and joins it on close", async () => {
     const next = vi.fn()
       .mockResolvedValueOnce({ value: { kind: "chat.updated" }, done: false })

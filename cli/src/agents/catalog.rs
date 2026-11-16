@@ -10,6 +10,7 @@ pub(crate) enum AgentTarget {
     Opencode,
     Claude,
     Amp,
+    Dots,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -80,12 +81,23 @@ pub(crate) const TARGETS: &[TargetDescriptor] = &[
         executable: "amp",
         family: TargetFamily::Bridge,
     },
+    // Not a coding harness: relays the owner's ChatGPT Dot through the
+    // Codex/ChatGPT login, so it is found through the Codex executable.
+    TargetDescriptor {
+        target: AgentTarget::Dots,
+        id: crate::bridge::DOTS_PROVIDER_ID,
+        display_name: crate::bridge::DOTS_DISPLAY_NAME,
+        executable: "codex",
+        family: TargetFamily::Bridge,
+    },
 ];
 
 pub(crate) fn bridge_catalog_matches() -> bool {
     let local = TARGETS
         .iter()
-        .filter(|descriptor| descriptor.family == TargetFamily::Bridge)
+        .filter(|descriptor| {
+            descriptor.family == TargetFamily::Bridge && descriptor.target != AgentTarget::Dots
+        })
         .map(|descriptor| {
             (
                 descriptor.id,

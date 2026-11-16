@@ -2652,6 +2652,7 @@ enum Method {
   READ_ACTIVITY = 168;
   SET_FOCUS_STATUS = 169;
   GET_SPACES = 170;
+  SEND_COMPOSE_SUGGESTION = 171;
 }
 
 message RpcCall {
@@ -2827,6 +2828,7 @@ message RpcCall {
     ReadActivityInput readActivity = 169;
     SetFocusStatusInput setFocusStatus = 170;
     GetSpacesInput getSpaces = 171;
+    SendComposeSuggestionInput sendComposeSuggestion = 172;
   }
 }
 
@@ -3004,6 +3006,7 @@ message RpcResult {
     ReadActivityResult readActivity = 169;
     SetFocusStatusResult setFocusStatus = 170;
     GetSpacesResult getSpaces = 171;
+    SendComposeSuggestionResult sendComposeSuggestion = 172;
   }
 }
 
@@ -4143,6 +4146,27 @@ message SendComposeActionInput {
 
 message SendComposeActionResult {}
 
+// A bot suggests what one participant might type next, shown as the gray
+// placeholder of that participant's composer and inserted with Tab. Ephemeral
+// like compose actions: never stored, delivered only to `user_id`.
+message SendComposeSuggestionInput {
+  // Chat the suggestion is for.
+  InputPeer peer_id = 1;
+
+  // The participant whose composer shows it.
+  int64 user_id = 2;
+
+  // Suggested next message. Empty clears an earlier suggestion.
+  string text = 3;
+
+  // The message the suggestion follows, usually the one that started the
+  // agent's turn. Clients drop it once a newer message arrives from anyone
+  // other than the bot that suggested it.
+  optional int64 after_message_id = 4;
+}
+
+message SendComposeSuggestionResult {}
+
 message PushContentEncryptionKey {
   enum Algorithm {
     ALGORITHM_UNSPECIFIED = 0;
@@ -5170,6 +5194,7 @@ message Update {
     UpdateAgentSessionControl agent_session_control = 57;
     UpdateAgentSettings agent_settings = 58;
     UpdateUnreadActivity unread_activity = 59;
+    UpdateComposeSuggestion compose_suggestion = 60;
   }
 }
 
@@ -5544,6 +5569,21 @@ message UpdateComposeAction {
 
   // Action of the user (typing, etc)
   ComposeAction action = 3;
+}
+
+// A suggested next message for the current user's composer in `peer_id`.
+message UpdateComposeSuggestion {
+  // The bot that suggested it.
+  int64 user_id = 1;
+
+  // Chat the suggestion is for.
+  Peer peer_id = 2;
+
+  // Suggested next message. Empty clears the bot's earlier suggestion.
+  string text = 3;
+
+  // See SendComposeSuggestionInput.after_message_id.
+  optional int64 after_message_id = 4;
 }
 
 message UpdateMessageAttachment {

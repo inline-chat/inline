@@ -22,11 +22,11 @@ pub use process::{
 };
 pub use protocol::{
     AdditionalContextEntry, AdditionalContextKind, ClientInfo, CodexNotification,
-    CompactThreadParams, DynamicToolSpec, InitializeParams, InterruptTurnParams, ProtocolError,
-    ResumeThreadParams, StartThreadParams, StartTurnParams, SteerTurnParams, UserInput,
-    approval_result, normalize_notification, normalize_question_request, normalize_server_request,
-    provider_session_id_from_response, question_result, turn_id_from_response,
-    unsupported_notification_diagnostic,
+    CompactThreadParams, DynamicFunctionTool, DynamicNamespaceTool, DynamicToolSpec,
+    InitializeParams, InterruptTurnParams, ProtocolError, ResumeThreadParams, StartThreadParams,
+    StartTurnParams, SteerTurnParams, UserInput, approval_result, normalize_notification,
+    normalize_question_request, normalize_server_request, provider_session_id_from_response,
+    question_result, turn_id_from_response, unsupported_notification_diagnostic,
 };
 pub use runtime_discovery::{
     CodexRuntime, CodexRuntimeAttempt, CodexRuntimeCapabilities, CodexRuntimeDiscoveryConfig,

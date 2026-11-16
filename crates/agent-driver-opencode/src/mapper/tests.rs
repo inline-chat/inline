@@ -1116,3 +1116,210 @@ fn a_session_still_running_keeps_its_turn_and_nothing_before_the_anchor_replays(
     assert!(!events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "Working on it")));
     assert!(!events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "first")));
 }
+
+fn child_event(seq: u64, kind: &str, data: Value) -> Value {
+    let mut data = data;
+    data["sessionID"] = json!("ses_child");
+    json!({"id": format!("evt_c{seq}"), "created": 1_700_000_100_000u64 + seq, "type": kind,
+           "durable": {"aggregateID": "ses_child", "seq": seq, "version": 1}, "data": data})
+}
+
+fn report(seq: u64, inbox: &str, state: &str) -> Value {
+    durable(
+        seq,
+        "session.inbox.enqueued",
+        json!({"inboxID": inbox, "item": {"type": "synthetic", "delivery": "steer", "payload": {
+            "text": format!("<subagent sessionID=\"ses_child\" state=\"{state}\" description=\"List files\">\na.txt\n</subagent>"),
+            "description": "List files",
+            "metadata": {"source": "subagent", "childID": "ses_child", "agent": "Explore", "state": state}}}}),
+    )
+}
+
+fn user_messages(events: &[Event]) -> usize {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::Item(Item {
+                    update: ItemUpdate::Completed {
+                        body: ItemBody::Message {
+                            role: MessageRole::User,
+                            ..
+                        },
+                        ..
+                    },
+                    ..
+                })
+            )
+        })
+        .count()
+}
+
+/// OpenCode 2.3.0, recorded: the `subagent` tool returns the child's session
+/// at once, the parent's run ends while the child works, and the child's
+/// report wakes the parent into a run of its own.
+#[test]
+fn a_background_sub_agent_reports_back_in_a_run_of_its_own() {
+    let mut mapper = mapper();
+    mapper.expect("msg_a", input("in-1"));
+    mapper.apply(&enqueue(
+        1,
+        "msg_a",
+        "map the repo with a subagent",
+        "steer",
+    ));
+    mapper.apply(&durable(2, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        3,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_a"}),
+    ));
+    mapper.apply(&durable(
+        4,
+        "session.tool.input.started",
+        json!({"assistantMessageID": "msg_s1", "id": "call_sub", "name": "subagent"}),
+    ));
+    mapper.apply(&durable(5, "session.tool.called", json!({"assistantMessageID": "msg_s1", "id": "call_sub",
+        "input": {"agent": "explore", "description": "List files", "prompt": "List the files."}, "executed": true})));
+    let created = mapper.apply(&json!({"type": "session.created", "durable": {"aggregateID": "ses_child", "seq": 0, "version": 1},
+        "data": {"sessionID": "ses_child", "parentID": SESSION, "title": "List files"}}));
+    assert!(
+        matches!(&created[0], Event::Child { update } if update.status == ChildStatus::Started)
+    );
+    let returned = mapper.apply(&durable(6, "session.tool.success", json!({"assistantMessageID": "msg_s1", "id": "call_sub",
+        "content": [{"type": "text", "text": "The subagent is working in the background (sessionID: ses_child)."}],
+        "metadata": {"sessionID": "ses_child", "status": "running", "truncated": false}, "executed": true})));
+    assert!(
+        matches!(&returned[0], Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Child { child, .. }, .. }, .. }) if child.id.as_str() == "ses_child")
+    );
+    mapper.apply(&child_event(1, "session.execution.started", json!({})));
+
+    // The parent's run ends while the child still works: the turn completes,
+    // the child stays live work.
+    let ended = mapper.apply(&durable(7, "session.execution.succeeded", json!({})));
+    assert!(
+        matches!(ended.last(), Some(Event::Turn { turn, phase: TurnPhase::Completed { outcome: TurnOutcome::Completed, inputs_consumed, .. } })
+        if turn.as_str() == "msg_a" && inputs_consumed == &vec![input("in-1")])
+    );
+    assert!(mapper.turn().is_none());
+    assert_eq!(mapper.running_children().len(), 1);
+
+    // The child's work streams under it with no parent turn.
+    let answer = mapper.apply(&child_event(
+        2,
+        "session.text.ended",
+        json!({"assistantMessageID": "msg_c1", "ordinal": 0, "text": "a.txt"}),
+    ));
+    assert!(
+        matches!(&answer[0], Event::Item(Item { turn: None, parent: Some(parent), .. }) if parent.id.as_str() == "ses_child")
+    );
+    let done = mapper.apply(&child_event(3, "session.execution.succeeded", json!({})));
+    assert!(
+        matches!(done.last(), Some(Event::Child { update }) if update.status == ChildStatus::Completed)
+    );
+    assert!(mapper.running_children().is_empty());
+
+    // The report wakes the parent: a turn named after the report, with no
+    // Inline input, and the report is never shown as a user prompt.
+    assert!(
+        mapper
+            .apply(&report(8, "msg_report", "completed"))
+            .is_empty()
+    );
+    assert!(mapper.pending_inbox().is_empty());
+    let woke = mapper.apply(&durable(9, "session.execution.started", json!({})));
+    assert_eq!(
+        woke,
+        vec![Event::Turn {
+            turn: TurnId::new("msg_report").unwrap(),
+            phase: TurnPhase::Started { inputs: vec![] },
+        }]
+    );
+    let delivered = mapper.apply(&durable(
+        10,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_report"}),
+    ));
+    assert_eq!(user_messages(&delivered), 0);
+    assert!(
+        !delivered
+            .iter()
+            .any(|event| matches!(event, Event::Input { .. }))
+    );
+    assert!(matches!(&delivered[..], [Event::Item(Item {
+        turn: Some(turn),
+        parent: Some(parent),
+        update: ItemUpdate::Completed { body: ItemBody::Message { role: MessageRole::System, text, .. }, .. },
+        ..
+    })] if turn.as_str() == "msg_report" && parent.id.as_str() == "ses_child" && text == "List files reported back"));
+    let summary = mapper.apply(&durable(
+        11,
+        "session.text.ended",
+        json!({"assistantMessageID": "msg_s2", "ordinal": 0, "text": "One file: a.txt"}),
+    ));
+    assert!(
+        matches!(&summary[0], Event::Item(Item { turn: Some(turn), .. }) if turn.as_str() == "msg_report")
+    );
+    let closed = mapper.apply(&durable(12, "session.execution.succeeded", json!({})));
+    assert!(
+        matches!(closed.last(), Some(Event::Turn { turn, phase: TurnPhase::Completed { outcome: TurnOutcome::Completed, inputs_consumed, .. } })
+        if turn.as_str() == "msg_report" && inputs_consumed.is_empty())
+    );
+}
+
+#[test]
+fn a_report_steered_into_a_running_turn_stays_in_it_and_ends_a_missed_child() {
+    let mut mapper = mapper();
+    mapper.apply(&enqueue(1, "msg_a", "keep going", "steer"));
+    mapper.apply(&durable(2, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        3,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_a"}),
+    ));
+    assert!(mapper.adopt_child("ses_child", Some("List files".into()), true));
+    // A user prompt queued behind the run is Inline's to withdraw; the
+    // report is not.
+    mapper.apply(&enqueue(4, "msg_q", "then this", "queue"));
+    mapper.apply(&report(5, "msg_report", "error"));
+    assert_eq!(mapper.pending_inbox(), vec!["msg_q".to_owned()]);
+    let delivered = mapper.apply(&durable(
+        6,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_report"}),
+    ));
+    // The child's own end was not seen: the report ends it.
+    assert!(
+        matches!(&delivered[0], Event::Child { update } if update.status == ChildStatus::Failed)
+    );
+    assert!(
+        matches!(&delivered[1], Event::Item(Item { turn: Some(turn), update: ItemUpdate::Completed { body: ItemBody::Message { role: MessageRole::System, text, .. }, .. }, .. })
+        if turn.as_str() == "msg_a" && text == "List files failed")
+    );
+    assert!(mapper.running_children().is_empty());
+}
+
+#[test]
+fn a_report_run_missed_while_disconnected_is_rebuilt_as_its_own_turn() {
+    let at = now();
+    let mut mapper = mapper().with_opened_ms(at);
+    let messages = vec![
+        json!({"id": "msg_idle2", "type": "idle", "outcome": "succeeded", "time": {"created": at + 4}}),
+        json!({"id": "msg_a2", "type": "assistant", "time": {"created": at + 3, "completed": at + 3}, "content": [
+            {"type": "text", "text": "One file: a.txt"}]}),
+        json!({"id": "msg_report", "type": "synthetic", "text": "<subagent ...>", "description": "List files",
+               "metadata": {"source": "subagent", "childID": "ses_child", "agent": "Explore", "state": "completed"},
+               "time": {"created": at + 2}}),
+    ];
+    let events = mapper.reconcile(&messages, false);
+    assert!(
+        matches!(&events[0], Event::Turn { turn, phase: TurnPhase::Started { .. } } if turn.as_str() == "msg_report")
+    );
+    assert_eq!(user_messages(&events), 0);
+    assert!(
+        matches!(events.last(), Some(Event::Turn { turn, phase: TurnPhase::Completed { outcome: TurnOutcome::Completed, .. } }) if turn.as_str() == "msg_report")
+    );
+    // Seen once: a second reconciliation adds nothing.
+    assert!(mapper.reconcile(&messages, false).is_empty());
+}

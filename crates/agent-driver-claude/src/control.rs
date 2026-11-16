@@ -303,9 +303,12 @@ impl PermissionDecision {
 
     /// Answers AskUserQuestion: `answers` maps each question's text to the
     /// chosen label (several labels joined with ", " for multi-select).
+    /// Claude Code 2.1.321+ denies an answer whose input sets the undocumented
+    /// `afkTimeoutMs`, so it is dropped from the echoed input.
     pub fn answer_questions(original_input: &Value, answers: Map<String, Value>) -> Self {
         let mut input = original_input.clone();
         if let Some(object) = input.as_object_mut() {
+            object.remove("afkTimeoutMs");
             object.insert("answers".into(), Value::Object(answers));
         }
         Self::Allow {
@@ -550,6 +553,21 @@ mod tests {
             value["updatedInput"]["questions"][0]["header"],
             json!("Color")
         );
+    }
+
+    #[test]
+    fn ask_user_question_answers_drop_afk_timeout() {
+        let input = json!({
+            "questions": [{"question": "Which color?", "options": [{"label": "Red"}]}],
+            "afkTimeoutMs": 60000
+        });
+        let mut answers = Map::new();
+        answers.insert("Which color?".into(), json!("Red"));
+        let value = PermissionDecision::answer_questions(&input, answers).to_value(&input);
+        let updated = value["updatedInput"].as_object().expect("updated input");
+        assert!(!updated.contains_key("afkTimeoutMs"));
+        assert_eq!(updated["answers"]["Which color?"], json!("Red"));
+        assert_eq!(updated["questions"], input["questions"]);
     }
 
     #[test]

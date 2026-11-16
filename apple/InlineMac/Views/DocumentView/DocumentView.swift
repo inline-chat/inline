@@ -599,7 +599,8 @@ class DocumentView: NSView {
     }
   }
 
-  private func downloadAction(saveToDownloadsWhenFinished: Bool) {
+  /// A click or menu command downloads at user priority; automatic downloads pass `.visible`.
+  private func downloadAction(saveToDownloadsWhenFinished: Bool, priority: NativeDownloadPriority = .userInitiated) {
     guard let fullMessage else {
       Log.shared.warning("Cannot download document without a message")
       return
@@ -623,7 +624,7 @@ class DocumentView: NSView {
 
     // Start the download
     let startedNativeDownload = ExperimentalFeatureFlags.nativeFileDownloadsEnabled
-    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message) { [weak self] result in
+    FileDownloader.shared.downloadDocument(document: documentInfo, for: fullMessage.message, priority: priority) { [weak self] result in
       guard let self else { return }
 
       DispatchQueue.main.async {
@@ -785,7 +786,7 @@ class DocumentView: NSView {
     let sizeBytes = documentInfo.document.size.map(Int64.init)
     guard AutoDownloadPolicy.shouldDownload(kind: .file, sizeBytes: sizeBytes) else { return }
 
-    downloadAction(saveToDownloadsWhenFinished: false)
+    downloadAction(saveToDownloadsWhenFinished: false, priority: .visible)
   }
 
   @objc private func handleClose() {

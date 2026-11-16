@@ -247,6 +247,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
       self?.applyWindowAppearance()
       window?.invalidateRestorableState()
     }
+    // Back and forward open chats from a prepared payload, like the sidebar, instead of reading
+    // their first window on the main thread.
+    nav3.chatHistoryPreparer = { [weak self] peer, commit in
+      guard let self else {
+        commit()
+        return
+      }
+      chatOpenPreloader.openHistoryChat(
+        peer: peer,
+        nav: nav3,
+        database: dependencies.database,
+        commit: commit
+      )
+    }
     configureWindow(window)
     bindToolbarStyle(window)
     installContent()

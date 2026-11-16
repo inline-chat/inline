@@ -118,13 +118,21 @@ public struct TranslationToolbarButton: View {
   private let activeColor: Color
   private let action: () -> Void
 
-  @State private var isTranslationEnabled: Bool
+  /// The last change reported for a chat. The button can outlive its chat (macOS keeps toolbar
+  /// items across chat switches), so a change for another chat falls back to the stored preference.
+  @State private var reported: (peer: Peer, isEnabled: Bool)?
 
   public init(peer: Peer, activeColor: Color = .accentColor, action: @escaping () -> Void) {
     self.peer = peer
     self.activeColor = activeColor
     self.action = action
-    _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peer))
+  }
+
+  private var isTranslationEnabled: Bool {
+    if let reported, reported.peer == peer {
+      return reported.isEnabled
+    }
+    return TranslationState.shared.isTranslationEnabled(for: peer)
   }
 
   public var body: some View {
@@ -140,7 +148,10 @@ public struct TranslationToolbarButton: View {
     .onReceive(TranslationState.shared.subject) { event in
       let (eventPeer, enabled) = event
       guard eventPeer == peer else { return }
-      isTranslationEnabled = enabled
+      reported = (eventPeer, enabled)
+    }
+    .onChange(of: peer) { _, _ in
+      reported = nil
     }
   }
 }

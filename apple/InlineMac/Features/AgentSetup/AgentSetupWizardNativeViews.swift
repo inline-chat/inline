@@ -33,16 +33,8 @@ struct AgentSetupWizardContentView: View {
 
   var body: some View {
     switch model.phase {
-    case .idle, .choosingLocation:
-      AgentSetupLocationScreen(
-        onChooseLocal: model.chooseLocalSetup,
-        onChooseRemote: model.chooseRemoteSetup
-      )
-    case .remoteSetup:
-      AgentSetupRemoteScreen(
-        prompt: model.remoteSetupPrompt,
-        documentationURL: model.documentationURL
-      )
+    case .idle:
+      AgentSetupIdleScreen(remoteSetup: model.remoteSetup)
     case .installingCLI, .signingIn, .discovering:
       AgentSetupProgressScreen(
         title: "Preparing This Mac",
@@ -56,10 +48,14 @@ struct AgentSetupWizardContentView: View {
         missingTargets: model.missingTargets,
         selectedTargetID: $model.selectedTargetID,
         documentationURL: model.documentationURL,
-        agentInstructionsURL: model.agentInstructionsURL
+        agentInstructionsURL: model.agentInstructionsURL,
+        remoteSetup: model.remoteSetup
       )
     case .noHarnesses:
-      AgentSetupNoHarnessesScreen(targets: model.missingTargets)
+      AgentSetupNoHarnessesScreen(
+        targets: model.missingTargets,
+        remoteSetup: model.remoteSetup
+      )
     case let .settingUp(name):
       AgentSetupProgressScreen(
         title: "Setting Up \(name)",
@@ -77,7 +73,10 @@ struct AgentSetupWizardContentView: View {
     case .failed:
       AgentSetupFailureScreen(
         failure: model.failure,
-        items: model.progressItems
+        items: model.progressItems,
+        // Preparation failed before any harness was found, e.g. in the
+        // sandboxed build; another machine is still an option.
+        remoteSetup: model.failureOperation == .preparation ? model.remoteSetup : nil
       )
     }
   }
@@ -92,6 +91,12 @@ struct AgentSetupWizardFooter: View {
       Spacer(minLength: 16)
 
       switch model.phase {
+      case .idle:
+        Button("Check This Mac") {
+          model.start()
+        }
+        .keyboardShortcut(.defaultAction)
+        .buttonStyle(.borderedProminent)
       case .choosing:
         Button("Set Up Agent") {
           model.setUpSelectedTarget()
@@ -150,8 +155,6 @@ struct AgentSetupWizardFooter: View {
         }
         .disabled(model.isCancelling)
         .keyboardShortcut(.cancelAction)
-      case .idle, .choosingLocation, .remoteSetup:
-        EmptyView()
       }
     }
     .buttonStyle(.bordered)
@@ -178,84 +181,62 @@ struct AgentSetupReplacementButton: View {
   }
 }
 
-private struct AgentSetupLocationScreen: View {
-  let onChooseLocal: () -> Void
-  let onChooseRemote: () -> Void
+/// Shown when checking this Mac was cancelled before it found anything.
+private struct AgentSetupIdleScreen: View {
+  let remoteSetup: AgentSetupRemoteSetup
 
   var body: some View {
     VStack(spacing: 0) {
       AgentSetupScreenHeader(
-        systemImage: "cpu",
-        title: "Where Is Your Agent Running?",
-        detail: "Choose the Mac or other machine that already has the agent or harness."
+        systemImage: "square.stack.3d.up",
+        title: "Set Up an Agent",
+        detail: "Inline checks this Mac for installed agent harnesses."
       )
 
       List {
-        Button(action: onChooseLocal) {
-          AgentSetupNavigationRow(
-            systemImage: "laptopcomputer",
-            title: "This Mac",
-            detail: "Use an agent or harness installed on this Mac."
-          )
-        }
-        Button(action: onChooseRemote) {
-          AgentSetupNavigationRow(
-            systemImage: "server.rack",
-            title: "Another Machine",
-            detail: "Continue on a server, cloud host, or another computer."
-          )
-        }
+        AgentSetupRemoteMachineRow(remoteSetup: remoteSetup)
       }
-      .buttonStyle(.plain)
       .listStyle(.inset)
       .scrollContentBackground(.hidden)
     }
   }
 }
 
-private struct AgentSetupRemoteScreen: View {
+struct AgentSetupRemoteSetup: Equatable {
   let prompt: String
-  let documentationURL: URL
-  @State private var copied = false
+  let guideURL: URL
+}
+
+/// Agents on a server or another computer are set up there, by handing the
+/// agent one instruction or following the guide.
+private struct AgentSetupRemoteMachineRow: View {
+  let remoteSetup: AgentSetupRemoteSetup
 
   var body: some View {
-    VStack(spacing: 0) {
-      AgentSetupScreenHeader(
-        systemImage: "arrow.up.right.square",
-        title: "Continue on the Other Machine",
-        detail: "Give the setup instruction to the agent there, or follow the guide yourself."
-      )
-
-      List {
-        Button(action: copyPrompt) {
-          AgentSetupNavigationRow(
-            systemImage: copied ? "checkmark" : "doc.on.doc",
-            title: copied ? "Prompt Copied" : "Copy Prompt for Agent",
-            detail: "Paste one instruction into the agent running on that machine.",
-            showsDisclosure: false
-          )
-        }
-        .buttonStyle(.plain)
-
-        Link(destination: documentationURL) {
-          AgentSetupNavigationRow(
-            systemImage: "book.pages",
-            title: "Read Setup Guide",
-            detail: "Open the instructions and set up the agent manually."
-          )
-        }
-        .buttonStyle(.plain)
+    HStack(spacing: 12) {
+      AgentSetupHarnessIcon(targetID: "remote", fallbackSystemImage: "server.rack")
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Another Machine")
+        Text("Set up an agent on a server or another computer")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
-      .listStyle(.inset)
-      .scrollContentBackground(.hidden)
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      Link("Setup Guide", destination: remoteSetup.guideURL)
+        .font(.callout)
+
+      Button("Copy Prompt", action: copyPrompt)
+        .controlSize(.small)
+        .help("Copy an instruction to paste into the agent on that machine")
     }
+    .padding(.vertical, 5)
   }
 
   private func copyPrompt() {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
-    pasteboard.setString(prompt, forType: .string)
-    copied = true
+    pasteboard.setString(remoteSetup.prompt, forType: .string)
     ToastCenter.shared.showSuccess("Copied setup prompt")
   }
 }
@@ -266,6 +247,7 @@ private struct AgentSetupHarnessPickerScreen: View {
   @Binding var selectedTargetID: String?
   let documentationURL: URL
   let agentInstructionsURL: URL
+  let remoteSetup: AgentSetupRemoteSetup
 
   var body: some View {
     VStack(spacing: 0) {
@@ -275,13 +257,17 @@ private struct AgentSetupHarnessPickerScreen: View {
         detail: "Inline configures only the selected installed harness."
       )
 
-      List(installedTargets, selection: $selectedTargetID) { target in
-        AgentSetupHarnessRow(
-          target: target,
-          documentationURL: documentationURL,
-          agentInstructionsURL: agentInstructionsURL
-        )
-        .tag(target.id)
+      List(selection: $selectedTargetID) {
+        ForEach(installedTargets) { target in
+          AgentSetupHarnessRow(
+            target: target,
+            documentationURL: documentationURL,
+            agentInstructionsURL: agentInstructionsURL
+          )
+          .tag(target.id)
+        }
+        // Untagged, so it can't be selected for local setup.
+        AgentSetupRemoteMachineRow(remoteSetup: remoteSetup)
       }
       .listStyle(.inset)
       .scrollContentBackground(.hidden)
@@ -318,7 +304,7 @@ private struct AgentSetupHarnessRow: View {
               .foregroundStyle(.secondary)
           }
         }
-        Text(target.family == .gateway ? "Gateway integration" : "Local coding harness")
+        Text(subtitle)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -333,9 +319,14 @@ private struct AgentSetupHarnessRow: View {
     .padding(.vertical, 5)
   }
 
+  private var subtitle: LocalizedStringResource {
+    if target.id == "dots" { return "Your Dot from ChatGPT" }
+    return target.family == .gateway ? "Gateway integration" : "Local coding harness"
+  }
+
   private var maturityLabel: LocalizedStringResource? {
     switch target.id {
-      case "codex":
+      case "codex", "dots":
         "(Alpha)"
       case "hermes", "opencode", "claude":
         "(Beta)"
@@ -469,6 +460,7 @@ private struct AgentSetupHarnessIcon: View {
     case "opencode": "AgentHarnessOpenCode"
     case "claude": "AgentHarnessClaude"
     case "amp": "AgentHarnessAmp"
+    case "dots": "AgentHarnessDots"
     default: nil
     }
   }
@@ -476,6 +468,7 @@ private struct AgentSetupHarnessIcon: View {
 
 private struct AgentSetupNoHarnessesScreen: View {
   let targets: [AgentHarnessTarget]
+  let remoteSetup: AgentSetupRemoteSetup
 
   var body: some View {
     ScrollView {
@@ -500,6 +493,10 @@ private struct AgentSetupNoHarnessesScreen: View {
           } label: {
             Text("Supported Harnesses")
           }
+        }
+
+        GroupBox {
+          AgentSetupRemoteMachineRow(remoteSetup: remoteSetup)
         }
       }
       .frame(maxWidth: 440)
@@ -1013,6 +1010,7 @@ private struct AgentSetupRecoveryCard: View {
 struct AgentSetupFailureScreen: View {
   let failure: AgentSetupFailure?
   let items: [AgentSetupProgressItem]
+  var remoteSetup: AgentSetupRemoteSetup?
   @State private var showsDetails = false
 
   private var presentation: AgentSetupFailurePresentation? {
@@ -1062,6 +1060,12 @@ struct AgentSetupFailureScreen: View {
 
           if !items.isEmpty {
             AgentSetupProgressList(items: items)
+          }
+
+          if let remoteSetup {
+            GroupBox {
+              AgentSetupRemoteMachineRow(remoteSetup: remoteSetup)
+            }
           }
 
           if let failure {
@@ -1202,40 +1206,6 @@ private struct AgentSetupScreenHeader: View {
     .padding(.horizontal, 24)
     .padding(.top, 20)
     .padding(.bottom, 14)
-  }
-}
-
-private struct AgentSetupNavigationRow: View {
-  let systemImage: String
-  let title: LocalizedStringResource
-  let detail: LocalizedStringResource
-  var showsDisclosure = true
-
-  var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: systemImage)
-        .font(.title3)
-        .foregroundStyle(.secondary)
-        .frame(width: 26)
-        .accessibilityHidden(true)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.body.weight(.medium))
-        Text(detail)
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      if showsDisclosure {
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tertiary)
-          .accessibilityHidden(true)
-      }
-    }
-    .padding(.vertical, 7)
-    .contentShape(Rectangle())
   }
 }
 

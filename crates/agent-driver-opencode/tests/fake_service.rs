@@ -35,6 +35,8 @@ struct Fake {
     requests: Arc<Mutex<Vec<(String, Value)>>>,
     tool_results: mpsc::UnboundedSender<Value>,
     folder: String,
+    /// Lets a scripted run continue once the test has looked at its state.
+    resume: Arc<tokio::sync::Notify>,
 }
 
 impl Fake {
@@ -50,6 +52,16 @@ impl Fake {
         let _ = self.events.send(json!({
             "id": format!("evt_{}", *seq), "created": 1_700_000_000_000u64 + *seq,
             "type": kind, "durable": {"aggregateID": SESSION, "seq": *seq, "version": 1}, "data": data,
+        }));
+    }
+
+    /// A durable event of a sub-agent session, in that session's own sequence.
+    fn child(&self, child: &str, seq: u64, kind: &str, data: Value) {
+        let mut data = data;
+        data["sessionID"] = json!(child);
+        let _ = self.events.send(json!({
+            "id": format!("evt_{child}_{seq}"), "created": 1_700_000_100_000u64 + seq,
+            "type": kind, "durable": {"aggregateID": child, "seq": seq, "version": 1}, "data": data,
         }));
     }
 
@@ -185,6 +197,13 @@ async fn prompt(
     let response = json!({"data": {"id": id, "sessionID": SESSION, "time": {"created": 1}, "type": "user",
         "payload": {"text": body["text"], "metadata": body["metadata"]}, "delivery": delivery}});
     let fake = fake.clone();
+    if body["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("subagent"))
+    {
+        tokio::spawn(background_subagent_run(fake, id, body));
+        return axum::Json(response);
+    }
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(20)).await;
         fake.durable("session.inbox.enqueued", json!({"inboxID": id, "item": {"type": "user", "delivery": delivery, "payload": {"text": body["text"], "metadata": body["metadata"]}}}));
@@ -212,6 +231,70 @@ async fn prompt(
             "source": {"type": "tool", "messageID": "msg_a1", "id": "call_1"}}));
     });
     axum::Json(response)
+}
+
+/// OpenCode 2.3.0's sub-agent sequence, as recorded live: the `subagent`
+/// tool returns at once, the parent's run ends while the child works, and
+/// the child's report wakes the parent into a run of its own.
+async fn background_subagent_run(fake: Fake, id: String, body: Value) {
+    const CHILD: &str = "ses_fake_child";
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    fake.durable(
+        "session.inbox.enqueued",
+        json!({"inboxID": id, "item": {"type": "user", "delivery": "steer",
+        "payload": {"text": body["text"], "metadata": body["metadata"]}}}),
+    );
+    fake.durable("session.execution.started", json!({}));
+    fake.durable("session.inbox.delivered", json!({"inboxID": id}));
+    fake.durable(
+        "session.tool.input.started",
+        json!({"assistantMessageID": "msg_s1", "id": "call_sub", "name": "subagent"}),
+    );
+    fake.durable("session.tool.called", json!({"assistantMessageID": "msg_s1", "id": "call_sub",
+        "input": {"agent": "explore", "description": "List files", "prompt": "List the files."}, "executed": true}));
+    fake.child(
+        CHILD,
+        0,
+        "session.created",
+        json!({"parentID": SESSION, "title": "List files"}),
+    );
+    fake.durable("session.tool.success", json!({"assistantMessageID": "msg_s1", "id": "call_sub",
+        "content": [{"type": "text", "text": "The subagent is working in the background (sessionID: ses_fake_child)."}],
+        "metadata": {"sessionID": CHILD, "status": "running", "truncated": false}, "executed": true}));
+    fake.child(CHILD, 1, "session.execution.started", json!({}));
+    fake.durable(
+        "session.text.ended",
+        json!({"assistantMessageID": "msg_s1", "ordinal": 0, "text": "Started a sub-agent."}),
+    );
+    fake.durable("session.execution.succeeded", json!({}));
+    // The parent is idle; the child works until the test lets it finish.
+    fake.resume.notified().await;
+    fake.child(
+        CHILD,
+        2,
+        "session.tool.input.started",
+        json!({"assistantMessageID": "msg_c1", "id": "call_glob", "name": "glob"}),
+    );
+    fake.child(CHILD, 3, "session.tool.success", json!({"assistantMessageID": "msg_c1", "id": "call_glob",
+        "content": [{"type": "text", "text": "a.txt"}], "metadata": {"count": 1}, "executed": true}));
+    fake.child(
+        CHILD,
+        4,
+        "session.text.ended",
+        json!({"assistantMessageID": "msg_c1", "ordinal": 0, "text": "a.txt"}),
+    );
+    fake.child(CHILD, 5, "session.execution.succeeded", json!({}));
+    fake.durable("session.inbox.enqueued", json!({"inboxID": "msg_report", "item": {"type": "synthetic", "delivery": "steer", "payload": {
+        "text": "<subagent sessionID=\"ses_fake_child\" state=\"completed\" description=\"List files\">\na.txt\n</subagent>",
+        "description": "List files",
+        "metadata": {"source": "subagent", "childID": CHILD, "agent": "Explore", "state": "completed"}}}}));
+    fake.durable("session.execution.started", json!({}));
+    fake.durable("session.inbox.delivered", json!({"inboxID": "msg_report"}));
+    fake.durable(
+        "session.text.ended",
+        json!({"assistantMessageID": "msg_s2", "ordinal": 0, "text": "One file: a.txt"}),
+    );
+    fake.durable("session.execution.succeeded", json!({}));
 }
 
 async fn permission_reply(
@@ -340,6 +423,7 @@ async fn serve(folder: &std::path::Path) -> (Fake, url::Url, mpsc::UnboundedRece
         requests: Arc::new(Mutex::new(Vec::new())),
         tool_results,
         folder: folder.display().to_string(),
+        resume: Arc::new(tokio::sync::Notify::new()),
     };
     let app = Router::new()
         .route("/api/info", get(info))
@@ -743,5 +827,128 @@ async fn a_turn_runs_end_to_end_with_approval_tools_and_catalog() {
 
     let released = session.release().await.unwrap();
     assert_eq!(released.outcome, ReleaseOutcome::NativeReleased);
+    harness.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_background_sub_agent_reports_back_as_a_continuation_turn() {
+    let folder = tempfile::tempdir().unwrap();
+    let (fake, url, _tool_results) = serve(folder.path()).await;
+    let link = Link::fixed(
+        Api::new(Endpoint::open(url)).unwrap(),
+        ServerInfo {
+            version: "2.3.0".into(),
+            pid: std::process::id(),
+        },
+        ServiceConfig::new("/nonexistent/opencode"),
+    );
+    let harness = OpenCodeHarness::with_link(
+        OpenCodeHarnessConfig::new("/nonexistent/opencode", "test"),
+        link,
+    )
+    .await
+    .unwrap();
+    let session = harness
+        .open(OpenSpec {
+            mode: OpenMode::Start,
+            folder: folder.path().to_path_buf(),
+            settings: SettingsChange::default(),
+            instructions: None,
+            title: None,
+            after: None,
+            output_mode: OutputMode::Detailed,
+        })
+        .await
+        .unwrap();
+    let mut events = session.events();
+    let receipt = session
+        .send(Input {
+            id: InputId::new("in-sub").unwrap(),
+            content: InputContent::text("map the repo with a subagent"),
+            origin: Origin::Owner { user: UserId(1) },
+            delivery: Delivery::Turn,
+        })
+        .await
+        .unwrap();
+    let InputDisposition::Started { turn } = receipt.disposition.clone() else {
+        panic!("{receipt:?}");
+    };
+
+    // The parent's turn ends with the sub-agent still at work.
+    let ended = next_matching(&mut events, |event| {
+        matches!(
+            event,
+            Event::Turn {
+                phase: TurnPhase::Completed { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(
+        matches!(ended, Event::Turn { turn: ended, phase: TurnPhase::Completed { outcome: TurnOutcome::Completed, inputs_consumed, .. } }
+        if ended == turn && inputs_consumed == vec![InputId::new("in-sub").unwrap()])
+    );
+    let live = session.live_work();
+    assert!(live.turn.is_none());
+    assert_eq!(live.children.len(), 1);
+    assert_eq!(live.children[0].id.as_str(), "ses_fake_child");
+    assert!(!live.is_idle());
+
+    // The child finishes and reports: the parent wakes into a run of its
+    // own, named after the report, with no Inline input.
+    fake.resume.notify_one();
+    let mut seen = Vec::new();
+    let continuation = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = events.next().await.expect("stream open").event;
+            let done = matches!(
+                &event,
+                Event::Turn {
+                    phase: TurnPhase::Completed { .. },
+                    ..
+                }
+            );
+            seen.push(event);
+            if done {
+                return seen;
+            }
+        }
+    })
+    .await
+    .expect("the report's run in time");
+    assert!(continuation.iter().any(|event| matches!(event, Event::Child { update }
+        if update.child.id.as_str() == "ses_fake_child" && update.status == ChildStatus::Completed)));
+    assert!(continuation.iter().any(|event| matches!(event,
+        Event::Turn { turn, phase: TurnPhase::Started { inputs } } if turn.as_str() == "msg_report" && inputs.is_empty())));
+    // The report is the child's, never a user prompt.
+    assert!(!continuation.iter().any(|event| matches!(
+        event,
+        Event::Item(Item {
+            update: ItemUpdate::Completed {
+                body: ItemBody::Message {
+                    role: MessageRole::User,
+                    ..
+                },
+                ..
+            },
+            ..
+        })
+    )));
+    assert!(continuation.iter().any(|event| matches!(event, Event::Item(Item {
+        turn: Some(turn), parent: Some(parent),
+        update: ItemUpdate::Completed { body: ItemBody::Message { role: MessageRole::System, .. }, .. }, ..
+    }) if turn.as_str() == "msg_report" && parent.id.as_str() == "ses_fake_child")));
+    assert!(continuation.iter().any(|event| matches!(event, Event::Item(Item {
+        turn: Some(turn),
+        update: ItemUpdate::Completed { body: ItemBody::Message { role: MessageRole::Assistant, text, .. }, .. }, ..
+    }) if turn.as_str() == "msg_report" && text == "One file: a.txt")));
+    assert!(
+        matches!(continuation.last(), Some(Event::Turn { turn, phase: TurnPhase::Completed { outcome: TurnOutcome::Completed, inputs_consumed, .. } })
+        if turn.as_str() == "msg_report" && inputs_consumed.is_empty())
+    );
+    assert!(session.live_work().is_idle());
+
+    session.release().await.unwrap();
     harness.shutdown().await;
 }

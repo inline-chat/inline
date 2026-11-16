@@ -7093,6 +7093,12 @@ export interface RpcCall {
          */
         getSpaces: GetSpacesInput;
     } | {
+        oneofKind: "sendComposeSuggestion";
+        /**
+         * @generated from protobuf field: SendComposeSuggestionInput sendComposeSuggestion = 172;
+         */
+        sendComposeSuggestion: SendComposeSuggestionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -8121,6 +8127,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetSpacesResult getSpaces = 171;
          */
         getSpaces: GetSpacesResult;
+    } | {
+        oneofKind: "sendComposeSuggestion";
+        /**
+         * @generated from protobuf field: SendComposeSuggestionResult sendComposeSuggestion = 172;
+         */
+        sendComposeSuggestion: SendComposeSuggestionResult;
     } | {
         oneofKind: undefined;
     };
@@ -11131,6 +11143,46 @@ export interface SendComposeActionInput {
 export interface SendComposeActionResult {
 }
 /**
+ * A bot suggests what one participant might type next, shown as the gray
+ * placeholder of that participant's composer and inserted with Tab. Ephemeral
+ * like compose actions: never stored, delivered only to `user_id`.
+ *
+ * @generated from protobuf message SendComposeSuggestionInput
+ */
+export interface SendComposeSuggestionInput {
+    /**
+     * Chat the suggestion is for.
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * The participant whose composer shows it.
+     *
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+    /**
+     * Suggested next message. Empty clears an earlier suggestion.
+     *
+     * @generated from protobuf field: string text = 3;
+     */
+    text: string;
+    /**
+     * The message the suggestion follows, usually the one that started the
+     * agent's turn. Clients drop it once a newer message arrives from anyone
+     * other than the bot that suggested it.
+     *
+     * @generated from protobuf field: optional int64 after_message_id = 4;
+     */
+    afterMessageId?: bigint;
+}
+/**
+ * @generated from protobuf message SendComposeSuggestionResult
+ */
+export interface SendComposeSuggestionResult {
+}
+/**
  * @generated from protobuf message PushContentEncryptionKey
  */
 export interface PushContentEncryptionKey {
@@ -13705,6 +13757,12 @@ export interface Update {
          */
         unreadActivity: UpdateUnreadActivity;
     } | {
+        oneofKind: "composeSuggestion";
+        /**
+         * @generated from protobuf field: UpdateComposeSuggestion compose_suggestion = 60;
+         */
+        composeSuggestion: UpdateComposeSuggestion;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -14615,6 +14673,37 @@ export enum UpdateComposeAction_ComposeAction {
      * @generated from protobuf enum value: WORKING = 6;
      */
     WORKING = 6
+}
+/**
+ * A suggested next message for the current user's composer in `peer_id`.
+ *
+ * @generated from protobuf message UpdateComposeSuggestion
+ */
+export interface UpdateComposeSuggestion {
+    /**
+     * The bot that suggested it.
+     *
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+    /**
+     * Chat the suggestion is for.
+     *
+     * @generated from protobuf field: Peer peer_id = 2;
+     */
+    peerId?: Peer;
+    /**
+     * Suggested next message. Empty clears the bot's earlier suggestion.
+     *
+     * @generated from protobuf field: string text = 3;
+     */
+    text: string;
+    /**
+     * See SendComposeSuggestionInput.after_message_id.
+     *
+     * @generated from protobuf field: optional int64 after_message_id = 4;
+     */
+    afterMessageId?: bigint;
 }
 /**
  * @generated from protobuf message UpdateMessageAttachment
@@ -18723,7 +18812,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_SPACES = 170;
      */
-    GET_SPACES = 170
+    GET_SPACES = 170,
+    /**
+     * @generated from protobuf enum value: SEND_COMPOSE_SUGGESTION = 171;
+     */
+    SEND_COMPOSE_SUGGESTION = 171
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -33265,7 +33358,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "input", T: () => GetUnreadActivityInput },
             { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
             { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
-            { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput }
+            { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput },
+            { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -34298,6 +34392,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getSpaces: GetSpacesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getSpaces)
                     };
                     break;
+                case /* SendComposeSuggestionInput sendComposeSuggestion */ 172:
+                    message.input = {
+                        oneofKind: "sendComposeSuggestion",
+                        sendComposeSuggestion: SendComposeSuggestionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).sendComposeSuggestion)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -34820,6 +34920,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetSpacesInput getSpaces = 171; */
         if (message.input.oneofKind === "getSpaces")
             GetSpacesInput.internalBinaryWrite(message.input.getSpaces, writer.tag(171, WireType.LengthDelimited).fork(), options).join();
+        /* SendComposeSuggestionInput sendComposeSuggestion = 172; */
+        if (message.input.oneofKind === "sendComposeSuggestion")
+            SendComposeSuggestionInput.internalBinaryWrite(message.input.sendComposeSuggestion, writer.tag(172, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35003,7 +35106,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 168, name: "getUnreadActivity", kind: "message", oneof: "result", T: () => GetUnreadActivityResult },
             { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
             { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
-            { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult }
+            { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult },
+            { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -36036,6 +36140,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getSpaces: GetSpacesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getSpaces)
                     };
                     break;
+                case /* SendComposeSuggestionResult sendComposeSuggestion */ 172:
+                    message.result = {
+                        oneofKind: "sendComposeSuggestion",
+                        sendComposeSuggestion: SendComposeSuggestionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).sendComposeSuggestion)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -36558,6 +36668,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetSpacesResult getSpaces = 171; */
         if (message.result.oneofKind === "getSpaces")
             GetSpacesResult.internalBinaryWrite(message.result.getSpaces, writer.tag(171, WireType.LengthDelimited).fork(), options).join();
+        /* SendComposeSuggestionResult sendComposeSuggestion = 172; */
+        if (message.result.oneofKind === "sendComposeSuggestion")
+            SendComposeSuggestionResult.internalBinaryWrite(message.result.sendComposeSuggestion, writer.tag(172, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -46568,6 +46681,100 @@ class SendComposeActionResult$Type extends MessageType<SendComposeActionResult> 
  */
 export const SendComposeActionResult = new SendComposeActionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class SendComposeSuggestionInput$Type extends MessageType<SendComposeSuggestionInput> {
+    constructor() {
+        super("SendComposeSuggestionInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "after_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SendComposeSuggestionInput>): SendComposeSuggestionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<SendComposeSuggestionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendComposeSuggestionInput): SendComposeSuggestionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* string text */ 3:
+                    message.text = reader.string();
+                    break;
+                case /* optional int64 after_message_id */ 4:
+                    message.afterMessageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SendComposeSuggestionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        /* string text = 3; */
+        if (message.text !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.text);
+        /* optional int64 after_message_id = 4; */
+        if (message.afterMessageId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.afterMessageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendComposeSuggestionInput
+ */
+export const SendComposeSuggestionInput = new SendComposeSuggestionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SendComposeSuggestionResult$Type extends MessageType<SendComposeSuggestionResult> {
+    constructor() {
+        super("SendComposeSuggestionResult", []);
+    }
+    create(value?: PartialMessage<SendComposeSuggestionResult>): SendComposeSuggestionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SendComposeSuggestionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SendComposeSuggestionResult): SendComposeSuggestionResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: SendComposeSuggestionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SendComposeSuggestionResult
+ */
+export const SendComposeSuggestionResult = new SendComposeSuggestionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class PushContentEncryptionKey$Type extends MessageType<PushContentEncryptionKey> {
     constructor() {
         super("PushContentEncryptionKey", [
@@ -53222,7 +53429,8 @@ class Update$Type extends MessageType<Update> {
             { no: 56, name: "agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
             { no: 57, name: "agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl },
             { no: 58, name: "agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings },
-            { no: 59, name: "unread_activity", kind: "message", oneof: "update", T: () => UpdateUnreadActivity }
+            { no: 59, name: "unread_activity", kind: "message", oneof: "update", T: () => UpdateUnreadActivity },
+            { no: 60, name: "compose_suggestion", kind: "message", oneof: "update", T: () => UpdateComposeSuggestion }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -53579,6 +53787,12 @@ class Update$Type extends MessageType<Update> {
                         unreadActivity: UpdateUnreadActivity.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).unreadActivity)
                     };
                     break;
+                case /* UpdateComposeSuggestion compose_suggestion */ 60:
+                    message.update = {
+                        oneofKind: "composeSuggestion",
+                        composeSuggestion: UpdateComposeSuggestion.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).composeSuggestion)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -53765,6 +53979,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateUnreadActivity unread_activity = 59; */
         if (message.update.oneofKind === "unreadActivity")
             UpdateUnreadActivity.internalBinaryWrite(message.update.unreadActivity, writer.tag(59, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateComposeSuggestion compose_suggestion = 60; */
+        if (message.update.oneofKind === "composeSuggestion")
+            UpdateComposeSuggestion.internalBinaryWrite(message.update.composeSuggestion, writer.tag(60, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -56344,6 +56561,75 @@ class UpdateComposeAction$Type extends MessageType<UpdateComposeAction> {
  * @generated MessageType for protobuf message UpdateComposeAction
  */
 export const UpdateComposeAction = new UpdateComposeAction$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateComposeSuggestion$Type extends MessageType<UpdateComposeSuggestion> {
+    constructor() {
+        super("UpdateComposeSuggestion", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "after_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateComposeSuggestion>): UpdateComposeSuggestion {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        message.text = "";
+        if (value !== undefined)
+            reflectionMergePartial<UpdateComposeSuggestion>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateComposeSuggestion): UpdateComposeSuggestion {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* Peer peer_id */ 2:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* string text */ 3:
+                    message.text = reader.string();
+                    break;
+                case /* optional int64 after_message_id */ 4:
+                    message.afterMessageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateComposeSuggestion, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        /* Peer peer_id = 2; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string text = 3; */
+        if (message.text !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.text);
+        /* optional int64 after_message_id = 4; */
+        if (message.afterMessageId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.afterMessageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateComposeSuggestion
+ */
+export const UpdateComposeSuggestion = new UpdateComposeSuggestion$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateMessageAttachment$Type extends MessageType<UpdateMessageAttachment> {
     constructor() {
