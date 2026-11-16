@@ -301,6 +301,35 @@ final class HarnessUITests: XCTestCase {
     shot("pill-touch-caught-3s")
   }
 
+  /// The composer's reply and edit bars coming and going: the rows keep their distance from the composer's
+  /// top edge, at the newest message and scrolled up, as they do for the keyboard. Keyboard down, then up.
+  func testComposeBars() {
+    launch()
+    func cycle(_ suffix: String) {
+      shot("bars-\(suffix)-start")
+      script("Compose reply")
+      Thread.sleep(forTimeInterval: 1)
+      shot("bars-\(suffix)-reply")
+      script("Compose clear")
+      Thread.sleep(forTimeInterval: 1)
+      shot("bars-\(suffix)-reply-cleared")
+      script("Compose edit")
+      Thread.sleep(forTimeInterval: 1)
+      shot("bars-\(suffix)-edit")
+      script("Compose clear")
+      Thread.sleep(forTimeInterval: 1)
+      shot("bars-\(suffix)-edit-cleared")
+    }
+    cycle("newest")
+    drag(190, 200, 190, 420, v: 400, hold: 0.3)
+    Thread.sleep(forTimeInterval: 1)
+    cycle("scrolled")
+    drag(190, 480, 190, 100, v: 6000)
+    Thread.sleep(forTimeInterval: 2.5)
+    openKeyboard()
+    cycle("kb")
+  }
+
   /// Translation on and off keeps the newest row on the bottom edge; scrolled up, the reading row.
   func testTranslation() {
     launch()
