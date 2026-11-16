@@ -78,6 +78,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   // History, jumps, read state
   private var loadingEdges: Set<TimelineEdge> = []
   private var historyTasks: [TimelineEdge: Task<Void, Never>] = [:]
+  /// A trim that waits for the scroll to end (`trimWindow(keeping:)`).
+  private var pendingTrimEdge: TimelineEdge?
+  /// What the view model was last told about the reader's place.
+  private var reportedPlace: (atBottom: Bool, messageId: Int64?)?
   private var jumpTask: Task<Void, Never>?
   private var returnToLatestTask: Task<Void, Never>?
   private var pendingFocusMessageId: Int64?
@@ -713,7 +717,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         scroll = jumpScroll(for: target, in: snapshot)
         timing = Self.jumpTiming
         towards = direction(of: target, from: shownMessageId)
-      case .initialOpen, .olderPage, .newerPage, .refresh, .presentation:
+      case .initialOpen, .olderPage, .newerPage, .refresh, .presentation, .trim:
         break
     }
     // The sent row and the composer's shrink move as one.
@@ -729,6 +733,27 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     readPass(force: true)
     warmMedia()
     offerForTranslation(diff.insertions.map(\.id) + diff.updates.map(\.id))
+  }
+
+  /// Tells the view model where the reader is, as the collection view does on every scroll: at the
+  /// live end, or the newest message on screen. Reloads stay in that part of history, and a trim
+  /// never removes it.
+  private func reportPlace() {
+    let layout = list.layout
+    let atBottom = layout.isAtBottom
+    var messageId: Int64?
+    if !atBottom {
+      for placement in layout.visible.reversed() {
+        if let id = row(placement.id)?.content.message?.message.messageId, id > 0 {
+          messageId = id
+          break
+        }
+      }
+    }
+    if let reportedPlace, reportedPlace.atBottom == atBottom, reportedPlace.messageId == messageId { return }
+    reportedPlace = (atBottom, messageId)
+    viewModel.setAtBottom(atBottom)
+    if let messageId { viewModel.setHistoryAnchor(messageId) }
   }
 
   /// The server id of a message on screen, to tell which way a jump to another window goes.
@@ -793,7 +818,24 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
           return
         }
       }
-      _ = await viewModel.loadBatchAsync(at: direction, allowUnavailableLocal: !local)
+      if await viewModel.loadBatchAsync(at: direction, allowUnavailableLocal: !local) {
+        trimWindow(keeping: edge)
+      }
+    }
+  }
+
+  /// After a page, a long window's far side leaves (the view model keeps about 600 messages), so
+  /// paging through a long chat keeps planning and memory bounded. Never while a finger is down,
+  /// a fling runs or the other edge loads: then it waits for the scroll to end.
+  private func trimWindow(keeping edge: TimelineEdge) {
+    guard !list.isTracking, !list.isDecelerating, loadingEdges.subtracting([edge]).isEmpty else {
+      pendingTrimEdge = edge
+      return
+    }
+    pendingTrimEdge = nil
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      _ = await viewModel.trimWindow(keeping: edge == .older ? .older : .newer)
     }
   }
 
@@ -947,6 +989,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   private func layoutChanged() {
+    reportPlace()
     prefetchMedia()
     updateAffordance(force: false)
     updateDatePill()
@@ -955,6 +998,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   private func scrollEnded() {
+    if let edge = pendingTrimEdge, loadingEdges.isEmpty { trimWindow(keeping: edge) }
     warmMedia()
     scheduleDatePillHide()
     saveReadingPlace()
