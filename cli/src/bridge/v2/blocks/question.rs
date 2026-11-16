@@ -7,7 +7,7 @@
 //! every Inline app draws; a reply to the card answers in the person's own
 //! words where the harness takes one.
 
-use inline_agent_bridge::harness::{FieldInput, QuestionForm};
+use inline_agent_bridge::harness::{FieldAnswer, FieldInput, QuestionForm};
 use inline_protocol::proto;
 
 use super::head;
@@ -116,6 +116,47 @@ pub(crate) fn pick_card(
     if takes_reply(form, field) {
         builder.footer("Or reply to this message with your own answer.");
     }
+    builder.finish()
+}
+
+/// The card once the question closed: what it asked, each answer Inline sent
+/// beside its question, and `resolution` ("Answered by Mo") under them. A
+/// question without an answer (cancelled, answered elsewhere, or secret) shows
+/// only its text.
+pub(crate) fn closed_card(
+    agent: &str,
+    form: &QuestionForm,
+    answers: &[FieldAnswer],
+    resolution: &str,
+) -> Doc {
+    let mut builder = DocBuilder::new();
+    let count = form.fields.len();
+    builder.paragraph(&match (&form.title, count) {
+        (Some(title), _) => title.clone(),
+        (None, 1) => format!("{agent} asked a question"),
+        (None, count) => format!("{agent} asked {count} questions"),
+    });
+    for field in &form.fields {
+        let answer = answers
+            .iter()
+            .find(|answer| answer.field == field.id)
+            .map(|answer| {
+                answer
+                    .values
+                    .iter()
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .filter(|answer| !answer.is_empty());
+        let prompt = field.prompt.trim();
+        builder.paragraph(&match answer {
+            Some(answer) => format!("{prompt}: {answer}"),
+            None => prompt.to_owned(),
+        });
+    }
+    builder.footer(resolution);
     builder.finish()
 }
 

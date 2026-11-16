@@ -21,9 +21,9 @@ use std::path::{Path, PathBuf};
 
 use inline_agent_bridge::harness::{
     ApprovalSubject, ChildRef, ClosedBy, CommandAction, Decision, DecisionKind, Envelope, Event,
-    FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId, InteractionKind,
-    Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole, NoticeLevel, OutputMode,
-    QuestionForm, TurnPhase,
+    FieldAnswer, FieldInput, FileChangeKind, FileDiff, InputFact, InputId, Interaction,
+    InteractionId, InteractionKind, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole,
+    NoticeLevel, OutputMode, QuestionForm, TurnPhase,
 };
 use inline_agent_bridge::{AgentMessagePhase, PlanStep, TurnId, TurnOutcome};
 use serde_json::Value;
@@ -154,6 +154,9 @@ pub(crate) struct Renderer {
     interactions: HashMap<InteractionId, Interaction>,
     /// The changes an open approval is about, for its card when it closes.
     card_diffs: HashMap<InteractionId, Vec<FileDiff>>,
+    /// Answers sent from Inline to an open question, for its card when it
+    /// closes. Secret answers are never kept.
+    card_answers: HashMap<InteractionId, Vec<FieldAnswer>>,
     /// People who answered cards, by user ID.
     names: HashMap<i64, String>,
     /// The main agent's latest task list this turn, pinned under its
@@ -183,6 +186,7 @@ impl Renderer {
             final_answer: None,
             interactions: HashMap::new(),
             card_diffs: HashMap::new(),
+            card_answers: HashMap::new(),
             names: HashMap::new(),
             plan: None,
             proposed_plan: None,
@@ -210,6 +214,28 @@ impl Renderer {
     /// Names a person who answers a card, for its resolution line.
     pub(crate) fn name_user(&mut self, user_id: i64, name: String) {
         self.names.insert(user_id, name);
+    }
+
+    /// The answers being sent to an open question, so its closed card keeps
+    /// what was asked and what was answered. Secret answers are dropped here.
+    pub(crate) fn note_answers(&mut self, interaction: &InteractionId, answers: &[FieldAnswer]) {
+        let Some(Interaction {
+            kind: InteractionKind::Question { form },
+            ..
+        }) = self.interactions.get(interaction)
+        else {
+            return;
+        };
+        let kept = answers
+            .iter()
+            .filter(|answer| {
+                form.fields.iter().any(|field| {
+                    field.id == answer.field && !matches!(field.input, FieldInput::Secret)
+                })
+            })
+            .cloned()
+            .collect();
+        self.card_answers.insert(interaction.clone(), kept);
     }
 
     pub(crate) fn apply(&mut self, envelope: &Envelope) -> Vec<RenderOp> {
@@ -261,6 +287,12 @@ impl Renderer {
             Event::InteractionClosed { id, by } => {
                 if let Some(interaction) = self.interactions.remove(id) {
                     let diffs = self.card_diffs.remove(id).unwrap_or_default();
+                    // Answers count only when Inline closed it.
+                    let answers = self.card_answers.remove(id).unwrap_or_default();
+                    let answers = match by {
+                        ClosedBy::Inline { .. } => answers,
+                        _ => Vec::new(),
+                    };
                     ops.push(RenderOp::CardClosed {
                         interaction: id.clone(),
                         doc: closed_card(
@@ -268,7 +300,10 @@ impl Renderer {
                             &interaction,
                             by,
                             &self.names,
-                            &diffs,
+                            &ClosedDetail {
+                                diffs: &diffs,
+                                answers: &answers,
+                            },
                             self.folder.as_deref(),
                         ),
                     });
@@ -562,7 +597,23 @@ impl Renderer {
 
     fn interaction(&mut self, interaction: &Interaction, ops: &mut Vec<RenderOp>) {
         match &interaction.kind {
-            InteractionKind::Dialog { .. } => {}
+            // Inline has no card for it. Codex cancels it; OpenCode keeps it
+            // open in its own app. Either way the chat says so.
+            InteractionKind::Dialog { dialog } => {
+                let next = match self.vocabulary {
+                    Vocabulary::OpenCode => "Answer it in OpenCode.",
+                    _ => "It was cancelled.",
+                };
+                let mut builder = DocBuilder::new();
+                builder.callout(
+                    CalloutKind::Warning,
+                    "Inline can't show this request yet",
+                    &format!("{} asked for `{dialog}`. {next}", self.agent),
+                );
+                ops.push(RenderOp::Notice {
+                    doc: builder.finish(),
+                });
+            }
             InteractionKind::Approval { subject, decisions } => {
                 self.mark_rows_waiting(interaction.item.as_ref().map(ToString::to_string));
                 let actions = card_actions(subject, decisions);
@@ -1872,14 +1923,23 @@ pub(crate) fn card_action(decision: &Decision) -> CardAction {
     }
 }
 
+/// What a closed card keeps from while it was open.
+struct ClosedDetail<'a> {
+    /// The changes an approval was about.
+    diffs: &'a [FileDiff],
+    /// The answers Inline sent to a question, secrets left out.
+    answers: &'a [FieldAnswer],
+}
+
 /// A card whose interaction closed: an approval or plan keeps its block,
-/// decided, with the outcome under it; a question becomes its outcome.
+/// decided, with the outcome under it; a question keeps what it asked and
+/// the answers, with the outcome under them.
 fn closed_card(
     agent: &str,
     interaction: &Interaction,
     by: &ClosedBy,
     names: &HashMap<i64, String>,
-    diffs: &[FileDiff],
+    detail: &ClosedDetail<'_>,
     folder: Option<&Path>,
 ) -> Doc {
     let decided = match (by, &interaction.kind) {
@@ -1928,7 +1988,7 @@ fn closed_card(
         InteractionKind::Approval { subject, .. } => blocks::approval::card(
             agent,
             subject,
-            diffs,
+            detail.diffs,
             folder,
             &[],
             &Resolution {
@@ -1937,7 +1997,10 @@ fn closed_card(
                 note: Some(resolution),
             },
         ),
-        _ => {
+        InteractionKind::Question { form } => {
+            blocks::question::closed_card(agent, form, detail.answers, &resolution)
+        }
+        InteractionKind::Dialog { .. } => {
             let mut builder = DocBuilder::new();
             builder.footer(&resolution);
             builder.finish()
@@ -2889,6 +2952,116 @@ mod tests {
             *many = true;
         }
         assert!(!pickable(&multiple));
+    }
+
+    #[test]
+    fn a_closed_question_keeps_what_it_asked_and_the_answers_sent() {
+        use inline_agent_bridge::harness::{FieldId, FormField};
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Claude, "Claude");
+        let form = QuestionForm {
+            title: None,
+            fields: vec![
+                question("Scope", &["Only the CLI", "CLI and server"], true),
+                FormField {
+                    id: FieldId::new("token").expect("id"),
+                    header: None,
+                    prompt: "API token".to_owned(),
+                    input: FieldInput::Secret,
+                    required: true,
+                },
+                question("Run tests after", &["Yes", "No"], false),
+            ],
+            asynchronous: false,
+            auto_resolution_ms: None,
+        };
+        let id = InteractionId::new("q1").expect("id");
+        run(
+            &mut renderer,
+            vec![(
+                0,
+                Event::Interaction(Interaction {
+                    id: id.clone(),
+                    turn: None,
+                    item: None,
+                    parent: None,
+                    kind: InteractionKind::Question { form },
+                    native: Value::Null,
+                }),
+            )],
+        );
+        renderer.name_user(7, "Mo".to_owned());
+        renderer.note_answers(
+            &id,
+            &[
+                FieldAnswer {
+                    field: FieldId::new("Scope").expect("id"),
+                    values: vec!["Only the CLI".to_owned()],
+                },
+                FieldAnswer {
+                    field: FieldId::new("token").expect("id"),
+                    values: vec!["sk-secret".to_owned()],
+                },
+            ],
+        );
+        let ops = run(
+            &mut renderer,
+            vec![(
+                1,
+                Event::InteractionClosed {
+                    id,
+                    by: ClosedBy::Inline {
+                        user: inline_agent_bridge::harness::UserId(7),
+                        decision: None,
+                    },
+                },
+            )],
+        );
+        let RenderOp::CardClosed { doc, .. } = &ops[0] else {
+            panic!("expected the card closed");
+        };
+        assert_eq!(
+            doc.text,
+            "Claude asked 3 questions\nScope: Only the CLI\nAPI token\nRun tests after\nAnswered by Mo"
+        );
+        assert!(
+            !doc.text.contains("sk-secret"),
+            "secrets never reach the chat"
+        );
+    }
+
+    #[test]
+    fn a_dialog_inline_cannot_show_leaves_a_notice() {
+        for (vocabulary, next) in [
+            (Vocabulary::Codex, "It was cancelled."),
+            (Vocabulary::OpenCode, "Answer it in OpenCode."),
+        ] {
+            let mut renderer = Renderer::new(OutputMode::Friendly, vocabulary, "Agent");
+            let ops = run(
+                &mut renderer,
+                vec![(
+                    0,
+                    Event::Interaction(Interaction {
+                        id: InteractionId::new("d1").expect("id"),
+                        turn: None,
+                        item: None,
+                        parent: None,
+                        kind: InteractionKind::Dialog {
+                            dialog: "item/tool/call".to_owned(),
+                        },
+                        native: Value::Null,
+                    }),
+                )],
+            );
+            let Some(RenderOp::Notice { doc }) = ops.first() else {
+                panic!("expected a notice, got {ops:?}");
+            };
+            assert!(
+                doc.text.contains("Agent asked for `item/tool/call`"),
+                "{}",
+                doc.text
+            );
+            assert!(doc.text.ends_with(next), "{}", doc.text);
+        }
     }
 
     #[test]

@@ -1387,6 +1387,10 @@ impl Actor {
         // The card's resolution names who answered.
         let name = self.agent.names.of(actor).await;
         self.renderer.name_user(actor, name);
+        // The closed card shows what was answered.
+        if let InteractionResponse::Answers { answers } = &response {
+            self.renderer.note_answers(&interaction, answers);
+        }
         match session
             .control(Op::Answer {
                 interaction,
