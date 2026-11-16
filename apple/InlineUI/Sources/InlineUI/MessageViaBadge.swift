@@ -14,6 +14,7 @@ public enum MessageViaAgentIcon {
     switch agentId {
       case "claude-code", "claude": Icon(asset: "AgentIconClaude", fillsBadge: false)
       case "codex": Icon(asset: "AgentIconCodex", fillsBadge: true)
+      case "chatgpt": Icon(asset: "AgentIconChatGPT", fillsBadge: true)
       case "opencode": Icon(asset: "AgentIconOpenCode", fillsBadge: false)
       default: nil
     }
