@@ -251,6 +251,7 @@ extension AppDelegate {
     }) else { return }
     guard await runLogoutPhase(.uploads, attempt: attempt, operation: {
       await FileUploader.shared.cancelAll()
+      await FileNativeUploadStagingStore.shared.removeAll()
     }) else { return }
     guard await runLogoutPhase(.cachedDownloads, attempt: attempt, operation: {
       await FileCache.shared.cancelAllDownloads()
