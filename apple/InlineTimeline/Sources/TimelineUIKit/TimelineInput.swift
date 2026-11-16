@@ -66,6 +66,11 @@ final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
 final class TimelineInput: NSObject, UIGestureRecognizerDelegate {
   let pan = TimelinePanGestureRecognizer()
   var onPan: ((TimelinePanGestureRecognizer) -> Void)?
+  /// Drags the scroll indicator, as UIScrollView's can be dragged to move through long content.
+  let indicatorPan = UIPanGestureRecognizer()
+  var onIndicatorPan: ((UIPanGestureRecognizer) -> Void)?
+  /// Whether a touch starting here (in the list) lands on the shown indicator.
+  var startsOnIndicator: (CGPoint) -> Bool = { _ in false }
   var onTick: ((CADisplayLink) -> Void)?
   private var link: CADisplayLink?
 
@@ -73,6 +78,9 @@ final class TimelineInput: NSObject, UIGestureRecognizerDelegate {
     super.init()
     pan.addTarget(self, action: #selector(handlePan(_:)))
     pan.delegate = self
+    indicatorPan.addTarget(self, action: #selector(handleIndicatorPan(_:)))
+    indicatorPan.delegate = self
+    indicatorPan.maximumNumberOfTouches = 1
     pan.maximumNumberOfTouches = 1
     pan.delaysTouchesEnded = false
     // Trackpads and mouse wheels scroll the list too (iPad).
@@ -81,6 +89,10 @@ final class TimelineInput: NSObject, UIGestureRecognizerDelegate {
 
   @objc private func handlePan(_ recognizer: TimelinePanGestureRecognizer) {
     onPan?(recognizer)
+  }
+
+  @objc private func handleIndicatorPan(_ recognizer: UIPanGestureRecognizer) {
+    onIndicatorPan?(recognizer)
   }
 
   @objc private func handleTick(_ link: CADisplayLink) {
@@ -107,9 +119,16 @@ final class TimelineInput: NSObject, UIGestureRecognizerDelegate {
   // reply swipe takes drags within 24 degrees of horizontal. From the left edge only vertical drags, so
   // the navigation back swipe keeps its own.
   func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+    if recognizer === indicatorPan, let view = indicatorPan.view {
+      let translation = indicatorPan.translation(in: view)
+      let location = indicatorPan.location(in: view)
+      return startsOnIndicator(CGPoint(x: location.x - translation.x, y: location.y - translation.y))
+    }
     guard recognizer === pan, let view = pan.view else { return true }
     let velocity = pan.velocity(in: view)
     let start = pan.location(in: view).x - pan.translation(in: view).x
+    // A drag on the shown indicator moves through the content instead.
+    if startsOnIndicator(CGPoint(x: start, y: pan.location(in: view).y - pan.translation(in: view).y)) { return false }
     if start < 24 { return abs(velocity.y) >= abs(velocity.x) }
     return abs(velocity.y) >= abs(velocity.x) * tan(24 * .pi / 180)
   }

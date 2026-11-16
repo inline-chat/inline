@@ -322,6 +322,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     addSubview(content)
     addSubview(indicatorView)
     addGestureRecognizer(input.pan)
+    addGestureRecognizer(input.indicatorPan)
+    input.startsOnIndicator = { [weak self] point in self?.indicatorTakes(point) ?? false }
+    input.onIndicatorPan = { [weak self] pan in self?.handleIndicatorPan(pan) }
     input.pan.onTouchDown = { [weak self] in self?.catchFlight() }
     input.pan.onTouchUpWithoutPan = { [weak self] in self?.tapEnded() }
     input.onPan = { [weak self] pan in self?.handlePan(pan) }
@@ -1072,6 +1075,56 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     indicatorView.layer.removeAnimation(forKey: Self.indicatorFlightKey)
     placeIndicator(timing: .none)
     CATransaction.commit()
+  }
+
+  // MARK: - Dragging the indicator
+
+  /// Where the drag holds the thumb, from its top.
+  private var indicatorGrab: CGFloat?
+
+  /// The thumb takes a touch while it shows: a strip along the trailing edge, a little taller than it.
+  private func indicatorTakes(_ point: CGPoint) -> Bool {
+    guard indicatorShown, !indicatorView.isHidden, indicatorView.alpha > 0.5, state.rows.count > 1 else { return false }
+    // Only long content, as UIKit offers it, so drags near the edge of a short chat stay drags.
+    let extent = indicatorExtent()
+    guard extent.total > extent.visible * 4 else { return false }
+    let frame = indicatorView.frame
+    return point.x >= bounds.width - 24 && point.y >= frame.minY - 16 && point.y <= frame.maxY + 16
+  }
+
+  /// The thumb follows the finger and the list goes to the row at its place in the loaded rows, as
+  /// UIScrollView's indicator moves through long content.
+  private func handleIndicatorPan(_ pan: UIPanGestureRecognizer) {
+    let track = indicatorTrack()
+    let travel = max(1, track.length - indicatorLength)
+    switch pan.state {
+      case .began:
+        catchFlight()
+        caughtFlight = false
+        isTracking = true
+        showIndicator()
+        onDragBegan?()
+        indicatorGrab = pan.location(in: self).y - indicatorView.frame.minY
+      case .changed:
+        guard let grab = indicatorGrab else { return }
+        let top = min(max(track.top, pan.location(in: self).y - grab), track.top + travel)
+        let progress = (top - track.top) / travel
+        let rows = state.rows
+        let scroll: TimelineScroll<ID> = progress >= 0.999
+          ? .latest
+          : .to(rows[min(rows.count - 1, Int((progress * CGFloat(rows.count - 1)).rounded()))], .top(0))
+        apply(TimelineTransaction(scroll: scroll))
+        indicator.progress = progress
+        placeIndicator(timing: .none)
+        showIndicator()
+      case .ended, .cancelled, .failed:
+        indicatorGrab = nil
+        isTracking = false
+        scheduleIndicatorHide()
+        onScrollEnded?()
+      default:
+        break
+    }
   }
 
   private func showIndicator() {
