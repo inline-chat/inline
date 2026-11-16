@@ -158,6 +158,24 @@ private struct TimelineHarnessScreen: View {
           Button("Receive") { model.run { try $0.receive() } }
           Button("Send and ack") { model.runAsync { try await $0.sendAndAcknowledge() } }
           Button("Edit newest") { model.run { try $0.edit() } }
+          // The composer's edit and reply bars. The harness is signed out, so the menu has no Edit item.
+          Button("Compose edit") {
+            model.run { fixture in
+              guard let id = try fixture.newestOutgoingMessageId() else { return }
+              ChatState.shared.setEditingMessageId(peer: fixture.peer, id: id)
+            }
+          }
+          Button("Compose reply") {
+            model.run { fixture in
+              guard let id = try fixture.newestOutgoingMessageId() else { return }
+              ChatState.shared.setReplyingMessageId(peer: fixture.peer, id: id)
+            }
+          }
+          Button("Compose clear") {
+            guard let peer = model.fixture?.peer else { return }
+            ChatState.shared.clearReplyingMessageId(peer: peer)
+            ChatState.shared.clearEditingMessageId(peer: peer)
+          }
           Button("Stream") { model.runAsync { try await $0.stream(steps: 120, every: .milliseconds(50)) } }
           Button("Delete newest") { model.run { try $0.deleteNewest() } }
           Button("Collapse history") { model.box.container?.setCollapsedMaxId(380) }
