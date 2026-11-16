@@ -29,6 +29,12 @@ final class TimelineMessageMenu: NSObject {
   /// was asked for (before UIKit hides the bubble).
   private var system: (configuration: UIContextMenuConfiguration, id: ChatRowID, preview: UITargetedPreview?)?
   private var systemPresented = false
+  /// The row UIKit's menu holds live: lifting its bubble, or flying the preview back onto it. Changing the
+  /// row then tears the preview, so the host holds its updates until the menu lets go, as the collection
+  /// view did; while the menu shows its own preview, rows update under it.
+  private(set) var liveSourceID: ChatRowID?
+  /// UIKit's menu let go of a row it held live.
+  var onLiveSourceReleased: ((ChatRowID) -> Void)?
 
   #if DEBUG
   /// The harness's stand-ins for the user's hold action and for VoiceOver, never stored.
@@ -54,6 +60,8 @@ final class TimelineMessageMenu: NSObject {
 
   /// The keyboard is up, so the menu draws in its window over it.
   var isKeyboardVisible: () -> Bool = { false }
+  /// The safe area and the navigation bar, as last laid out (the bar can report 0 mid-transition).
+  var navigationInset: () -> CGFloat = { 0 }
   /// A reaction picked from UIKit's menu: the menu closes once the row shows it, or after a while.
   private var pendingSystemReaction: (id: ChatRowID, timeout: DispatchWorkItem)?
 
@@ -449,9 +457,9 @@ final class TimelineMessageMenu: NSObject {
   /// Picks a reaction from the open menu: the menu stays up a moment so the bubble flies back onto
   /// the reacted row instead of the reaction popping in after it lands.
   func react(_ toggle: () -> Void) {
-    toggle()
     if systemPresented, let id = system?.id {
-      // UIKit's menu returns its preview to the row once it shows the reaction (`rowsDidUpdate`).
+      // UIKit's menu returns its preview to the row once it shows the reaction (`rowsDidUpdate`), noted
+      // before the toggle in case the row updates inside it.
       pendingSystemReaction?.timeout.cancel()
       let timeout = DispatchWorkItem { [weak self] in
         self?.pendingSystemReaction = nil
@@ -459,8 +467,10 @@ final class TimelineMessageMenu: NSObject {
       }
       pendingSystemReaction = (id, timeout)
       DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
+      toggle()
       return
     }
+    toggle()
     guard let controller else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak controller] in
       guard let self, let controller, self.controller === controller else { return }
@@ -487,11 +497,13 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   ) -> Any? {
     guard let list, let window = list.window else { return nil }
     let barHeight = list.navigationBarHeight()
+    let known = navigationInset()
+    let top = barHeight > 0 || known <= 0 ? window.safeAreaInsets.top + barHeight : known
     let styleClass = NSClassFromString("_UIContextMenuStyle") as? NSObject.Type
     guard let style = styleClass?.perform(NSSelectorFromString("defaultStyle"))?.takeUnretainedValue() as? NSObject
     else { return nil }
     style.setValue(
-      UIEdgeInsets(top: window.safeAreaInsets.top + barHeight, left: 30, bottom: 0, right: 30),
+      UIEdgeInsets(top: top, left: 30, bottom: 0, right: 30),
       forKey: "preferredEdgeInsets"
     )
     return style
@@ -530,6 +542,7 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     if let stale = system, !systemPresented {
       (stale.configuration.identifier as? ContextMenuIdentifierUIView)?.removeFromSuperview()
       system = nil
+      releaseLiveSource()
     }
     guard usesSystemMenu, controller == nil, system == nil, let list, !list.isTracking, !list.isDecelerating,
           let target = target(at: location)
@@ -591,7 +604,11 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   ) -> UITargetedPreview? {
     guard let system, system.configuration === configuration else { return nil }
     // The press and lift animate the bubble itself while it is on screen.
-    return livePreview(for: system.id) ?? system.preview
+    if let live = livePreview(for: system.id) {
+      liveSourceID = system.id
+      return live
+    }
+    return system.preview
   }
 
   func contextMenuInteraction(
@@ -601,7 +618,9 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     guard let system, system.configuration === configuration else { return nil }
     // The menu returns to the row's bubble where it is now; never to another row.
     setSourceHidden(false, id: system.id)
-    return livePreview(for: system.id)
+    let live = livePreview(for: system.id)
+    if live != nil { liveSourceID = system.id }
+    return live
   }
 
   func contextMenuInteraction(
@@ -612,6 +631,7 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     systemPresented = true
     // The menu draws its own preview from here on.
     setSourceHidden(true, id: system.id)
+    releaseLiveSource()
     onWillDisplay?()
   }
 
@@ -630,6 +650,7 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
       setSourceHidden(false, id: id)
       self.system = nil
       systemPresented = false
+      releaseLiveSource()
       updateSystemInteraction()
       if presented { onDidEnd?() }
     }
@@ -639,6 +660,12 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     } else {
       finish()
     }
+  }
+
+  private func releaseLiveSource() {
+    guard let id = liveSourceID else { return }
+    liveSourceID = nil
+    onLiveSourceReleased?(id)
   }
 
   private func setSourceHidden(_ hidden: Bool, id: ChatRowID) {

@@ -54,11 +54,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var heights: [ChatRowID: (width: CGFloat, height: CGFloat)] = [:]
   private var environmentRevision: UInt64 = 0
   private var rowPool: [TimelineRowView] = []
+  /// Rows whose update waits for UIKit's menu to let go of their live bubble (`TimelineMessageMenu.liveSourceID`).
+  private var heldRows: Set<ChatRowID> = []
 
   // Send flight
   weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
   /// Rows of sent messages whose bubble is still flying in from the composer.
   private var flightTargets: Set<ChatRowID> = []
+  /// Where each flight is headed (the bubble, in the window), so only a row that moved retargets it.
+  private var flightFrames: [ChatRowID: CGRect] = [:]
 
   // Floating date
   private let datePill = TimelineDatePill(floating: true)
@@ -76,6 +80,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// A send shrinks the composer before its row arrives. The shrink waits for the row, so the list
   /// moves once, not down and back up.
   private var heldComposeInset: CGFloat?
+  /// While a message menu is open the list keeps its place, as the collection view froze its viewport:
+  /// compose-area changes (the menu putting the keyboard away) wait, and after the menu the keyboard
+  /// coming back meets the list where it was. `latest` is the newest held inset.
+  private var menuInsetHold: (atStart: CGFloat, latest: CGFloat?)?
+  private var awaitsMenuKeyboard = false
+  private var menuInsetRelease: DispatchWorkItem?
   private var holdsComposeInsetForSend = false
   private var composeInsetHoldTask: Task<Void, Never>?
   private var pinnedHeaderHeight: CGFloat = 0
@@ -90,6 +100,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// Edges whose last page failed or brought nothing: the list asks again after the reader's next drag,
   /// not on every layout pass near the edge, as the collection view's pagination waited for a gesture.
   private var blockedEdges: Set<TimelineEdge> = []
+  /// Bumped when the list shows another window (a jump), so a page that finishes for the old one blocks nothing.
+  private var windowGeneration = 0
   private var historyTasks: [TimelineEdge: Task<Void, Never>] = [:]
   /// A trim that waits for the scroll to end (`trimWindow(keeping:)`).
   private var pendingTrimEdge: TimelineEdge?
@@ -274,8 +286,24 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func setUpMenu() {
     menu = TimelineMessageMenu(list: list, actions: menuActions) { [weak self] id in self?.row(id) }
-    menu.onWillDisplay = { [weak self] in self?.onContextMenuWillDisplay?() }
-    menu.onDidEnd = { [weak self] in self?.onContextMenuDidEnd?() }
+    menu.navigationInset = { [weak self] in self?.lastNavigationInset ?? 0 }
+    menu.onWillDisplay = { [weak self] in
+      self?.beginMenuInsetHold()
+      self?.onContextMenuWillDisplay?()
+    }
+    menu.onDidEnd = { [weak self] in
+      guard let self else { return }
+      onContextMenuDidEnd?()
+      // The container said neither way (it waits for the emoji sheet, or had nothing to restore).
+      if menuInsetHold != nil, !awaitsMenuKeyboard, !menuActions.isReactionPickerPresented {
+        endMenuInsetHold(timing: Self.rowTiming)
+      }
+    }
+    menu.onLiveSourceReleased = { [weak self] id in
+      guard let self, heldRows.remove(id) != nil else { return }
+      // Once UIKit has finished with the bubble, the row takes its update and moves like one.
+      DispatchQueue.main.async { [weak self] in self?.replan(id, timing: Self.rowTiming) }
+    }
     menuActions.presenter = { [weak self] in self?.findViewController() }
     menuActions.containerWidth = { [weak self] in
       self?.window?.bounds.width ?? self?.bounds.width ?? UIScreen.main.bounds.width
@@ -379,6 +407,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   func composeAreaDidChange(bottomInset: CGFloat, timing: TimelineTiming, isInteractive _: Bool) {
+    if let hold = menuInsetHold {
+      menuInsetHold?.latest = bottomInset
+      // The keyboard is back after the menu (or a reply bar rose): the list moves only by what changed.
+      if awaitsMenuKeyboard, bottomInset >= hold.atStart - 0.5 { endMenuInsetHold(timing: timing) }
+      return
+    }
     // The composer shrinks right after a send (the text, a reply or edit bar going away) while the
     // sent row is still on its way.
     if !holdsComposeInsetForSend, bottomInset < composeBottomInset,
@@ -556,6 +590,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func configure(_ view: TimelineRowView, id: ChatRowID, width: CGFloat, timing: TimelineTiming) {
     guard let row = row(id) else { return }
+    if heldRows.contains(id), menu.liveSourceID == id { return }
     defer {
       view.isMenuSourceHidden = menu.isSource(id)
       view.isSendTargetHidden = flightTargets.contains(id)
@@ -569,10 +604,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       if case let .message(message, _) = row.content,
          let remaining = focusHighlightRemaining(for: message.message.messageId)
       {
-        view.highlightBubble(
-          outgoing: message.message.out == true, theme: theme,
-          hold: max(0, remaining - TimelineRowView.focusHighlightFadeIn), fadeIn: false
-        )
+        view.highlightBubble(outgoing: message.message.out == true, theme: theme, hold: remaining, fadeIn: false)
       }
     }
     switch row.content {
@@ -582,7 +614,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         configureMessage(view, row, message, ChatRowGrouping(), isThreadAnchor: true, width: width, timing: timing)
       case let .daySeparator(dayStart):
         // As the collection view's day badges: a tap puts the day's first message at the top.
-        view.showLabel(Self.dayTitle(dayStart), style: .pill, theme: theme) { [weak self] in self?.jumpToDay(dayStart) }
+        view.showLabel(Self.dayTitle(dayStart), style: .pill, theme: theme) { [weak self] in
+          // A tap that stops a fling only stops it, as on the floating date.
+          guard let self, CACurrentMediaTime() - list.lastFlightCatch > 0.15 else { return }
+          jumpToDay(dayStart)
+        }
       case .unreadLine:
         view.showLabel("Unread messages", style: .line, theme: theme)
       case let .statusNotice(text):
@@ -617,7 +653,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard let plan = plan(row, message, grouping, isThreadAnchor: isThreadAnchor, width: width) else {
       view.onAvatarTap = openSender
       view.showLegacy(
-        message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId
+        message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId,
+        environment: environmentRevision
       )
       // As the collection view's cell wired the older view: photos open the gallery, and a double tap
       // set to the reactions menu opens the emoji sheet.
@@ -807,13 +844,19 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     var scroll = TimelineScroll<ChatRowID>.latest
     // A focus asked for as the chat opened wins over the opening place, placed without motion. Only its
     // own message: a nearby one stands in only after the window around it loaded (`apply`).
-    if let focus = resolveFocus(in: snapshot, exactOnly: true) {
+    // Its load already ran (its window was published before the list opened): a nearby message stands in.
+    let focusLoaded = pendingFocus.map { !$0.awaitsArrival && jumpTask == nil } ?? false
+    if let focus = resolveFocus(in: snapshot, exactOnly: !focusLoaded) {
       list.apply(TimelineTransaction(rows: snapshot.ids, coverage: coverage(snapshot), scroll: .to(focus.row, .center)))
       focusResolved(focus, opening: true)
       readPass(force: true)
       warmMedia()
       offerForTranslation(snapshot.ids)
       return
+    }
+    if focusLoaded {
+      pendingFocus = nil
+      ToastManager.shared.showToast("Message unavailable", type: .error, systemImage: "exclamationmark.triangle.fill")
     }
     switch openAnchor {
       case .latest:
@@ -863,7 +906,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       heights[change.id] = nil
     }
     let changed = Set(diff.updates.map(\.id))
-    for id in changed { heights[id] = nil }
+    // A row UIKit's menu holds live keeps its height and content until the menu lets go.
+    if let held = menu.liveSourceID, changed.contains(held) { heldRows.insert(held) }
+    for id in changed where !heldRows.contains(id) { heights[id] = nil }
 
     var timing = TimelineTiming.none
     var scroll = TimelineScroll<ChatRowID>.preserve
@@ -872,11 +917,6 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     switch snapshot.reason {
       case .liveAdd, .liveUpdate, .delete, .sendAck:
         timing = Self.rowTiming
-        // A focused message newer than the synced history arrived.
-        if pendingFocus?.awaitsArrival == true, let focus = resolveFocus(in: snapshot) {
-          landed = focus
-          scroll = .to(focus.row, .center)
-        }
       case .localSend:
         timing = Self.rowTiming
         scroll = .latest
@@ -885,6 +925,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case let .jump(target):
         // A new window has new edges.
         blockedEdges.removeAll()
+        windowGeneration &+= 1
         towards = direction(of: target, from: shownMessageId)
         if pendingFocus != nil, case .message = target {
           landed = resolveFocus(in: snapshot)
@@ -910,6 +951,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         }
       case .initialOpen, .olderPage, .newerPage, .refresh, .trim:
         break
+    }
+    // A focused message newer than the synced history arrived, however it came.
+    if landed == nil, pendingFocus?.awaitsArrival == true, let focus = resolveFocus(in: snapshot) {
+      landed = focus
+      scroll = .to(focus.row, .center)
+      if case .none = timing { timing = Self.rowTiming }
     }
     // The sent row and the composer's shrink move as one.
     let releasedInset = snapshot.reason == .localSend ? releaseComposeInsetHold(applying: false) : nil
@@ -1077,6 +1124,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         loadingEdges.remove(edge)
         historyTasks[edge] = nil
       }
+      let generation = windowGeneration
+      // A page that failed or brought nothing for this window blocks its edge; a cancelled one or one
+      // for a window since replaced does not.
+      let block = { [weak self] in
+        guard let self, !Task.isCancelled, windowGeneration == generation else { return }
+        blockedEdges.insert(edge)
+      }
       let direction: MessagesProgressiveViewModel.MessagesLoadDirection = edge == .older ? .older : .newer
       let local = edge == .older ? viewModel.canLoadOlderFromLocal : viewModel.canLoadNewerFromLocal
       if !local {
@@ -1087,18 +1141,18 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
             ? try await MessageHistoryRepairCoordinator.shared.loadOlder(peer: peer, beforeID: boundary)
             : try await MessageHistoryRepairCoordinator.shared.loadNewer(peer: peer, afterID: boundary)
           if outcome == .empty {
-            blockedEdges.insert(edge)
+            block()
             return
           }
         } catch {
-          blockedEdges.insert(edge)
+          block()
           return
         }
       }
       if await viewModel.loadBatchAsync(at: direction, allowUnavailableLocal: !local) {
         trimWindow(keeping: edge)
       } else {
-        blockedEdges.insert(edge)
+        block()
       }
     }
   }
@@ -1142,6 +1196,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         continue
       }
       flightTargets.insert(id)
+      flightFrames[id] = target.bubbleFrameInWindow
       rowView.isSendTargetHidden = true
       let began = SendMessageAnimationActions.performWithAnimationsEnabled(reason: "timeline-begin-flight") {
         coordinator.beginIfPossible(target: target) { [weak self] _ in self?.endFlight(id) }
@@ -1160,6 +1215,18 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     for (stableId, identity) in coordinator.activeAnimatingIdentitiesByStableMessageId() {
       let id = ChatRowID.message(stableId)
       guard flightTargets.contains(id), !begun.contains(id) else { continue }
+      // An ack or a change elsewhere leaves the row where it was: the flight goes on undisturbed (and no
+      // snapshot is taken).
+      if let current = flightFrames[id], let window, let messageView = (list.view(for: id) as? TimelineRowView)?.shownMessageView,
+         let frames = messageView.sendAnimationTargetFrames()
+      {
+        let bubble = messageView.convert(frames.bubble, to: window)
+        if abs(current.minY - bubble.minY) < 0.5, abs(current.minX - bubble.minX) < 0.5,
+           abs(current.height - bubble.height) < 0.5, abs(current.width - bubble.width) < 0.5
+        {
+          continue
+        }
+      }
       guard case let .message(message, _)? = row(id)?.content,
             let (target, _) = flightTarget(for: id, message: message, identity: identity)
       else {
@@ -1167,6 +1234,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         coordinator.cancel(identity: identity)
         continue
       }
+      flightFrames[id] = target.bubbleFrameInWindow
       let duration = coordinator.retargetDuration(for: identity) ?? SendMessageAnimationTiming.duration
       coordinator.retargetIfPossible(target: target, duration: duration) { [weak self] _ in self?.endFlight(id) }
     }
@@ -1201,6 +1269,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func endFlight(_ id: ChatRowID) {
     flightTargets.remove(id)
+    flightFrames[id] = nil
     (list.view(for: id) as? TimelineRowView)?.isSendTargetHidden = false
   }
 
@@ -1242,7 +1311,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       } catch is CancellationError {
         return
       } catch {
-        if !returnToLatestInterrupted, !Task.isCancelled {
+        guard !Task.isCancelled else { return }
+        if !returnToLatestInterrupted {
           // A useful cached latest window, with the coverage still unknown.
           _ = try? await viewModel.loadLatestWindowAsync()
         }
@@ -1325,6 +1395,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         guard !requiresExactMessage || !isHiddenByCollapsedHistory(messageID), outcome != .empty,
               viewModel.loadLocalWindowAroundMessage(messageId: messageID)
         else {
+          // An empty window's publish may have said so already (`apply`).
+          guard pendingFocus?.messageId == messageID else { return }
           pendingFocus = nil
           ToastManager.shared.showToast(unavailable, type: .error, systemImage: "exclamationmark.triangle.fill")
           return
@@ -1717,8 +1789,38 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   var isContextMenuInteractionActive: Bool { menu.isActive }
   var isReactionPickerPresented: Bool { menuActions.isReactionPickerPresented }
-  func cancelContextMenuKeyboardRestoration() {}
-  func preserveContextMenuViewportForKeyboardRestoration() {}
+  private func beginMenuInsetHold() {
+    menuInsetRelease?.cancel()
+    awaitsMenuKeyboard = false
+    guard menuInsetHold == nil else { return }
+    menuInsetHold = (composeBottomInset, nil)
+  }
+
+  /// The menu ended and the container brings the composer's focus back: the hold waits for the keyboard,
+  /// a moment at most.
+  func preserveContextMenuViewportForKeyboardRestoration() {
+    guard menuInsetHold != nil else { return }
+    awaitsMenuKeyboard = true
+    menuInsetRelease?.cancel()
+    let release = DispatchWorkItem { [weak self] in self?.endMenuInsetHold(timing: Self.rowTiming) }
+    menuInsetRelease = release
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: release)
+  }
+
+  /// The menu ended without bringing focus back: the list follows the composer now.
+  func cancelContextMenuKeyboardRestoration() {
+    endMenuInsetHold(timing: Self.rowTiming)
+  }
+
+  private func endMenuInsetHold(timing: TimelineTiming) {
+    guard let hold = menuInsetHold else { return }
+    menuInsetHold = nil
+    awaitsMenuKeyboard = false
+    menuInsetRelease?.cancel()
+    menuInsetRelease = nil
+    guard let latest = hold.latest else { return }
+    composeAreaDidChange(bottomInset: latest, timing: timing, isInteractive: false)
+  }
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     viewModel.rowFeed.setCollapsedMaxId(collapsedMaxId)

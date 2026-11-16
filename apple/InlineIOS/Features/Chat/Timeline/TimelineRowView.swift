@@ -239,15 +239,20 @@ final class TimelineRowView: UIView {
     var width: CGFloat
     var theme: IOSThemeSnapshot
     var spaceId: Int64?
+    /// The host's environment (text size, translation on or off): a new one rebuilds the view.
+    var environment: UInt64
   }
 
   private var legacyShown: LegacyShown?
 
   func showLegacy(
     _ message: FullMessage, grouping: ChatRowGrouping, isThreadAnchor: Bool, width: CGFloat,
-    theme: IOSThemeSnapshot, spaceId: Int64?
+    theme: IOSThemeSnapshot, spaceId: Int64?, environment: UInt64 = 0
   ) {
-    if updateLegacyInPlace(message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId) {
+    if updateLegacyInPlace(
+      message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme, spaceId: spaceId,
+      environment: environment
+    ) {
       return
     }
     removeLegacy()
@@ -317,7 +322,7 @@ final class TimelineRowView: UIView {
     NSLayoutConstraint.activate(legacyConstraints)
     legacyShown = LegacyShown(
       message: message, grouping: grouping, isThreadAnchor: isThreadAnchor, width: width, theme: theme,
-      spaceId: spaceId
+      spaceId: spaceId, environment: environment
     )
   }
 
@@ -325,11 +330,12 @@ final class TimelineRowView: UIView {
   /// one pops) and an outgoing bubble's tail change in place and animate; anything else rebuilds.
   private func updateLegacyInPlace(
     _ message: FullMessage, grouping: ChatRowGrouping, isThreadAnchor: Bool, width: CGFloat,
-    theme: IOSThemeSnapshot, spaceId: Int64?
+    theme: IOSThemeSnapshot, spaceId: Int64?, environment: UInt64
   ) -> Bool {
     guard let view = legacyView, let shown = legacyShown, !view.isHidden, shown.message.id == message.id,
           shown.isThreadAnchor == isThreadAnchor, abs(shown.width - width) <= 0.5, shown.theme == theme,
-          shown.spaceId == spaceId,
+          shown.spaceId == spaceId, shown.environment == environment,
+          shown.message.displayText == message.displayText,
           shown.message.message.out == message.message.out
     else { return false }
     let current = shown.message

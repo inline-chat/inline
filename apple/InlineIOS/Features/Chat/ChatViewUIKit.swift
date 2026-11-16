@@ -148,6 +148,9 @@ public class ChatContainerView: UIView {
 
   private func installTimelineKeyboard() {
     let coordinator = KeyboardCoordinator(view: self)
+    // As the collection view's composer followed the keyboard layout guide: on iPad it rides on an
+    // undocked or split keyboard.
+    coordinator.followsUndockedKeyboard = UIDevice.current.userInterfaceIdiom == .pad
     coordinator.ridingHeight = { [weak self] in
       guard let self else { return 0 }
       return max(0, bounds.maxY - (keyboardCoordinator?.height ?? 0) - composeContainerView.frame.minY)
@@ -163,7 +166,10 @@ public class ChatContainerView: UIView {
   /// The composer and the list's bottom inset move here, together, and nowhere else.
   private func applyKeyboard(_ change: KeyboardChange) {
     composeSkirt.backgroundColor = theme.chatCanvas.uiColor
-    if change.height > 0 {
+    if keyboardCoordinator?.isFloating == true {
+      // A floating keyboard leaves the rows around it in sight.
+      composeSkirt.isHidden = true
+    } else if change.height > 0 {
       composeSkirt.isHidden = false
     } else {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
