@@ -5694,6 +5694,7 @@ fn resolve_message_caption(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_message(
     realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
