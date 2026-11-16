@@ -41,8 +41,10 @@ final class TimelineRowView: UIView {
       if replyMessage != nil { installSwipe() }
       swipe?.isEnabled = replyMessage != nil
       if replyMessage == nil { resetSwipe() }
+      updateReplyAction()
     }
   }
+  private var replyAction: UIAccessibilityCustomAction?
   private var swipe: UIPanGestureRecognizer?
   private var swipeDirection = INUserSettings.current.messageGestures.swipeToReplyDirection
   private var swipeStart: CGFloat = 0
@@ -388,19 +390,32 @@ final class TimelineRowView: UIView {
     }
   }
 
+  private var flashOverlay: UIView?
+
   /// A short highlight for the row a jump landed on.
   func flash(theme: IOSThemeSnapshot) {
+    removeFlash()
     let overlay = UIView(frame: bounds)
+    flashOverlay = overlay
     overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     overlay.isUserInteractionEnabled = false
     overlay.backgroundColor = theme.primary.uiColor.withAlphaComponent(0.18)
     overlay.alpha = 0
     addSubview(overlay)
     UIView.animate(withDuration: 0.18, animations: { overlay.alpha = 1 }) { _ in
-      UIView.animate(withDuration: 0.4, delay: 1.0, options: [], animations: { overlay.alpha = 0 }) { _ in
+      UIView.animate(withDuration: 0.4, delay: 1.0, options: [], animations: { overlay.alpha = 0 }) { [weak self] _ in
         overlay.removeFromSuperview()
+        if self?.flashOverlay === overlay { self?.flashOverlay = nil }
       }
     }
+  }
+
+  /// A row reused for another message must not carry the last one's highlight.
+  private func removeFlash() {
+    guard let overlay = flashOverlay else { return }
+    flashOverlay = nil
+    overlay.layer.removeAllAnimations()
+    overlay.removeFromSuperview()
   }
 
   func prepareForReuse() {
@@ -417,6 +432,7 @@ final class TimelineRowView: UIView {
     messageView?.onReactionsMenu = nil
     messageView?.onContentStateChange = nil
     messageView?.onRevealLineChange = nil
+    removeFlash()
     layer.removeAllAnimations()
   }
 
@@ -439,6 +455,22 @@ final class TimelineRowView: UIView {
     pan.delegate = self
     addGestureRecognizer(pan)
     swipe = pan
+  }
+
+  /// VoiceOver's stand-in for the swipe. Custom actions on a container reach the elements inside it, so
+  /// the bubble's text offers it too.
+  private func updateReplyAction() {
+    guard replyMessage != nil else {
+      accessibilityCustomActions = nil
+      return
+    }
+    let action = replyAction ?? UIAccessibilityCustomAction(name: "Reply") { [weak self] _ in
+      guard let message = self?.replyMessage else { return false }
+      ChatState.shared.setReplyingMessageId(peer: message.message.peerId, id: message.message.messageId)
+      return true
+    }
+    replyAction = action
+    if accessibilityCustomActions?.first !== action { accessibilityCustomActions = [action] }
   }
 
   /// The views that slide with the finger.

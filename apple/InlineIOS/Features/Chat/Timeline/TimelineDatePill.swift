@@ -11,6 +11,8 @@ final class TimelineDatePill: UIView {
   private let label = UILabel()
   private var title = ""
   var onTap: (() -> Void)?
+  /// True while the pill should let touches through to the list behind it.
+  var passesTouches: (() -> Bool)?
 
   init(floating: Bool) {
     if #available(iOS 26.0, *) {
@@ -64,7 +66,7 @@ final class TimelineDatePill: UIView {
 
   /// Only the capsule takes touches; the rest of the strip passes them to the list.
   override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-    guard alpha > 0.01, !isHidden else { return false }
+    guard alpha > 0.01, !isHidden, passesTouches?() != true else { return false }
     return effectView.frame.insetBy(dx: -8, dy: -12).contains(point)
   }
 

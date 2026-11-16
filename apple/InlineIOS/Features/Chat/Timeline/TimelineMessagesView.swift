@@ -167,9 +167,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         (view as? TimelineRowView).map { configure($0, id: id, width: width, timing: timing) }
       },
       recycle: { [unowned self] _, view in
-        guard let row = view as? TimelineRowView, rowPool.count < 24 else { return }
+        // Reset even when the pool is full: the list keeps the row in a hidden slot it may reuse.
+        guard let row = view as? TimelineRowView else { return }
         row.prepareForReuse()
-        rowPool.append(row)
+        if rowPool.count < 24 { rowPool.append(row) }
       },
       // The sender's avatar stays in sight beside its group, as the collection view's overlay keeps it.
       pin: { [unowned self] id, view in
@@ -188,6 +189,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     addSubview(list)
     datePill.alpha = 0
     datePill.onTap = { [weak self] in self?.jumpToDatePillDay() }
+    // While the list moves, a finger on the pill is a finger on the list: it catches the fling.
+    datePill.passesTouches = { [weak self] in self.map { $0.list.isTracking || $0.list.isDecelerating } ?? false }
     addSubview(datePill)
 
     viewModel.rowFeed.isPublishing = true
@@ -1338,8 +1341,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       y = min(top, row.y - TimelineDatePill.height)
     }
     datePill.frame.origin.y = y
-    datePillDay = current.day
-    datePill.configure(title: Self.dayTitle(current.day))
+    // This runs every frame of a scroll; the title is formatted only when the day changes.
+    if datePillDay != current.day {
+      datePillDay = current.day
+      datePill.configure(title: Self.dayTitle(current.day))
+    }
     if list.isTracking || list.isDecelerating {
       datePillHide?.cancel()
       datePill.setVisible(true, animated: datePill.alpha == 0)
