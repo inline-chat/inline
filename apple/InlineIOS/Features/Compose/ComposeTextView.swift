@@ -222,6 +222,16 @@ class ComposeTextView: UITextView {
       name: UITextView.textDidChangeNotification,
       object: self
     )
+    // The keyboard runs in its own process and applies keystrokes asynchronously, so letters typed
+    // just before a send can land after the composer cleared itself, without the change callbacks
+    // that hide the placeholder. Every edit goes through the storage; the callbacks, when they do
+    // run, come after this and keep the final say.
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(textStorageDidEdit),
+      name: NSTextStorage.didProcessEditingNotification,
+      object: textStorage
+    )
 
     NotificationCenter.default.addObserver(
       self,
@@ -257,6 +267,11 @@ class ComposeTextView: UITextView {
 
   func showPlaceholder(_ show: Bool) {
     placeholderLabel?.alpha = show ? 1 : 0
+  }
+
+  @objc private func textStorageDidEdit() {
+    guard textStorage.editedMask.contains(.editedCharacters) else { return }
+    showPlaceholder(textStorage.length == 0)
   }
 
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
