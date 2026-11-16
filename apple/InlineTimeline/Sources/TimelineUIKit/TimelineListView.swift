@@ -330,6 +330,19 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       self, selector: #selector(accessibilityFocusChanged(_:)), name: UIAccessibility.elementFocusedNotification,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(applicationWillResignActive), name: UIApplication.willResignActiveNotification,
+      object: nil
+    )
+  }
+
+  /// The app is going away mid-fling: the list stops where it is, as a scroll view pauses, rather than
+  /// leaving a fling the system may drop with the content already at its end.
+  @objc private func applicationWillResignActive() {
+    guard flight != nil, !isTracking else { return }
+    catchFlight()
+    caughtFlight = false
+    rest()
   }
 
   @available(*, unavailable)
@@ -756,8 +769,12 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     CATransaction.commit()
   }
 
-  /// A lifted pin hangs outside its row, where the row's own hit test does not look.
+  /// A lifted pin hangs outside its row, where the row's own hit test does not look. A touch landing on
+  /// a moving list only stops it, as a scroll view's does: it reaches the list, not the row under it.
   override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    if flight != nil, isUserInteractionEnabled, !isHidden, alpha > 0.01, self.point(inside: point, with: event) {
+      return self
+    }
     if isUserInteractionEnabled, !isHidden, alpha > 0.01, self.point(inside: point, with: event) {
       for slot in slots.values {
         guard let pin = slot.pin, pin.lift > 0.5, !pin.view.isHidden, pin.view.alpha > 0.01,
