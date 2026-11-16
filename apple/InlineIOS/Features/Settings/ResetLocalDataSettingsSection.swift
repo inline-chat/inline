@@ -89,6 +89,7 @@ private enum LocalDataResetPerformer {
 
     do {
       await FileUploader.shared.cancelAll()
+      await FileNativeUploadStagingStore.shared.removeAll()
       await FileCache.shared.cancelAllDownloads()
       await FileDownloader.shared.resetSession()
       NotionTaskService.shared.resetSession()

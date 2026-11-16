@@ -342,6 +342,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
+    MainActor.assumeIsolated { BackgroundSends.shared.pushReceived() }
     guard let account = MessageNotificationAccount.capture(userInfo: userInfo),
           NotificationSyncCleaner.isSyncPush(userInfo)
     else {
