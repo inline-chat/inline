@@ -106,6 +106,26 @@ struct MessageFormAnswersTests {
     MessageFormDraftStore.shared.discard(key)
   }
 
+  @Test("A submitted form keeps the sent answers and drops secrets")
+  func submittedKeepsAnswers() {
+    let form = Self.form()
+    let key = MessageFormDraftStore.Key(message: Self.message(form), formID: "f")
+    let store = MessageFormDraftStore.shared
+    store.discard(key)
+    store.setValue(.selection(["a"], other: nil), key: key, fieldID: "pick")
+    store.setValue(.text("hunter2"), key: key, fieldID: "secret")
+    #expect(MessageFormAnswers.secretFieldIDs(form) == ["secret"])
+    store.markSubmitted(key, secretFieldIDs: MessageFormAnswers.secretFieldIDs(form))
+    #expect(store.phase(key) == .submitted)
+    #expect(MessageFormAnswers.value(form.fields[0], key: key) == .selection(["a"], other: nil))
+    #expect(store.value(key, fieldID: "secret") == nil)
+    // Without the form, nothing is kept.
+    store.setValue(.selection(["a"], other: nil), key: key, fieldID: "pick")
+    store.markSubmitted(key, secretFieldIDs: nil)
+    #expect(store.value(key, fieldID: "pick") == nil)
+    store.discard(key)
+  }
+
   @Test("A form is found inside other blocks")
   func find() {
     let message = Self.message(Self.form())

@@ -32,6 +32,13 @@ public enum MessageFormAnswers {
     return nil
   }
 
+  /// IDs of `form`'s secret text fields, whose answers are never kept after submit.
+  public static func secretFieldIDs(_ form: BlockForm) -> Set<String> {
+    Set(form.fields.compactMap { field in
+      if case let .text(text)? = field.kind, text.kind == .secret { field.fieldID } else { nil }
+    })
+  }
+
   /// Whether `field` is a single choice with too many options to list, picked from a menu.
   public static func usesMenu(_ select: BlockFormSelect) -> Bool {
     !select.multiple && select.options.count > 6
