@@ -656,10 +656,12 @@ impl HarnessDriver for ClaudeHarness {
                 )));
             }
             options.retain_supported(&self.help());
-            // Thinking summaries are what Claude Code shows between tools;
-            // headless, the API would send current models' thinking empty.
+            // Claude Code and Claude desktop omit thinking by default: their
+            // summaries are the model's self-talk, not updates for the
+            // person. What a model writes for the reader still arrives as
+            // text, or as a thinking block that has text.
             if version.at_least(THINKING_DISPLAY_MIN) {
-                options.thinking_display = Some("summarized".to_owned());
+                options.thinking_display = Some("omitted".to_owned());
             }
             let session_id = options
                 .target_session_id()
