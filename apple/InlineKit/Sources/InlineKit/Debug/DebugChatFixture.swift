@@ -1,6 +1,8 @@
 #if DEBUG
+import CoreGraphics
 import Foundation
 import GRDB
+import ImageIO
 import InlineProtocol
 
 /// A signed-out, in-memory chat for list development (debug builds only):
@@ -117,9 +119,10 @@ public final class DebugChatFixture {
     } else if index % 29 == 0 {
       photoId = 9_000 + id
       let photo = try Photo(photoId: 9_000 + id, date: now, format: .jpeg).insertAndFetch(db)
-      // Sizes reference the photo's local row id.
-      try PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: index % 2 == 0 ? 800 : 1_600)
-        .insert(db)
+      // Sizes reference the photo's local row id. A drawn local file, so a tap opens the gallery.
+      var size = PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: index % 2 == 0 ? 800 : 1_600)
+      size.localPath = Self.photoFile(tall: index % 2 != 0)
+      try size.insert(db)
       if index % 2 == 0 { text = nil }
     }
     var message = Message(
@@ -135,6 +138,27 @@ public final class DebugChatFixture {
                      date: now, chatId: chatId).insert(db)
       }
     }
+  }
+
+  /// A drawn JPEG in the photo cache (a diagonal gradient), written once per shape; its local path.
+  private nonisolated static func photoFile(tall: Bool) -> String? {
+    let name = tall ? "debug-fixture-tall.jpg" : "debug-fixture-wide.jpg"
+    let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(name)
+    if FileManager.default.fileExists(atPath: url.path) { return name }
+    let width = 600, height = tall ? 800 : 400
+    guard let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+    ) else { return nil }
+    let colors = [CGColor(red: 0.98, green: 0.6, blue: 0.3, alpha: 1), CGColor(red: 0.3, green: 0.45, blue: 0.95, alpha: 1)]
+    guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1])
+    else { return nil }
+    context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: width, y: height), options: [])
+    guard let image = context.makeImage(),
+          let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)
+    else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    return CGImageDestinationFinalize(destination) ? name : nil
   }
 
   /// Simulates a server page of older history: up to `limit` messages below
@@ -305,6 +329,18 @@ public final class DebugChatFixture {
       try await Task.sleep(for: interval)
     }
   }
+
+  /// A message is deleted, wherever it is.
+  public func delete(messageId: Int64) throws {
+    let chatId = chatId
+    _ = try database.dbWriter.write { db in
+      try Message.filter(Column("chatId") == chatId && Column("messageId") == messageId).deleteAll(db)
+    }
+    publisher.messagesDeleted(messageIds: [messageId], peer: peer)
+  }
+
+  /// The server id the next received message will get.
+  public var upcomingMessageId: Int64 { nextMessageId }
 
   /// The newest message is deleted.
   public func deleteNewest() throws {
