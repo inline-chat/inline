@@ -7,6 +7,7 @@ import {
   Update,
   type AgentThreadContext,
   type BlockContent,
+  type InputMessageVia,
 } from "@inline-chat/protocol/core"
 import { ensureBotCanReachDmPeer } from "@in/server/modules/contacts/contacts"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -112,6 +113,7 @@ import {
 } from "@in/server/modules/agents/access"
 import { InlineError } from "@in/server/types/errors"
 import { logReplacedSendDate, resolveMessageDate } from "@in/server/modules/message/clientSendDate"
+import { resolveMessageVia } from "@in/server/modules/message/via"
 
 type Input = {
   peerId: InputPeer
@@ -163,6 +165,9 @@ type Input = {
 
   /** Add mentioned users who can't see this thread yet, when the sender may add them. */
   addMentionedUsers?: boolean
+
+  /** The agent sending this for the sender, shown as "Sent via <name>". Forwards leave it out. */
+  via?: InputMessageVia
 }
 
 type Output = {
@@ -261,6 +266,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     if (recovered) return { updates: recovered }
   }
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
+  const via = await resolveMessageVia({ via: input.via, currentUserId, senderIsBot })
   const currentSessionConnections = connectionManager
     .getUserConnections(currentUserId)
     .filter(({ sessionId }) => sessionId === context.currentSessionId)
@@ -541,6 +547,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           actionsEncrypted: encryptedActions?.encrypted ?? null,
           actionsIv: encryptedActions?.iv ?? null,
           actionsTag: encryptedActions?.authTag ?? null,
+          viaApp: via.viaApp,
+          viaBotUserId: via.viaBotUserId,
+          viaName: via.viaName,
         },
         preparedBlockContent,
         tx,

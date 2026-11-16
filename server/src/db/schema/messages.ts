@@ -1,4 +1,4 @@
-import { bigint, boolean, pgTable, timestamp, unique } from "drizzle-orm/pg-core"
+import { bigint, boolean, pgTable, timestamp, unique, varchar } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { text } from "drizzle-orm/pg-core"
 import { chats } from "./chats"
@@ -111,6 +111,15 @@ export const messages = pgTable(
 
     /** False for historical projections that must remain visible without becoming unread. */
     countsAsUnread: boolean("counts_as_unread").default(true).notNull(),
+
+    /** Known agent id that sent this for the sender ("Sent via Codex"); see modules/message/via. */
+    viaApp: varchar("via_app", { length: 32 }),
+
+    /** A bot the sender owns that sent this for them. No foreign key: bots are soft-deleted, and a key would scan this table. */
+    viaBotUserId: integer("via_bot_user_id"),
+
+    /** The signing bot's name when the message was sent; agents are named from the known list. */
+    viaName: varchar("via_name", { length: 64 }),
   },
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),

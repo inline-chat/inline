@@ -68,6 +68,9 @@ const baseMessage: DbMessage = {
   hasLink: null,
   blockContentId: null,
   countsAsUnread: true,
+  viaApp: null,
+  viaBotUserId: null,
+  viaName: null,
 }
 
 const baseUser: DbUser = {
@@ -131,6 +134,9 @@ const baseFullMessage: DbFullMessage = {
   hasLink: null,
   blockContentId: null,
   countsAsUnread: true,
+  viaApp: null,
+  viaBotUserId: null,
+  viaName: null,
   entities: null,
   actions: null,
   systemMessage: null,
@@ -573,5 +579,37 @@ describe("service messages", () => {
       throw new Error("Expected pinned message service metadata")
     }
     expect(result.serviceMessage.event.pinnedMessage.messageId).toBe(13n)
+  })
+})
+
+describe("encodeMessage via", () => {
+  it("carries the agent that sent the message", () => {
+    const result = encodeMessage({
+      message: buildMessage({ text: "Deploy checklist", viaApp: "claude-code" }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.via).toEqual({ source: { oneofKind: "app", app: "claude-code" }, name: "Claude Code" })
+  })
+
+  it("leaves plain messages without via", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({ text: "hi" }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.via).toBeUndefined()
+  })
+
+  it("carries a bot signer from full messages", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({ text: "metrics", viaBotUserId: 77, viaName: "Atlas" }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.via).toEqual({ source: { oneofKind: "botUserId", botUserId: 77n }, name: "Atlas" })
   })
 })
