@@ -22,6 +22,7 @@ import UIKit
 ///   (never stored), which shows the rows' actions button.
 /// - `--timeline-harness-system-menu` stands in for VoiceOver: the list uses UIKit's menu.
 /// - `--timeline-harness-focus ID` asks for a message as the chat opens.
+/// - `--timeline-harness-dense` sends the fixture's messages 45 s apart in runs of 12, so long sender groups form.
 /// - `--timeline-harness-preview` shows the chat as the chat list's preview does (no composer, no touches).
 /// - `--timeline-harness-receive-every MS` receives a message every MS milliseconds, so one can arrive
 ///   mid-fling or mid-jump without a touch on the Script menu.
@@ -84,7 +85,8 @@ final class TimelineHarnessModel {
       let arguments = CommandLine.arguments
       let uncached = arguments.contains("--timeline-harness-uncached")
       let fixture = try DebugChatFixture(
-        messageCount: count, remoteFloor: uncached ? max(1, count - 30) : nil, database: .shared, publisher: .shared
+        messageCount: count, remoteFloor: uncached ? max(1, count - 30) : nil,
+        dense: arguments.contains("--timeline-harness-dense"), database: .shared, publisher: .shared
       )
       TimelineMessagesView.debugCurrentUserId = fixture.currentUserId
       // Chat state is saved in user defaults and the fixture's peer is the same every launch, so a reply

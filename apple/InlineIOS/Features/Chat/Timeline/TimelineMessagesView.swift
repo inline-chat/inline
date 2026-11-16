@@ -72,6 +72,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private let datePill = TimelineDatePill(floating: true)
   /// Where each day starts in the rows, oldest first.
   private var dayRows: [(index: Int, day: Date)] = []
+  /// Each message row's sender group, as row indexes, built once per snapshot: the list asks for a
+  /// group's ends on every frame of a fling (pins, the avatar row kept placed).
+  private var groupSpans: [ChatRowID: (start: Int, end: Int)] = [:]
   private var datePillDay: Date?
   private var datePillHide: DispatchWorkItem?
 
@@ -418,7 +421,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     )
   }
 
-  func composeAreaDidChange(bottomInset: CGFloat, timing: TimelineTiming, isInteractive _: Bool) {
+  func composeAreaDidChange(bottomInset: CGFloat, timing: TimelineTiming, isInteractive: Bool) {
+    // A finger on the keyboard ends any hold: the list follows it.
+    if isInteractive, menuInsetHold != nil {
+      menuInsetHold = nil
+      awaitsMenuKeyboard = false
+      menuInsetRelease?.cancel()
+    }
     if let hold = menuInsetHold {
       menuInsetHold?.latest = bottomInset
       // The keyboard is back after the menu (or a reply bar rose): the list moves only by what changed.
@@ -505,27 +514,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   /// The last row of the avatar group a message row belongs to, when that is another row.
   private func avatarGroupEnd(of id: ChatRowID) -> ChatRowID? {
-    guard let snapshot, var index = snapshot.index(of: id),
-          case let .message(_, grouping) = snapshot.rows[index].content, grouping.showsAvatar, !grouping.isLastInGroup
-    else { return nil }
-    let rows = snapshot.rows
-    while index + 1 < rows.count, case let .message(_, grouping) = rows[index].content, !grouping.isLastInGroup,
-          case .message = rows[index + 1].content
-    {
-      index += 1
-    }
-    return rows[index].id
+    guard let span = groupSpans[id], let rows = snapshot?.rows, rows.indices.contains(span.end) else { return nil }
+    let end = rows[span.end]
+    guard end.id != id, case let .message(_, grouping) = end.content, grouping.showsAvatar else { return nil }
+    return end.id
   }
 
   /// The first row of the sender group a message row ends.
   private func groupStart(of id: ChatRowID) -> ChatRowID {
-    guard let snapshot, var index = snapshot.index(of: id) else { return id }
-    while index > 0, case let .message(_, grouping) = snapshot.rows[index].content, !grouping.isFirstInGroup,
-          case .message = snapshot.rows[index - 1].content
-    {
-      index -= 1
-    }
-    return snapshot.rows[index].id
+    guard let span = groupSpans[id], let rows = snapshot?.rows, rows.indices.contains(span.start) else { return id }
+    return rows[span.start].id
   }
 
   private func height(of id: ChatRowID, width: CGFloat) -> CGFloat {
@@ -618,13 +616,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func makeRow(_ id: ChatRowID, width: CGFloat) -> UIView {
     let view = rowPool.popLast() ?? TimelineRowView()
-    configure(view, id: id, width: width, timing: .none)
+    configure(view, id: id, width: width, timing: .none, isNew: true)
     return view
   }
 
-  private func configure(_ view: TimelineRowView, id: ChatRowID, width: CGFloat, timing: TimelineTiming) {
+  private func configure(
+    _ view: TimelineRowView, id: ChatRowID, width: CGFloat, timing: TimelineTiming, isNew: Bool = false
+  ) {
     guard let row = row(id) else { return }
-    if heldRows.contains(id), menu.liveSourceID == id { return }
+    // A row a menu holds live keeps what it shows; a view made for it now shows the row as it is.
+    if !isNew, heldRows.contains(id), menu.liveSourceID == id { return }
     defer {
       view.isMenuSourceHidden = menu.isSource(id)
       view.isSendTargetHidden = flightTargets.contains(id)
@@ -672,6 +673,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         }
       case .threadRepliesHeader:
         view.showLabel("", style: .plain, theme: theme)
+        view.accessibilityElementsHidden = true
     }
   }
 
@@ -944,9 +946,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       heights[change.id] = nil
     }
     let changed = Set(diff.updates.map(\.id))
-    // A row UIKit's menu holds live keeps its height and content until the menu lets go.
+    // A row a menu holds live keeps its height and content until the menu lets go.
     if let held = menu.liveSourceID, changed.contains(held) { heldRows.insert(held) }
-    for id in changed where !heldRows.contains(id) { heights[id] = nil }
+    for id in changed where id != menu.liveSourceID { heights[id] = nil }
 
     var timing = TimelineTiming.none
     var scroll = TimelineScroll<ChatRowID>.preserve
@@ -957,7 +959,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         timing = Self.rowTiming
         // Resting just above the newest message (within 44 pt), a new or growing message brings the list
         // to it, as the collection view followed from there.
-        if snapshot.reason == .liveAdd || snapshot.reason == .liveUpdate, !list.isTracking,
+        // Never during a fling or under an open menu; an update only when it is the newest message's.
+        if snapshot.reason == .liveAdd || (snapshot.reason == .liveUpdate && snapshot.ids.last.map(changed.contains) == true),
+           !list.isTracking, !list.isDecelerating, !menu.isActive, menuInsetHold == nil,
            distanceFromBottom > 0.5, distanceFromBottom <= 44, viewModel.historyCoverage.isAtCertifiedLiveEnd
         {
           scroll = .latest
@@ -1752,6 +1756,27 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     dayRows = snapshot?.rows.enumerated().compactMap { index, row in
       if case let .daySeparator(day) = row.content { (index, day) } else { nil }
     } ?? []
+    rebuildGroupSpans()
+  }
+
+  private func rebuildGroupSpans() {
+    groupSpans.removeAll(keepingCapacity: true)
+    guard let rows = snapshot?.rows else { return }
+    var start: Int?
+    for (index, row) in rows.enumerated() {
+      guard case let .message(_, grouping) = row.content else {
+        start = nil
+        continue
+      }
+      if grouping.isFirstInGroup || start == nil { start = index }
+      var nextIsMessage = false
+      if index + 1 < rows.count, case .message = rows[index + 1].content { nextIsMessage = true }
+      if grouping.isLastInGroup || !nextIsMessage {
+        let span = (start ?? index, index)
+        for member in span.0 ... span.1 { groupSpans[rows[member].id] = span }
+        start = nil
+      }
+    }
   }
 
   /// The day of the topmost row floats at the top edge while the reader scrolls. The next day's row
@@ -1844,7 +1869,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// The menu ended and the container brings the composer's focus back: the hold waits for the keyboard,
   /// a moment at most.
   func preserveContextMenuViewportForKeyboardRestoration() {
-    guard menuInsetHold != nil else { return }
+    guard let hold = menuInsetHold else { return }
+    // Nothing moved while the menu was open (it drew over the keyboard, or kept it): nothing to wait for.
+    guard hold.latest != nil else {
+      endMenuInsetHold(timing: .none)
+      return
+    }
     awaitsMenuKeyboard = true
     menuInsetRelease?.cancel()
     let release = DispatchWorkItem { [weak self] in self?.endMenuInsetHold(timing: Self.rowTiming) }

@@ -502,6 +502,7 @@ final class TimelineRowView: UIView {
   }
 
   func prepareForReuse() {
+    accessibilityElementsHidden = false
     isMenuSourceHidden = false
     isSendTargetHidden = false
     replyMessage = nil

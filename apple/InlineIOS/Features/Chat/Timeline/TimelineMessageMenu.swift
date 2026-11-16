@@ -32,7 +32,20 @@ final class TimelineMessageMenu: NSObject {
   /// The row UIKit's menu holds live: lifting its bubble, or flying the preview back onto it. Changing the
   /// row then tears the preview, so the host holds its updates until the menu lets go, as the collection
   /// view did; while the menu shows its own preview, rows update under it.
-  private(set) var liveSourceID: ChatRowID?
+  private(set) var liveSourceID: ChatRowID? {
+    didSet {
+      // A new row held lets go of the one before, which takes its update.
+      if let oldValue, oldValue != liveSourceID { onLiveSourceReleased?(oldValue) }
+      liveSourceTimeout?.cancel()
+      guard liveSourceID != nil else { return }
+      // Whatever happens to the menu, a row is never held for long.
+      let timeout = DispatchWorkItem { [weak self] in self?.releaseLiveSource() }
+      liveSourceTimeout = timeout
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: timeout)
+    }
+  }
+
+  private var liveSourceTimeout: DispatchWorkItem?
   /// UIKit's menu let go of a row it held live.
   var onLiveSourceReleased: ((ChatRowID) -> Void)?
 
@@ -681,9 +694,7 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   }
 
   private func releaseLiveSource() {
-    guard let id = liveSourceID else { return }
     liveSourceID = nil
-    onLiveSourceReleased?(id)
   }
 
   private func setSourceHidden(_ hidden: Bool, id: ChatRowID) {
