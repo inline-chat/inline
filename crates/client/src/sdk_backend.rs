@@ -10307,6 +10307,7 @@ mod tests {
                         reply_quote: None,
                         unread_mention: None,
                         unread_reactions: None,
+                        via: None,
                     }),
                 })),
             }],
