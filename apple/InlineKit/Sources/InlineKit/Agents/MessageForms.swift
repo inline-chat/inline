@@ -67,11 +67,27 @@ public final class MessageFormDraftStore {
     phases[key] ?? .editing
   }
 
+  /// Sets where a submission stands. `.submitted` drops every answer; a client
+  /// that shows what was sent uses `markSubmitted(_:secretFieldIDs:)` instead.
   public func setPhase(_ phase: Phase, key: Key) {
     phases[key] = phase
     if phase == .submitted {
       // Drop answers, secrets included, once the bot has them.
       drafts[key] = nil
+    }
+  }
+
+  /// The bot has the answers. Secret answers are dropped now; the rest stay, so
+  /// the form keeps showing what was sent rather than its defaults until the
+  /// bot closes it. `nil` (the form couldn't be found) drops every answer.
+  public func markSubmitted(_ key: Key, secretFieldIDs: Set<String>?) {
+    guard let secretFieldIDs else {
+      setPhase(.submitted, key: key)
+      return
+    }
+    phases[key] = .submitted
+    for fieldID in secretFieldIDs {
+      drafts[key]?[fieldID] = nil
     }
   }
 }

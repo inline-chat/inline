@@ -46,6 +46,8 @@ export type OauthGrant = {
   spaceIds: bigint[]
   allowDms: boolean
   allowHomeThreads: boolean
+  /** The app may send without "Sent via <app>" when the user asks. */
+  allowUnsigned: boolean
   inlineTokenEncrypted: Buffer | null
   createdAtMs: number
   revokedAtMs: number | null
@@ -134,6 +136,7 @@ function mapGrant(row: typeof oauthGrants.$inferSelect): OauthGrant {
     spaceIds: spaceIdsRaw.map((value) => BigInt(value)),
     allowDms: row.allowDms,
     allowHomeThreads: row.allowHomeThreads,
+    allowUnsigned: row.allowUnsigned,
     inlineTokenEncrypted: row.inlineTokenEncrypted,
     createdAtMs: row.date.getTime(),
     revokedAtMs: toMs(row.revokedAt),
@@ -310,6 +313,7 @@ export const OauthModel = {
     spaceIds: bigint[]
     allowDms: boolean
     allowHomeThreads: boolean
+    allowUnsigned?: boolean
     inlineTokenEncrypted?: Buffer | null
     nowMs: number
   }, connection: Transaction | typeof db = db): Promise<OauthGrant> {
@@ -324,6 +328,7 @@ export const OauthModel = {
         spaceIdsJson: input.spaceIds.map((spaceId) => Number(spaceId)),
         allowDms: input.allowDms,
         allowHomeThreads: input.allowHomeThreads,
+        allowUnsigned: input.allowUnsigned ?? false,
         inlineTokenEncrypted: input.inlineTokenEncrypted,
         date: toDate(input.nowMs),
       })

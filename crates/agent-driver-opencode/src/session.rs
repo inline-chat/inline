@@ -7,6 +7,13 @@
 //! | `Queue` | `POST /prompt {delivery: "queue"}`: taken when the model finishes, in the same execution |
 //! | `Passive` | `POST /synthetic {resume: false}`: context the agent reads with its next step |
 //!
+//! Inline's note on an input (who sent it, its instructions and the thread
+//! around it) goes just before the prompt as a `/synthetic {resume: false}`
+//! with no description, which OpenCode's TUI, desktop and web apps hide; the
+//! prompt itself is the author's text. A queued prompt runs later than a
+//! note could land, so its note leads the prompt text and `displayText`
+//! keeps the desktop and web apps showing only the author's text.
+//!
 //! Every prompt carries an id Inline chose (`msg_…`, OpenCode's own format)
 //! and the input id in its metadata. OpenCode admits an id once, so a send
 //! whose response was lost is retried with the same id without running twice.
@@ -33,7 +40,7 @@ use crate::api::{Api, ApiError, Query, data};
 use crate::events::{BusMessage, EventBus};
 use crate::harness::Shared;
 use crate::link::Link;
-use crate::mapper::{INPUT_METADATA_KEY, Mapper, PendingKind};
+use crate::mapper::{INPUT_METADATA_KEY, Mapper, NOTE_METADATA_KEY, PendingKind};
 
 const MAX_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
 /// A side call waits on the model; the default request timeout is too short.
@@ -459,23 +466,47 @@ impl Session for OpenCodeSession {
                     inner.path("/synthetic"),
                     json!({
                         "id": message_id,
-                        "text": text,
-                        "description": "Inline conversation",
+                        "text": format!(
+                            "<inline-context untrusted=\"true\">\n{}\n\n{}\n</inline-context>",
+                            input.sender_note(),
+                            input.content.text
+                        ),
                         "metadata": {INPUT_METADATA_KEY: input.id.as_str()},
                         "delivery": "steer",
                         "resume": false,
                     }),
                 ),
-                delivery => (
+                Delivery::Queue => (
                     inner.path("/prompt"),
                     json!({
                         "id": message_id,
-                        "text": text,
+                        "text": format!("{}\n\n{text}", note_text(&input)),
                         "files": files(&input),
-                        "metadata": {INPUT_METADATA_KEY: input.id.as_str()},
-                        "delivery": if matches!(delivery, Delivery::Queue) { "queue" } else { "steer" },
+                        "metadata": {
+                            INPUT_METADATA_KEY: input.id.as_str(),
+                            "displayText": input.content.text,
+                            "comments": [],
+                            "attachments": [],
+                        },
+                        "delivery": "queue",
                     }),
                 ),
+                _ => {
+                    if let Err(error) = inner.post_note(&input).await {
+                        inner.state().mapper.forget(&message_id);
+                        return Err(error);
+                    }
+                    (
+                        inner.path("/prompt"),
+                        json!({
+                            "id": message_id,
+                            "text": text,
+                            "files": files(&input),
+                            "metadata": {INPUT_METADATA_KEY: input.id.as_str()},
+                            "delivery": "steer",
+                        }),
+                    )
+                }
             };
             let result = inner.post_prompt(&path, body).await;
             let native = match result {
@@ -556,6 +587,30 @@ impl Session for OpenCodeSession {
 }
 
 impl SessionInner {
+    /// Inline's note on an input, just before its prompt: a description-less
+    /// synthetic that does not start a turn and that OpenCode's apps hide.
+    async fn post_note(&self, input: &Input) -> Result<(), SendError> {
+        self.post_prompt(
+            &self.path("/synthetic"),
+            json!({
+                "id": crate::ids::message_id(),
+                "text": note_text(input),
+                "metadata": {NOTE_METADATA_KEY: input.id.as_str()},
+                "delivery": "steer",
+                "resume": false,
+            }),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            if error.outcome_unknown() {
+                SendError::Unknown(error.to_string())
+            } else {
+                SendError::Rejected(error.to_string())
+            }
+        })
+    }
+
     async fn send_command(
         &self,
         input: Input,
@@ -566,27 +621,10 @@ impl SessionInner {
             Delivery::Queue => "queue",
             _ => "steer",
         };
-        // OpenCode's ACP adapter admits assistant context as a non-waking
-        // synthetic input before a native command. The command API has no
-        // context field, and its argument string must stay unchanged.
-        self.post_prompt(
-            &self.path("/synthetic"),
-            json!({
-                "id": crate::ids::message_id(),
-                "text": prompt_context(&input).join("\n\n"),
-                "description": "Inline sender and conversation context",
-                "delivery": "steer",
-                "resume": false,
-            }),
-        )
-        .await
-        .map_err(|error| {
-            if error.outcome_unknown() {
-                SendError::Unknown(error.to_string())
-            } else {
-                SendError::Rejected(error.to_string())
-            }
-        })?;
+        // The command API has no context field, and its argument string must
+        // stay unchanged: the note goes first, as for a prompt (OpenCode's
+        // ACP adapter does the same for assistant context).
+        self.post_note(&input).await?;
         // The synthetic input must not claim the command's receipt.
         self.state().mapper.expect_command(input.id.clone());
         let result = self
@@ -1167,10 +1205,11 @@ fn slash_command(text: &str) -> Option<(&str, &str)> {
     (!name.is_empty() && !name.contains('/')).then_some((name, rest.trim()))
 }
 
-fn prompt_context(input: &Input) -> Vec<String> {
-    let mut parts = Vec::new();
-    {
-        let context = input.context_with_origin();
+/// Inline's note on an input: who sent it, Inline's instructions for it and
+/// the untrusted thread around it.
+fn note_text(input: &Input) -> String {
+    let mut parts = vec![input.sender_note()];
+    if let Some(context) = &input.content.context {
         if !context.instructions.trim().is_empty() {
             parts.push(format!(
                 "<inline-instructions>\n{}\n</inline-instructions>",
@@ -1184,13 +1223,13 @@ fn prompt_context(input: &Input) -> Vec<String> {
             ));
         }
     }
-    parts
+    parts.join("\n\n")
 }
 
-/// The prompt text: Inline's per-input instructions and untrusted
-/// conversation excerpts, kept apart from the author's own words.
+/// The prompt text: the author's words, after any attachments OpenCode
+/// cannot take as files.
 fn prompt_text(input: &Input) -> String {
-    let mut parts = prompt_context(input);
+    let mut parts = Vec::new();
     let described: Vec<String> = input
         .content
         .attachments
@@ -1360,60 +1399,42 @@ mod tests {
     use inline_agent_bridge::harness::{InputContent, InputId, Origin, UserId};
 
     #[test]
-    fn prompt_text_separates_context_from_the_author() {
+    fn the_prompt_is_the_authors_text_and_the_note_carries_the_rest() {
         let input = Input {
             id: InputId::new("in-1").unwrap(),
             content: InputContent {
                 text: "fix it".into(),
-                attachments: Vec::new(),
                 context: Some(inline_agent_bridge::TurnContext {
                     instructions: String::new(),
                     conversation: "Ana: the build is red".into(),
                 }),
+                ..InputContent::default()
             },
             origin: Origin::Owner { user: UserId(1) },
             delivery: Delivery::Turn,
         };
+        assert_eq!(prompt_text(&input), "fix it");
         assert_eq!(
-            prompt_text(&input),
-            "<inline-context untrusted=\"true\">\nSent by Inline user 1 (the owner).\n\nAna: the build is red\n</inline-context>\n\nfix it"
+            note_text(&input),
+            "<inline-message from_user_id=\"1\" role=\"owner\"/>\n\n<inline-context untrusted=\"true\">\nAna: the build is red\n</inline-context>"
         );
     }
 
     #[test]
-    fn followups_preserve_sender_identity_without_join_context() {
+    fn every_note_names_the_sender() {
         for (origin, expected) in [
-            (
-                Origin::Owner { user: UserId(1) },
-                "Inline user 1 (the owner)",
-            ),
-            (
-                Origin::Teammate { user: UserId(2) },
-                "Inline user 2 (a teammate, not the owner)",
-            ),
-            (Origin::Scheduled, "Scheduled wakeup"),
+            (Origin::Owner { user: UserId(1) }, "role=\"owner\""),
+            (Origin::Teammate { user: UserId(2) }, "role=\"teammate\""),
+            (Origin::Scheduled, "Inline wakeup"),
         ] {
-            for delivery in [
-                Delivery::Turn,
-                Delivery::Queue,
-                Delivery::Steer {
-                    expected_turn: TurnId::new("turn-1").unwrap(),
-                    priority: inline_agent_bridge::harness::SteerPriority::Next,
-                },
-            ] {
-                let input = Input {
-                    id: InputId::new("followup").unwrap(),
-                    content: InputContent::text("do it"),
-                    origin: origin.clone(),
-                    delivery,
-                };
-                let prompt = prompt_text(&input);
-                assert!(prompt.contains(expected), "{prompt}");
-                assert!(prompt.ends_with("\n\ndo it"));
-                if !origin.can_consent_for_owner() {
-                    assert!(prompt.contains("consent"));
-                }
-            }
+            let input = Input {
+                id: InputId::new("followup").unwrap(),
+                content: InputContent::text("do it"),
+                origin,
+                delivery: Delivery::Turn,
+            };
+            assert!(note_text(&input).contains(expected));
+            assert_eq!(prompt_text(&input), "do it");
         }
     }
 

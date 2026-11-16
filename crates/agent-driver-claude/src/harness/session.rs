@@ -30,7 +30,7 @@ use inline_agent_bridge::{
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::delivery::{OpPlan, op_plan, user_message};
+use super::delivery::{OpPlan, input_messages, op_plan};
 use super::mapper::{ClaudeMapper, RequestMapped};
 use super::{CORE_FLOOR, setup_reason};
 use crate::agents::{LiveSession, holder, list_live_sessions};
@@ -656,10 +656,12 @@ impl HarnessDriver for ClaudeHarness {
                 )));
             }
             options.retain_supported(&self.help());
-            // Thinking summaries are what Claude Code shows between tools;
-            // headless, the API would send current models' thinking empty.
+            // Claude Code and Claude desktop omit thinking by default: their
+            // summaries are the model's self-talk, not updates for the
+            // person. What a model writes for the reader still arrives as
+            // text, or as a thinking block that has text.
             if version.at_least(THINKING_DISPLAY_MIN) {
-                options.thinking_display = Some("summarized".to_owned());
+                options.thinking_display = Some("omitted".to_owned());
             }
             let session_id = options
                 .target_session_id()
@@ -1242,7 +1244,7 @@ impl Session for ClaudeSession {
                 }
                 _ => {}
             }
-            let mut message = user_message(&self.inner.session_id, &input);
+            let (note, mut message) = input_messages(&self.inner.session_id, &input);
             // Typing while Claude works: a person's steer cuts the model at
             // once, as Codex does, and otherwise clears the way once written.
             let person_steer =
@@ -1269,6 +1271,14 @@ impl Session for ClaudeSession {
                 }
             }
             let wait_on_tools = person_steer && message.priority == Some(Priority::Next);
+            // Inline's note goes first, so Claude folds it into this input.
+            if let Some(note) = &note {
+                self.inner.mapper().sent_note(&note.uuid);
+                if let Err(error) = self.write(note).await {
+                    self.inner.mapper().forget_sent(&input.id);
+                    return Err(error);
+                }
+            }
             let (ack, acked) = oneshot::channel();
             self.inner
                 .acks

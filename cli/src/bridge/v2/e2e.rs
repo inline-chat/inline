@@ -105,6 +105,20 @@ impl FakeModel {
             return;
         }
         let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+        // Codex asks for a prediction of the user's next message after some
+        // turns. That side request is not part of the agent's work, so it is
+        // answered without using a scripted output or counting as a request.
+        if is_next_message_prediction(&body) {
+            let output = json!({"type": "message", "role": "assistant",
+                "content": [{"type": "output_text", "text": "E2E_PREDICTION"}]});
+            write_response(
+                &mut reader,
+                &format!("prediction-{}", uuid::Uuid::new_v4()),
+                output,
+            )
+            .await;
+            return;
+        }
         let number = {
             let mut requests = self.requests.lock().unwrap();
             requests.push(json!({
@@ -163,21 +177,48 @@ impl FakeModel {
                 .await;
             return;
         }
-        if output.get("id").is_none() {
-            output["id"] = json!(format!("item-{number}"));
-        }
-        let id = format!("response-{number}");
-        let events = [
-            json!({"type": "response.created", "response": {"id": id}}),
-            json!({"type": "response.output_item.done", "output_index": 0, "item": output}),
-            json!({"type": "response.completed", "response": {"id": id,
+        write_response(&mut reader, &number.to_string(), output).await;
+    }
+
+    fn request_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+}
+
+fn is_next_message_prediction(body: &Value) -> bool {
+    body.get("input")
+        .and_then(Value::as_array)
+        .and_then(|input| input.last())
+        .and_then(|item| item.get("content"))
+        .and_then(Value::as_array)
+        .is_some_and(|content| {
+            content.iter().any(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| {
+                        text.starts_with("Predict the next message the user will send")
+                    })
+            })
+        })
+}
+
+/// Streams one output item as a completed Responses API reply.
+async fn write_response(reader: &mut BufReader<TcpStream>, suffix: &str, mut output: Value) {
+    if output.get("id").is_none() {
+        output["id"] = json!(format!("item-{suffix}"));
+    }
+    let id = format!("response-{suffix}");
+    let events = [
+        json!({"type": "response.created", "response": {"id": id}}),
+        json!({"type": "response.output_item.done", "output_index": 0, "item": output}),
+        json!({"type": "response.completed", "response": {"id": id,
                 "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}}}),
-        ];
-        let payload: String = events
-            .into_iter()
-            .map(|event| format!("data: {event}\n\n"))
-            .collect();
-        let _ = reader
+    ];
+    let payload: String = events
+        .into_iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect();
+    let _ = reader
             .get_mut()
             .write_all(
                 format!(
@@ -187,11 +228,6 @@ impl FakeModel {
                 .as_bytes(),
             )
             .await;
-    }
-
-    fn request_count(&self) -> usize {
-        self.requests.lock().unwrap().len()
-    }
 }
 
 struct OwnerClient(InlineClient);

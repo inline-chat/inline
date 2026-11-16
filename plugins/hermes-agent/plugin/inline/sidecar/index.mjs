@@ -13090,7 +13090,8 @@ class Message$Type extends import_runtime4.MessageType {
       { no: 26, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 },
       { no: 27, name: "reply_quote", kind: "scalar", opt: true, T: 9 },
       { no: 28, name: "unread_mention", kind: "scalar", opt: true, T: 8 },
-      { no: 29, name: "unread_reactions", kind: "scalar", opt: true, T: 8 }
+      { no: 29, name: "unread_reactions", kind: "scalar", opt: true, T: 8 },
+      { no: 30, name: "via", kind: "message", T: () => MessageVia }
     ]);
   }
   create(value) {
@@ -13199,6 +13200,9 @@ class Message$Type extends import_runtime4.MessageType {
         case 29:
           message.unreadReactions = reader.bool();
           break;
+        case 30:
+          message.via = MessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -13271,6 +13275,8 @@ class Message$Type extends import_runtime4.MessageType {
       writer.tag(28, import_runtime.WireType.Varint).bool(message.unreadMention);
     if (message.unreadReactions !== undefined)
       writer.tag(29, import_runtime.WireType.Varint).bool(message.unreadReactions);
+    if (message.via)
+      MessageVia.internalBinaryWrite(message.via, writer.tag(30, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13278,6 +13284,122 @@ class Message$Type extends import_runtime4.MessageType {
   }
 }
 var Message = new Message$Type;
+
+class MessageVia$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("MessageVia", [
+      { no: 1, name: "app", kind: "scalar", oneof: "source", T: 9 },
+      { no: 2, name: "bot_user_id", kind: "scalar", oneof: "source", T: 3, L: 0 },
+      { no: 3, name: "name", kind: "scalar", opt: true, T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.source = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.source = {
+            oneofKind: "app",
+            app: reader.string()
+          };
+          break;
+        case 2:
+          message.source = {
+            oneofKind: "botUserId",
+            botUserId: reader.int64().toBigInt()
+          };
+          break;
+        case 3:
+          message.name = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.source.oneofKind === "app")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.source.app);
+    if (message.source.oneofKind === "botUserId")
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.source.botUserId);
+    if (message.name !== undefined)
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.name);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var MessageVia = new MessageVia$Type;
+
+class InputMessageVia$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("InputMessageVia", [
+      { no: 1, name: "app", kind: "scalar", oneof: "source", T: 9 },
+      { no: 2, name: "bot_user_id", kind: "scalar", oneof: "source", T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.source = { oneofKind: undefined };
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.source = {
+            oneofKind: "app",
+            app: reader.string()
+          };
+          break;
+        case 2:
+          message.source = {
+            oneofKind: "botUserId",
+            botUserId: reader.int64().toBigInt()
+          };
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.source.oneofKind === "app")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.source.app);
+    if (message.source.oneofKind === "botUserId")
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.source.botUserId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var InputMessageVia = new InputMessageVia$Type;
 
 class AgentSessionMessageInfo$Type extends import_runtime4.MessageType {
   constructor() {
@@ -14416,7 +14538,6 @@ class AgentSession$Type extends import_runtime4.MessageType {
   }
 }
 var AgentSession = new AgentSession$Type;
-
 class AgentAttention$Type extends import_runtime4.MessageType {
   constructor() {
     super("AgentAttention", [
@@ -14535,6 +14656,7 @@ class AgentHeldBy$Type extends import_runtime4.MessageType {
   }
 }
 var AgentHeldBy = new AgentHeldBy$Type;
+
 class AgentSessionState$Type extends import_runtime4.MessageType {
   constructor() {
     super("AgentSessionState", [
@@ -25132,7 +25254,6 @@ class MoveGridCallHereResult$Type extends import_runtime4.MessageType {
   }
 }
 var MoveGridCallHereResult = new MoveGridCallHereResult$Type;
-
 class SetGridRoomTitleInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("SetGridRoomTitleInput", [
@@ -34081,7 +34202,8 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
       { no: 12, name: "source_chat_id", kind: "scalar", opt: true, T: 3, L: 0 },
       { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
       { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 },
-      { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 }
+      { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 },
+      { no: 16, name: "via", kind: "message", T: () => InputMessageVia }
     ]);
   }
   create(value) {
@@ -34146,6 +34268,9 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
         case 15:
           message.addMentionedUsers = reader.bool();
           break;
+        case 16:
+          message.via = InputMessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -34192,6 +34317,8 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
       writer.tag(14, import_runtime.WireType.LengthDelimited).string(message.replyQuote);
     if (message.addMentionedUsers !== undefined)
       writer.tag(15, import_runtime.WireType.Varint).bool(message.addMentionedUsers);
+    if (message.via)
+      InputMessageVia.internalBinaryWrite(message.via, writer.tag(16, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

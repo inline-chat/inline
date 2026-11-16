@@ -49,11 +49,15 @@ fn codex_fixtures_match_the_mapper() {
 
         for delivery in entries(&fixture, "deliveries") {
             let input: Input = serde_json::from_value(delivery["input"].clone()).expect("input");
-            let request = input_request("thr-1", &input);
-            let native = serde_json::json!({"method": request.method, "params": request.params});
+            let (note, request) = input_request("thr-1", &input);
+            let native: Vec<Value> = note
+                .into_iter()
+                .chain([request])
+                .map(|request| serde_json::json!({"method": request.method, "params": request.params}))
+                .collect();
             assert_eq!(
-                strip_nulls(&native),
-                strip_nulls(&delivery["native"][0]),
+                strip_nulls(&Value::Array(native)),
+                strip_nulls(&delivery["native"]),
                 "{name}: delivery `{}`",
                 delivery["name"]
             );

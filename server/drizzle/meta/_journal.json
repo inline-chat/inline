@@ -1219,6 +1219,13 @@
       "when": 1794684962209,
       "tag": "0173_bot-open-to-everyone",
       "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 1794778338633,
+      "tag": "0174_message-via",
+      "breakpoints": true
     }
   ]
 }

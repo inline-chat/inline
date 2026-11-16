@@ -39,6 +39,8 @@ Ask it something like:
 Use Inline to list my chats.
 ```
 
+Messages the app sends for you show "Sent via ChatGPT" (or the app's name) under them. To let the app leave that off when you ask, check "Let it send without the Sent via label" while connecting.
+
 ---
 
 [MCP tools](https://github.com/inline-chat/inline/tree/main/packages/mcp) · [OAuth metadata](https://api.inline.chat/.well-known/oauth-authorization-server) · [Protected resource metadata](https://mcp.inline.chat/.well-known/oauth-protected-resource)

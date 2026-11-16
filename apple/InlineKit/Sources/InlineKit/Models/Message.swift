@@ -628,6 +628,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   private static func hasContentPayload(_ payload: Client_MessageContentPayload) -> Bool {
     payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage || payload.hasSubthread || payload.hasCountsAsUnread
+      || payload.hasVia
   }
 
   private static func contentPayload(from voice: InlineProtocol.Voice) -> Client_MessageContentPayload {
@@ -659,6 +660,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       payload.subthread = message.subthread
     }
     if message.hasCountsAsUnread { payload.countsAsUnread = message.countsAsUnread }
+    if message.hasVia { payload.via = message.via }
 
     return hasContentPayload(payload) ? payload : nil
   }
@@ -791,6 +793,13 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
           merged.countsAsUnread = existing.countsAsUnread
         }
 
+        // Set once at send; an edit or partial update never drops it.
+        if incoming.hasVia {
+          merged.via = incoming.via
+        } else if existing.hasVia {
+          merged.via = existing.via
+        }
+
         return hasContentPayload(merged) ? merged : nil
 
       case let (incoming?, nil):
@@ -804,11 +813,15 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
-  private static func mergedVoiceContent(
+  static func mergedVoiceContent(
     incoming: Client_MessageVoiceContent,
     existing: Client_MessageVoiceContent?
   ) -> Client_MessageVoiceContent {
-    guard let existing, incoming.voiceID == 0 || incoming.voiceID == existing.voiceID else { return incoming }
+    // Our own upload keeps its temporary negative id until the server's copy of the message
+    // arrives with the real one; that is the same voice, so its local file stays attached.
+    guard let existing,
+          incoming.voiceID == 0 || incoming.voiceID == existing.voiceID || (existing.voiceID < 0 && incoming.voiceID > 0)
+    else { return incoming }
 
     var merged = incoming
     if merged.voiceID == 0 {
@@ -896,6 +909,12 @@ public extension Message {
     }
     guard let contentPayload, contentPayload.hasCountsAsUnread else { return true }
     return contentPayload.countsAsUnread
+  }
+
+  /// The agent that sent this for its sender, or nil when the sender sent it themselves.
+  var via: MessageVia? {
+    guard let contentPayload, contentPayload.hasVia, contentPayload.via.source != nil else { return nil }
+    return contentPayload.via
   }
 
   var serviceFallbackText: String? {

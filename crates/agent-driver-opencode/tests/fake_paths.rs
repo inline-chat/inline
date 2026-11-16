@@ -744,8 +744,19 @@ async fn send_failures_are_classified_and_passive_input_never_starts_a_turn() {
         .unwrap();
     assert_eq!(receipt.disposition, InputDisposition::Absorbed);
     let synthetic = fake.requests("synthetic");
-    assert_eq!(synthetic[0]["resume"], false);
-    assert_eq!(synthetic[0]["metadata"]["inline.input"], "in-passive");
+    let passive = synthetic
+        .iter()
+        .find(|body| body["metadata"]["inline.input"] == "in-passive")
+        .expect("passive synthetic");
+    assert_eq!(passive["resume"], false);
+    assert!(passive.get("description").is_none());
+    // Every prompt's note went first, hidden (no description), never waking.
+    assert!(
+        synthetic
+            .iter()
+            .filter(|body| body["metadata"].get("inline.note").is_some())
+            .all(|note| note["resume"] == false && note.get("description").is_none())
+    );
     assert!(
         fake.requests("prompt")
             .iter()

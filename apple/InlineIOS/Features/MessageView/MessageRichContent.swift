@@ -24,6 +24,16 @@ struct MessageRichContent {
   /// Message actions blocks draw as their own buttons, or replaced with their decision. The
   /// message's action rows leave them out.
   var inlineActionIDs: Set<String> = []
+  /// For each claimed action, the innermost block that claimed it: the node that draws it.
+  var actionOwners: [String: RichPath] = [:]
+  /// The soonest a pending task card here expires, so a visible row can replan then.
+  var nextExpiry: Date?
+
+  /// The claims whose blocks `layout` draws. A collapsed plan cuts its later children, and a
+  /// layout past the node cap is nil; their buttons stay in the action rows.
+  func drawnActionIDs(in layout: RichLayout?) -> Set<String> {
+    layout?.drawnActions(actionOwners) ?? []
+  }
 
   struct Style {
     var baseFont: UIFont
@@ -50,6 +60,7 @@ struct MessageRichContent {
       let content = BlockContentDirection.resolved(stored, text: body.string)
       var builder = Builder(body: body, style: style, expanded: expanded, messageDate: message.message.date)
       builder.actions = BlockInlineActions.byID(message.message.actions)
+      builder.message = message.message
       guard builder.withinLimits(content),
             let blocks = builder.blocks(content.blocks, path: RichPath(), bounds: 0 ..< body.length),
             !blocks.isEmpty
@@ -58,7 +69,9 @@ struct MessageRichContent {
         blocks: blocks,
         photos: builder.photos,
         sources: builder.sources,
-        inlineActionIDs: builder.inlineActionIDs
+        inlineActionIDs: builder.inlineActionIDs,
+        actionOwners: builder.actionOwners.filter { builder.inlineActionIDs.contains($0.key) },
+        nextExpiry: builder.nextExpiry
       )
     }
     return codeFences(in: message, body: body, style: style)
@@ -112,7 +125,11 @@ struct MessageRichContent {
     var sources: [RichPath: Range<Int>] = [:]
     /// The message's actions by ID, for blocks that draw some as buttons.
     var actions: [String: MessageAction] = [:]
+    /// The message the blocks belong to, for forms' answers.
+    var message: InlineKit.Message?
     var inlineActionIDs: Set<String> = []
+    var actionOwners: [String: RichPath] = [:]
+    var nextExpiry: Date?
     /// For container blocks by path: the text their children may claim, so an unknown kind
     /// first or last inside still shows (`BlockContentSpan.childBounds`).
     var childBounds: [RichPath: Range<Int>] = [:]
@@ -183,11 +200,19 @@ struct MessageRichContent {
         }
         // A block that falls back gives back the buttons it claimed.
         let claimed = inlineActionIDs
+        let owners = actionOwners
         if let converted = self.block(block, path: blockPath) {
           result.append(converted)
+          // Children claimed theirs first; what is left is this block's own.
+          for id in inlineActionIDs.subtracting(claimed)
+            where actionOwners[id]?.components.starts(with: blockPath.components) != true
+          {
+            actionOwners[id] = blockPath
+          }
           continue
         }
         inlineActionIDs = claimed
+        actionOwners = owners
         if let range = BlockContentSpan.fallbackRange(
           at: index, in: list, text: body.string as NSString, bounds: bounds
         ) {
@@ -232,7 +257,8 @@ struct MessageRichContent {
           } else {
             ("•", .bullet)
           }
-          guard let children = blocks(item.children, path: path.appending(index)) else { return nil }
+          let itemBounds = BlockContentSpan.itemBounds(at: index, in: list, bounds: childBounds[path])
+          guard let children = blocks(item.children, path: path.appending(index), bounds: itemBounds) else { return nil }
           items.append(.init(
             marker: styled(marker),
             symbol: symbol,
@@ -316,9 +342,11 @@ struct MessageRichContent {
         return self.nextStep(step, block: block, path: path)
       case let .promptSuggestions(prompts)?:
         return self.promptSuggestions(prompts, block: block, path: path)
-      case .form?, .widget?, nil:
-        // Forms and widgets aren't drawn natively here yet; they and kinds newer than this
-        // build show their fallback text in `blocks`.
+      case let .form(form)?:
+        return self.form(form, block: block, path: path)
+      case .widget?, nil:
+        // Widgets aren't drawn natively here yet; they and kinds newer than this build show
+        // their fallback text in `blocks`.
         return nil
       }
     }

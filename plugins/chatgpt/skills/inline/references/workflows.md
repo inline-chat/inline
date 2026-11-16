@@ -52,7 +52,7 @@ Resolve the source, authors, and destination independently. Inspect the relevant
 
 1. Confirm the target and whether the message is a new post or reply.
 2. Preserve the user's intended text; draft when wording is not final.
-3. Call `messages.send` once with the resolved `chatId`.
+3. Call `messages.send` once with the resolved `chatId`. Recipients see “Sent via <app>” under it; don't add your own signature or footer. Pass `sign: false` only when the user asks for an unsigned message; `metadata.signed` in the result says whether it took effect.
 4. Report the returned message ID and target. Do not retry blindly after an uncertain transport failure because duplicate sends are possible.
 
 ## Send media

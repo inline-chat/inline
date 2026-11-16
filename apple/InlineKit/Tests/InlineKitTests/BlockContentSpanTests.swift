@@ -98,6 +98,40 @@ struct BlockContentSpanTests {
     #expect(BlockContentSpan.childBounds(at: 1, in: blocks, bounds: bounds) == nil)
   }
 
+  @Test("An unknown kind first or last inside a list item shows its text, between the items")
+  func listItemEdges() throws {
+    let text = "Intro\nfirst new\nStep one\nmiddle new\nStep two\nlast new\nOutro"
+    let first: [Block] = try [unknownBlock(), .with { $0.paragraph = range(text, of: "Step one") }]
+    let second: [Block] = try [
+      unknownBlock(),
+      .with { $0.paragraph = range(text, of: "Step two") },
+      unknownBlock(),
+    ]
+    let list = BlockList.with {
+      $0.items = [.with { $0.children = first }, .with { $0.children = second }]
+    }
+    let blocks: [Block] = [
+      .with { $0.paragraph = range(text, of: "Intro") },
+      .with { $0.list = list },
+      .with { $0.paragraph = range(text, of: "Outro") },
+    ]
+    let nsText = text as NSString
+    let listBounds = BlockContentSpan.childBounds(at: 1, in: blocks, bounds: 0 ..< nsText.length)
+    #expect(string(listBounds, in: text) == "\nfirst new\nStep one\nmiddle new\nStep two\nlast new\n")
+
+    let firstBounds = BlockContentSpan.itemBounds(at: 0, in: list, bounds: listBounds)
+    #expect(string(BlockContentSpan.fallbackRange(at: 0, in: first, text: nsText, bounds: firstBounds), in: text) == "first new")
+
+    // The second item starts after the first item's text.
+    let secondBounds = BlockContentSpan.itemBounds(at: 1, in: list, bounds: listBounds)
+    #expect(string(BlockContentSpan.fallbackRange(at: 0, in: second, text: nsText, bounds: secondBounds), in: text) == "middle new")
+    #expect(string(BlockContentSpan.fallbackRange(at: 2, in: second, text: nsText, bounds: secondBounds), in: text) == "last new")
+
+    // Without the list's bounds, the outer edges have nothing to stand in for them.
+    #expect(BlockContentSpan.itemBounds(at: 0, in: list, bounds: nil) == nil)
+    #expect(BlockContentSpan.itemBounds(at: 2, in: list, bounds: listBounds) == nil)
+  }
+
   @Test("A plan proposal's Show full plan state is kept, and follows its title across edits")
   func planOpenState() {
     let text = "Ship the fallback\nStep one"

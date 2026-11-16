@@ -36,7 +36,8 @@ import {
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { Value } from "@sinclair/typebox/value"
 import { authPageDocument, authPageHeaders, escapeHtml, type AuthPageContext } from "@in/server/modules/auth/authPage"
-import { describeOAuthScopes, oauthClientTrust } from "@in/server/modules/oauth/clientTrust"
+import { describeOAuthScopes, oauthClientTrust, oauthClientViaApp } from "@in/server/modules/oauth/clientTrust"
+import { GENERIC_VIA_AGENT } from "@in/server/modules/message/viaAgents"
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -507,6 +508,12 @@ export async function completeAuthorizeSignIn(
     `<label><input type="checkbox" name="allow_dms" value="1"${checked} /> <span>Direct messages</span></label>`,
     `<label><input type="checkbox" name="allow_home_threads" value="1"${checked} /> <span>Home threads shared with you</span></label>`,
   ].join("")
+  // Messages it sends read "Sent via <app>". Leaving that off is opt-in, and
+  // only matters for apps that can send.
+  const signatureChoice = authRequest.scope.split(/\s+/).includes("messages:write")
+    ? `<div class="section-label">Signature</div>
+  <div class="choices"><label><input type="checkbox" name="allow_unsigned" value="1" /> <span>Let it send without the “Sent via” label when you ask</span></label></div>`
+    : ""
   const permissions = describeOAuthScopes(authRequest.scope)
     .map((description) => `<li>${escapeHtml(description)}</li>`)
     .join("")
@@ -540,6 +547,7 @@ ${notice}${intro}
   <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
   <div class="section-label">Share with</div>
   <div class="choices">${choices}</div>
+  ${signatureChoice}
   <div class="button-row">
     <button type="submit" name="decision" value="allow">Allow access</button>
     <button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Cancel</button>
@@ -1162,6 +1170,7 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
   const selectedSpaceIds = readAllParams(body, "space_id")
   const allowDms = readParam(body, "allow_dms") === "1"
   const allowHomeThreads = readParam(body, "allow_home_threads") === "1"
+  const allowUnsigned = readParam(body, "allow_unsigned") === "1"
 
   if (selectedSpaceIds.length === 0 && !allowDms && !allowHomeThreads) {
     // Not a dead end: show the same choices again with a nudge.
@@ -1212,6 +1221,7 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
       spaceIds: chosenSpaceIds,
       allowDms,
       allowHomeThreads,
+      allowUnsigned,
       inlineTokenEncrypted: request.inlineTokenEncrypted,
       nowMs,
     }, tx)
@@ -1435,6 +1445,8 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     return json(401, { active: false })
   }
 
+  const client = await OauthModel.getClient(result.grant.clientId)
+
   return json(200, {
     active: true,
     grant_id: result.grant.id,
@@ -1447,6 +1459,10 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     allow_dms: result.grant.allowDms,
     allow_home_threads: result.grant.allowHomeThreads,
     inline_token: inlineToken,
+    // The agent this connection's messages are sent via ("Sent via ChatGPT").
+    via_app: client ? oauthClientViaApp(client) : GENERIC_VIA_AGENT,
+    // Whether the app may leave the "Sent via" label off when the user asks.
+    allow_unsigned: result.grant.allowUnsigned,
   })
 }
 

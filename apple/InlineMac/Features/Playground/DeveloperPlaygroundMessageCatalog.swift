@@ -330,6 +330,7 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
         .init(.richTaskSuggestion, "Task suggestion", "A new-thread card with Start and Dismiss"),
         .init(.richNextStep, "Next step", "Recap, the one question and its buttons, waiting on you"),
         .init(.richPromptSuggestions, "Prompt suggestions", "Chips that put a prompt in the message box"),
+        .init(.richQuestionnaire, "Questionnaire", "Header chips, a recommended option, previews and Other"),
         .init(.richUnknownBlock, "Unknown block kind", "A kind newer than this build shows its text; the rest stays rich"),
       ]
     case .structure:
@@ -436,6 +437,7 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case richTaskSuggestion
   case richNextStep
   case richPromptSuggestions
+  case richQuestionnaire
   case richUnknownBlock
   case groupStart
   case groupMiddle
@@ -550,6 +552,8 @@ private enum DeveloperMessageCatalogFactory {
       return richFixture(id: id, content: richNextStep())
     case .richPromptSuggestions:
       return richFixture(id: id, content: richPromptSuggestions())
+    case .richQuestionnaire:
+      return richFixture(id: id, content: richQuestionnaire())
     case .richUnknownBlock:
       return richFixture(id: id, content: richUnknownBlock())
     case .groupStart:
@@ -1177,6 +1181,51 @@ private enum DeveloperMessageCatalogFactory {
       prompts.append(prompt)
     }
     return builder.finish(blocks: [paragraphBlock(answer), .with { $0.promptSuggestions = .with { $0.prompts = prompts } }])
+  }
+
+  private static func richQuestionnaire() -> RichCatalogFixture {
+    var builder = RichCatalogTextBuilder()
+    var form = BlockForm()
+    form.formID = "playground-setup"
+    form.title = builder.segment("A few questions before I start")
+    var auth = BlockFormField()
+    auth.fieldID = "auth"
+    auth.required = true
+    auth.header = builder.segment("Auth method")
+    auth.label = builder.segment("How should people sign in?")
+    var oauth = BlockFormOption()
+    oauth.optionID = "oauth"
+    oauth.label = builder.segment("OAuth with Google and GitHub")
+    oauth.description_p = builder.segment("Fewer passwords to manage.")
+    oauth.preview = builder.segment("[ Continue with Google ]\n[ Continue with GitHub ]")
+    oauth.recommended = true
+    var magic = BlockFormOption()
+    magic.optionID = "magic"
+    magic.label = builder.segment("Email magic link")
+    magic.preview = builder.segment("Email  [ you@company.com ]\n       [ Send link ]\n\nCheck your inbox to finish.")
+    auth.select = .with {
+      $0.allowOther = true
+      $0.options = [oauth, magic]
+    }
+    var scope = BlockFormField()
+    scope.fieldID = "scope"
+    scope.header = builder.segment("Scope")
+    scope.label = builder.segment("Which parts should I touch?")
+    scope.select = .with { select in
+      select.multiple = true
+      select.options = ["Server", "macOS", "iOS"].map { name in
+        BlockFormOption.with {
+          $0.optionID = name.lowercased()
+          $0.label = builder.segment(name)
+        }
+      }
+    }
+    var notes = BlockFormField()
+    notes.fieldID = "notes"
+    notes.label = builder.segment("Anything I should avoid?")
+    notes.text = .with { $0.kind = .multiline; $0.placeholder = "Optional" }
+    form.fields = [auth, scope, notes]
+    return builder.finish(blocks: [.with { $0.form = form }])
   }
 
   private static func richUnknownBlock() -> RichCatalogFixture {
@@ -1895,7 +1944,7 @@ private enum DeveloperMessageCatalogFactory {
       .richUnavailableImage, .richAlbum, .richAgentAnswer,
       .richRTLBlocks, .richMixedRTL, .richQuote, .richTable,
       .richAgentPlan, .richPlanProposal, .richApproval, .richReview, .richTaskSuggestion, .richNextStep,
-      .richPromptSuggestions, .richUnknownBlock,
+      .richPromptSuggestions, .richQuestionnaire, .richUnknownBlock,
       .groupStart, .groupMiddle, .groupEnd, .reply, .forwarded, .reactions, .sending, .failed,
       .compactUrlPreview, .largeUrlPreview, .multipleUrlPreviews,
       .photo, .photoCaption, .video, .pdf, .archive, .voice,

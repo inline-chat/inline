@@ -9,7 +9,7 @@ mod delivery;
 mod mapper;
 mod session;
 
-pub use delivery::{INLINE_CHANNEL, OpPlan, op_plan, origin, user_message};
+pub use delivery::{OpPlan, input_messages, op_plan, user_message};
 pub use mapper::{ALLOW, AnswerPlan, ClaudeMapper, DENY, RequestMapped};
 pub use session::{
     ClaudeHarness, ClaudeHarnessConfig, ClaudeSession, availability, parse_permission_modes,

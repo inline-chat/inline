@@ -26,6 +26,8 @@ struct MediaGalleryItem: Hashable {
   let strippedThumbnail: Data?
   let duration: Int?
   let message: Message?
+  /// The video, which can play from its native download before it is on disk.
+  let video: VideoInfo?
 
   static func photo(url: URL, id: Int64 = 0) -> MediaGalleryItem {
     MediaGalleryItem(
@@ -50,7 +52,8 @@ struct MediaGalleryItem: Hashable {
     pixelSize: CGSize?,
     strippedThumbnail: Data?,
     duration: Int?,
-    message: Message?
+    message: Message?,
+    video: VideoInfo? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -61,6 +64,7 @@ struct MediaGalleryItem: Hashable {
     self.strippedThumbnail = strippedThumbnail
     self.duration = duration
     self.message = message
+    self.video = video
   }
 
   /// A chat message's photo or video, or nil for stickers and other media.
@@ -97,7 +101,8 @@ struct MediaGalleryItem: Hashable {
         pixelSize: MediaGalleryURLs.size(width: video.video.width, height: video.video.height),
         strippedThumbnail: InlineTinyThumbnailDecoder.strippedBytes(from: video.thumbnail),
         duration: video.video.duration,
-        message: message
+        message: message,
+        video: video
       )
       return
     }

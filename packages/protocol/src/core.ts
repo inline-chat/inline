@@ -3174,6 +3174,83 @@ export interface Message {
      * @generated from protobuf field: optional bool unread_reactions = 29;
      */
     unreadReactions?: boolean;
+    /**
+     * The agent that sent this message for its sender. Absent when the sender
+     * sent it themselves. Older clients ignore it and show a plain message.
+     *
+     * @generated from protobuf field: optional MessageVia via = 30;
+     */
+    via?: MessageVia;
+}
+/**
+ * Who sent a message for its sender, shown as "Sent via <name>". Set by the
+ * server from a known agent list or a bot the sender owns; never free text.
+ *
+ * @generated from protobuf message MessageVia
+ */
+export interface MessageVia {
+    /**
+     * @generated from protobuf oneof: source
+     */
+    source: {
+        oneofKind: "app";
+        /**
+         * Known agent id, such as "claude-code", "codex", "chatgpt" or "agent"
+         * for an unnamed one.
+         *
+         * @generated from protobuf field: string app = 1;
+         */
+        app: string;
+    } | {
+        oneofKind: "botUserId";
+        /**
+         * A bot the sender owns. Clients show its name and avatar.
+         *
+         * @generated from protobuf field: int64 bot_user_id = 2;
+         */
+        botUserId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
+    /**
+     * Name to show: the agent's ("Claude Code", "an AI agent"), or the bot's
+     * name when the message was sent. Like a forward's from_name, it lets people
+     * who can't see the bot, and apps built before an agent was added, still
+     * read who signed.
+     *
+     * @generated from protobuf field: optional string name = 3;
+     */
+    name?: string;
+}
+/**
+ * How a message names the agent sending it for its sender. Ignored when a
+ * bot sends; an app id the server doesn't know is sent as an unnamed agent.
+ *
+ * @generated from protobuf message InputMessageVia
+ */
+export interface InputMessageVia {
+    /**
+     * @generated from protobuf oneof: source
+     */
+    source: {
+        oneofKind: "app";
+        /**
+         * Known agent id; unknown ids are sent as "agent".
+         *
+         * @generated from protobuf field: string app = 1;
+         */
+        app: string;
+    } | {
+        oneofKind: "botUserId";
+        /**
+         * A bot the sender owns; any other bot is rejected.
+         *
+         * @generated from protobuf field: int64 bot_user_id = 2;
+         */
+        botUserId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * @generated from protobuf message AgentSessionMessageInfo
@@ -12136,6 +12213,13 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional bool add_mentioned_users = 15;
      */
     addMentionedUsers?: boolean;
+    /**
+     * The agent sending this for the sender, shown as "Sent via <name>". Absent
+     * when the sender sends it themselves.
+     *
+     * @generated from protobuf field: optional InputMessageVia via = 16;
+     */
+    via?: InputMessageVia;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -26075,7 +26159,8 @@ class Message$Type extends MessageType<Message> {
             { no: 26, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 27, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 28, name: "unread_mention", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 29, name: "unread_reactions", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 29, name: "unread_reactions", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 30, name: "via", kind: "message", T: () => MessageVia }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -26184,6 +26269,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional bool unread_reactions */ 29:
                     message.unreadReactions = reader.bool();
                     break;
+                case /* optional MessageVia via */ 30:
+                    message.via = MessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -26286,6 +26374,9 @@ class Message$Type extends MessageType<Message> {
         /* optional bool unread_reactions = 29; */
         if (message.unreadReactions !== undefined)
             writer.tag(29, WireType.Varint).bool(message.unreadReactions);
+        /* optional MessageVia via = 30; */
+        if (message.via)
+            MessageVia.internalBinaryWrite(message.via, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26296,6 +26387,133 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageVia$Type extends MessageType<MessageVia> {
+    constructor() {
+        super("MessageVia", [
+            { no: 1, name: "app", kind: "scalar", oneof: "source", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "bot_user_id", kind: "scalar", oneof: "source", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageVia>): MessageVia {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.source = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<MessageVia>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageVia): MessageVia {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string app */ 1:
+                    message.source = {
+                        oneofKind: "app",
+                        app: reader.string()
+                    };
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.source = {
+                        oneofKind: "botUserId",
+                        botUserId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* optional string name */ 3:
+                    message.name = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageVia, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string app = 1; */
+        if (message.source.oneofKind === "app")
+            writer.tag(1, WireType.LengthDelimited).string(message.source.app);
+        /* int64 bot_user_id = 2; */
+        if (message.source.oneofKind === "botUserId")
+            writer.tag(2, WireType.Varint).int64(message.source.botUserId);
+        /* optional string name = 3; */
+        if (message.name !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.name);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageVia
+ */
+export const MessageVia = new MessageVia$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMessageVia$Type extends MessageType<InputMessageVia> {
+    constructor() {
+        super("InputMessageVia", [
+            { no: 1, name: "app", kind: "scalar", oneof: "source", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "bot_user_id", kind: "scalar", oneof: "source", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputMessageVia>): InputMessageVia {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.source = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<InputMessageVia>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMessageVia): InputMessageVia {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string app */ 1:
+                    message.source = {
+                        oneofKind: "app",
+                        app: reader.string()
+                    };
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.source = {
+                        oneofKind: "botUserId",
+                        botUserId: reader.int64().toBigInt()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputMessageVia, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string app = 1; */
+        if (message.source.oneofKind === "app")
+            writer.tag(1, WireType.LengthDelimited).string(message.source.app);
+        /* int64 bot_user_id = 2; */
+        if (message.source.oneofKind === "botUserId")
+            writer.tag(2, WireType.Varint).int64(message.source.botUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMessageVia
+ */
+export const InputMessageVia = new InputMessageVia$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class AgentSessionMessageInfo$Type extends MessageType<AgentSessionMessageInfo> {
     constructor() {
@@ -49319,7 +49537,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 12, name: "source_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
             { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 16, name: "via", kind: "message", T: () => InputMessageVia }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -49384,6 +49603,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional bool add_mentioned_users */ 15:
                     message.addMentionedUsers = reader.bool();
                     break;
+                case /* optional InputMessageVia via */ 16:
+                    message.via = InputMessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -49447,6 +49669,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional bool add_mentioned_users = 15; */
         if (message.addMentionedUsers !== undefined)
             writer.tag(15, WireType.Varint).bool(message.addMentionedUsers);
+        /* optional InputMessageVia via = 16; */
+        if (message.via)
+            InputMessageVia.internalBinaryWrite(message.via, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

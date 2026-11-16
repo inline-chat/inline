@@ -66,6 +66,7 @@ let package = Package(
         .product(name: "InlineAvatarCore", package: "InlineKit"),
         "ReactionPickerEmojis",
       ],
+      resources: [.process("Resources")],
       swiftSettings: swiftSettings
     ),
 

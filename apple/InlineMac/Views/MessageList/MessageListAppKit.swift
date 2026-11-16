@@ -1636,6 +1636,8 @@ class MessageListAppKit: NSViewController {
   private func canGroup(_ earlier: FullMessage, _ later: FullMessage) -> Bool {
     guard !earlier.message.isServiceMessage, !later.message.isServiceMessage else { return false }
     guard earlier.message.fromId == later.message.fromId else { return false }
+    // A person and an agent sending for them never share a group.
+    guard earlier.message.via == later.message.via else { return false }
 
     let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
     guard gapSeconds <= 300 else { return false }
@@ -1704,7 +1706,8 @@ class MessageListAppKit: NSViewController {
       stableId: message.id,
       userInfo: avatarUserInfo(for: message),
       frame: frame,
-      sticky: sticky
+      sticky: sticky,
+      viaMark: message.viaPresentation?.mark
     ) { [weak self] in
       guard let self else { return }
       guard let user = message.senderInfo?.user else { return }

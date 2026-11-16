@@ -363,25 +363,36 @@ pub struct AcpSession {
     inner: Arc<AcpSessionInner>,
 }
 
+/// The prompt for an input: the author's text, and Inline's note for the
+/// assistant (the trusted guide on the first turn, since ACP has no system
+/// prompt slot every agent honours; who sent it; the untrusted thread).
 fn turn_input(input: &Input, instructions: Option<&str>, first: bool) -> TurnInput {
-    let mut context = Some(input.context_with_origin());
-    // The trusted guide rides on the first turn; ACP has no system prompt slot.
-    if first && let Some(instructions) = instructions {
-        let mut merged = context.unwrap_or_else(|| inline_agent_bridge::TurnContext {
-            instructions: String::new(),
-            conversation: String::new(),
-        });
-        if merged.instructions.is_empty() {
-            merged.instructions = instructions.to_string();
-        } else {
-            merged.instructions = format!("{instructions}\n\n{}", merged.instructions);
-        }
-        context = Some(merged);
+    let own = input.content.context.as_ref();
+    let instructions = [
+        instructions.filter(|_| first).unwrap_or_default(),
+        own.map(|context| context.instructions.trim())
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join("\n\n");
+    let mut conversation = input.sender_note();
+    if let Some(thread) = own
+        .map(|context| context.conversation.trim())
+        .filter(|thread| !thread.is_empty())
+    {
+        conversation.push_str(&format!(
+            "\n\n<inline-context untrusted=\"true\">\n{thread}\n</inline-context>"
+        ));
     }
     TurnInput {
         text: input.content.text.clone(),
         attachments: input.content.attachments.clone(),
-        context,
+        context: Some(inline_agent_bridge::TurnContext {
+            instructions,
+            conversation,
+        }),
         client_message_id: Some(input.id.as_str().to_string()),
     }
 }

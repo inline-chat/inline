@@ -101,6 +101,8 @@ final class RichBlockLayoutPlanner {
 
   private final class PlanBox: NSObject {
     let plan: RichBlockLayoutPlan
+    /// The soonest an open task card in the plan lapses; the plan is stale from then.
+    let nextExpiry: TimeInterval?
     let content: InlineProtocol.BlockContent
     let attributedText: NSAttributedString
 
@@ -112,6 +114,10 @@ final class RichBlockLayoutPlanner {
       var geometry = plan
       geometry.mathSnapshot = nil
       self.plan = geometry
+      nextExpiry = plan.nodes.lazy.compactMap { node -> TimeInterval? in
+        guard case let .agentCard(card) = node.kind else { return nil }
+        return card.expiresAt
+      }.min()
       self.content = content
       self.attributedText = attributedText.copy() as? NSAttributedString ?? attributedText
     }
@@ -192,7 +198,8 @@ final class RichBlockLayoutPlanner {
       actions: actions
     )
     if let cached = cache.object(forKey: key),
-       cached.matches(content: content, attributedText: attributedText)
+       cached.matches(content: content, attributedText: attributedText),
+       cached.nextExpiry.map({ Date().timeIntervalSince1970 <= $0 }) ?? true
     {
       var prepared = cached.plan
       prepared.mathSnapshot = math
@@ -1006,7 +1013,8 @@ final class RichBlockLayoutPlanner {
           width: childWidth,
           depth: depth,
           inheritedDirection: isRTL,
-          fullBleedContainer: nil
+          fullBleedContainer: nil,
+          bounds: BlockContentSpan.itemBounds(at: itemIndex, in: list, bounds: childBounds[path])
         ) else { return false }
         height = max(height, itemStart + markerHeight)
       }

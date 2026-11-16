@@ -115,6 +115,11 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     return message.senderInfo
   }
 
+  var avatarOverlayViaMark: MessageViaPresentation.Mark? {
+    guard canShowAvatarOverlay else { return nil }
+    return message?.viaPresentation?.mark
+  }
+
   // MARK: - Sizes
 
   private let avatarSize: CGFloat = 28
@@ -1142,7 +1147,7 @@ extension MessageCollectionViewCell {
     if showsCellAvatar, let from = message.senderInfo {
       let avatar = UserAvatarView()
       UIView.performWithoutAnimation {
-        avatar.configure(with: from, size: avatarSize)
+        avatar.configure(with: from, size: avatarSize, viaMark: message.viaPresentation?.mark)
         avatar.translatesAutoresizingMaskIntoConstraints = false
         avatarView = avatar
       }
@@ -1579,7 +1584,8 @@ extension MessageCollectionViewCell {
       message,
       context: context,
       footer: pacer.isStreaming(message.id) ? .reserved : .visible,
-      revealedLength: pacer.revealedLength(for: message.id)
+      revealedLength: pacer.revealedLength(for: message.id),
+      cache: Self.nextTextLayoutCache
     )
   }
 

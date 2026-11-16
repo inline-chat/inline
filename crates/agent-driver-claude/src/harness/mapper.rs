@@ -81,6 +81,8 @@ pub struct ClaudeMapper {
     sent: HashSet<String>,
     /// Passive inputs: their lifecycle never opens a turn.
     passive: HashSet<String>,
+    /// Inline's notes sent ahead of an input: never an input of their own.
+    notes: HashSet<String>,
     facts: HashSet<(String, &'static str)>,
     effective: EffectiveSettings,
     tools: HashMap<String, ToolItem>,
@@ -242,6 +244,11 @@ impl ClaudeMapper {
         self.awaiting_turn.retain(|waiting| waiting != input);
     }
 
+    /// Records Inline's note written just before an input (its own uuid).
+    pub fn sent_note(&mut self, uuid: &str) {
+        self.notes.insert(uuid.to_string());
+    }
+
     /// Records passive context written to stdin (`shouldQuery: false`).
     pub fn sent_passive(&mut self, input: &InputId) {
         self.sent.insert(input.as_str().to_string());
@@ -400,6 +407,12 @@ impl ClaudeMapper {
     }
 
     fn lifecycle_events(&mut self, uuid: &str, state: &str) -> Vec<Event> {
+        if self.notes.contains(uuid) {
+            if !matches!(state, "queued" | "started") {
+                self.notes.remove(uuid);
+            }
+            return Vec::new();
+        }
         let input = InputId::new(uuid).ok();
         match state {
             "started" => {
@@ -843,10 +856,20 @@ impl ClaudeMapper {
             events.push(Event::Usage { usage });
         }
         let consumed: Vec<InputId> = match &result.user_message_uuids {
-            Some(uuids) => uuids
-                .iter()
-                .filter_map(|uuid| InputId::new(uuid.as_str()).ok())
-                .collect(),
+            Some(uuids) => {
+                let notes_only =
+                    !uuids.is_empty() && uuids.iter().all(|uuid| self.notes.contains(uuid));
+                let consumed = uuids
+                    .iter()
+                    .filter(|uuid| !self.notes.remove(uuid.as_str()))
+                    .filter_map(|uuid| InputId::new(uuid.as_str()).ok())
+                    .collect();
+                // A note on its own (an idle `shouldQuery: false`) is no turn.
+                if notes_only && self.turn.is_none() {
+                    return events;
+                }
+                consumed
+            }
             None => self.turn_inputs.clone(),
         };
         let turn = match self.turn.take() {
@@ -2020,6 +2043,58 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_note_never_opens_ends_or_joins_a_turn() {
+        let mut mapper = ClaudeMapper::new(None);
+        let note = "0d6a7c1e-1111-4a00-8000-0000000000a1";
+        let t1 = "0d6a7c1e-1111-4a00-8000-0000000000a2";
+        mapper.sent_note(note);
+        let idle = mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": note, "state": "started"}),
+        ));
+        assert!(idle.is_empty(), "{idle:?}");
+        mapper.sent_note(note);
+        mapper.sent(&InputId::new(t1).unwrap(), true);
+        let mut events = mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": t1, "state": "started"}),
+        ));
+        events.extend(mapper.message(&message(
+            json!({"type": "result", "subtype": "success", "is_error": false,
+            "num_turns": 1, "user_message_uuids": [note, t1]}),
+        )));
+        let started = events.iter().find_map(|event| match event {
+            Event::Turn {
+                turn,
+                phase: TurnPhase::Started { .. },
+            } => Some(turn.as_str().to_string()),
+            _ => None,
+        });
+        assert_eq!(started.as_deref(), Some(t1));
+        let consumed = events.iter().find_map(|event| match event {
+            Event::Turn {
+                phase:
+                    TurnPhase::Completed {
+                        inputs_consumed, ..
+                    },
+                ..
+            } => Some(inputs_consumed.clone()),
+            _ => None,
+        });
+        assert_eq!(consumed, Some(vec![InputId::new(t1).unwrap()]));
+
+        mapper.sent_note(note);
+        let alone = mapper.message(&message(
+            json!({"type": "result", "subtype": "success", "is_error": false,
+            "num_turns": 0, "user_message_uuids": [note]}),
+        ));
+        assert!(
+            alone
+                .iter()
+                .all(|event| !matches!(event, Event::Turn { .. })),
+            "{alone:?}"
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::path::Path;
 use inline_agent_bridge::harness::{Event, Input, InteractionId, InteractionResponse, Op, UserId};
 use serde_json::{Value, json};
 
-use super::delivery::{OpPlan, op_plan, user_message};
+use super::delivery::{OpPlan, input_messages, op_plan};
 use super::mapper::{ClaudeMapper, RequestMapped};
 use crate::control::InterruptReceipt;
 use crate::wire::CliMessage;
@@ -80,9 +80,19 @@ fn claude_fixtures_match_the_mapper() {
 
         for delivery in entries(&fixture, "deliveries") {
             let input: Input = serde_json::from_value(delivery["input"].clone()).expect("input");
+            let (note, message) = input_messages(session_id, &input);
+            let mut native: Vec<Value> = note
+                .into_iter()
+                .chain([message])
+                .map(|message| message.to_value())
+                .collect();
+            // Notes get a fresh uuid each send.
+            if native.len() == 2 {
+                native[0]["uuid"] = Value::String("<note>".into());
+            }
             assert_eq!(
-                strip_nulls(&user_message(session_id, &input).to_value()),
-                strip_nulls(&delivery["native"][0]),
+                strip_nulls(&Value::Array(native)),
+                strip_nulls(&delivery["native"]),
                 "{name}: delivery `{}`",
                 delivery["name"]
             );

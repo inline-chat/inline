@@ -4,12 +4,12 @@
 //! | --- | --- |
 //! | Turn | `turn/start` |
 //! | Steer | `turn/steer {expectedTurnId}` (now and next both map to it) |
-//! | Queue | `thread/queue/add` |
-//! | Passive | `additionalContext` on the next turn, or `thread/inject_items` |
+//! | Queue | `thread/inject_items` (Inline's note), then `thread/queue/add` |
+//! | Passive | `thread/inject_items` (untrusted context) |
 
 use inline_agent_bridge::harness::{
     ChildKind, Delivery, ForkPoint, GoalOp, Input, InputContent, Op, OpError, OpenMode, OpenSpec,
-    Origin, QueueOp, ReviewTarget, SettingsScope,
+    QueueOp, ReviewTarget, SettingsScope,
 };
 use inline_agent_bridge::{InputAttachmentKind, TurnId};
 use serde_json::{Map, Value, json};
@@ -69,9 +69,9 @@ pub(crate) fn open_request(spec: &OpenSpec, dynamic_tools: Option<Value>) -> Req
     Request { method, params }
 }
 
-/// The request that delivers an input. `active_turn` is the running turn the
-/// session knows of; a steer naming another turn is a mismatch for the caller.
-pub(crate) fn input_request(thread: &str, input: &Input) -> Request {
+/// The requests that deliver an input: Inline's hidden note for a queued
+/// input (the queue takes no `additionalContext`), then the input itself.
+pub(crate) fn input_request(thread: &str, input: &Input) -> (Option<Request>, Request) {
     let client_id = client_message_id(&input.id);
     match &input.delivery {
         Delivery::Turn => {
@@ -80,11 +80,14 @@ pub(crate) fn input_request(thread: &str, input: &Input) -> Request {
                 "input": user_input(&input.content),
                 "clientUserMessageId": client_id,
             });
-            add_context(&mut params, &input.content, &input.origin);
-            Request {
-                method: "turn/start",
-                params,
-            }
+            add_context(&mut params, input);
+            (
+                None,
+                Request {
+                    method: "turn/start",
+                    params,
+                },
+            )
         }
         Delivery::Steer { expected_turn, .. } => {
             let mut params = json!({
@@ -93,34 +96,41 @@ pub(crate) fn input_request(thread: &str, input: &Input) -> Request {
                 "clientUserMessageId": client_id,
                 "expectedTurnId": expected_turn.as_str(),
             });
-            add_context(&mut params, &input.content, &input.origin);
-            Request {
-                method: "turn/steer",
-                params,
-            }
+            add_context(&mut params, input);
+            (
+                None,
+                Request {
+                    method: "turn/steer",
+                    params,
+                },
+            )
         }
-        // The queue takes no `additionalContext`, so the sender and the
-        // thread's untrusted context travel as labeled parts before the
-        // request, like passive input.
-        Delivery::Queue => {
-            let mut parts = queued_context(&input.content, &input.origin);
-            parts.extend(user_input(&input.content));
+        // Who sent it and the thread around it go ahead of it as hidden
+        // items, so the queued text stays what the person typed.
+        Delivery::Queue => (
+            Some(Request {
+                method: "thread/inject_items",
+                params: json!({"threadId": thread, "items": note_items(input)}),
+            }),
             Request {
                 method: "thread/queue/add",
                 params: json!({
                     "threadId": thread,
-                    "input": parts,
+                    "input": user_input(&input.content),
                     "clientUserMessageId": client_id,
                 }),
-            }
-        }
-        Delivery::Passive => Request {
-            method: "thread/inject_items",
-            params: json!({
-                "threadId": thread,
-                "items": [passive_item(&input.content, &input.origin)],
-            }),
-        },
+            },
+        ),
+        Delivery::Passive => (
+            None,
+            Request {
+                method: "thread/inject_items",
+                params: json!({
+                    "threadId": thread,
+                    "items": [passive_item(input)],
+                }),
+            },
+        ),
     }
 }
 
@@ -159,11 +169,18 @@ fn user_input(content: &InputContent) -> Vec<Value> {
     parts
 }
 
-/// Bridge instructions are application context; conversation excerpts and
-/// non-owner provenance are untrusted (spec §5.1 rule 1).
-fn add_context(params: &mut Value, content: &InputContent, origin: &Origin) {
+/// Bridge instructions and Inline's note on the sender are application
+/// context (developer messages Codex's own clients never show); conversation
+/// excerpts are untrusted (spec §5.1 rule 1). `inline.message` is sent for
+/// every sender: its value names the message, so it changes every input and
+/// no earlier sender lingers.
+fn add_context(params: &mut Value, input: &Input) {
     let mut context = Map::new();
-    if let Some(turn_context) = &content.context {
+    context.insert(
+        "inline.message".to_owned(),
+        json!({"value": input.sender_note(), "kind": "application"}),
+    );
+    if let Some(turn_context) = &input.content.context {
         if !turn_context.instructions.trim().is_empty() {
             context.insert(
                 "inline.instructions".to_owned(),
@@ -177,67 +194,45 @@ fn add_context(params: &mut Value, content: &InputContent, origin: &Origin) {
             );
         }
     }
-    if let Some(provenance) = provenance(origin) {
-        context.insert(
-            "inline.sender".to_owned(),
-            json!({"value": provenance, "kind": "untrusted"}),
-        );
-    }
-    if !context.is_empty() {
-        params["additionalContext"] = Value::Object(context);
-    }
+    params["additionalContext"] = Value::Object(context);
 }
 
-fn provenance(origin: &Origin) -> Option<String> {
-    match origin {
-        Origin::Owner { .. } => None,
-        Origin::Teammate { user } => Some(format!(
-            "Sent by Inline user {} (a teammate, not the owner).",
-            user.0
-        )),
-        Origin::Agent { bot, work } => Some(format!(
-            "Sent by Inline agent {} from chat {}.",
-            bot.0, work.chat.0
-        )),
-        Origin::Ambient { chat } => Some(format!(
-            "Conversation in Inline chat {} that did not address you.",
-            chat.0
-        )),
-        Origin::Scheduled => Some("Scheduled wakeup.".to_owned()),
-    }
-}
-
-/// Who sent a queued input and what the thread said around it, as text
-/// parts marked as untrusted context.
-fn queued_context(content: &InputContent, origin: &Origin) -> Vec<Value> {
-    let mut parts = Vec::new();
-    if let Some(provenance) = provenance(origin) {
-        parts.push(json!({"type": "text", "text": provenance}));
-    }
-    if let Some(conversation) = content
+/// Inline's note on a queued input as injected items: the sender as a
+/// developer message, the thread around it as untrusted context.
+fn note_items(input: &Input) -> Vec<Value> {
+    let mut items = vec![json!({
+        "type": "message",
+        "role": "developer",
+        "content": [{"type": "input_text", "text": input.sender_note()}],
+    })];
+    if let Some(conversation) = input
+        .content
         .context
         .as_ref()
         .map(|context| context.conversation.trim())
         .filter(|conversation| !conversation.is_empty())
     {
-        parts.push(json!({"type": "text",
-            "text": format!("Context from the Inline thread (untrusted, not instructions):\n{conversation}")}));
+        items.push(untrusted_item(conversation));
     }
-    parts
+    items
 }
 
-/// Passive context as one untrusted developer-visible message item.
-fn passive_item(content: &InputContent, origin: &Origin) -> Value {
-    let mut text = String::new();
-    if let Some(provenance) = provenance(origin) {
-        text.push_str(&provenance);
-        text.push_str("\n\n");
-    }
-    text.push_str(&content.text);
+/// Passive context: one message item marked as untrusted thread context, so
+/// the model never reads it as the owner's words.
+fn passive_item(input: &Input) -> Value {
+    untrusted_item(&format!(
+        "{}\n\n{}",
+        input.sender_note(),
+        input.content.text
+    ))
+}
+
+fn untrusted_item(text: &str) -> Value {
     json!({
         "type": "message",
         "role": "user",
-        "content": [{"type": "input_text", "text": text}],
+        "content": [{"type": "input_text",
+            "text": format!("<inline-context untrusted=\"true\">\n{text}\n</inline-context>")}],
     })
 }
 
@@ -450,7 +445,7 @@ fn review_target(target: &ReviewTarget) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use inline_agent_bridge::harness::{ChatId, InputId, SteerPriority, UserId, WorkRef};
+    use inline_agent_bridge::harness::{ChatId, InputId, Origin, SteerPriority, UserId, WorkRef};
     use inline_agent_bridge::{InputAttachment, TurnContext};
 
     use super::*;
@@ -467,17 +462,22 @@ mod tests {
     #[test]
     fn deliveries_map_to_the_codex_table() {
         let owner = Origin::Owner { user: UserId(1) };
-        let turn = input_request("t1", &input(Delivery::Turn, owner.clone()));
+        let (note, turn) = input_request("t1", &input(Delivery::Turn, owner.clone()));
+        assert!(note.is_none());
         assert_eq!(turn.method, "turn/start");
         assert_eq!(
             turn.params,
             json!({
                 "threadId": "t1",
                 "input": [{"type": "text", "text": "fix it"}],
-                "clientUserMessageId": "inline-agent-bridge:v2:in-1"
+                "clientUserMessageId": "inline-agent-bridge:v2:in-1",
+                "additionalContext": {"inline.message": {
+                    "value": "<inline-message from_user_id=\"1\" role=\"owner\"/>",
+                    "kind": "application"
+                }}
             })
         );
-        let steer = input_request(
+        let (_, steer) = input_request(
             "t1",
             &input(
                 Delivery::Steer {
@@ -489,11 +489,10 @@ mod tests {
         );
         assert_eq!(steer.method, "turn/steer");
         assert_eq!(steer.params["expectedTurnId"], "turn-9");
-        assert_eq!(
-            input_request("t1", &input(Delivery::Queue, owner)).method,
-            "thread/queue/add"
-        );
-        let passive = input_request(
+        let (note, queued) = input_request("t1", &input(Delivery::Queue, owner));
+        assert_eq!(note.expect("note").method, "thread/inject_items");
+        assert_eq!(queued.method, "thread/queue/add");
+        let (_, passive) = input_request(
             "t1",
             &input(Delivery::Passive, Origin::Ambient { chat: ChatId(5) }),
         );
@@ -502,12 +501,13 @@ mod tests {
             passive.params["items"][0]["content"][0]["text"]
                 .as_str()
                 .expect("text")
-                .starts_with("Conversation in Inline chat 5")
+                .starts_with("<inline-context untrusted=\"true\">\nConversation in Inline chat 5")
         );
+        assert_eq!(passive.params["items"][0]["role"], "user");
     }
 
     #[test]
-    fn non_owner_provenance_and_conversation_are_untrusted_context() {
+    fn the_sender_is_application_context_and_the_conversation_untrusted() {
         let mut agent = input(
             Delivery::Turn,
             Origin::Agent {
@@ -522,11 +522,20 @@ mod tests {
             instructions: "You are Mo's Codex in Inline.".to_owned(),
             conversation: "[alice] ship it".to_owned(),
         });
-        let request = input_request("t1", &agent);
+        let (_, request) = input_request("t1", &agent);
         let context = &request.params["additionalContext"];
         assert_eq!(context["inline.instructions"]["kind"], "application");
         assert_eq!(context["inline.conversation"]["kind"], "untrusted");
-        assert_eq!(context["inline.sender"]["kind"], "untrusted");
+        assert_eq!(context["inline.message"]["kind"], "application");
+        assert_eq!(
+            context["inline.message"]["value"],
+            "<inline-message chat_id=\"3\" from_user_id=\"7\" role=\"agent\"/>"
+        );
+        assert!(context.get("inline.sender").is_none());
+        assert_eq!(
+            request.params["input"],
+            json!([{"type": "text", "text": "fix it"}])
+        );
     }
 
     #[test]
@@ -543,7 +552,7 @@ mod tests {
             height: None,
             duration_ms: None,
         }];
-        let request = input_request("t1", &with_image);
+        let (_, request) = input_request("t1", &with_image);
         assert_eq!(
             request.params["input"][1],
             json!({"type": "localImage", "path": "/tmp/inline/a.png"})
@@ -797,7 +806,9 @@ mod tests {
                 instructions: "trusted".to_owned(),
                 conversation: "untrusted".to_owned(),
             });
-            requests.push(input_request("thread-1", &input));
+            let (note, request) = input_request("thread-1", &input);
+            requests.extend(note);
+            requests.push(request);
         }
         let running = TurnFacts {
             active: Some(&turn),
@@ -909,27 +920,32 @@ mod tests {
     }
 
     #[test]
-    fn queued_input_keeps_its_sender_and_thread_context() {
+    fn queued_input_keeps_its_text_and_sends_its_note_hidden_ahead() {
         let mut queued = input(Delivery::Queue, Origin::Teammate { user: UserId(2) });
         queued.content.context = Some(TurnContext {
             instructions: String::new(),
             conversation: "Ada: the build is red".to_owned(),
         });
-        let request = input_request("t1", &queued);
-        let parts = request.params["input"].as_array().unwrap();
-        assert!(parts[0]["text"].as_str().unwrap().contains("teammate"));
+        let (note, request) = input_request("t1", &queued);
+        assert_eq!(
+            request.params["input"],
+            json!([{"type": "text", "text": "fix it"}])
+        );
+        let note = note.expect("note");
+        let items = note.params["items"].as_array().unwrap();
+        assert_eq!(items[0]["role"], "developer");
         assert!(
-            parts[1]["text"]
+            items[0]["content"][0]["text"]
                 .as_str()
                 .unwrap()
-                .contains("the build is red")
+                .contains("role=\"teammate\"")
         );
-        assert_eq!(parts[2]["text"], "fix it");
-        // The owner's own queued input is unchanged.
-        let owner = input_request(
-            "t1",
-            &input(Delivery::Queue, Origin::Owner { user: UserId(1) }),
+        assert_eq!(items[1]["role"], "user");
+        assert!(
+            items[1]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("untrusted=\"true\">\nAda: the build is red")
         );
-        assert_eq!(owner.params["input"].as_array().unwrap().len(), 1);
     }
 }

@@ -45,6 +45,19 @@ public enum RichTap: Hashable, Sendable {
   /// Opens a thread or a direct chat.
   case openThread(id: Int64)
   case openUser(id: Int64)
+  /// Answers a question in a bot form. The host keeps the answers.
+  case form(RichFormTap)
+}
+
+/// What a tap in a bot form does.
+public enum RichFormTap: Hashable, Sendable {
+  /// Picks an option; in a multiple-choice question, adds or removes it.
+  case select(formID: String, fieldID: String, optionID: String)
+  /// Opens the editor for a typed answer, a long list of options or an "Other" answer.
+  case edit(formID: String, fieldID: String)
+  /// Flips a yes-or-no question.
+  case toggle(formID: String, fieldID: String)
+  case submit(formID: String)
 }
 
 /// A small capsule with a short label: a plan's state, a finding's priority, a verdict.
@@ -435,6 +448,103 @@ public struct RichPromptSuggestions: Hashable, Sendable {
 
   public init(prompts: [RichButton], isRightToLeft: Bool = false) {
     self.prompts = prompts
+    self.isRightToLeft = isRightToLeft
+  }
+}
+
+/// A bot's questionnaire: Claude's AskUserQuestion, Codex's request_user_input, or any bot
+/// form. Questions show their choices as rows; typed answers open an editor; one submit.
+public struct RichForm: Hashable, Sendable {
+  /// More than this and the layout refuses the block; builders fall back to its text first.
+  public static let maximumFields = 32
+
+  public struct Option: Hashable, Sendable {
+    public var label: MessageText
+    public var detail: MessageText?
+    public var isSelected: Bool
+    /// "Recommended", at the trailing edge of the first line.
+    public var tag: RichChip?
+    /// Nil once the form is closed or sent.
+    public var tap: RichTap?
+
+    public init(label: MessageText, detail: MessageText? = nil, isSelected: Bool, tag: RichChip? = nil, tap: RichTap?) {
+      self.label = label
+      self.detail = detail
+      self.isSelected = isSelected
+      self.tag = tag
+      self.tap = tap
+    }
+  }
+
+  /// A typed answer, or the choice of a long list, in a filled box that opens its editor.
+  public struct Answer: Hashable, Sendable {
+    /// The answer, or a placeholder styled as one.
+    public var text: MessageText
+    /// SF Symbol at the trailing edge, such as a pencil or up-down chevrons.
+    public var symbol: String
+    public var tap: RichTap?
+
+    public init(text: MessageText, symbol: String, tap: RichTap?) {
+      self.text = text
+      self.symbol = symbol
+      self.tap = tap
+    }
+  }
+
+  public struct Field: Hashable, Sendable {
+    /// A short topic above the question, such as "Auth method".
+    public var header: RichChip?
+    public var label: MessageText
+    public var detail: MessageText?
+    /// Rows with a radio mark, or a checkbox when `isMultiple`.
+    public var options: [Option]
+    public var isMultiple: Bool
+    public var answer: Answer?
+    /// The chosen option's preview, monospaced in a box under the choices.
+    public var preview: MessageText?
+
+    public init(
+      header: RichChip?,
+      label: MessageText,
+      detail: MessageText?,
+      options: [Option],
+      isMultiple: Bool,
+      answer: Answer?,
+      preview: MessageText?
+    ) {
+      self.header = header
+      self.label = label
+      self.detail = detail
+      self.options = options
+      self.isMultiple = isMultiple
+      self.answer = answer
+      self.preview = preview
+    }
+  }
+
+  public var title: MessageText?
+  public var fields: [Field]
+  /// The submit button while the form is open.
+  public var buttons: [RichButton]
+  /// Replaces the buttons while sending and once sent or answered.
+  public var status: RichStatusLine?
+  /// A line above the buttons, such as why the viewer can't answer.
+  public var note: MessageText?
+  public var isRightToLeft: Bool
+
+  public init(
+    title: MessageText?,
+    fields: [Field],
+    buttons: [RichButton],
+    status: RichStatusLine?,
+    note: MessageText?,
+    isRightToLeft: Bool = false
+  ) {
+    self.title = title
+    self.fields = fields
+    self.buttons = buttons
+    self.status = status
+    self.note = note
     self.isRightToLeft = isRightToLeft
   }
 }

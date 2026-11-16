@@ -12,7 +12,9 @@ class UserAvatarView: NSView {
   private var currentRenderSignature: RenderSignature?
   private var isPressed = false
 
-  private var hostingView: NSHostingView<UserAvatar>?
+  private var hostingView: NSHostingView<MessageViaAvatar<UserAvatar>>?
+  /// Agent badge for a message an agent sent for this user.
+  private var viaMark: MessageViaPresentation.Mark?
 
   private struct RenderSignature: Equatable {
     let userId: Int64
@@ -24,12 +26,14 @@ class UserAvatarView: NSView {
     let avatarIdentity: String?
     let remoteURL: URL?
     let localPath: String?
+    let viaMark: MessageViaPresentation.Mark?
   }
 
-  init(userInfo: UserInfo, size: CGFloat = Theme.messageAvatarSize) {
+  init(userInfo: UserInfo, size: CGFloat = Theme.messageAvatarSize, viaMark: MessageViaPresentation.Mark? = nil) {
     self.userInfo = userInfo
     self.size = size
-    currentRenderSignature = Self.renderSignature(for: userInfo)
+    self.viaMark = viaMark
+    currentRenderSignature = Self.renderSignature(for: userInfo, viaMark: viaMark)
 
     super.init(frame: NSRect(
       x: 0,
@@ -74,12 +78,13 @@ class UserAvatarView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(userInfo: UserInfo, size nextSize: CGFloat? = nil) {
-    let nextRenderSignature = Self.renderSignature(for: userInfo)
+  func update(userInfo: UserInfo, size nextSize: CGFloat? = nil, viaMark nextViaMark: MessageViaPresentation.Mark? = nil) {
+    let nextRenderSignature = Self.renderSignature(for: userInfo, viaMark: nextViaMark)
     let resolvedSize = nextSize ?? size
     let sizeChanged = size != resolvedSize
     guard currentRenderSignature != nextRenderSignature || sizeChanged else { return }
     self.userInfo = userInfo
+    viaMark = nextViaMark
     currentRenderSignature = nextRenderSignature
     if sizeChanged {
       size = resolvedSize
@@ -91,11 +96,17 @@ class UserAvatarView: NSView {
   private func updateAvatar() {
     guard let userInfo else { return }
 
-    let rootView = UserAvatar(
-      userInfo: userInfo,
-      size: size,
-      ignoresSafeArea: true
-    )
+    let rootView = MessageViaAvatar(
+      avatarSize: size,
+      mark: viaMark,
+      ringColor: Color(nsColor: .windowBackgroundColor)
+    ) {
+      UserAvatar(
+        userInfo: userInfo,
+        size: size,
+        ignoresSafeArea: true
+      )
+    }
 
     if let hostingView {
       hostingView.rootView = rootView
@@ -110,7 +121,7 @@ class UserAvatarView: NSView {
     }
   }
 
-  private static func renderSignature(for userInfo: UserInfo) -> RenderSignature {
+  private static func renderSignature(for userInfo: UserInfo, viaMark: MessageViaPresentation.Mark?) -> RenderSignature {
     let user = userInfo.user
     return RenderSignature(
       userId: user.id,
@@ -121,7 +132,8 @@ class UserAvatarView: NSView {
       email: user.email,
       avatarIdentity: userInfo.stableAvatarIdentity,
       remoteURL: user.getRemoteURL(),
-      localPath: user.profileLocalPath
+      localPath: user.profileLocalPath,
+      viaMark: viaMark
     )
   }
 

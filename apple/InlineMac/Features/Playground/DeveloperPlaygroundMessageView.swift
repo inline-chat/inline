@@ -317,6 +317,14 @@ enum DeveloperMessageFixtureFactory {
       entities: configuration.content.entities
     )
     message.globalId = messageID
+    if configuration.content == .agentSent {
+      var payload = Client_MessageContentPayload()
+      payload.via = .with {
+        $0.app = "claude-code"
+        $0.name = "Claude Code"
+      }
+      message.contentPayload = payload
+    }
 
     let reactions = configuration.content == .reactions
       ? makeReactions(messageID: messageID)
@@ -474,6 +482,7 @@ enum DeveloperMessagePlaygroundContent: String, CaseIterable, Identifiable {
   case forwarded
   case reactions
   case delivery
+  case agentSent
 
   var id: Self { self }
 
@@ -488,6 +497,7 @@ enum DeveloperMessagePlaygroundContent: String, CaseIterable, Identifiable {
     case .forwarded: "Forwarded"
     case .reactions: "Reactions"
     case .delivery: "Delivery state"
+    case .agentSent: "Sent via agent"
     }
   }
 
@@ -502,6 +512,7 @@ enum DeveloperMessagePlaygroundContent: String, CaseIterable, Identifiable {
     case .forwarded: "Forward header with a resolved sender"
     case .reactions: "Grouped reaction chips"
     case .delivery: "Outgoing sending, sent, and failed indicators"
+    case .agentSent: "Agent badge and the Sent via line at the end of the run"
     }
   }
 
@@ -525,6 +536,8 @@ enum DeveloperMessagePlaygroundContent: String, CaseIterable, Identifiable {
       "Should we ship this version today?"
     case .delivery:
       "Sending the updated build now."
+    case .agentSent:
+      "Deploy checklist from docs/deploy.md is ready: freeze main, migrate, then roll the API."
     }
   }
 

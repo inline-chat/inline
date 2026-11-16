@@ -307,8 +307,11 @@ async fn unknown_slash_text_keeps_guide_and_conversation_context() {
     let prompts = f.prompts.lock().unwrap().clone();
     assert_eq!(
         prompts[0].len(),
-        1,
-        "ordinary prompts retain merged context compatibility"
+        2,
+        "Inline's note, then the author's words"
+    );
+    assert!(
+        matches!(&prompts[0][1], acp::ContentBlock::Text(text) if text.text == "/not-a-command")
     );
     let text = prompt_text(&prompts[0]);
     assert!(text.contains("unique trusted guide"));
@@ -329,10 +332,9 @@ async fn subsequent_turns_preserve_the_authenticated_sender_without_join_context
     session.send(teammate).await.unwrap();
     assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
     let prompts = f.prompts.lock().unwrap().clone();
-    assert!(prompt_text(&prompts[0]).contains("Inline user 1 (the owner)"));
+    assert!(prompt_text(&prompts[0]).contains("from_user_id=\"1\" role=\"owner\""));
     let followup = prompt_text(&prompts[1]);
-    assert!(followup.contains("Inline user 42 (a teammate, not the owner)"));
-    assert!(followup.contains("does not carry the owner's consent"));
+    assert!(followup.contains("from_user_id=\"42\" role=\"teammate\""));
     assert!(followup.ends_with("do it"));
     f.driver.shutdown().await.unwrap();
 }

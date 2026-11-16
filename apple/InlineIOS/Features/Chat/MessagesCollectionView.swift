@@ -1751,6 +1751,7 @@ private extension MessagesCollectionView {
     private struct AvatarOverlayDraft {
       let stableId: Int64
       let userInfo: UserInfo
+      let viaMark: MessageViaPresentation.Mark?
       let avatarX: CGFloat
       let avatarSize: CGFloat
       let viewportFrame: CGRect
@@ -3768,6 +3769,8 @@ private extension MessagesCollectionView {
     private func canGroup(_ earlier: FullMessage, _ later: FullMessage) -> Bool {
       guard !earlier.message.isServiceMessage, !later.message.isServiceMessage else { return false }
       guard earlier.message.fromId == later.message.fromId else { return false }
+      // A person and an agent sending for them never share a group.
+      guard earlier.message.via == later.message.via else { return false }
       guard groupCalendar.isDate(earlier.message.date, inSameDayAs: later.message.date) else { return false }
 
       let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
@@ -4229,6 +4232,7 @@ private extension MessagesCollectionView {
           drafts[stableId] = AvatarOverlayDraft(
             stableId: stableId,
             userInfo: userInfo,
+            viaMark: cell.avatarOverlayViaMark,
             avatarX: avatarFrame.minX,
             avatarSize: avatarFrame.width,
             viewportFrame: viewportFrame,
@@ -4256,6 +4260,7 @@ private extension MessagesCollectionView {
         return MessageAvatarOverlayItem(
           stableId: draft.stableId,
           userInfo: draft.userInfo,
+          viaMark: draft.viaMark,
           frame: frame,
           viewportFrame: draft.viewportFrame,
           limitFrame: draft.limitFrame,
@@ -5697,6 +5702,15 @@ private extension MessagesCollectionView {
 
       let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
       menuChildren.append(deleteMenu)
+
+      if let via = fullMessage.viaPresentation {
+        let viaAction = UIAction(
+          title: via.detail(senderName: fullMessage.senderInfo?.user.shortDisplayName),
+          image: UIImage(systemName: "sparkles"),
+          attributes: .disabled
+        ) { _ in }
+        menuChildren.append(UIMenu(title: "", options: .displayInline, children: [viaAction]))
+      }
 
       if let attribution = fullMessage.acknowledgementAttributionLabel {
         let attributionAction = UIAction(

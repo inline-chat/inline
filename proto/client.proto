@@ -13,6 +13,8 @@ message MessageContentPayload {
   optional bool counts_as_unread = 6;
   // Text quoted from the replied message; the message text is only the caption.
   optional string reply_quote = 7;
+  // The agent that sent this message for its sender ("Sent via Codex").
+  MessageVia via = 8;
 }
 
 message MessageVoiceContent {

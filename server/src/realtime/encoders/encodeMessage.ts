@@ -1,3 +1,4 @@
+import { encodeMessageVia } from "@in/server/modules/message/via"
 import { ModelError } from "@in/server/db/models/_errors"
 import type { TPeerInfo } from "@in/server/api-types"
 import type { DbFile, DbMessage } from "@in/server/db/schema"
@@ -246,6 +247,7 @@ export const encodeMessage = ({
     sendMode: message.countsAsUnread === false ? MessageSendMode.MODE_SILENT : sendMode ?? undefined,
     countsAsUnread: message.countsAsUnread === false ? false : undefined,
     fwdFrom: fwdFrom,
+    via: encodeMessageVia(message),
     replies,
     subthread,
     actions: message.systemMessage?.event.oneofKind === "gridTranscript" ? undefined : actions,
@@ -399,6 +401,7 @@ export const encodeFullMessage = ({
     sendMode: message.countsAsUnread === false ? MessageSendMode.MODE_SILENT : undefined,
     countsAsUnread: message.countsAsUnread === false ? false : undefined,
     fwdFrom: fwdFrom,
+    via: encodeMessageVia(message),
     replies,
     subthread,
     actions: message.systemMessage?.event.oneofKind === "gridTranscript" ? undefined : message.actions ?? undefined,

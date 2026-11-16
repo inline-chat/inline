@@ -1225,7 +1225,10 @@ impl Session for CodexSession {
                 }
                 _ => {}
             }
-            let request = input_request(&self.inner.thread, &input);
+            let (note, request) = input_request(&self.inner.thread, &input);
+            if let Some(note) = note {
+                self.connection.request(note).await.map_err(send_error)?;
+            }
             let response = self.connection.request(request).await.map_err(send_error)?;
             let disposition = match &input.delivery {
                 Delivery::Turn => {

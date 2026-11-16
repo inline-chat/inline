@@ -53,6 +53,9 @@ const COMMAND_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Inline's metadata key on prompts, carrying the input id.
 pub const INPUT_METADATA_KEY: &str = "inline.input";
+/// Marks Inline's note on an input (a description-less synthetic OpenCode's
+/// own clients hide): context for the model, not an item of the session.
+pub const NOTE_METADATA_KEY: &str = "inline.note";
 
 /// One inbox entry this session knows about.
 #[derive(Clone, Debug)]
@@ -648,6 +651,14 @@ impl Mapper {
                     event.clone(),
                 )));
                 events
+            }
+            "session.synthetic"
+                if data
+                    .get("metadata")
+                    .and_then(|metadata| metadata.get(NOTE_METADATA_KEY))
+                    .is_some() =>
+            {
+                Vec::new()
             }
             "session.synthetic" if Report::of(&data).is_some() => {
                 let report = Report::of(&data).expect("checked");

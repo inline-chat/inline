@@ -169,7 +169,7 @@ describe("inline-api over the HTTP invoker", () => {
     })
     try {
       await expect(api.getProfile()).resolves.toEqual({ id: 42n, name: "Ada Lovelace", email: "ada@example.test" })
-      await expect(api.sendMessage({ userId: 7n, text: "**hi**", sendMode: "silent", parseMarkdown: true })).resolves.toEqual({ messageId: 501n, spaceId: null })
+      await expect(api.sendMessage({ userId: 7n, text: "**hi**", sendMode: "silent", parseMarkdown: true })).resolves.toEqual({ messageId: 501n, spaceId: null, signed: false })
       const send = server.calls[1]!.call
       expect(send.method).toBe(Method.SEND_MESSAGE)
       if (send.input.oneofKind !== "sendMessage") throw new Error("expected sendMessage")

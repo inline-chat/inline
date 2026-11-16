@@ -11,6 +11,7 @@ extension Client_MessageContentPayload: Codable {
     case serviceMessage
     case subthread
     case countsAsUnread
+    case via
   }
 
   public init(from decoder: Decoder) throws {
@@ -21,6 +22,7 @@ extension Client_MessageContentPayload: Codable {
     let serviceMessage = try container.decodeIfPresent(MessageService.self, forKey: .serviceMessage)
     let subthread = try container.decodeIfPresent(MessageSubthread.self, forKey: .subthread)
     let countsAsUnread = try container.decodeIfPresent(Bool.self, forKey: .countsAsUnread)
+    let via = try container.decodeIfPresent(MessageVia.self, forKey: .via)
 
     self.init()
     if let voice {
@@ -40,6 +42,9 @@ extension Client_MessageContentPayload: Codable {
     }
     if let countsAsUnread {
       self.countsAsUnread = countsAsUnread
+    }
+    if let via {
+      self.via = via
     }
   }
 
@@ -62,6 +67,42 @@ extension Client_MessageContentPayload: Codable {
     }
     if hasCountsAsUnread {
       try container.encode(countsAsUnread, forKey: .countsAsUnread)
+    }
+    if hasVia {
+      try container.encode(via, forKey: .via)
+    }
+  }
+}
+
+extension MessageVia: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case app
+    case botUserID
+    case name
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init()
+    if let app = try container.decodeIfPresent(String.self, forKey: .app) {
+      self.app = app
+    } else if let botUserID = try container.decodeIfPresent(Int64.self, forKey: .botUserID) {
+      self.botUserID = botUserID
+    }
+    if let name = try container.decodeIfPresent(String.self, forKey: .name) {
+      self.name = name
+    }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch source {
+      case let .app(app): try container.encode(app, forKey: .app)
+      case let .botUserID(botUserID): try container.encode(botUserID, forKey: .botUserID)
+      case nil: break
+    }
+    if hasName {
+      try container.encode(name, forKey: .name)
     }
   }
 }

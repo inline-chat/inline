@@ -71,6 +71,9 @@ const baseMessage: DbMessage = {
   hasLink: false,
   blockContentId: null,
   countsAsUnread: true,
+  viaApp: null,
+  viaBotUserId: null,
+  viaName: null,
 }
 
 describe("system message insertion updates", () => {

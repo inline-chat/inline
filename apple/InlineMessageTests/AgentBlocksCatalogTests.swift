@@ -139,6 +139,41 @@ struct AgentBlocksCatalogTests {
       .with { $0.promptSuggestions = .with { $0.prompts = prompts } },
     ])))
 
+    var formText = Builder()
+    var form = BlockForm()
+    form.formID = "setup"
+    form.title = formText.add("A few questions before I start")
+    var auth = BlockFormField()
+    auth.fieldID = "auth"
+    auth.required = true
+    auth.header = formText.add("Auth method")
+    auth.label = formText.add("How should people sign in?")
+    auth.select = .with { select in
+      select.allowOther = true
+      select.defaultOptionIds = ["oauth"]
+      select.options = [
+        .with {
+          $0.optionID = "oauth"
+          $0.label = formText.add("OAuth with Google and GitHub")
+          $0.description_p = formText.add("Fewer passwords to manage.")
+          $0.preview = formText.add("[ Continue with Google ]\n[ Continue with GitHub ]")
+          $0.recommended = true
+        },
+        .with {
+          $0.optionID = "magic"
+          $0.label = formText.add("Email magic link")
+          $0.preview = formText.add("Email  [ you@company.com ]\n       [ Send link ]")
+        },
+      ]
+    }
+    var notes = BlockFormField()
+    notes.fieldID = "notes"
+    notes.header = formText.add("Notes")
+    notes.label = formText.add("Anything I should avoid?")
+    notes.text = .with { $0.kind = .multiline; $0.placeholder = "Optional" }
+    form.fields = [auth, notes]
+    entries.append(("questionnaire", message(8_009, formText, [.with { $0.form = form }])))
+
     var unknownText = Builder()
     let before = unknownText.add("Before the new block")
     _ = unknownText.add("This text belongs to a block kind this build doesn't know.")

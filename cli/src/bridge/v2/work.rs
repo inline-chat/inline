@@ -1392,6 +1392,10 @@ impl Actor {
         // The card's resolution names who answered.
         let name = self.agent.names.of(actor).await;
         self.renderer.name_user(actor, name);
+        // The closed card shows what was answered.
+        if let InteractionResponse::Answers { answers } = &response {
+            self.renderer.note_answers(&interaction, answers);
+        }
         match session
             .control(Op::Answer {
                 interaction,
@@ -1408,8 +1412,14 @@ impl Actor {
                     let input = Input {
                         id: InputId::new(uuid::Uuid::new_v4().to_string()).ok()?,
                         content: inline_agent_bridge::harness::InputContent::text(text),
-                        origin: inline_agent_bridge::harness::Origin::Teammate {
-                            user: UserId(actor),
+                        origin: if actor == self.agent.owner_user_id {
+                            inline_agent_bridge::harness::Origin::Owner {
+                                user: UserId(actor),
+                            }
+                        } else {
+                            inline_agent_bridge::harness::Origin::Teammate {
+                                user: UserId(actor),
+                            }
                         },
                         delivery: match live_turn(&session) {
                             Some(turn) => Delivery::Steer {
@@ -1941,6 +1951,8 @@ impl Actor {
                     inline_tools: self.agent.tools.is_some(),
                     no_project,
                     lead: self.chat_id == self.agent.dm_chat_id,
+                    narrate: self.renderer.mode() == OutputMode::Detailed
+                        && self.renderer.vocabulary() == Vocabulary::Claude,
                 })),
                 title: None,
                 after: None,
@@ -2148,6 +2160,9 @@ impl Actor {
                 // `send_message` with `reply_thread: "current"` anchors here.
                 if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
                     tools.record_request(native, self.chat_id, message_id);
+                    if let Some(envelope) = &input.content.envelope {
+                        tools.record_message(native, envelope.clone());
+                    }
                 }
                 // The harness may report the turn a moment later. Until then
                 // the delivery itself is live work, so an idle tick never

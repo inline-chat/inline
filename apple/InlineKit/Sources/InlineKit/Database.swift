@@ -2164,6 +2164,7 @@ public extension AppDatabase {
       // Before any view resolves a cached media path under the scoped root.
       if database.isPersistent {
         LegacyMediaCacheMigration.runIfNeeded(database: database)
+        MediaCacheSweep.scheduleIfDue(database: database)
       }
       return database
     }

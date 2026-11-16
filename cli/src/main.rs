@@ -2146,6 +2146,12 @@ Examples (single quotes protect backticks and dollar signs from the shell):
 
 --reply-to quotes a message in the same chat. --thread posts in the message's
 reply thread (a separate child chat), starting it if it does not exist yet.
+
+Signature: run inside a coding agent (Claude Code, Codex, OpenCode, ...), the
+message shows "Sent via <agent>" to recipients. --as-me sends it without the
+signature, only when the user asks for that. --via-bot signs with a bot you own.
+Run by a person in a plain terminal, messages are not signed. Don't add your
+own agent signature or footer; Inline adds it.
 "#;
 
 #[derive(Args)]
@@ -2221,6 +2227,86 @@ struct MessagesSendArgs {
     #[arg(long, value_name = "PATH", conflicts_with_all = ["text", "stdin"], value_hint = clap::ValueHint::FilePath,
         help = "Read UTF-8 text from a file, or - for stdin (preserves whitespace; max 1 MiB)")]
     text_file: Option<PathBuf>,
+
+    #[command(flatten)]
+    signature: MessageSignatureArgs,
+}
+
+#[derive(Args, Default)]
+struct MessageSignatureArgs {
+    #[arg(
+        long,
+        conflicts_with_all = ["via", "via_bot"],
+        help = "Send without the \"Sent via <agent>\" signature, as if you typed it"
+    )]
+    as_me: bool,
+
+    #[arg(
+        long,
+        value_name = "AGENT",
+        conflicts_with = "via_bot",
+        help = "Name the agent when it isn't detected, e.g. codex or claude-code (known agents only)"
+    )]
+    via: Option<String>,
+
+    #[arg(
+        long = "via-bot",
+        value_name = "BOT_ID",
+        help = "Sign with a bot you own; recipients see its name and avatar"
+    )]
+    via_bot: Option<i64>,
+}
+
+impl MessageSignatureArgs {
+    /// The agent sending this for the user: explicit flags first, then the
+    /// detected agent harness. None sends the message plain.
+    fn input(&self) -> Result<Option<proto::InputMessageVia>, CliError> {
+        message_via_input(self, agent_context::detect().map(|harness| harness.id))
+    }
+}
+
+fn message_via_input(
+    args: &MessageSignatureArgs,
+    detected: Option<&str>,
+) -> Result<Option<proto::InputMessageVia>, CliError> {
+    use proto::input_message_via::Source;
+    if args.as_me {
+        return Ok(None);
+    }
+    if let Some(bot_id) = args.via_bot {
+        if bot_id <= 0 {
+            return Err(CliError::invalid_args(
+                "--via-bot must be a positive bot user id",
+            ));
+        }
+        return Ok(Some(proto::InputMessageVia {
+            source: Some(Source::BotUserId(bot_id)),
+        }));
+    }
+    let app = match args.via.as_deref().map(str::trim) {
+        Some("") => {
+            return Err(CliError::invalid_args(
+                "--via needs an agent name, e.g. codex",
+            ));
+        }
+        Some(app) => app.to_ascii_lowercase(),
+        None => match detected {
+            Some(id) => id.to_string(),
+            None => return Ok(None),
+        },
+    };
+    Ok(Some(proto::InputMessageVia {
+        source: Some(Source::App(app)),
+    }))
+}
+
+/// "Sent via Claude Code" for human output, or None for a plain message.
+fn message_via_label(via: &Option<proto::InputMessageVia>) -> Option<String> {
+    use proto::input_message_via::Source;
+    match via.as_ref()?.source.as_ref()? {
+        Source::App(app) => Some(format!("Sent via {}", agent_context::via_display_name(app))),
+        Source::BotUserId(bot_id) => Some(format!("Sent via bot {bot_id}")),
+    }
 }
 
 #[derive(Args)]
@@ -4603,6 +4689,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let caption = resolve_message_source(args.text, args.stdin, args.text_file.as_deref())?;
                     let mention_entities = parse_mention_entities(&args.mentions)?;
+                    let via = args.signature.input()?;
+                    let via_label = message_via_label(&via);
                     if mention_entities.is_some() && caption.is_none() {
                         return Err(CliError::mentions_require_text().into());
                     }
@@ -4649,14 +4737,16 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             parse_markdown_for_entities(&mention_entities),
                             reply_to,
                             mention_entities,
+                            via,
                         )
                         .await?;
+                        let signed = via_label.map(|label| format!(" ({label})")).unwrap_or_default();
                         if cli.json {
                             print_send_json(payload, reply_thread, json_format)?;
                         } else if let Some(thread) = reply_thread {
-                            println!("Message sent in reply thread {}.", thread.chat_id);
+                            println!("Message sent in reply thread {}{signed}.", thread.chat_id);
                         } else {
-                            println!("Message sent (updates: {}).", payload.updates.len());
+                            println!("Message sent (updates: {}){signed}.", payload.updates.len());
                         }
                     } else {
                         let peer_summary = peer_summary_from_input(&peer);
@@ -4666,6 +4756,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             caption,
                             reply_to,
                             mention_entities,
+                            via,
                             attachments,
                             peer_summary,
                             cli.json,
@@ -4673,8 +4764,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .await?;
                         if cli.json {
                             print_send_json(output, reply_thread, json_format)?;
-                        } else if let Some(thread) = reply_thread {
-                            println!("Message sent in reply thread {}.", thread.chat_id);
+                        } else {
+                            if let Some(thread) = reply_thread {
+                                println!("Message sent in reply thread {}.", thread.chat_id);
+                            }
+                            if let Some(label) = via_label {
+                                println!("{label}.");
+                            }
                         }
                     }
                 }
@@ -5598,6 +5694,7 @@ fn resolve_message_caption(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_message(
     realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
@@ -5606,6 +5703,7 @@ async fn send_message(
     parse_markdown: bool,
     reply_to_msg_id: Option<i64>,
     entities: Option<proto::MessageEntities>,
+    via: Option<proto::InputMessageVia>,
 ) -> Result<proto::SendMessageResult, Box<dyn std::error::Error>> {
     let mut rng = OsRng;
     let random_id: i64 = rng.next_u64() as i64;
@@ -5626,6 +5724,7 @@ async fn send_message(
         actions: None,
         initial_agent_context: None,
         source_chat_id: None,
+        via,
         ..Default::default()
     };
 
@@ -5659,6 +5758,7 @@ async fn send_messages_with_attachments(
     caption: Option<String>,
     reply_to_msg_id: Option<i64>,
     mention_entities: Option<proto::MessageEntities>,
+    via: Option<proto::InputMessageVia>,
     attachments: Vec<PreparedAttachment>,
     peer_summary: Option<PeerSummary>,
     json: bool,
@@ -5688,6 +5788,7 @@ async fn send_messages_with_attachments(
             caption.is_some() && parse_markdown_for_entities(&mention_entities),
             reply_to_msg_id,
             mention_entities.clone(),
+            via.clone(),
         )
         .await?;
         let updates_len = send.updates.len();
@@ -9206,6 +9307,79 @@ mod cli_parsing_tests {
                 }
             }
         ));
+    }
+
+    fn send_signature(extra: &[&str]) -> Result<MessageSignatureArgs, clap::Error> {
+        let mut argv = vec!["inline", "messages", "send", "--chat-id", "1", "-m", "hi"];
+        argv.extend_from_slice(extra);
+        match Cli::try_parse_from(argv)?.command {
+            Command::Messages {
+                command: MessagesCommand::Send(args),
+            } => Ok(args.signature),
+            _ => panic!("expected messages send"),
+        }
+    }
+
+    fn via_source(via: Option<proto::InputMessageVia>) -> Option<proto::input_message_via::Source> {
+        via.and_then(|via| via.source)
+    }
+
+    #[test]
+    fn signs_sends_with_the_detected_agent_unless_asked_not_to() {
+        use proto::input_message_via::Source;
+        let plain = send_signature(&[]).unwrap();
+        assert_eq!(
+            via_source(message_via_input(&plain, Some("claude-code")).unwrap()),
+            Some(Source::App("claude-code".into()))
+        );
+        assert_eq!(
+            message_via_input(&plain, None).unwrap(),
+            None,
+            "a person in a plain terminal"
+        );
+
+        let as_me = send_signature(&["--as-me"]).unwrap();
+        assert_eq!(message_via_input(&as_me, Some("codex")).unwrap(), None);
+
+        let named = send_signature(&["--via", " Codex "]).unwrap();
+        assert_eq!(
+            via_source(message_via_input(&named, Some("claude-code")).unwrap()),
+            Some(Source::App("codex".into()))
+        );
+
+        let bot = send_signature(&["--via-bot", "4521"]).unwrap();
+        assert_eq!(
+            via_source(message_via_input(&bot, Some("codex")).unwrap()),
+            Some(Source::BotUserId(4521))
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_or_empty_signatures() {
+        assert!(send_signature(&["--as-me", "--via", "codex"]).is_err());
+        assert!(send_signature(&["--as-me", "--via-bot", "1"]).is_err());
+        assert!(send_signature(&["--via", "codex", "--via-bot", "1"]).is_err());
+        assert!(message_via_input(&send_signature(&["--via", " "]).unwrap(), None).is_err());
+        assert!(message_via_input(&send_signature(&["--via-bot", "0"]).unwrap(), None).is_err());
+    }
+
+    #[test]
+    fn labels_signed_sends_for_people() {
+        use proto::input_message_via::Source;
+        let app = |app: &str| {
+            Some(proto::InputMessageVia {
+                source: Some(Source::App(app.into())),
+            })
+        };
+        assert_eq!(
+            message_via_label(&app("claude-code")).as_deref(),
+            Some("Sent via Claude Code")
+        );
+        assert_eq!(
+            message_via_label(&app("mystery")).as_deref(),
+            Some("Sent via an AI agent")
+        );
+        assert_eq!(message_via_label(&None), None);
     }
 
     #[test]

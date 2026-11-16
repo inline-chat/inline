@@ -114,6 +114,8 @@ inline chats follow --chat-id REPLY_THREAD_ID
 inline notifications set-chat --chat-id CHAT_ID --mode mentions
 ```
 
+Run inside a coding agent, the CLI signs what it sends: recipients see “Sent via Claude Code” (or Codex, OpenCode, …) under the message. Add `--as-me` only when the user asks for an unsigned message, and don't add your own agent signature or footer. `--via-bot BOT_ID` signs with a bot the user owns. A person running the CLI in a plain terminal sends unsigned.
+
 Destructive commands never prompt in JSON mode and require `--yes`. Pass it only for the exact user-approved target. After an uncertain write result, inspect the target before retrying to avoid duplicates.
 
 Send text and attachment captions support [rich Markdown](message-formatting.md), including tables, code, images, disclosures, inline styles, and math. Use `--text-file report.md` or `--stdin` for multiline content, or single-quote `--text` to protect backticks and dollar signs from the shell. `inline messages send --help` lists the syntax. Explicit `--mention` ranges disable Markdown parsing; use Markdown mention links when combining mentions with formatting.

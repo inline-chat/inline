@@ -25,10 +25,17 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
     var toggle: NSSwitch?
     var stepper: NSStepper?
     var descriptions: [RichBlockTextSurface] = []
+    /// "Recommended" tags, one per recommended option, in option order.
+    var tags: [NSTextField] = []
+    var previewBox: NSView?
+    var previewText: RichBlockTextSurface?
     var views: [NSView] = []
   }
 
   private var pool: [RichBlockTextSurface] = []
+  /// Capsules behind field headers, one per header, in field order.
+  private var headerChips: [NSView] = []
+  private var context: RichBlockRenderContext?
   private var controls: [String: FieldControls] = [:]
   private var structure: [RichBlockFormNode.Field] = []
   private var node: RichBlockFormNode?
@@ -93,9 +100,12 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
     }
     self.node = form
     self.message = message
+    self.context = context
     draftKey = key
     structure = form.fields
     applyText(form, context: context)
+    updateColors(context.palette)
+    for field in form.fields { updatePreview(field.id) }
     applySubmitState(form, context: context)
     needsLayout = true
   }
@@ -126,18 +136,31 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
         onEntityClick: context.interactions.onTextEntityClick
       )
     }
+    var headers = 0
     for field in form.fields {
-      let label = NSMutableAttributedString(attributedString: context.text(field.label, role: .paragraph, isRTL: form.isRTL))
-      PlatformFontTraits.applyBaseFont(
-        ChatTypography.current.font(sized: context.baseFontSize, weight: .medium),
-        to: label
-      )
-      if field.required {
-        label.append(NSAttributedString(string: " *", attributes: [
-          .font: ChatTypography.current.font(sized: context.baseFontSize),
-          .foregroundColor: context.palette.tertiary,
-        ]))
+      if let header = field.header {
+        surface().apply(
+          text: context.text(header, role: .footer, isRTL: form.isRTL),
+          linkColor: context.palette.link,
+          onEntityClick: context.interactions.onTextEntityClick
+        )
+        if headers == headerChips.count {
+          let chip = NSView()
+          chip.wantsLayer = true
+          chip.layer?.cornerRadius = 4
+          chip.layer?.cornerCurve = .continuous
+          addSubview(chip, positioned: .below, relativeTo: nil)
+          headerChips.append(chip)
+        }
+        headerChips[headers].isHidden = false
+        headers += 1
       }
+      let label = RichBlockLayoutPlanner.Builder.formFieldLabel(
+        context.text(field.label, role: .paragraph, isRTL: form.isRTL),
+        required: field.required,
+        baseFontSize: context.baseFontSize,
+        asteriskColor: context.palette.tertiary
+      )
       surface().apply(text: label, linkColor: context.palette.link, onEntityClick: context.interactions.onTextEntityClick)
       if let description = field.description {
         surface().apply(
@@ -148,6 +171,51 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
       }
     }
     for extra in pool.dropFirst(index) { extra.isHidden = true }
+    for extra in headerChips.dropFirst(headers) { extra.isHidden = true }
+  }
+
+  private func updateColors(_ palette: RichBlockPalette) {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      for chip in headerChips { chip.layer?.backgroundColor = palette.codeFill.cgColor }
+      for field in controls.values {
+        field.previewBox?.layer?.backgroundColor = palette.codeFill.cgColor
+        field.tags.forEach { $0.textColor = .controlAccentColor }
+      }
+    }
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    if let palette = context?.palette { updateColors(palette) }
+  }
+
+  /// Shows the chosen option's preview; before a choice, the recommended option's (else the
+  /// first one's), dimmed, so the pane is never an empty gap.
+  private func updatePreview(_ fieldID: String) {
+    guard let field = node?.fields.first(where: { $0.id == fieldID }), field.previewFrame != nil,
+          let built = controls[fieldID], let surface = built.previewText, let context
+    else { return }
+    let options: [RichBlockFormNode.Option] = switch field.control {
+    case let .choices(options, _, _, _), let .menu(options, _, _): options
+    default: []
+    }
+    var chosen = Set<String>()
+    if case let .selection(ids, _)? = currentValue(fieldID) { chosen = Set(ids) }
+    let selected = options.first { chosen.contains($0.id) && $0.preview != nil }
+    let shown = selected
+      ?? options.first { $0.tagFrame != nil && $0.preview != nil }
+      ?? options.first { $0.preview != nil }
+    guard let preview = shown?.preview else {
+      surface.isHidden = true
+      return
+    }
+    surface.isHidden = false
+    guard let text = RichBlockLayoutPlanner.monospaceText(context.attributedText, range: preview, color: context.palette.primary) else {
+      surface.isHidden = true
+      return
+    }
+    surface.apply(text: text, linkColor: context.palette.link, onEntityClick: context.interactions.onTextEntityClick)
+    surface.alphaValue = selected == nil ? 0.55 : 1
   }
 
   private func applySubmitState(_ form: RichBlockFormNode, context: RichBlockRenderContext) {
@@ -206,10 +274,26 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
           let button = multiple
             ? NSButton(checkboxWithTitle: title, target: self, action: #selector(choiceChanged(_:)))
             : NSButton(radioButtonWithTitle: title, target: self, action: #selector(choiceChanged(_:)))
+          // The planner measured the title wrapping in the chat font; draw it that way.
+          button.font = ChatTypography.current.font(sized: context.baseFontSize)
+          button.cell?.wraps = true
+          button.cell?.lineBreakMode = .byWordWrapping
           button.state = selected.contains(option.id) ? .on : .off
           button.identifier = NSUserInterfaceItemIdentifier(field.id)
           container.addSubview(button)
           built.buttons.append((option.id, button))
+          if option.tagFrame != nil {
+            let tag = NSTextField(labelWithString: RichBlockLayoutPlanner.Builder.recommendedTag)
+            tag.font = RichBlockAgentMetrics.formTagFont
+            tag.textColor = .controlAccentColor
+            tag.alignment = .center
+            tag.wantsLayer = true
+            tag.layer?.cornerRadius = 4
+            tag.layer?.borderWidth = 1
+            tag.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.45).cgColor
+            container.addSubview(tag)
+            built.tags.append(tag)
+          }
           if let description = option.description, description.length > 0 {
             let surface = RichBlockTextSurface(frame: .zero)
             surface.apply(
@@ -339,6 +423,19 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
         built.stepper = stepper
         built.views += [textField, stepper]
       }
+      if field.previewFrame != nil {
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 6
+        box.layer?.cornerCurve = .continuous
+        box.layer?.masksToBounds = true
+        let text = RichBlockTextSurface(frame: .zero)
+        box.addSubview(text)
+        addSubview(box)
+        built.previewBox = box
+        built.previewText = text
+        built.views.append(box)
+      }
       controls[field.id] = built
     }
   }
@@ -373,7 +470,15 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
     guard let node else { return }
     var surfaces = pool.filter { !$0.isHidden }.makeIterator()
     if let titleFrame = node.titleFrame { surfaces.next()?.frame = titleFrame }
+    var chips = headerChips.makeIterator()
     for field in node.fields {
+      if let headerFrame = field.headerFrame {
+        surfaces.next()?.frame = headerFrame
+        chips.next()?.frame = headerFrame.insetBy(
+          dx: -RichBlockAgentMetrics.formChipHorizontalPadding,
+          dy: -RichBlockAgentMetrics.formChipVerticalPadding
+        )
+      }
       surfaces.next()?.frame = field.labelFrame
       if let descriptionFrame = field.descriptionFrame { surfaces.next()?.frame = descriptionFrame }
       guard let built = controls[field.id] else { continue }
@@ -382,15 +487,21 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
       case let .choices(options, _, _, otherFrame):
         built.container?.frame = frame
         var descriptions = built.descriptions.makeIterator()
+        var tags = built.tags.makeIterator()
         for (option, entry) in zip(options, built.buttons) {
           let optionFrame = option.frame
-          entry.button.frame = CGRect(x: optionFrame.minX, y: optionFrame.minY, width: optionFrame.width, height: 18)
+          entry.button.frame = CGRect(x: optionFrame.minX, y: optionFrame.minY, width: optionFrame.width, height: option.labelHeight)
+          if let tagFrame = option.tagFrame, let tag = tags.next() {
+            // Narrow the button so its title can't run under the tag.
+            entry.button.frame.size.width = max(0, tagFrame.minX - 4)
+            tag.frame = tagFrame.offsetBy(dx: optionFrame.minX, dy: optionFrame.minY)
+          }
           if let description = option.description, description.length > 0 {
             descriptions.next()?.frame = CGRect(
               x: optionFrame.minX + RichBlockAgentMetrics.formChoiceIndent,
-              y: optionFrame.minY + 18,
+              y: optionFrame.minY + option.labelHeight,
               width: max(1, optionFrame.width - RichBlockAgentMetrics.formChoiceIndent),
-              height: max(0, optionFrame.height - 18)
+              height: max(0, optionFrame.height - option.labelHeight)
             )
           }
         }
@@ -411,6 +522,16 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
       case .number:
         built.textField?.frame = CGRect(x: frame.minX, y: frame.minY, width: min(140, frame.width - 22), height: frame.height)
         built.stepper?.frame = CGRect(x: frame.minX + min(140, frame.width - 22) + 4, y: frame.minY, width: 18, height: frame.height)
+      }
+      if let previewFrame = field.previewFrame, let box = built.previewBox {
+        box.frame = previewFrame
+        let inset = RichBlockAgentMetrics.formPreviewInset
+        built.previewText?.frame = CGRect(
+          x: inset,
+          y: inset,
+          width: max(1, previewFrame.width - inset * 2),
+          height: max(1, previewFrame.height - inset * 2)
+        )
       }
     }
     let submit = node.submitFrame
@@ -439,6 +560,9 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
     controls.removeAll()
     pool.forEach { $0.removeFromSuperview() }
     pool.removeAll()
+    headerChips.forEach { $0.removeFromSuperview() }
+    headerChips.removeAll()
+    context = nil
     structure = []
     node = nil
     message = nil
@@ -456,6 +580,7 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
       if built.otherButton !== button { built.otherButton?.state = .off }
     }
     saveDraft(fieldID)
+    updatePreview(fieldID)
   }
 
   @objc private func toggleChanged(_ sender: NSSwitch) {
@@ -577,7 +702,11 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
         // The account changed while sending: nothing here belongs to it.
         guard MessageFormDraftStore.shared.generation == generation else { return }
         MessageActionInteractionState.shared.attachInteractionId(interactionID, for: loadingKey)
-        MessageFormDraftStore.shared.setPhase(.submitted, key: draftKey)
+        // Keeps the sent answers, secrets excepted, so a rebuilt row shows them.
+        MessageFormDraftStore.shared.markSubmitted(
+          draftKey,
+          secretFieldIDs: MessageFormAnswers.form(node.formID, in: message).map(MessageFormAnswers.secretFieldIDs)
+        )
       } catch {
         guard MessageFormDraftStore.shared.generation == generation else { return }
         MessageActionInteractionState.shared.fail(key: loadingKey)

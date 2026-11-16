@@ -70,6 +70,8 @@ export const oauthGrants = pgTable(
     spaceIdsJson: jsonb("space_ids_json").$type<number[]>().notNull(),
     allowDms: boolean("allow_dms").default(false).notNull(),
     allowHomeThreads: boolean("allow_home_threads").default(false).notNull(),
+    /** The app may send without "Sent via <app>" when the user asks; chosen at consent. */
+    allowUnsigned: boolean("allow_unsigned").default(false).notNull(),
     inlineTokenEncrypted: bytea("inline_token_encrypted"),
     date: creationDate,
     revokedAt: timestamp("revoked_at", { mode: "date", precision: 3 }),

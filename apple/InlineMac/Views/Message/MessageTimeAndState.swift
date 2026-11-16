@@ -23,6 +23,11 @@ class MessageTimeAndState: NSView {
   }
 
   private var fullMessage: FullMessage
+  /// "Sent via Codex · " before the time on the last message of an agent's run.
+  private var viaPrefix: String?
+  /// One generic sentence about the agent, shown in the tooltip.
+  private var viaDetail: String?
+  private var viaPrefixWidth: CGFloat = 0
   private var currentState: MessageSendingStatus = .sent
   private var tooltipText: String = ""
   private var trackingArea: NSTrackingArea?
@@ -211,9 +216,13 @@ class MessageTimeAndState: NSView {
     fullMessage: FullMessage,
     overlay: Bool,
     usesOutgoingBubbleStyle: Bool = false,
-    contentAlignment: ContentAlignment = .center
+    contentAlignment: ContentAlignment = .center,
+    via: MessageViaPresentation? = nil
   ) {
     self.fullMessage = fullMessage
+    viaPrefix = via.map { Self.viaPrefix(for: $0) }
+    viaDetail = via?.detail(senderName: fullMessage.senderInfo?.user.shortDisplayName)
+    viaPrefixWidth = Self.viaPrefixWidth(viaPrefix)
     isOverlay = overlay
     self.usesOutgoingBubbleStyle = usesOutgoingBubbleStyle
     self.contentAlignment = contentAlignment
@@ -239,7 +248,8 @@ class MessageTimeAndState: NSView {
   }
 
   private func updateTooltip() {
-    let tooltipText = Self.tooltipFormatter.string(from: fullMessage.message.date)
+    let date = Self.tooltipFormatter.string(from: fullMessage.message.date)
+    let tooltipText = viaDetail.map { "\($0)\n\(date)" } ?? date
     self.tooltipText = tooltipText
 
     toolTip = tooltipText
@@ -287,7 +297,7 @@ class MessageTimeAndState: NSView {
   override func layout() {
     super.layout()
 
-    let maxTimeWidth = Self.timeWidth
+    let maxTimeWidth = Self.timeWidth + viaPrefixWidth
     let symbolWidth = Self.symbolWidth
     let totalWidth = maxTimeWidth + (hasSymbol ? symbolWidth : 0.0)
     let timeX: CGFloat = switch contentAlignment {
@@ -337,8 +347,17 @@ class MessageTimeAndState: NSView {
     _ fullMessage: FullMessage,
     overlay: Bool,
     usesOutgoingBubbleStyle: Bool = false,
-    contentAlignment: ContentAlignment? = nil
+    contentAlignment: ContentAlignment? = nil,
+    via: MessageViaPresentation? = nil
   ) {
+    let nextViaPrefix = via.map { Self.viaPrefix(for: $0) }
+    let viaChanged = nextViaPrefix != viaPrefix
+    if viaChanged {
+      viaPrefix = nextViaPrefix
+      viaDetail = via?.detail(senderName: fullMessage.senderInfo?.user.shortDisplayName)
+      viaPrefixWidth = Self.viaPrefixWidth(nextViaPrefix)
+    }
+
     let oldStatus = self.fullMessage.message.status
     let oldDate = self.fullMessage.message.date
     let oldOut = self.fullMessage.message.out
@@ -385,6 +404,11 @@ class MessageTimeAndState: NSView {
       timeLayer.alignmentMode = self.contentAlignment.layerAlignment
     }
 
+    if viaChanged {
+      updateTimeContent()
+      updateTooltip()
+    }
+
     needsLayout = true
   }
 
@@ -395,7 +419,9 @@ class MessageTimeAndState: NSView {
   }
 
   private func updateTimeContent() {
-    let string = isFailedMessage ? "Failed" : Self.formatter.string(from: fullMessage.message.date)
+    let string = isFailedMessage
+      ? "Failed"
+      : (viaPrefix ?? "") + Self.formatter.string(from: fullMessage.message.date)
     let attributedString = NSAttributedString(
       string: string,
       attributes: [
@@ -445,6 +471,16 @@ class MessageTimeAndState: NSView {
 
   static var timeWidth: CGFloat = 0.0
   static var timeHeight: CGFloat = 0.0
+
+  static func viaPrefix(for via: MessageViaPresentation) -> String {
+    "\(via.label) · "
+  }
+
+  /// Extra width the time slot needs for a "Sent via …" prefix.
+  static func viaPrefixWidth(_ prefix: String?) -> CGFloat {
+    guard let prefix, !prefix.isEmpty else { return 0 }
+    return NSAttributedString(string: prefix, attributes: [.font: font]).size().width.rounded(.up)
+  }
 
   // Must be called once
   static func precalculateTimeWidth() {

@@ -362,6 +362,105 @@ struct RichAgentLayoutTests {
     Self.expectInside(layout)
   }
 
+  // MARK: Form
+
+  static func form(selected: String?, isRightToLeft: Bool = false, sent: Bool = false) -> RichForm {
+    let options = ["oauth", "keys"].map { id in
+      RichForm.Option(
+        label: t(id == "oauth" ? "OAuth with a long label that wraps onto a second line" : "API keys"),
+        detail: id == "keys" ? t("Simpler, less secure", size: 14) : nil,
+        isSelected: selected == id,
+        tag: id == "oauth" ? RichChip(text: t("Recommended", size: 12), tone: .accent) : nil,
+        tap: sent ? nil : .form(.select(formID: "f", fieldID: "auth", optionID: id))
+      )
+    }
+    return RichForm(
+      title: t("A few questions"),
+      fields: [
+        RichForm.Field(
+          header: RichChip(text: t("Auth method", size: 12), tone: .neutral),
+          label: t("How should people sign in?"),
+          detail: nil,
+          options: options,
+          isMultiple: false,
+          answer: nil,
+          preview: selected == nil ? nil : t("+--------+\n| Login  |\n+--------+", size: 13)
+        ),
+        RichForm.Field(
+          header: nil,
+          label: t("Anything else?"),
+          detail: nil,
+          options: [],
+          isMultiple: false,
+          answer: RichForm.Answer(text: t("Your answer"), symbol: "pencil", tap: sent ? nil : .form(.edit(formID: "f", fieldID: "notes"))),
+          preview: nil
+        ),
+      ],
+      buttons: sent ? [] : [RichButton(title: t("Submit", size: 15), tap: .form(.submit(formID: "f")), style: .primary)],
+      status: sent ? RichStatusLine(symbol: .named("checkmark.circle.fill", tone: .success), text: t("Sent")) : nil,
+      note: nil,
+      isRightToLeft: isRightToLeft
+    )
+  }
+
+  @Test("A form shows each question's header, its options as rows that select, and one submit")
+  func form() throws {
+    let layout = try Self.layout([.form(Self.form(selected: "oauth"))])
+    let card = try #require(Self.card(layout.nodes[0]))
+    let rows = card.parts.filter { if case .row = $0.kind { true } else { false } }
+    #expect(rows.map(\.tap) == [
+      .form(.select(formID: "f", fieldID: "auth", optionID: "oauth")),
+      .form(.select(formID: "f", fieldID: "auth", optionID: "keys")),
+      .form(.edit(formID: "f", fieldID: "notes")),
+    ])
+    #expect(rows[0].frame.maxY <= rows[1].frame.minY, "option rows don't overlap")
+    let chips = Self.parts(card, where: Self.isChip)
+    #expect(chips.count == 2, "the header and the recommended tag")
+    #expect(chips[0].frame.maxY <= rows[0].frame.minY, "the header sits above the options")
+    let marks = card.parts.compactMap { part -> String? in
+      if case let .symbol(.named(name, _)) = part.kind { name } else { nil }
+    }
+    #expect(marks.contains("largecircle.fill.circle"))
+    #expect(marks.contains("circle"))
+    let boxes = card.parts.filter { if case .box = $0.kind { true } else { false } }
+    #expect(boxes.count == 2, "the preview and the typed answer")
+    let submit = try #require(Self.parts(card, where: Self.isButton).last)
+    #expect(submit.tap == .form(.submit(formID: "f")))
+    #expect(boxes.allSatisfy { $0.frame.maxY <= submit.frame.minY })
+    Self.expectInside(layout)
+  }
+
+  @Test("A sent form has no taps and a status instead of its submit")
+  func sentForm() throws {
+    let layout = try Self.layout([.form(Self.form(selected: "keys", sent: true))])
+    let card = try #require(Self.card(layout.nodes[0]))
+    #expect(card.parts.allSatisfy { $0.tap == nil })
+    #expect(Self.parts(card, where: Self.isButton).isEmpty)
+    Self.expectInside(layout)
+  }
+
+  @Test("A right-to-left form puts marks on the right and keeps previews left to right")
+  func rightToLeftForm() throws {
+    let layout = try Self.layout([.form(Self.form(selected: "oauth", isRightToLeft: true))])
+    let card = try #require(Self.card(layout.nodes[0]))
+    let width = layout.nodes[0].frame.width
+    let mark = try #require(card.parts.first { part in
+      if case .symbol(.named("largecircle.fill.circle", _)) = part.kind { true } else { false }
+    })
+    #expect(mark.frame.midX > width / 2)
+    let box = try #require(card.parts.first { if case .box = $0.kind { true } else { false } })
+    let preview = try #require(card.parts.first { $0.frame.minY > box.frame.minY && $0.frame.maxY < box.frame.maxY && Self.isText($0.kind) })
+    #expect(preview.frame.minX < width / 2, "the preview stays on the left")
+    Self.expectInside(layout)
+  }
+
+  @Test("Too many questions refuse the form")
+  func formLimit() {
+    var form = Self.form(selected: nil)
+    form.fields = Array(repeating: form.fields[1], count: RichForm.maximumFields + 1)
+    #expect(RichLayoutPlanner.layout([.form(form)], maximumWidth: 300, grid: Fixtures.grid) == nil)
+  }
+
   // MARK: Fallback
 
   /// What the host builds for a message whose third block it can't draw (a kind newer than the
