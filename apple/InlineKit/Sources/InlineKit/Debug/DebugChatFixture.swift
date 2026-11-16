@@ -130,10 +130,25 @@ public final class DebugChatFixture {
       try size.insert(db)
       if index % 2 == 0 { text = nil }
     }
+    var videoId: Int64?
+    if photoId == nil, payload == nil, index % 53 == 0 {
+      // A video with a drawn thumbnail and a stand-in file, so a tap opens the chat's gallery.
+      let thumbnail = try Photo(photoId: 8_000 + id, date: now, format: .jpeg).insertAndFetch(db)
+      var size = PhotoSize(photoId: thumbnail.id ?? 0, type: "f", width: 1_200, height: 600)
+      size.localPath = Self.photoFile(tall: false)
+      try size.insert(db)
+      let video = Video(
+        videoId: 7_000 + id, date: now, width: 1_280, height: 720, duration: 12, size: 1_000,
+        thumbnailPhotoId: thumbnail.id, cdnUrl: nil, localPath: Self.videoFile()
+      )
+      try video.insert(db)
+      videoId = video.videoId
+      text = nil
+    }
     var message = Message(
       messageId: id, fromId: from, date: start.addingTimeInterval(Double(index) * step), text: text,
       peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == 1, status: from == 1 ? .sent : nil,
-      repliedToMessageId: index % 11 == 0 && index > 5 ? id - 5 : nil, photoId: photoId,
+      repliedToMessageId: index % 11 == 0 && index > 5 ? id - 5 : nil, photoId: photoId, videoId: videoId,
       contentPayload: payload
     )
     try message.saveMessage(db)
@@ -143,6 +158,16 @@ public final class DebugChatFixture {
                      date: now, chatId: chatId).insert(db)
       }
     }
+  }
+
+  /// A stand-in video file in the video cache (not playable); its local path.
+  private nonisolated static func videoFile() -> String? {
+    let name = "debug-fixture-video.mp4"
+    let url = FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(name)
+    if !FileManager.default.fileExists(atPath: url.path) {
+      guard FileManager.default.createFile(atPath: url.path, contents: Data(count: 1_000)) else { return nil }
+    }
+    return name
   }
 
   /// A drawn JPEG in the photo cache (a diagonal gradient), written once per shape; its local path.
