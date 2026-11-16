@@ -87,6 +87,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var affordance = MessagesCollectionView.ScrollAffordanceState()
   private var lastReadPass: CFTimeInterval = 0
 
+  // Media warm-up
+  /// Rows whose images were asked for ahead of time, so they can be let go when they move away.
+  private var prefetched: [ChatRowID: FullMessage] = [:]
+  private var prefetchKey: (first: Int, last: Int, revision: UInt64)?
+  private var warmupTask: Task<Void, Never>?
+  private var warmups: [InlineTinyThumbnailWarmup] = []
+
   // Translation
   private let translation: TranslationViewModel
   private var hasDetectedLanguages = false
@@ -215,6 +222,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     for task in historyTasks.values { task.cancel() }
     jumpTask?.cancel()
     returnToLatestTask?.cancel()
+    warmupTask?.cancel()
+    let warmups = warmups
+    let prefetched = Array(prefetched.values)
+    Task {
+      for warmup in warmups { await InlineTinyThumbnailPrewarmer.cancel(warmup) }
+      await ImagePrefetcher.shared.cancelPrefetching(for: prefetched)
+    }
     viewModel.dispose()
   }
 
@@ -539,6 +553,75 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     list.apply(TimelineTransaction(changed: Set(snapshot.ids), timing: timing))
   }
 
+  // MARK: - Media warm-up
+
+  /// The collection view's prefetching: rows up to the lookahead beyond the placed ones have their
+  /// images and stripped thumbnails asked for before they are made, and are let go once they are
+  /// beyond the lookahead again. The placed window already reaches ahead of a fling by its speed.
+  private func prefetchMedia() {
+    guard let snapshot, let first = list.layout.placements.first?.index,
+          let last = list.layout.placements.last?.index else { return }
+    if let key = prefetchKey, key.first == first, key.last == last, key.revision == snapshot.revision { return }
+    prefetchKey = (first, last, snapshot.revision)
+    let lookahead = InlineTinyThumbnailWarmupPolicy.adaptiveLookaheadRows()
+    let rows = snapshot.rows
+    let lower = max(0, first - lookahead), upper = min(rows.count - 1, last + lookahead)
+    var window = Set<ChatRowID>()
+    var arriving: [FullMessage] = []
+    if lower <= upper {
+      for index in lower ... upper {
+        let row = rows[index]
+        window.insert(row.id)
+        // A placed row loads its own media; one that becomes placed keeps what was asked for it.
+        guard index < first || index > last, prefetched[row.id] == nil, let message = row.content.message else { continue }
+        prefetched[row.id] = message
+        arriving.append(message)
+      }
+    }
+    var leaving: [FullMessage] = []
+    for (id, message) in prefetched where !window.contains(id) {
+      prefetched[id] = nil
+      leaving.append(message)
+    }
+    if !leaving.isEmpty { Task.detached(priority: .utility) { await ImagePrefetcher.shared.cancelPrefetching(for: leaving) } }
+    if !arriving.isEmpty { Task.detached(priority: .utility) { await ImagePrefetcher.shared.prefetchImages(for: arriving) } }
+  }
+
+  /// After an update and when scrolling stops, as the collection view does: the stripped thumbnails
+  /// of the rows on screen first, then of the two newer rows and the lookahead's older ones.
+  private func warmMedia() {
+    warmupTask?.cancel()
+    warmupTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      let previous = warmups
+      warmups.removeAll()
+      for warmup in previous { await InlineTinyThumbnailPrewarmer.cancel(warmup) }
+      await Task.yield()
+      guard !Task.isCancelled, let snapshot else { return }
+      let visible = list.layout.visible
+      guard let first = visible.first?.index, let last = visible.last?.index else { return }
+      let rows = snapshot.rows
+      let lookahead = InlineTinyThumbnailWarmupPolicy.adaptiveLookaheadRows()
+      func messages(_ range: some Sequence<Int>) -> [FullMessage] {
+        range.compactMap { rows.indices.contains($0) ? rows[$0].content.message : nil }
+      }
+      let onScreen = messages(first ... last)
+      let nearby = messages(Array(max(0, first - lookahead) ..< first) + Array((last + 1) ..< (last + 3)))
+      var started: [InlineTinyThumbnailWarmup] = []
+      if !onScreen.isEmpty {
+        started.append(await ImagePrefetcher.shared.prepareThumbnails(for: onScreen, priority: .visible))
+      }
+      if !nearby.isEmpty, !Task.isCancelled {
+        started.append(await ImagePrefetcher.shared.prepareThumbnails(for: nearby, priority: .nearby))
+      }
+      guard !Task.isCancelled else {
+        for warmup in started { await InlineTinyThumbnailPrewarmer.cancel(warmup) }
+        return
+      }
+      warmups = started
+    }
+  }
+
   // MARK: - Translation
 
   /// Messages loaded or changed are offered for translation, as the collection view offers them; the
@@ -592,6 +675,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     list.apply(TimelineTransaction(rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll))
     readPass(force: true)
+    warmMedia()
     offerForTranslation(snapshot.ids)
   }
 
@@ -643,6 +727,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     if case .jump = snapshot.reason { highlightPendingFocus() }
     viewModel.ensureThreadAnchorCached()
     readPass(force: true)
+    warmMedia()
     offerForTranslation(diff.insertions.map(\.id) + diff.updates.map(\.id))
   }
 
@@ -862,6 +947,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   private func layoutChanged() {
+    prefetchMedia()
     updateAffordance(force: false)
     updateDatePill()
     // While the list moves, read marking runs a few times a second at most.
@@ -869,6 +955,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   private func scrollEnded() {
+    warmMedia()
     scheduleDatePillHide()
     saveReadingPlace()
     readPass(force: true)
