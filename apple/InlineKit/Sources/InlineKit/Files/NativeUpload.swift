@@ -2,6 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import Auth
+import InlineConfig
 import InlineProtocol
 import Logger
 import RealtimeV2
@@ -301,6 +302,20 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     return removed
   }
 
+  /// Removes every staged body, sidecar and pending cancellation. For logout and local data
+  /// reset, after uploads are cancelled: nothing of the account may stay behind, and a send
+  /// retried later stages again from its original file.
+  @discardableResult
+  public func removeAll() -> Int {
+    let fileManager = FileManager.default
+    guard let urls = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return 0 }
+    var removed = 0
+    for url in urls where (try? fileManager.removeItem(at: url)) != nil {
+      removed += 1
+    }
+    return removed
+  }
+
   public func discard(logicalID: String) {
     let baseName = Self.fileName(for: logicalID)
     try? FileManager.default.removeItem(at: root.appendingPathComponent("\(baseName).body"))
@@ -432,16 +447,43 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
   }
 
   private static func defaultRoot() -> URL {
-    let fileManager = FileManager.default
     #if os(iOS)
-    if let shared = fileManager.containerURL(
+    if let shared = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: "group.chat.inline"
     ) {
       return shared.appendingPathComponent("NativeUploads", isDirectory: true)
     }
     #endif
-    return FileHelpers.getApplicationSupportDirectory()
+    return defaultRoot(
+      applicationSupportDirectory: FileHelpers.getApplicationSupportDirectory(),
+      bundleIdentifier: Bundle.main.bundleIdentifier,
+      userProfile: ProjectConfig.userProfile
+    )
+  }
+
+  /// On macOS, Application Support is shared by every app and Inline profile outside the
+  /// sandbox, so staging is scoped like the media cache: one folder per app and profile, which
+  /// logout can empty without touching another profile's sends.
+  static func defaultRoot(applicationSupportDirectory: URL, bundleIdentifier: String?, userProfile: String?) -> URL {
+    #if os(macOS)
+    let profile = userProfile.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
+    return applicationSupportDirectory
+      .appendingPathComponent(bundleIdentifier ?? "chat.inline", isDirectory: true)
       .appendingPathComponent("NativeUploads", isDirectory: true)
+      .appendingPathComponent(profile, isDirectory: true)
+    #else
+    return applicationSupportDirectory.appendingPathComponent("NativeUploads", isDirectory: true)
+    #endif
+  }
+
+  /// The unscoped folder earlier macOS builds staged into. Other builds and profiles may still
+  /// use it, so it only gets the age-based prune every build applies.
+  static var legacySharedRoot: URL? {
+    #if os(macOS)
+    FileHelpers.getApplicationSupportDirectory().appendingPathComponent("NativeUploads", isDirectory: true)
+    #else
+    nil
+    #endif
   }
 }
 

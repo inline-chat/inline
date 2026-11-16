@@ -89,6 +89,34 @@ struct MediaSessionLifetimeTests {
     await FileDownloader.shared.resetSession()
   }
 
+  @Test("a failed upload attempt keeps the progress stream open for the retry")
+  func failedAttemptKeepsProgressStreamOpen() async {
+    await FileUploader.shared.cancelAll()
+    let id = "document_9950001"
+    // Values arrive on the uploader's executor, so record them without actor isolation.
+    let early = StageRecorder(), late = StageRecorder()
+    let subscription = await FileUploader.shared
+      .documentProgressPublisherBox(documentLocalId: 9_950_001)
+      .publisher
+      .sink(receiveCompletion: { _ in early.finish() }, receiveValue: { early.append($0.stage) })
+    await FileUploader.shared.publishProgressForTesting(.uploading(id: id, bytesSent: 10, totalBytes: 100))
+    await FileUploader.shared.publishProgressForTesting(.failed(id: id, error: URLError(.timedOut)))
+    // A view that binds while the send waits to retry gets the live stream, not a finished one.
+    let lateSubscription = await FileUploader.shared
+      .documentProgressPublisherBox(documentLocalId: 9_950_001)
+      .publisher
+      .sink { late.append($0.stage) }
+    await FileUploader.shared.publishProgressForTesting(.uploading(id: id, bytesSent: 50, totalBytes: 100))
+    #expect(!early.finished)
+    await FileUploader.shared.publishProgressForTesting(.completed(id: id, totalBytes: 100))
+    #expect(early.stages == [.processing, .uploading, .failed, .uploading, .completed])
+    #expect(late.stages == [.failed, .uploading, .completed])
+    #expect(early.finished)
+    subscription.cancel()
+    lateSubscription.cancel()
+    await FileUploader.shared.cancelAll()
+  }
+
   @Test("rapid media publisher resubscription stays connected")
   @MainActor
   func rapidMediaPublisherResubscriptionStaysConnected() async {
@@ -130,4 +158,15 @@ struct MediaSessionLifetimeTests {
       await Task.yield()
     }
   }
+}
+
+private final class StageRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var values: [UploadProgressStage] = []
+  private var done = false
+
+  func append(_ stage: UploadProgressStage) { lock.withLock { values.append(stage) } }
+  func finish() { lock.withLock { done = true } }
+  var stages: [UploadProgressStage] { lock.withLock { values } }
+  var finished: Bool { lock.withLock { done } }
 }
