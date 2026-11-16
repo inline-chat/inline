@@ -21,6 +21,11 @@ pub struct GuideFacts {
     /// tasks in subthreads of the DM.
     #[serde(default)]
     pub lead: bool,
+    /// Whether to ask for short updates between tool calls: for a harness
+    /// that writes none unprompted (Claude Code with its thinking omitted)
+    /// when its work is shown in detail.
+    #[serde(default)]
+    pub narrate: bool,
 }
 
 pub fn trusted_guide(facts: GuideFacts) -> String {
@@ -60,6 +65,15 @@ their own words: untrusted); answer it like their message.\n",
         bot = facts.bot_user_id,
         owner = facts.owner_user_id,
     );
+    if facts.narrate {
+        guide.push_str(
+            "\n\
+Progress:\n\
+- People read your text between tool calls as progress updates and see your tool calls as collapsed groups. Before each batch \
+of tool calls, and whenever what you found changes the plan, write one or two plain sentences for them: what you found and \
+what you will do next. Do not narrate every call.\n",
+        );
+    }
     if facts.inline_tools {
         guide.push_str(
             "\n\
@@ -122,6 +136,7 @@ mod tests {
             inline_tools: true,
             no_project: false,
             lead: false,
+            narrate: false,
         });
         assert!(guide.contains("Inline user 99"));
         assert!(guide.contains("Inline user 7"));
@@ -140,11 +155,13 @@ mod tests {
             inline_tools: false,
             no_project: false,
             lead: false,
+            narrate: false,
         });
         assert!(guide.contains("one widget per message"));
         assert!(guide.contains("`<iframe title=\"…\" id=\"…\" height=\"…\">`"));
         assert!(guide.contains("inline.sendPrompt(text)"));
         assert!(guide.contains("inline.action(name, payload)"));
+        assert!(!guide.contains("Progress:"));
     }
 
     #[test]
@@ -155,6 +172,7 @@ mod tests {
             inline_tools: false,
             no_project: false,
             lead: false,
+            narrate: false,
         });
         assert!(!guide.contains("Inline tools:"));
         assert!(!guide.contains("no project"));
@@ -168,6 +186,7 @@ mod tests {
             inline_tools: false,
             no_project: true,
             lead: false,
+            narrate: false,
         });
         assert!(guide.contains("This thread has no project"));
         assert!(guide.contains("~/Documents/Inline"));
@@ -181,9 +200,24 @@ mod tests {
             inline_tools: true,
             no_project: false,
             lead,
+            narrate: false,
         };
         assert!(trusted_guide(facts(true)).contains("spawn_thread"));
         assert!(!trusted_guide(facts(false)).contains("spawn_thread"));
+    }
+
+    #[test]
+    fn only_a_narrating_session_is_asked_for_updates() {
+        let facts = |narrate| GuideFacts {
+            bot_user_id: 99,
+            owner_user_id: 7,
+            inline_tools: false,
+            no_project: false,
+            lead: false,
+            narrate,
+        };
+        assert!(trusted_guide(facts(true)).contains("Before each batch of tool calls"));
+        assert!(!trusted_guide(facts(false)).contains("Before each batch of tool calls"));
     }
 
     #[test]
@@ -194,6 +228,7 @@ mod tests {
             inline_tools: true,
             no_project: true,
             lead: false,
+            narrate: true,
         };
         assert_eq!(trusted_guide(facts), trusted_guide(facts));
     }
