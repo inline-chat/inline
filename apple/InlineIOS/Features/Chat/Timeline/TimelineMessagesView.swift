@@ -5,6 +5,7 @@ import InlineKit
 import InlineMessageLayout
 import InlineUI
 import Logger
+import Translation
 import UIKit
 
 /// The message list on `InlineTimeline`, hosted by `ChatContainerView` behind the
@@ -86,6 +87,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var affordance = MessagesCollectionView.ScrollAffordanceState()
   private var lastReadPass: CFTimeInterval = 0
 
+  // Translation
+  private let translation: TranslationViewModel
+  private var hasDetectedLanguages = false
+
   private struct Plan {
     var revision: UInt64
     var environment: UInt64
@@ -126,6 +131,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     )
     list = TimelineListView(rows: TimelineRows(height: { _, _ in 0 }, make: { _, _ in UIView() }))
     menuActions = MessageMenuActions(peerId: peer, spaceId: spaceId, theme: theme)
+    translation = TranslationViewModel(peerId: peer)
     super.init(frame: .zero)
     setUpMenu()
     backgroundColor = .clear
@@ -159,6 +165,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
     viewModel.rowFeed.isPublishing = true
     viewModel.rowFeed.updates.sink { [weak self] update in self?.apply(update) }.store(in: &cancellables)
+    TranslationState.shared.subject.sink { [weak self] peer, enabled in
+      guard let self, peer == self.peer else { return }
+      translationToggled(enabled)
+    }.store(in: &cancellables)
     NotificationCenter.default.addObserver(
       self, selector: #selector(scrollToRepliedMessage(_:)), name: Notification.Name("ScrollToRepliedMessage"),
       object: nil
@@ -520,13 +530,36 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   /// Theme, text size or direction changed: every row is planned again where it stands.
-  private func environmentChanged() {
+  private func environmentChanged(timing: TimelineTiming = .none) {
     environmentRevision &+= 1
     plans.removeAll()
     legacyHeights.removeAll()
     heights.removeAll()
     guard let snapshot else { return }
-    list.apply(TimelineTransaction(changed: Set(snapshot.ids)))
+    list.apply(TimelineTransaction(changed: Set(snapshot.ids), timing: timing))
+  }
+
+  // MARK: - Translation
+
+  /// Messages loaded or changed are offered for translation, as the collection view offers them; the
+  /// translations arrive as message updates. The first batch also detects the chat's languages.
+  private func offerForTranslation(_ ids: some Sequence<ChatRowID>) {
+    guard let snapshot else { return }
+    let messages = ids.compactMap { snapshot.row(for: $0)?.content.message }.filter { !$0.message.isServiceMessage }
+    guard !messages.isEmpty else { return }
+    translation.messagesDisplayed(messages: messages)
+    if !hasDetectedLanguages {
+      hasDetectedLanguages = true
+      let peer = peer
+      Task { await TranslationDetector.shared.analyzeMessages(peer: peer, messages: messages) }
+    }
+  }
+
+  /// Translation was turned on or off for this chat: every row is shown again in the other text where
+  /// it stands, and turning it on asks for the loaded messages' translations.
+  private func translationToggled(_ enabled: Bool) {
+    environmentChanged(timing: Self.rowTiming)
+    if enabled, let snapshot { offerForTranslation(snapshot.ids) }
   }
 
   func applyTheme(_ theme: IOSThemeSnapshot) {
@@ -559,6 +592,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     list.apply(TimelineTransaction(rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll))
     readPass(force: true)
+    offerForTranslation(snapshot.ids)
   }
 
   private func coverage(_ snapshot: ChatRowSnapshot) -> TimelineCoverage {
@@ -609,6 +643,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     if case .jump = snapshot.reason { highlightPendingFocus() }
     viewModel.ensureThreadAnchorCached()
     readPass(force: true)
+    offerForTranslation(diff.insertions.map(\.id) + diff.updates.map(\.id))
   }
 
   /// The server id of a message on screen, to tell which way a jump to another window goes.

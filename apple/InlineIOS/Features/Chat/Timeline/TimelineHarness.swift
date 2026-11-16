@@ -3,6 +3,7 @@ import InlineIOSUI
 import InlineKit
 import InlineTheme
 import SwiftUI
+import Translation
 import UIKit
 
 /// Debug builds only: `--chatlist-harness` opens the production chat screen with the timeline list
@@ -131,6 +132,13 @@ private struct TimelineHarnessScreen: View {
           Button("Stream") { model.runAsync { try await $0.stream(steps: 120, every: .milliseconds(50)) } }
           Button("Delete newest") { model.run { try $0.deleteNewest() } }
           Button("Collapse history") { model.box.container?.setCollapsedMaxId(380) }
+          Button("Translate newest") { model.run { try $0.translateNewest(language: UserLocale.getCurrentLanguage()) } }
+          Button("Toggle translation") {
+            guard let peer = model.fixture?.peer else { return }
+            // Locally only: the harness is signed out, so the preference is never sent.
+            let preferences = AppDatabase.shared.translationPreferences
+            preferences.begin(!preferences.isEnabled(for: peer), for: peer, intent: UUID())
+          }
           Button("Jump far up") {
             model.box.container?.focusMessage(40, requestRevision: Int.random(in: 1 ... 1_000_000), requiresExactMessage: false)
           }
