@@ -659,7 +659,7 @@ final class NewVideoView: UIView {
         case .uploading, .completed:
           durationBadge.text = uploadProgressLabel(uploadProgressSnapshot)
         case .failed:
-          durationBadge.text = "Failed"
+          durationBadge.text = uploadProgressSnapshot.pendingRetryDescription
         }
       } else {
         durationBadge.text = "Processing"

@@ -33,6 +33,11 @@ final class BackgroundSends {
 
   private var connectionRetained = false
   private var retentionTail: Task<Void, Never>?
+  private var pendingRelease: Task<Void, Never>?
+  /// On return the hold outlives the connection manager's own "active" signal, which arrives
+  /// after `willEnterForeground`: released before it, with the background lease long gone, the
+  /// manager would close the transport and break the upload in flight.
+  static let foregroundReleaseDelay: Duration = .seconds(3)
 
   private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
   private var backgroundTaskUsed = false
@@ -63,6 +68,14 @@ final class BackgroundSends {
       .store(in: &cancellables)
   }
 
+  /// A push woke the app: as Telegram does, sends still pending get another stretch of
+  /// background time.
+  func pushReceived() {
+    guard !inForeground, backgroundTask == .invalid else { return }
+    backgroundTaskUsed = false
+    update()
+  }
+
   private func setForeground(_ value: Bool) {
     guard value != inForeground else { return }
     inForeground = value
@@ -90,6 +103,26 @@ final class BackgroundSends {
     var holdsTime = backgroundTask != .invalid
     if #available(iOS 26.0, *), continuedTask?.launched == true { holdsTime = true }
     let retain = !inForeground && !pending.isEmpty && holdsTime
+    if retain {
+      pendingRelease?.cancel()
+      pendingRelease = nil
+      setConnectionRetained(true)
+    } else if connectionRetained, inForeground {
+      guard pendingRelease == nil else { return }
+      pendingRelease = Task { [weak self] in
+        try? await Task.sleep(for: Self.foregroundReleaseDelay)
+        guard !Task.isCancelled, let self else { return }
+        pendingRelease = nil
+        setConnectionRetained(false)
+      }
+    } else {
+      pendingRelease?.cancel()
+      pendingRelease = nil
+      setConnectionRetained(false)
+    }
+  }
+
+  private func setConnectionRetained(_ retain: Bool) {
     guard retain != connectionRetained else { return }
     connectionRetained = retain
     let previous = retentionTail
@@ -174,15 +207,8 @@ final class BackgroundSends {
   private func submitContinuedTaskIfUploading() async {
     // Only for uploads that are moving: a send waiting for the network would show a stalled
     // task the system may expire, and expiry deletes.
-    var uploading = false
-    for send in pending where !uploading {
-      for media in send.media {
-        if let fraction = await FileUploader.shared.uploadFraction(for: media), fraction > 0, fraction < 1 {
-          uploading = true
-          break
-        }
-      }
-    }
+    let fractions = await FileUploader.shared.uploadFractions(for: pending.flatMap(\.media))
+    let uploading = fractions.contains { ($0 ?? 0) > 0 && ($0 ?? 0) < 1 }
     guard uploading, !inForeground, !pending.isEmpty, continuedTask == nil,
           let bundleID = Bundle.main.bundleIdentifier else { return }
     nextContinuedNumber += 1
@@ -232,19 +258,6 @@ final class BackgroundSends {
   fileprivate var pendingSends: [PendingMediaSend] { pending }
   fileprivate var isInForeground: Bool { inForeground }
 
-  /// Deletes unsent messages and cancels their uploads, as the user's cancel would. The
-  /// synchronous part (cancel markers, transaction cancel) runs before this returns.
-  fileprivate static func delete(_ sends: [PendingMediaSend]) {
-    for send in sends {
-      if let message = try? FullMessage.get(messageId: send.temporaryMessageId, chatId: send.chatId),
-         PendingMessageCanceller.cancel(message)
-      {
-        continue
-      }
-      Transactions.shared.cancel(transactionId: send.transactionId)
-    }
-  }
-
   static func title(count: Int) -> String {
     count == 1 ? "Sending 1 message" : "Sending \(count) messages"
   }
@@ -262,8 +275,12 @@ private final class ContinuedSends {
   private(set) var launched = false
   private var task: BGContinuedProcessingTask?
   private var sendIDs: Set<String> = []
-  /// Upload fractions seen on the last report.
+  /// Upload fractions seen on the last report, and when each send's last went up.
   private var lastFractions: [String: Double] = [:]
+  private var lastMoved: [String: ContinuousClock.Instant] = [:]
+  /// A send whose upload hasn't moved for this long is waiting (network lost mid-upload), not
+  /// uploading, and expiry leaves it queued.
+  static let movingWindow: Duration = .seconds(15)
   private var stoppedByApp = false
   private var ended = false
   private var progress = PendingSendsProgress()
@@ -322,16 +339,21 @@ private final class ContinuedSends {
   }
 
   private func report(_ sends: [PendingMediaSend]) async {
+    // One hop to the uploader for every item.
+    var values = await FileUploader.shared.uploadFractions(for: sends.flatMap(\.media))[...]
     var fractions: [String: Double] = [:]
     for send in sends {
-      var sum = 0.0
-      for media in send.media {
-        sum += await FileUploader.shared.uploadFraction(for: media) ?? 0
-      }
+      let items = values.prefix(send.media.count)
+      values = values.dropFirst(send.media.count)
+      let sum = items.reduce(0.0) { $0 + ($1 ?? 0) }
       fractions[send.transactionId] = send.media.isEmpty ? 0 : sum / Double(send.media.count)
     }
     guard !ended, let task else { return }
     sendIDs.formUnion(fractions.keys)
+    let now = ContinuousClock.now
+    for (id, fraction) in fractions where fraction > (lastFractions[id] ?? 0) {
+      lastMoved[id] = now
+    }
     lastFractions = fractions
     progress.update(fractions)
     let units = progress.units
@@ -348,14 +370,20 @@ private final class ContinuedSends {
     ended = true
     loop?.cancel()
     if !stoppedByApp {
-      // Only sends of this task whose upload was under way. One still waiting for the network
-      // stays queued, and one whose upload finished is already being sent: leave it.
+      // Only sends of this task whose upload was moving. One waiting for the network (never
+      // started, or stalled when the connection dropped) stays queued, and one whose upload
+      // finished is already being sent: leave both.
+      let now = ContinuousClock.now
       let unsent = PendingMediaSends.shared.current.filter { send in
-        guard sendIDs.contains(send.transactionId), let fraction = lastFractions[send.transactionId] else { return false }
-        return fraction > 0 && fraction < 1
+        let id = send.transactionId
+        guard sendIDs.contains(id), let fraction = lastFractions[id], fraction > 0, fraction < 1,
+              let moved = lastMoved[id] else { return false }
+        return now - moved < Self.movingWindow
       }
       Log.scoped("BackgroundSends").warning("Continued processing task expired; deleting \(unsent.count) unsent messages")
-      BackgroundSends.delete(unsent)
+      // Rows go before the task completes: the process may be killed right after, and a row
+      // still sending would be resumed on the next launch.
+      PendingMediaSends.deleteUnsent(unsent)
     }
     task?.setTaskCompleted(success: false)
     owner?.continuedTaskEnded(self)
