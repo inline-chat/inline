@@ -11,7 +11,7 @@ final class UserAvatarView: UIView {
   private var widthConstraint: NSLayoutConstraint?
   private var heightConstraint: NSLayoutConstraint?
   private var currentRenderSignature: RenderSignature?
-  private var hostingController: UIHostingController<UserAvatar>?
+  private var hostingController: UIHostingController<MessageViaAvatar<UserAvatar>>?
 
   private struct RenderSignature: Equatable {
     let userId: Int64
@@ -24,6 +24,7 @@ final class UserAvatarView: UIView {
     let remoteURL: URL?
     let localPath: String?
     let size: CGFloat
+    let viaMark: MessageViaPresentation.Mark?
   }
 
   // MARK: - Initialization
@@ -55,15 +56,16 @@ final class UserAvatarView: UIView {
 
   // MARK: - Configuration
 
-  func configure(with userInfo: UserInfo, size: CGFloat = 32) {
+  /// `viaMark` pins an agent badge to the avatar when an agent sent the message for this user.
+  func configure(with userInfo: UserInfo, size: CGFloat = 32, viaMark: MessageViaPresentation.Mark? = nil) {
     self.size = size
     configureSize()
 
-    let renderSignature = Self.renderSignature(for: userInfo, size: size)
+    let renderSignature = Self.renderSignature(for: userInfo, size: size, viaMark: viaMark)
     guard currentRenderSignature != renderSignature else { return }
 
     currentRenderSignature = renderSignature
-    updateAvatar(with: userInfo)
+    updateAvatar(with: userInfo, viaMark: viaMark)
   }
 
   // MARK: - Private Configuration Methods
@@ -84,11 +86,13 @@ final class UserAvatarView: UIView {
     }
   }
 
-  private func updateAvatar(with userInfo: UserInfo) {
-    let rootView = UserAvatar(
-      userInfo: userInfo,
-      size: size
-    )
+  private func updateAvatar(with userInfo: UserInfo, viaMark: MessageViaPresentation.Mark?) {
+    let rootView = MessageViaAvatar(avatarSize: size, mark: viaMark, ringColor: Color(uiColor: .systemBackground)) {
+      UserAvatar(
+        userInfo: userInfo,
+        size: size
+      )
+    }
 
     if let hostingController {
       hostingController.rootView = rootView
@@ -121,7 +125,11 @@ final class UserAvatarView: UIView {
     }
   }
 
-  private static func renderSignature(for userInfo: UserInfo, size: CGFloat) -> RenderSignature {
+  private static func renderSignature(
+    for userInfo: UserInfo,
+    size: CGFloat,
+    viaMark: MessageViaPresentation.Mark?
+  ) -> RenderSignature {
     let user = userInfo.user
     return RenderSignature(
       userId: user.id,
@@ -133,7 +141,8 @@ final class UserAvatarView: UIView {
       avatarIdentity: userInfo.stableAvatarIdentity,
       remoteURL: user.getRemoteURL(),
       localPath: user.profileLocalPath,
-      size: size
+      size: size,
+      viaMark: viaMark
     )
   }
 }

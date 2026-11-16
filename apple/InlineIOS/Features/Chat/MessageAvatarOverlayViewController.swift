@@ -13,6 +13,8 @@ enum MessageAvatarOverlayConfig {
 struct MessageAvatarOverlayItem {
   let stableId: Int64
   let userInfo: UserInfo
+  /// Agent badge when an agent sent this group for the user.
+  var viaMark: MessageViaPresentation.Mark? = nil
   let frame: CGRect
   let viewportFrame: CGRect
   let limitFrame: CGRect
@@ -218,11 +220,11 @@ private final class MessageAvatarOverlayView: UIView {
     let entry: Entry
 
     if let current = active[item.stableId] {
-      current.view.configure(with: item.userInfo, size: size)
+      current.view.configure(with: item.userInfo, size: size, viaMark: item.viaMark)
       current.reuseKey = key
       entry = current
     } else {
-      entry = dequeueEntry(for: item.userInfo, key: key, size: size)
+      entry = dequeueEntry(for: item.userInfo, key: key, size: size, viaMark: item.viaMark)
       addSubview(entry.view)
       active[item.stableId] = entry
     }
@@ -276,7 +278,12 @@ private final class MessageAvatarOverlayView: UIView {
     )
   }
 
-  private func dequeueEntry(for userInfo: UserInfo, key: ReuseKey, size: CGFloat) -> Entry {
+  private func dequeueEntry(
+    for userInfo: UserInfo,
+    key: ReuseKey,
+    size: CGFloat,
+    viaMark: MessageViaPresentation.Mark?
+  ) -> Entry {
     if var entries = pool[key], let entry = entries.popLast() {
       pooledViewCount = max(0, pooledViewCount - 1)
       if entries.isEmpty {
@@ -284,14 +291,14 @@ private final class MessageAvatarOverlayView: UIView {
       } else {
         pool[key] = entries
       }
-      entry.view.configure(with: userInfo, size: size)
+      entry.view.configure(with: userInfo, size: size, viaMark: viaMark)
       entry.reuseKey = key
       return entry
     }
 
     let view = UserAvatarView()
     view.translatesAutoresizingMaskIntoConstraints = true
-    view.configure(with: userInfo, size: size)
+    view.configure(with: userInfo, size: size, viaMark: viaMark)
     return Entry(view: view, reuseKey: key)
   }
 

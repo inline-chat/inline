@@ -172,8 +172,10 @@ struct MessageViewContent {
     if let inline = rich?.inlineActionIDs, !inline.isEmpty {
       blocks = MessageBlock.excludingActions(inline, from: blocks, message: model, traits: traits)
     }
+    // The last message of an agent's run reads "Sent via Codex · 10:04".
+    let via = context.isLastInGroup && !context.isThreadAnchor ? message.viaPresentation : nil
     let time = MessageText(NSAttributedString(
-      string: timeFormatter.string(from: model.date),
+      string: (via.map { "\($0.label) · " } ?? "") + timeFormatter.string(from: model.date),
       attributes: [
         .font: ChatTypography.font(11, style: .caption2, compatibleWith: traits),
         .foregroundColor: secondaryColor,
