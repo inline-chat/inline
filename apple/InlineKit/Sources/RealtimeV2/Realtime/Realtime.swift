@@ -153,6 +153,7 @@ public actor RealtimeV2 {
   private var acceptsTransactions: Bool
   private var isPreparingForTermination = false
   private var mediaRetentionRevision: UInt64 = 0
+  private var sendRetentionHeld = false
   private var transactionRetryTask: Task<Void, Never>?
   private struct HistoryCompletion {
     let transactionID: TransactionId
@@ -1818,6 +1819,19 @@ public actor RealtimeV2 {
           (try? auth.validateAccountMutation(accountToken)) != nil else { return }
     mediaRetentionRevision &+= 1
     await connectionManager.setMediaRetention(eligible: eligible, revision: mediaRetentionRevision)
+  }
+
+  /// Keeps the connection open, past the background grace, while the app holds background time
+  /// for sends in progress. Release it when that time ends: a suspended process can't use the
+  /// socket, and a held one skips the reconnect on return.
+  public func setSendRetention(_ retain: Bool) async {
+    guard retain != sendRetentionHeld, !(retain && isPreparingForTermination) else { return }
+    sendRetentionHeld = retain
+    if retain {
+      await connectionManager.beginUserInitiatedOperation()
+    } else {
+      await connectionManager.endUserInitiatedOperation()
+    }
   }
 
   /// Bounded user-requested work (for example system automation) on the existing account owner.

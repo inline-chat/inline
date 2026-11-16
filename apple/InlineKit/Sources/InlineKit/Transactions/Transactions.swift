@@ -444,9 +444,13 @@ public protocol Transaction: Codable, Sendable, Identifiable {
 
   /// Rollback changes from local cache that happened in optimistic
   func rollback() async
+
+  /// Set for a message send with attachments, so background time can follow it.
+  var pendingMediaSend: PendingMediaSend? { get }
 }
 
 extension Transaction {
+  public var pendingMediaSend: PendingMediaSend? { nil }
   public func retryLimit(for error: Error) -> Int { config.maxRetries }
   public func waitsForConnection(after error: Error) -> Bool { false }
   public func retryDelay(afterAttempt attempt: Int, error: Error) -> TimeInterval { config.retryDelay }
