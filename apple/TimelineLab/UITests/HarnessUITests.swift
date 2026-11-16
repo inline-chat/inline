@@ -20,7 +20,14 @@ final class HarnessUITests: XCTestCase {
     if ProcessInfo.processInfo.environment["HARNESS_ATTACH"] == "1" { app.activate() } else { app.launch() }
     _ = app.buttons["Script"].waitForExistence(timeout: 10)
     Thread.sleep(forTimeInterval: 1.5)
+    // Read once: a query per gesture would delay it.
+    screen = app.windows.firstMatch.frame.size
+    barBottom = app.navigationBars.firstMatch.frame.maxY
+    print("[UITEST] screen \(screen) bar bottom \(barBottom)")
   }
+
+  var screen = CGSize.zero
+  var barBottom: CGFloat = 0
 
   func shot(_ name: String) {
     let a = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -30,8 +37,28 @@ final class HarnessUITests: XCTestCase {
     print("[UITEST] shot \(name) t=\(String(format: "%.3f", Date().timeIntervalSince1970))")
   }
 
+  /// Coordinates are written for the SE (375 x 667, bar bottom 64, composer top 595). On another phone a
+  /// point keeps its place relative to the screen's width and to the band between the bar and the composer;
+  /// points above the bar keep their distance from the bar's bottom, points below the composer from the
+  /// screen's bottom.
   func coord(_ x: CGFloat, _ y: CGFloat) -> XCUICoordinate {
-    app.windows.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y))
+    let size = screen
+    var point = CGPoint(x: x, y: y)
+    if size.height > 0, abs(size.height - 667) > 1, size.height > size.width {
+      let barBottom: CGFloat = 64, composerTop: CGFloat = 595
+      // Phones with a home indicator keep 34 pt under the composer.
+      let newBarBottom = self.barBottom > 0 ? self.barBottom : 106
+      let newComposerTop = size.height - (size.height >= 812 ? 34 : 0) - (667 - composerTop)
+      point.x = x * size.width / 375
+      if y <= barBottom {
+        point.y = y + (newBarBottom - barBottom)
+      } else if y >= composerTop {
+        point.y = newComposerTop + (y - composerTop)
+      } else {
+        point.y = newBarBottom + (y - barBottom) * (newComposerTop - newBarBottom) / (composerTop - barBottom)
+      }
+    }
+    return app.windows.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y))
   }
 
   /// Press, drag at `v` pt/s, hold, lift. With no hold the finger lifts while moving: a fling.
