@@ -1218,6 +1218,38 @@ message Message {
   // The viewer's message, with reactions they haven't seen. Set on history
   // results only; absent elsewhere.
   optional bool unread_reactions = 29;
+
+  // The agent that sent this message for its sender. Absent when the sender
+  // sent it themselves. Older clients ignore it and show a plain message.
+  optional MessageVia via = 30;
+}
+
+// Who sent a message for its sender, shown as "Sent via <name>". Set by the
+// server from a known agent list or a bot the sender owns; never free text.
+message MessageVia {
+  oneof source {
+    // Known agent id, such as "claude-code", "codex", "chatgpt" or "agent"
+    // for an unnamed one.
+    string app = 1;
+    // A bot the sender owns. Clients show its name and avatar.
+    int64 bot_user_id = 2;
+  }
+  // Name to show: the agent's ("Claude Code", "an AI agent"), or the bot's
+  // name when the message was sent. Like a forward's from_name, it lets people
+  // who can't see the bot, and apps built before an agent was added, still
+  // read who signed.
+  optional string name = 3;
+}
+
+// How a message names the agent sending it for its sender. Ignored when a
+// bot sends; an app id the server doesn't know is sent as an unnamed agent.
+message InputMessageVia {
+  oneof source {
+    // Known agent id; unknown ids are sent as "agent".
+    string app = 1;
+    // A bot the sender owns; any other bot is rejected.
+    int64 bot_user_id = 2;
+  }
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -4587,6 +4619,10 @@ message SendMessageInput {
   // them, before the message is sent, so the message reaches them. Threads
   // only; mentions in DMs and public threads are never added.
   optional bool add_mentioned_users = 15;
+
+  // The agent sending this for the sender, shown as "Sent via <name>". Absent
+  // when the sender sends it themselves.
+  optional InputMessageVia via = 16;
 }
 
 message SendMessageResult {

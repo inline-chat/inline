@@ -7832,11 +7832,119 @@ public nonisolated struct Message: @unchecked Sendable {
   /// Clears the value of `unreadReactions`. Subsequent reads from it will return its default value.
   public mutating func clearUnreadReactions() {_uniqueStorage()._unreadReactions = nil}
 
+  /// The agent that sent this message for its sender. Absent when the sender
+  /// sent it themselves. Older clients ignore it and show a plain message.
+  public var via: MessageVia {
+    get {_storage._via ?? MessageVia()}
+    set {_uniqueStorage()._via = newValue}
+  }
+  /// Returns true if `via` has been explicitly set.
+  public var hasVia: Bool {_storage._via != nil}
+  /// Clears the value of `via`. Subsequent reads from it will return its default value.
+  public mutating func clearVia() {_uniqueStorage()._via = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Who sent a message for its sender, shown as "Sent via <name>". Set by the
+/// server from a known agent list or a bot the sender owns; never free text.
+public nonisolated struct MessageVia: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var source: MessageVia.OneOf_Source? = nil
+
+  /// Known agent id, such as "claude-code", "codex", "chatgpt" or "agent"
+  /// for an unnamed one.
+  public var app: String {
+    get {
+      if case .app(let v)? = source {return v}
+      return String()
+    }
+    set {source = .app(newValue)}
+  }
+
+  /// A bot the sender owns. Clients show its name and avatar.
+  public var botUserID: Int64 {
+    get {
+      if case .botUserID(let v)? = source {return v}
+      return 0
+    }
+    set {source = .botUserID(newValue)}
+  }
+
+  /// Name to show: the agent's ("Claude Code", "an AI agent"), or the bot's
+  /// name when the message was sent. Like a forward's from_name, it lets people
+  /// who can't see the bot, and apps built before an agent was added, still
+  /// read who signed.
+  public var name: String {
+    get {_name ?? String()}
+    set {_name = newValue}
+  }
+  /// Returns true if `name` has been explicitly set.
+  public var hasName: Bool {self._name != nil}
+  /// Clears the value of `name`. Subsequent reads from it will return its default value.
+  public mutating func clearName() {self._name = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Source: Equatable, Sendable {
+    /// Known agent id, such as "claude-code", "codex", "chatgpt" or "agent"
+    /// for an unnamed one.
+    case app(String)
+    /// A bot the sender owns. Clients show its name and avatar.
+    case botUserID(Int64)
+
+  }
+
+  public init() {}
+
+  fileprivate var _name: String? = nil
+}
+
+/// How a message names the agent sending it for its sender. Ignored when a
+/// bot sends; an app id the server doesn't know is sent as an unnamed agent.
+public nonisolated struct InputMessageVia: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var source: InputMessageVia.OneOf_Source? = nil
+
+  /// Known agent id; unknown ids are sent as "agent".
+  public var app: String {
+    get {
+      if case .app(let v)? = source {return v}
+      return String()
+    }
+    set {source = .app(newValue)}
+  }
+
+  /// A bot the sender owns; any other bot is rejected.
+  public var botUserID: Int64 {
+    get {
+      if case .botUserID(let v)? = source {return v}
+      return 0
+    }
+    set {source = .botUserID(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Source: Equatable, Sendable {
+    /// Known agent id; unknown ids are sent as "agent".
+    case app(String)
+    /// A bot the sender owns; any other bot is rejected.
+    case botUserID(Int64)
+
+  }
+
+  public init() {}
 }
 
 public nonisolated struct AgentSessionMessageInfo: Sendable {
@@ -20976,6 +21084,17 @@ public nonisolated struct SendMessageInput: @unchecked Sendable {
   public var hasAddMentionedUsers: Bool {_storage._addMentionedUsers != nil}
   /// Clears the value of `addMentionedUsers`. Subsequent reads from it will return its default value.
   public mutating func clearAddMentionedUsers() {_uniqueStorage()._addMentionedUsers = nil}
+
+  /// The agent sending this for the sender, shown as "Sent via <name>". Absent
+  /// when the sender sends it themselves.
+  public var via: InputMessageVia {
+    get {_storage._via ?? InputMessageVia()}
+    set {_uniqueStorage()._via = newValue}
+  }
+  /// Returns true if `via` has been explicitly set.
+  public var hasVia: Bool {_storage._via != nil}
+  /// Clears the value of `via`. Subsequent reads from it will return its default value.
+  public mutating func clearVia() {_uniqueStorage()._via = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -35130,7 +35249,7 @@ nonisolated extension BlockPromptSuggestion: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}counts_as_unread\0\u{3}reply_quote\0\u{3}unread_mention\0\u{3}unread_reactions\0\u{4}S]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}counts_as_unread\0\u{3}reply_quote\0\u{3}unread_mention\0\u{3}unread_reactions\0\u{1}via\0\u{4}R]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -35163,6 +35282,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _replyQuote: String? = nil
     var _unreadMention: Bool? = nil
     var _unreadReactions: Bool? = nil
+    var _via: MessageVia? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -35203,6 +35323,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _replyQuote = source._replyQuote
       _unreadMention = source._unreadMention
       _unreadReactions = source._unreadReactions
+      _via = source._via
     }
   }
 
@@ -35250,6 +35371,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 27: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
         case 28: try { try decoder.decodeSingularBoolField(value: &_storage._unreadMention) }()
         case 29: try { try decoder.decodeSingularBoolField(value: &_storage._unreadReactions) }()
+        case 30: try { try decoder.decodeSingularMessageField(value: &_storage._via) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -35350,6 +35472,9 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._unreadReactions {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 29)
       } }()
+      try { if let v = _storage._via {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -35392,10 +35517,130 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._replyQuote != rhs_storage._replyQuote {return false}
         if _storage._unreadMention != rhs_storage._unreadMention {return false}
         if _storage._unreadReactions != rhs_storage._unreadReactions {return false}
+        if _storage._via != rhs_storage._via {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageVia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageVia"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}app\0\u{3}bot_user_id\0\u{1}name\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.source != nil {try decoder.handleConflictingOneOf()}
+          self.source = .app(v)
+        }
+      }()
+      case 2: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.source != nil {try decoder.handleConflictingOneOf()}
+          self.source = .botUserID(v)
+        }
+      }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._name) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.source {
+    case .app?: try {
+      guard case .app(let v)? = self.source else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    }()
+    case .botUserID?: try {
+      guard case .botUserID(let v)? = self.source else { preconditionFailure() }
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try { if let v = self._name {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageVia, rhs: MessageVia) -> Bool {
+    if lhs.source != rhs.source {return false}
+    if lhs._name != rhs._name {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension InputMessageVia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "InputMessageVia"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}app\0\u{3}bot_user_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.source != nil {try decoder.handleConflictingOneOf()}
+          self.source = .app(v)
+        }
+      }()
+      case 2: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.source != nil {try decoder.handleConflictingOneOf()}
+          self.source = .botUserID(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.source {
+    case .app?: try {
+      guard case .app(let v)? = self.source else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    }()
+    case .botUserID?: try {
+      guard case .botUserID(let v)? = self.source else { preconditionFailure() }
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: InputMessageVia, rhs: InputMessageVia) -> Bool {
+    if lhs.source != rhs.source {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -55630,7 +55875,7 @@ nonisolated extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendMessageInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{3}initial_agent_context\0\u{3}source_chat_id\0\u{3}block_content\0\u{3}reply_quote\0\u{3}add_mentioned_users\0\u{4}Y\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{3}initial_agent_context\0\u{3}source_chat_id\0\u{3}block_content\0\u{3}reply_quote\0\u{3}add_mentioned_users\0\u{1}via\0\u{4}X\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _peerID: InputPeer? = nil
@@ -55650,6 +55895,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _blockContent: BlockContent? = nil
     var _replyQuote: String? = nil
     var _addMentionedUsers: Bool? = nil
+    var _via: InputMessageVia? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -55677,6 +55923,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       _blockContent = source._blockContent
       _replyQuote = source._replyQuote
       _addMentionedUsers = source._addMentionedUsers
+      _via = source._via
     }
   }
 
@@ -55710,6 +55957,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._blockContent) }()
         case 14: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._addMentionedUsers) }()
+        case 16: try { try decoder.decodeSingularMessageField(value: &_storage._via) }()
         case 1000: try { try decoder.decodeSingularInt64Field(value: &_storage._temporarySendDate) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
@@ -55769,6 +56017,9 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       try { if let v = _storage._addMentionedUsers {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 15)
       } }()
+      try { if let v = _storage._via {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
+      } }()
       try { if let v = _storage._temporarySendDate {
         try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
       } }()
@@ -55801,6 +56052,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._blockContent != rhs_storage._blockContent {return false}
         if _storage._replyQuote != rhs_storage._replyQuote {return false}
         if _storage._addMentionedUsers != rhs_storage._addMentionedUsers {return false}
+        if _storage._via != rhs_storage._via {return false}
         return true
       }
       if !storagesAreEqual {return false}
