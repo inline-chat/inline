@@ -560,7 +560,7 @@ final class TimelineRowView: UIView {
 
   /// The views that slide with the finger.
   private var swipedViews: [UIView] {
-    [messageView.flatMap { $0.isHidden ? nil : $0 }, legacyView, legacyName].compactMap(\.self)
+    [messageView.flatMap { $0.isHidden ? nil : $0 }, legacyView, legacyName, legacyAvatar].compactMap(\.self)
   }
 
   @objc private func handleSwipe(_ pan: UIPanGestureRecognizer) {

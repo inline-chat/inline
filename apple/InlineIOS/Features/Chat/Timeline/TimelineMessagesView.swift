@@ -260,6 +260,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     datePill.passesTouches = { [weak self] in self.map { $0.list.isTracking || $0.list.isDecelerating } ?? false }
     addSubview(datePill)
 
+    // As the collection view drew them: the unread line under its day's badge.
+    viewModel.rowFeed.unreadLineFollowsDay = true
     if isPreview {
       viewModel.rowFeed.setUnreadBoundary(nil)
     } else {
@@ -1720,7 +1722,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// Saves where the reader is when the newest message is off screen, and clears it otherwise.
   private func saveReadingPlace() {
     guard !isPreview, hasOpened, let snapshot else { return }
-    if !viewModel.canLoadNewerFromLocal, distanceFromBottom <= 12 {
+    // The newest message on screen at all: there is no place to keep, as the collection view decided.
+    if !viewModel.canLoadNewerFromLocal,
+       let newest = snapshot.rows.last(where: { $0.content.message != nil })?.id,
+       list.layout.visible.contains(where: { $0.id == newest })
+    {
       ChatReadingPlaceStore.shared.clear(for: peer)
       return
     }
