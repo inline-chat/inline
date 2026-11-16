@@ -1936,6 +1936,8 @@ impl Actor {
                     inline_tools: self.agent.tools.is_some(),
                     no_project,
                     lead: self.chat_id == self.agent.dm_chat_id,
+                    narrate: self.renderer.mode() == OutputMode::Detailed
+                        && self.renderer.vocabulary() == Vocabulary::Claude,
                 })),
                 title: None,
                 after: None,

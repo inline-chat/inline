@@ -3,9 +3,12 @@
 //! Pure: the runtime feeds envelopes in order and performs the returned
 //! operations (send, edit, reply), coalescing progress edits as today.
 //!
-//! - **Detailed**: every item the harness reports, in its own vocabulary and
-//!   order, as collapsible rows (sub-agent rows nest their items), plus a
-//!   separate final answer.
+//! - **Detailed**: the agent's prose between calls, and the calls between two
+//!   pieces of prose as one group titled in the harness's words ("Read 3
+//!   files, ran 2 commands"), each call a collapsible row inside it (sub-agent
+//!   rows nest their items), plus a separate final answer. Reasoning is never
+//!   a row: Codex's headers are the live status, and Claude's thinking that
+//!   has text is prose.
 //! - **Friendly**: no progress cards; only the harness's short prose updates
 //!   (Codex commentary and reasoning summaries, Claude's text between tools and
 //!   `SendUserMessage`), then the final answer.
@@ -189,6 +192,10 @@ impl Renderer {
 
     pub(crate) fn mode(&self) -> OutputMode {
         self.mode
+    }
+
+    pub(crate) fn vocabulary(&self) -> Vocabulary {
+        self.vocabulary
     }
 
     pub(crate) fn set_mode(&mut self, mode: OutputMode) {
@@ -456,7 +463,7 @@ impl Renderer {
             .iter()
             .take_while(|&&index| {
                 let row = &slot.rows[index];
-                !matches!(row.status, Status::Running | Status::Waiting) || !shows(row)
+                !matches!(row.status, Status::Running | Status::Waiting) || !self.shows(row)
             })
             .count();
         // A longer prefix is never smaller, so the longest that fits is found
@@ -765,7 +772,9 @@ impl Renderer {
             started_at: *started_at,
             text,
         });
-        builder.progress("Working", true, elapsed, |inner| self.write_rows(inner));
+        builder.progress(&self.status_line(), true, elapsed, |inner| {
+            self.write_rows(inner)
+        });
         if let Some(steps) = &self.plan {
             blocks::plan::pinned(&mut builder, steps, false);
         }
@@ -778,140 +787,149 @@ impl Renderer {
         }
     }
 
-    /// Top-level rows in phases and runs, as v1 and Codex draw a turn: a
-    /// reasoning summary heads the work that follows it, and runs of
-    /// exploration, finished commands and edits fold into one row each.
+    /// Top-level rows as Claude Code and Codex draw a turn: the agent's own
+    /// prose stays as text, and the calls between two pieces of prose form
+    /// one group titled in the harness's words. Reasoning never splits a
+    /// group: Claude's thinking that has text is written for the reader, so
+    /// it is prose, and Codex's reasoning headers are the live status.
     fn write_slot(&self, builder: &mut DocBuilder, slot: &Slot) {
-        let rows: Vec<&Row> = slot
+        let mut group: Vec<&Row> = Vec::new();
+        for row in slot
             .rows
             .iter()
-            .filter(|row| row.parent.is_none() && shows(row))
-            .collect();
-        let mut start = 0;
-        while start < rows.len() {
-            let end = rows[start + 1..]
-                .iter()
-                .position(|row| starts_phase(row))
-                .map_or(rows.len(), |offset| start + 1 + offset);
-            if starts_phase(rows[start]) && end > start + 1 {
-                self.write_phase(builder, slot, rows[start], &rows[start + 1..end]);
-            } else if starts_phase(rows[start]) {
-                self.write_row(builder, slot, rows[start]);
+            .filter(|row| row.parent.is_none() && self.shows(row))
+        {
+            if self.is_prose(row) {
+                self.write_group(builder, slot, &group);
+                group.clear();
+                self.write_row(builder, slot, row);
             } else {
-                self.write_runs(builder, slot, &rows[start..end]);
+                group.push(row);
             }
-            start = end;
         }
+        self.write_group(builder, slot, &group);
     }
 
-    fn write_phase(&self, builder: &mut DocBuilder, slot: &Slot, head: &Row, rows: &[&Row]) {
-        let Some(ItemBody::Reasoning { summary, .. }) = &head.body else {
+    /// One group: a lone call, or one run of reads and searches, as itself;
+    /// more under a title such as "Read 3 files, ran 2 commands".
+    fn write_group(&self, builder: &mut DocBuilder, slot: &Slot, rows: &[&Row]) {
+        let units = units(rows);
+        let running = rows
+            .iter()
+            .any(|row| matches!(row.status, Status::Running | Status::Waiting));
+        let title = (units.len() > 1)
+            .then(|| group_title(self.vocabulary, rows, running))
+            .filter(|title| !title.is_empty());
+        let Some(title) = title else {
+            for unit in &units {
+                self.write_unit(builder, slot, unit);
+            }
             return;
         };
-        let text = summary.join("\n\n");
-        let title = first_line(&text, 80);
-        let busy = std::iter::once(head)
-            .chain(rows.iter().copied())
-            .any(|row| matches!(row.status, Status::Running | Status::Waiting));
-        let status = if busy { Status::Running } else { Status::Done };
-        builder.disclosure(&title, None, ActivityKind::Reasoning, status, |inner| {
-            if text.trim() != title {
-                inner.paragraph(&tail(&text));
-            }
-            self.write_runs(inner, slot, rows);
-        });
+        let (added, removed) = rows
+            .iter()
+            .filter_map(|row| match &row.body {
+                Some(ItemBody::FileChange { changes }) => Some(changes.iter()),
+                _ => None,
+            })
+            .flatten()
+            .map(line_counts)
+            .fold((0, 0), |(a, r), (added, removed)| (a + added, r + removed));
+        let status = if rows.iter().any(|row| row.status == Status::Waiting) {
+            Status::Waiting
+        } else if running {
+            Status::Running
+        } else {
+            Status::Done
+        };
+        builder.disclosure(
+            &title,
+            counts_meta(added, removed).as_deref(),
+            self.group_activity(rows),
+            status,
+            |inner| {
+                for unit in &units {
+                    self.write_unit(inner, slot, unit);
+                }
+            },
+        );
     }
 
-    fn write_runs(&self, builder: &mut DocBuilder, slot: &Slot, rows: &[&Row]) {
-        let mut index = 0;
-        while index < rows.len() {
-            let fold = self.fold_of(rows[index]);
-            let mut end = index + 1;
-            if fold != Fold::None {
-                while end < rows.len() && self.fold_of(rows[end]) == fold {
-                    end += 1;
-                }
+    /// A run of reads and searches folds into one row as the harness folds
+    /// it (Claude Code leaves a lone read as its own row); any other call is
+    /// its own row.
+    fn write_unit(&self, builder: &mut DocBuilder, slot: &Slot, unit: &[&Row]) {
+        if explores(unit) && (self.vocabulary != Vocabulary::Claude || unit.len() > 1) {
+            self.write_explore(builder, unit);
+        } else {
+            for row in unit {
+                self.write_row(builder, slot, row);
             }
-            let run = &rows[index..end];
-            match fold {
-                Fold::Explore if self.vocabulary == Vocabulary::Codex || run.len() > 1 => {
-                    self.write_explore(builder, run);
-                }
-                Fold::Command if run.len() > 1 => {
-                    let total: u64 = run
-                        .iter()
-                        .filter_map(|row| match &row.body {
-                            Some(ItemBody::Command { duration_ms, .. }) => *duration_ms,
-                            _ => None,
-                        })
-                        .sum();
-                    let meta = (total > 0).then(|| elapsed_text(total.max(1000)));
-                    let title = format!("Ran {} commands", run.len());
-                    builder.disclosure(
-                        &title,
-                        meta.as_deref(),
-                        ActivityKind::Command,
-                        Status::Done,
-                        |inner| {
-                            for row in run {
-                                self.write_row(inner, slot, row);
-                            }
-                        },
-                    );
-                }
-                Fold::Edit if run.len() > 1 => {
-                    let changes: Vec<&FileDiff> = run
-                        .iter()
-                        .filter_map(|row| match &row.body {
-                            Some(ItemBody::FileChange { changes }) => Some(changes.iter()),
-                            _ => None,
-                        })
-                        .flatten()
-                        .collect();
-                    let (added, removed) = changes
-                        .iter()
-                        .map(|change| line_counts(change))
-                        .fold((0, 0), |(a, r), (added, removed)| (a + added, r + removed));
-                    let files = changes
-                        .iter()
-                        .map(|change| &change.path)
-                        .collect::<std::collections::HashSet<_>>()
-                        .len();
-                    let title = if files == 1 {
-                        "Edited 1 file".to_owned()
-                    } else {
-                        format!("Edited {files} files")
-                    };
-                    builder.disclosure(
-                        &title,
-                        counts_meta(added, removed).as_deref(),
-                        ActivityKind::Edit,
-                        Status::Done,
-                        |inner| {
-                            for row in run {
-                                self.write_row(inner, slot, row);
-                            }
-                        },
-                    );
-                }
-                _ => {
-                    for row in run {
-                        self.write_row(builder, slot, row);
-                    }
-                }
-            }
-            index = end;
         }
     }
 
-    fn fold_of(&self, row: &Row) -> Fold {
-        match &row.body {
-            Some(body) if is_exploration(body) => Fold::Explore,
-            Some(ItemBody::Command {
-                exit_code: Some(0), ..
-            }) if row.status == Status::Done => Fold::Command,
-            Some(ItemBody::FileChange { .. }) if row.status == Status::Done => Fold::Edit,
-            _ => Fold::None,
+    /// The group's icon: its rows' kind when they share one.
+    fn group_activity(&self, rows: &[&Row]) -> ActivityKind {
+        let mut kinds = rows
+            .iter()
+            .filter_map(|row| row.body.as_ref().map(activity));
+        let Some(first) = kinds.next() else {
+            return ActivityKind::Unspecified;
+        };
+        if kinds.all(|kind| kind == first) {
+            first
+        } else {
+            ActivityKind::Unspecified
+        }
+    }
+
+    /// Rows a message shows: an answer, a text still in doubt, or reasoning
+    /// is not one, except Claude's thinking that has text, which is an
+    /// update written for the reader (Claude Code omits its real thinking).
+    fn shows(&self, row: &Row) -> bool {
+        let held_message = row.kind == ItemKind::Message
+            && (row.phase == Some(AgentMessagePhase::FinalAnswer)
+                || row.phase.is_none() && row.body.is_some());
+        let hidden_reasoning = row.kind == ItemKind::Reasoning
+            && (self.vocabulary != Vocabulary::Claude || reasoning_text(row).is_none());
+        // The main agent's task list is pinned under the rows instead; a
+        // review goes out as its own message.
+        let pinned_plan = row.parent.is_none()
+            && matches!(&row.body, Some(ItemBody::Plan { steps, .. }) if !steps.is_empty());
+        let review = row.kind == ItemKind::Review;
+        !(held_message || hidden_reasoning || pinned_plan || review)
+    }
+
+    /// The agent's text between calls: commentary, and Claude's thinking
+    /// that has text.
+    fn is_prose(&self, row: &Row) -> bool {
+        row.kind == ItemKind::Message
+            || self.vocabulary == Vocabulary::Claude && row.kind == ItemKind::Reasoning
+    }
+
+    /// The live status while working: Codex's latest reasoning header, as
+    /// its status line shows it, or "Thinking" while Claude thinks.
+    fn status_line(&self) -> String {
+        let Some(slot) = &self.slot else {
+            return "Working".to_owned();
+        };
+        let mut tops = slot.rows.iter().filter(|row| row.parent.is_none());
+        match self.vocabulary {
+            Vocabulary::Claude => match tops.next_back() {
+                Some(row)
+                    if row.kind == ItemKind::Reasoning
+                        && row.status == Status::Running
+                        && reasoning_text(row).is_none() =>
+                {
+                    "Thinking".to_owned()
+                }
+                _ => "Working".to_owned(),
+            },
+            _ => tops
+                .rev()
+                .filter(|row| row.kind == ItemKind::Reasoning)
+                .find_map(reasoning_header)
+                .unwrap_or_else(|| "Working".to_owned()),
         }
     }
 
@@ -974,6 +992,13 @@ impl Renderer {
             builder.paragraph(&inline_agent_bridge::widget::preview(&text));
             return;
         }
+        // Claude's thinking that has text is an update, so it reads as prose.
+        if row.kind == ItemKind::Reasoning {
+            if let Some(text) = reasoning_text(row) {
+                builder.paragraph(&tail(&text));
+            }
+            return;
+        }
         let Some(body) = row.body.clone() else {
             // Streaming before the first snapshot: show the text as it grows.
             let label = match row.kind {
@@ -1004,7 +1029,7 @@ impl Renderer {
                 .rows
                 .iter()
                 .filter(|candidate| {
-                    candidate.parent.as_deref() == Some(child.id.as_str()) && shows(candidate)
+                    candidate.parent.as_deref() == Some(child.id.as_str()) && self.shows(candidate)
                 })
                 .collect(),
             _ => Vec::new(),
@@ -1018,38 +1043,231 @@ impl Renderer {
     }
 }
 
-/// How a row joins its neighbours in a run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Fold {
-    Explore,
-    Command,
-    Edit,
-    None,
+/// Rows in order, with each run of reads, searches and listings together.
+fn units<'a>(rows: &[&'a Row]) -> Vec<Vec<&'a Row>> {
+    let mut units: Vec<Vec<&Row>> = Vec::new();
+    for &row in rows {
+        match units.last_mut() {
+            Some(last) if explores(&[row]) && explores(last) => last.push(row),
+            _ => units.push(vec![row]),
+        }
+    }
+    units
 }
 
-/// Rows a message shows: an answer, a text still in doubt, or thinking with
-/// no text (Claude's omitted thinking, Codex reasoning without a summary) is
-/// not one.
-fn shows(row: &Row) -> bool {
-    let held_message = row.kind == ItemKind::Message
-        && (row.phase == Some(AgentMessagePhase::FinalAnswer)
-            || row.phase.is_none() && row.body.is_some());
-    let silent_reasoning = row.kind == ItemKind::Reasoning
-        && row.delta.trim().is_empty()
-        && match &row.body {
-            Some(ItemBody::Reasoning { summary, .. }) => !has_text(summary),
-            _ => true,
+/// A call's kind, for a group's icon; reads and searches are exploring.
+fn activity(body: &ItemBody) -> ActivityKind {
+    match body {
+        _ if is_exploration(body) => ActivityKind::Explore,
+        ItemBody::Command { .. } => ActivityKind::Command,
+        ItemBody::FileChange { .. } => ActivityKind::Edit,
+        ItemBody::Tool { name, .. } => tool_activity(name),
+        ItemBody::Child { .. } => ActivityKind::Agent,
+        _ => ActivityKind::Unspecified,
+    }
+}
+
+fn tool_activity(name: &str) -> ActivityKind {
+    match name {
+        "Read" | "view_image" => ActivityKind::Read,
+        "Grep" | "Glob" => ActivityKind::Search,
+        "WebFetch" | "WebSearch" | "web_search" => ActivityKind::Web,
+        _ => ActivityKind::Tool,
+    }
+}
+
+fn explores(rows: &[&Row]) -> bool {
+    rows.iter()
+        .all(|row| row.body.as_ref().is_some_and(is_exploration))
+}
+
+/// A group's title in the harness's words: Claude Code counts ("Edited 2
+/// files, read 3 files, ran 4 commands…" while live), the Codex app names
+/// the kinds ("Read files, edited files, ran commands").
+fn group_title(vocabulary: Vocabulary, rows: &[&Row], running: bool) -> String {
+    let mut tally = Tally::default();
+    for row in rows {
+        tally.add(row);
+    }
+    let parts = match vocabulary {
+        Vocabulary::Claude => tally.claude(running),
+        Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => tally.codex(running),
+    };
+    let line = parts.join(", ");
+    let mut title = line
+        .get(..1)
+        .map(|first| first.to_uppercase() + &line[1..])
+        .unwrap_or(line);
+    if running && vocabulary == Vocabulary::Claude && !title.is_empty() {
+        title.push('…');
+    }
+    title
+}
+
+/// What a group did, by kind.
+#[derive(Default)]
+struct Tally {
+    files: Vec<PathBuf>,
+    searches: usize,
+    reads: usize,
+    lists: usize,
+    /// MCP calls by server, in first-call order.
+    servers: Vec<(String, usize)>,
+    agents: usize,
+    loads: usize,
+    tools: usize,
+    commands: usize,
+}
+
+impl Tally {
+    fn add(&mut self, row: &Row) {
+        let Some(body) = &row.body else {
+            return;
         };
-    // The main agent's task list is pinned under the rows instead; a review
-    // goes out as its own message.
-    let pinned_plan = row.parent.is_none()
-        && matches!(&row.body, Some(ItemBody::Plan { steps, .. }) if !steps.is_empty());
-    let review = row.kind == ItemKind::Review;
-    !(held_message || silent_reasoning || pinned_plan || review)
+        match body {
+            ItemBody::FileChange { changes } => {
+                for change in changes {
+                    if !self.files.contains(&change.path) {
+                        self.files.push(change.path.clone());
+                    }
+                }
+            }
+            ItemBody::Command { actions, .. } if is_exploration(body) => {
+                for action in actions {
+                    match action {
+                        CommandAction::Read { .. } => self.reads += 1,
+                        CommandAction::Search { .. } => self.searches += 1,
+                        CommandAction::ListFiles { .. } => self.lists += 1,
+                        CommandAction::Unknown { .. } => {}
+                    }
+                }
+            }
+            ItemBody::Command { .. } => self.commands += 1,
+            ItemBody::Tool {
+                server: Some(server),
+                ..
+            } => match self.servers.iter_mut().find(|(name, _)| name == server) {
+                Some((_, count)) => *count += 1,
+                None => self.servers.push((server.clone(), 1)),
+            },
+            ItemBody::Tool { name, .. } => match name.as_str() {
+                "Grep" | "Glob" => self.searches += 1,
+                "Read" => self.reads += 1,
+                "LS" => self.lists += 1,
+                "ToolSearch" => self.loads += 1,
+                _ => self.tools += 1,
+            },
+            ItemBody::Child { .. } => self.agents += 1,
+            ItemBody::Plan { .. } => self.tools += 1,
+            _ => {}
+        }
+    }
+
+    /// Claude Code's order and words: "edited 2 files, searched for 1
+    /// pattern, read 3 files, called inline 2 times, ran 4 commands".
+    fn claude(&self, running: bool) -> Vec<String> {
+        let counted = |count: usize, (live, done): (&str, &str), one: &str, many: &str| {
+            (count > 0).then(|| {
+                let verb = if running { live } else { done };
+                let noun = if count == 1 { one } else { many };
+                format!("{verb} {count} {noun}")
+            })
+        };
+        let mut parts: Vec<Option<String>> = vec![
+            counted(self.files.len(), ("editing", "edited"), "file", "files"),
+            counted(
+                self.searches,
+                ("searching for", "searched for"),
+                "pattern",
+                "patterns",
+            ),
+            counted(self.reads, ("reading", "read"), "file", "files"),
+            counted(
+                self.lists,
+                ("listing", "listed"),
+                "directory",
+                "directories",
+            ),
+        ];
+        for (server, count) in &self.servers {
+            let verb = if running { "calling" } else { "called" };
+            let times = if *count == 1 {
+                "once".to_owned()
+            } else {
+                format!("{count} times")
+            };
+            parts.push(Some(format!("{verb} {server} {times}")));
+        }
+        parts.push(counted(self.agents, ("running", "ran"), "agent", "agents"));
+        let loaded = if running {
+            "loading tools"
+        } else {
+            "loaded tools"
+        };
+        parts.push((self.loads > 0).then(|| loaded.to_owned()));
+        parts.push(counted(self.tools, ("calling", "called"), "tool", "tools"));
+        parts.push(counted(
+            self.commands,
+            ("running", "ran"),
+            "command",
+            "commands",
+        ));
+        parts.into_iter().flatten().collect()
+    }
+
+    /// The Codex app's kind words, without counts.
+    fn codex(&self, running: bool) -> Vec<String> {
+        let word = |count: usize, (live, done): (&str, &str), one: &str, many: &str| {
+            (count > 0).then(|| {
+                let verb = if running { live } else { done };
+                let noun = if count == 1 { one } else { many };
+                format!("{verb} {noun}")
+            })
+        };
+        let calls =
+            self.servers.iter().map(|(_, count)| count).sum::<usize>() + self.loads + self.tools;
+        [
+            word(
+                self.reads + self.searches + self.lists,
+                ("reading", "read"),
+                "a file",
+                "files",
+            ),
+            word(self.files.len(), ("editing", "edited"), "a file", "files"),
+            word(self.commands, ("running", "ran"), "a command", "commands"),
+            word(self.agents, ("running", "ran"), "an agent", "agents"),
+            word(calls, ("calling", "called"), "a tool", "tools"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
 }
 
-fn starts_phase(row: &Row) -> bool {
-    matches!(&row.body, Some(ItemBody::Reasoning { summary, .. }) if has_text(summary))
+/// Reasoning text, summary or streamed, when it has any.
+fn reasoning_text(row: &Row) -> Option<String> {
+    let text = match &row.body {
+        Some(ItemBody::Reasoning { summary, .. }) if has_text(summary) => summary.join("\n\n"),
+        _ => row.delta.clone(),
+    };
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// The header a reasoning summary leads with: its last bold title
+/// ("**Tracing the lock error**"), or its first line.
+fn reasoning_header(row: &Row) -> Option<String> {
+    let text = reasoning_text(row)?;
+    let segments: Vec<&str> = text.split("**").collect();
+    let bold = (1..segments.len().saturating_sub(1))
+        .step_by(2)
+        .rev()
+        .map(|index| segments[index].trim())
+        .find(|segment| !segment.is_empty());
+    let header = match bold {
+        Some(bold) => first_line(bold, 80),
+        None => first_line(&text, 80),
+    };
+    (!header.is_empty()).then_some(header)
 }
 
 fn has_text(parts: &[String]) -> bool {
@@ -1463,13 +1681,7 @@ fn row_title(
                     None => name.clone(),
                 },
             };
-            let activity = match name.as_str() {
-                "Read" | "view_image" => ActivityKind::Read,
-                "Grep" | "Glob" => ActivityKind::Search,
-                "WebFetch" | "WebSearch" | "web_search" => ActivityKind::Web,
-                _ => ActivityKind::Tool,
-            };
-            (title, None, activity)
+            (title, None, tool_activity(name))
         }
         ItemBody::Plan { steps, .. } if steps.is_empty() => (
             "Proposed a plan".to_owned(),
@@ -2322,27 +2534,192 @@ mod tests {
     }
 
     #[test]
-    fn codex_work_nests_under_its_reasoning_and_runs_fold_in_codex_words() {
+    fn codex_work_groups_between_commentary_in_codex_words() {
         let text = codex_turn(true);
         assert!(text.starts_with("Worked for 2m 14s\n"), "{text}");
         for expected in [
-            "Tracing the lock error",
+            "Read files, edited a file, ran commands · +2 −1",
             "Explored",
             "Read helpers.rs, bridge.rs",
             // A search that found nothing exits 1 and is not a failure.
             "Search try_lock in cli/src\n",
-            "Fixing the retry",
             "Edited cli/src/bridge/backoff.rs · +2 −1",
             "Ran cargo test -p inline-cli · exit 101",
-            "Ran 2 commands",
+            "Ran cargo fmt",
         ] {
             assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
+        }
+        // Reasoning headers are the live status, never rows.
+        for absent in [
+            "Tracing the lock error",
+            "Fixing the retry",
+            "Ran 2 commands",
+        ] {
+            assert!(!text.contains(absent), "{absent:?} in:\n{text}");
         }
         assert!(
             !text.contains("/work/"),
             "paths are relative to the folder:\n{text}"
         );
         assert!(!text.contains("failed"), "the later run fixed it:\n{text}");
+    }
+
+    fn started(id: &str, body: ItemBody) -> Event {
+        Event::Item(Item::new(
+            ItemId::new(id).expect("id"),
+            None,
+            ItemUpdate::Started { body },
+            Value::Null,
+        ))
+    }
+
+    fn working_title(ops: &[RenderOp]) -> String {
+        let doc = ops
+            .iter()
+            .rev()
+            .find_map(|op| match op {
+                RenderOp::Progress { doc, .. } => Some(doc),
+                _ => None,
+            })
+            .expect("progress");
+        doc.text.lines().next().unwrap_or_default().to_owned()
+    }
+
+    #[test]
+    fn codex_shows_its_latest_reasoning_header_as_the_live_status() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1_000,
+                    reasoning(
+                        "r1",
+                        "**Tracing the lock error**\n\nThe retry holds the lock across the await.",
+                    ),
+                ),
+                (2_000, started("c1", ran("1", None))),
+            ],
+        );
+        assert!(
+            working_title(&ops).starts_with("Tracing the lock error · "),
+            "{ops:?}"
+        );
+        let doc = match ops.last() {
+            Some(RenderOp::Progress { doc, .. }) => doc,
+            other => panic!("{other:?}"),
+        };
+        assert!(!doc.text.contains("holds the lock"), "{}", doc.text);
+    }
+
+    #[test]
+    fn claude_shows_thinking_while_it_thinks_without_text() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let thinking = ItemBody::Reasoning {
+            summary: Vec::new(),
+            content: Vec::new(),
+        };
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1_000, started("m1:0", thinking)),
+            ],
+        );
+        assert!(working_title(&ops).starts_with("Thinking · "), "{ops:?}");
+        let ops = run(&mut renderer, vec![(2_000, command("toolu_1"))]);
+        assert!(working_title(&ops).starts_with("Working · "), "{ops:?}");
+    }
+
+    #[test]
+    fn claude_prose_splits_its_work_into_groups_titled_with_counts() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        renderer.set_folder("/work".into());
+        let tool = |id: &str, name: &str, input: Value| {
+            completed(
+                id,
+                ItemBody::Tool {
+                    name: name.to_owned(),
+                    server: None,
+                    input,
+                    output: Some("ok".to_owned()),
+                    error: None,
+                },
+                None,
+            )
+        };
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1,
+                    tool("t1", "Grep", serde_json::json!({"pattern": "try_lock"})),
+                ),
+                (
+                    2,
+                    tool(
+                        "t2",
+                        "Read",
+                        serde_json::json!({"file_path": "/work/cli/src/helpers.rs"}),
+                    ),
+                ),
+                (
+                    3,
+                    tool(
+                        "t3",
+                        "Read",
+                        serde_json::json!({"file_path": "/work/cli/src/bridge.rs"}),
+                    ),
+                ),
+                (4, shell("t4", "cargo test", 101)),
+                (
+                    5,
+                    completed(
+                        "m1:0",
+                        message("The retry holds the lock. Fixing it."),
+                        None,
+                    ),
+                ),
+                (6, edited("t5", "/work/cli/src/bridge/backoff.rs")),
+                (7, shell("t6", "cargo test", 0)),
+                // Thinking that has text is written for the reader.
+                (8, reasoning("m2:0", "Tests pass. Checking the formatting.")),
+                (9, shell("t7", "cargo fmt --check", 0)),
+                (10, completed("m3:0", message("Fixed."), None)),
+                (
+                    11,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: Some(11_000),
+                    }),
+                ),
+            ],
+        );
+        let text = ended_text(&ops);
+        let expected = [
+            "Searched for 1 pattern, read 2 files, ran 1 command",
+            "Searched for 1 pattern, read 2 files",
+            "Read cli/src/helpers.rs",
+            "Bash cargo test · exit 101",
+            "The retry holds the lock. Fixing it.",
+            "Edited 1 file, ran 1 command · +2 −1",
+            "Edit cli/src/bridge/backoff.rs · +2 −1",
+            "Tests pass. Checking the formatting.",
+            "Bash cargo fmt --check",
+        ];
+        let mut from = 0;
+        for line in expected {
+            let at = text[from..]
+                .find(line)
+                .unwrap_or_else(|| panic!("missing {line:?} after {from} in:\n{text}"));
+            from += at + line.len();
+        }
+        assert!(!text.contains("Fixed."), "the answer is its own message");
+        assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Fixed."));
     }
 
     #[test]
