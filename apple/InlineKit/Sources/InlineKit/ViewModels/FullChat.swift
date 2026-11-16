@@ -99,7 +99,10 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     return groupedDictionary.enumerated().map { _, item in
       let (emoji, reactions) = item
       return GroupedReaction(emoji: emoji, reactions: reactions)
-    }.sorted { $0.maxDate < $1.maxDate }
+    }
+    // Dictionary order differs between instances and reaction dates are whole seconds, so a tie needs
+    // its own order or the chips swap places whenever the message is rebuilt.
+    .sorted { ($0.maxDate, $0.emoji) < ($1.maxDate, $1.emoji) }
   }
 
   // stable id
