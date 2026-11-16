@@ -205,7 +205,8 @@ enum MessageFormController {
         // The account changed while sending: nothing here belongs to it.
         guard store.generation == generation else { return }
         MessageActionInteractionState.shared.attachInteractionId(interactionID, for: loadingKey)
-        store.setPhase(.submitted, key: key)
+        // Keeps the sent answers on the card, secrets excepted.
+        store.markSubmitted(key, secretFieldIDs: MessageFormAnswers.secretFieldIDs(form))
       } catch {
         guard store.generation == generation else { return }
         MessageActionInteractionState.shared.fail(key: loadingKey)
