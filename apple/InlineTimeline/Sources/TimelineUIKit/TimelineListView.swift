@@ -184,6 +184,17 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   public var onScrollEnded: (() -> Void)?
   /// The finger's release velocity can be replaced (zero when another gesture consumed the drag).
   public var releaseVelocityFilter: ((CGFloat) -> CGFloat)?
+  /// The status bar was tapped. Setting it makes the list take the tap, as a scroll view with
+  /// `scrollsToTop` would; the host decides where that goes.
+  public var onScrollToTop: (() -> Void)? {
+    didSet { scrollToTopProxy.action = onScrollToTop }
+  }
+  /// A thin indicator at the trailing edge of the usable area while the list moves.
+  public var showsScrollIndicator = true {
+    didSet { if !showsScrollIndicator { hideIndicator(animated: false) } }
+  }
+  /// What VoiceOver says after it paged the list towards this edge; nil says the list's own words.
+  public var accessibilityPageDescription: ((TimelineEdge) -> String?)?
 
   public private(set) var isTracking = false
   /// When a finger last caught a fling. A touch that stops a moving list is not a press on a row.
@@ -224,6 +235,19 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// The screen a far jump left, sliding out while the destination slides in ("carousel"). In
   /// viewport space, under the content, so a finger on the new rows does not drag it.
   private var carouselExit: UIView?
+
+  // Scroll indicator, status bar, accessibility
+  private let indicatorView = TimelineScrollIndicatorView()
+  private var indicator = TimelineIndicator(progress: 1)
+  /// The thumb's length, kept while the row count, coverage and track stay, so it does not
+  /// twitch as rows are measured.
+  private var indicatorLength: CGFloat = 0
+  private var indicatorLengthKey: IndicatorLengthKey?
+  /// The thumb's path during the running flight: its place `progress` at the flight displacement
+  /// `applied`, moved from there by the rule of `TimelineIndicator` with `extent` as measured then.
+  private var indicatorFlight: (start: CFTimeInterval, progress: CGFloat, extent: TimelineIndicator.Extent, applied: Double)?
+  private var indicatorHide: DispatchWorkItem?
+  private let scrollToTopProxy = TimelineScrollToTopProxy()
 
   private final class Slot {
     let view: UIView
@@ -277,6 +301,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
   private static var flightKey: String { "timeline.flight" }
   private static var pinKey: String { "timeline.pin" }
+  private static var indicatorFlightKey: String { "timeline.indicator.flight" }
+  private static var indicatorTrackKey: String { "timeline.indicator.track" }
   private var pinTrackCount = 0
   /// Seconds of travel realised beyond the standard margins while flinging.
   private static var lookahead: CGFloat { 0.1 }
@@ -286,12 +312,19 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     state = TimelineState(viewport: TimelineViewport(width: 0, height: 0))
     super.init(frame: .zero)
     clipsToBounds = true
+    // Under the content, which takes every touch in its place.
+    addSubview(scrollToTopProxy)
     addSubview(content)
+    addSubview(indicatorView)
     addGestureRecognizer(input.pan)
     input.pan.onTouchDown = { [weak self] in self?.catchFlight() }
     input.pan.onTouchUpWithoutPan = { [weak self] in self?.tapEnded() }
     input.onPan = { [weak self] pan in self?.handlePan(pan) }
     input.onTick = { [weak self] link in self?.tick(link) }
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(accessibilityFocusChanged(_:)), name: UIAccessibility.elementFocusedNotification,
+      object: nil
+    )
   }
 
   @available(*, unavailable)
@@ -402,6 +435,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   override public func layoutSubviews() {
     super.layoutSubviews()
     content.frame = bounds
+    scrollToTopProxy.frame = bounds
     syncOrigin()
     let viewport = viewport()
     guard viewport.width > 0, viewport.height > 0 else { return }
@@ -434,10 +468,14 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
     isApplying = true
     let width = update.viewport?.width ?? state.viewport.width
+    let extentBefore = indicatorExtent()
     let change = state.apply(update) { rows.height($0, width) }
     var scrolled: CGFloat = 0
     if case let .by(delta) = update.scroll { scrolled = delta }
-    commit(change, timing: timing, changed: changed, scrolled: scrolled, jump: jump)
+    commit(
+      change, timing: timing, changed: changed, scrolled: scrolled, jump: jump,
+      indicatorMoves: update.scroll != .preserve ? extentBefore : nil
+    )
     isApplying = false
     if !queued.isEmpty {
       let next = queued.removeFirst()
@@ -445,8 +483,10 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
   }
 
+  /// `indicatorMoves` is set for a change that scrolls, with the indicator's extent before it.
   private func commit(
-    _ change: TimelineChange<ID>, timing: TimelineTiming, changed: Set<ID>, scrolled: CGFloat, jump: TimelineEdge??
+    _ change: TimelineChange<ID>, timing: TimelineTiming, changed: Set<ID>, scrolled: CGFloat, jump: TimelineEdge??,
+    indicatorMoves: TimelineIndicator.Extent? = nil
   ) {
     let layout = change.layout
     let width = layout.viewport.width
@@ -568,6 +608,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
     updatePins(timing: animates && carousel == nil ? timing : .none)
     updateScreens(timing: animates ? timing : .none, from: screenFrom)
+    moveIndicator(change, scrolledBy: indicatorMoves.map { ($0, originDelta) }, timing: animates ? timing : .none)
     CATransaction.commit()
 
     if !change.demands.isEmpty { onDemand?(change.demands) }
@@ -841,6 +882,286 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     CATransaction.commit()
   }
 
+  // MARK: - Scroll indicator
+
+  /// Seconds the indicator stays after the list stops, and its fade.
+  private static var indicatorFadeDelay: TimeInterval { 0.5 }
+  private static var indicatorFade: TimeInterval { 0.3 }
+  private var indicatorShown = false
+  private var indicatorTrackCount = 0
+
+  private func indicatorExtent() -> TimelineIndicator.Extent {
+    // Beyond a loaded end that is not a real end, two screens stand for the unknown rest.
+    state.layout.indicatorExtent(
+      rowCount: state.rows.count, coverage: state.coverage, unknown: 2 * state.viewport.usableHeight
+    )
+  }
+
+  /// The thumb travels the usable area, inset at both ends.
+  private func indicatorTrack() -> (top: CGFloat, length: CGFloat) {
+    let viewport = state.viewport
+    let inset = TimelineScrollIndicatorView.inset
+    return (viewport.usableTop + inset, max(0, viewport.usableHeight - 2 * inset))
+  }
+
+  private func indicatorTop(_ progress: CGFloat, track: (top: CGFloat, length: CGFloat)) -> CGFloat {
+    track.top + progress * max(0, track.length - indicatorLength)
+  }
+
+  /// The thumb's place after a change: on a flight's baked path while one runs, from the estimate
+  /// when the list opens or jumps to rows it did not show, moved with the content when it scrolls,
+  /// and left where it is otherwise (rows arriving, leaving, growing; insets).
+  private func moveIndicator(
+    _ change: TimelineChange<ID>, scrolledBy scroll: (extent: TimelineIndicator.Extent, delta: CGFloat)?,
+    timing: TimelineTiming
+  ) {
+    let before = indicatorView.layer.position.y
+    // A programmatic scroll shows the thumb travelling, as UIScrollView's animated scrolls do; a
+    // hidden thumb counts as shown while it is placed, so it gets its track.
+    let reveals = timing.isAnimated && (scroll != nil || change.isDisjoint) && showsScrollIndicator
+    let wasShown = indicatorShown
+    if reveals { indicatorShown = true }
+    if let flight, let baked = indicatorFlight, baked.start == flight.start {
+      indicator.progress = TimelineIndicator.progress(
+        baked.progress, extent: baked.extent, moved: CGFloat(flight.applied - baked.applied)
+      )
+    } else if change.previous.placements.isEmpty || change.isDisjoint {
+      indicator.progress = TimelineIndicator.estimate(indicatorExtent())
+    } else if let scroll {
+      indicator.move(by: scroll.delta, extent: scroll.extent)
+    }
+    placeIndicator(timing: timing)
+    guard reveals else { return }
+    if abs(indicatorView.layer.position.y - before) > 0.5 {
+      showIndicator()
+      scheduleIndicatorHide(after: timing.duration + Self.indicatorFadeDelay)
+    } else {
+      indicatorShown = wasShown
+    }
+  }
+
+  /// Sets the thumb's model geometry: its place for the state, or a running flight's end. A change
+  /// with an animated timing moves it there with an additive track, as rows move.
+  private func placeIndicator(timing: TimelineTiming) {
+    let extent = indicatorExtent()
+    let track = indicatorTrack()
+    guard showsScrollIndicator, extent.isScrollable, track.length > TimelineScrollIndicatorView.minimumLength else {
+      indicatorView.isHidden = true
+      return
+    }
+    indicatorView.isHidden = false
+    let layer = indicatorView.layer
+    let oldTop = layer.position.y
+    let oldLength = layer.bounds.height
+    var lengthMoves = false
+    let key = IndicatorLengthKey(rows: state.rows.count, coverage: state.coverage, track: track.length)
+    if indicatorFlight == nil, !indicatorShown || indicatorLengthKey != key {
+      let length = TimelineIndicator.length(extent, track: track.length, minimum: TimelineScrollIndicatorView.minimumLength)
+      lengthMoves = indicatorShown && abs(length - indicatorLength) > 0.5
+      indicatorLength = length
+      indicatorLengthKey = key
+    }
+    var progress = indicator.progress
+    if let flight, let baked = indicatorFlight, baked.start == flight.start {
+      progress = TimelineIndicator.progress(
+        baked.progress, extent: baked.extent, moved: CGFloat(flight.path.end - baked.applied)
+      )
+    }
+    let top = indicatorTop(progress, track: track)
+    let x = bounds.width - TimelineScrollIndicatorView.inset - TimelineScrollIndicatorView.width
+    let size = CGSize(width: TimelineScrollIndicatorView.width, height: indicatorLength)
+    guard layer.position != CGPoint(x: x, y: top) || layer.bounds.size != size else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer.bounds = CGRect(origin: .zero, size: size)
+    layer.position = CGPoint(x: x, y: top)
+    if indicatorShown {
+      // Tracks stack (each from the old model value), as the rows' do.
+      let timing = lengthMoves && !timing.isAnimated
+        ? TimelineTiming.curve(duration: 0.2, c1x: 0.25, c1y: 0.1, c2x: 0.25, c2y: 1) : timing
+      for (keyPath, delta) in [("position.y", oldTop - top), ("bounds.size.height", oldLength - indicatorLength)]
+        where abs(delta) > 0.01 && (lengthMoves || keyPath == "position.y")
+      {
+        guard let track = timing.track(keyPath: keyPath, from: delta) else { continue }
+        indicatorTrackCount &+= 1
+        layer.add(track, forKey: "\(Self.indicatorTrackKey).\(indicatorTrackCount)")
+      }
+    }
+    CATransaction.commit()
+  }
+
+  private struct IndicatorLengthKey: Equatable {
+    var rows: Int
+    var coverage: TimelineCoverage
+    var track: CGFloat
+  }
+
+  /// A flight's thumb moves on the render server with the content: the flight's samples mapped to
+  /// thumb places by the indicator's rule from where it is now, on the content's clock. Linear on
+  /// each side of the start, so the thumb follows the content exactly whatever the main thread does.
+  private func bakeIndicator(_ flight: Flight) {
+    let layer = indicatorView.layer
+    layer.removeAnimation(forKey: Self.indicatorFlightKey)
+    let extent = indicatorExtent()
+    guard extent.isScrollable else {
+      indicatorFlight = nil
+      return
+    }
+    let baked = (start: flight.start, progress: indicator.progress, extent: extent, applied: flight.applied)
+    indicatorFlight = baked
+    placeIndicator(timing: .none)
+    let track = indicatorTrack()
+    let path = flight.path
+    func top(_ displacement: Double) -> CGFloat {
+      indicatorTop(
+        TimelineIndicator.progress(baked.progress, extent: extent, moved: CGFloat(displacement - baked.applied)),
+        track: track
+      )
+    }
+    let end = top(path.end)
+    var varies = false
+    let values: [NSNumber] = path.positions.map { position in
+      let offset = top(position) - end
+      if abs(offset) > 0.01 { varies = true }
+      return NSNumber(value: Double(offset))
+    }
+    guard varies, !indicatorView.isHidden else { return }
+    let animation = CAKeyframeAnimation(keyPath: "position.y")
+    animation.values = values
+    animation.duration = path.duration
+    animation.calculationMode = .linear
+    animation.isAdditive = true
+    animation.beginTime = layer.convertTime(flight.start, from: nil)
+    animation.isRemovedOnCompletion = true
+    animation.fillMode = .backwards
+    animation.preferredFrameRateRange = flightFrameRate
+    layer.add(animation, forKey: Self.indicatorFlightKey)
+  }
+
+  /// The flight stopped: the thumb leaves its path at the state's place. The scroll that brings the
+  /// state to where the content stopped moves it on from there.
+  private func endIndicatorFlight() {
+    guard indicatorFlight != nil else { return }
+    indicatorFlight = nil
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    indicatorView.layer.removeAnimation(forKey: Self.indicatorFlightKey)
+    placeIndicator(timing: .none)
+    CATransaction.commit()
+  }
+
+  private func showIndicator() {
+    indicatorHide?.cancel()
+    indicatorHide = nil
+    guard showsScrollIndicator else { return }
+    if !indicatorShown {
+      // Measured afresh while hidden: what it shows now is the current estimate's length.
+      placeIndicator(timing: .none)
+      indicatorShown = true
+    }
+    guard !indicatorView.isHidden else { return }
+    indicatorView.layer.removeAnimation(forKey: "opacity")
+    indicatorView.alpha = 1
+  }
+
+  private func scheduleIndicatorHide(after delay: TimeInterval = indicatorFadeDelay) {
+    guard indicatorShown, !isTracking, flight == nil else { return }
+    indicatorHide?.cancel()
+    let hide = DispatchWorkItem { [weak self] in self?.hideIndicator(animated: true) }
+    indicatorHide = hide
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: hide)
+  }
+
+  private func hideIndicator(animated: Bool) {
+    indicatorHide?.cancel()
+    indicatorHide = nil
+    guard !animated || (!isTracking && flight == nil) else { return }
+    indicatorShown = false
+    guard animated else {
+      indicatorView.layer.removeAnimation(forKey: "opacity")
+      indicatorView.alpha = 0
+      return
+    }
+    UIView.animate(withDuration: Self.indicatorFade, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+      self.indicatorView.alpha = 0
+    }
+  }
+
+  // MARK: - Accessibility
+
+  /// The placed rows, top to bottom. Their views are made and recycled in any order.
+  override public var accessibilityElements: [Any]? {
+    get {
+      var shown = Array(slots.values)
+      shown.append(contentsOf: lingering.values.map(\.slot))
+      shown.sort { $0.y < $1.y }
+      return shown.map(\.row)
+    }
+    set {}
+  }
+
+  /// VoiceOver's three-finger swipes: about a screen at a time, with the list's row motion. A swipe
+  /// up shows newer rows, as it shows what is below in a scroll view.
+  override public func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
+    let edge: TimelineEdge
+    switch direction {
+      case .down, .previous: edge = .older
+      case .up, .next: edge = .newer
+      default: return false
+    }
+    guard !isTracking else { return false }
+    let layout = state.layout
+    let room = edge == .older ? layout.distanceToOldest : layout.distanceToNewest
+    let isRealEnd = edge == .older ? state.coverage.reachesOldest : state.coverage.reachesNewest
+    // At a real end there is nothing to page to; VoiceOver plays its boundary sound.
+    if let room, room < 0.5, isRealEnd { return false }
+    let page = max(44, layout.viewport.usableHeight - 44)
+    apply(TimelineTransaction(scroll: .by(edge == .older ? page : -page), timing: .standard))
+    let words = accessibilityPageDescription?(edge) ?? (edge == .older ? "Older" : "Newer")
+    UIAccessibility.post(notification: .pageScrolled, argument: words)
+    return true
+  }
+
+  /// VoiceOver moved to an element of a row that is not wholly in the usable area (rows beyond the
+  /// screen are placed too): the list brings it in, as a scroll view does, which places the rows
+  /// beyond it and asks for history at a loaded end.
+  @objc private func accessibilityFocusChanged(_ note: Notification) {
+    guard window != nil, !isTracking, flight == nil,
+          let element = note.userInfo?[UIAccessibility.focusedElementUserInfoKey] as? NSObject
+    else { return }
+    revealAccessibilityElement(element)
+  }
+
+  /// Scrolls the row holding `element` into the usable area; false when it is not in a placed row.
+  @discardableResult
+  public func revealAccessibilityElement(_ element: NSObject) -> Bool {
+    var container: Any? = element
+    var view: UIView?
+    while let object = container {
+      if let found = object as? UIView {
+        view = found
+        break
+      }
+      container = (object as? UIAccessibilityElement)?.accessibilityContainer
+    }
+    guard let view, let (id, _) = slots.first(where: { view.isDescendant(of: $0.value.view) }),
+          var target = frame(for: id) else { return false }
+    // The element itself when it is smaller than its row (a line of a long message).
+    if let window {
+      let shown = convert(window.convert(element.accessibilityFrame, from: window.screen.coordinateSpace), from: window)
+      if !shown.isEmpty, shown.height < target.height { target = shown }
+    }
+    let viewport = state.viewport
+    var delta: CGFloat = 0
+    if target.minY < viewport.usableTop {
+      delta = viewport.usableTop - target.minY
+    } else if target.maxY > viewport.usableBottom {
+      delta = max(viewport.usableBottom - target.maxY, viewport.usableTop - target.minY)
+    }
+    if abs(delta) > 0.5 { apply(TimelineTransaction(scroll: .by(delta), timing: .standard)) }
+    return true
+  }
+
   // MARK: - Dragging
 
   private func handlePan(_ pan: TimelinePanGestureRecognizer) {
@@ -855,6 +1176,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         let shown = -state.layout.restShift
         let dimension = Double(max(1, state.viewport.usableHeight))
         pulled = shown == 0 ? 0 : (shown > 0 ? 1 : -1) * CGFloat(physics.rubberBandInverse(Double(abs(shown)), dimension: dimension))
+        showIndicator()
         onDragBegan?()
       case .changed:
         let translation = pan.translation(in: self).y
@@ -985,7 +1307,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     content.layer.add(animation, forKey: Self.flightKey)
     updatePins(timing: .none)
     updateScreens(timing: .none, from: [:])
+    bakeIndicator(flight)
     CATransaction.commit()
+    showIndicator()
     input.startTicking(maximumFramesPerSecond: window?.screen.maximumFramesPerSecond ?? 60)
   }
 
@@ -1072,11 +1396,14 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     self.flight = nil
     state.margins = .standard
     content.layer.removeAnimation(forKey: Self.flightKey)
+    endIndicatorFlight()
     input.stopTicking()
     scroll(by: CGFloat(position - flight.applied))
     syncOrigin()
     updatePins(timing: .none)
     updateScreens(timing: .none, from: [:])
+    // A drag beginning shows it again; a touch that only stopped the list lets it fade.
+    scheduleIndicatorHide()
   }
 
   private func endFlight(settle: Bool) {
@@ -1084,6 +1411,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     self.flight = nil
     state.margins = .standard
     content.layer.removeAnimation(forKey: Self.flightKey)
+    endIndicatorFlight()
     input.stopTicking()
     if settle {
       scroll(by: CGFloat(flight.path.end - flight.applied))
@@ -1113,6 +1441,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       }
     }
     syncOrigin()
+    scheduleIndicatorHide()
     onScrollEnded?()
   }
 }
