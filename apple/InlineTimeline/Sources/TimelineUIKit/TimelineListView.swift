@@ -62,7 +62,13 @@ public struct TimelineRowScreen {
   public func follow(_ layer: CALayer, keyPath: String, offset: (CGFloat) -> Any) {
     let key = "timeline.screen.\(keyPath)"
     if let flight {
-      if (layer.animation(forKey: key)?.value(forKey: "timelineFlight") as? CFTimeInterval) != flight.start {
+      // What one point of travel adds identifies the bake: a recycled row or a resized bubble on the
+      // same fling needs a new one.
+      let signature = String(describing: offset(1))
+      let current = layer.animation(forKey: key)
+      if (current?.value(forKey: "timelineFlight") as? CFTimeInterval) != flight.start
+        || (current?.value(forKey: "timelineSignature") as? String) != signature
+      {
         let path = flight.path
         let animation = CAKeyframeAnimation(keyPath: keyPath)
         animation.values = path.positions.map { offset(CGFloat($0 - path.end)) }
@@ -74,6 +80,7 @@ public struct TimelineRowScreen {
         animation.fillMode = .backwards
         animation.preferredFrameRateRange = flight.frameRate
         animation.setValue(flight.start, forKey: "timelineFlight")
+        animation.setValue(signature, forKey: "timelineSignature")
         layer.add(animation, forKey: key)
       }
     } else if layer.animation(forKey: key) != nil {
@@ -181,6 +188,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   public private(set) var isTracking = false
   /// When a finger last caught a fling. A touch that stops a moving list is not a press on a row.
   public private(set) var lastFlightCatch: CFTimeInterval = 0
+  /// The finger now down stopped a fling; if it lifts without dragging, the scroll ends there.
+  private var caughtFlight = false
   public var isDecelerating: Bool { flight != nil }
   public var layout: TimelineLayout<ID> { state.layout }
   public var position: TimelinePosition<ID> { state.position }
@@ -280,6 +289,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     addSubview(content)
     addGestureRecognizer(input.pan)
     input.pan.onTouchDown = { [weak self] in self?.catchFlight() }
+    input.pan.onTouchUpWithoutPan = { [weak self] in self?.tapEnded() }
     input.onPan = { [weak self] pan in self?.handlePan(pan) }
     input.onTick = { [weak self] link in self?.tick(link) }
   }
@@ -287,6 +297,17 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   @available(*, unavailable)
   public required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  /// The display link holds the input, not the list: stop it, or it ticks for good.
+  isolated deinit {
+    input.stopTicking()
+  }
+
+  /// Off screen (the chat popped or covered) a fling finishes where it was going.
+  override public func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window == nil, flight != nil { endFlight(settle: true) }
   }
 
   // MARK: - Changes
@@ -312,13 +333,16 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     } else if flight != nil {
       update.allowsOverscroll = true
     }
-    if transaction.scroll != .preserve, flight != nil, !isTracking { endFlight(settle: false) }
+    let takesOverFlight = transaction.scroll != .preserve && flight != nil && !isTracking
+    if takesOverFlight { endFlight(settle: false) }
     var jump: TimelineEdge??
     switch transaction.scroll {
       case .latest, .to: jump = .some(transaction.towards)
       case .preserve, .by: jump = nil
     }
     perform(update, timing: transaction.timing, changed: transaction.changed, jump: jump)
+    // The fling's scroll ends here; the change that took over moves the content on.
+    if takesOverFlight { onScrollEnded?() }
   }
 
   public func setInsets(top: CGFloat? = nil, bottom: CGFloat? = nil, timing: TimelineTiming = .none) {
@@ -823,6 +847,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     switch pan.state {
       case .began:
         catchFlight()
+        caughtFlight = false
         isTracking = true
         lastDragShown = nil
         input.startTicking(maximumFramesPerSecond: window?.screen.maximumFramesPerSecond ?? 60)
@@ -1028,8 +1053,16 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   }
 
   /// A finger landed: stop exactly where the content is on screen.
+  /// A finger that caught a fling lifted without dragging: the content rests where it stopped.
+  private func tapEnded() {
+    guard caughtFlight, !isTracking else { return }
+    caughtFlight = false
+    rest()
+  }
+
   private func catchFlight() {
     guard let flight else { return }
+    caughtFlight = true
     lastFlightCatch = CACurrentMediaTime()
     var position = flight.path.position(at: min(max(0, CACurrentMediaTime() - flight.start), flight.path.duration))
     if content.layer.animationKeys() == [Self.flightKey], let presented = content.layer.presentation() {

@@ -8,6 +8,8 @@ import UIKit.UIGestureRecognizerSubclass
 /// the finger at once) and keeps raw touch samples for the release velocity.
 final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
   var onTouchDown: (() -> Void)?
+  /// The finger lifted (or was cancelled) without the pan beginning: a tap.
+  var onTouchUpWithoutPan: (() -> Void)?
   private(set) var samples: [ReleaseVelocity.Sample] = []
   private(set) var releaseTime: TimeInterval = 0
 
@@ -34,7 +36,15 @@ final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
       releaseTime = touch.timestamp
       samples.append(ReleaseVelocity.Sample(time: touch.timestamp, position: Double(touch.location(in: nil).y)))
     }
+    let tapped = state == .possible
     super.touchesEnded(touches, with: event)
+    if tapped { onTouchUpWithoutPan?() }
+  }
+
+  override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+    let tapped = state == .possible
+    super.touchesCancelled(touches, with: event)
+    if tapped { onTouchUpWithoutPan?() }
   }
 
   /// The finger's vertical velocity at release, in window points per second (positive: downward).
