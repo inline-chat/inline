@@ -82,6 +82,10 @@ final class TimelineHarnessModel {
         messageCount: count, remoteFloor: uncached ? max(1, count - 30) : nil, database: .shared, publisher: .shared
       )
       TimelineMessagesView.debugCurrentUserId = fixture.currentUserId
+      // Chat state is saved in user defaults and the fixture's peer is the same every launch, so a reply
+      // left by one run would otherwise raise the composer for the next.
+      ChatState.shared.clearReplyingMessageId(peer: fixture.peer)
+      ChatState.shared.clearEditingMessageId(peer: fixture.peer)
       if uncached {
         let latency = TimelineHarnessRootView.argument("--timeline-harness-fetch-ms").flatMap(Int.init) ?? 600
         let fails = arguments.contains("--timeline-harness-fetch-fails")
