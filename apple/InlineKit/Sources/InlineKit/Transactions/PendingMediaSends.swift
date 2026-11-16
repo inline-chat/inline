@@ -1,11 +1,14 @@
 import Combine
 import Foundation
+import GRDB
 import InlineProtocol
+import Logger
 
 /// A message with attachments that is queued or sending, as the transaction runner sees it.
 public struct PendingMediaSend: Sendable {
   public let transactionId: String
   public let chatId: Int64
+  public let peerId: Peer
   public let temporaryMessageId: Int64
   public let media: [FileMediaItem]
 }
@@ -66,9 +69,46 @@ extension TransactionSendMessage {
     return PendingMediaSend(
       transactionId: id,
       chatId: chatId,
+      peerId: peerId,
       temporaryMessageId: temporaryMessageId,
       media: attachments.map(\.media)
     )
+  }
+}
+
+public extension PendingMediaSends {
+  /// Gives up on sends, as the user's cancel would, and deletes their message rows before
+  /// returning. The process may be suspended or killed right after (an expired background
+  /// task), and a row still `sending` would be resumed on the next launch.
+  @MainActor
+  static func deleteUnsent(_ sends: [PendingMediaSend], database: AppDatabase = .shared) {
+    guard !sends.isEmpty else { return }
+    for send in sends {
+      if let message = try? FullMessage.get(messageId: send.temporaryMessageId, chatId: send.chatId),
+         PendingMessageCanceller.cancel(message)
+      {
+        continue
+      }
+      Transactions.shared.cancel(transactionId: send.transactionId)
+    }
+    let deleted: [PendingMediaSend]
+    do {
+      deleted = try database.dbWriter.write { db in
+        try sends.filter { send in
+          guard let stored = try Message.fetchOne(db, key: [
+            "messageId": send.temporaryMessageId, "chatId": send.chatId,
+          ]), stored.status == .sending else { return false }
+          try Message.deleteMessages(db, messageIds: [send.temporaryMessageId], chatId: send.chatId)
+          return true
+        }
+      }
+    } catch {
+      Log.shared.error("Failed to delete unsent media messages", error: error)
+      return
+    }
+    for send in deleted {
+      MessagesPublisher.shared.messagesDeleted(messageIds: [send.temporaryMessageId], peer: send.peerId)
+    }
   }
 }
 

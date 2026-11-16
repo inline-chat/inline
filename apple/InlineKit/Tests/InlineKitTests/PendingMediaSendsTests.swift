@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import Testing
 @testable import InlineKit
 
@@ -41,13 +42,33 @@ struct PendingMediaSendsTests {
 
   @Test func aRetryAdmittedBeforeTheFailedRunLeftStaysPending() {
     let sends = PendingMediaSends()
-    let send = PendingMediaSend(transactionId: "tx", chatId: 1, temporaryMessageId: -1, media: [])
+    let send = PendingMediaSend(transactionId: "tx", chatId: 1, peerId: .thread(id: 1), temporaryMessageId: -1, media: [])
     sends.insert(send)
     sends.insert(send)
     sends.remove(transactionId: "tx")
     #expect(sends.current.map(\.transactionId) == ["tx"])
     sends.remove(transactionId: "tx")
     #expect(sends.current.isEmpty)
+  }
+
+  @Test @MainActor func deletingUnsentSendsRemovesOnlyRowsStillSending() throws {
+    let database = try AppDatabase(DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123")))
+    try database.dbWriter.write { db in
+      try User(id: 1, email: nil, firstName: "Sender").insert(db)
+      try Chat(id: 1, date: Date(), type: .thread, title: "Test", spaceId: nil).insert(db)
+      for (id, status) in [(Int64(-10), MessageSendingStatus.sending), (-11, .sent)] {
+        try Message(
+          messageId: id, fromId: 1, date: Date(), text: nil, peerUserId: nil,
+          peerThreadId: 1, chatId: 1, out: true, status: status
+        ).save(db)
+      }
+    }
+    let sends = [-10, -11].map {
+      PendingMediaSend(transactionId: "tx\($0)", chatId: 1, peerId: .thread(id: 1), temporaryMessageId: Int64($0), media: [])
+    }
+    PendingMediaSends.deleteUnsent(sends, database: database)
+    let left = try database.dbWriter.read { db in try Int64.fetchAll(db, sql: "SELECT messageId FROM \(Message.databaseTableName) ORDER BY messageId") }
+    #expect(left == [-11])
   }
 
   @Test func progressOnlyMovesForwardAndCountsFinishedSendsAsDone() {
@@ -83,7 +104,7 @@ private struct GatedMediaSend: Transaction {
   func rollback() async {}
 
   var pendingMediaSend: PendingMediaSend? {
-    hasMedia ? PendingMediaSend(transactionId: id, chatId: 1, temporaryMessageId: -1, media: []) : nil
+    hasMedia ? PendingMediaSend(transactionId: id, chatId: 1, peerId: .thread(id: 1), temporaryMessageId: -1, media: []) : nil
   }
 }
 

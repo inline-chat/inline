@@ -286,7 +286,14 @@ public actor FileUploader {
     }
 
     if progress.stage == .completed || progress.stage == .failed {
-      finishProgressPublisher(uploadId: uploadId)
+      if progress.stage == .completed {
+        finishProgressPublisher(uploadId: uploadId)
+      } else if progressPublishers[uploadId] != nil {
+        // A failed attempt is not the end: the send retries under the same upload id, and views
+        // that bound to this stream must see that attempt's progress. The message status says
+        // when the send has really failed. Kept like any idle stream, so the set stays bounded.
+        retainInactivePublisher(uploadId: uploadId)
+      }
       let evicted = terminalStateKeys.record(uploadId)
       for evictedID in evicted {
         latestProgress.removeValue(forKey: evictedID)
@@ -301,7 +308,7 @@ public actor FileUploader {
       return Just(.failed(id: uploadId, error: FileUploadError.uploadCancelled)).eraseToAnyPublisher()
     }
 
-    if let latest = latestProgress[uploadId], latest.stage == .completed || latest.stage == .failed {
+    if let latest = latestProgress[uploadId], latest.stage == .completed {
       return Just(latest).eraseToAnyPublisher()
     }
 
@@ -964,11 +971,17 @@ public actor FileUploader {
   public func uploadFraction(for media: FileMediaItem) -> Double? {
     let uploadId: String? = switch media {
     case let .photo(photo): photo.photo.id.map { getUploadId(photoId: $0) }
-    case let .video(video): video.video.id.map { getUploadId(videoId: $0) }
+    // A send may carry a video before its local row id is known; the send resolves it the same way.
+    case let .video(video): (try? resolveLocalVideoId(for: video.video)).map { getUploadId(videoId: $0) }
     case let .document(document): document.document.id.map { getUploadId(documentId: $0) }
     case let .voice(voice): getUploadId(voiceId: voice.voiceID)
     }
     return uploadId.flatMap { currentProgress(for: $0)?.fractionCompleted }
+  }
+
+  /// `uploadFraction(for:)` for several items in one call.
+  public func uploadFractions(for media: [FileMediaItem]) -> [Double?] {
+    media.map { uploadFraction(for: $0) }
   }
 
   public func cancelAll() async {
@@ -1017,6 +1030,10 @@ public actor FileUploader {
 
   func retainedProgressPublisherCount() -> Int {
     progressPublishers.count
+  }
+
+  func publishProgressForTesting(_ progress: UploadProgressSnapshot) {
+    publishProgress(uploadId: progress.id, progress: progress)
   }
 
   // MARK: - Status Queries
