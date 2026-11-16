@@ -51,12 +51,15 @@ public final class DebugChatFixture {
   private let seedStart: Date
   private let seedStep: TimeInterval
   private let seedNow: Date
+  /// Messages each sender sends in a row.
+  private let seedRun: Int
 
   /// Seeds `messageCount` messages ending now into `database` (a new
   /// in-memory one by default). With `remoteFloor`, messages below it are
-  /// held back as remote history behind a coverage hole.
+  /// held back as remote history behind a coverage hole. `dense` sends them
+  /// 45 s apart in runs of 12 per sender, so long sender groups form.
   public init(
-    messageCount: Int = 420, remoteFloor: Int? = nil,
+    messageCount: Int = 420, remoteFloor: Int? = nil, dense: Bool = false,
     database: AppDatabase? = nil, publisher: MessagesPublisher? = nil
   ) throws {
     let database = try database ?? AppDatabase(
@@ -73,12 +76,14 @@ public final class DebugChatFixture {
     self.remoteFloor = floor
     let chatId = chatId
     let now = Date()
-    // Spread over four days so day separators fall inside the window.
-    let start = now.addingTimeInterval(-86_400 * 3.2)
+    // Spread over four days so day separators fall inside the window (dense: 45 s apart).
+    let start = dense ? now.addingTimeInterval(-45 * Double(messageCount) - 60) : now.addingTimeInterval(-86_400 * 3.2)
     let step = (now.timeIntervalSince(start) - 60) / Double(messageCount)
+    let run = dense ? 12 : 3
     seedStart = start
     seedStep = step
     seedNow = now
+    seedRun = run
     try database.dbWriter.write { db in
       for (id, first, last) in Self.users {
         try User(id: id, email: nil, firstName: first, lastName: last).insert(db)
@@ -89,7 +94,7 @@ public final class DebugChatFixture {
         try ChatParticipant(chatId: chatId, userId: id, date: now).insert(db)
       }
       for index in Int(floor) ... messageCount {
-        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now)
+        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now, run: run)
       }
       try MessageHistoryCoverageStore.subtract(
         db, chatId: chatId, lowerId: floor, upperId: MessageHistoryHole.positiveMessageIDMax
@@ -105,10 +110,10 @@ public final class DebugChatFixture {
   }
 
   private nonisolated static func seed(
-    _ db: Database, index: Int, chatId: Int64, start: Date, step: TimeInterval, now: Date
+    _ db: Database, index: Int, chatId: Int64, start: Date, step: TimeInterval, now: Date, run runLength: Int = 3
   ) throws {
     let id = Int64(index)
-    let run = (index / 3) % 7
+    let run = (index / runLength) % 7
     let from: Int64 = [2, 2, 3, 1, 4, 5, 1][run]
     var text: String? = Self.texts[(index * 7 + run) % Self.texts.count]
     var payload: Client_MessageContentPayload?
@@ -168,10 +173,10 @@ public final class DebugChatFixture {
     try await Task.sleep(for: latency)
     let upper = remoteFloor - 1
     let lower = max(1, upper - Int64(limit) + 1)
-    let (chatId, start, step, now) = (chatId, seedStart, seedStep, seedNow)
+    let (chatId, start, step, now, run) = (chatId, seedStart, seedStep, seedNow, seedRun)
     try await database.dbWriter.write { db in
       for index in Int(lower) ... Int(upper) {
-        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now)
+        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now, run: run)
       }
       try MessageHistoryCoverageStore.subtract(db, chatId: chatId, lowerId: lower, upperId: upper)
     }
