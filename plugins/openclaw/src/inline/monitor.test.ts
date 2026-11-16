@@ -15924,7 +15924,10 @@ describe("inline/monitor durable inbound recovery", () => {
       else if (reads === 2) await burstGate
       return []
     })
-    const handle = await start(harness, { debounceMs: 40 })
+    // The gates go by read order: /stop must reach its access check before
+    // the burst's debounce window closes. A short window lets a loaded runner
+    // flush the burst first, which hands it the /stop gate.
+    const handle = await start(harness, { debounceMs: 500 })
     try {
       await waitFor(() => expect(reads).toBe(2))
       expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
