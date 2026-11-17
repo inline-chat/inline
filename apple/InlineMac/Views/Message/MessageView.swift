@@ -982,8 +982,10 @@ class MessageViewAppKit: NSView {
   }
 
   private func wantsCoreTextRenderer() -> Bool {
-    guard CoreTextMessageText.isEnabled, hasText, props.layout.richBlockContent == nil else { return false }
-    return CoreTextMessageText.supports(entities: fullMessage.translationEntities ?? fullMessage.message.entities)
+    // Rich messages use it too, as the host their blocks are placed in.
+    guard CoreTextMessageText.isEnabled, hasText else { return false }
+    return props.layout.richBlockContent != nil
+      || CoreTextMessageText.supports(entities: fullMessage.translationEntities ?? fullMessage.message.entities)
   }
 
   /// Moves the message's text between NSTextView and the Core Text view.
@@ -1514,11 +1516,11 @@ class MessageViewAppKit: NSView {
       setupEntityClickHandling()
     }
     if view.onContextMenu == nil {
-      view.onContextMenu = { [weak self, weak view] index, _ in
+      view.onContextMenu = { [weak self, weak view] index, event in
         guard let self, let view else { return nil }
         return createMenu(
           context: .textView,
-          nativeMenu: view.nativeTextMenu(at: index),
+          nativeMenu: view.nativeTextMenu(at: index, event: event),
           linkURL: index.flatMap { self.linkURLForContextMenu(at: $0) }
         )
       }
@@ -3356,7 +3358,7 @@ class MessageViewAppKit: NSView {
       }
       richView.onTextLongPress = { [weak self] event in
         guard let self else { return }
-        handleTextLongPress(at: textView.convert(event.locationInWindow, from: nil), event: event)
+        handleTextLongPress(at: textHostView.convert(event.locationInWindow, from: nil), event: event)
       }
       richView.onMessageAction = { [weak self] action in
         self?.handleMessageActionTap(action)
@@ -3372,19 +3374,30 @@ class MessageViewAppKit: NSView {
           message: self.fullMessage.message
         )
       }
-      textView.setMessageAttributedString(
-        NSAttributedString(),
-        isRtl: props.isRtl,
-        layoutSize: props.layout.text?.size ?? .zero,
-        useTextKit2: useTextKit2
-      )
-      if richView.superview !== textView {
-        richView.removeFromSuperview()
-        textView.addSubview(richView)
+      // The rich blocks draw everything; their host only places them.
+      let host = textHostView
+      if let coreTextView, usesCoreText {
+        coreTextView.setMessageAttributedString(
+          NSAttributedString(),
+          isRtl: props.isRtl,
+          layoutSize: props.layout.text?.size ?? .zero,
+          linkColor: linkColor
+        )
+      } else {
+        textView.setMessageAttributedString(
+          NSAttributedString(),
+          isRtl: props.isRtl,
+          layoutSize: props.layout.text?.size ?? .zero,
+          useTextKit2: useTextKit2
+        )
       }
-      textView.setAccessibilityElement(true)
-      textView.setAccessibilityRole(.group)
-      textView.setAccessibilityChildren([richView])
+      if richView.superview !== host {
+        richView.removeFromSuperview()
+        host.addSubview(richView)
+      }
+      host.setAccessibilityElement(true)
+      host.setAccessibilityRole(.group)
+      host.setAccessibilityChildren([richView])
       richView.frame = CGRect(origin: .zero, size: richBlockPlan.size)
       richView.update(
         plan: richBlockPlan,
@@ -3404,6 +3417,8 @@ class MessageViewAppKit: NSView {
     richBlockContentView?.prepareForReuse()
     richBlockContentView?.removeFromSuperview()
     if usesCoreText {
+      coreTextView?.setAccessibilityRole(.staticText)
+      coreTextView?.setAccessibilityChildren(nil)
       coreTextView?.setMessageAttributedString(
         attributedString,
         isRtl: props.isRtl,

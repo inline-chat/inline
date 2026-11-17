@@ -14,11 +14,11 @@ enum CoreTextMessageText {
   /// Read from defaults so the size calculator can ask off the main actor.
   static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
-  /// Whether a message with these entities can be drawn here, decided before its text is built:
-  /// math (attachments) is not drawn yet.
-  static func supports(entities: MessageEntities?) -> Bool {
-    guard let entities else { return true }
-    return !entities.entities.contains { $0.type == .math }
+  /// Whether a message with these entities can be drawn here, decided before its text is built.
+  /// Plain text marks math as source (formulas become attachments only in rich blocks, which
+  /// draw themselves), so every entity is supported; `supports(_:)` still guards attachments.
+  static func supports(entities _: MessageEntities?) -> Bool {
+    true
   }
 
   /// Whether this renderer draws `text`: everything but attachments (inline math).
