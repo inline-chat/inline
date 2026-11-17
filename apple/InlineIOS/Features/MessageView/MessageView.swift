@@ -41,6 +41,18 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   var onReactionsMenu: ((FullMessage) -> Void)?
   var onAvatarTap: (() -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
+
+  /// The album grid this view draws, if its message is an album.
+  var albumView: MessageAlbumView? {
+    blockViews.values.lazy.compactMap { $0.contentView as? MessageAlbumView }.first
+  }
+
+  /// The album item under `point` (in this view's coordinates): actions aimed at one photo
+  /// (reply, save, copy) go to it. Nil off the grid or for a message that isn't an album.
+  func albumItem(at point: CGPoint) -> FullMessage? {
+    guard let albumView else { return nil }
+    return albumView.item(at: convert(point, to: albumView))
+  }
   /// Local state that changes the layout, such as an opened disclosure, changed; the host
   /// replans the row.
   var onContentStateChange: ((FullMessage) -> Void)?
@@ -236,10 +248,18 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           }
         }
         let isEdgeToEdge = layout.edgeToEdgeBlocks.contains(block.id)
-        let bubbleBleed = mediaBleed(frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge)
+        // An album's grid is clipped to the bubble's corners by its host; its tiles never bleed.
+        let bubbleBleed = block.kind == .album
+          ? nil
+          : mediaBleed(frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge)
         view.configure(block, message: content.message, size: frame.size, bubbleBleed: bubbleBleed)
         // Media continuing into the tail reaches past the host and masks itself.
-        roundToBubble(view, frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge && bubbleBleed == nil)
+        // Album styles whose tiles round themselves (stacks, strips, cards) are not clipped.
+        let tilesRoundThemselves = (block.mosaic?.tileCornerRadius ?? 0) > 0
+        roundToBubble(
+          view, frame: layout.frame(.block(block.id)),
+          isEdgeToEdge: isEdgeToEdge && bubbleBleed == nil && !tilesRoundThemselves
+        )
       }
 
       if content.showsAcknowledgement {
@@ -365,7 +385,9 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// A sending photo's upload bar sits in the gap under the last bubble of its group, so it
   /// never changes the row's height and the list doesn't move when it leaves.
   private func syncUploadProgress(_ content: MessageViewContent, layout: MessageLayout, isSameMessage: Bool) {
-    let message = content.message
+    // An album shows its first photo still uploading, then the next, until all are sent.
+    let message = content.album?.items.first { $0.showsPhotoUploadProgress && $0.photoInfo != nil }
+      ?? content.message
     guard message.showsPhotoUploadProgress, content.context.isLastInGroup, layout.bubble.isVisible,
           let photoLocalId = message.photoInfo?.photo.id
     else {
@@ -424,10 +446,13 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       return
     }
     let body = layout.bubble.body
+    // Inside the media frame the corners stay concentric with the bubble's.
+    let inset = content?.input.metrics.mediaInset ?? 0
+    let reach = inset + 0.5
     var corners: CACornerMask = []
-    if abs(frame.minY - body.minY) < 0.5 { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
-    if abs(frame.maxY - body.maxY) < 0.5 { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
-    view.layer.cornerRadius = layout.bubble.cornerRadius
+    if abs(frame.minY - body.minY) < reach { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
+    if abs(frame.maxY - body.maxY) < reach { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
+    view.layer.cornerRadius = max(0, layout.bubble.cornerRadius - inset)
     view.layer.maskedCorners = corners
     view.clipsToBounds = !corners.isEmpty
   }

@@ -59,7 +59,10 @@ struct MessageRowContext: Equatable {
 /// Everything the next message view shows for one message, resolved on the main thread.
 /// `input` goes to the planner; the rest styles the planned nodes.
 struct MessageViewContent {
+  /// The message the bubble draws; for an album, its bubble message (`MessageAlbum.bubbleMessage`).
   let message: FullMessage
+  /// Photos and videos sent with `message`, drawn as one grid.
+  let album: MessageAlbum?
   let context: MessageRowContext
   let input: MessageLayoutInput
   let bubbleColor: UIColor
@@ -83,7 +86,8 @@ struct MessageViewContent {
   var isOutgoing: Bool { message.message.out == true }
 
   /// Kinds the next view draws today. Everything else keeps the current view until it is built.
-  static func supports(_ message: FullMessage, displayMode: MessageDisplayMode) -> Bool {
+  static func supports(_ message: FullMessage, displayMode: MessageDisplayMode, album: MessageAlbum? = nil) -> Bool {
+    if album != nil { return true }
     let model = message.message
     guard !model.isServiceMessage,
           model.isSticker != true,
@@ -100,12 +104,15 @@ struct MessageViewContent {
   /// `footer` is `.reserved` while a message streams: the time keeps its place but stays hidden.
   @MainActor
   static func make(
-    _ message: FullMessage,
+    _ rowMessage: FullMessage,
+    album: MessageAlbum? = nil,
     context: MessageRowContext,
     footer: MessageLayoutInput.Footer.Visibility = .visible,
     revealedLength: Int? = nil,
     cache: TextLayoutCache? = nil
   ) -> MessageViewContent? {
+    // An album's bubble takes its caption, reactions and status from its items.
+    let message = album?.bubbleMessage ?? rowMessage
     // A captionless voice note's display text is its "Voice message" preview; it has no caption.
     let text = message.message.hasVoice && message.message.text?.isEmpty != false ? "" : message.displayText ?? ""
     let traits = context.traits
@@ -114,13 +121,16 @@ struct MessageViewContent {
     let outgoing = model.out == true
     let grid = PixelGrid(scale: context.displayScale)
     let contentWidth = maximumContentWidth(context: context, outgoing: outgoing)
-    var blocks = MessageBlock.blocks(for: message, context: context, maximumContentWidth: contentWidth)
+    var blocks = MessageBlock.blocks(for: message, album: album, context: context, maximumContentWidth: contentWidth)
     guard !text.isEmpty || !blocks.isEmpty else { return nil }
     let isEmoji = blocks.isEmpty && text.containsOnlyEmojis
     // Captionless media carries its time in a dark pill over its corner, and fills the bubble.
     let hasMedia = blocks.contains { $0.input.isEdgeToEdge }
     let overlaysMedia = hasMedia && text.isEmpty && message.reactions.isEmpty
-    let isBareMedia = overlaysMedia && !blocks.contains { $0.kind == .forward || $0.kind == .reply }
+    // Media sits in a thin frame of the bubble's colour (`mediaInset`), so the bubble shows even
+    // without a caption. Album styles whose tiles stand apart (stacks, strips, cards) float bare.
+    let floatsMedia = blocks.contains { ($0.mosaic?.tileCornerRadius ?? 0) > 0 }
+    let isBareMedia = floatsMedia && overlaysMedia && !blocks.contains { $0.kind == .forward || $0.kind == .reply }
 
     // Large emoji carry their time in a dark pill, like the current view's floating time.
     let textColor: UIColor = outgoing ? .white : theme.incomingText.uiColor
@@ -211,6 +221,7 @@ struct MessageViewContent {
     metrics.cornerRadius = MessageBubbleGeometry.cornerRadius
     metrics.maximumBubbleWidthFraction = MessageBubbleWidthPolicy.maximumWidthFraction
     metrics.maximumBubbleWidth = MessageBubbleWidthPolicy.maximumWidth
+    metrics.mediaInset = floatsMedia ? 0 : Self.mediaInset
 
     let bodyInput: MessageLayoutInput.Body = if let rich {
       .rich(rich.blocks)
@@ -245,6 +256,7 @@ struct MessageViewContent {
       .compactMap(\.self)
     return MessageViewContent(
       message: message,
+      album: album,
       context: context,
       input: input,
       bubbleColor: bubbleColor,
@@ -264,6 +276,9 @@ struct MessageViewContent {
   }
 
   // MARK: - Pieces
+
+  /// The band of the bubble's colour around photos, videos and albums (as Telegram draws media).
+  static let mediaInset: CGFloat = 2
 
   /// The widest content a bubble in this row can hold inside its padding.
   private static func maximumContentWidth(context: MessageRowContext, outgoing: Bool) -> CGFloat {

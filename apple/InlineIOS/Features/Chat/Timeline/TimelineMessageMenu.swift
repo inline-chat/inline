@@ -87,6 +87,8 @@ final class TimelineMessageMenu: NSObject {
 
   private struct Press {
     let id: ChatRowID
+    /// The message the menu is for: on an album, the item under the finger.
+    let message: FullMessage
     weak var row: TimelineRowView?
     weak var view: UIView?
     /// A message view's bubble container is placed by frame, so it shrinks through its sublayers;
@@ -152,9 +154,11 @@ final class TimelineMessageMenu: NSObject {
     guard let list else { return nil }
     for placement in list.layout.visible {
       guard let frame = list.presentedFrame(for: placement.id), frame.contains(point),
-            case let .message(message, _)? = row(placement.id)?.content,
+            let content = row(placement.id)?.content, let rowMessage = TimelineMessagesView.actionMessage(of: content),
             let rowView = list.view(for: placement.id) as? TimelineRowView
       else { continue }
+      // On an album, the menu is for the photo or video under the finger.
+      let message = rowView.shownMessageView.flatMap { $0.albumItem(at: list.convert(point, to: $0)) } ?? rowMessage
       // The actions button keeps its own touches.
       if rowView.isActionsButton(at: list.convert(point, to: rowView)) { return nil }
       let host: UIView
@@ -201,7 +205,10 @@ final class TimelineMessageMenu: NSObject {
   private func beginPress(at point: CGPoint) -> Bool {
     guard controller == nil, let list, !list.isTracking, let target = target(at: point) else { return false }
     let source = customHoldAction(for: target.message) == nil ? sourceView(for: target.row) : nil
-    press = Press(id: target.id, row: target.row, view: source?.view, shrinksSublayers: source?.shrinksSublayers ?? false)
+    press = Press(
+      id: target.id, message: target.message, row: target.row, view: source?.view,
+      shrinksSublayers: source?.shrinksSublayers ?? false
+    )
     feedback.prepare()
     return true
   }
@@ -263,11 +270,13 @@ final class TimelineMessageMenu: NSObject {
 
   private func activate(_ gesture: MessageContextMenuHoldGesture) {
     guard let press, let list, let rowView = list.view(for: press.id) as? TimelineRowView, rowView === press.row,
-          case let .message(message, _)? = row(press.id)?.content
+          let content = row(press.id)?.content, let rowMessage = TimelineMessagesView.actionMessage(of: content)
     else {
       endPress(animated: true)
       return
     }
+    // The pressed album item as the row has it now, else the row's own message.
+    let message = content.messages.first { $0.id == press.message.id } ?? rowMessage
     // The hold owns the finger now: the list's drag and the row's own gestures let go.
     cancelGestures(in: rowView)
     for recognizer in list.gestureRecognizers ?? [] where recognizer !== gesture { cancel(recognizer) }
@@ -298,7 +307,7 @@ final class TimelineMessageMenu: NSObject {
   /// The row's actions button: the menu a hold opens on the row's message, without the hold.
   func open(_ id: ChatRowID) {
     guard controller == nil, !systemPresented, let list, let rowView = list.view(for: id) as? TimelineRowView,
-          case let .message(message, _)? = row(id)?.content
+          let content = row(id)?.content, let message = TimelineMessagesView.actionMessage(of: content)
     else { return }
     endPress(animated: false)
     gesture.cancelPress()
@@ -308,11 +317,12 @@ final class TimelineMessageMenu: NSObject {
   /// UIKit's pull-down menu for the actions button while the list uses the system menu: the
   /// message's actions with a Reactions item, as the collection view's cells offer them.
   func pullDownMenu(_ id: ChatRowID) -> UIMenu {
-    guard case let .message(message, _)? = row(id)?.content else { return UIMenu(children: []) }
+    guard let content = row(id)?.content, let message = TimelineMessagesView.actionMessage(of: content)
+    else { return UIMenu(children: []) }
     if message.message.isServiceMessage { return actions.serviceMenu(for: message.message) }
     return actions.actionsMenu(
       for: message,
-      photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView) },
+      photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView, for: message) },
       openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) },
       includeReactionsAction: true
     )
@@ -430,13 +440,14 @@ final class TimelineMessageMenu: NSObject {
           if message.isServiceMessage { return actions.serviceMenu(for: message) }
           return actions.actionsMenu(
             for: fullMessage,
-            photo: { [weak rowView] in Self.photo(in: rowView) },
+            photo: { [weak rowView] in Self.photo(in: rowView, for: fullMessage) },
             openDocument: { [weak rowView] in Self.openDocument(in: rowView) },
             includesTextCopy: !hasTextSelection,
             offersSelectText: selectableText == nil
           )
         },
-        accessory: message.isServiceMessage ? nil : actions.reactionPicker(for: fullMessage),
+        // An album's reactions sit on its caption (or first) item, which the bubble shows.
+        accessory: message.isServiceMessage ? nil : actions.reactionPicker(for: reactionTarget(id) ?? fullMessage),
         quoteSelection: message.isServiceMessage || message.status == .sending || message.status == .failed
           ? nil
           : { text in
@@ -554,8 +565,17 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     }
   }
 
-  private static func photo(in rowView: TimelineRowView?) -> UIImage? {
-    rowView?.shownMessageView?.contextMenuPhotoImage ?? rowView?.shownLegacyView?.newPhotoView.getCurrentImage()
+  private static func photo(in rowView: TimelineRowView?, for message: FullMessage) -> UIImage? {
+    // An album item's own tile.
+    if let tile = rowView?.shownMessageView?.albumView?.tileView(messageId: message.message.messageId) {
+      return (tile as? NewPhotoView)?.getCurrentImage()
+    }
+    return rowView?.shownMessageView?.contextMenuPhotoImage ?? rowView?.shownLegacyView?.newPhotoView.getCurrentImage()
+  }
+
+  /// Where a reaction from this row's menu goes: the row's own message, or an album's primary item.
+  private func reactionTarget(_ id: ChatRowID) -> FullMessage? {
+    row(id).flatMap { TimelineMessagesView.actionMessage(of: $0.content) }
   }
 
   private static func openDocument(in rowView: TimelineRowView?) {
@@ -598,12 +618,12 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     } else {
       menu = actions.actionsMenu(
         for: fullMessage,
-        photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView) },
+        photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView, for: fullMessage) },
         openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) }
       )
       // The reaction bar under the preview, as the collection view's system menu shows it.
       let view = ContextMenuIdentifierUIView(
-        accessoryView: actions.reactionPicker(for: fullMessage),
+        accessoryView: actions.reactionPicker(for: reactionTarget(id) ?? fullMessage),
         configuration: ContextMenuAccessoryConfiguration(
           location: .below, trackingAxis: .vertical, attachment: .center,
           alignment: message.out == true ? .trailing : .leading,

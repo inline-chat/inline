@@ -116,7 +116,7 @@ final class NewVideoView: UIView {
     case uploading(videoLocalId: Int64, transactionId: String?, randomId: Int64?)
   }
 
-  private var fullMessage: FullMessage
+  private(set) var fullMessage: FullMessage
   private let maxWidth = NewPhotoView.maximumWidth
   private let maxHeight = NewPhotoView.maximumHeight
   private let minWidth = NewPhotoView.minimumWidth
@@ -149,6 +149,25 @@ final class NewVideoView: UIView {
 
   private var bleedLeadingConstraints: [NSLayoutConstraint] = []
   private var bleedTrailingConstraints: [NSLayoutConstraint] = []
+
+  /// A tile of an album grid: square corners; the grid's host rounds the album's outer corners.
+  var isAlbumTile = false {
+    didSet {
+      guard isAlbumTile != oldValue else { return }
+      updateMask()
+    }
+  }
+
+  /// False when the host rounds this view (the next message view clips media to the bubble's
+  /// corners, inside its frame); the older view lets the media round itself.
+  var masksOwnCorners = true {
+    didSet { if masksOwnCorners != oldValue { updateMask() } }
+  }
+
+  /// A tile that rounds its own corners (album styles whose tiles stand apart: stacks, cards).
+  var albumTileCornerRadius: CGFloat = 0 {
+    didSet { if albumTileCornerRadius != oldValue { updateMask() } }
+  }
 
   private var downloadProgressCancellable: AnyCancellable?
   private var uploadProgressCancellable: AnyCancellable?
@@ -493,8 +512,14 @@ final class NewVideoView: UIView {
   }
 
   private func updateMask() {
-    if let bubbleBleed {
+    if let bubbleBleed, !isAlbumTile {
       maskLayer.path = bubbleBleed.maskPath(in: bounds)
+      return
+    }
+    if isAlbumTile || !masksOwnCorners {
+      maskLayer.path = albumTileCornerRadius > 0
+        ? UIBezierPath(roundedRect: bounds, cornerRadius: albumTileCornerRadius).cgPath
+        : UIBezierPath(rect: bounds).cgPath
       return
     }
 

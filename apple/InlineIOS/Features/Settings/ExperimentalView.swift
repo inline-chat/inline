@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import InlineIOSUI
+import InlineMessageLayout
 import SwiftUI
 
 struct ExperimentalView: View {
@@ -19,6 +20,9 @@ struct ExperimentalView: View {
 
   @AppStorage(TimelineFeature.preferenceKey)
   private var timelineEnabled = false
+
+  @AppStorage(MessageAlbumView.layoutStyleKey)
+  private var albumLayout = AlbumLayoutStyle.telegram.rawValue
 
   var body: some View {
     List {
@@ -86,10 +90,22 @@ struct ExperimentalView: View {
             Toggle("Next Message View", isOn: $nextMessageViewEnabled)
               .labelsHidden()
           }
+          SettingsItem(
+            icon: "square.grid.2x2.fill",
+            iconColor: .teal,
+            title: "Album Layout"
+          ) {
+            Picker("Album Layout", selection: $albumLayout) {
+              ForEach(AlbumLayoutStyle.allCases, id: \.rawValue) { style in
+                Text(style.title).tag(style.rawValue)
+              }
+            }
+            .labelsHidden()
+          }
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("The next message view is on by default. Turn it off to compare with the previous view. Reopen the chat after changing it.")
+          Text("The next message view is on by default. Turn it off to compare with the previous view. Album Layout picks how photos sent together are drawn in the next message view. Reopen the chat after changing either.")
         }
       }
     }

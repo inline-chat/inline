@@ -134,7 +134,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   // Media warm-up
   /// Rows whose images were asked for ahead of time, so they can be let go when they move away.
-  private var prefetched: [ChatRowID: FullMessage] = [:]
+  private var prefetched: [ChatRowID: [FullMessage]] = [:]
   private var prefetchKey: (first: Int, last: Int, revision: UInt64)?
   private var warmupTask: Task<Void, Never>?
   private var warmups: [InlineTinyThumbnailWarmup] = []
@@ -332,7 +332,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       self?.window?.bounds.width ?? self?.bounds.width ?? UIScreen.main.bounds.width
     }
     menuActions.currentMessage = { [weak self] stableId, messageId, chatId, randomId in
-      self?.snapshot?.rows.lazy.compactMap(\.content.message).first { message in
+      self?.snapshot?.rows.lazy.flatMap(\.content.messages).first { message in
         message.id == stableId
           || (message.message.messageId == messageId && message.message.chatId == chatId)
           || (randomId != nil && message.message.randomId == randomId && message.message.chatId == chatId)
@@ -365,7 +365,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     unreadFetchTask?.cancel()
     unreadFetchSpinner?.removeFromSuperview()
     let warmups = warmups
-    let prefetched = Array(prefetched.values)
+    let prefetched = Array(prefetched.values.joined())
     Task {
       for warmup in warmups { await InlineTinyThumbnailPrewarmer.cancel(warmup) }
       await ImagePrefetcher.shared.cancelPrefetching(for: prefetched)
@@ -520,7 +520,32 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// reads, the reading place, the history anchor and jumps leave it out, as the collection view's
   /// thread anchor was left out of them.
   private static func chatMessage(_ row: ChatRow?) -> FullMessage? {
-    if case let .message(message, _)? = row?.content { message } else { nil }
+    switch row?.content {
+      case let .message(message, _)?: message
+      case let .album(album, _)?: album.lead
+      default: nil
+    }
+  }
+
+  /// Every message of this chat a row draws, oldest first: an album's items, or its one message.
+  private static func chatMessages(_ row: ChatRow?) -> [FullMessage] {
+    switch row?.content {
+      case let .message(message, _)?: [message]
+      case let .album(album, _)?: album.items
+      default: []
+    }
+  }
+
+  /// The message a message row's own actions go to (reply swipe, actions button, menu): the
+  /// message itself, or an album's caption (or first) item. Nil for the thread's parent and
+  /// rows without a message.
+  static func actionMessage(of content: ChatRowContent) -> FullMessage? {
+    switch content {
+      case let .message(message, _): message
+      // A failed item first, so the bubble's actions offer its retry.
+      case let .album(album, _): album.items.first { $0.message.status == .failed } ?? album.primary
+      default: nil
+    }
   }
 
   /// The thread's parent message stands alone; when someone else wrote it, it shows their avatar and
@@ -534,7 +559,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func avatarGroupEnd(of id: ChatRowID) -> ChatRowID? {
     guard let span = groupSpans[id], let rows = snapshot?.rows, rows.indices.contains(span.end) else { return nil }
     let end = rows[span.end]
-    guard end.id != id, case let .message(_, grouping) = end.content, grouping.showsAvatar else { return nil }
+    guard end.id != id, let grouping = end.content.grouping, grouping.showsAvatar else { return nil }
     return end.id
   }
 
@@ -560,6 +585,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     switch row.content {
       case let .message(message, grouping):
         return messageHeight(row, message, grouping, isThreadAnchor: false, width: width)
+      case let .album(album, grouping):
+        return messageHeight(row, album.lead, grouping, isThreadAnchor: false, width: width)
       case let .threadParent(message):
         return messageHeight(row, message, Self.threadParentGrouping(message), isThreadAnchor: true, width: width)
       case .daySeparator: return 44
@@ -605,7 +632,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     {
       return plan
     }
-    guard width > 0, MessageViewContent.supports(message, displayMode: isThreadAnchor ? .threadAnchor : .normal)
+    let album = row.content.album
+    guard width > 0,
+          MessageViewContent.supports(message, displayMode: isThreadAnchor ? .threadAnchor : .normal, album: album)
     else { return nil }
     #if DEBUG
     // The harness can show every message with the older view, to check the fallback rows.
@@ -625,7 +654,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     )
     context.isThreadAnchor = isThreadAnchor
     guard let content = MessageViewContent.make(
-      message, context: context, footer: pacer.isStreaming(message.id) ? .reserved : .visible,
+      message, album: album, context: context, footer: pacer.isStreaming(message.id) ? .reserved : .visible,
       revealedLength: streamLength
     ) else { return nil }
     let plan = Plan(
@@ -651,15 +680,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     defer {
       view.isMenuSourceHidden = menu.isSource(id)
       view.isSendTargetHidden = flightTargets.contains(id)
-      // A swipe replies to a message that can take a reply; never to the thread's parent.
-      if case let .message(message, _) = row.content, message.canReply {
+      // A swipe replies to a message that can take a reply; never to the thread's parent. On an
+      // album it replies to the album's caption (or first) item.
+      if let message = Self.actionMessage(of: row.content), message.canReply {
         view.replyMessage = message
       } else {
         view.replyMessage = nil
       }
       view.messageActions = messageActions(for: row)
-      if case let .message(message, _) = row.content,
-         let remaining = focusHighlightRemaining(for: message.message.messageId)
+      if let message = Self.actionMessage(of: row.content),
+         let remaining = row.content.messages.lazy.compactMap({ self.focusHighlightRemaining(for: $0.message.messageId) }).first
       {
         view.highlightBubble(outgoing: message.message.out == true, theme: theme, hold: remaining, fadeIn: false)
       }
@@ -667,6 +697,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     switch row.content {
       case let .message(message, grouping):
         configureMessage(view, row, message, grouping, isThreadAnchor: false, width: width, timing: timing)
+      case let .album(album, grouping):
+        configureMessage(view, row, album.lead, grouping, isThreadAnchor: false, width: width, timing: timing)
       case let .threadParent(message):
         configureMessage(
           view, row, message, Self.threadParentGrouping(message), isThreadAnchor: true, width: width, timing: timing
@@ -739,7 +771,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// The actions button of a message row, shown when the user gave the hold another action; it opens
   /// the menu a hold would. Never on the thread's parent, as the collection view's cells.
   private func messageActions(for row: ChatRow) -> TimelineRowView.MessageActions? {
-    guard !isPreview, case let .message(message, _) = row.content, TimelineMessageMenu.customHoldAction(for: message) != nil
+    guard !isPreview, let message = Self.actionMessage(of: row.content),
+          TimelineMessageMenu.customHoldAction(for: message) != nil
     else { return nil }
     let id = row.id
     if menu.usesSystemMenu {
@@ -826,15 +859,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         let row = rows[index]
         window.insert(row.id)
         // A placed row loads its own media; one that becomes placed keeps what was asked for it.
-        guard index < first || index > last, prefetched[row.id] == nil, let message = row.content.message else { continue }
-        prefetched[row.id] = message
-        arriving.append(message)
+        let messages = row.content.messages
+        guard index < first || index > last, prefetched[row.id] == nil, !messages.isEmpty else { continue }
+        prefetched[row.id] = messages
+        arriving.append(contentsOf: messages)
       }
     }
     var leaving: [FullMessage] = []
-    for (id, message) in prefetched where !window.contains(id) {
+    for (id, messages) in prefetched where !window.contains(id) {
       prefetched[id] = nil
-      leaving.append(message)
+      leaving.append(contentsOf: messages)
     }
     if !leaving.isEmpty { Task.detached(priority: .utility) { await ImagePrefetcher.shared.cancelPrefetching(for: leaving) } }
     if !arriving.isEmpty { Task.detached(priority: .utility) { await ImagePrefetcher.shared.prefetchImages(for: arriving) } }
@@ -856,7 +890,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       let rows = snapshot.rows
       let lookahead = InlineTinyThumbnailWarmupPolicy.adaptiveLookaheadRows()
       func messages(_ range: some Sequence<Int>) -> [FullMessage] {
-        range.compactMap { rows.indices.contains($0) ? rows[$0].content.message : nil }
+        range.flatMap { rows.indices.contains($0) ? rows[$0].content.messages : [] }
       }
       let onScreen = messages(first ... last)
       let nearby = messages(Array(max(0, first - lookahead) ..< first) + Array((last + 1) ..< (last + 3)))
@@ -881,8 +915,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// translations arrive as message updates. The first batch also detects the chat's languages.
   private func offerForTranslation(_ ids: some Sequence<ChatRowID>) {
     guard !isPreview, let snapshot else { return }
-    // Not the thread's parent: a request names this chat's peer and its first message's chat.
-    let messages = ids.compactMap { Self.chatMessage(snapshot.row(for: $0)) }.filter { !$0.message.isServiceMessage }
+    // Not the thread's parent: a request names this chat's peer and its first message's chat. Every
+    // item of an album is offered.
+    let messages = ids.flatMap { Self.chatMessages(snapshot.row(for: $0)) }.filter { !$0.message.isServiceMessage }
     guard !messages.isEmpty else { return }
     translation.messagesDisplayed(messages: messages)
     if !hasDetectedLanguages {
@@ -944,7 +979,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         // Below where the date pill sits, as the collection view places it.
         if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(TimelineDatePill.height)) }
       case let .saved(place):
-        if let row = snapshot.rows.first(where: { Self.chatMessage($0)?.message.messageId == place.messageId }) {
+        if let row = snapshot.rows.first(where: { Self.chatMessages($0).contains { $0.message.messageId == place.messageId } }) {
           scroll = .to(row.id, .top(place.offset))
         }
     }
@@ -1076,7 +1111,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     var messageId: Int64?
     if !atBottom {
       for placement in layout.visible.reversed() {
-        if let id = Self.chatMessage(row(placement.id))?.message.messageId, id > 0 {
+        // An album's newest item, so a trim around this place keeps the whole album.
+        if let id = Self.chatMessages(row(placement.id)).last?.message.messageId, id > 0 {
           messageId = id
           break
         }
@@ -1114,7 +1150,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .unreadLine:
         return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(TimelineDatePill.height)) : .latest
       case let .message(messageId):
-        guard let row = snapshot.rows.first(where: { Self.chatMessage($0)?.message.messageId == messageId })
+        guard let row = snapshot.rows.first(where: { Self.chatMessages($0).contains { $0.message.messageId == messageId } })
         else { return .latest }
         return .to(row.id, .center)
     }
@@ -1515,7 +1551,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func messageRow(_ messageID: Int64, in snapshot: ChatRowSnapshot) -> ChatRow? {
     snapshot.rows.first { row in
-      if case let .message(message, _) = row.content { message.message.messageId == messageID } else { false }
+      switch row.content {
+        case .message, .album: row.content.contains(messageId: messageID)
+        default: false
+      }
     }
   }
 
@@ -1527,8 +1566,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard let focus = pendingFocus else { return nil }
     if let row = messageRow(focus.messageId, in: snapshot) { return (row.id, focus.messageId, true) }
     guard !exactOnly, !focus.requiresExact, !focus.awaitsArrival else { return nil }
-    let ids = snapshot.rows.compactMap { row -> Int64? in
-      if case let .message(message, _) = row.content, message.message.messageId > 0 { message.message.messageId } else { nil }
+    let ids = snapshot.rows.flatMap { row -> [Int64] in
+      switch row.content {
+        case .message, .album: row.content.messages.map(\.message.messageId).filter { $0 > 0 }
+        default: []
+      }
     }
     let target = focus.messageId
     guard let neighbour = ids.filter({ $0 > target }).min() ?? ids.filter({ $0 < target }).max(),
@@ -1709,7 +1751,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func visibleMessages() -> [FullMessage] {
     guard let snapshot else { return [] }
-    return list.layout.visible.compactMap { Self.chatMessage(snapshot.row(for: $0.id)) }
+    // Every item of an album on screen is seen.
+    return list.layout.visible.flatMap { Self.chatMessages(snapshot.row(for: $0.id)) }
       .filter { $0.message.messageId > 0 }
   }
 
@@ -1810,13 +1853,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard let rows = snapshot?.rows else { return }
     var start: Int?
     for (index, row) in rows.enumerated() {
-      guard case let .message(_, grouping) = row.content else {
+      guard let grouping = row.content.grouping else {
         start = nil
         continue
       }
       if grouping.isFirstInGroup || start == nil { start = index }
-      var nextIsMessage = false
-      if index + 1 < rows.count, case .message = rows[index + 1].content { nextIsMessage = true }
+      let nextIsMessage = index + 1 < rows.count && rows[index + 1].content.grouping != nil
       if grouping.isLastInGroup || !nextIsMessage {
         let span = (start ?? index, index)
         for member in span.0 ... span.1 { groupSpans[rows[member].id] = span }
@@ -1995,8 +2037,19 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       // The zoom starts from and returns to the photo or the video's thumbnail, not the whole row; the
       // thread's parent too, as the collection view found its anchor cell.
       sourceViewProvider: { [weak self] item in
-        guard let self, let id = item.messageStableId else { return nil }
-        return (list.view(for: .message(id)) ?? list.view(for: .threadParent(id))).flatMap(Self.galleryMediaView(in:))
+        guard let self, let stableId = item.messageStableId else { return nil }
+        // An album item zooms from its own tile, inside the album's row.
+        if let row = snapshot?.rows.first(where: { $0.content.album?.contains(stableId: stableId) == true }),
+           let item = row.content.album?.items.first(where: { $0.id == stableId }),
+           let albumView = (list.view(for: row.id) as? TimelineRowView)?.shownMessageView?.albumView,
+           let tile = albumView.tileView(messageId: item.message.messageId)
+        {
+          if let photo = tile as? NewPhotoView { return photo.imageView }
+          if let video = tile as? NewVideoView { return video.gallerySourceView }
+          return tile
+        }
+        return (list.view(for: .message(stableId)) ?? list.view(for: .threadParent(stableId)))
+          .flatMap(Self.galleryMediaView(in:))
       }
     )
     viewer.onDismiss = { [weak self] in self?.isPresentingGallery = false }

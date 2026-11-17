@@ -95,7 +95,27 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     var thumbnailImage: UIImage?
   }
 
-  var attachmentItems: [String: FileMediaItem] = [:]
+  var attachmentItems: [String: FileMediaItem] = [:] {
+    didSet { attachmentOrder = Self.updatedAttachmentOrder(attachmentOrder, items: attachmentItems) }
+  }
+  /// Keys of `attachmentItems` in the order they were added: the order they are sent in, and so
+  /// the order of an album's photos.
+  private(set) var attachmentOrder: [String] = []
+
+  /// Keeps known keys in place, drops removed ones and appends new ones.
+  static func updatedAttachmentOrder(_ order: [String], items: [String: FileMediaItem]) -> [String] {
+    var updated = order.filter { items[$0] != nil }
+    if updated.count < items.count {
+      let known = Set(updated)
+      updated.append(contentsOf: items.keys.filter { !known.contains($0) }.sorted())
+    }
+    return updated
+  }
+
+  /// Attachments in the order they were added.
+  func orderedAttachments(_ items: [String: FileMediaItem]) -> [FileMediaItem] {
+    attachmentOrder.compactMap { items[$0] }
+  }
   var pendingVideoAttachments: [PendingVideoAttachment] = []
   var canceledPendingVideoAttachmentIds: Set<String> = []
   private var pendingMediaSendState = ComposePendingMediaSendState()
@@ -1223,6 +1243,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       hasActiveAttachmentUploads: hasActiveUploads
     )
     let attachmentItemsToSend = shouldSendTextOnly ? [String: FileMediaItem]() : attachmentItemsSnapshot
+    // Ordered now: the compose clears its attachments (and their order) before the send runs.
+    let orderedAttachmentsToSend = orderedAttachments(attachmentItemsToSend)
     let hasAttachments = !attachmentItemsToSend.isEmpty
 
     // Can't send if no text, no attachments, and not forwarding
@@ -1331,26 +1353,25 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           await sendTextTransaction(transaction)
         }
       } else {
-        for (index, (_, attachment)) in attachmentItemsToSend.enumerated() {
-          log.debug("Sending attachment: \(attachment)")
-          let isFirst = index == 0
-
+        // In the order they were added; neighbouring photos and videos go out as albums.
+        let attachments = orderedAttachmentsToSend.filter { attachment in
           // Verify attachment has valid local path before sending
           guard attachment.getLocalPath() != nil else {
             log.error("Attachment has no local path, skipping: \(attachment)")
-            continue
+            return false
           }
-
-          submitAttachmentSend(.init(
-            text: isFirst ? text : nil,
-            peerId: peerId,
-            chatId: chatId,
-            mediaItems: [attachment],
-            replyToMsgId: isFirst ? replyToMessageId : nil,
-            isSticker: nil,
-            entities: isFirst ? entities : nil,
-            sendMode: sendMode
-          ))
+          return true
+        }
+        for send in TransactionSendMessage.sends(
+          text: text,
+          peerId: peerId,
+          chatId: chatId,
+          mediaItems: attachments,
+          replyToMsgId: replyToMessageId,
+          entities: entities,
+          sendMode: sendMode
+        ) {
+          submitAttachmentSend(send)
         }
       }
     }
