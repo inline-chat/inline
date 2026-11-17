@@ -562,21 +562,77 @@ describe("searchMessages", () => {
     expect(forB.totalCount).toBe(6)
   })
 
-  test("count_only requires a query", async () => {
+  test("count_only needs a query or a media filter", async () => {
     const userA = (await testUtils.createUser("search-count-e@example.com"))!
     const userB = (await testUtils.createUser("search-count-f@example.com"))!
     await testUtils.createPrivateChat(userA, userB)
+    const peerId = { type: { oneofKind: "user" as const, user: { userId: BigInt(userB.id) } } }
 
     await expect(
+      searchMessages({ peerId, queries: [], countOnly: true }, makeFunctionContext(userA.id)),
+    ).rejects.toThrow()
+    // Links are found by scanning text, so they still need a query to count.
+    await expect(
       searchMessages(
-        {
-          peerId: { type: { oneofKind: "user", user: { userId: BigInt(userB.id) } } },
-          queries: [],
-          filter: SearchMessagesFilter.FILTER_DOCUMENTS,
-          countOnly: true,
-        },
+        { peerId, queries: [], filter: SearchMessagesFilter.FILTER_LINKS, countOnly: true },
         makeFunctionContext(userA.id),
       ),
     ).rejects.toThrow()
+  })
+
+  test("count_only counts photos and videos with a media filter alone", async () => {
+    const userA = (await testUtils.createUser("search-count-g@example.com"))!
+    const userB = (await testUtils.createUser("search-count-h@example.com"))!
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: true,
+    })
+
+    for (let messageId = 1; messageId <= 5; messageId++) {
+      const [photo] = await db.insert(schema.photos).values({ format: "jpeg" }).returning()
+      await db
+        .insert(schema.messages)
+        .values({ messageId, chatId: chat.id, fromId: userA.id, mediaType: "photo", photoId: photo!.id })
+        .execute()
+    }
+    const [videoFile] = await db
+      .insert(schema.files)
+      .values({ fileUniqueId: "file-count-video-1", userId: userA.id, mimeType: "video/mp4", fileSize: 120 })
+      .returning()
+    const [video] = await db.insert(schema.videos).values({ fileId: videoFile!.id }).returning()
+    await db
+      .insert(schema.messages)
+      .values({ messageId: 6, chatId: chat.id, fromId: userA.id, mediaType: "video", videoId: video!.id })
+      .execute()
+    const [sticker] = await db.insert(schema.photos).values({ format: "png" }).returning()
+    await db
+      .insert(schema.messages)
+      .values({ messageId: 7, chatId: chat.id, fromId: userA.id, mediaType: "photo", photoId: sticker!.id, isSticker: true })
+      .execute()
+    await testUtils.createTestMessage({ messageId: 8, chatId: chat.id, fromId: userA.id, text: "no media" })
+    await db
+      .update(schema.dialogs)
+      .set({ collapsedMaxId: 2 })
+      .where(and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, userA.id)))
+
+    const peerFromA = { type: { oneofKind: "user" as const, user: { userId: BigInt(userB.id) } } }
+    const peerFromB = { type: { oneofKind: "user" as const, user: { userId: BigInt(userA.id) } } }
+    const media = { queries: [], filter: SearchMessagesFilter.FILTER_PHOTO_VIDEO, countOnly: true }
+
+    const forA = await searchMessages({ peerId: peerFromA, ...media }, makeFunctionContext(userA.id))
+    expect(forA.messages).toEqual([])
+    // Photos 3-5 and the video; the sticker, the text message and cleared history are left out.
+    expect(forA.totalCount).toBe(4)
+
+    const forB = await searchMessages({ peerId: peerFromB, ...media }, makeFunctionContext(userB.id))
+    expect(forB.totalCount).toBe(6)
+
+    const videos = await searchMessages(
+      { peerId: peerFromB, queries: [], filter: SearchMessagesFilter.FILTER_VIDEOS, countOnly: true },
+      makeFunctionContext(userB.id),
+    )
+    expect(videos.totalCount).toBe(1)
   })
 })
