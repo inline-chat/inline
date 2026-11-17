@@ -121,9 +121,10 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
 
     // Resting on the newest row counts as pinned, so arrivals and growth keep the bottom. Only at the
     // live end: the newest row of a window short of it is a loaded end, and a newer page landing
-    // below it must not pull the reader to the end of that page.
+    // below it must not pull the reader to the end of that page. Content past the end (a fling's
+    // bounce) is moving, not resting: pinning there would snap it onto the end under the bounce.
     if update.pinsWhenAtBottom, update.scroll == .preserve, reachedNewest, previous.isAtBottom,
-       !previous.placements.isEmpty
+       abs(previous.restShift) <= 0.5, !previous.placements.isEmpty
     {
       position = .latest
     }

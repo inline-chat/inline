@@ -386,6 +386,24 @@ private extension Comparable {
     checkInvariants(fixture.state.layout, rows: Array(0 ..< 150))
   }
 
+  @Test func `an update during a fling's bounce past the newest row leaves the bounce alone`() {
+    var fixture = Fixture()
+    fixture.apply(.init(rows: Array(0 ..< 100), scroll: .latest))
+    // A fling towards the newest rows overshoots the end, as the flight realises its path.
+    fixture.apply(.init(scroll: .by(-40), pinsWhenAtBottom: false, allowsOverscroll: true))
+    #expect(fixture.maxY(99) == 500)
+    #expect(fixture.state.layout.restShift == 40)
+    // The host applies an unrelated update while the bounce plays (a fling allows overscroll).
+    let change = fixture.apply(.init(allowsOverscroll: true))
+    #expect(fixture.maxY(99) == 500)
+    #expect(!change.movesAnything)
+    // The flight returns the content to the end; resting there pins again.
+    fixture.apply(.init(scroll: .by(40), pinsWhenAtBottom: false, allowsOverscroll: true))
+    fixture.apply(.init(rows: Array(0 ... 100)))
+    #expect(fixture.maxY(100) == 540)
+    #expect(fixture.state.layout.position == .latest)
+  }
+
   @Test func `resting on the newest row at the live end still pins`() {
     var fixture = Fixture()
     fixture.apply(.init(rows: Array(0 ..< 100), coverage: .init(reachesOldest: true, reachesNewest: true),
