@@ -11,17 +11,27 @@ public struct TextLayoutStyle: Hashable, Sendable {
   public var minimumLineHeight: CGFloat
   /// Direction for paragraphs with no letters, usually the UI direction.
   public var fallbackDirection: TextDirection
+  /// How line boxes are sized. Under `.fontDefault`, `lineSpacing` follows every line and
+  /// `paragraphSpacing` is added after a paragraph's last line, as in TextKit.
+  public var lineHeight: TextLineHeight
+  /// One base direction for every paragraph, as a whole-message direction setting does. Nil
+  /// picks each paragraph's dominant direction.
+  public var baseDirection: TextDirection?
 
   public init(
     lineSpacing: CGFloat = 0,
     paragraphSpacing: CGFloat = 0,
     minimumLineHeight: CGFloat = 0,
-    fallbackDirection: TextDirection = .leftToRight
+    fallbackDirection: TextDirection = .leftToRight,
+    lineHeight: TextLineHeight = .natural,
+    baseDirection: TextDirection? = nil
   ) {
     self.lineSpacing = lineSpacing
     self.paragraphSpacing = paragraphSpacing
     self.minimumLineHeight = minimumLineHeight
     self.fallbackDirection = fallbackDirection
+    self.lineHeight = lineHeight
+    self.baseDirection = baseDirection
   }
 }
 
@@ -297,8 +307,17 @@ public enum TextLayouter {
       let endsParagraph = endsWithHardBreak(string, range: range) || NSMaxRange(range) >= length
 
       let natural = ascent + descent + leading
-      let lineHeight = grid.ceil(max(natural, style.minimumLineHeight))
-      let baseline = grid.round(y + (lineHeight - natural) + ascent)
+      let lineHeight: CGFloat
+      let baseline: CGFloat
+      if style.lineHeight == .fontDefault, let metrics = fontDefaultMetrics(of: attributed, range: range) {
+        // The platform's line box, unrounded: its height is whole points already, and its
+        // baseline is where the platform draws glyphs.
+        lineHeight = max(metrics.height, style.minimumLineHeight)
+        baseline = y + (lineHeight - metrics.height) + metrics.baseline
+      } else {
+        lineHeight = grid.ceil(max(natural, style.minimumLineHeight))
+        baseline = grid.round(y + (lineHeight - natural) + ascent)
+      }
       lines.append(TextLayout.Line(
         range: range,
         frame: CGRect(x: 0, y: y, width: lineWidth, height: lineHeight),
@@ -313,7 +332,10 @@ public enum TextLayouter {
       y = grid.round(y + lineHeight)
       start = NSMaxRange(range)
       if start < length {
-        y = grid.round(y + (endsParagraph ? style.paragraphSpacing : style.lineSpacing))
+        let spacing = style.lineHeight == .fontDefault
+          ? style.lineSpacing + (endsParagraph ? style.paragraphSpacing : 0)
+          : (endsParagraph ? style.paragraphSpacing : style.lineSpacing)
+        y = grid.round(y + spacing)
       }
       if endsParagraph {
         paragraphStart = start
@@ -336,7 +358,8 @@ public enum TextLayouter {
   }
 
   private static func direction(of string: NSString, from start: Int, style: TextLayoutStyle) -> TextDirection {
-    TextDirection.dominant(in: string, range: paragraphContent(of: string, from: start), fallback: style.fallbackDirection)
+    if let forced = style.baseDirection { return forced }
+    return TextDirection.dominant(in: string, range: paragraphContent(of: string, from: start), fallback: style.fallbackDirection)
   }
 
   /// The paragraph starting at `start`, without its line break.
@@ -358,7 +381,8 @@ public enum TextLayouter {
     var start = 0
     while start < string.length {
       let content = paragraphContent(of: string, from: start)
-      let dominant = TextDirection.dominant(in: string, range: content, fallback: style.fallbackDirection)
+      let dominant = style.baseDirection
+        ?? TextDirection.dominant(in: string, range: content, fallback: style.fallbackDirection)
       let firstStrong = TextDirection.firstStrong(in: string, range: content, fallback: style.fallbackDirection)
       let next = min(string.length, NSMaxRange(content) + 1)
       if dominant != firstStrong {
