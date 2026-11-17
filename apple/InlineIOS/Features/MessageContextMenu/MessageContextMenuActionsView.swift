@@ -706,7 +706,7 @@ final class MessageContextMenuRowView: UIControl {
   private var hasSubtitle: Bool { subtitleLabel.superview != nil }
 
   private var iconSlot: CGFloat {
-    reservesIconSlot ? style.iconSlotWidth + style.iconTitleSpacing : 0
+    reservesIconSlot ? style.scaledIconSlotWidth + style.iconTitleSpacing : 0
   }
 
   private var chevronWidth: CGFloat {
@@ -750,11 +750,11 @@ final class MessageContextMenuRowView: UIControl {
 
     // Positions in a left-to-right row; mirrored below for right-to-left.
     let leadsWithIcon = style.iconsLead || element.isBack
-    let iconX: CGFloat = leadsWithIcon ? style.rowSideInset : width - style.rowSideInset - style.iconSlotWidth
+    let iconX: CGFloat = leadsWithIcon ? style.rowSideInset : width - style.rowSideInset - style.scaledIconSlotWidth
     let textX: CGFloat = style.rowSideInset + (leadsWithIcon ? iconSlot : 0)
     var frames: [(UIView, CGRect)] = [
       (titleLabel, CGRect(x: textX, y: textTop, width: textWidth, height: titleHeight)),
-      (iconView, CGRect(x: iconX, y: 0, width: style.iconSlotWidth, height: bounds.height)),
+      (iconView, CGRect(x: iconX, y: 0, width: style.scaledIconSlotWidth, height: bounds.height)),
     ]
     if hasSubtitle {
       frames.append((subtitleLabel, CGRect(x: textX, y: textTop + titleHeight + 2, width: textWidth, height: subtitleHeight - 2)))

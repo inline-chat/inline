@@ -93,6 +93,12 @@ struct MessageContextMenuStyle {
     UIImage.SymbolConfiguration(font: titleFont, scale: .medium)
   }
 
+  /// The icon column at the current text size. The icons scale with the title's font, so the column
+  /// does too; a fixed column let large-text icons run into their titles.
+  var scaledIconSlotWidth: CGFloat {
+    ceil(iconSlotWidth * titleFont.pointSize / 17)
+  }
+
   var highlightColor: UIColor {
     UIColor.label.withAlphaComponent(platter == .glass ? 0.1 : 0.12)
   }
