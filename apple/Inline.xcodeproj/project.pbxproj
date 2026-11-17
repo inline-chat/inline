@@ -77,6 +77,7 @@
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
 		F1A0B1C32F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */; };
+		F1A0B1C52F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
 		D4B53A132F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A122F1C000100000001 /* InlineSearch */; };
@@ -361,6 +362,7 @@
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
 				A9E100052F50000100000001 /* MemojiPickerUI in Frameworks */,
 				E5A100032FA0000100000001 /* InlineSyntaxHighlighting in Frameworks */,
+				F1A0B1C52F10432100A1B2C3 /* InlineMessageLayout in Frameworks */,
 				D4B53A132F1C000100000001 /* InlineSearch in Frameworks */,
 				D7A0C0022F50000100000001 /* InlineRTC in Frameworks */,
 				A55C00012FA0003000000001 /* InlineMacScripting in Frameworks */,
@@ -619,6 +621,7 @@
 				A9E100022F50000100000001 /* MemojiKit */,
 				A9E100032F50000100000001 /* MemojiPickerUI */,
 				E5A100022FA0000100000001 /* InlineSyntaxHighlighting */,
+				F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */,
 				D4B53A122F1C000100000001 /* InlineSearch */,
 				D7A0C0012F50000100000001 /* InlineRTC */,
 				C38C905F2CB9432200B78B8A /* InlineKit */,

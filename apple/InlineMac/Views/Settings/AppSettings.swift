@@ -156,6 +156,7 @@ final class AppSettings: ObservableObject {
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
   static let messageWidgetsEnabledKey = "experimental.messageWidgetsEnabled"
   static let stableChatRouteEnabledKey = "experimental.stableChatRouteEnabled"
+  static let coreTextMessageTextEnabledKey = CoreTextMessageText.defaultsKey
   static let sidebarSortKey = "sidebarSort"
   static let messageDoubleClickActionKey = "messageDoubleClickAction"
   static let messageHoldActionKey = "messageHoldAction"
@@ -453,6 +454,16 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  /// Draws plain message text with Inline's Core Text renderer instead of NSTextView. Rich
+  /// messages and code blocks keep NSTextView. Off until it reaches parity.
+  @Published var coreTextMessageTextEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(coreTextMessageTextEnabled, forKey: Self.coreTextMessageTextEnabledKey)
+      // Text sizes come from the renderer that draws them.
+      MessageSizeCalculator.shared.invalidateCache()
+    }
+  }
+
   @Published var richTextInlineMathEnabled: Bool {
     didSet {
       UserDefaults.standard.set(
@@ -547,6 +558,7 @@ final class AppSettings: ObservableObject {
     ) as? Bool ?? true
     messageWidgetsEnabled = UserDefaults.standard.object(forKey: Self.messageWidgetsEnabledKey) as? Bool ?? false
     stableChatRouteEnabled = UserDefaults.standard.object(forKey: Self.stableChatRouteEnabledKey) as? Bool ?? false
+    coreTextMessageTextEnabled = UserDefaults.standard.object(forKey: Self.coreTextMessageTextEnabledKey) as? Bool ?? false
     richTextInlineMathEnabled = UserDefaults.standard.object(
       forKey: Self.richTextInlineMathEnabledKey
     ) as? Bool ?? false

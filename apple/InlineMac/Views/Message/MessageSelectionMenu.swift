@@ -25,11 +25,11 @@ final class MessageSelectionMenu {
   private var pendingShow = 0
 
   /// Called after a mouse selection gesture in a message text view finishes.
-  static func selectionTrackingEnded(in textView: NSTextView, at windowPoint: NSPoint) {
+  static func selectionTrackingEnded(in textView: any MessageTextSurface, at windowPoint: NSPoint) {
     shared.selectionTrackingEnded(in: textView, at: windowPoint)
   }
 
-  private func selectionTrackingEnded(in textView: NSTextView, at windowPoint: NSPoint) {
+  private func selectionTrackingEnded(in textView: any MessageTextSurface, at windowPoint: NSPoint) {
     dismiss()
     pendingShow += 1
     let token = pendingShow
@@ -40,7 +40,7 @@ final class MessageSelectionMenu {
     }
   }
 
-  private func show(for textView: NSTextView, at windowPoint: NSPoint) {
+  private func show(for textView: any MessageTextSurface, at windowPoint: NSPoint) {
     guard let window = textView.window, window.isKeyWindow,
           let provider = provider(for: textView),
           let host = host(for: textView)
@@ -100,15 +100,16 @@ final class MessageSelectionMenu {
 
   /// Centers the menu on the pointer, just above the first selected line; below it when the
   /// top of the selection is scrolled away or there is no room above. Returns `host` coordinates.
-  private func frame(for size: NSSize, in host: NSView, textView: NSTextView, windowPoint: NSPoint) -> NSRect? {
+  private func frame(for size: NSSize, in host: NSView, textView: any MessageTextSurface, windowPoint: NSPoint) -> NSRect? {
     guard let window = textView.window else { return nil }
     let gap: CGFloat = 6
     let visibleInWindow = textView.convert(textView.visibleRect, to: nil)
 
     var anchor = NSRect(x: windowPoint.x, y: windowPoint.y - 9, width: 0, height: 18)
-    let selection = (textView as? MessageTextView)?.listSelectionRange ?? textView.selectedRange()
+    let selection = textView.listSelectionRange ?? (textView as? NSTextView)?.selectedRange()
+      ?? NSRange(location: 0, length: 0)
     if selection.length > 0 {
-      let firstLine = window.convertFromScreen(textView.firstRect(forCharacterRange: selection, actualRange: nil))
+      let firstLine = window.convertFromScreen(textView.firstLineScreenRect(for: selection))
       if !firstLine.isEmpty, firstLine.maxY <= visibleInWindow.maxY, firstLine.minY >= visibleInWindow.minY {
         anchor = firstLine
       }
