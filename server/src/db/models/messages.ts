@@ -79,6 +79,7 @@ export const MessageModel = {
   getMessages: getMessages,
   getLatestMessagesForChat: getLatestMessagesForChat,
   getMessagesWithMediaFilter: getMessagesWithMediaFilter,
+  countMessagesWithMediaFilter: countMessagesWithMediaFilter,
   getMessage: getMessage, // 1 msg
   getMessageByRandomId: getMessageByRandomId,
   getMessagesByIds: getMessagesByIds,
@@ -633,6 +634,26 @@ async function getMessagesWithMediaFilter(input: {
     with: fullMessageRelations,
   })
   return processMessages(result, input.tx)
+}
+
+/** Counts the chat's messages that match a media filter, newer than `afterMessageId` when set. */
+async function countMessagesWithMediaFilter(input: {
+  chatId: number
+  filter: Exclude<MessageMediaFilter, "links">
+  afterMessageId?: number
+  tx?: Transaction
+}): Promise<number> {
+  const [row] = await (input.tx ?? db)
+    .select({ count: sql<number>`count(*)::int` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.chatId, input.chatId),
+        input.afterMessageId === undefined ? undefined : gt(messages.messageId, input.afterMessageId),
+        buildMediaFilterClause(input.filter),
+      ),
+    )
+  return row?.count ?? 0
 }
 
 export function buildMediaFilterClause(filter: MessageMediaFilter | undefined) {
