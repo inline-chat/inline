@@ -547,4 +547,59 @@ final class HarnessUITests: XCTestCase {
       shot("history-\(i)")
     }
   }
+  /// Agent blocks: a code block and a table scroll sideways under a horizontal drag without moving the list
+  /// or starting a reply; a closed disclosure opens and closes in place.
+  func testAgentBlocks() {
+    func sideways(_ element: XCUIElement, _ name: String) {
+      guard element.waitForExistence(timeout: 3) else { return print("[UITEST] no \(name)") }
+      Thread.sleep(forTimeInterval: 1)
+      let y = element.frame.midY
+      print("[UITEST] \(name) y \(y)")
+      shot("\(name)-before")
+      let window = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+      window.withOffset(CGVector(dx: screen.width - 60, dy: y)).press(
+        forDuration: 0.05, thenDragTo: window.withOffset(CGVector(dx: 80, dy: y)), withVelocity: 600,
+        thenHoldForDuration: 0.2
+      )
+      Thread.sleep(forTimeInterval: 1)
+      print("[UITEST] \(name) y after \(element.frame.midY) menu=\(app.buttons["Copy"].exists)")
+      shot("\(name)-after-drag")
+    }
+    launch(["--timeline-harness-focus", "369"])
+    sideways(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'func apply'")).firstMatch, "code")
+    launch(["--timeline-harness-focus", "287"])
+    sideways(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Longest'")).firstMatch, "table")
+
+    launch(["--timeline-harness-focus", "328"])
+    Thread.sleep(forTimeInterval: 2)
+    shot("disclosure-closed")
+    let details = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Details'")).firstMatch
+    if details.waitForExistence(timeout: 3) {
+      print("[UITEST] details y \(details.frame.minY)")
+      details.tap()
+      Thread.sleep(forTimeInterval: 1)
+      print("[UITEST] details y open \(details.frame.minY)")
+      shot("disclosure-open")
+      details.tap()
+      Thread.sleep(forTimeInterval: 1)
+      print("[UITEST] details y closed \(details.frame.minY)")
+      shot("disclosure-closed-again")
+    } else {
+      print("[UITEST] no disclosure")
+    }
+  }
+
+  /// A long chat flung far into history, then held still so `heap` can count the rows and views alive (the
+  /// runner prints `[UITEST] heap-check ready`). Extra arguments set the size, e.g. `--timeline-harness-count 3000`.
+  func testLongFlings() {
+    launch()
+    for i in 0 ..< 30 {
+      drag(190, 180, 190, 580, v: 4000)
+      Thread.sleep(forTimeInterval: i % 5 == 4 ? 2 : 0.7)
+    }
+    Thread.sleep(forTimeInterval: 2)
+    shot("long-flings")
+    print("[UITEST] heap-check ready")
+    Thread.sleep(forTimeInterval: 40)
+  }
 }
