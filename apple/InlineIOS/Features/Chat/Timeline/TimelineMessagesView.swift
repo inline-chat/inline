@@ -516,6 +516,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func row(_ id: ChatRowID) -> ChatRow? { snapshot?.row(for: id) }
 
+  /// A message of this chat. The thread's parent is the parent chat's message, numbered in that chat, so
+  /// reads, the reading place, the history anchor and jumps leave it out, as the collection view's
+  /// thread anchor was left out of them.
+  private static func chatMessage(_ row: ChatRow?) -> FullMessage? {
+    if case let .message(message, _)? = row?.content { message } else { nil }
+  }
+
   /// The thread's parent message stands alone; when someone else wrote it, it shows their avatar and
   /// name, as the collection view's thread layout did.
   private static func threadParentGrouping(_ message: FullMessage) -> ChatRowGrouping {
@@ -870,7 +877,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// translations arrive as message updates. The first batch also detects the chat's languages.
   private func offerForTranslation(_ ids: some Sequence<ChatRowID>) {
     guard !isPreview, let snapshot else { return }
-    let messages = ids.compactMap { snapshot.row(for: $0)?.content.message }.filter { !$0.message.isServiceMessage }
+    // Not the thread's parent: a request names this chat's peer and its first message's chat.
+    let messages = ids.compactMap { Self.chatMessage(snapshot.row(for: $0)) }.filter { !$0.message.isServiceMessage }
     guard !messages.isEmpty else { return }
     translation.messagesDisplayed(messages: messages)
     if !hasDetectedLanguages {
@@ -932,7 +940,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         // Below where the date pill sits, as the collection view places it.
         if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(TimelineDatePill.height)) }
       case let .saved(place):
-        if let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == place.messageId }) {
+        if let row = snapshot.rows.first(where: { Self.chatMessage($0)?.message.messageId == place.messageId }) {
           scroll = .to(row.id, .top(place.offset))
         }
     }
@@ -1064,7 +1072,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     var messageId: Int64?
     if !atBottom {
       for placement in layout.visible.reversed() {
-        if let id = row(placement.id)?.content.message?.message.messageId, id > 0 {
+        if let id = Self.chatMessage(row(placement.id))?.message.messageId, id > 0 {
           messageId = id
           break
         }
@@ -1079,7 +1087,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// The server id of a message on screen, to tell which way a jump to another window goes.
   private func messageIdOnScreen() -> Int64? {
     for placement in list.layout.visible.reversed() {
-      if let id = row(placement.id)?.content.message?.message.messageId, id > 0 { return id }
+      if let id = Self.chatMessage(row(placement.id))?.message.messageId, id > 0 { return id }
     }
     return nil
   }
@@ -1102,7 +1110,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .unreadLine:
         return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(TimelineDatePill.height)) : .latest
       case let .message(messageId):
-        guard let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == messageId })
+        guard let row = snapshot.rows.first(where: { Self.chatMessage($0)?.message.messageId == messageId })
         else { return .latest }
         return .to(row.id, .center)
     }
@@ -1697,7 +1705,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func visibleMessages() -> [FullMessage] {
     guard let snapshot else { return [] }
-    return list.layout.visible.compactMap { snapshot.row(for: $0.id)?.content.message }
+    return list.layout.visible.compactMap { Self.chatMessage(snapshot.row(for: $0.id)) }
       .filter { $0.message.messageId > 0 }
   }
 
@@ -1760,7 +1768,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     let top = list.layout.viewport.usableTop
     for placement in list.layout.visible {
-      guard let messageId = snapshot.row(for: placement.id)?.content.message?.message.messageId, messageId > 0,
+      guard let messageId = Self.chatMessage(snapshot.row(for: placement.id))?.message.messageId, messageId > 0,
             placement.y >= top - 0.5 || placement.id == list.layout.visible.last?.id else { continue }
       ChatReadingPlaceStore.shared.save(ChatReadingPlace(messageId: messageId, offset: placement.y - top), for: peer)
       return
