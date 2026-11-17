@@ -49,6 +49,54 @@ enum MediaGalleryChromeStyle {
   }
 }
 
+/// A glass capsule with an icon and a line of text, for save, copy and download status.
+final class MediaGalleryToastView: UIView {
+  private let panel = MediaGalleryChromeStyle.glassPanel(cornerRadius: 20)
+  private let iconView = UIImageView()
+  private let label = UILabel()
+
+  init() {
+    super.init(frame: .zero)
+    isUserInteractionEnabled = false
+    iconView.tintColor = .label
+    iconView.contentMode = .scaleAspectFit
+    iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+    iconView.setContentHuggingPriority(.required, for: .horizontal)
+    label.font = .systemFont(ofSize: 14, weight: .medium)
+    label.textColor = .label
+    label.lineBreakMode = .byTruncatingTail
+
+    let stack = UIStackView(arrangedSubviews: [iconView, label])
+    stack.spacing = 8
+    stack.alignment = .center
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(panel)
+    panel.contentView.addSubview(stack)
+    NSLayoutConstraint.activate([
+      panel.topAnchor.constraint(equalTo: topAnchor),
+      panel.bottomAnchor.constraint(equalTo: bottomAnchor),
+      panel.leadingAnchor.constraint(equalTo: leadingAnchor),
+      panel.trailingAnchor.constraint(equalTo: trailingAnchor),
+      stack.centerYAnchor.constraint(equalTo: panel.contentView.centerYAnchor),
+      stack.leadingAnchor.constraint(equalTo: panel.contentView.leadingAnchor, constant: 16),
+      stack.trailingAnchor.constraint(equalTo: panel.contentView.trailingAnchor, constant: -18),
+      heightAnchor.constraint(equalToConstant: 40),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func update(text: String, systemImage: String) {
+    iconView.image = UIImage(systemName: systemImage)
+    label.text = text
+    accessibilityLabel = text
+    UIAccessibility.post(notification: .announcement, argument: text)
+  }
+}
+
 /// Bars let taps on their empty areas reach the photo, so a tap anywhere toggles the chrome.
 class MediaGalleryPassthroughView: UIView {
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -267,8 +315,10 @@ final class MediaGalleryVideoControls: UIView {
   private let elapsedLabel = UILabel()
   private let durationLabel = UILabel()
   private(set) var isScrubbing = false
+  private var duration: Double = 0
 
-  var onSeek: ((Double) -> Void)?
+  /// Seeks to a fraction of the video. `exact` is false while the thumb is still moving.
+  var onSeek: ((_ fraction: Double, _ exact: Bool) -> Void)?
   var onScrubChange: ((Bool) -> Void)?
 
   init() {
@@ -313,9 +363,13 @@ final class MediaGalleryVideoControls: UIView {
   }
 
   func update(elapsed: Double, duration: Double, isPlaying: Bool) {
-    elapsedLabel.text = Self.format(elapsed)
+    self.duration = duration
     durationLabel.text = Self.format(duration)
-    if !isScrubbing {
+    // While scrubbing, the label follows the thumb rather than the seek catching up.
+    if isScrubbing {
+      elapsedLabel.text = Self.format(Double(slider.value) * duration)
+    } else {
+      elapsedLabel.text = Self.format(elapsed)
       slider.value = duration > 0 ? Float(elapsed / duration) : 0
     }
     playButton.setImage(
@@ -344,12 +398,13 @@ final class MediaGalleryVideoControls: UIView {
   }
 
   @objc private func sliderChanged() {
-    onSeek?(Double(slider.value))
+    elapsedLabel.text = Self.format(Double(slider.value) * duration)
+    onSeek?(Double(slider.value), false)
   }
 
   @objc private func sliderEnded() {
     isScrubbing = false
-    onSeek?(Double(slider.value))
+    onSeek?(Double(slider.value), true)
     onScrubChange?(false)
   }
 }
@@ -373,6 +428,9 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
 
   /// The user tapped or dragged to an item.
   var onSelect: ((Int) -> Void)?
+  /// The user started or stopped dragging the strip; the gallery settles on a page once it stops.
+  var onScrubChange: ((Bool) -> Void)?
+  private let selectionFeedback = UISelectionFeedbackGenerator()
 
   init() {
     super.init(frame: .zero)
@@ -489,6 +547,8 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
     isScrubbing = true
     lastScrubbedIndex = currentIndex
+    selectionFeedback.prepare()
+    onScrubChange?(true)
     UIView.animate(withDuration: 0.2) {
       self.layout.invalidateLayout()
       self.collectionView.layoutIfNeeded()
@@ -498,7 +558,7 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
     guard isScrubbing, let index = indexNearestCenter(), index != lastScrubbedIndex else { return }
     lastScrubbedIndex = index
-    UISelectionFeedbackGenerator().selectionChanged()
+    selectionFeedback.selectionChanged()
     onSelect?(index)
   }
 
@@ -514,6 +574,7 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
     guard isScrubbing else { return }
     isScrubbing = false
     if let index = lastScrubbedIndex { currentIndex = index }
+    onScrubChange?(false)
     UIView.animate(withDuration: 0.25) {
       self.layout.invalidateLayout()
       self.collectionView.layoutIfNeeded()
