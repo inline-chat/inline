@@ -88,6 +88,22 @@ public struct TimelineLayout<ID: Hashable & Sendable>: Equatable, Sendable {
     )
   }
 
+  /// Where the content meets its ends, as displacements from where it is now (positive: down,
+  /// towards older rows, as `TimelineScroll.by`); nil where that end is not placed. Past an end,
+  /// `distanceToNewest` and `distanceToOldest` read zero, but the end is where the content rests:
+  /// `restShift` away. A fling re-baked while past an end (its bounce, or rows that left under it)
+  /// returns there instead of to wherever the end was.
+  public var ends: (lower: CGFloat?, upper: CGFloat?) {
+    var lower = distanceToNewest.map { -$0 }
+    var upper = distanceToOldest
+    if restShift > 0.25 {
+      lower = restShift
+    } else if restShift < -0.25 {
+      upper = restShift
+    }
+    return (lower, upper)
+  }
+
   public func placement(for id: ID) -> TimelinePlacement<ID>? {
     placements.first { $0.id == id }
   }

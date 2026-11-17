@@ -1422,11 +1422,13 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
   /// Rows that loaded during the fling can bring an end into reach, or take one away. The rest of
   /// the path is baked again from the path's own position and velocity at `now`, on the same clock.
+  /// Past an end (the bounce) the end is where the content rests, so a bounce re-bakes only when rows
+  /// arriving or leaving there moved that end; the path then returns to where the end is now.
   private func rebakeIfEndsChanged(now: CFTimeInterval) {
-    guard let flight, abs(state.layout.restShift) < 0.25 else { return }
-    let layout = state.layout
-    let upper = layout.distanceToOldest.map { flight.applied + Double($0) }
-    let lower = layout.distanceToNewest.map { flight.applied - Double($0) }
+    guard let flight else { return }
+    let ends = state.layout.ends
+    let upper = ends.upper.map { flight.applied + Double($0) }
+    let lower = ends.lower.map { flight.applied + Double($0) }
 
     func differs(_ a: Double?, _ b: Double?) -> Bool {
       switch (a, b) {

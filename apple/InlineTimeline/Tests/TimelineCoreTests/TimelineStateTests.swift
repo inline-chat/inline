@@ -404,6 +404,28 @@ private extension Comparable {
     #expect(fixture.state.layout.position == .latest)
   }
 
+  @Test func `the ends of a fling past its end are where the content rests, after rows leave under it too`() {
+    var fixture = Fixture()
+    fixture.apply(.init(rows: Array(0 ..< 100), scroll: .latest))
+    #expect(fixture.state.layout.ends.lower == 0)
+    // A fling towards the newest rows is 30 pt short of the end.
+    fixture.apply(.init(scroll: .by(30), pinsWhenAtBottom: false, allowsOverscroll: true))
+    #expect(fixture.state.layout.ends.lower == -30)
+    #expect(fixture.state.layout.ends.upper == nil)
+    // The newest row leaves (a deleted message, the status notice): the content is now 20 pt past the
+    // new end. The distance reads zero, but the end the fling has to return to is 20 pt down.
+    fixture.apply(.init(rows: Array(0 ..< 99), allowsOverscroll: true))
+    #expect(fixture.state.layout.distanceToNewest == 0)
+    #expect(fixture.state.layout.restShift == 20)
+    #expect(fixture.state.layout.ends.lower == 20)
+    // Past the oldest end, the same.
+    var top = Fixture()
+    top.apply(.init(rows: Array(0 ..< 100), scroll: .to(0, .top(0))))
+    top.apply(.init(scroll: .by(25), pinsWhenAtBottom: false, allowsOverscroll: true))
+    #expect(top.state.layout.distanceToOldest == 0)
+    #expect(top.state.layout.ends.upper == -25)
+  }
+
   @Test func `resting on the newest row at the live end still pins`() {
     var fixture = Fixture()
     fixture.apply(.init(rows: Array(0 ..< 100), coverage: .init(reachesOldest: true, reachesNewest: true),
