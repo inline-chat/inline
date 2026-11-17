@@ -329,7 +329,7 @@ class MessageViewAppKit: NSView {
   /// Media reaching the bubble's bottom corners continues into the tail.
   private var mediaBubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
     let layout = props.layout
-    guard props.renderStyle == .bubble, layout.hasBubbleColor else { return nil }
+    guard props.renderStyle == .bubble, layout.hasBubbleColor, props.album == nil else { return nil }
     let media: (plan: MessageSizeCalculator.LayoutPlan, top: CGFloat)? = if let photo = layout.photo {
       (photo, layout.photoContentViewTop)
     } else if let video = layout.video {
@@ -507,6 +507,42 @@ class MessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
+
+  /// An album's grid, in its photo's place (`props.album`). The photo view keeps the slot's
+  /// constraints and stays hidden under it.
+  private var albumGridView: MessageAlbumGridView?
+
+  private func syncAlbumGrid() {
+    guard let album = props.album, let photo = props.layout.photo, photoView.superview != nil else {
+      albumGridView?.removeFromSuperview()
+      albumGridView = nil
+      photoView.isHidden = false
+      return
+    }
+    photoView.isHidden = true
+    let grid = albumGridView ?? {
+      let grid = MessageAlbumGridView()
+      grid.translatesAutoresizingMaskIntoConstraints = false
+      contentView.addSubview(grid, positioned: .above, relativeTo: photoView)
+      NSLayoutConstraint.activate([
+        grid.topAnchor.constraint(equalTo: photoView.topAnchor),
+        grid.leadingAnchor.constraint(equalTo: photoView.leadingAnchor),
+        grid.widthAnchor.constraint(equalTo: photoView.widthAnchor),
+        grid.heightAnchor.constraint(equalTo: photoView.heightAnchor),
+      ])
+      albumGridView = grid
+      return grid
+    }()
+    let message = fullMessage.message
+    grid.configure(
+      album: album,
+      availableWidth: props.layout.albumAvailableWidth ?? photo.size.width,
+      scrollState: scrollState,
+      isRightToLeft: userInterfaceLayoutDirection == .rightToLeft,
+      roundsTop: message.repliedToMessageId == nil && !message.hasForwardHeader,
+      roundsBottom: message.text?.isEmpty != false
+    )
+  }
 
   private lazy var videoView: NewVideoView = {
     let view = NewVideoView(fullMessage, scrollState: scrollState)
@@ -2321,6 +2357,7 @@ class MessageViewAppKit: NSView {
 
     defer {
       NSLayoutConstraint.activate(constraints)
+      syncAlbumGrid()
     }
 
     // Note:
@@ -3526,6 +3563,31 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
+    // An album goes as a whole: sent items on the server, sends in flight cancelled, failed
+    // ones locally.
+    if let album = props.album {
+      let peerId = message.peerId
+      let chatId = message.chatId
+      let sent = album.items.map(\FullMessage.message.messageId).filter { $0 > 0 }
+      let cancelled = album.items.filter { $0.message.messageId <= 0 && PendingMessageCanceller.cancel($0) }
+      let local = album.items.filter { item in
+        item.message.messageId <= 0 && !cancelled.contains { $0.id == item.id }
+      }.map(\FullMessage.message.messageId)
+      if !local.isEmpty {
+        Task {
+          _ = try? await AppDatabase.shared.dbWriter.write { db in
+            try Message.deleteMessages(db, messageIds: local, chatId: chatId)
+          }
+          await MainActor.run { MessagesPublisher.shared.messagesDeleted(messageIds: local, peer: peerId) }
+        }
+      }
+      if !sent.isEmpty {
+        Task(priority: .userInitiated) { @MainActor in
+          try await Api.realtime.send(.deleteMessages(messageIds: sent, peerId: peerId, chatId: chatId))
+        }
+      }
+      return
+    }
     if message.status == .failed {
       let messageId = message.messageId
       let chatId = message.chatId
@@ -3866,7 +3928,8 @@ class MessageViewAppKit: NSView {
 
   @objc private func forwardMessage() {
     if let forwardMessages = dependencies?.forwardMessages {
-      forwardMessages.present(messages: [fullMessage])
+      // An album forwards as a whole and stays one album in the destination.
+      forwardMessages.present(messages: props.album?.items ?? [fullMessage])
       return
     }
 
@@ -3880,7 +3943,7 @@ class MessageViewAppKit: NSView {
 
     weak var weakHostingController: NSViewController?
     let rootView = ForwardMessagesSheet(
-      messages: [fullMessage],
+      messages: props.album?.items ?? [fullMessage],
       onSelect: { [weak self] destination, selection in
         guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
           Log.shared.error("Forward nav failed: missing destination chat id")
@@ -4309,6 +4372,7 @@ class MessageViewAppKit: NSView {
     if hasPhoto {
       photoView.update(with: fullMessage)
     }
+    syncAlbumGrid()
 
     // Video
     if hasVideo {
@@ -4371,6 +4435,7 @@ class MessageViewAppKit: NSView {
       // disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
       disableTextRelayout: true
     )
+    syncAlbumGrid()
 
     if let richBlockPlan = props.layout.richBlockContent,
        let richBlockContentView
@@ -4406,8 +4471,10 @@ class MessageViewAppKit: NSView {
       if hasPhoto {
         if scrollState == .idle {
           photoView.setIsScrolling(false)
+          albumGridView?.setIsScrolling(false)
         } else {
           photoView.setIsScrolling(true)
+          albumGridView?.setIsScrolling(true)
         }
       }
       if hasVideo {
@@ -5276,8 +5343,8 @@ extension MessageViewAppKit: NSMenuDelegate {
       }
     }
 
-    // Add photo actions
-    if hasPhoto {
+    // Add photo actions (an album's photos open one at a time, from their tiles)
+    if hasPhoto, props.album == nil {
       let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
       copyItem.target = photoView
       copyItem.isEnabled = true

@@ -253,6 +253,7 @@ struct DeveloperProductionMessageRow: NSViewRepresentable {
       translated: false,
       usesAvatarOverlay: false,
       richBlockCodePresentation: codePresentation,
+      album: inputProps.album,
       layout: layout
     )
 
@@ -279,6 +280,8 @@ struct DeveloperMessageFixture {
   let conversation: DeveloperMessagePlaygroundConversation
   let groupPosition: DeveloperMessagePlaygroundGroupPosition
   let isRtl: Bool
+  /// Photos sent together; `message` is then the album's bubble message.
+  var album: MessageAlbum? = nil
 
   func inputProps(style: MessageRenderStyle) -> MessageViewInputProps {
     MessageViewInputProps(
@@ -290,7 +293,9 @@ struct DeveloperMessageFixture {
       isDM: conversation == .directMessage,
       isRtl: isRtl,
       translated: false,
-      renderStyle: style
+      renderStyle: style,
+      // The minimal style draws albums as separate messages, as the list does.
+      album: style == .bubble ? album : nil
     )
   }
 }

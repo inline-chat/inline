@@ -311,6 +311,8 @@ class MessageSizeCalculator {
 
     /// photo is always above text
     var photo: LayoutPlan?
+    /// For an album laid out as one photo: the width its grid was laid out at.
+    var albumAvailableWidth: CGFloat?
 
     /// video is always above text, mutually exclusive with other media types
     var video: LayoutPlan?
@@ -777,7 +779,9 @@ class MessageSizeCalculator {
     let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
-    let hasMedia = message.hasMedia
+    // An album (`props.album`) is laid out as one photo the size of its grid.
+    let hasMedia = message.hasMedia || props.album != nil
+    var albumAvailableWidth: CGFloat?
     let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
@@ -894,7 +898,10 @@ class MessageSizeCalculator {
         }
       }
 
-      if message.message.isSticker == true {
+      if let album = props.album {
+        albumAvailableWidth = min(parentAvailableWidth, maxMediaSide)
+        photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: albumAvailableWidth!).size
+      } else if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: width,
           height: height,
@@ -1701,6 +1708,7 @@ class MessageSizeCalculator {
       text: textPlan,
       richBlockContent: richBlockPlan,
       photo: photoPlan,
+      albumAvailableWidth: albumAvailableWidth,
       video: videoPlan,
       document: documentPlan,
       attachmentItems: attachmentItemsPlans,
@@ -1752,7 +1760,9 @@ class MessageSizeCalculator {
     let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
-    let hasMedia = message.hasMedia
+    // An album (`props.album`) is laid out as one photo the size of its grid.
+    let hasMedia = message.hasMedia || props.album != nil
+    var albumAvailableWidth: CGFloat?
     let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
@@ -1867,7 +1877,10 @@ class MessageSizeCalculator {
         }
       }
 
-      if message.message.isSticker == true {
+      if let album = props.album {
+        albumAvailableWidth = min(parentAvailableWidth, Self.minimalMediaMaxWidth)
+        photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: albumAvailableWidth!).size
+      } else if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: mediaIntrinsicWidth,
           height: mediaIntrinsicHeight,
@@ -2326,6 +2339,7 @@ class MessageSizeCalculator {
       text: textPlan,
       richBlockContent: richBlockPlan,
       photo: photoPlan,
+      albumAvailableWidth: albumAvailableWidth,
       video: videoPlan,
       document: documentPlan,
       attachmentItems: attachmentItemsPlans,

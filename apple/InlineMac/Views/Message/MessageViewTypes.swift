@@ -1,3 +1,4 @@
+import InlineKit
 import Foundation
 
 enum MessageRenderStyle: String, Codable, CaseIterable, Hashable {
@@ -31,10 +32,20 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
   var renderStyle: MessageRenderStyle
   var interactionMode: MessageInteractionMode = .normal
   var replyThreadTitle: String? = nil
+  /// Photos and videos sent with the row's message, drawn as one grid in its photo's place.
+  var album: MessageAlbum? = nil
 
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(lastInGroup ? "LG" : "")\(renderStyle == .minimal && startsAfterDaySeparator ? "DS" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")\(interactionMode == .threadAnchor ? "TA" : "NM")\(replyThreadTitle?.isEmpty == false ? "RT" : "")"
+    "\(albumSignature)\(firstInGroup ? "FG" : "")\(lastInGroup ? "LG" : "")\(renderStyle == .minimal && startsAfterDaySeparator ? "DS" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")\(interactionMode == .threadAnchor ? "TA" : "NM")\(replyThreadTitle?.isEmpty == false ? "RT" : "")"
+  }
+}
+
+extension MessageViewInputProps {
+  /// The album's items and their shapes, so a grid that gains or loses an item is measured again.
+  var albumSignature: String {
+    guard let album else { return "" }
+    return "AL\(album.items.map { "\($0.id):\($0.photoInfo?.id ?? $0.videoInfo?.id ?? 0)" }.joined(separator: ","))"
   }
 }
 
@@ -53,6 +64,8 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var replyThreadTitle: String? = nil
   var usesAvatarOverlay: Bool = true
   var richBlockCodePresentation: RichBlockCodePresentation = .syntaxHighlighted
+  /// Photos and videos sent with the row's message, drawn as one grid in its photo's place.
+  var album: MessageAlbum? = nil
   var layout: MessageSizeCalculator.LayoutPlans
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
@@ -68,6 +81,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       replyThreadTitle == rhs.replyThreadTitle &&
       usesAvatarOverlay == rhs.usesAvatarOverlay &&
       richBlockCodePresentation == rhs.richBlockCodePresentation &&
-      translated == rhs.translated
+      translated == rhs.translated &&
+      album == rhs.album
   }
 }

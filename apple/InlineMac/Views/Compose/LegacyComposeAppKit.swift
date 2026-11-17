@@ -1776,23 +1776,17 @@ class LegacyComposeAppKit: NSView {
     let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
     func enqueueAttachments(replyToMessageId: Int64?) {
-      for (index, attachment) in attachmentItemsSnapshot.enumerated() {
-        let isFirst = index == 0
-        Transactions.shared.mutate(
-          transaction:
-          .sendMessage(
-            TransactionSendMessage(
-              text: isFirst ? text : nil,
-              peerId: destinationPeerId,
-              chatId: destinationChatId, // FIXME: chatId fallback
-              mediaItems: [attachment],
-              replyToMsgId: isFirst ? replyToMessageId : nil,
-              isSticker: nil,
-              entities: isFirst ? entities : nil,
-              sendMode: effectiveSendMode
-            )
-          )
-        )
+      // Neighbouring photos and videos go out as albums; the text is the first one's caption.
+      for send in TransactionSendMessage.sends(
+        text: text,
+        peerId: destinationPeerId,
+        chatId: destinationChatId, // FIXME: chatId fallback
+        mediaItems: attachmentItemsSnapshot,
+        replyToMsgId: replyToMessageId,
+        entities: entities,
+        sendMode: effectiveSendMode
+      ) {
+        Transactions.shared.mutate(transaction: .sendMessage(send))
       }
     }
 
