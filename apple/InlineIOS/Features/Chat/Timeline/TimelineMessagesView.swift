@@ -714,7 +714,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     messageView.onReactionsMenu = { [weak self] message in self?.menuActions.showReactionEmojiPicker(for: message) }
     // A disclosure opened or closed, or a streamed line was revealed: the row is planned again
     // and the list moves with it.
-    messageView.onContentStateChange = { [weak self] _ in self?.replan(id, timing: Self.rowTiming) }
+    messageView.onContentStateChange = { [weak self] _ in self?.replanKeepingTop(id) }
     messageView.onRevealLineChange = { [weak self] _ in self?.replan(id, timing: .streamingLine) }
     messageView.apply(plan.content, layout: plan.layout, motion: Self.motion(for: timing))
   }
@@ -737,6 +737,22 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       guard let view = list.view(for: placement.id) as? TimelineRowView, let row = row(placement.id) else { continue }
       view.messageActions = messageActions(for: row)
     }
+  }
+
+  /// A disclosure the reader opened or closed: the row keeps its top, so the control stays under the
+  /// finger, and grows downward. Only when its bottom would pass the usable bottom does it rise, never
+  /// above the usable top. A row cut off at the top keeps its place.
+  private func replanKeepingTop(_ id: ChatRowID) {
+    let layout = list.layout
+    guard let placement = layout.placement(for: id), let width = heights[id]?.width,
+          placement.maxY > layout.viewport.usableTop, placement.y < layout.viewport.usableBottom
+    else { return replan(id, timing: Self.rowTiming) }
+    plans[id] = nil
+    heights[id] = nil
+    let newHeight = height(of: id, width: width)
+    let top = placement.y - layout.viewport.usableTop
+    let target = top < 0 ? top : max(0, min(top, layout.viewport.usableHeight - newHeight))
+    list.apply(TimelineTransaction(scroll: .to(id, .top(target)), changed: [id], timing: Self.rowTiming))
   }
 
   private func replan(_ id: ChatRowID, timing: TimelineTiming) {
