@@ -267,7 +267,10 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           if animated { view.alpha = 0 }
           appearing.append(view)
         }
-        view.configure(with: sender, size: content.input.metrics.avatarSize)
+        // An agent's run carries its badge on the sender's avatar, as the collection view's overlay drew it.
+        view.configure(
+          with: sender, size: content.input.metrics.avatarSize, viaMark: content.message.viaPresentation?.mark
+        )
         view.isHidden = false
       } else {
         avatarView?.isHidden = true

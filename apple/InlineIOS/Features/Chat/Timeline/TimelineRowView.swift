@@ -300,7 +300,7 @@ final class TimelineRowView: UIView {
        let sender = message.senderInfo
     {
       let avatar = UserAvatarView()
-      avatar.configure(with: sender, size: 28)
+      avatar.configure(with: sender, size: 28, viaMark: message.viaPresentation?.mark)
       avatar.translatesAutoresizingMaskIntoConstraints = false
       avatar.isUserInteractionEnabled = true
       avatar.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleAvatarTap)))
