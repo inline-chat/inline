@@ -114,11 +114,37 @@ public final class DebugChatFixture {
   ) throws {
     let id = Int64(index)
     let run = (index / runLength) % 7
-    let from: Int64 = [2, 2, 3, 1, 4, 5, 1][run]
+    // Albums: four photos every 41 messages, three every 47, a captioned pair every 61, one sender
+    // each, kept off the messages the other kinds own (service, agent blocks, files).
+    let ownedElsewhere = index % 97 == 0 || index % 41 == 0 || index % 61 == 0
+    let album: (start: Int, size: Int)? = if ownedElsewhere {
+      nil
+    } else if (20 ..< 24).contains(index % 41) {
+      (index - index % 41 + 20, 4)
+    } else if (30 ..< 32).contains(index % 61) {
+      (index - index % 61 + 30, 2)
+    } else if (10 ..< 13).contains(index % 47) {
+      (index - index % 47 + 10, 3)
+    } else {
+      nil
+    }
+    let senderRun = album.map { ($0.start / runLength) % 7 } ?? run
+    let from: Int64 = [2, 2, 3, 1, 4, 5, 1][senderRun]
     var text: String? = Self.texts[(index * 7 + run) % Self.texts.count]
     var payload: Client_MessageContentPayload?
     var photoId: Int64?
-    if index % 97 == 0 {
+    var groupedId: Int64?
+    if let album {
+      groupedId = 50_000 + Int64(album.start)
+      photoId = 9_000 + id
+      let photo = try Photo(photoId: 9_000 + id, date: now, format: .jpeg).insertAndFetch(db)
+      // Four: a portrait or two among landscapes. Three: a portrait first (Telegram's column layout).
+      let tall = album.size == 4 ? index % 3 == 1 : album.size == 3 && index == album.start
+      var size = PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: tall ? 1_600 : 800)
+      size.localPath = Self.photoFile(tall: tall)
+      try size.insert(db)
+      text = index == album.start && album.size == 2 ? "Two from the weekend" : nil
+    } else if index % 97 == 0 {
       text = "Pinned a message"
       payload = .with { $0.serviceMessage = .with { $0.pinnedMessage = .with { $0.messageID = id - 3 } } }
     } else if index % 29 == 0 {
@@ -131,11 +157,11 @@ public final class DebugChatFixture {
       if index % 2 == 0 { text = nil }
     }
     // Alice's even messages are sent for her by Codex: the agent badge and "Sent via Codex".
-    if payload == nil, from == 2, index % 2 == 0 {
+    if payload == nil, from == 2, index % 2 == 0, groupedId == nil {
       payload = .with { $0.via = .with { $0.app = "codex" } }
     }
     var videoId: Int64?
-    if photoId == nil, payload == nil, index % 53 == 0 {
+    if photoId == nil, payload == nil, groupedId == nil, index % 53 == 0 {
       // A video with a drawn thumbnail and a stand-in file, so a tap opens the chat's gallery.
       let thumbnail = try Photo(photoId: 8_000_000 + id, date: now, format: .jpeg).insertAndFetch(db)
       var size = PhotoSize(photoId: thumbnail.id ?? 0, type: "f", width: 1_200, height: 600)
@@ -171,8 +197,9 @@ public final class DebugChatFixture {
     var message = Message(
       messageId: id, fromId: from, date: start.addingTimeInterval(Double(index) * step), text: text,
       peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == 1, status: from == 1 ? .sent : nil,
-      repliedToMessageId: index % 11 == 0 && index > 5 ? id - 5 : nil, photoId: photoId, videoId: videoId,
-      documentId: documentId, contentPayload: payload, blockContentPayload: blocks
+      repliedToMessageId: index % 11 == 0 && index > 5 && groupedId == nil ? id - 5 : nil, photoId: photoId,
+      videoId: videoId, documentId: documentId, contentPayload: payload, blockContentPayload: blocks,
+      groupedId: groupedId
     )
     try message.saveMessage(db)
     if index % 7 == 0 {

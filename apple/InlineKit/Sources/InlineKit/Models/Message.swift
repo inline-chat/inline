@@ -66,6 +66,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case hasLink
     case entities
     case resourceFlags
+    case groupedId
   }
 
   /// Locally autoincremented id
@@ -141,6 +142,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   /// Authoritative tag membership. A filtered absence proof may clear a bit
   /// while retaining the canonical payload for ordinary history and byte cache.
   public var resourceFlags: Int64 = 0
+  /// Album: consecutive photos and videos from one sender sharing this id are
+  /// drawn as one grid (`MessageAlbums`). Nil for messages outside an album.
+  public var groupedId: Int64?
 
   public var blockContent: InlineProtocol.BlockContent? {
     blockContentPayload?.content
@@ -208,6 +212,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
     public static let resourceFlags = Column(CodingKeys.resourceFlags)
+    public static let groupedId = Column(CodingKeys.groupedId)
   }
 
   public static let acknowledgements = hasMany(
@@ -365,9 +370,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     transactionId: String? = nil,
     isSticker: Bool? = nil,
     hasLink: Bool? = nil,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    groupedId: Int64? = nil
   ) {
     self.messageId = messageId
+    self.groupedId = groupedId == 0 ? nil : groupedId
     self.randomId = randomId
     self.date = date
     self.text = text
@@ -468,7 +475,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
-      entities: from.hasEntities ? from.entities : nil
+      entities: from.hasEntities ? from.entities : nil,
+      groupedId: from.hasGroupedID ? from.groupedID : nil
     )
   }
 
@@ -1195,6 +1203,7 @@ public extension Message {
         }
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
+        groupedId = groupedId ?? existing.groupedId
         rev = max(rev, existing.rev)
         transactionId = existing.transactionId
         isExisting = true
@@ -1415,6 +1424,8 @@ public extension Message {
       if !authoritativeSnapshot {
         message.isSticker = message.isSticker ?? existing.isSticker
         message.hasLink = message.hasLink ?? existing.hasLink
+        // A send's own album id until the server echoes it.
+        message.groupedId = message.groupedId ?? existing.groupedId
       }
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId

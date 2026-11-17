@@ -34,13 +34,15 @@ public enum MessageLayoutPlanner {
     // width, scaled down to fit the lane; a caption wraps to it.
     let blocks = isEmoji ? [] : input.blocks
     let edgeIndex = blocks.firstIndex { $0.isEdgeToEdge && $0.position == .aboveText }
+    // A media frame: the bubble's colour shows this far around edge-to-edge media.
+    let mediaInset = hasBubble && edgeIndex != nil ? m.mediaInset : 0
     let edgeSize: CGSize? = edgeIndex.map { index in
       let block = blocks[index]
       let wanted = max(1, block.width.preferred)
-      let width = grid.floor(min(maximumBodyWidth, wanted))
+      let width = grid.floor(min(maximumBodyWidth - 2 * mediaInset, wanted))
       return CGSize(width: width, height: grid.round(block.height * width / wanted))
     }
-    let maximumContentWidth = max(1, (edgeSize?.width ?? maximumBodyWidth) - insets.horizontal)
+    let maximumContentWidth = max(1, (edgeSize.map { $0.width + 2 * mediaInset } ?? maximumBodyWidth) - insets.horizontal)
     let above = blocks.indices.filter { blocks[$0].position == .aboveText }
     let below = blocks.indices.filter { blocks[$0].position == .belowText }
     let outside = blocks.indices.filter { blocks[$0].position == .belowBubble }
@@ -239,7 +241,7 @@ public enum MessageLayoutPlanner {
     for (position, index) in above.enumerated() {
       let isEdge = index == edgeIndex
       if position == 0 {
-        stackBottom = isEdge ? 0 : insets.top
+        stackBottom = isEdge ? mediaInset : insets.top
       } else {
         stackBottom += lastWasEdge ? insets.top : m.blockSpacing
       }
@@ -250,10 +252,10 @@ public enum MessageLayoutPlanner {
     let regionTop = above.isEmpty ? insets.top : stackBottom + (lastWasEdge ? insets.top : m.blockSpacing)
 
     // Bubble body, in logical coordinates (x from the row's leading edge).
-    let bodyWidth = edgeSize?.width ?? contentWidth + insets.horizontal
+    let bodyWidth = edgeSize.map { $0.width + 2 * mediaInset } ?? contentWidth + insets.horizontal
     let minimumBodyHeight = hasBubble ? m.cornerRadius * 2 : 0
     let bodyHeight: CGFloat = if overlaysMedia {
-      max(stackBottom, minimumBodyHeight)
+      max(stackBottom + mediaInset, minimumBodyHeight)
     } else if besideBlock != nil {
       max(stackBottom + insets.bottom, minimumBodyHeight)
     } else {
@@ -303,7 +305,10 @@ public enum MessageLayoutPlanner {
       let block = blocks[index]
       let top = body.minY + (blockTops[index] ?? 0)
       frames[.block(block.id)] = index == edgeIndex
-        ? CGRect(x: body.minX, y: top, width: body.width, height: edgeSize?.height ?? block.height)
+        ? CGRect(
+          x: body.minX + mediaInset, y: top, width: body.width - 2 * mediaInset,
+          height: edgeSize?.height ?? block.height
+        )
         : CGRect(x: contentOrigin.x, y: top, width: width(of: block), height: block.height)
     }
     for (offset, index) in zip(belowOffsets, below) {
@@ -348,7 +353,7 @@ public enum MessageLayoutPlanner {
       frames[.reaction(reaction.id)] = frame.offsetBy(dx: contentOrigin.x, dy: contentOrigin.y + reactionsTop)
     }
 
-    let footerMaxX = overlaysMedia ? body.maxX - m.mediaOverlayInset : contentOrigin.x + contentWidth
+    let footerMaxX = overlaysMedia ? body.maxX - mediaInset - m.mediaOverlayInset : contentOrigin.x + contentWidth
     let footerY = if overlaysMedia {
       body.minY + stackBottom - m.mediaOverlayInset - footerHeight
     } else if besideBlock != nil {

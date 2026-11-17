@@ -9,7 +9,7 @@ import Foundation
 /// id through the temporary-to-server id swap (`FullMessage.id` is the local
 /// row id, `globalId`), so an acknowledged send is one row, not delete+insert.
 public enum ChatRowID: Hashable, Sendable {
-  /// `FullMessage.id`.
+  /// `FullMessage.id`; for an album, its oldest item's, so an album keeps its row as it fills in.
   case message(Int64)
   /// The thread's parent message, shown at the top of a reply thread.
   case threadParent(Int64)
@@ -57,6 +57,8 @@ public struct ChatRowGrouping: Hashable, Sendable {
 /// and other text are formatted by the host from these values.
 public enum ChatRowContent: Equatable, Sendable {
   case message(FullMessage, ChatRowGrouping)
+  /// Photos and videos sent together, in one bubble (`MessageAlbums`). Keyed as its oldest item.
+  case album(MessageAlbum, ChatRowGrouping)
   case threadParent(FullMessage)
   case threadRepliesHeader
   case collapsedHistory(maxMessageId: Int64)
@@ -65,11 +67,48 @@ public enum ChatRowContent: Equatable, Sendable {
   case unreadLine(firstUnreadMessageId: Int64)
   case statusNotice(String)
 
+  /// The row's message; an album's oldest item (its sender, reply and identity).
   public var message: FullMessage? {
     switch self {
       case let .message(message, _), let .threadParent(message): message
+      case let .album(album, _): album.lead
       default: nil
     }
+  }
+
+  /// Every message the row draws: an album's items, oldest first, or its one message.
+  public var messages: [FullMessage] {
+    switch self {
+      case let .album(album, _): album.items
+      default: message.map { [$0] } ?? []
+    }
+  }
+
+  /// The row's newest message: what reading the row marks read, and the row's time.
+  public var newestMessage: FullMessage? {
+    switch self {
+      case let .album(album, _): album.newest
+      default: message
+    }
+  }
+
+  /// Whether the row draws the message with this server id (an album draws several).
+  public func contains(messageId: Int64) -> Bool {
+    switch self {
+      case let .album(album, _): album.items.contains { $0.message.messageId == messageId }
+      default: message?.message.messageId == messageId
+    }
+  }
+
+  public var grouping: ChatRowGrouping? {
+    switch self {
+      case let .message(_, grouping), let .album(_, grouping): grouping
+      default: nil
+    }
+  }
+
+  public var album: MessageAlbum? {
+    if case let .album(album, _) = self { album } else { nil }
   }
 }
 

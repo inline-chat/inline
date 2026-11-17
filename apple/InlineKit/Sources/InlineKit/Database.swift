@@ -1522,6 +1522,15 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("message grouped id") { db in
+      // Albums: photos and videos sent together share a grouped id, and lists draw a run of
+      // them from one sender as one grid. Existing rows stay nil (separate messages) until
+      // their messages are fetched again.
+      try db.alter(table: "message") { table in
+        table.add(column: "groupedId", .integer)
+      }
+    }
+
     return migrator
   }
 }

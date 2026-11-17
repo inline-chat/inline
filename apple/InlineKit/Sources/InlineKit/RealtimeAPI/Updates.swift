@@ -2673,6 +2673,18 @@ extension InlineProtocol.UpdateNewMessage {
     {
       db.afterNextTransaction { committedDB in
         do {
+          // One notification per album: its first item. Later items from the same sender with the
+          // same album id stay quiet, as the server's pushes do.
+          if message.groupedID != 0,
+             try Message
+             .filter(Column("chatId") == msg.chatId && Column("groupedId") == message.groupedID)
+             .filter(Column("fromId") == msg.fromId && Column("messageId") < msg.messageId)
+             // An album's items are sent back to back: look only a short way back.
+             .filter(Column("messageId") > max(0, msg.messageId - 40))
+             .fetchCount(committedDB) > 0
+          {
+            return
+          }
           let replyToMessageID = message.hasReplyToMsgID ? message.replyToMsgID : nil
           guard let context = try MacIncomingNotificationContext.fetch(
             committedDB,

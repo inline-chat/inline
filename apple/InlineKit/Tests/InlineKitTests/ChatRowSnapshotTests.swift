@@ -55,6 +55,7 @@ struct ChatRowSnapshotTests {
     snapshot.rows.map { row in
       switch row.content {
         case let .message(message, _): "m\(message.message.messageId)"
+        case let .album(album, _): "album" + album.messageIds.map(String.init).joined(separator: ",")
         case let .threadParent(message): "parent\(message.message.messageId)"
         case .threadRepliesHeader: "replies"
         case .collapsedHistory: "collapsed"
@@ -277,6 +278,63 @@ struct ChatRowSnapshotTests {
     let diff = ChatRowDiff(from: before, to: after)
     #expect(Set(diff.removals.map(\.id)) == [.message(1002), .daySeparator(Self.at(86_400))])
     #expect(diff.removals.map(\.index) == [2, 3])
+  }
+
+  // MARK: Albums
+
+  private static func photo(
+    _ messageId: Int64, at seconds: TimeInterval, group: Int64?, from: Int64 = 2, text: String? = nil
+  ) -> FullMessage {
+    var full = message(messageId, at: seconds, from: from, text: text ?? "")
+    full.message.text = text
+    full.message.groupedId = group
+    full.photoInfo = PhotoInfo(photo: Photo(id: messageId, photoId: messageId, format: .jpeg))
+    return full
+  }
+
+  @Test func `an album's photos are one row keyed by its oldest photo, grouped with its neighbours`() {
+    let rows = Self.snapshot(Self.input([
+      Self.message(1, at: 10),
+      Self.photo(2, at: 20, group: 9), Self.photo(3, at: 21, group: 9), Self.photo(4, at: 22, group: 9),
+      Self.message(5, at: 30),
+    ]))
+    #expect(Self.describe(rows) == ["day0", "m1", "album2,3,4", "m5"])
+    let album = rows.row(for: .message(1_002))
+    #expect(album?.content.album?.items.count == 3)
+    #expect(album?.content.grouping == ChatRowGrouping(
+      isFirstInGroup: false, isLastInGroup: false, showsSenderName: false, showsAvatar: true
+    ))
+    #expect(album?.content.contains(messageId: 4) == true)
+    #expect(album?.content.newestMessage?.message.messageId == 4)
+    #expect(rows.row(for: .message(1_003)) == nil)
+  }
+
+  @Test func `an album filling in keeps its row and only updates it`() {
+    let first = Self.snapshot(Self.input([Self.photo(1, at: 10, group: 5)]))
+    #expect(Self.describe(first) == ["day0", "m1"])
+    let second = Self.snapshot(
+      Self.input([Self.photo(1, at: 10, group: 5), Self.photo(2, at: 11, group: 5)]), after: first, reason: .liveAdd
+    )
+    #expect(Self.describe(second) == ["day0", "album1,2"])
+    let diff = ChatRowDiff(from: first, to: second)
+    #expect(diff.insertions.isEmpty && diff.removals.isEmpty)
+    #expect(diff.updates.map(\.id) == [.message(1_001)])
+  }
+
+  @Test func `the unread line goes above an album it would split`() {
+    let rows = Self.snapshot(Self.input(
+      [Self.message(1, at: 5), Self.photo(2, at: 10, group: 5), Self.photo(3, at: 11, group: 5)],
+      unread: .init(boundary: 2)
+    ))
+    #expect(Self.describe(rows) == ["day0", "m1", "unread", "album2,3"])
+  }
+
+  @Test func `photos from another sender or another album stay apart`() {
+    let rows = Self.snapshot(Self.input([
+      Self.photo(1, at: 10, group: 5), Self.photo(2, at: 11, group: 5, from: 3),
+      Self.photo(3, at: 12, group: 6), Self.photo(4, at: 13, group: 6),
+    ]))
+    #expect(Self.describe(rows) == ["day0", "m1", "m2", "album3,4"])
   }
 
   @Test func `a first snapshot inserts every row`() {

@@ -205,6 +205,8 @@ public struct TransactionSendMessage: Transaction {
   public var isSticker: Bool? = nil
   public var entities: MessageEntities? = nil
   public var sendMode: MessageSendMode? = nil
+  /// Album id shared with the other photos and videos sent with this one (`TransactionSendMessage.sends`).
+  public var groupedId: Int64? = nil
 
   // Config
   public var id = UUID().uuidString
@@ -226,6 +228,7 @@ public struct TransactionSendMessage: Transaction {
     case isSticker
     case entities
     case sendMode
+    case groupedId
     case id
     case config
     case date
@@ -249,6 +252,7 @@ public struct TransactionSendMessage: Transaction {
     } else {
       sendMode = nil
     }
+    groupedId = try container.decodeIfPresent(Int64.self, forKey: .groupedId)
     id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
     let decodedConfig = try container.decodeIfPresent(TransactionConfig.self, forKey: .config)
       ?? TransactionConfig(maxRetries: 30, retryDelay: 4, executionTimeout: 600)
@@ -279,6 +283,7 @@ public struct TransactionSendMessage: Transaction {
     if let sendMode = sendMode {
       try container.encode(sendMode.rawValue, forKey: .sendMode)
     }
+    try container.encodeIfPresent(groupedId, forKey: .groupedId)
     try container.encode(id, forKey: .id)
     try container.encode(config, forKey: .config)
     try container.encode(date, forKey: .date)
@@ -296,7 +301,8 @@ public struct TransactionSendMessage: Transaction {
     replyToMsgId: Int64? = nil,
     isSticker: Bool? = nil,
     entities: MessageEntities? = nil,
-    sendMode: MessageSendMode? = nil
+    sendMode: MessageSendMode? = nil,
+    groupedId: Int64? = nil
   ) {
     self.text = text
     self.peerId = peerId
@@ -304,6 +310,7 @@ public struct TransactionSendMessage: Transaction {
     self.isSticker = isSticker
     self.entities = entities
     self.sendMode = sendMode
+    self.groupedId = groupedId
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     config = Self.sendConfiguration(config, hasAttachments: !attachments.isEmpty)
     self.replyToMsgId = replyToMsgId
@@ -339,7 +346,8 @@ public struct TransactionSendMessage: Transaction {
       mediaItems: mediaItems,
       replyToMsgId: message.repliedToMessageId,
       isSticker: message.isSticker,
-      entities: message.entities
+      entities: message.entities,
+      groupedId: message.groupedId
     )
     id = transactionId
     date = message.date
@@ -392,7 +400,8 @@ public struct TransactionSendMessage: Transaction {
       blockContentPayload: .literalBlocks(text: text, entities: entities),
       transactionId: id,
       isSticker: isSticker,
-      entities: entities
+      entities: entities,
+      groupedId: groupedId
     )
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
@@ -445,7 +454,54 @@ public struct TransactionSendMessage: Transaction {
     let date = Date()
     var inputMedia: InputMedia? = nil
 
-    // upload attachments and construct input media
+    // Joins the upload an album started for this item, if any.
+    inputMedia = try await uploadAttachment()
+
+    // Never turn an attachment send into a text-only (or empty) message when the
+    // upload finished without a server id; fail so the user can retry.
+    if !attachments.isEmpty, inputMedia == nil {
+      throw FileUploadError.failedToUpload
+    }
+
+    // An album's items wait for all of its uploads, then go out back to back.
+    await AlbumSendBarrier.shared.waitForAlbum(transactionId: id)
+    try Task.checkCancellation()
+
+    // Uploads overlap; the final sends in a chat go out in admission order.
+    await OutgoingSendOrder.shared.waitForTurn(transactionId: id)
+    try Task.checkCancellation()
+
+    // input for send message
+    let input: SendMessageInput = .with {
+      $0.peerID = peerId.toInputPeer()
+      $0.randomID = randomId
+      $0.temporarySendDate = optimisticMessageTimestamp(for: date)
+      $0.isSticker = isSticker ?? false
+
+      if let text { $0.message = text }
+      if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
+      if let inputMedia { $0.media = inputMedia }
+      if let entities { $0.entities = entities }
+      if let sendMode { $0.sendMode = sendMode }
+      if let groupedId, inputMedia != nil { $0.groupedID = groupedId }
+    }
+
+    // Keep upload persistence/retries here while finalizing through the primary socket.
+    let result_ = try await Api.realtime.callRpcDirect(
+      method: .sendMessage,
+      input: .sendMessage(input)
+    )
+
+    guard case let .sendMessage(result) = result_ else {
+      throw SendMessageError.failed
+    }
+
+    return result.updates
+  }
+
+  /// Uploads the attachment, or joins its upload, and returns its server media.
+  func uploadAttachment() async throws -> InputMedia? {
+    var inputMedia: InputMedia? = nil
     if let attachment = attachments.first {
       switch attachment.media {
         case let .photo(photoInfo):
@@ -554,41 +610,7 @@ public struct TransactionSendMessage: Transaction {
       }
     }
 
-    // Never turn an attachment send into a text-only (or empty) message when the
-    // upload finished without a server id; fail so the user can retry.
-    if !attachments.isEmpty, inputMedia == nil {
-      throw FileUploadError.failedToUpload
-    }
-
-    // Uploads overlap; the final sends in a chat go out in admission order.
-    await OutgoingSendOrder.shared.waitForTurn(transactionId: id)
-    try Task.checkCancellation()
-
-    // input for send message
-    let input: SendMessageInput = .with {
-      $0.peerID = peerId.toInputPeer()
-      $0.randomID = randomId
-      $0.temporarySendDate = optimisticMessageTimestamp(for: date)
-      $0.isSticker = isSticker ?? false
-
-      if let text { $0.message = text }
-      if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
-      if let inputMedia { $0.media = inputMedia }
-      if let entities { $0.entities = entities }
-      if let sendMode { $0.sendMode = sendMode }
-    }
-
-    // Keep upload persistence/retries here while finalizing through the primary socket.
-    let result_ = try await Api.realtime.callRpcDirect(
-      method: .sendMessage,
-      input: .sendMessage(input)
-    )
-
-    guard case let .sendMessage(result) = result_ else {
-      throw SendMessageError.failed
-    }
-
-    return result.updates
+    return inputMedia
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
@@ -702,6 +724,7 @@ public struct TransactionSendMessage: Transaction {
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
     // The server already ordered this send; release the next one before the local apply.
+    AlbumSendBarrier.shared.settle(transactionId: id)
     OutgoingSendOrder.shared.finish(transactionId: id)
     await Api.realtime.applyUpdates(result)
 
@@ -713,6 +736,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func didFail(error: Error?) async {
+    AlbumSendBarrier.shared.settle(transactionId: id)
     OutgoingSendOrder.shared.finish(transactionId: id)
     Log.shared.error("Failed to send message", error: error)
 
@@ -756,6 +780,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func rollback() async {
+    AlbumSendBarrier.shared.settle(transactionId: id)
     OutgoingSendOrder.shared.finish(transactionId: id)
     do {
       // Remove from database and update chat state

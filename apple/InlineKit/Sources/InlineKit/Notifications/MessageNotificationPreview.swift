@@ -43,6 +43,14 @@ public enum MessageNotificationPreview {
       return preview((message.isSticker ? "🖼️ " : prefix) + text)
     }
     if message.isSticker { return "🖼️ Sticker" }
+    // An album's first item stands for all of it (the rest don't notify), as the server words it.
+    if message.groupedID != 0 {
+      switch message.media.media {
+      case .photo, .video: return preview("🖼️ Album")
+      case .document: return preview("📄 Files")
+      default: break
+      }
+    }
     return preview(prefix + fallback)
   }
 

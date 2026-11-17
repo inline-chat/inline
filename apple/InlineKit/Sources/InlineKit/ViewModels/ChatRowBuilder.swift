@@ -18,7 +18,8 @@ public enum ChatRowChatKind: Equatable, Sendable {
 /// Order, top to bottom: thread parent and replies header, collapsed-history
 /// marker, then for each message (sorted every time) an unread line if it is
 /// the first unread message, a day separator if it starts a day, and the
-/// message; last, the status notice. The unread line sits above the day
+/// message (photos and videos sent together are one album row, keyed by its
+/// oldest item); last, the status notice. The unread line sits above the day
 /// separator of the day it starts, so opening at the line still shows the date.
 ///
 /// Cost per build: O(n) over the window's messages (one sortedness check, one
@@ -153,37 +154,59 @@ public enum ChatRowBuilder {
       day = interval
       return interval.start
     }
-    // A message joins the previous one's group unless a day or the unread line
-    // falls between them.
-    func joinsPrevious(_ index: Int) -> Bool {
-      index > 0 && index != unreadIndex && days[index] == days[index - 1]
-        && canGroup(visible[index - 1], visible[index], calendar: input.calendar)
+    // Photos and videos sent together make one row (`MessageAlbums`), never across a day.
+    var runs: [Range<Int>] = []
+    runs.reserveCapacity(visible.count)
+    for run in MessageAlbums.runs(in: visible) {
+      var start = run.lowerBound
+      for index in run.dropFirst() where days[index] != days[index - 1] {
+        runs.append(start ..< index)
+        start = index
+      }
+      runs.append(start ..< run.upperBound)
+    }
+    // The unread line goes above the row holding its message: an album is never split by it.
+    let unreadRun = unreadIndex.flatMap { index in runs.firstIndex { $0.contains(index) } }
+
+    // A row joins the previous one's group unless a day or the unread line falls between them.
+    func joinsPrevious(_ runIndex: Int) -> Bool {
+      guard runIndex > 0, runIndex != unreadRun else { return false }
+      let earlier = runs[runIndex - 1].upperBound - 1
+      let later = runs[runIndex].lowerBound
+      return days[later] == days[earlier] && canGroup(visible[earlier], visible[later], calendar: input.calendar)
     }
     var previousJoinsNext = false
     var placedUnread: Int64?
-    for index in visible.indices {
+    for (runIndex, run) in runs.enumerated() {
+      let index = run.lowerBound
       let message = visible[index]
       let startsDay = index == 0 || days[index] != days[index - 1]
       if startsDay, input.unreadLineFollowsDay {
         rows.append(.init(id: .daySeparator(days[index]), content: .daySeparator(dayStart: days[index])))
       }
-      if index == unreadIndex {
-        placedUnread = message.message.messageId
-        rows.append(.init(id: .unreadLine, content: .unreadLine(firstUnreadMessageId: message.message.messageId)))
+      if runIndex == unreadRun, let unreadIndex {
+        // Above the album, but naming the first unread message itself.
+        let firstUnread = visible[unreadIndex].message.messageId
+        placedUnread = firstUnread
+        rows.append(.init(id: .unreadLine, content: .unreadLine(firstUnreadMessageId: firstUnread)))
       }
       if startsDay, !input.unreadLineFollowsDay {
         rows.append(.init(id: .daySeparator(days[index]), content: .daySeparator(dayStart: days[index])))
       }
-      let joinsNext = index + 1 < visible.count && joinsPrevious(index + 1)
+      let joinsNext = runIndex + 1 < runs.count && joinsPrevious(runIndex + 1)
       let incoming = input.chatKind == .group && message.message.out != true && !message.message.isServiceMessage
-      let isFirstInGroup = index == 0 ? true : !previousJoinsNext
+      let isFirstInGroup = runIndex == 0 ? true : !previousJoinsNext
       let grouping = ChatRowGrouping(
         isFirstInGroup: isFirstInGroup,
         isLastInGroup: !joinsNext,
         showsSenderName: incoming && isFirstInGroup,
         showsAvatar: incoming
       )
-      rows.append(.init(id: .message(message.id), content: .message(message, grouping)))
+      if run.count > 1, let album = MessageAlbum(items: Array(visible[run])) {
+        rows.append(.init(id: .message(message.id), content: .album(album, grouping)))
+      } else {
+        rows.append(.init(id: .message(message.id), content: .message(message, grouping)))
+      }
       previousJoinsNext = joinsNext
     }
 

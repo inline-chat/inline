@@ -211,6 +211,9 @@ public struct MessageLayoutMetrics: Hashable, Sendable {
   public var blockSpacing: CGFloat = 6
   /// Distance of the time pill from the corner of media it overlays.
   public var mediaOverlayInset: CGFloat = 6
+  /// Edge-to-edge media sits this far inside the bubble, so a thin band of the bubble's colour
+  /// frames it (as Telegram draws media). Zero: media reaches the bubble's edges.
+  public var mediaInset: CGFloat = 0
   /// Gap between the bubble and blocks under it, and between those blocks.
   public var belowBubbleSpacing: CGFloat = 4
 
