@@ -79,3 +79,67 @@ struct FontDefaultLineHeightTests {
     #expect(natural.lines.map(\.direction) == [.leftToRight, .rightToLeft])
   }
 }
+
+/// Paragraph metrics under `.fontDefault`, against TextKit 2 (macOS 27): a 13 pt text paragraph
+/// with 2 pt line spacing, a 12 pt monospaced code block (6 pt before and after, 11 pt indent),
+/// then text again. TextKit puts a line's spacing above it from its own paragraph.
+extension FontDefaultLineHeightTests {
+// Nested so it runs serialized with the provider tests above: both swap the global provider.
+@Suite("Paragraph metrics")
+struct ParagraphMetricsTests {
+  let grid = PixelGrid(scale: 2)
+
+  func text(_ parts: [(String, CGFloat, Bool, TextParagraphMetrics)]) -> MessageText {
+    let result = NSMutableAttributedString()
+    for (string, size, mono, metrics) in parts {
+      let font = mono
+        ? CTFontCreateWithName("Menlo" as CFString, size, nil)
+        : CTFontCreateUIFontForLanguage(.system, size, nil)!
+      result.append(NSAttributedString(string: string, attributes: [
+        NSAttributedString.Key(kCTFontAttributeName as String): font,
+        TextParagraphMetrics.attributeKey: metrics,
+      ]))
+    }
+    return MessageText(result)
+  }
+
+  @Test("Spacing between text and a code block follows TextKit")
+  func codeBlock() {
+    FontLineMetricsProvider.install { font in
+      // The heights TextKit gave: 16 for 13 pt system, 15 for 12 pt monospaced.
+      let height: CGFloat = CTFontGetSize(font) == 13 ? 16 : 15
+      return FontLineMetrics(height: height, baseline: height - 3)
+    }
+    defer { FontLineMetricsProvider.install { FontLineMetrics.coreTextDefault(for: $0) } }
+    let layout = TextLayouter.layout(
+      text([
+        ("Before\n", 13, false, TextParagraphMetrics(lineSpacing: 2)),
+        ("code1\n", 12, true, TextParagraphMetrics(firstLineHeadIndent: 11, headIndent: 11, spacingBefore: 6)),
+        ("code2\n", 12, true, TextParagraphMetrics(firstLineHeadIndent: 11, headIndent: 11, spacingAfter: 6)),
+        ("After", 13, false, TextParagraphMetrics(lineSpacing: 2)),
+      ]),
+      style: TextLayoutStyle(lineHeight: .fontDefault),
+      maximumWidth: 300,
+      grid: grid
+    )
+    #expect(layout.lines.map(\.frame.minY) == [0, 22, 37, 60])
+    #expect(layout.lines.map(\.leadingIndent) == [0, 11, 11, 0])
+    #expect(layout.size.height == 76)
+  }
+
+  @Test("Indents narrow the lines and move them in")
+  func indents() {
+    let metrics = TextParagraphMetrics(firstLineHeadIndent: 20, headIndent: 10, tailIndent: -30)
+    let words = String(repeating: "word ", count: 40)
+    let layout = TextLayouter.layout(
+      text([(words, 13, false, metrics)]),
+      style: TextLayoutStyle(lineHeight: .fontDefault),
+      maximumWidth: 200,
+      grid: grid
+    )
+    #expect(layout.lines.first?.frame.minX == 20)
+    #expect(layout.lines.dropFirst().allSatisfy { $0.frame.minX == 10 })
+    #expect(layout.lines.allSatisfy { $0.frame.maxX <= 170.5 })
+  }
+}
+}

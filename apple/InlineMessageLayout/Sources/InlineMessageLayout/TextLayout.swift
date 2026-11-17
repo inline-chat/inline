@@ -11,8 +11,9 @@ public struct TextLayoutStyle: Hashable, Sendable {
   public var minimumLineHeight: CGFloat
   /// Direction for paragraphs with no letters, usually the UI direction.
   public var fallbackDirection: TextDirection
-  /// How line boxes are sized. Under `.fontDefault`, `lineSpacing` follows every line and
-  /// `paragraphSpacing` is added after a paragraph's last line, as in TextKit.
+  /// How line boxes are sized. Under `.fontDefault`, as in TextKit, every line but the first
+  /// has its paragraph's `lineSpacing` above it, and `paragraphSpacing` follows a paragraph's
+  /// last line.
   public var lineHeight: TextLineHeight
   /// One base direction for every paragraph, as a whole-message direction setting does. Nil
   /// picks each paragraph's dominant direction.
@@ -50,6 +51,10 @@ public struct TextLayout: Sendable {
     public let descent: CGFloat
     public let direction: TextDirection
     public let endsParagraph: Bool
+    /// Room before the line's leading edge and after its trailing edge, from its paragraph's
+    /// `TextParagraphMetrics` (a code block's padding, say).
+    public let leadingIndent: CGFloat
+    public let trailingIndent: CGFloat
     let storage: LineStorage
 
     public var ctLine: CTLine { storage.line }
@@ -100,7 +105,9 @@ public struct TextLayout: Sendable {
     copy.size.width = blockWidth
     for index in copy.lines.indices {
       let line = copy.lines[index]
-      let x = line.direction == .rightToLeft ? blockWidth - line.frame.width : 0
+      let x = line.direction == .rightToLeft
+        ? blockWidth - line.leadingIndent - line.frame.width
+        : line.leadingIndent
       copy.lines[index].frame.origin.x = x
     }
     return copy
@@ -287,11 +294,28 @@ public enum TextLayouter {
     var paragraphStart = 0
     var paragraphDirection = direction(of: string, from: 0, style: style)
 
+    var paragraph = TextParagraphMetrics.at(start, in: attributed)
+
     while start < length {
-      if start == paragraphStart {
+      let firstInParagraph = start == paragraphStart
+      if firstInParagraph {
         paragraphDirection = direction(of: string, from: start, style: style)
+        paragraph = TextParagraphMetrics.at(start, in: attributed)
+        if start > 0, let paragraph { y = grid.round(y + paragraph.spacingBefore) }
       }
-      var count = CTTypesetterSuggestLineBreak(typesetter, start, Double(width))
+      if start > 0, style.lineHeight == .fontDefault {
+        // TextKit puts a line's spacing above it, from its own paragraph.
+        y = grid.round(y + (paragraph?.lineSpacing ?? style.lineSpacing))
+      }
+      let leadingIndent = max(0, firstInParagraph ? paragraph?.firstLineHeadIndent ?? 0 : paragraph?.headIndent ?? 0)
+      let trailingIndent: CGFloat = {
+        guard let tail = paragraph?.tailIndent, tail != 0 else { return 0 }
+        // Like NSParagraphStyle: negative counts in from the trailing edge, positive is the
+        // line's end measured from the leading edge.
+        return tail < 0 ? -tail : max(0, width - tail)
+      }()
+      let breakWidth = max(1, width - leadingIndent - trailingIndent)
+      var count = CTTypesetterSuggestLineBreak(typesetter, start, Double(breakWidth))
       if count <= 0 {
         // Narrower than one cluster: take the cluster anyway rather than loop forever.
         count = string.rangeOfComposedCharacterSequence(at: start).length
@@ -320,21 +344,25 @@ public enum TextLayouter {
       }
       lines.append(TextLayout.Line(
         range: range,
-        frame: CGRect(x: 0, y: y, width: lineWidth, height: lineHeight),
+        frame: CGRect(x: leadingIndent, y: y, width: lineWidth, height: lineHeight),
         baseline: baseline,
         ascent: ascent,
         descent: descent,
         direction: paragraphDirection,
         endsParagraph: endsParagraph,
+        leadingIndent: leadingIndent,
+        trailingIndent: trailingIndent,
         storage: LineStorage(line: ctLine)
       ))
-      widest = max(widest, lineWidth)
+      widest = max(widest, leadingIndent + lineWidth + trailingIndent)
       y = grid.round(y + lineHeight)
       start = NSMaxRange(range)
       if start < length {
+        let lineSpacing = paragraph?.lineSpacing ?? style.lineSpacing
+        let paragraphSpacing = paragraph?.spacingAfter ?? style.paragraphSpacing
         let spacing = style.lineHeight == .fontDefault
-          ? style.lineSpacing + (endsParagraph ? style.paragraphSpacing : 0)
-          : (endsParagraph ? style.paragraphSpacing : style.lineSpacing)
+          ? (endsParagraph ? paragraphSpacing : 0)
+          : (endsParagraph ? paragraphSpacing : lineSpacing)
         y = grid.round(y + spacing)
       }
       if endsParagraph {
