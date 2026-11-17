@@ -229,7 +229,13 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       update: { [unowned self] id, view, width, timing in
         (view as? TimelineRowView).map { configure($0, id: id, width: width, timing: timing) }
       },
-      recycle: { [unowned self] _, view in
+      recycle: { [unowned self] id, view in
+        // A row planned mid-stream is measured again when it comes back: the pacer goes on revealing and
+        // finishes with no view to replan it, so its kept height would be short of what it then shows.
+        if plans[id]?.streamLength != nil {
+          plans[id] = nil
+          heights[id] = nil
+        }
         // Reset even when the pool is full: the list keeps the row in a hidden slot it may reuse.
         guard let row = view as? TimelineRowView else { return }
         row.prepareForReuse()
