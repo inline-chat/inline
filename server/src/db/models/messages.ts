@@ -91,6 +91,7 @@ export const MessageModel = {
   getAttachmentsByMessageGlobalIds: getAttachmentsByMessageGlobalIds,
   getNonFullMessagesFromNewToOld: getNonFullMessagesFromNewToOld,
   getSenderIdForMessage: getSenderIdForMessage,
+  hasEarlierAlbumMessage: hasEarlierAlbumMessage,
 }
 
 export type DbInputFullAttachment = DbMessageAttachment & {
@@ -256,6 +257,8 @@ type GetMessagesInput = {
   beforeLimit?: number
   afterLimit?: number
   includeAnchor?: boolean
+  /** Add the rest of an album cut by a page edge the page reads toward (`completeAlbumEdges`). */
+  completeAlbums?: boolean
 }
 
 const fullPhotoRelations = {
@@ -449,6 +452,20 @@ async function getMessages(inputPeer: InputPeer, input: GetMessagesInput): Promi
   }
 
   const mode = getResolvedHistoryMode(input)
+  const completeAlbums = <Row extends AlbumEdgeRow>(rows: Row[], edges: { older: boolean; newer: boolean }) =>
+    input.completeAlbums
+      ? completeAlbumEdges(rows, edges, (direction, edge) =>
+          (input.tx ?? db)._query.messages.findMany({
+            where: and(
+              eq(messages.chatId, chatId),
+              direction === "older" ? lt(messages.messageId, edge) : gt(messages.messageId, edge),
+            ),
+            orderBy: direction === "older" ? desc(messages.messageId) : asc(messages.messageId),
+            limit: maxAlbumSize - 1,
+            with: fullMessageRelations,
+          }) as unknown as Promise<Row[]>,
+        )
+      : Promise.resolve(rows)
 
   if (mode === "latest") {
     const latestMessages = await (input.tx ?? db)._query.messages.findMany({
@@ -458,7 +475,7 @@ async function getMessages(inputPeer: InputPeer, input: GetMessagesInput): Promi
       with: fullMessageRelations,
     })
 
-    return processMessages(latestMessages, input.tx)
+    return processMessages(await completeAlbums(latestMessages, { older: true, newer: false }), input.tx)
   }
 
   if (mode === "older") {
@@ -474,7 +491,7 @@ async function getMessages(inputPeer: InputPeer, input: GetMessagesInput): Promi
       with: fullMessageRelations,
     })
 
-    return processMessages(olderMessages, input.tx)
+    return processMessages(await completeAlbums(olderMessages, { older: true, newer: false }), input.tx)
   }
 
   if (mode === "newer") {
@@ -492,7 +509,7 @@ async function getMessages(inputPeer: InputPeer, input: GetMessagesInput): Promi
     })
 
     newerMessagesAsc.reverse()
-    return processMessages(newerMessagesAsc, input.tx)
+    return processMessages(await completeAlbums(newerMessagesAsc, { older: false, newer: true }), input.tx)
   }
 
   // mode === "around"
@@ -544,7 +561,45 @@ async function getMessages(inputPeer: InputPeer, input: GetMessagesInput): Promi
 
   combinedAround.sort((a, b) => b.messageId - a.messageId)
 
-  return processMessages(combinedAround, input.tx)
+  return processMessages(await completeAlbums(combinedAround, { older: true, newer: true }), input.tx)
+}
+
+/** Clients split larger picks, so an album never has more messages than this. */
+export const maxAlbumSize = 10
+
+type AlbumEdgeRow = { messageId: number; fromId: number; groupedId: bigint | null }
+
+/** Same album: consecutive messages from one sender sharing a non-zero grouped id. */
+const sameAlbum = (a: AlbumEdgeRow, b: AlbumEdgeRow) =>
+  a.groupedId !== null && a.groupedId !== 0n && a.groupedId === b.groupedId && a.fromId === b.fromId
+
+/**
+ * A history page never ends inside an album. When the message at an edge the
+ * page reads toward is part of an album, the album's messages past that edge
+ * are added (at most `maxAlbumSize - 1` rows, read only when the edge has a
+ * grouped id), so clients always receive whole albums. `rows` is newest first,
+ * and so is the result.
+ */
+export async function completeAlbumEdges<Row extends AlbumEdgeRow>(
+  rows: Row[],
+  edges: { older: boolean; newer: boolean },
+  readPast: (direction: "older" | "newer", edgeMessageId: number) => Promise<Row[]>,
+): Promise<Row[]> {
+  const continuation = async (direction: "older" | "newer", edge: Row | undefined): Promise<Row[]> => {
+    if (!edge || edge.groupedId === null || edge.groupedId === 0n) return []
+    const past = await readPast(direction, edge.messageId)
+    const members: Row[] = []
+    for (const row of past) {
+      if (!sameAlbum(edge, row)) break
+      members.push(row)
+    }
+    return members
+  }
+  const older = edges.older ? await continuation("older", rows.at(-1)) : []
+  const newer = edges.newer ? await continuation("newer", rows[0]) : []
+  if (older.length === 0 && newer.length === 0) return rows
+  // `newer` was read oldest first; the result is newest first.
+  return [...newer.reverse(), ...rows, ...older]
 }
 
 /** Reads the newest message identities and core rows from an existing snapshot. */
@@ -1491,6 +1546,33 @@ async function getMessagesAroundTarget(
  * @param input - The input object containing the chat ID and message IDs
  * @returns The sender ID or null if the message is not found
  */
+/**
+ * Whether an earlier message of the same album (same sender, same grouped id)
+ * sits shortly before `messageId`. Reads at most a short id range on the
+ * `(chat_id, message_id)` index; an album's messages are sent back to back.
+ */
+async function hasEarlierAlbumMessage(input: {
+  chatId: number
+  messageId: number
+  fromId: number
+  groupedId: bigint
+}): Promise<boolean> {
+  const earlier = await db
+    .select({ messageId: messages.messageId })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.chatId, input.chatId),
+        lt(messages.messageId, input.messageId),
+        gt(messages.messageId, input.messageId - 4 * maxAlbumSize),
+        eq(messages.groupedId, input.groupedId),
+        eq(messages.fromId, input.fromId),
+      ),
+    )
+    .limit(1)
+  return earlier.length > 0
+}
+
 async function getSenderIdForMessage({
   chatId,
   messageId,

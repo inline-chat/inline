@@ -12,6 +12,7 @@ import { FileModel } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { db } from "@in/server/db"
 import { urlPreview } from "@in/server/db/schema/attachments"
+import { messages } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -19,7 +20,7 @@ import { Log } from "@in/server/utils/log"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { collectReadyBlockPhotoIds, projectReadyBlockPhotos } from "@in/server/modules/message/blockContent"
 import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
-import { eq } from "drizzle-orm"
+import { and, eq, inArray, isNotNull } from "drizzle-orm"
 import { isSubthreadParentMessage } from "@in/server/modules/subthreads"
 
 const log = new Log("functions.forwardMessages")
@@ -227,6 +228,23 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
     currentUserId,
   })
 
+  // Album members forwarded together stay one album in the destination, under a new id.
+  const forwardedGroupedIds = forwardedAlbumIds(
+    await db
+      .select({ messageId: messages.messageId, fromId: messages.fromId, groupedId: messages.groupedId })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.chatId, sourceChat.id),
+          inArray(
+            messages.messageId,
+            input.messageIds.map((id) => Number(id)),
+          ),
+          isNotNull(messages.groupedId),
+        ),
+      ),
+  )
+
   for (const messageId of input.messageIds) {
     let sourceMessage: Awaited<ReturnType<typeof MessageModel.getMessage>>
     try {
@@ -337,6 +355,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
         messageAttachments: attachments,
         blockContent,
         skipLinkProcessing: true,
+        groupedId: forwardedGroupedIds.get(sourceMessage.messageId),
       },
       context,
     )
@@ -354,4 +373,37 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
   log.debug("forwardMessages complete", { updateCount: updates.length, currentUserId })
 
   return { updates, messageIds }
+}
+
+/**
+ * New album ids for forwarded album members: messages of one source album
+ * (same sender, same grouped id) get one fresh id when at least two of them
+ * are forwarded; a lone member is forwarded as a plain message. Keyed by the
+ * source message id.
+ */
+export function forwardedAlbumIds(
+  sourceMessages: readonly { messageId: number; fromId: number; groupedId: bigint | null }[],
+  newId: () => bigint = randomAlbumId,
+): Map<number, bigint> {
+  const groups = new Map<string, number[]>()
+  for (const message of sourceMessages) {
+    if (!message.groupedId) continue
+    const key = `${message.fromId}:${message.groupedId}`
+    groups.set(key, [...(groups.get(key) ?? []), message.messageId])
+  }
+  const ids = new Map<number, bigint>()
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    const id = newId()
+    for (const messageId of members) ids.set(messageId, id)
+  }
+  return ids
+}
+
+/** A random positive int64. */
+export function randomAlbumId(): bigint {
+  const bytes = crypto.getRandomValues(new Uint8Array(8))
+  bytes[0]! &= 0x7f
+  const id = new DataView(bytes.buffer).getBigUint64(0)
+  return id === 0n ? 1n : id
 }

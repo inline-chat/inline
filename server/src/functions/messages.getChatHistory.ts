@@ -105,6 +105,7 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
       beforeLimit,
       afterLimit,
       includeAnchor: input.includeAnchor,
+      completeAlbums: true,
       currentUserId: context.currentUserId,
     })
 

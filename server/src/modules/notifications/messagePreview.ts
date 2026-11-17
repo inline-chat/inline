@@ -7,6 +7,8 @@ type MessageNotificationBodyInput = {
   documentFileName?: string | null
   isAnimated?: boolean | null
   voiceDuration?: number | null
+  /** The first message of an album: one notification stands for all of it. */
+  isAlbum?: boolean
 }
 
 const mediaPrefix = (mediaType: MessageNotificationMediaType): string => {
@@ -103,6 +105,7 @@ export const messageNotificationBody = ({
   documentFileName,
   isAnimated,
   voiceDuration,
+  isAlbum,
 }: MessageNotificationBodyInput): string => {
   const text = normalizedBodyText(messageText)
   if (mediaType === "nudge") {
@@ -114,6 +117,12 @@ export const messageNotificationBody = ({
   }
   if (isSticker) {
     return notificationBodyText("🖼️ Sticker")
+  }
+  if (isAlbum && (mediaType === "photo" || mediaType === "video")) {
+    return notificationBodyText("🖼️ Album")
+  }
+  if (isAlbum && mediaType === "document") {
+    return notificationBodyText("📄 Files")
   }
 
   switch (mediaType) {
