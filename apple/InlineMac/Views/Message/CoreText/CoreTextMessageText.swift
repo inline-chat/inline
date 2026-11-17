@@ -15,20 +15,18 @@ enum CoreTextMessageText {
   static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
   /// Whether a message with these entities can be drawn here, decided before its text is built:
-  /// code blocks and math are not drawn yet.
+  /// math (attachments) is not drawn yet.
   static func supports(entities: MessageEntities?) -> Bool {
     guard let entities else { return true }
-    return !entities.entities.contains { $0.type == .pre || $0.type == .math }
+    return !entities.entities.contains { $0.type == .math }
   }
 
-  /// Whether this renderer draws `text` the way `MessageTextView` does. Code blocks (their
-  /// own backgrounds, padding and spacing) and attachments (inline math) are not drawn yet.
+  /// Whether this renderer draws `text`: everything but attachments (inline math).
   static func supports(_ text: NSAttributedString) -> Bool {
     guard text.length > 0 else { return true }
-    let fullRange = NSRange(location: 0, length: text.length)
     var supported = true
-    text.enumerateAttributes(in: fullRange, options: [.longestEffectiveRangeNotRequired]) { attributes, _, stop in
-      if attributes[.preCode] != nil || attributes[.codeBlock] != nil || attributes[.attachment] != nil {
+    text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, stop in
+      if value != nil {
         supported = false
         stop.pointee = true
       }
@@ -37,23 +35,29 @@ enum CoreTextMessageText {
   }
 
   /// Text-to-layout style matching how `MessageTextView` sets text: one base direction for the
-  /// whole message, TextKit's line boxes, and the typography's line spacing.
-  static func style(for text: NSAttributedString, isRtl: Bool, forcesDirection: Bool = true) -> TextLayoutStyle {
-    let paragraph = text.length > 0
-      ? text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
-      : nil
-    return TextLayoutStyle(
-      lineSpacing: paragraph?.lineSpacing ?? 0,
-      paragraphSpacing: paragraph?.paragraphSpacing ?? 0,
-      lineHeight: .fontDefault,
-      baseDirection: forcesDirection ? (isRtl ? .rightToLeft : .leftToRight) : nil
+  /// whole message and TextKit's line boxes. Spacing and indents come from each paragraph's
+  /// style (see `layoutText`).
+  static func style(for _: NSAttributedString, isRtl: Bool) -> TextLayoutStyle {
+    TextLayoutStyle(lineHeight: .fontDefault, baseDirection: isRtl ? .rightToLeft : .leftToRight)
+  }
+
+  static func paragraphMetrics(_ style: NSParagraphStyle) -> TextParagraphMetrics {
+    TextParagraphMetrics(
+      firstLineHeadIndent: style.firstLineHeadIndent,
+      headIndent: style.headIndent,
+      tailIndent: style.tailIndent,
+      lineSpacing: style.lineSpacing,
+      spacingBefore: style.paragraphSpacingBefore,
+      spacingAfter: style.paragraphSpacing
     )
   }
 
-  /// `text` with Core Text's own color keys, resolved for `appearance`, and links colored the
-  /// way `NSTextView.linkTextAttributes` colors them. Core Text reads `CGColor`s only.
+  /// What the glyph view paints with: `text` with its colors resolved for `appearance` as
+  /// `CGColor`s, links colored the way `NSTextView.linkTextAttributes` colors them, and
+  /// decorations under private keys. The layout never sees these, so measuring and drawing share
+  /// one layout and an appearance change only repaints.
   @MainActor
-  static func drawable(
+  static func paint(
     _ text: NSAttributedString,
     linkColor: NSColor?,
     appearance: NSAppearance
@@ -96,6 +100,10 @@ enum CoreTextMessageText {
         result.removeAttribute(.strikethroughStyle, range: range)
         result.addAttribute(strikethroughStyleKey, value: style, range: range)
       }
+      result.enumerateAttribute(.codeBlockBackground, in: fullRange) { value, range, _ in
+        guard let color = value as? NSColor else { return }
+        result.addAttribute(codeBlockColorKey, value: color.cgColor, range: range)
+      }
       result.enumerateAttribute(.strikethroughColor, in: fullRange) { value, range, _ in
         guard let color = value as? NSColor else { return }
         result.addAttribute(strikethroughColorKey, value: color.cgColor, range: range)
@@ -109,39 +117,94 @@ enum CoreTextMessageText {
   static let strikethroughStyleKey = NSAttributedString.Key("inline.coreText.strikethroughStyle")
   static let strikethroughColorKey = NSAttributedString.Key("inline.coreText.strikethroughColor")
   static let backgroundColorKey = NSAttributedString.Key("inline.coreText.backgroundColor")
+  static let codeBlockColorKey = NSAttributedString.Key("inline.coreText.codeBlockColor")
 
   /// The text box `MessageSizeCalculator` sizes the text view to: the laid-out text plus the
   /// same point of height `TextMeasurer` adds. Nil when the experiment is off or the text
-  /// stays on `MessageTextView`. Colors don't affect it, so the calculator's own string works.
-  static func measuredSize(_ text: NSAttributedString, width: CGFloat, extraWidth: CGFloat) -> CGSize? {
+  /// stays on `MessageTextView`. The layout it makes is the one the view then draws.
+  static func measuredSize(_ text: NSAttributedString, isRtl: Bool, width: CGFloat, extraWidth: CGFloat) -> CGSize? {
     guard isEnabled, text.length > 0, supports(text) else { return nil }
-    installAppKitLineMetrics()
-    let layout = TextLayouter.layout(
-      MessageText(text),
-      style: style(for: text, isRtl: false, forcesDirection: false),
-      maximumWidth: max(1, ceil(width)),
-      grid: PixelGrid(scale: 2)
-    )
+    let layout = layout(text, isRtl: isRtl, width: width)
     return CGSize(width: ceil(layout.size.width) + extraWidth, height: ceil(layout.size.height) + 1)
   }
 
-  /// Typeset message text, shared by every Core Text message view.
-  static let layoutCache = TextLayoutCache(characterBudget: 600_000)
+  /// Attributes that move glyphs. Everything else (colors, links, decorations) is painted.
+  private static let layoutKeys: [NSAttributedString.Key] = [
+    .font, .paragraphStyle, .kern, .tracking, .ligature, .baselineOffset, .superscript, .expansion,
+    .verticalGlyphForm, NSAttributedString.Key(kCTRunDelegateAttributeName as String),
+  ]
 
-  static func layout(
-    _ drawable: NSAttributedString,
-    style: TextLayoutStyle,
-    width: CGFloat,
-    scale: CGFloat
-  ) -> TextLayout {
-    installAppKitLineMetrics()
-    return layoutCache.layout(
-      MessageText(drawable),
-      style: style,
-      maximumWidth: width,
-      grid: PixelGrid(scale: scale)
+  /// `text` reduced to what decides where glyphs go, drawn in the context's fill color. The
+  /// size calculator's string and the view's (which adds link styling) reduce to the same text.
+  static func layoutText(_ text: NSAttributedString) -> NSAttributedString {
+    let result = NSMutableAttributedString(string: text.string)
+    let fullRange = NSRange(location: 0, length: text.length)
+    guard fullRange.length > 0 else { return result }
+    text.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
+      var kept: [NSAttributedString.Key: Any] = [:]
+      for key in layoutKeys {
+        if let value = attributes[key] { kept[key] = value }
+      }
+      if let paragraph = attributes[.paragraphStyle] as? NSParagraphStyle {
+        kept[TextParagraphMetrics.attributeKey] = paragraphMetrics(paragraph)
+      }
+      if !kept.isEmpty { result.setAttributes(kept, range: range) }
+    }
+    result.addAttribute(
+      NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String),
+      value: true,
+      range: fullRange
     )
-    .aligned(toWidth: width)
+    return result
+  }
+
+  /// The layout of `text` (display or measuring string) for a text box `width` wide.
+  ///
+  /// A layout made for one width is reused for any width it still fits, down to its widest
+  /// line: the size calculator lays text out at the space available, and the view then asks at
+  /// the width that came out, so each message is typeset once.
+  static func layout(_ text: NSAttributedString, isRtl: Bool, width: CGFloat) -> TextLayout {
+    installAppKitLineMetrics()
+    let width = max(1, ceil(width))
+    let key = LayoutKey(text: MessageText(layoutText(text)), style: style(for: text, isRtl: isRtl))
+    if let entry = layouts.object(forKey: key),
+       entry.layout.size.width <= width + 0.01, width <= entry.width + 0.01
+    {
+      return entry.layout
+    }
+    let layout = TextLayouter.layout(key.text, style: key.style, maximumWidth: width, grid: PixelGrid(scale: 2))
+    layouts.setObject(LayoutEntry(layout: layout, width: width), forKey: key, cost: max(1, text.length))
+    return layout
+  }
+
+  private static let layouts: NSCache<LayoutKey, LayoutEntry> = {
+    let cache = NSCache<LayoutKey, LayoutEntry>()
+    cache.totalCostLimit = 600_000
+    return cache
+  }()
+
+  private final class LayoutKey: NSObject, @unchecked Sendable {
+    let text: MessageText
+    let style: TextLayoutStyle
+    init(text: MessageText, style: TextLayoutStyle) {
+      self.text = text
+      self.style = style
+    }
+
+    override var hash: Int { text.hashValue ^ style.hashValue }
+    override func isEqual(_ object: Any?) -> Bool {
+      guard let other = object as? LayoutKey else { return false }
+      return other.style == style && other.text == text
+    }
+  }
+
+  private final class LayoutEntry: NSObject, @unchecked Sendable {
+    let layout: TextLayout
+    let width: CGFloat
+    init(layout: TextLayout, width: CGFloat) {
+      self.layout = layout
+      self.width = width
+    }
   }
 
   /// Line boxes from AppKit itself, so legacy fonts (Helvetica, Courier, Palatino) get the

@@ -455,7 +455,7 @@ final class AppSettings: ObservableObject {
   }
 
   /// Draws plain message text with Inline's Core Text renderer instead of NSTextView. Rich
-  /// messages and code blocks keep NSTextView. Off until it reaches parity.
+  /// messages keep NSTextView. Off until it reaches parity.
   @Published var coreTextMessageTextEnabled: Bool {
     didSet {
       UserDefaults.standard.set(coreTextMessageTextEnabled, forKey: Self.coreTextMessageTextEnabledKey)

@@ -1070,7 +1070,7 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      let textSize_ = calculateSizeForAttributedString(attributedString, width: availableWidth, message: message)
+      let textSize_ = calculateSizeForAttributedString(attributedString, width: availableWidth, isRtl: props.isRtl, message: message)
       textSize = textSize_
 
       // Cache as single line if height is equal to single line height
@@ -1951,7 +1951,7 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      textSize = calculateSizeForAttributedString(attributedString, width: textAvailableWidth, message: message)
+      textSize = calculateSizeForAttributedString(attributedString, width: textAvailableWidth, isRtl: props.isRtl, message: message)
     }
 
     let measuredTextHeight = textSize?.height ?? 0
@@ -2451,10 +2451,16 @@ class MessageSizeCalculator {
   private func calculateSizeForAttributedString(
     _ attributedString: NSAttributedString,
     width: CGFloat,
+    isRtl: Bool,
     message _: FullMessage? = nil
   ) -> NSSize {
-    // The Core Text renderer is measured with its own layout, so the box fits what it draws.
-    let size = CoreTextMessageText.measuredSize(attributedString, width: width, extraWidth: Self.extraSafeWidth)
+    // The Core Text renderer is measured with the layout it then draws.
+    let size = CoreTextMessageText.measuredSize(
+      attributedString,
+      isRtl: isRtl,
+      width: width,
+      extraWidth: Self.extraSafeWidth
+    )
       ?? messageTextMeasurer.measure(attributedString, width: width)
 
     #if DEBUG
