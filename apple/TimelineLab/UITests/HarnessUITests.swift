@@ -410,4 +410,75 @@ final class HarnessUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 1.5)
     shot("flight-reply-end")
   }
+
+  /// The jumps the collection view handled specially: a deleted message lands on its nearest neighbour, an
+  /// exact jump lands on its message and is refused once history is cleared, a message not received yet
+  /// waits at the live end until it arrives; then the status notice comes and goes.
+  func testJumps() {
+    launch()
+    script("Jump to deleted 200")
+    Thread.sleep(forTimeInterval: 2)
+    shot("jump-deleted-nearest")
+    script("Jump exact to 100")
+    Thread.sleep(forTimeInterval: 2)
+    shot("jump-exact-100")
+    script("Collapse history")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("jump-collapsed")
+    script("Jump exact to 100")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("jump-exact-cleared-refused")
+    script("Jump to next incoming")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("jump-awaiting")
+    script("Receive")
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("jump-arrived")
+    script("Toggle status notice")
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("notice-on")
+    script("Toggle status notice")
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("notice-off")
+  }
+
+  /// A message asked for as the chat opens lands without the latest messages showing first.
+  func testFocusAtOpen() {
+    launch(["--timeline-harness-focus", "150"])
+    Thread.sleep(forTimeInterval: 2)
+    shot("focus-open-150")
+  }
+
+  /// The chat list's preview: the latest messages, no unread line, no composer.
+  func testPreview() {
+    launch(["--timeline-harness-preview", "--timeline-harness-open", "unread"])
+    Thread.sleep(forTimeInterval: 2)
+    shot("preview")
+  }
+
+  /// Long sender groups: the avatar stays at the bottom of the group's visible part while its last row is
+  /// far below the screen, held and flung.
+  func testDenseGroups() {
+    launch(["--timeline-harness-dense"])
+    for i in 0 ..< 4 {
+      drag(190, 200, 190, 420, v: 400, hold: 0.3)
+      Thread.sleep(forTimeInterval: 0.8)
+      shot("dense-held-\(i)")
+    }
+    for i in 0 ..< 3 {
+      drag(190, 180, 190, 560, v: 3000)
+      Thread.sleep(forTimeInterval: 2.5)
+      shot("dense-flung-\(i)")
+    }
+  }
+
+  /// A tap on a moving list only stops it: the media under the finger does not open.
+  func testFlingTap() {
+    launch()
+    drag(190, 180, 190, 560, v: 3000)
+    coord(120, 330).press(forDuration: 0.05)
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("fling-tap-stopped")
+    XCTAssertTrue(app.buttons["Script"].exists, "a tap that stopped the fling opened something")
+  }
 }
