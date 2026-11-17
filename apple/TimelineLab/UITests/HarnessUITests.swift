@@ -481,4 +481,70 @@ final class HarnessUITests: XCTestCase {
     shot("fling-tap-stopped")
     XCTAssertTrue(app.buttons["Script"].exists, "a tap that stopped the fling opened something")
   }
+  /// UIKit's accessibility audit of the chat screen at rest, scrolled into history and with the keyboard up.
+  /// Issues are printed, not failed, so the two lists can be compared (`--timeline-harness-collection`).
+  nonisolated(unsafe) static var auditIssues: [String] = []
+
+  func testAccessibilityAudit() throws {
+    launch()
+    func audit(_ name: String) {
+      Self.auditIssues = []
+      try? app.performAccessibilityAudit { issue in
+        let element = issue.element
+        let what = element.map { "\($0.elementType.rawValue) id='\($0.identifier)' label='\($0.label.prefix(40))'" } ?? "nil"
+        HarnessUITests.auditIssues.append("\(issue.auditType.rawValue) \(issue.compactDescription) | \(what)")
+        return true
+      }
+      let issues = Self.auditIssues
+      print("[UITEST] audit \(name) issues=\(issues.count)")
+      for issue in issues { print("[UITEST] audit \(name): \(issue)") }
+      shot("audit-\(name)")
+    }
+    audit("rest")
+    drag(190, 200, 190, 520, v: 600, hold: 0.3)
+    Thread.sleep(forTimeInterval: 1)
+    audit("history")
+    openKeyboard()
+    audit("keyboard")
+  }
+
+  /// Opens and leaves the pushed chat several times, scrolling and opening a menu each time, then waits so
+  /// `leaks` can be run on the app (the runner prints `[UITEST] leak-check ready`).
+  func testOpenCloseCycles() {
+    launch(["--timeline-harness-push"])
+    for i in 0 ..< 6 {
+      drag(190, 200, 190, 520, v: 2500)
+      Thread.sleep(forTimeInterval: 1.2)
+      coord(260, 400).press(forDuration: 0.6)
+      Thread.sleep(forTimeInterval: 0.8)
+      coord(30, 120).tap()
+      Thread.sleep(forTimeInterval: 0.6)
+      app.navigationBars.buttons.firstMatch.tap()
+      Thread.sleep(forTimeInterval: 1)
+      let open = app.buttons["harnessOpenChat"]
+      if open.waitForExistence(timeout: 3) { open.tap() } else { print("[UITEST] no open button at cycle \(i)") }
+      Thread.sleep(forTimeInterval: 1.5)
+    }
+    app.navigationBars.buttons.firstMatch.tap()
+    Thread.sleep(forTimeInterval: 2)
+    shot("cycles-closed")
+    print("[UITEST] leak-check ready")
+    Thread.sleep(forTimeInterval: 45)
+  }
+  /// Prints the screen's accessibility tree at rest, to compare the two lists' elements.
+  func testAccessibilityTree() {
+    launch()
+    for line in app.debugDescription.split(separator: "\n") { print("[UITEST] tree \(line)") }
+  }
+  /// Pages up through history leaving a screenshot of each screen, for appearance and text size checks
+  /// (set with `simctl ui`).
+  func testHistoryShots() {
+    launch()
+    shot("history-0")
+    for i in 1 ... 8 {
+      drag(190, 180, 190, 560, v: 500, hold: 0.4)
+      Thread.sleep(forTimeInterval: 0.8)
+      shot("history-\(i)")
+    }
+  }
 }
