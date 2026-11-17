@@ -100,7 +100,7 @@ struct ExperimentalSettingsDetailView: View {
       Toggle(isOn: $settings.coreTextMessageTextEnabled) {
         SettingsRowLabel(
           .coreTextMessageText,
-          description: "Draw message text with Inline's own text renderer instead of the system text view, for faster scrolling. Rich messages and code blocks are unchanged."
+          description: "Draw message text with Inline's own text renderer instead of the system text view, for faster scrolling. Rich messages are unchanged."
         )
       }
       .settingsSearchAnchor(.coreTextMessageText)

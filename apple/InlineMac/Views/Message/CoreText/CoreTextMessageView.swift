@@ -2,6 +2,7 @@ import AppKit
 import CoreText
 import InlineKit
 import InlineMessageLayout
+import TextProcessing
 
 /// Message text drawn by Inline's Core Text renderer instead of `NSTextView`.
 ///
@@ -24,6 +25,8 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   private var inlineCodeRanges: [NSRange] = []
   /// Ranges that show a pointing hand, like NSTextView's `.cursor` attribute.
   private var pointerRanges: [NSRange] = []
+  /// Code blocks and the rounded backgrounds drawn behind them.
+  private var codeBlocks: [CodeBlockBox] = []
 
   private let glyphView = CoreTextGlyphView()
 
@@ -91,19 +94,13 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     rebuildLayout()
   }
 
-  private var backingScale: CGFloat {
-    window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-  }
-
   private func rebuildLayout() {
-    let drawable = CoreTextMessageText.drawable(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
-    textLayout = CoreTextMessageText.layout(
-      drawable,
-      style: CoreTextMessageText.style(for: surfaceText, isRtl: isRtl),
-      width: max(1, layoutWidth),
-      scale: backingScale
-    )
+    glyphView.paint = CoreTextMessageText.paint(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
+    textLayout = CoreTextMessageText.layout(surfaceText, isRtl: isRtl, width: layoutWidth)
+      .aligned(toWidth: max(1, layoutWidth))
     glyphView.textLayout = textLayout
+    codeBlocks = Self.codeBlocks(in: surfaceText, layout: textLayout, width: max(1, layoutWidth))
+    glyphView.codeBlocks = codeBlocks
     glyphView.selectionBands = listSelectionRange.map { selectionBands(for: $0) } ?? []
     window?.invalidateCursorRects(for: self)
     NSAccessibility.post(element: self, notification: .valueChanged)
@@ -139,13 +136,8 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
     guard surfaceText.length > 0 else { return }
-    rebuildLayout()
-  }
-
-  override func viewDidChangeBackingProperties() {
-    super.viewDidChangeBackingProperties()
-    guard surfaceText.length > 0, textLayout.lineCount > 0 else { return }
-    rebuildLayout()
+    // Colors are painted, so a new appearance doesn't touch the layout.
+    glyphView.paint = CoreTextMessageText.paint(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
   }
 
   override func layout() {
@@ -205,9 +197,40 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     return min(max(0, textLayout.closestCaretIndex(to: point)), surfaceText.length)
   }
 
-  func codeBlockRange(at _: NSPoint) -> NSRange? {
-    // Messages with code blocks stay on MessageTextView.
-    nil
+  func codeBlockRange(at point: NSPoint) -> NSRange? {
+    codeBlocks.first { $0.rect.contains(point) }?.range
+  }
+
+  /// Where `MessageTextView` puts code block backgrounds: around the code's text, out to the
+  /// block's padding (the paragraph indents leave room for it), within the text box's width.
+  /// Drawing also clips them to the box's height, as `MessageTextView` clips to its bounds.
+  static func codeBlocks(in text: NSAttributedString, layout: TextLayout, width: CGFloat) -> [CodeBlockBox] {
+    guard text.length > 0, text.length == layout.length else { return [] }
+    let style = CodeBlockStyle.block
+    var boxes: [CodeBlockBox] = []
+    text.enumerateAttribute(.codeBlock, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+      guard (value as? Bool) == true else { return }
+      let lines = layout.lines.filter { NSIntersectionRange($0.range, range).length > 0 }
+      guard let first = lines.first, let last = lines.last else { return }
+      let glyphs = layout.rects(for: range).reduce(CGRect.null) { $0.union($1) }
+      let left = (glyphs.isNull ? first.frame.minX : glyphs.minX) - style.textInsetLeft
+      let right = (glyphs.isNull ? first.frame.minX : glyphs.maxX) + style.textInsetRight
+      let rect = CGRect(
+        x: left,
+        y: first.frame.minY - style.verticalPadding,
+        width: right - left,
+        height: last.frame.maxY - first.frame.minY + style.verticalPadding * 2
+      )
+      let clipped = rect.intersection(CGRect(
+        x: style.blockHorizontalInset,
+        y: rect.minY,
+        width: width - style.blockHorizontalInset * 2,
+        height: rect.height
+      ))
+      guard !clipped.isNull else { return }
+      boxes.append(CodeBlockBox(range: range, rect: clipped, cornerRadius: style.cornerRadius))
+    }
+    return boxes
   }
 
   func inlineCodeRange(at point: NSPoint) -> NSRange? {
@@ -217,6 +240,9 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   }
 
   func entityHit(at point: NSPoint, extraTextRanges: [NSRange]) -> MessageTextEntityHit? {
+    if let range = codeBlockRange(at: point) {
+      return .codeBlock(range)
+    }
     if let range = inlineCodeRange(at: point) {
       return .inlineCode(range)
     }
@@ -512,6 +538,15 @@ final class CoreTextGlyphView: NSView {
     didSet { needsDisplay = true }
   }
 
+  /// Colors and decorations for the layout's text (`CoreTextMessageText.paint`).
+  var paint = NSAttributedString() {
+    didSet { needsDisplay = true }
+  }
+
+  var codeBlocks: [CodeBlockBox] = [] {
+    didSet { if codeBlocks != oldValue { needsDisplay = true } }
+  }
+
   /// List selection, in the owner's coordinates.
   var selectionBands: [CGRect] = [] {
     didSet { if selectionBands != oldValue { needsDisplay = true } }
@@ -541,6 +576,25 @@ final class CoreTextGlyphView: NSView {
     context.translateBy(x: bleed, y: bleed)
     let rect = dirtyRect.offsetBy(dx: -bleed, dy: -bleed)
 
+    // Code block backgrounds, then the selection, then text, as MessageTextView draws them.
+    let box = bounds.insetBy(dx: bleed, dy: bleed).offsetBy(dx: -bleed, dy: -bleed)
+    for block in codeBlocks where block.rect.intersects(rect) {
+      let blockRect = block.rect.intersection(box)
+      guard !blockRect.isNull else { continue }
+      let value = paint.length > block.range.location
+        ? paint.attribute(CoreTextMessageText.codeBlockColorKey, at: block.range.location, effectiveRange: nil)
+        : nil
+      let color: CGColor = value != nil ? (value as! CGColor) : NSColor.labelColor.withAlphaComponent(0.08).cgColor
+      context.setFillColor(color)
+      context.addPath(CGPath(
+        roundedRect: blockRect,
+        cornerWidth: block.cornerRadius,
+        cornerHeight: block.cornerRadius,
+        transform: nil
+      ))
+      context.fillPath()
+    }
+
     if !selectionBands.isEmpty {
       context.setFillColor(NSColor.selectedTextBackgroundColor.cgColor)
       for band in selectionBands where band.intersects(rect) {
@@ -548,8 +602,8 @@ final class CoreTextGlyphView: NSView {
       }
     }
 
-    let text = textLayout.text.attributedString
-    let fullRange = NSRange(location: 0, length: text.length)
+    let text = paint
+    let fullRange = NSRange(location: 0, length: text.length == textLayout.length ? text.length : 0)
     if fullRange.length > 0 {
       // Background colors (highlights) fill the font's ascent and descent around the baseline,
       // as TextKit draws them, with the sides floored to pixels.
@@ -576,12 +630,37 @@ final class CoreTextGlyphView: NSView {
     if fullRange.length > 0 {
       drawDecorations(in: context, text: text, fullRange: fullRange, visible: visible)
     }
+    let foregroundKey = NSAttributedString.Key(kCTForegroundColorAttributeName as String)
+    let fallback = NSColor.labelColor.cgColor
+    func color(at index: Int) -> CGColor {
+      guard index >= 0, index < fullRange.length,
+            let value = text.attribute(foregroundKey, at: index, effectiveRange: nil)
+      else { return fallback }
+      return value as! CGColor
+    }
     for line in textLayout.lines where line.frame.intersects(visible) {
       context.saveGState()
       context.translateBy(x: line.frame.minX, y: line.baseline)
       context.scaleBy(x: 1, y: -1)
-      context.textPosition = .zero
-      CTLineDraw(line.ctLine, context)
+      // The layout draws in the context's fill color; paint each stretch of glyphs in its
+      // text's color.
+      for run in CTLineGetGlyphRuns(line.ctLine) as? [CTRun] ?? [] {
+        let count = CTRunGetGlyphCount(run)
+        guard count > 0 else { continue }
+        var indices = [CFIndex](repeating: 0, count: count)
+        CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
+        var start = 0
+        var current = color(at: indices[0])
+        for glyph in 1 ... count {
+          let next = glyph < count ? color(at: indices[glyph]) : nil
+          guard glyph == count || next != current else { continue }
+          context.setFillColor(current)
+          context.textPosition = .zero
+          CTRunDraw(run, context, CFRange(location: start, length: glyph - start))
+          start = glyph
+          if let next { current = next }
+        }
+      }
       context.restoreGState()
     }
     context.restoreGState()
@@ -665,4 +744,10 @@ final class CoreTextGlyphView: NSView {
     }
     return gaps
   }
+}
+
+struct CodeBlockBox: Equatable {
+  let range: NSRange
+  let rect: CGRect
+  let cornerRadius: CGFloat
 }
