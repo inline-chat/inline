@@ -110,6 +110,7 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
     let previous = layout
     let previousIndex = index
     var position = previous.position
+    let reachedNewest = coverage.reachesNewest
 
     if let newRows = update.rows {
       rows = newRows
@@ -118,8 +119,12 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
     }
     if let newCoverage = update.coverage { coverage = newCoverage }
 
-    // Resting on the newest row counts as pinned, so arrivals and growth keep the bottom.
-    if update.pinsWhenAtBottom, update.scroll == .preserve, previous.isAtBottom, !previous.placements.isEmpty {
+    // Resting on the newest row counts as pinned, so arrivals and growth keep the bottom. Only at the
+    // live end: the newest row of a window short of it is a loaded end, and a newer page landing
+    // below it must not pull the reader to the end of that page.
+    if update.pinsWhenAtBottom, update.scroll == .preserve, reachedNewest, previous.isAtBottom,
+       !previous.placements.isEmpty
+    {
       position = .latest
     }
 

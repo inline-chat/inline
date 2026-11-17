@@ -367,3 +367,32 @@ private struct SplitMix {
 private extension Comparable {
   func clamped(to range: ClosedRange<Self>) -> Self { min(max(self, range.lowerBound), range.upperBound) }
 }
+
+@Suite struct TimelineReviewTests {
+  @Test func `resting on the newest loaded row of a window short of the live end does not pin`() {
+    var fixture = Fixture()
+    // A jump into history: the loaded rows stop short of the live end.
+    fixture.apply(.init(rows: Array(0 ..< 100), coverage: .init(reachesOldest: true, reachesNewest: false),
+                        scroll: .to(50, .top(0))))
+    // The reader scrolls down to the newest loaded row; the list stops there and asks for more.
+    fixture.apply(.init(scroll: .by(-10_000), pinsWhenAtBottom: false))
+    #expect(fixture.state.layout.isAtBottom)
+    let before = fixture.state.layout.placements
+    // The newer page lands below: nothing on screen moves, the new rows wait below the edge.
+    let change = fixture.apply(.init(rows: Array(0 ..< 150), coverage: .init(reachesOldest: true, reachesNewest: false)))
+    for placement in before { #expect(fixture.y(placement.id) == placement.y) }
+    #expect(!change.movesAnything || change.inserted.allSatisfy { (fixture.y($0) ?? 0) >= 540 })
+    #expect(fixture.state.layout.position != .latest)
+    checkInvariants(fixture.state.layout, rows: Array(0 ..< 150))
+  }
+
+  @Test func `resting on the newest row at the live end still pins`() {
+    var fixture = Fixture()
+    fixture.apply(.init(rows: Array(0 ..< 100), coverage: .init(reachesOldest: true, reachesNewest: true),
+                        scroll: .to(50, .top(0))))
+    fixture.apply(.init(scroll: .by(-10_000), pinsWhenAtBottom: false))
+    fixture.apply(.init(rows: Array(0 ... 100)))
+    #expect(fixture.maxY(100) == 540)
+    #expect(fixture.state.layout.position == .latest)
+  }
+}
