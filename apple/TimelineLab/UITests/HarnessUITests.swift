@@ -602,4 +602,452 @@ final class HarnessUITests: XCTestCase {
     print("[UITEST] heap-check ready")
     Thread.sleep(forTimeInterval: 40)
   }
+
+  // MARK: - Journeys (2026-11-18)
+
+  /// The message texts on screen between the bar and the composer, top to bottom, from one accessibility
+  /// snapshot (reading each element's frame separately re-resolves it, so rows arriving meanwhile mix up).
+  /// Labels drop their trailing time (", 00:15"). Prints them and returns them with their frames.
+  @discardableResult
+  func visibleTexts(_ name: String, matching prefix: String? = nil) -> [(String, CGRect)] {
+    nonisolated(unsafe) let app = app!
+    let top = barBottom - 4
+    // XCUITest runs test methods on the main thread.
+    let out: [(String, CGRect)] = MainActor.assumeIsolated {
+      guard let root = try? app.windows.firstMatch.snapshot() else { return [] }
+      let composer = app.textViews.firstMatch
+      let bottom = composer.exists ? composer.frame.minY : root.frame.maxY
+      var out: [(String, CGRect)] = []
+      func walk(_ node: any XCUIElementSnapshot) {
+        if node.elementType == .staticText {
+          let frame = node.frame
+          var label = node.label
+          if let range = label.range(of: #", \d{1,2}:\d{2}( [AP]M)?$"#, options: .regularExpression) {
+            label.removeSubrange(range)
+          }
+          if frame.height > 0, frame.minY > top, frame.maxY <= bottom, prefix.map(label.contains) ?? true {
+            out.append((label, frame))
+          }
+        }
+        for child in node.children { walk(child) }
+      }
+      walk(root)
+      return out.sorted { $0.1.minY < $1.1.minY }
+    }
+    print("[UITEST] texts \(name): " + out.map { "\($0.0.prefix(24))@\(Int($0.1.minY))-\(Int($0.1.maxY))" }.joined(separator: " | "))
+    return out
+  }
+
+  var composerTop: CGFloat { composer.exists ? composer.frame.minY : screen.height }
+
+  var scrollButton: XCUIElement { app.buttons["Scroll to Bottom"] }
+
+  /// Sends from the composer with the software keyboard: a burst of short messages, as fast as the user can.
+  func testSendBurstKeyboardUp() {
+    launch()
+    openKeyboard()
+    let send = app.buttons["Up"]
+    for i in 1 ... 8 {
+      composer.typeText("Burst \(i)")
+      if send.exists { send.tap() } else { print("[UITEST] no send button at \(i)") }
+    }
+    Thread.sleep(forTimeInterval: 0.3)
+    shot("burst-mid")
+    Thread.sleep(forTimeInterval: 2.5)
+    shot("burst-end")
+    let texts = visibleTexts("burst-end", matching: "Burst")
+    XCTAssertEqual(texts.map(\.0).suffix(4), (5 ... 8).map { "Burst \($0)" }, "burst out of order or missing")
+    if let last = texts.last {
+      print("[UITEST] last burst bottom \(last.1.maxY) composer top \(composerTop)")
+      XCTAssertLessThanOrEqual(last.1.maxY, composerTop, "newest burst row under the composer")
+      XCTAssertGreaterThan(last.1.maxY, composerTop - 60, "newest burst row not resting on the composer")
+    }
+    XCTAssertFalse(scrollButton.isHittable, "scroll button shown at the newest message")
+  }
+
+  /// Script sends and receives interleaved quickly at the bottom, keyboard up: every row arrives, the newest rests
+  /// on the composer.
+  func testScriptBurstKeyboardUp() {
+    launch()
+    openKeyboard()
+    for _ in 0 ..< 3 {
+      script("Send and ack")
+      script("Receive")
+    }
+    Thread.sleep(forTimeInterval: 2.5)
+    shot("script-burst-end")
+    let texts = visibleTexts("script-burst-end")
+    if let last = texts.last {
+      print("[UITEST] last bottom \(last.1.maxY) composer top \(composerTop)")
+      XCTAssertTrue(last.0.contains("Incoming"), "newest is not the last receive: \(last.0)")
+      XCTAssertLessThanOrEqual(last.1.maxY, composerTop)
+    }
+  }
+
+  /// Messages arrive every 300 ms while the user flings through history, catches and comes back with the
+  /// scroll button. Run with `--timeline-harness-receive-every 300`.
+  func testReceiveWhileFlinging() {
+    launch()
+    for i in 0 ..< 4 {
+      drag(190, 180, 190, 560, v: 4000)
+      Thread.sleep(forTimeInterval: 0.6)
+      shot("rx-fling-\(i)-moving")
+      Thread.sleep(forTimeInterval: 1.6)
+    }
+    drag(190, 480, 190, 100, v: 3000)
+    Thread.sleep(forTimeInterval: 0.3)
+    coord(190, 330).press(forDuration: 0.05)
+    Thread.sleep(forTimeInterval: 0.5)
+    let caught = visibleTexts("rx-caught")
+    Thread.sleep(forTimeInterval: 1.5)
+    let later = visibleTexts("rx-caught-later")
+    // Arrivals below must not move the reading rows.
+    if let a = caught.first(where: { !$0.0.contains("Incoming") }),
+       let b = later.first(where: { $0.0 == a.0 })
+    {
+      print("[UITEST] reading row \(a.0.prefix(20)) \(a.1.minY) -> \(b.1.minY)")
+      XCTAssertEqual(a.1.minY, b.1.minY, accuracy: 1, "reading row moved while messages arrived below")
+    }
+    shot("rx-caught")
+    XCTAssertTrue(scrollButton.waitForExistence(timeout: 2) && scrollButton.isHittable, "no scroll button in history")
+    scrollButton.tap()
+    Thread.sleep(forTimeInterval: 2)
+    shot("rx-bottom")
+    let bottom = visibleTexts("rx-bottom", matching: "Incoming")
+    if let last = bottom.last {
+      print("[UITEST] newest after scroll button \(last.0) bottom \(last.1.maxY) composer \(composerTop)")
+      XCTAssertLessThanOrEqual(last.1.maxY, composerTop)
+      XCTAssertGreaterThan(last.1.maxY, composerTop - 80, "not at the newest after the scroll button")
+    }
+    Thread.sleep(forTimeInterval: 2)
+    let bottom2 = visibleTexts("rx-bottom-follow", matching: "Incoming")
+    if let last = bottom2.last { XCTAssertGreaterThan(last.1.maxY, composerTop - 80, "stopped following new messages") }
+    shot("rx-bottom-follow")
+  }
+
+  /// Edit and delete the newest message while reading history: the reading rows stay where they are; the scroll
+  /// button then brings the edited newest into view.
+  func testEditDeleteNewestScrolledUp() {
+    launch()
+    script("Receive")
+    Thread.sleep(forTimeInterval: 1)
+    drag(190, 200, 190, 520, v: 600, hold: 0.3)
+    Thread.sleep(forTimeInterval: 1)
+    let before = visibleTexts("ed-before")
+    shot("ed-scrolled")
+    script("Edit newest")
+    Thread.sleep(forTimeInterval: 0.5)
+    script("Receive")
+    Thread.sleep(forTimeInterval: 1.2)
+    let edited = visibleTexts("ed-after-edit")
+    shot("ed-after-edit")
+    script("Delete newest")
+    Thread.sleep(forTimeInterval: 1.2)
+    let deleted = visibleTexts("ed-after-delete")
+    shot("ed-after-delete")
+    for (name, after) in [("edit", edited), ("delete", deleted)] {
+      if let a = before.dropFirst().first, let b = after.first(where: { $0.0 == a.0 }) {
+        print("[UITEST] \(name): \(a.0.prefix(20)) \(a.1.minY) -> \(b.1.minY)")
+        XCTAssertEqual(a.1.minY, b.1.minY, accuracy: 1, "reading row moved after \(name) of the newest")
+      } else {
+        XCTFail("reading row gone after \(name)")
+      }
+    }
+    scrollButton.tap()
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("ed-bottom")
+    let bottom = visibleTexts("ed-bottom")
+    if let last = bottom.last {
+      XCTAssertTrue(last.0.contains("edited"), "newest is not the edited message: \(last.0)")
+      XCTAssertLessThanOrEqual(last.1.maxY, composerTop)
+    }
+    // Delete at the bottom: the next newest settles on the composer.
+    script("Delete newest")
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("ed-bottom-deleted")
+    let after = visibleTexts("ed-bottom-deleted")
+    if let last = after.last {
+      XCTAssertFalse(last.0.contains("edited"))
+      XCTAssertGreaterThan(last.1.maxY, composerTop - 80, "a gap opened under the newest after a delete")
+    }
+  }
+
+  /// A reply swipe that is pulled back before the threshold does nothing; a full one shows the reply bar, and its
+  /// close button takes it away with the rows back on the composer.
+  func testReplySwipeCancel() {
+    launch()
+    let start = visibleTexts("swipe-start")
+    let startGap = start.last.map { composerTop - $0.1.maxY } ?? 0
+    // Partial swipe: left 40 pt then back to the start, released.
+    coord(280, 521).press(forDuration: 0.05, thenDragTo: coord(250, 522), withVelocity: 150, thenHoldForDuration: 0.3)
+    Thread.sleep(forTimeInterval: 1)
+    shot("swipe-partial")
+    let close = app.buttons.matching(NSPredicate(format: "label IN {'Close', 'xmark', 'Cancel'}")).firstMatch
+    print("[UITEST] reply bar after partial: \(close.exists)")
+    let partial = visibleTexts("swipe-partial")
+    if let a = start.last, let b = partial.first(where: { $0.0 == a.0 }) {
+      XCTAssertEqual(a.1.minX, b.1.minX, accuracy: 1, "the swiped row did not return")
+    }
+    // Full swipe.
+    drag(280, 521, 150, 523, v: 700, hold: 0.1)
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("swipe-full")
+    let replied = visibleTexts("swipe-full")
+    print("[UITEST] keyboard \(keyboardUp) composer \(composerTop) buttons=\(app.buttons.allElementsBoundByIndex.map { $0.label })")
+    if close.waitForExistence(timeout: 2) {
+      close.tap()
+      Thread.sleep(forTimeInterval: 1.2)
+      shot("swipe-closed")
+      let closed = visibleTexts("swipe-closed")
+      if let last = closed.last {
+        print("[UITEST] after close bottom \(last.1.maxY) composer \(composerTop)")
+        // Rows keep their distance from the composer's top edge, keyboard down or up.
+        XCTAssertEqual(composerTop - last.1.maxY, startGap, accuracy: 2, "a gap left under the newest after closing the reply bar")
+        XCTAssertLessThanOrEqual(last.1.maxY, composerTop)
+      }
+    } else {
+      XCTFail("no reply bar close button")
+    }
+    _ = replied
+  }
+
+  /// A reply's quote jumps to its original far above; the scroll button brings the reader back to the newest.
+  func testReplyJumpAndBack() {
+    launch(["--timeline-harness-focus", "341"])
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("quote-start")
+    // A reply's text reads "Reply to <sender>, <quote>, <text>"; its quote sits right above the text.
+    let before = visibleTexts("quote-before")
+    let start = before.filter { $0.0.contains("Reply to") }
+    if let reply = start.first {
+      app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        .withOffset(CGVector(dx: reply.1.minX + 30, dy: reply.1.minY - 12)).tap()
+      Thread.sleep(forTimeInterval: 1.5)
+      shot("quote-jumped")
+      let jumped = visibleTexts("quote-jumped")
+      XCTAssertNotEqual(jumped.map(\.1.minY), before.map(\.1.minY), "the quote tap did not move the list")
+    } else {
+      XCTFail("no reply on screen")
+    }
+    XCTAssertTrue(scrollButton.waitForExistence(timeout: 2), "no scroll button after the jump")
+    if scrollButton.isHittable { scrollButton.tap() }
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("quote-back")
+    let bottom = visibleTexts("quote-back")
+    if let last = bottom.last { XCTAssertGreaterThan(last.1.maxY, composerTop - 80, "not back at the newest") }
+    XCTAssertFalse(scrollButton.isHittable, "scroll button still shown at the newest")
+  }
+
+  /// Long-press menus on the topmost and bottommost rows with the keyboard up; each closes and gives the keyboard back.
+  func testMenuEdgesKeyboardUp() {
+    launch()
+    openKeyboard()
+    let texts = visibleTexts("menu-edges")
+    let candidates = texts.filter { $0.1.minY > barBottom + 4 && $0.1.maxY < composerTop - 4 }
+    for (name, target) in [("top", candidates.first), ("bottom", candidates.last)] {
+      guard let target else { continue }
+      print("[UITEST] hold \(name) \(target.0.prefix(20)) at \(target.1.midY)")
+      app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        .withOffset(CGVector(dx: target.1.midX, dy: target.1.midY)).press(forDuration: 1.0)
+      Thread.sleep(forTimeInterval: 1)
+      shot("menu-\(name)-open")
+      let copy = app.buttons["Copy"]
+      print("[UITEST] menu \(name) copy=\(copy.exists) frame=\(copy.exists ? copy.frame : .zero)")
+      if copy.exists {
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(copy.frame), "menu item off screen (\(name))")
+      } else {
+        XCTFail("no menu at the \(name) row")
+      }
+      // Dismiss by tapping the dim at the far left middle.
+      coord(20, 330).tap()
+      Thread.sleep(forTimeInterval: 1.5)
+      shot("menu-\(name)-closed-up=\(keyboardUp)")
+      XCTAssertTrue(keyboardUp, "keyboard not back after the \(name) menu")
+      if !keyboardUp { openKeyboard() }
+    }
+    let after = visibleTexts("menu-edges-after")
+    if let a = texts.last, let b = after.first(where: { $0.0 == a.0 }) {
+      XCTAssertEqual(a.1.minY, b.1.minY, accuracy: 1, "rows moved after the menus")
+    }
+  }
+
+  /// Landscape: open the keyboard, type and send; the sent row lands above the composer. Back to portrait.
+  func testLandscapeCompose() {
+    launch()
+    XCUIDevice.shared.orientation = .landscapeLeft
+    Thread.sleep(forTimeInterval: 2)
+    shot("land-start")
+    openKeyboard()
+    shot("land-kb")
+    composer.typeText("Landscape send")
+    let send = app.buttons["Up"]
+    if send.exists { send.tap() }
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("land-sent")
+    let texts = visibleTexts("land-sent")
+    if let last = texts.last {
+      print("[UITEST] landscape last \(last.0) \(last.1) composer \(composer.frame)")
+      XCTAssertEqual(last.0, "Landscape send")
+      XCTAssertLessThanOrEqual(last.1.maxY, composer.frame.minY)
+    }
+    XCUIDevice.shared.orientation = .portrait
+    Thread.sleep(forTimeInterval: 2)
+    shot("land-back")
+    let back = visibleTexts("land-back")
+    if let last = back.last {
+      XCTAssertEqual(last.0, "Landscape send")
+      XCTAssertLessThanOrEqual(last.1.maxY, composer.frame.minY)
+    }
+  }
+
+  /// The system menu (VoiceOver stand-in): open on a row, pick Reply; the reply bar shows.
+  func testSystemMenu() {
+    launch(["--timeline-harness-system-menu"])
+    let texts = visibleTexts("sys-start")
+    guard let target = texts.dropLast().last else { return XCTFail("no rows") }
+    app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+      .withOffset(CGVector(dx: target.1.midX, dy: target.1.midY)).press(forDuration: 1.0)
+    Thread.sleep(forTimeInterval: 1.2)
+    shot("sys-open")
+    print("[UITEST] sys buttons \(app.buttons.allElementsBoundByIndex.map { $0.label })")
+    let reply = app.buttons["Reply"]
+    if reply.waitForExistence(timeout: 2) {
+      reply.tap()
+      Thread.sleep(forTimeInterval: 1.2)
+      shot("sys-replied")
+    } else {
+      XCTFail("no Reply in the system menu")
+    }
+  }
+
+  /// Uncached unread opening, with the fetch failing: the list ends up showing messages (not a spinner forever).
+  func testUnreadOpening() {
+    launch()
+    Thread.sleep(forTimeInterval: 2.5)
+    shot("unread-open")
+    let texts = visibleTexts("unread-open")
+    XCTAssertFalse(texts.isEmpty, "no rows after the opening")
+    print("[UITEST] spinner \(app.activityIndicators.count)")
+  }
+
+  /// Puts the keyboard away with a tap on the list's empty leading margin (a drag would also scroll it).
+  func tapToDismissKeyboard() {
+    coord(6, 330).tap()
+    Thread.sleep(forTimeInterval: 1.2)
+    print("[UITEST] keyboard up after tap=\(keyboardUp)")
+  }
+
+  /// The gap between the newest row's text and the composer, to compare with the opening's.
+  func newestGap(_ name: String) -> CGFloat? {
+    guard let last = visibleTexts(name).last else { return nil }
+    let gap = composerTop - last.1.maxY
+    print("[UITEST] gap \(name) \(gap) newest \(last.0.prefix(30))")
+    return gap
+  }
+
+  /// Sending from far up in history: the list goes to the newest message and the sent row rests on the composer.
+  func testSendFromFarHistory() {
+    launch()
+    for _ in 0 ..< 4 {
+      drag(190, 180, 190, 560, v: 5000)
+      Thread.sleep(forTimeInterval: 2)
+    }
+    shot("far-history")
+    openKeyboard()
+    composer.typeText("Sent from far up")
+    app.buttons["Up"].tap()
+    Thread.sleep(forTimeInterval: 2)
+    shot("far-sent")
+    let texts = visibleTexts("far-sent")
+    XCTAssertEqual(texts.last?.0, "Sent from far up", "the sent message is not the newest on screen")
+    let sentGap = newestGap("far-sent") ?? 0
+    // Keyboard down again: the same gap above the composer.
+    tapToDismissKeyboard()
+    shot("far-sent-kb-down")
+    if let gap = newestGap("far-sent-kb-down") {
+      XCTAssertEqual(gap, sentGap, accuracy: 2, "the newest row does not rest on the composer")
+    }
+    XCTAssertFalse(scrollButton.isHittable, "scroll button shown at the newest")
+  }
+
+  /// Messages arriving every 300 ms while the keyboard opens and closes repeatedly; the newest stays on the
+  /// composer. Run with `--timeline-harness-receive-every 300`.
+  func testKeyboardTogglesWhileReceiving() {
+    launch()
+    let openGap = newestGap("kbrx-open") ?? 0
+    for i in 0 ..< 4 {
+      openKeyboard()
+      if let gap = newestGap("kbrx-up-\(i)") {
+        XCTAssertEqual(gap, openGap, accuracy: 2, "newest off the composer with the keyboard up (\(i))")
+      }
+      tapToDismissKeyboard()
+      if let gap = newestGap("kbrx-down-\(i)") {
+        XCTAssertEqual(gap, openGap, accuracy: 2, "newest off the composer with the keyboard down (\(i))")
+      }
+    }
+    shot("kbrx-end")
+  }
+
+  /// A far jump started while a fling runs (or at rest, with `JUMP_AT_REST`), then the scroll button: the jump
+  /// wins, and the button brings the newest message back onto the composer.
+  func testJumpDuringFling() {
+    launch()
+    let openGap = newestGap("jumpfling-open") ?? 0
+    let flings = ProcessInfo.processInfo.environment["JUMP_AT_REST"] != "1"
+    if flings { drag(190, 180, 190, 560, v: 5000) }
+    script("Jump far up")
+    Thread.sleep(forTimeInterval: 2)
+    shot("jumpfling-landed")
+    let landed = visibleTexts("jumpfling-landed")
+    XCTAssertFalse(landed.isEmpty, "blank list after the jump")
+    XCTAssertTrue(scrollButton.waitForExistence(timeout: 2) && scrollButton.isHittable, "no scroll button after the jump")
+    scrollButton.tap()
+    for t in [0.3, 0.6, 1.2, 2.5, 5.0] {
+      Thread.sleep(forTimeInterval: t - (t == 0.3 ? 0 : [0.3, 0.6, 1.2, 2.5, 5.0][[0.3, 0.6, 1.2, 2.5, 5.0].firstIndex(of: t)! - 1]))
+      shot("jumpfling-back-\(t)")
+      _ = newestGap("jumpfling-back-\(t)")
+    }
+    XCTAssertFalse(scrollButton.isHittable, "scroll button still shown at the newest")
+    if let gap = newestGap("jumpfling-back") {
+      XCTAssertEqual(gap, openGap, accuracy: 2, "the newest row is not on the composer after the scroll button")
+    }
+  }
+
+  /// The newest messages deleted one after another, quickly: no gap opens under the newest that remains.
+  func testRapidDeletes() {
+    launch()
+    let openGap = newestGap("del-open") ?? 0
+    for _ in 0 ..< 8 { script("Delete newest") }
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("del-end")
+    if let gap = newestGap("del-end") {
+      // The newest may have a different footer (sent via), so allow its height to differ by a line.
+      XCTAssertLessThan(abs(gap - openGap), 45, "a gap under the newest after deletes")
+    }
+    let texts = visibleTexts("del-end")
+    XCTAssertGreaterThan(texts.count, 3, "rows missing after deletes")
+  }
+
+  /// VoiceOver's three-finger scrolls (stand-ins in the Script menu): pages older then newer return to the same rows.
+  func testVoiceOverPaging() {
+    launch()
+    let start = visibleTexts("vo-start")
+    for i in 0 ..< 3 {
+      script("VoiceOver older")
+      Thread.sleep(forTimeInterval: 0.8)
+      shot("vo-older-\(i)")
+    }
+    let older = visibleTexts("vo-older")
+    XCTAssertNotEqual(older.map(\.0), start.map(\.0), "VoiceOver older did not page")
+    for _ in 0 ..< 3 {
+      script("VoiceOver newer")
+      Thread.sleep(forTimeInterval: 0.8)
+    }
+    shot("vo-back")
+    let back = visibleTexts("vo-back")
+    XCTAssertEqual(back.last?.0, start.last?.0, "VoiceOver newer did not return to the newest")
+    script("VoiceOver focusTop")
+    Thread.sleep(forTimeInterval: 0.8)
+    shot("vo-focus-top")
+  }
 }
