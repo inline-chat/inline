@@ -546,6 +546,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   private func height(of id: ChatRowID, width: CGFloat) -> CGFloat {
     if let cached = heights[id], abs(cached.width - width) < 0.5 { return cached.height }
+    // The list can still ask for a row of the previous snapshot: a jump that takes over a fling first
+    // settles the fling on the rows it had. That row is not measured or remembered here; a cached zero
+    // would stack it on its neighbours when a later window brings it back.
+    guard row(id) != nil else { return 0 }
     let height = measure(id, width: width)
     heights[id] = (width, height)
     return height
