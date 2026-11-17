@@ -3314,7 +3314,11 @@ class MessageViewAppKit: NSView {
       styleKey: renderCacheStyleKey
     ) {
       attributedString = cached
-      detectedLinks = LinkDetector.shared.detectLinks(in: cached).map { (range: $0.range, url: $0.url) }
+      // The cached text already carries `.link` on detected URLs, which the Core Text view reads;
+      // only NSTextView still re-runs detection here (up to ~2 ms for a long message).
+      detectedLinks = usesCoreText
+        ? []
+        : LinkDetector.shared.detectLinks(in: cached).map { (range: $0.range, url: $0.url) }
     } else {
       let codeBlockBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.05)
       let inlineCodeBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.06)
