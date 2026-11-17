@@ -1988,9 +1988,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let viewer = MediaGalleryViewController(
       source: ChatMediaGallerySource(chatId: chatId, peer: peer, anchor: anchor),
       initialItemID: anchor.id, sourceImage: sourceImage, actions: actions,
-      // The zoom starts from and returns to the photo or the video's thumbnail, not the whole row.
+      // The zoom starts from and returns to the photo or the video's thumbnail, not the whole row; the
+      // thread's parent too, as the collection view found its anchor cell.
       sourceViewProvider: { [weak self] item in
-        item.messageStableId.flatMap { self?.list.view(for: .message($0)) }.flatMap(Self.galleryMediaView(in:))
+        guard let self, let id = item.messageStableId else { return nil }
+        return (list.view(for: .message(id)) ?? list.view(for: .threadParent(id))).flatMap(Self.galleryMediaView(in:))
       }
     )
     viewer.onDismiss = { [weak self] in self?.isPresentingGallery = false }
