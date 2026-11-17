@@ -349,6 +349,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   isolated deinit {
+    #if DEBUG
+    FileHandle.standardError.write(Data("TIMELINE_DEBUG deinit messages view\n".utf8))
+    #endif
     for task in historyTasks.values { task.cancel() }
     jumpTask?.cancel()
     returnToLatestTask?.cancel()
