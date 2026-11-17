@@ -42,15 +42,24 @@ public struct FontLineMetrics: Hashable, Sendable {
 public enum FontLineMetricsProvider {
   public typealias Provider = @Sendable (CTFont) -> FontLineMetrics
 
-  private static let current = Mutex<Provider>({ FontLineMetrics.coreTextDefault(for: $0) })
+  /// The closure lives in a class so reads hand back a reference. Reading a bare closure out
+  /// of `Mutex` through `withLock { $0 }` re-wraps the stored value in a reabstraction thunk on
+  /// every read, so each lookup got slower than the last (a 40-paragraph message took 180 ms).
+  private final class Box: Sendable {
+    let provider: Provider
+    init(_ provider: @escaping Provider) { self.provider = provider }
+  }
+
+  private static let current = Mutex(Box { FontLineMetrics.coreTextDefault(for: $0) })
 
   public static func install(_ provider: @escaping Provider) {
-    current.withLock { $0 = provider }
+    let box = Box(provider)
+    current.withLock { $0 = box }
   }
 
   static func metrics(for font: CTFont) -> FontLineMetrics {
-    let provider = current.withLock { $0 }
-    return provider(font)
+    let box = current.withLock { $0 }
+    return box.provider(font)
   }
 }
 
