@@ -986,8 +986,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         timing = Self.rowTiming
         // Resting just above the newest message (within 44 pt), a new or growing message brings the list
         // to it, as the collection view followed from there.
-        // Never during a fling or under an open menu; an update only when it is the newest message's.
-        if snapshot.reason == .liveAdd || (snapshot.reason == .liveUpdate && snapshot.ids.last.map(changed.contains) == true),
+        // Never during a fling or under an open menu; an update only when it is the newest message's
+        // (the status notice can be the last row, under it).
+        if snapshot.reason == .liveAdd
+          || (snapshot.reason == .liveUpdate
+            && snapshot.rows.last(where: { $0.content.message != nil }).map({ changed.contains($0.id) }) == true),
            !list.isTracking, !list.isDecelerating, !menu.isActive, menuInsetHold == nil,
            distanceFromBottom > 0.5, distanceFromBottom <= 44, viewModel.historyCoverage.isAtCertifiedLiveEnd
         {
