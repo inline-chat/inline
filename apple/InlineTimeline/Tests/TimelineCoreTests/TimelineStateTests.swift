@@ -48,6 +48,24 @@ private func checkInvariants(_ layout: TimelineLayout<Int>, rows: [Int], sourceL
 }
 
 @Suite struct TimelineStateTests {
+  @Test func `the newest row placed by its top after it shrinks still rests on the bottom and stays pinned`() {
+    var fixture = Fixture()
+    let rows = Array(0 ..< 100)
+    fixture.heights[99] = 300
+    fixture.apply(.init(rows: rows, scroll: .latest))
+    #expect(fixture.state.layout.isAtBottom)
+    let top = (fixture.y(99) ?? 0) - fixture.state.layout.viewport.usableTop
+    // A disclosure in the newest row closes; the list keeps the row's top, as `replanKeepingTop` asks.
+    fixture.heights[99] = 80
+    fixture.apply(.init(scroll: .to(99, .top(top))))
+    #expect(abs((fixture.maxY(99) ?? 0) - fixture.state.layout.viewport.usableBottom) < 0.5)
+    #expect(fixture.state.layout.isAtBottom)
+    // A message that arrives next is followed.
+    fixture.apply(.init(rows: Array(0 ..< 101)))
+    #expect(abs((fixture.maxY(100) ?? 0) - fixture.state.layout.viewport.usableBottom) < 0.5)
+    checkInvariants(fixture.state.layout, rows: Array(0 ..< 101))
+  }
+
   @Test func `the span of the lowest visible row stays placed to its end, within the span margin`() {
     var state = TimelineState<Int>(
       viewport: TimelineViewport(width: 320, height: 600, topInset: 50, bottomInset: 60),
