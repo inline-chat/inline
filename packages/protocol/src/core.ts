@@ -12742,9 +12742,10 @@ export interface SearchMessagesInput {
     filter?: SearchMessagesFilter;
     /**
      * Count every matching message instead of returning a page: the result has
-     * total_count set and no messages. Scans the whole chat, so clients send it
-     * alongside the first page request rather than waiting on it. Requires
-     * queries; limit and offset_id are ignored.
+     * total_count set and no messages. Clients send it alongside the first page
+     * request rather than waiting on it. Requires queries (a full scan), or a
+     * photo, video, photo_video, document or voice memo filter on its own (an
+     * indexed count); links still need queries. limit and offset_id are ignored.
      *
      * @generated from protobuf field: optional bool count_only = 6;
      */
