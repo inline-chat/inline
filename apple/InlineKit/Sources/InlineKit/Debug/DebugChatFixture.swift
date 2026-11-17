@@ -122,8 +122,8 @@ public final class DebugChatFixture {
       text = "Pinned a message"
       payload = .with { $0.serviceMessage = .with { $0.pinnedMessage = .with { $0.messageID = id - 3 } } }
     } else if index % 29 == 0 {
-      photoId = 9_000 + id
-      let photo = try Photo(photoId: 9_000 + id, date: now, format: .jpeg).insertAndFetch(db)
+      photoId = 9_000_000 + id
+      let photo = try Photo(photoId: 9_000_000 + id, date: now, format: .jpeg).insertAndFetch(db)
       // Sizes reference the photo's local row id. A drawn local file, so a tap opens the gallery.
       var size = PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: index % 2 == 0 ? 800 : 1_600)
       size.localPath = Self.photoFile(tall: index % 2 != 0)
@@ -137,23 +137,42 @@ public final class DebugChatFixture {
     var videoId: Int64?
     if photoId == nil, payload == nil, index % 53 == 0 {
       // A video with a drawn thumbnail and a stand-in file, so a tap opens the chat's gallery.
-      let thumbnail = try Photo(photoId: 8_000 + id, date: now, format: .jpeg).insertAndFetch(db)
+      let thumbnail = try Photo(photoId: 8_000_000 + id, date: now, format: .jpeg).insertAndFetch(db)
       var size = PhotoSize(photoId: thumbnail.id ?? 0, type: "f", width: 1_200, height: 600)
       size.localPath = Self.photoFile(tall: false)
       try size.insert(db)
       let video = Video(
-        videoId: 7_000 + id, date: now, width: 1_280, height: 720, duration: 12, size: 1_000,
+        videoId: 7_000_000 + id, date: now, width: 1_280, height: 720, duration: 12, size: 1_000,
         thumbnailPhotoId: thumbnail.id, cdnUrl: nil, localPath: Self.videoFile()
       )
       try video.insert(db)
       videoId = video.videoId
       text = nil
     }
+    // Agent replies with blocks every 41st message: a code block with lines wider than the bubble (it
+    // scrolls sideways), a wide table, and a closed disclosure that opens in place.
+    var blocks: BlockContentPayload?
+    if photoId == nil, videoId == nil, payload == nil, index % 41 == 0 {
+      let rich = Self.agentBlocks(variant: (index / 41) % 3)
+      text = rich.text
+      blocks = rich.payload
+    }
+    // A file every 61st message.
+    var documentId: Int64?
+    if photoId == nil, videoId == nil, payload == nil, blocks == nil, index % 61 == 0 {
+      let document = Document(
+        id: 6_000_000 + id, documentId: 6_000_000 + id, date: now, fileName: "timeline-notes-\(index).pdf",
+        mimeType: "application/pdf", size: 248_000, cdnUrl: nil, localPath: nil, thumbnailPhotoId: nil
+      )
+      try document.insert(db)
+      documentId = document.documentId
+      if index % 2 == 0 { text = nil }
+    }
     var message = Message(
       messageId: id, fromId: from, date: start.addingTimeInterval(Double(index) * step), text: text,
       peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: from == 1, status: from == 1 ? .sent : nil,
       repliedToMessageId: index % 11 == 0 && index > 5 ? id - 5 : nil, photoId: photoId, videoId: videoId,
-      contentPayload: payload
+      documentId: documentId, contentPayload: payload, blockContentPayload: blocks
     )
     try message.saveMessage(db)
     if index % 7 == 0 {
@@ -162,6 +181,60 @@ public final class DebugChatFixture {
                      date: now, chatId: chatId).insert(db)
       }
     }
+  }
+
+  /// Message text and blocks whose ranges point into it, as an agent sends them.
+  private nonisolated static func agentBlocks(variant: Int) -> (text: String, payload: BlockContentPayload?) {
+    var text = ""
+    func add(_ string: String) -> BlockText {
+      if !text.isEmpty { text += "\n" }
+      let start = (text as NSString).length
+      text += string
+      return .with {
+        $0.offset = Int64(start)
+        $0.length = Int64((string as NSString).length)
+      }
+    }
+    var blocks: [Block] = []
+    switch variant {
+      case 0:
+        blocks.append(.with { $0.paragraph = add("The fix keeps the reading row in place when older pages arrive:") })
+        let code = add("""
+        func apply(_ transaction: TimelineTransaction) {
+          let anchor = layout.anchor(nearest: viewport.midY) // the row the reader is looking at, kept where it is
+          solver.place(transaction.changed, keeping: anchor, margins: TimelineMargins(span: 900, ahead: 1_200, behind: 600))
+        }
+        """)
+        blocks.append(.with { $0.code = .with { $0.text = code; $0.language = "swift" } })
+      case 1:
+        blocks.append(.with { $0.paragraph = add("Fling stalls by device and fixture:") })
+        let header = ["Device", "Fixture", "Frames", "Stalls", "Longest", "Notes"].map(add)
+        let rows = [
+          ["iPhone SE", "normal", "2,310", "4", "71 ms", "first page load"],
+          ["iPhone 17e", "dense", "2,284", "4", "68 ms", "long sender groups"],
+        ].map { $0.map(add) }
+        blocks.append(.with {
+          $0.table = .with { table in
+            table.rows = ([header] + rows).map { cells in .with { $0.cells = cells } }
+          }
+        })
+      default:
+        blocks.append(.with { $0.paragraph = add("Done. Three places changed.") })
+        let summary = add("Details")
+        let children: [Block] = [
+          .with { $0.paragraph = add("The keyboard coordinator measures again after a rotation.") },
+          .with { $0.paragraph = add("The date pill's tap no longer puts the keyboard away.") },
+          .with { $0.paragraph = add("History paging waits for the next drag after a failed page.") },
+        ]
+        blocks.append(.with {
+          $0.disclosure = .with {
+            $0.summary = summary
+            $0.initiallyOpen = false
+            $0.children = children
+          }
+        })
+    }
+    return (text, BlockContentPayload(.with { $0.blocks = blocks }))
   }
 
   /// A stand-in video file in the video cache (not playable); its local path.
