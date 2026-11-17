@@ -1113,7 +1113,12 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         let scroll: TimelineScroll<ID> = progress >= 0.999
           ? .latest
           : .to(rows[min(rows.count - 1, Int((progress * CGFloat(rows.count - 1)).rounded()))], .top(0))
-        apply(TimelineTransaction(scroll: scroll))
+        // Not `apply`, which lets content under a finger leave its limits: a row near the newest end put
+        // at the top would leave the space below it empty, and nothing brings it back on release.
+        var update = TimelineUpdate<ID>(viewport: viewport(), scroll: scroll)
+        update.followsBottomInset = false
+        update.pinsWhenAtBottom = false
+        perform(update, timing: .none, changed: [])
         indicator.progress = progress
         placeIndicator(timing: .none)
         showIndicator()
