@@ -17,11 +17,7 @@ import Translation
 import UIKit
 
 final class MessagesCollectionView: UICollectionView {
-  struct ScrollAffordanceState: Equatable {
-    var isVisible = false
-    /// Unread messages below the reader; see `ChatUnreadBadgeCount`.
-    var unreadCount = 0
-  }
+  typealias ScrollAffordanceState = ChatScrollAffordanceState
 
   private enum ScrollAffordanceMetrics {
     static let showDistance: CGFloat = 44

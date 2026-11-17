@@ -33,6 +33,18 @@ protocol ChatMessageListHosting: UIView {
   func composeAreaDidChange(bottomInset: CGFloat, timing: TimelineTiming, isInteractive: Bool)
 }
 
+/// The scroll-to-bottom button's state, as either list reports it.
+struct ChatScrollAffordanceState: Equatable {
+  var isVisible = false
+  /// Unread messages below the reader; see `ChatUnreadBadgeCount`.
+  var unreadCount = 0
+}
+
+/// The collection view lets the composer prepare a flight at the bottom (within 44 pt), or when empty.
+extension MessagesCollectionView: SendMessageAnimationListGate {
+  var acceptsSendAnimation: Bool { itemsEmpty || shouldScrollToBottom }
+}
+
 /// A message list that opens the chat's media gallery: every photo and video of the chat, paged from
 /// cache and server. Media views inside a row find it among their superviews.
 @MainActor

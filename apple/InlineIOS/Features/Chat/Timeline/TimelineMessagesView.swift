@@ -23,7 +23,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   var onContextMenuWillDisplay: (() -> Void)?
   var onContextMenuDidEnd: (() -> Void)?
-  var onScrollAffordanceChanged: ((MessagesCollectionView.ScrollAffordanceState) -> Void)? {
+  var onScrollAffordanceChanged: ((ChatScrollAffordanceState) -> Void)? {
     didSet { onScrollAffordanceChanged?(affordance) }
   }
 
@@ -129,7 +129,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var lastReadCoverage: MessageHistoryCoverageProjection?
   private var readFrontier: Int64 = 0
   private var unreadState: ChatActivityNavigator.State = .empty
-  private var affordance = MessagesCollectionView.ScrollAffordanceState()
+  private var affordance = ChatScrollAffordanceState()
   private var lastReadPass: CFTimeInterval = 0
 
   // Media warm-up
@@ -905,7 +905,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         break
       case .unread:
         // Below where the date pill sits, as the collection view places it.
-        if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(DateSeparatorView.height)) }
+        if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(TimelineDatePill.height)) }
       case let .saved(place):
         if let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == place.messageId }) {
           scroll = .to(row.id, .top(place.offset))
@@ -1072,7 +1072,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .latest:
         return .latest
       case .unreadLine:
-        return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(DateSeparatorView.height)) : .latest
+        return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(TimelineDatePill.height)) : .latest
       case let .message(messageId):
         guard let row = snapshot.rows.first(where: { $0.content.message?.message.messageId == messageId })
         else { return .latest }
@@ -1750,7 +1750,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         readFrontier: readFrontier, coverage: viewModel.historyCoverage, loadedMessages: viewModel.messages
       )
     }
-    let next = MessagesCollectionView.ScrollAffordanceState(isVisible: visible, unreadCount: count)
+    let next = ChatScrollAffordanceState(isVisible: visible, unreadCount: count)
     guard next != affordance else { return }
     affordance = next
     onScrollAffordanceChanged?(next)
