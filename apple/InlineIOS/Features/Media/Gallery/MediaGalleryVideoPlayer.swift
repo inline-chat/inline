@@ -27,9 +27,13 @@ final class MediaGalleryVideoPlayer {
   private var endObserver: NSObjectProtocol?
   private var timeObserver: Any?
 
-  init(url: URL, stream: NativeVideoStream? = nil) {
+  /// The duration from the message, used before the item has loaded its own.
+  private let fallbackDuration: Double
+
+  init(url: URL, stream: NativeVideoStream? = nil, fallbackDuration: Double = 0) {
     self.url = url
     self.stream = stream
+    self.fallbackDuration = fallbackDuration
     let asset = stream?.asset ?? AVURLAsset(url: url)
     player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
     player.actionAtItemEnd = .pause
@@ -95,9 +99,14 @@ final class MediaGalleryVideoPlayer {
     isPlaying ? pause() : play()
   }
 
-  func seek(to fraction: Double) {
-    let target = duration * max(0, min(1, fraction))
-    player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+  /// Seeks to a fraction of the video. While a scrub is still moving, a loose seek lands on
+  /// a nearby keyframe so the picture keeps up; the final seek is exact.
+  func seek(to fraction: Double, exact: Bool = true) {
+    let length = duration > 0 ? duration : fallbackDuration
+    guard length > 0 else { return }
+    let target = CMTime(seconds: length * max(0, min(1, fraction)), preferredTimescale: 600)
+    let tolerance = exact ? CMTime.zero : CMTime(seconds: 0.5, preferredTimescale: 600)
+    player.seek(to: target, toleranceBefore: tolerance, toleranceAfter: tolerance)
     onUpdate?()
   }
 

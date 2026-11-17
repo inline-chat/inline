@@ -196,7 +196,14 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   /// Shows `item`. `placeholder` covers the page until the full image arrives.
   func configure(item: MediaGalleryItem, placeholder: UIImage?, pageGap: CGFloat) {
     self.pageGap = pageGap
+    updateAccessibility(item)
     if self.item == item, hasFullImage || imageTask != nil {
+      return
+    }
+    // The same media with new details (its download landed, a fresh link, an edited caption)
+    // keeps the image on screen instead of dropping back to the thumbnail.
+    if let current = self.item, current.id == item.id, current.kind == item.kind, hasFullImage {
+      self.item = item
       return
     }
     imageTask?.cancel()
@@ -226,6 +233,22 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
           hasFullImage = true
         }
     }
+  }
+
+  private func updateAccessibility(_ item: MediaGalleryItem) {
+    isAccessibilityElement = true
+    accessibilityTraits = item.kind == .video ? [.image, .startsMediaSession] : .image
+    var parts = [item.kind == .video ? NSLocalizedString("Video", comment: "Gallery page") : NSLocalizedString(
+      "Photo",
+      comment: "Gallery page"
+    )]
+    if let message = item.message {
+      parts.append(MediaGalleryViewController.dateText(message.date))
+      if let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+        parts.append(text)
+      }
+    }
+    accessibilityLabel = parts.joined(separator: ", ")
   }
 
   private static func cachedImage(_ url: URL?) -> UIImage? {
@@ -320,6 +343,19 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
         UIView.animate(withDuration: 0.15) { self?.playerView.alpha = ready ? 1 : 0 }
       }
     }
+  }
+
+  /// What the page shows now: the video's current frame once it has played, else the image.
+  func displayedImage() -> UIImage? {
+    guard playerView.playerLayer.player != nil, playerView.playerLayer.isReadyForDisplay, playerView.alpha > 0,
+          let time = playerView.playerLayer.player?.currentTime().seconds, time.isFinite, time > 0.05,
+          imageView.bounds.width > 0, imageView.bounds.height > 0
+    else { return imageView.image }
+    let renderer = UIGraphicsImageRenderer(bounds: imageView.bounds)
+    let frame = renderer.image { _ in
+      imageView.drawHierarchy(in: imageView.bounds, afterScreenUpdates: false)
+    }
+    return frame
   }
 
   func detachPlayer() {

@@ -366,6 +366,12 @@ final class ChatMediaGallerySource: MediaGallerySource {
     for id in removedIds {
       byId[id] = nil
     }
+    // The window pages back from the latest media. Until it reaches the anchor, what it holds
+    // is newer than a gap of unloaded items, so the page after the anchor wouldn't be its
+    // neighbor. Show only the anchor until then.
+    if !anchorLoaded {
+      byId = byId.filter { $0.key == anchor.id }
+    }
 
     let next = byId.values.sorted { $0.id < $1.id }
     let changed = next != items

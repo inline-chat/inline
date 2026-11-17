@@ -51,6 +51,9 @@ final class MediaGalleryViewController: UIViewController {
 
   private let pageGap: CGFloat = 20
   private let prefetcher = Nuke.ImagePrefetcher()
+  private var prefetchedURLs = Set<URL>()
+  private var isStripScrubbing = false
+  private weak var openingHero: UIView?
 
   // MARK: - Views
 
@@ -59,7 +62,8 @@ final class MediaGalleryViewController: UIViewController {
   private lazy var pager = UICollectionView(frame: .zero, collectionViewLayout: pagerLayout)
   private let topBar = MediaGalleryTopBar()
   private let bottomBar = MediaGalleryBottomBar()
-  private let toastView = UILabel()
+  private let toastView = MediaGalleryToastView()
+  private var isPreparingShare = false
   private lazy var dismissPan = UIPanGestureRecognizer(target: self, action: #selector(handleDismissPan(_:)))
 
   // MARK: - Init
@@ -187,12 +191,6 @@ final class MediaGalleryViewController: UIViewController {
     topBar.alpha = 0
     bottomBar.alpha = 0
 
-    toastView.font = .systemFont(ofSize: 14, weight: .medium)
-    toastView.textColor = .label
-    toastView.textAlignment = .center
-    toastView.backgroundColor = .secondarySystemBackground
-    toastView.layer.cornerRadius = 18
-    toastView.layer.masksToBounds = true
     toastView.alpha = 0
     view.addSubview(toastView)
 
@@ -213,13 +211,70 @@ final class MediaGalleryViewController: UIViewController {
     super.viewDidLayoutSubviews()
     let frame = CGRect(x: 0, y: 0, width: view.bounds.width + pageGap, height: view.bounds.height)
     guard pager.frame != frame else { return }
+    // A rotation or window resize clamps the old offset against the new content size, which
+    // scrolls. Suppress that, or the page would read from the stale offset and jump.
+    isApplyingSource = true
     pager.frame = frame
     pagerLayout.itemSize = frame.size
     pagerLayout.invalidateLayout()
     pager.layoutIfNeeded()
-    isApplyingSource = true
-    pager.contentOffset = CGPoint(x: CGFloat(currentIndex) * frame.width, y: 0)
+    // Not `contentOffset =`: a paging scroll view starts an animated snap from the clamped
+    // offset, and only the non-animated setter cancels it.
+    pager.setContentOffset(CGPoint(x: CGFloat(currentIndex) * frame.width, y: 0), animated: false)
     isApplyingSource = false
+  }
+
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    // Takes focus from the composer so its keyboard doesn't stay over the gallery, and
+    // receives hardware-keyboard commands.
+    becomeFirstResponder()
+  }
+
+  override var canBecomeFirstResponder: Bool {
+    true
+  }
+
+  override var prefersHomeIndicatorAutoHidden: Bool {
+    !chromeVisible
+  }
+
+  override var keyCommands: [UIKeyCommand]? {
+    var commands = [
+      UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(closeFromKeyboard)),
+      UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: #selector(showPreviousFromKeyboard)),
+      UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: #selector(showNextFromKeyboard)),
+    ]
+    if currentItem?.kind == .video {
+      commands.append(UIKeyCommand(input: " ", modifierFlags: [], action: #selector(togglePlaybackFromKeyboard)))
+    }
+    for command in commands {
+      command.wantsPriorityOverSystemBehavior = true
+    }
+    return commands
+  }
+
+  @objc private func closeFromKeyboard() {
+    animateOut()
+  }
+
+  @objc private func showPreviousFromKeyboard() {
+    guard !isTransitioning, !isDismissPanning else { return }
+    scrollToItem(at: currentIndex - 1, animated: true)
+  }
+
+  @objc private func showNextFromKeyboard() {
+    guard !isTransitioning, !isDismissPanning else { return }
+    scrollToItem(at: currentIndex + 1, animated: true)
+  }
+
+  @objc private func togglePlaybackFromKeyboard() {
+    toggleVideoPlayback()
+  }
+
+  override func accessibilityPerformEscape() -> Bool {
+    animateOut()
+    return true
   }
 
   override func viewIsAppearing(_ animated: Bool) {
@@ -240,6 +295,7 @@ final class MediaGalleryViewController: UIViewController {
   private func cleanUp() {
     guard !didFinish else { return }
     didFinish = true
+    toastHideWork?.cancel()
     stopVideo()
     prefetcher.stopPrefetching()
     source.stop()
@@ -300,6 +356,7 @@ final class MediaGalleryViewController: UIViewController {
     let from = sourceView.convert(sourceView.bounds, to: view)
     let hero = makeHero(image: image, frame: from, cornerRadius: cornerRadius(for: sourceView))
     view.insertSubview(hero, belowSubview: topBar)
+    openingHero = hero
     suppress(sourceView)
 
     UIView.animate(springDuration: 0.42, bounce: 0) {
@@ -308,13 +365,16 @@ final class MediaGalleryViewController: UIViewController {
       self.backgroundView.alpha = 1
       self.applyChromeAlpha()
     } completion: { _ in
-      self.pager.isHidden = false
       hero.removeFromSuperview()
+      // Closed before the morph landed; the close animation owns the pager now.
+      guard !self.isDismissing else { return }
+      self.pager.isHidden = false
       self.didFinishAppearing()
     }
   }
 
   private func didFinishAppearing() {
+    guard !isDismissing else { return }
     isTransitioning = false
     startVideoIfNeeded(autoplay: true)
     prefetchNeighbors()
@@ -327,11 +387,15 @@ final class MediaGalleryViewController: UIViewController {
     guard !isDismissing else { return }
     isDismissing = true
     isTransitioning = true
-    stopVideo()
+    resignFirstResponder()
+    openingHero?.removeFromSuperview()
+    openingHero = nil
 
     let cell = currentCell
-    let image = cell?.imageView.image
+    // A played video flies back on its current frame, not its poster.
+    let image = cell?.displayedImage()
     let fromFrame = cell.map { $0.imageView.convert($0.imageView.bounds, to: view) }
+    stopVideo()
 
     guard let image, let fromFrame, fromFrame.width > 0, fromFrame.height > 0 else {
       UIView.animate(withDuration: 0.2) {
@@ -434,7 +498,7 @@ final class MediaGalleryViewController: UIViewController {
 
   private func sourceDidChange() {
     let busy = pager.isTracking || pager.isDragging || pager.isDecelerating || isDismissPanning
-      || isTransitioning || currentCell?.isZoomed == true
+      || isTransitioning || isStripScrubbing || currentCell?.isZoomed == true
     if busy {
       needsSourceApply = true
       updateChrome()
@@ -505,6 +569,9 @@ final class MediaGalleryViewController: UIViewController {
   }
 
   private func pageDidSettle() {
+    // Scrubbing the strip passes through many pages; settle once it lets go, so passing a
+    // video doesn't start its player and download.
+    guard !isStripScrubbing else { return }
     for case let cell as MediaGalleryPageCell in pager.visibleCells where cell.item?.id != currentItem?.id {
       cell.resetZoom(animated: false)
     }
@@ -513,19 +580,26 @@ final class MediaGalleryViewController: UIViewController {
     if needsSourceApply { applySource() }
   }
 
-  private func scrollToItem(at index: Int) {
+  private func scrollToItem(at index: Int, animated: Bool = false) {
     guard items.indices.contains(index), index != currentIndex else { return }
-    pager.setContentOffset(CGPoint(x: CGFloat(index) * pageWidth, y: 0), animated: false)
-    pageDidSettle()
+    // Animated scrolls settle in `scrollViewDidEndScrollingAnimation`.
+    pager.setContentOffset(CGPoint(x: CGFloat(index) * pageWidth, y: 0), animated: animated)
+    if !animated { pageDidSettle() }
   }
 
+  /// Warms the pages next to the current one, and drops warming that's no longer near.
   private func prefetchNeighbors() {
-    let range = max(0, currentIndex - 2) ... min(items.count - 1, currentIndex + 2)
     guard !items.isEmpty else { return }
+    let range = max(0, currentIndex - 2) ... min(items.count - 1, currentIndex + 2)
     let urls = range.compactMap { index -> URL? in
       let item = items[index]
       return item.kind == .photo ? item.mediaURL : item.thumbnailURL
     }
+    let stale = prefetchedURLs.subtracting(urls)
+    if !stale.isEmpty {
+      prefetcher.stopPrefetching(with: Array(stale))
+    }
+    prefetchedURLs = Set(urls)
     prefetcher.startPrefetching(with: urls)
   }
 
@@ -551,6 +625,7 @@ final class MediaGalleryViewController: UIViewController {
       self.backgroundView.backgroundColor = self.backgroundColor
       self.setNeedsStatusBarAppearanceUpdate()
     }
+    setNeedsUpdateOfHomeIndicatorAutoHidden()
   }
 
   private func updateChrome() {
@@ -657,10 +732,15 @@ final class MediaGalleryViewController: UIViewController {
     bottomBar.strip.onSelect = { [weak self] index in
       self?.scrollToItem(at: index)
     }
+    bottomBar.strip.onScrubChange = { [weak self] scrubbing in
+      guard let self else { return }
+      isStripScrubbing = scrubbing
+      if !scrubbing { pageDidSettle() }
+    }
 
     let controls = bottomBar.videoControls
     controls.playButton.addAction(UIAction { [weak self] _ in self?.toggleVideoPlayback() }, for: .touchUpInside)
-    controls.onSeek = { [weak self] fraction in self?.player?.seek(to: fraction) }
+    controls.onSeek = { [weak self] fraction, exact in self?.player?.seek(to: fraction, exact: exact) }
     controls.onScrubChange = { [weak self] scrubbing in
       guard let self, let player else { return }
       if scrubbing {
@@ -717,18 +797,28 @@ final class MediaGalleryViewController: UIViewController {
   }
 
   private func share(_ item: MediaGalleryItem) {
+    guard !isPreparingShare else { return }
+    isPreparingShare = true
     Task {
+      defer { isPreparingShare = false }
       let activityItem: Any?
       switch item.kind {
         case .photo:
-          activityItem = await fullImage(for: item)
+          // The original file keeps its format and metadata; a decoded image would be re-encoded.
+          if let file = Self.existingFile(item.mediaURL) {
+            activityItem = file
+          } else {
+            activityItem = await fullImage(for: item)
+          }
         case .video:
           activityItem = try? await localVideoURL(for: item)
       }
+      guard !didFinish, !isDismissing else { return }
       guard let activityItem else {
         showToast("Couldn't load this item", systemImage: "exclamationmark.triangle")
         return
       }
+      hideToast()
       let controller = UIActivityViewController(activityItems: [activityItem], applicationActivities: nil)
       controller.popoverPresentationController?.sourceView = bottomBar.shareButton
       controller.popoverPresentationController?.sourceRect = bottomBar.shareButton.bounds
@@ -746,9 +836,15 @@ final class MediaGalleryViewController: UIViewController {
       do {
         switch item.kind {
           case .photo:
-            guard let image = await fullImage(for: item) else { throw MediaGalleryError.unavailable }
-            try await PHPhotoLibrary.shared().performChanges {
-              PHAssetChangeRequest.creationRequestForAsset(from: image)
+            if let file = Self.existingFile(item.mediaURL) {
+              try await PHPhotoLibrary.shared().performChanges {
+                _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: file)
+              }
+            } else {
+              guard let image = await fullImage(for: item) else { throw MediaGalleryError.unavailable }
+              try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+              }
             }
           case .video:
             let url = try await localVideoURL(for: item)
@@ -765,6 +861,11 @@ final class MediaGalleryViewController: UIViewController {
     }
   }
 
+  private static func existingFile(_ url: URL?) -> URL? {
+    guard let url, url.isFileURL, FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return url
+  }
+
   private func fullImage(for item: MediaGalleryItem) async -> UIImage? {
     for url in [item.mediaURL, item.fallbackURL].compactMap({ $0 }) {
       if let image = try? await ImagePipeline.shared.image(for: url) {
@@ -774,41 +875,64 @@ final class MediaGalleryViewController: UIViewController {
     return nil
   }
 
+  /// The video on disk. A chat video that isn't there yet joins its native download, the same
+  /// one the player streams from and the chat keeps, instead of fetching a second copy.
   private func localVideoURL(for item: MediaGalleryItem) async throws -> URL {
-    if let url = item.mediaURL, url.isFileURL, FileManager.default.fileExists(atPath: url.path) {
+    if let url = Self.existingFile(item.mediaURL) {
       return url
+    }
+    if let video = item.video, let message = item.message {
+      showToast("Downloading…", systemImage: "arrow.down.circle", persistent: true)
+      return try await withCheckedThrowingContinuation { continuation in
+        FileDownloader.shared.downloadVideo(video: video, for: message, priority: .userInitiated) { result in
+          continuation.resume(with: result)
+        }
+      }
     }
     guard let remote = [item.mediaURL, item.fallbackURL].compactMap({ $0 }).first(where: { !$0.isFileURL }) else {
       throw MediaGalleryError.unavailable
     }
-    showToast("Downloading…", systemImage: "arrow.down.circle")
+    showToast("Downloading…", systemImage: "arrow.down.circle", persistent: true)
     let (downloaded, _) = try await URLSession.shared.download(from: remote)
     let ext = remote.pathExtension.isEmpty ? "mp4" : remote.pathExtension
     let destination = FileManager.default.temporaryDirectory
-      .appendingPathComponent(UUID().uuidString)
+      .appendingPathComponent("Video")
       .appendingPathExtension(ext)
+    try? FileManager.default.removeItem(at: destination)
     try FileManager.default.moveItem(at: downloaded, to: destination)
     return destination
   }
 
   private var toastHideWork: DispatchWorkItem?
 
-  private func showToast(_ text: String, systemImage: String) {
-    let attachment = NSTextAttachment(image: UIImage(systemName: systemImage)?
-      .withTintColor(.white, renderingMode: .alwaysOriginal) ?? UIImage())
-    let string = NSMutableAttributedString(attachment: attachment)
-    string.append(NSAttributedString(string: "  " + text))
-    toastView.attributedText = string
-    let size = toastView.sizeThatFits(CGSize(width: view.bounds.width - 64, height: 36))
-    toastView.bounds = CGRect(x: 0, y: 0, width: size.width + 36, height: 36)
-    toastView.center = CGPoint(x: view.bounds.midX, y: topBar.frame.maxY + 12)
+  /// A short status under the top bar. A persistent one stays until the next toast or `hideToast`.
+  func showToast(_ text: String, systemImage: String, persistent: Bool = false) {
+    guard !didFinish else { return }
+    toastView.update(text: text, systemImage: systemImage)
+    let size = toastView.systemLayoutSizeFitting(
+      CGSize(width: view.bounds.width - 64, height: 40),
+      withHorizontalFittingPriority: .fittingSizeLevel,
+      verticalFittingPriority: .required
+    )
+    let width = min(size.width, view.bounds.width - 64)
+    toastView.frame = CGRect(
+      x: (view.bounds.width - width) / 2,
+      y: max(topBar.frame.maxY, view.safeAreaInsets.top) + 8,
+      width: width,
+      height: 40
+    )
     toastHideWork?.cancel()
     UIView.animate(withDuration: 0.2) { self.toastView.alpha = 1 }
-    let work = DispatchWorkItem { [weak self] in
-      UIView.animate(withDuration: 0.25) { self?.toastView.alpha = 0 }
-    }
+    guard !persistent else { return }
+    let work = DispatchWorkItem { [weak self] in self?.hideToast() }
     toastHideWork = work
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.6, execute: work)
+  }
+
+  private func hideToast() {
+    toastHideWork?.cancel()
+    toastHideWork = nil
+    UIView.animate(withDuration: 0.25) { self.toastView.alpha = 0 }
   }
 
   // MARK: - Video
@@ -827,7 +951,7 @@ final class MediaGalleryViewController: UIViewController {
     if !url.isFileURL, let video = item.video, let message = item.message {
       stream = FileDownloader.shared.videoStream(video: video, for: message)
     }
-    let player = MediaGalleryVideoPlayer(url: url, stream: stream)
+    let player = MediaGalleryVideoPlayer(url: url, stream: stream, fallbackDuration: Double(item.duration ?? 0))
     player.onUpdate = { [weak self] in self?.updateVideoControls() }
     self.player = player
     playerItemID = item.id
@@ -841,6 +965,11 @@ final class MediaGalleryViewController: UIViewController {
   /// The current page's player, for device tests.
   var currentVideoPlayer: AVPlayer? {
     player?.player
+  }
+
+  /// The item on screen, for device tests.
+  var visibleItemID: Int64? {
+    currentItem?.id
   }
 
   private static func playableURL(for item: MediaGalleryItem) -> URL? {
@@ -883,7 +1012,14 @@ final class MediaGalleryViewController: UIViewController {
   // MARK: - Dismiss drag
 
   @objc private func handleDismissPan(_ gesture: UIPanGestureRecognizer) {
-    guard let cell = currentCell else { return }
+    guard let cell = currentCell else {
+      // The page went away mid-drag; never leave paging disabled.
+      if gesture.state != .began, gesture.state != .changed {
+        pager.isScrollEnabled = true
+        isDismissPanning = false
+      }
+      return
+    }
     let translation = gesture.translation(in: view)
     let velocity = gesture.velocity(in: view)
 
@@ -949,7 +1085,12 @@ extension MediaGalleryViewController: UICollectionViewDataSource, UICollectionVi
       toggleVideoPlayback()
     }
     cell.onZoomChange = { [weak self] zoomed in
-      if zoomed { self?.setChromeVisible(false) }
+      guard let self else { return }
+      if zoomed {
+        setChromeVisible(false)
+      } else if needsSourceApply, !pager.isDragging, !pager.isDecelerating {
+        applySource()
+      }
     }
     cell.onLoadFailed = { [weak self] item in
       self?.source.refreshLinks(id: item.id) ?? false
