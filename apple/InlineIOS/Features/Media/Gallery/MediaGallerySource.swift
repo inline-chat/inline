@@ -201,6 +201,9 @@ protocol MediaGallerySource: AnyObject {
   var items: [MediaGalleryItem] { get }
   /// True when no older pages remain to load.
   var isComplete: Bool { get }
+  /// The 1-based position of the page at `index` among all of the source's media, and their
+  /// total, or nil while unknown.
+  func position(at index: Int) -> (index: Int, total: Int)?
   var onChange: (() -> Void)? { get set }
   func start()
   func stop()
@@ -229,6 +232,10 @@ final class StaticMediaGallerySource: MediaGallerySource {
   func start() {}
   func stop() {}
   func pageDidChange(to index: Int) {}
+
+  func position(at index: Int) -> (index: Int, total: Int)? {
+    items.indices.contains(index) ? (index + 1, items.count) : nil
+  }
 
   func remove(id: Int64) {
     items.removeAll { $0.id == id }
@@ -259,6 +266,10 @@ final class ChatMediaGallerySource: MediaGallerySource {
   private var anchorLoaded = false
   private var isLoadingMore = false
   private var currentIndex = 0
+  /// The chat's media count from the server, and pages removed here since it arrived.
+  private var serverTotal: Int?
+  private var removedSinceCount = 0
+  private var countTask: Task<Void, Never>?
 
   private(set) var items: [MediaGalleryItem]
   var onChange: (() -> Void)?
@@ -294,9 +305,35 @@ final class ChatMediaGallerySource: MediaGallerySource {
       }
       .store(in: &cancellables)
     Task { await viewModel.loadInitial() }
+    countTask = Task { [weak self, viewModel] in
+      do {
+        let total = try await viewModel.countRemote()
+        guard let self, !Task.isCancelled else { return }
+        serverTotal = total
+        removedSinceCount = 0
+        onChange?()
+      } catch {
+        Log.shared.debug("Gallery media count unavailable: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  /// Exact once every page has loaded. Before that, the server's total gives it: the window
+  /// holds everything from the newest media down to the anchor, so the pages newer than this
+  /// one are all loaded and counted.
+  func position(at index: Int) -> (index: Int, total: Int)? {
+    guard items.indices.contains(index) else { return nil }
+    if isComplete {
+      return (index + 1, items.count)
+    }
+    guard anchorLoaded, let serverTotal else { return nil }
+    let total = max(items.count, serverTotal - removedSinceCount)
+    let newer = items.count - 1 - index
+    return (total - newer, total)
   }
 
   func stop() {
+    countTask?.cancel()
     cancellables.removeAll()
     viewModel.deactivate()
   }
@@ -349,6 +386,7 @@ final class ChatMediaGallerySource: MediaGallerySource {
   }
 
   func remove(id: Int64) {
+    if serverTotal != nil, !removedIds.contains(id) { removedSinceCount += 1 }
     removedIds.insert(id)
     rebuild(viewModel.rows)
   }

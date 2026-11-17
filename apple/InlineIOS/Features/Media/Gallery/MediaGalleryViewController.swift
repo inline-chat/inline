@@ -45,13 +45,19 @@ final class MediaGalleryViewController: UIViewController {
   private var player: MediaGalleryVideoPlayer?
   private var playerItemID: Int64?
   private var resumeAfterScrub = false
+  private var wasPlaying = false
+  /// The rate to return to when a press-and-hold speed-up ends.
+  private var rateBeforeHold: Float?
+  private var chromeHideWork: DispatchWorkItem?
+  /// Where long videos were left, by message, for the rest of the app session.
+  private static var videoPositions: [Int64: Double] = [:]
 
   private weak var suppressedSourceView: UIView?
   private var suppressedSourceAlpha: CGFloat = 1
 
   private let pageGap: CGFloat = 20
   private let prefetcher = Nuke.ImagePrefetcher()
-  private var prefetchedURLs = Set<URL>()
+  private var prefetchedRequests: [URL: ImageRequest] = [:]
   private var isStripScrubbing = false
   private weak var openingHero: UIView?
 
@@ -247,6 +253,12 @@ final class MediaGalleryViewController: UIViewController {
     ]
     if currentItem?.kind == .video {
       commands.append(UIKeyCommand(input: " ", modifierFlags: [], action: #selector(togglePlaybackFromKeyboard)))
+      commands.append(UIKeyCommand(input: "m", modifierFlags: [], action: #selector(toggleMuteFromKeyboard)))
+      commands.append(UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: .shift, action: #selector(skipBackFromKeyboard)))
+      commands.append(UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: .shift, action: #selector(skipForwardFromKeyboard)))
+    }
+    if let item = currentItem, canDelete(item) {
+      commands.append(UIKeyCommand(input: UIKeyCommand.inputDelete, modifierFlags: [], action: #selector(deleteFromKeyboard)))
     }
     for command in commands {
       command.wantsPriorityOverSystemBehavior = true
@@ -270,6 +282,23 @@ final class MediaGalleryViewController: UIViewController {
 
   @objc private func togglePlaybackFromKeyboard() {
     toggleVideoPlayback()
+  }
+
+  @objc private func deleteFromKeyboard() {
+    guard let item = currentItem, canDelete(item), presentedViewController == nil else { return }
+    confirmDelete(item)
+  }
+
+  @objc private func toggleMuteFromKeyboard() {
+    toggleMute()
+  }
+
+  @objc private func skipBackFromKeyboard() {
+    currentPlayer?.skip(by: -5)
+  }
+
+  @objc private func skipForwardFromKeyboard() {
+    currentPlayer?.skip(by: 5)
   }
 
   override func accessibilityPerformEscape() -> Bool {
@@ -587,20 +616,35 @@ final class MediaGalleryViewController: UIViewController {
     if !animated { pageDidSettle() }
   }
 
-  /// Warms the pages next to the current one, and drops warming that's no longer near.
+  private var displayScale: CGFloat {
+    let scale = traitCollection.displayScale
+    return scale > 0 ? scale : 3
+  }
+
+  /// Warms the pages next to the current one with the same page-sized requests the pages make,
+  /// and drops warming that's no longer near.
   private func prefetchNeighbors() {
-    guard !items.isEmpty else { return }
+    guard !items.isEmpty, view.bounds.width > 0 else { return }
     let range = max(0, currentIndex - 2) ... min(items.count - 1, currentIndex + 2)
-    let urls = range.compactMap { index -> URL? in
-      let item = items[index]
-      return item.kind == .photo ? item.mediaURL : item.thumbnailURL
+    var requests: [URL: ImageRequest] = [:]
+    for item in items[range] {
+      switch item.kind {
+        case .photo:
+          guard let url = item.mediaURL else { continue }
+          requests[url] = MediaGalleryImageRequests.display(
+            url: url, item: item, pageSize: view.bounds.size, scale: displayScale
+          )
+        case .video:
+          guard let url = item.thumbnailURL else { continue }
+          requests[url] = ImageRequest(url: url)
+      }
     }
-    let stale = prefetchedURLs.subtracting(urls)
+    let stale = prefetchedRequests.filter { requests[$0.key] == nil }
     if !stale.isEmpty {
-      prefetcher.stopPrefetching(with: Array(stale))
+      prefetcher.stopPrefetching(with: Array(stale.values))
     }
-    prefetchedURLs = Set(urls)
-    prefetcher.startPrefetching(with: urls)
+    prefetchedRequests = requests
+    prefetcher.startPrefetching(with: Array(requests.values))
   }
 
   // MARK: - Chrome
@@ -626,6 +670,27 @@ final class MediaGalleryViewController: UIViewController {
       self.setNeedsStatusBarAppearanceUpdate()
     }
     setNeedsUpdateOfHomeIndicatorAutoHidden()
+    if visible { scheduleChromeAutoHide() } else { chromeHideWork?.cancel() }
+  }
+
+  /// Like Telegram, the chrome steps aside after a few seconds of video playback.
+  private func scheduleChromeAutoHide() {
+    chromeHideWork?.cancel()
+    guard chromeVisible, let player = currentPlayer, player.isPlaying else { return }
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, chromeVisible, let player = currentPlayer, player.isPlaying, !player.isBuffering,
+            !bottomBar.videoControls.isScrubbing, !isStripScrubbing, !isDismissPanning, presentedViewController == nil
+      else { return }
+      setChromeVisible(false)
+    }
+    chromeHideWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
+  }
+
+  /// The player, when it belongs to the page on screen.
+  private var currentPlayer: MediaGalleryVideoPlayer? {
+    guard let player, playerItemID == currentItem?.id else { return nil }
+    return player
   }
 
   private func updateChrome() {
@@ -635,7 +700,15 @@ final class MediaGalleryViewController: UIViewController {
     topBar.menuButton.menu = makeMenu(for: item)
     topBar.menuButton.isHidden = topBar.menuButton.menu?.children.isEmpty ?? true
 
-    let counter = items.count > 1 && source.isComplete ? "\(currentIndex + 1) of \(items.count)" : nil
+    let counter = source.position(at: currentIndex).flatMap { position in
+      position.total > 1
+        ? String(
+          format: NSLocalizedString("%@ of %@", comment: "Gallery position: item of total"),
+          position.index.formatted(),
+          position.total.formatted()
+        )
+        : nil
+    }
     bottomBar.update(caption: message?.text, counter: counter, isVideo: item.kind == .video)
     bottomBar.strip.isHidden = items.count < 2
     bottomBar.strip.update(items: items, currentIndex: currentIndex, animated: true)
@@ -689,8 +762,51 @@ final class MediaGalleryViewController: UIViewController {
     return String(format: NSLocalizedString("%@ at %@", comment: "Gallery date: day at time"), day, time)
   }
 
+  private static func rateTitle(_ rate: Float) -> String {
+    rate == 1
+      ? NSLocalizedString("Normal", comment: "Gallery video playback speed")
+      : "\(rate.formatted(.number.precision(.fractionLength(0 ... 2))))×"
+  }
+
+  private func setRate(_ rate: Float) {
+    if let player = currentPlayer {
+      player.rate = rate
+    } else {
+      MediaGalleryVideoPlayer.preferredRate = rate
+    }
+    if let item = currentItem {
+      topBar.menuButton.menu = makeMenu(for: item)
+    }
+  }
+
+  private func toggleMute() {
+    guard currentItem?.kind == .video else { return }
+    if let player = currentPlayer {
+      player.isMuted.toggle()
+    } else {
+      MediaGalleryVideoPlayer.prefersMuted.toggle()
+    }
+    updateVideoControls()
+  }
+
   private func makeMenu(for item: MediaGalleryItem) -> UIMenu {
     var children: [UIMenuElement] = []
+    if item.kind == .video {
+      let current = currentPlayer?.rate ?? MediaGalleryVideoPlayer.preferredRate
+      let speeds = MediaGalleryVideoPlayer.rates.map { rate in
+        UIAction(title: Self.rateTitle(rate), state: rate == current ? .on : .off) { [weak self] _ in
+          self?.setRate(rate)
+        }
+      }
+      let speed = UIMenu(
+        title: NSLocalizedString("Playback Speed", comment: "Gallery video menu"),
+        subtitle: Self.rateTitle(current),
+        image: UIImage(systemName: "gauge.with.dots.needle.50percent"),
+        options: .singleSelection,
+        children: speeds
+      )
+      children.append(UIMenu(options: .displayInline, children: [speed]))
+    }
     if let showInChat = actions.showInChat {
       children.append(UIAction(title: "Show in Chat", image: UIImage(systemName: "text.bubble")) { [weak self] _ in
         self?.performAfterDismiss { showInChat(item) }
@@ -740,10 +856,12 @@ final class MediaGalleryViewController: UIViewController {
 
     let controls = bottomBar.videoControls
     controls.playButton.addAction(UIAction { [weak self] _ in self?.toggleVideoPlayback() }, for: .touchUpInside)
+    controls.muteButton.addAction(UIAction { [weak self] _ in self?.toggleMute() }, for: .touchUpInside)
     controls.onSeek = { [weak self] fraction, exact in self?.player?.seek(to: fraction, exact: exact) }
     controls.onScrubChange = { [weak self] scrubbing in
       guard let self, let player else { return }
       if scrubbing {
+        chromeHideWork?.cancel()
         resumeAfterScrub = player.isPlaying
         player.pause()
       } else if resumeAfterScrub {
@@ -868,7 +986,8 @@ final class MediaGalleryViewController: UIViewController {
 
   private func fullImage(for item: MediaGalleryItem) async -> UIImage? {
     for url in [item.mediaURL, item.fallbackURL].compactMap({ $0 }) {
-      if let image = try? await ImagePipeline.shared.image(for: url) {
+      // A one-off full decode for copy, share or save; keep it out of the memory cache.
+      if let image = try? await ImagePipeline.shared.image(for: ImageRequest(url: url, options: [.disableMemoryCacheWrites])) {
         return image
       }
     }
@@ -951,10 +1070,17 @@ final class MediaGalleryViewController: UIViewController {
     if !url.isFileURL, let video = item.video, let message = item.message {
       stream = FileDownloader.shared.videoStream(video: video, for: message)
     }
-    let player = MediaGalleryVideoPlayer(url: url, stream: stream, fallbackDuration: Double(item.duration ?? 0))
+    let knownDuration = Double(item.duration ?? 0)
+    let player = MediaGalleryVideoPlayer(url: url, stream: stream, fallbackDuration: knownDuration)
     player.onUpdate = { [weak self] in self?.updateVideoControls() }
+    // Short clips loop, as in Telegram; long videos pick up where they were left.
+    player.loops = knownDuration > 0 && knownDuration <= Self.loopingDuration
+    if item.message != nil, let position = Self.videoPositions[item.id] {
+      player.seek(toSeconds: position)
+    }
     self.player = player
     playerItemID = item.id
+    wasPlaying = false
     currentCell?.attach(player: player)
     if autoplay {
       player.play()
@@ -972,6 +1098,16 @@ final class MediaGalleryViewController: UIViewController {
     currentItem?.id
   }
 
+  /// The page on screen, for device tests.
+  var visiblePageCell: MediaGalleryPageCell? {
+    currentCell
+  }
+
+  /// Whether the bars are showing, for device tests.
+  var isChromeVisible: Bool {
+    chromeVisible
+  }
+
   private static func playableURL(for item: MediaGalleryItem) -> URL? {
     if let url = item.mediaURL, !url.isFileURL || FileManager.default.fileExists(atPath: url.path) {
       return url
@@ -979,15 +1115,46 @@ final class MediaGalleryViewController: UIViewController {
     return item.fallbackURL
   }
 
+  /// Clips up to this long loop.
+  private static let loopingDuration: Double = 30
+  /// Videos at least this long skip from a double tap; shorter ones zoom.
+  private static let skippableDuration: Double = 30
+  /// Videos at least this long remember where they were left.
+  private static let resumableDuration: Double = 20
+
   private func stopVideo() {
     guard let player else { return }
+    rememberPosition(of: player)
     player.stop()
     self.player = nil
     playerItemID = nil
+    rateBeforeHold = nil
+    wasPlaying = false
+    chromeHideWork?.cancel()
     for case let cell as MediaGalleryPageCell in pager.visibleCells {
       cell.detachPlayer()
-      cell.setPlaying(false)
     }
+  }
+
+  /// Keeps a long video's position when it's left mid-way; near either end, it starts over.
+  private func rememberPosition(of player: MediaGalleryVideoPlayer) {
+    guard let id = playerItemID, items.first(where: { $0.id == id })?.message != nil else { return }
+    let duration = player.duration
+    let time = player.currentTime
+    if duration >= Self.resumableDuration, time > 5, time < duration - 5 {
+      Self.videoPositions[id] = time
+    } else {
+      Self.videoPositions[id] = nil
+    }
+  }
+
+  private func videoState(of player: MediaGalleryVideoPlayer) -> MediaGalleryPageCell.VideoState {
+    MediaGalleryPageCell.VideoState(
+      isPlaying: player.isPlaying,
+      isBuffering: player.isBuffering,
+      isFailed: player.isFailed,
+      isAtEnd: player.isAtEnd
+    )
   }
 
   private func toggleVideoPlayback() {
@@ -1002,10 +1169,25 @@ final class MediaGalleryViewController: UIViewController {
     guard let item = currentItem, item.kind == .video else { return }
     if let player, playerItemID == item.id {
       let duration = player.duration > 0 ? player.duration : Double(item.duration ?? 0)
-      bottomBar.videoControls.update(elapsed: player.currentTime, duration: duration, isPlaying: player.isPlaying)
-      currentCell?.setPlaying(player.isPlaying)
+      bottomBar.videoControls.update(
+        elapsed: player.currentTime,
+        duration: duration,
+        isPlaying: player.isPlaying,
+        isMuted: player.isMuted
+      )
+      currentCell?.setVideoState(videoState(of: player))
+      let isPlaying = player.isPlaying && !player.isBuffering
+      if isPlaying != wasPlaying {
+        wasPlaying = isPlaying
+        if isPlaying { scheduleChromeAutoHide() } else { chromeHideWork?.cancel() }
+      }
     } else {
-      bottomBar.videoControls.update(elapsed: 0, duration: Double(item.duration ?? 0), isPlaying: false)
+      bottomBar.videoControls.update(
+        elapsed: 0,
+        duration: Double(item.duration ?? 0),
+        isPlaying: false,
+        isMuted: MediaGalleryVideoPlayer.prefersMuted
+      )
     }
   }
 
@@ -1075,7 +1257,12 @@ extension MediaGalleryViewController: UICollectionViewDataSource, UICollectionVi
       for: indexPath
     ) as! MediaGalleryPageCell
     let item = items[indexPath.item]
-    cell.configure(item: item, placeholder: item.id == openingItemID ? openingImage : nil, pageGap: pageGap)
+    cell.configure(
+      item: item,
+      placeholder: item.id == openingItemID ? openingImage : nil,
+      pageGap: pageGap,
+      displayScale: displayScale
+    )
     cell.onSingleTap = { [weak self] in
       guard let self else { return }
       setChromeVisible(!chromeVisible)
@@ -1095,9 +1282,35 @@ extension MediaGalleryViewController: UICollectionViewDataSource, UICollectionVi
     cell.onLoadFailed = { [weak self] item in
       self?.source.refreshLinks(id: item.id) ?? false
     }
+    cell.onVideoRetry = { [weak self] in
+      guard let self, currentItem?.id == item.id else { return }
+      stopVideo()
+      startVideoIfNeeded(autoplay: true)
+    }
+    cell.onSkip = { [weak self] seconds in
+      guard let self, currentItem?.id == item.id, let player = currentPlayer else { return false }
+      let duration = player.duration > 0 ? player.duration : Double(item.duration ?? 0)
+      guard duration >= Self.skippableDuration else { return false }
+      player.skip(by: seconds)
+      return true
+    }
+    cell.onHoldSpeedUp = { [weak self] holding in
+      guard let self, currentItem?.id == item.id, let player = currentPlayer else { return false }
+      if holding {
+        guard player.isPlaying, rateBeforeHold == nil else { return false }
+        rateBeforeHold = player.player.rate
+        player.player.rate = 2
+        chromeHideWork?.cancel()
+        return true
+      }
+      guard let previous = rateBeforeHold else { return false }
+      rateBeforeHold = nil
+      if player.player.timeControlStatus != .paused { player.player.rate = previous }
+      return true
+    }
     if let player, playerItemID == item.id {
       cell.attach(player: player)
-      cell.setPlaying(player.isPlaying)
+      cell.setVideoState(videoState(of: player))
     }
     return cell
   }
