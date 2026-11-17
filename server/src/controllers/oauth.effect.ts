@@ -296,6 +296,8 @@ export const OAuthIntrospectionResult = Schema.Struct({
   allow_dms: Schema.Boolean,
   allow_home_threads: Schema.Boolean,
   inline_token: Schema.String,
+  via_app: OptionalString,
+  allow_unsigned: Schema.optionalKey(Schema.Boolean),
 }).annotate({
   identifier: "OAuthIntrospectionResult",
 })
@@ -1067,11 +1069,20 @@ const oauthResponseContracts: Readonly<
   mcpEvents: [jsonVariant(200, Schema.Unknown), badRequestVariant, jsonVariant(401, OAuthError), jsonVariant(500, OAuthError)],
 }
 
+/**
+ * - `variant`: the status/media type pair is not declared for the operation.
+ * - `header`: a header the declared variant requires (cache-control, ...) is missing.
+ * - `body`: the status, media type and headers match, but the body does not
+ *   decode against the declared schema (for example a new field).
+ */
+export type OAuthResponseContractFailureKind = "variant" | "header" | "body"
+
 export class OAuthResponseContractFailure extends Data.TaggedError(
   "OAuthResponseContractFailure",
 )<{
   readonly operation: OAuthHttpOperation
   readonly status: number
+  readonly kind: OAuthResponseContractFailureKind
   readonly cause: unknown
 }> {}
 
@@ -1109,6 +1120,7 @@ export const validateOAuthResponse = (
         new OAuthResponseContractFailure({
           operation,
           status: response.status,
+          kind: "variant",
           cause: new Error(
             `Undeclared OAuth response status/media type: ${response.status} ${mediaType ?? "<none>"}`,
           ),
@@ -1122,6 +1134,7 @@ export const validateOAuthResponse = (
           new OAuthResponseContractFailure({
             operation,
             status: response.status,
+            kind: "header",
             cause: new Error(
               `OAuth response omitted required ${header} header`,
             ),
@@ -1142,6 +1155,7 @@ export const validateOAuthResponse = (
         new OAuthResponseContractFailure({
           operation,
           status: response.status,
+          kind: "body",
           cause,
         }),
     })
@@ -1157,6 +1171,7 @@ export const validateOAuthResponse = (
           new OAuthResponseContractFailure({
             operation,
             status: response.status,
+            kind: "body",
             cause,
           }),
         ),
@@ -1166,6 +1181,7 @@ export const validateOAuthResponse = (
         new OAuthResponseContractFailure({
           operation,
           status: response.status,
+          kind: "body",
           cause: new Error(
             "OAuth no-content response contained a body",
           ),
@@ -1202,12 +1218,27 @@ export const executeOAuth = (
       request: webRequest,
       clientIp: context.clientIp,
     })
-    return webResponseToHttpServerResponse(
-      yield* validateOAuthResponse(
-        operation,
-        response,
+    const validated = yield* validateOAuthResponse(
+      operation,
+      response,
+    ).pipe(
+      // A body that drifted from its declared schema (a new field, a renamed
+      // one) still came from our own handler with a declared status and the
+      // required headers. Serving it keeps OAuth clients and MCP connections
+      // working; the drift is reported so the contract gets updated.
+      Effect.catchTag("OAuthResponseContractFailure", (failure) =>
+        failure.kind === "body"
+          ? reportUnexpectedError({
+              cause: Cause.fail(failure),
+              context: {
+                operation: `oauth.${operation}.contractDrift`,
+                requestId: context.requestId,
+              },
+            }).pipe(Effect.as(response))
+          : Effect.fail(failure),
       ),
     )
+    return webResponseToHttpServerResponse(validated)
   }).pipe(
     Effect.catch((failure) =>
       Effect.gen(function* () {
