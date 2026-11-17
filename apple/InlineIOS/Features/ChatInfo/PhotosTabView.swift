@@ -133,6 +133,12 @@ struct MediaTabView: View {
     actions.showInChat = { item in
       if let message = item.message { onShowInChat(message) }
     }
+    let canDeleteMessage = MessageDeletePolicy.checker(peer: mediaMessage.message.peerId)
+    actions.canDelete = { item in item.message.map(canDeleteMessage) ?? false }
+    actions.delete = { item in
+      guard let message = item.message else { return }
+      MessageViewActions.sendDeleteMessage(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
+    }
     let viewer = MediaGalleryViewController(
       source: ChatMediaGallerySource(
         chatId: mediaMessage.message.chatId,

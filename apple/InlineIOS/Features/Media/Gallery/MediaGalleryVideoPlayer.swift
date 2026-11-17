@@ -16,8 +16,17 @@ final class MediaGalleryVideoPlayer {
   let stream: NativeVideoStream?
   /// Called when play state, time, or readiness changes.
   var onUpdate: (() -> Void)?
+  /// Starts over at the end instead of pausing, for short clips.
+  var loops = false
+
+  /// Mute and speed carry from one video to the next for the rest of the app session.
+  static var prefersMuted = false
+  static var preferredRate: Float = 1
+  static let rates: [Float] = [0.5, 1, 1.25, 1.5, 2]
 
   private(set) var isStopped = false
+  /// A seek asked for before the item could take it, applied once it's ready.
+  private var pendingSeek: Double?
   private var hasAudio: Bool?
   private var wantsPlay = false
   private var sessionToken: InlineAudioSession.Token?
@@ -37,6 +46,8 @@ final class MediaGalleryVideoPlayer {
     let asset = stream?.asset ?? AVURLAsset(url: url)
     player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
     player.actionAtItemEnd = .pause
+    player.isMuted = Self.prefersMuted
+    player.defaultRate = Self.preferredRate
     observe()
 
     Task { @MainActor [weak self] in
@@ -58,6 +69,46 @@ final class MediaGalleryVideoPlayer {
 
   var isPlaying: Bool {
     wantsPlay || player.timeControlStatus != .paused
+  }
+
+  /// Waiting on data (or on track inspection) while playback was asked for.
+  var isBuffering: Bool {
+    guard !hasFailed else { return false }
+    if wantsPlay { return true }
+    return player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+      && player.reasonForWaitingToPlay != .noItemToPlay
+      && !sessionIsStarting
+  }
+
+  var isFailed: Bool {
+    hasFailed
+  }
+
+  /// Paused on the last frame after playing through.
+  var isAtEnd: Bool {
+    guard !isPlaying, duration > 0 else { return false }
+    return currentTime >= duration - 0.1
+  }
+
+  var isMuted: Bool {
+    get { player.isMuted }
+    set {
+      player.isMuted = newValue
+      Self.prefersMuted = newValue
+      onUpdate?()
+    }
+  }
+
+  var rate: Float {
+    get { player.defaultRate }
+    set {
+      Self.preferredRate = newValue
+      player.defaultRate = newValue
+      if player.timeControlStatus != .paused {
+        player.rate = newValue
+      }
+      onUpdate?()
+    }
   }
 
   var currentTime: Double {
@@ -97,6 +148,23 @@ final class MediaGalleryVideoPlayer {
 
   func togglePlayback() {
     isPlaying ? pause() : play()
+  }
+
+  /// Jumps by `seconds`, staying inside the video.
+  func skip(by seconds: Double) {
+    let length = duration > 0 ? duration : fallbackDuration
+    guard length > 0 else { return }
+    seek(toSeconds: min(max(0, currentTime + seconds), length))
+  }
+
+  /// Seeks to a time; before the item is ready, the seek waits for it.
+  func seek(toSeconds seconds: Double) {
+    guard player.currentItem?.status == .readyToPlay else {
+      pendingSeek = seconds
+      return
+    }
+    player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    onUpdate?()
   }
 
   /// Seeks to a fraction of the video. While a scrub is still moving, a loose seek lands on
@@ -154,8 +222,13 @@ final class MediaGalleryVideoPlayer {
     if let item = player.currentItem {
       observations.append(item.observe(\.status, options: [.new]) { [weak self] _, _ in
         Task { @MainActor [weak self] in
-          self?.updateSession()
-          self?.onUpdate?()
+          guard let self else { return }
+          if player.currentItem?.status == .readyToPlay, let seconds = pendingSeek {
+            pendingSeek = nil
+            seek(toSeconds: seconds)
+          }
+          updateSession()
+          onUpdate?()
         }
       })
       endObserver = NotificationCenter.default.addObserver(
@@ -165,6 +238,11 @@ final class MediaGalleryVideoPlayer {
       ) { [weak self] _ in
         MainActor.assumeIsolated {
           guard let self, !self.isStopped else { return }
+          if self.loops {
+            self.player.seek(to: .zero)
+            self.player.play()
+            return
+          }
           self.player.pause()
           self.releaseSession()
           self.onUpdate?()

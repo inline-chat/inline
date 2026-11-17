@@ -4806,6 +4806,9 @@ private extension MessagesCollectionView {
         else { return }
         presentForwardSheet(fullMessage)
       }
+      // The server's rule: anyone in a DM, in a space your own messages or any as an admin.
+      let canDeleteMessage = MessageDeletePolicy.checker(peer: peerId)
+      actions.canDelete = { item in item.message.map(canDeleteMessage) ?? false }
       actions.delete = { item in
         guard let message = item.message else { return }
         MessageViewActions.sendDeleteMessage(
