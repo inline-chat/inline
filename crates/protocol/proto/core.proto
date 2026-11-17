@@ -4623,6 +4623,13 @@ message SendMessageInput {
   // The agent sending this for the sender, shown as "Sent via <name>". Absent
   // when the sender sends it themselves.
   optional InputMessageVia via = 16;
+
+  // Album: photos and videos sent together share one sender-chosen non-zero
+  // id, sent as consecutive messages in order. Stored as Message.grouped_id.
+  // Requires photo, video or document media. Clients draw consecutive messages
+  // from one sender with the same id as one grid; older clients show them as
+  // separate messages.
+  optional int64 grouped_id = 17;
 }
 
 message SendMessageResult {

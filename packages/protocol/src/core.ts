@@ -12220,6 +12220,16 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional InputMessageVia via = 16;
      */
     via?: InputMessageVia;
+    /**
+     * Album: photos and videos sent together share one sender-chosen non-zero
+     * id, sent as consecutive messages in order. Stored as Message.grouped_id.
+     * Requires photo, video or document media. Clients draw consecutive messages
+     * from one sender with the same id as one grid; older clients show them as
+     * separate messages.
+     *
+     * @generated from protobuf field: optional int64 grouped_id = 17;
+     */
+    groupedId?: bigint;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -49538,7 +49548,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
             { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 16, name: "via", kind: "message", T: () => InputMessageVia }
+            { no: 16, name: "via", kind: "message", T: () => InputMessageVia },
+            { no: 17, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -49606,6 +49617,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional InputMessageVia via */ 16:
                     message.via = InputMessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
                     break;
+                case /* optional int64 grouped_id */ 17:
+                    message.groupedId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -49672,6 +49686,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional InputMessageVia via = 16; */
         if (message.via)
             InputMessageVia.internalBinaryWrite(message.via, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 grouped_id = 17; */
+        if (message.groupedId !== undefined)
+            writer.tag(17, WireType.Varint).int64(message.groupedId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
