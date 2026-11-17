@@ -63,7 +63,10 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
 
   override func viewWillMove(toWindow newWindow: NSWindow?) {
     super.viewWillMove(toWindow: newWindow)
-    if newWindow == nil { cancelPendingTextHold() }
+    if newWindow == nil {
+      cancelPendingTextHold()
+      NativeTextMenuHelper.shared.dismiss(from: self)
+    }
   }
 
   // MARK: Content
@@ -453,11 +456,25 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     return onContextMenu?(index, event) ?? super.menu(for: event)
   }
 
-  /// The text items NSTextView would offer for a right click at `index`, for the message menu
-  /// to pick from: Look Up for the word there.
-  func nativeTextMenu(at index: Int?) -> NSMenu {
+  /// The text items NSTextView offers for a right click at `index` (Look Up and Translate for
+  /// the word there, or for the list's selection in this message), for the message menu to
+  /// pick from. They come from AppKit itself: a shared, invisible NSTextView holding just that
+  /// text sits over it, so the system's popovers open where the text is.
+  func nativeTextMenu(at index: Int?, event: NSEvent) -> NSMenu {
     let menu = NSMenu()
-    if let index, let word = lookUpWord(at: index) {
+    guard let index, let range = menuTextRange(at: index) else { return menu }
+    let rects = rects(for: range)
+    guard let first = rects.first else { return menu }
+    let anchor = rects.dropFirst().reduce(first) { $0.union($1) }
+    let helper = NativeTextMenuHelper.shared
+    helper.present(surfaceText.attributedSubstring(from: range), over: anchor, in: self)
+    for item in helper.menu(for: event)?.items ?? [] where item.title.hasPrefix("Look Up") || item.title.hasPrefix("Translate") {
+      let copy = item.copy() as! NSMenuItem
+      // Items aimed at the first responder still go to the text they were made for.
+      if copy.target == nil { copy.target = helper }
+      menu.addItem(copy)
+    }
+    if menu.items.isEmpty, let word = lookUpWord(at: index) {
       let title = (surfaceText.string as NSString).substring(with: word)
       let item = NSMenuItem(title: "Look Up “\(title)”", action: #selector(lookUpFromMenu(_:)), keyEquivalent: "")
       item.target = self
@@ -467,10 +484,20 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     return menu
   }
 
+  /// The list's selection when the click is in it, else the word clicked.
+  private func menuTextRange(at index: Int) -> NSRange? {
+    if let selection = listSelectionRange, selection.length > 0, NSLocationInRange(index, selection) {
+      return clamped(selection)
+    }
+    return lookUpWord(at: index)
+  }
+
   // MARK: Cursors
 
   override func resetCursorRects() {
     super.resetCursorRects()
+    // As a rich message's host there is no text of its own; the blocks set their cursors.
+    guard surfaceText.length > 0 else { return }
     addCursorRect(bounds, cursor: .iBeam)
     for range in pointerRanges {
       for rect in rects(for: range) {
@@ -750,4 +777,37 @@ struct CodeBlockBox: Equatable {
   let range: NSRange
   let rect: CGRect
   let cornerRadius: CGFloat
+}
+
+/// One read-only NSTextView, invisible, that a right click places over the clicked text so the
+/// menu gets AppKit's own Look Up and Translate, and their popovers open at that text. Built on
+/// first use only.
+@MainActor
+final class NativeTextMenuHelper: NSTextView {
+  static let shared: NativeTextMenuHelper = {
+    let helper = NativeTextMenuHelper(usingTextLayoutManager: false)
+    helper.isEditable = false
+    helper.isSelectable = true
+    helper.drawsBackground = false
+    helper.textContainerInset = .zero
+    helper.textContainer?.lineFragmentPadding = 0
+    helper.alphaValue = 0.01
+    return helper
+  }()
+
+  func present(_ text: NSAttributedString, over rect: CGRect, in host: NSView) {
+    textStorage?.setAttributedString(text)
+    frame = rect
+    if superview !== host { host.addSubview(self) }
+    setSelectedRange(NSRange(location: 0, length: text.length))
+  }
+
+  func dismiss(from host: NSView) {
+    guard superview === host else { return }
+    removeFromSuperview()
+  }
+
+  override func hitTest(_: NSPoint) -> NSView? { nil }
+  override func draw(_: NSRect) {}
+  override var acceptsFirstResponder: Bool { false }
 }
