@@ -93,6 +93,8 @@ public enum ChatRowBuilder {
   public static func canGroup(_ earlier: FullMessage, _ later: FullMessage, calendar: Calendar) -> Bool {
     guard !earlier.message.isServiceMessage, !later.message.isServiceMessage,
           earlier.message.fromId == later.message.fromId else { return false }
+    // A person and an agent sending for them never share a group.
+    guard earlier.message.via == later.message.via else { return false }
     let gap = later.message.date.timeIntervalSince(earlier.message.date)
     guard gap >= 0, gap <= groupingInterval else { return false }
     return calendar.isDate(earlier.message.date, inSameDayAs: later.message.date)

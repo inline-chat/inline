@@ -2,6 +2,7 @@
 import InlineAvatarCore
 import InlineKit
 import Kingfisher
+import SwiftUI
 import UIKit
 
 /// `UserAvatar` drawn with plain views: the same initials, gradient, border and cached photo,
@@ -20,6 +21,10 @@ public final class UserAvatarLayerView: UIView {
     let size: CGFloat
   }
 
+  /// The circle: everything but the agent badge, which sits on its edge.
+  private let contentView = UIView()
+  private var badgeHost: UIHostingController<AnyView>?
+  private var badgeMark: MessageViaPresentation.Mark?
   private let gradientLayer = CAGradientLayer()
   private let borderLayer = CAShapeLayer()
   private let initialsLabel = UILabel()
@@ -30,12 +35,14 @@ public final class UserAvatarLayerView: UIView {
   override public init(frame: CGRect) {
     super.init(frame: frame)
     isOpaque = false
-    clipsToBounds = true
+    contentView.clipsToBounds = true
+    contentView.isUserInteractionEnabled = false
+    addSubview(contentView)
     gradientLayer.startPoint = CGPoint(x: 0.5, y: 0)
     gradientLayer.endPoint = CGPoint(x: 0.5, y: 1)
-    layer.addSublayer(gradientLayer)
+    contentView.layer.addSublayer(gradientLayer)
     borderLayer.fillColor = nil
-    layer.addSublayer(borderLayer)
+    contentView.layer.addSublayer(borderLayer)
     initialsLabel.textAlignment = .center
     initialsLabel.adjustsFontSizeToFitWidth = false
     symbolView.contentMode = .center
@@ -43,7 +50,7 @@ public final class UserAvatarLayerView: UIView {
     imageView.clipsToBounds = true
     for view in [initialsLabel, symbolView, imageView] {
       view.isUserInteractionEnabled = false
-      addSubview(view)
+      contentView.addSubview(view)
     }
   }
 
@@ -52,8 +59,10 @@ public final class UserAvatarLayerView: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  /// Shows `userInfo` the way `UserAvatar(userInfo:size:)` does.
-  public func configure(with userInfo: UserInfo, size: CGFloat) {
+  /// Shows `userInfo` the way `UserAvatar(userInfo:size:)` does; `viaMark` pins the agent badge to its
+  /// corner when an agent sent the message for this user, as `MessageViaAvatar` draws it.
+  public func configure(with userInfo: UserInfo, size: CGFloat, viaMark: MessageViaPresentation.Mark? = nil) {
+    setBadge(viaMark, size: size)
     let user = userInfo.user
     let presentation = InlineAvatarPresentation.user(identity: .init(
       firstName: user.firstName,
@@ -128,6 +137,32 @@ public final class UserAvatarLayerView: UIView {
     setNeedsLayout()
   }
 
+  private func setBadge(_ mark: MessageViaPresentation.Mark?, size: CGFloat) {
+    let shown = mark.flatMap { MessageViaAgentIcon.hasBadge($0) ? $0 : nil }
+    guard shown != badgeMark || (shown != nil && badgeHost == nil) else { return }
+    badgeMark = shown
+    guard let shown else {
+      badgeHost?.view.removeFromSuperview()
+      badgeHost = nil
+      return
+    }
+    let badge = AnyView(
+      MessageViaBadge(mark: shown, size: MessageViaBadge.diameter(forAvatar: size))
+        .padding(1.5)
+        .background(Circle().fill(Color(uiColor: .systemBackground)))
+    )
+    if let badgeHost {
+      badgeHost.rootView = badge
+    } else {
+      let host = UIHostingController(rootView: badge)
+      host.view.backgroundColor = .clear
+      host.view.isUserInteractionEnabled = false
+      addSubview(host.view)
+      badgeHost = host
+    }
+    setNeedsLayout()
+  }
+
   private func showInitials(_ shows: Bool) {
     initialsLabel.isHidden = !shows
     symbolView.isHidden = !shows
@@ -174,7 +209,13 @@ public final class UserAvatarLayerView: UIView {
 
   override public func layoutSubviews() {
     super.layoutSubviews()
-    layer.cornerRadius = min(bounds.width, bounds.height) / 2
+    contentView.frame = bounds
+    contentView.layer.cornerRadius = min(bounds.width, bounds.height) / 2
+    if let badgeHost {
+      // In the avatar's bottom-right corner, inside its square, as `MessageViaAvatar` places it.
+      let side = MessageViaBadge.diameter(forAvatar: min(bounds.width, bounds.height)) + 3
+      badgeHost.view.frame = CGRect(x: bounds.maxX - side, y: bounds.maxY - side, width: side, height: side)
+    }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     gradientLayer.frame = bounds
