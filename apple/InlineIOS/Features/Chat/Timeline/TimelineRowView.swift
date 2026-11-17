@@ -301,6 +301,10 @@ final class TimelineRowView: UIView {
     {
       let avatar = UserAvatarView()
       avatar.configure(with: sender, size: 28, viaMark: message.viaPresentation?.mark)
+      avatar.isAccessibilityElement = true
+      avatar.accessibilityLabel = sender.user.displayName
+      avatar.accessibilityTraits = .button
+      avatar.accessibilityHint = String(localized: "Opens profile")
       avatar.translatesAutoresizingMaskIntoConstraints = false
       avatar.isUserInteractionEnabled = true
       avatar.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleAvatarTap)))

@@ -271,6 +271,11 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         view.configure(
           with: sender, size: content.input.metrics.avatarSize, viaMark: content.message.viaPresentation?.mark
         )
+        // VoiceOver reads the sender's name, not the initial, and can open the profile as a tap does.
+        view.isAccessibilityElement = true
+        view.accessibilityLabel = sender.user.displayName
+        view.accessibilityTraits = .button
+        view.accessibilityHint = String(localized: "Opens profile")
         view.isHidden = false
       } else {
         avatarView?.isHidden = true
