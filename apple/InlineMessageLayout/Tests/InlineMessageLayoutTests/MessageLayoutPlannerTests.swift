@@ -91,6 +91,21 @@ struct MessageLayoutPlannerTests {
     #expect(tailed.bubble.body.minX == metrics.rowLeadingInset + metrics.bodyEdgeInset)
   }
 
+  @Test("A footer wider than the bubble wraps inside it instead of widening it past the row")
+  func longFooterWraps() throws {
+    let rowWidth: CGFloat = 390
+    let lane = rowWidth - metrics.rowLeadingInset - metrics.rowTrailingInset
+    var input = Fixtures.message("ok", rowWidth: rowWidth, outgoing: true)
+    // "Sent via Codex · 10:04" at the largest accessibility text size.
+    input.footer.time = Fixtures.text("Sent via Codex · 10:04", font: Fixtures.font(40))
+    let layout = MessageLayoutPlanner.layout(input)
+    #expect(layout.bubble.body.width <= lane * metrics.maximumBubbleWidthFraction + 0.5)
+    #expect(layout.time.lineCount == 2)
+    let time = try #require(layout.frame(.time))
+    #expect(time.maxX <= layout.bubble.body.maxX + 0.5)
+    #expect(time.minX >= layout.bubble.body.minX - 0.5)
+  }
+
   @Test("An absolute width cap bounds wide rows, and the default leaves them unbounded")
   func absoluteWidthCap() {
     let long = String(repeating: "Wide message ", count: 60)

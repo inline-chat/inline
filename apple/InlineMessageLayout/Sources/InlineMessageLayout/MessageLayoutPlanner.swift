@@ -87,7 +87,6 @@ public enum MessageLayoutPlanner {
       CGSize(width: $0.map(\.width).max() ?? 0, height: $0.last?.frame.maxY ?? 0)
     } ?? text.size
     let hasBody = rich != nil || text.lineCount > 0
-    let time = typeset(input.footer.time, width: .greatestFiniteMagnitude)
     let name = input.name.map { typeset($0, width: maximumBodyWidth) }
 
     let flow = ReactionFlow(
@@ -103,6 +102,12 @@ public enum MessageLayoutPlanner {
     let statusSize = input.footer.statusSize ?? .zero
     // Over large emoji and media the time sits in a pill, so its frame includes the pill's padding.
     let pill = isEmoji || overlaysMedia ? m.timeOverlayPadding : .zero
+    // A long footer ("Sent via Codex · 10:04" at the largest text sizes) wraps inside the bubble
+    // instead of widening it past the screen.
+    let timeRoom = maximumContentWidth - pill.width * 2
+      - (input.footer.statusSize == nil ? 0 : m.timeStatusSpacing + statusSize.width)
+      - (input.acknowledgementSize.map { $0.width + m.acknowledgementSpacing } ?? 0)
+    let time = typeset(input.footer.time, width: max(timeRoom, 1))
     let timeWidth = time.size.width + (input.footer.statusSize == nil ? 0 : m.timeStatusSpacing + statusSize.width)
       + pill.width * 2
     let timeHeight = max(time.size.height, statusSize.height) + pill.height * 2
