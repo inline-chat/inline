@@ -130,6 +130,10 @@ public final class DebugChatFixture {
       try size.insert(db)
       if index % 2 == 0 { text = nil }
     }
+    // Alice's even messages are sent for her by Codex: the agent badge and "Sent via Codex".
+    if payload == nil, from == 2, index % 2 == 0 {
+      payload = .with { $0.via = .with { $0.app = "codex" } }
+    }
     var videoId: Int64?
     if photoId == nil, payload == nil, index % 53 == 0 {
       // A video with a drawn thumbnail and a stand-in file, so a tap opens the chat's gallery.
