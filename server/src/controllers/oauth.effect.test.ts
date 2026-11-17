@@ -574,6 +574,80 @@ describe("Effect OAuth routes", () => {
     }
   })
 
+  it("accepts the introspection body the handler sends to MCP", async () => {
+    const response = await Effect.runPromise(
+      validateOAuthResponse(
+        "introspect",
+        Response.json({
+          active: true,
+          grant_id: "grant-1",
+          client_id: "client-1",
+          scope: "messages:read messages:write spaces:read",
+          aud: "https://mcp.inline.chat/mcp/v2",
+          exp: 1_900_000_000,
+          inline_user_id: "13000",
+          space_ids: ["1"],
+          allow_dms: true,
+          allow_home_threads: false,
+          inline_token: "13000:token",
+          via_app: "chatgpt",
+          allow_unsigned: false,
+        }),
+      ),
+    )
+    expect(response.status).toBe(200)
+  })
+
+  it("serves a drifted success body and reports it instead of failing", async () => {
+    let reports = 0
+    const kernel = makeKernel({
+      reporter: {
+        report: () =>
+          Effect.sync(() => {
+            reports += 1
+          }),
+      },
+      oauth: {
+        execute: () =>
+          Effect.succeed(
+            Response.json({
+              active: true,
+              grant_id: "grant-1",
+              client_id: "client-1",
+              scope: "messages:read",
+              aud: "https://mcp.inline.chat/mcp/v2",
+              exp: 1_900_000_000,
+              inline_user_id: "13000",
+              space_ids: [],
+              allow_dms: false,
+              allow_home_threads: false,
+              inline_token: "13000:token",
+              field_added_later: "value",
+            }),
+          ),
+      },
+    })
+
+    try {
+      const response = await kernel.handler(
+        new Request("http://inline.test/oauth/introspect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: "access-token" }),
+        }),
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        active: true,
+        field_added_later: "value",
+      })
+      expect(reports).toBe(1)
+    } finally {
+      await kernel.dispose()
+    }
+  })
+
   it("accepts a real provider redemption user projection", async () => {
     const user = encodeFullUserInfo({
       id: 1000,

@@ -38,6 +38,12 @@ import { Value } from "@sinclair/typebox/value"
 import { authPageDocument, authPageHeaders, escapeHtml, type AuthPageContext } from "@in/server/modules/auth/authPage"
 import { describeOAuthScopes, oauthClientTrust, oauthClientViaApp } from "@in/server/modules/oauth/clientTrust"
 import { GENERIC_VIA_AGENT } from "@in/server/modules/message/viaAgents"
+import type {
+  OAuthIntrospectionResult,
+  OAuthMetadata,
+  OAuthRegisterResult,
+  OAuthTokenResult,
+} from "@in/server/controllers/oauth.effect"
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -266,6 +272,11 @@ async function providerBrowserError(input: {
     description: input.description,
   })
 }
+
+// Success bodies are checked against the controller's response contract at
+// compile time. The contract decodes with onExcessProperty "error", so a field
+// added here but not declared there would otherwise only fail in production.
+type WireBody<S extends { readonly Encoded: unknown }> = S["Encoded"]
 
 function json(status: number, body: unknown, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(body), {
@@ -628,11 +639,11 @@ export async function handleRegister(
       client_id: client.clientId,
       client_id_issued_at: Math.floor(nowMs / 1000),
       redirect_uris: client.redirectUris,
-      client_name: client.clientName ?? undefined,
+      ...(client.clientName != null ? { client_name: client.clientName } : {}),
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
-    },
+    } satisfies WireBody<typeof OAuthRegisterResult>,
     {
       "cache-control": "no-store",
     },
@@ -1329,7 +1340,7 @@ export async function handleToken(
         token_type: "bearer",
         expires_in: Math.floor(config.accessTokenTtlMs / 1000),
         scope: grant.scope,
-      },
+      } satisfies WireBody<typeof OAuthTokenResult>,
       { "cache-control": "no-store", pragma: "no-cache" },
     )
   }
@@ -1382,7 +1393,7 @@ export async function handleToken(
         token_type: "bearer",
         expires_in: Math.floor(config.accessTokenTtlMs / 1000),
         scope: result.grant.scope,
-      },
+      } satisfies WireBody<typeof OAuthTokenResult>,
       { "cache-control": "no-store", pragma: "no-cache" },
     )
   }
@@ -1463,7 +1474,7 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     via_app: client ? oauthClientViaApp(client) : GENERIC_VIA_AGENT,
     // Whether the app may leave the "Sent via" label off when the user asks.
     allow_unsigned: result.grant.allowUnsigned,
-  })
+  } satisfies WireBody<typeof OAuthIntrospectionResult>)
 }
 
 export async function handleProviderStart(
@@ -2136,7 +2147,7 @@ export function handleAuthorizationServerMetadata(): Response {
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
-  })
+  } satisfies WireBody<typeof OAuthMetadata>)
 }
 
 export function prepareAuthorizeRequest(request: Request): Promise<Response> {
