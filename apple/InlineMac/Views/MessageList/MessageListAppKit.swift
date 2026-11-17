@@ -3826,11 +3826,18 @@ class MessageListAppKit: NSViewController {
     heightPrecalcTask?.cancel()
     heightPrecalcTask = Task(priority: .userInitiated) { [weak self] in
       guard let self else { return }
+      // This runs on the main actor; give frames and input a turn every few milliseconds instead
+      // of measuring every row in one go.
+      var sliceStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
       for row in rowsToUpdate {
         guard !Task.isCancelled else { return }
         guard let message = message(forRow: row) else { continue }
         let props = messageProps(for: row)
         let _ = calculateSize(for: message, with: props, tableWidth: width_)
+        if clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - sliceStart > 4_000_000 {
+          await Task.yield()
+          sliceStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        }
       }
     }
   }
