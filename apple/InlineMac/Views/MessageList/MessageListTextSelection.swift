@@ -6,13 +6,13 @@ import WebKit
 /// A message's selectable text views in reading order, plus what copy needs between them
 /// (list markers, rendered math sources, table structure) and what each view shows.
 struct MessageTextSelectionProjection {
-  let textViews: [MessageTextView]
+  let textViews: [any MessageTextSurface]
   let document: [RichTextMultiSurfaceSelection.DocumentItem]
   let literals: [NSAttributedString]
   var roles: [MessageClipboardDocument.SurfaceRole] = []
   var literalRoles: [MessageClipboardDocument.LiteralRole] = []
 
-  static func single(_ textView: MessageTextView) -> MessageTextSelectionProjection {
+  static func single(_ textView: any MessageTextSurface) -> MessageTextSelectionProjection {
     MessageTextSelectionProjection(
       textViews: [textView],
       document: [.init(content: .surface(0), separatorAfter: "")],
@@ -21,7 +21,7 @@ struct MessageTextSelectionProjection {
     )
   }
 
-  var lengths: [Int] { textViews.map { $0.textStorage?.length ?? 0 } }
+  @MainActor var lengths: [Int] { textViews.map { $0.surfaceText.length } }
 
   /// The selected content as copy blocks (headings, list items, code, tables, quotes).
   @MainActor
@@ -33,7 +33,7 @@ struct MessageTextSelectionProjection {
     ) else { return [] }
     return MessageClipboardDocument.blocks(
       parts: parts,
-      surfaceTexts: textViews.map { $0.textStorage ?? NSAttributedString() },
+      surfaceTexts: textViews.map(\.surfaceText),
       roles: roles,
       literals: literals,
       literalRoles: literalRoles
@@ -96,7 +96,7 @@ final class MessageListTextSelection {
   /// Endpoints in drag order. Nil when nothing is selected.
   private(set) var selection: (anchor: Endpoint, head: Endpoint)?
   /// Text views currently drawing part of the selection, including recycled offscreen cells.
-  private let highlighted = NSHashTable<MessageTextView>.weakObjects()
+  private let highlighted = NSHashTable<NSView>.weakObjects()
   /// Selected text per message from when it was last on screen, so copy stays faithful for
   /// messages scrolled away (and recycled) during a long drag.
   private var fragments: [Int64: (ranges: [NSRange?], blocks: [MessageClipboardDocument.Block])] = [:]
@@ -218,7 +218,7 @@ final class MessageListTextSelection {
     let modifiers = event.modifierFlags.intersection([.shift, .control, .option, .command])
     guard modifiers == .shift, event.clickCount == 1, let selection,
           let press = textPress(event, host: host, window: window),
-          press.hit is MessageTextView,
+          press.hit is any MessageTextSurface,
           let head = headEndpoint(at: event.locationInWindow, anchor: selection.anchor)
     else { return false }
     self.selection = (selection.anchor, head)
@@ -235,7 +235,7 @@ final class MessageListTextSelection {
     let table = host.textSelectionTableView
     pressedView = press.hit
 
-    if let textView = press.hit as? MessageTextView {
+    if let textView = press.hit as? any MessageTextSurface {
       // Links and mentions act on press; they never start a selection.
       if case .text = textView.entityHit(
         at: textView.convert(event.locationInWindow, from: nil),
@@ -273,7 +273,7 @@ final class MessageListTextSelection {
   /// Double click selects a word, triple click a paragraph, like native text.
   private func selectUnit(_ unit: Unit, around point: Endpoint, in projection: MessageTextSelectionProjection) {
     guard projection.textViews.indices.contains(point.surface),
-          let storage = projection.textViews[point.surface].textStorage, storage.length > 0
+          case let storage = projection.textViews[point.surface].surfaceText, storage.length > 0
     else { return }
     let index = min(point.offset, storage.length - 1)
     let range: NSRange
@@ -403,10 +403,11 @@ final class MessageListTextSelection {
     while let view = current, view !== table {
       current = view.superview
       // Text views hold through a timer; their own recognizers are NSTextView internals.
-      if let textView = view as? NSTextView {
-        (textView as? MessageTextView)?.cancelPendingTextHold()
+      if let textView = view as? any MessageTextSurface {
+        textView.cancelPendingTextHold()
         continue
       }
+      if view is NSTextView { continue }
       for recognizer in view.gestureRecognizers
         where recognizer.isEnabled && (recognizer is NSPressGestureRecognizer || recognizer is NSClickGestureRecognizer)
       {
@@ -592,14 +593,14 @@ final class MessageListTextSelection {
         touched.insert(ObjectIdentifier(textView))
       }
     }
-    for textView in highlighted.allObjects where !touched.contains(ObjectIdentifier(textView)) {
-      textView.listSelectionRange = nil
-      highlighted.remove(textView)
+    for view in highlighted.allObjects where !touched.contains(ObjectIdentifier(view)) {
+      (view as? any MessageTextSurface)?.listSelectionRange = nil
+      highlighted.remove(view)
     }
   }
 
   @discardableResult
-  private func apply(to cell: MessageTableCell, row: Int, stableId: Int64) -> [MessageTextView] {
+  private func apply(to cell: MessageTableCell, row: Int, stableId: Int64) -> [any MessageTextSurface] {
     guard let projection = cell.textSelectionSource?.textSelectionProjection() else { return [] }
     let lengths = projection.lengths
     let planned = ranges(forRow: row, lengths: lengths)
@@ -628,14 +629,14 @@ final class MessageListTextSelection {
   func clear() {
     selection = nil
     fragments = [:]
-    for textView in highlighted.allObjects {
-      textView.listSelectionRange = nil
+    for view in highlighted.allObjects {
+      (view as? any MessageTextSurface)?.listSelectionRange = nil
     }
     highlighted.removeAllObjects()
   }
 
   /// The text view holding the selection's end when the selection lies in one message.
-  private func singleMessageHeadView() -> MessageTextView? {
+  private func singleMessageHeadView() -> (any MessageTextSurface)? {
     guard let selection, let bounds = orderedBounds(), bounds.lowerRow == bounds.upperRow,
           let projection = projection(atRow: bounds.upperRow),
           projection.textViews.indices.contains(selection.head.surface)

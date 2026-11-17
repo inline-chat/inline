@@ -93,6 +93,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case richCopyMarkdownEditing
   case quickForward
   case stableChatRoute
+  case coreTextMessageText
   case fileBrowser
   case nativeFileDownloads
 
@@ -143,7 +144,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richCopyMarkdownEditing, .quickForward, .stableChatRoute,
+         .messageWidgets, .richCopyMarkdownEditing, .quickForward, .stableChatRoute, .coreTextMessageText,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -219,6 +220,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .quickForward: "Quick Forward"
     case .stableChatRoute: "Faster Chat Switching"
+    case .coreTextMessageText: "Core Text Message Text"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
     case .syncEngine: "Sync Engine"
@@ -277,7 +279,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
          .messageWidgets:
       "Agents"
-    case .richCopyMarkdownEditing, .quickForward, .stableChatRoute: "Messages"
+    case .richCopyMarkdownEditing, .quickForward, .stableChatRoute, .coreTextMessageText: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -354,6 +356,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .quickForward: ["forward"]
     case .stableChatRoute: ["performance", "speed", "switch", "toolbar"]
+    case .coreTextMessageText: ["performance", "renderer", "text", "scroll", "core text"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]
     case .syncEngine: ["realtime", "sync"]

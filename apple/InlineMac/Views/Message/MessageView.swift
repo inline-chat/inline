@@ -977,7 +977,65 @@ class MessageViewAppKit: NSView {
 
   private var prevDelegate: NSTextViewportLayoutControllerDelegate?
 
-  private lazy var textView: NSTextView = {
+  /// Whether the NSTextView exists. Messages drawn by Core Text, and messages without text,
+  /// never create one.
+  private var isNativeTextViewLoaded = false
+
+  private var textView: NSTextView {
+    isNativeTextViewLoaded = true
+    return nativeTextView
+  }
+
+  /// Plain text drawn by Inline's Core Text renderer instead of NSTextView, behind the
+  /// "Core Text Message Text" experiment. Rich messages and code blocks stay on NSTextView.
+  private var coreTextView: CoreTextMessageView?
+  private var usesCoreText = false
+
+  /// The view that shows this message's text, created on demand.
+  private var textHostView: NSView {
+    usesCoreText ? loadCoreTextView() : textView
+  }
+
+  /// The text view when it is in the view hierarchy; never creates one.
+  private var attachedTextHost: NSView? {
+    if usesCoreText {
+      return coreTextView?.superview != nil ? coreTextView : nil
+    }
+    return isNativeTextViewLoaded && textView.superview != nil ? textView : nil
+  }
+
+  private var textSurface: (any MessageTextSurface)? {
+    if usesCoreText { return coreTextView }
+    return isNativeTextViewLoaded ? textView as? MessageTextView : nil
+  }
+
+  private func loadCoreTextView() -> CoreTextMessageView {
+    if let coreTextView { return coreTextView }
+    let view = CoreTextMessageView(frame: .zero)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    coreTextView = view
+    return view
+  }
+
+  private func wantsCoreTextRenderer() -> Bool {
+    guard CoreTextMessageText.isEnabled, hasText, props.layout.richBlockContent == nil else { return false }
+    return CoreTextMessageText.supports(entities: fullMessage.translationEntities ?? fullMessage.message.entities)
+  }
+
+  /// Moves the message's text between NSTextView and the Core Text view.
+  private func applyTextRenderer(coreText: Bool) {
+    guard coreText != usesCoreText else { return }
+    if let host = attachedTextHost {
+      textSurface?.onEntityClick = nil
+      textSurface?.onTextLongPress = nil
+      host.removeFromSuperview()
+    }
+    clearTextViewConstraints()
+    usesCoreText = coreText
+    needsUpdateConstraints = true
+  }
+
+  private lazy var nativeTextView: NSTextView = {
     if useTextKit2 {
       let textView = MessageTextView(usingTextLayoutManager: true)
       textView.translatesAutoresizingMaskIntoConstraints = false
@@ -1097,7 +1155,7 @@ class MessageViewAppKit: NSView {
 
   /// Handles link clicks by opening the URL in the default browser
   private func handleLinkClick(at characterIndex: Int) {
-    guard let url = linkURL(at: characterIndex, in: textView.attributedString()) else {
+    guard let url = linkURL(at: characterIndex, in: displayedText) else {
       MessageGestureTrace.debug(
         "MessageView.handleLinkClick messageId=\(message.messageId) char=\(characterIndex) result=noURL"
       )
@@ -1108,7 +1166,11 @@ class MessageViewAppKit: NSView {
   }
 
   private func linkURLForContextMenu(at characterIndex: Int) -> URL? {
-    linkURL(at: characterIndex, in: textView.attributedString())
+    linkURL(at: characterIndex, in: displayedText)
+  }
+
+  private var displayedText: NSAttributedString {
+    textSurface?.surfaceText ?? NSAttributedString()
   }
 
   private func linkURL(at characterIndex: Int, in attributedString: NSAttributedString) -> URL? {
@@ -1425,7 +1487,7 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupEntityClickHandling() {
-    guard let messageTextView = textView as? MessageTextView else {
+    guard let messageTextView = textSurface else {
       MessageGestureTrace.debug("MessageView.setupEntityClickHandling messageId=\(message.messageId) result=noMessageTextView")
       return
     }
@@ -1441,6 +1503,11 @@ class MessageViewAppKit: NSView {
   }
 
   private func syncTextViewForCurrentProps() {
+    applyTextRenderer(coreText: wantsCoreTextRenderer())
+    if usesCoreText {
+      syncCoreTextViewForCurrentProps()
+      return
+    }
     if hasText {
       if textView.superview == nil {
         contentView.addSubview(textView)
@@ -1456,13 +1523,42 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    guard textView.superview != nil else { return }
+    guard isNativeTextViewLoaded, textView.superview != nil else { return }
     MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=detachTextView")
     (textView as? MessageTextView)?.onEntityClick = nil
     (textView as? MessageTextView)?.onTextLongPress = nil
     textView.removeFromSuperview()
     clearTextViewConstraints()
     detectedLinks = []
+  }
+
+  private func syncCoreTextViewForCurrentProps() {
+    let view = loadCoreTextView()
+    guard hasText else {
+      guard view.superview != nil else { return }
+      view.onEntityClick = nil
+      view.onTextLongPress = nil
+      view.removeFromSuperview()
+      clearTextViewConstraints()
+      detectedLinks = []
+      return
+    }
+    if view.superview == nil {
+      contentView.addSubview(view)
+    }
+    if view.onEntityClick == nil {
+      setupEntityClickHandling()
+    }
+    if view.onContextMenu == nil {
+      view.onContextMenu = { [weak self, weak view] index, _ in
+        guard let self, let view else { return nil }
+        return createMenu(
+          context: .textView,
+          nativeMenu: view.nativeTextMenu(at: index),
+          linkURL: index.flatMap { self.linkURLForContextMenu(at: $0) }
+        )
+      }
+    }
   }
 
   private func clearTextViewConstraints() {
@@ -1493,7 +1589,7 @@ class MessageViewAppKit: NSView {
       )
       return false
     }
-    let handled = handleTextEntityClick(hit, attributedString: textView.attributedString())
+    let handled = handleTextEntityClick(hit, attributedString: displayedText)
     if handled, let event {
       handledEntityClickEventNumber = event.eventNumber
     }
@@ -1667,7 +1763,7 @@ class MessageViewAppKit: NSView {
   }
 
   private func textEntityHit(at location: NSPoint) -> MessageTextEntityHit? {
-    guard let messageTextView = textView as? MessageTextView else { return nil }
+    guard let messageTextView = textSurface else { return nil }
     let hit = messageTextView.entityHit(
       at: location,
       extraTextRanges: detectedLinks.map(\.range)
@@ -1687,7 +1783,7 @@ class MessageViewAppKit: NSView {
       return true
     }
 
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard let textView = attachedTextHost, !textView.isHidden else { return false }
 
     let locationInSelf = convert(event.locationInWindow, from: nil)
     let locationInText = textView.convert(locationInSelf, from: self)
@@ -1707,7 +1803,7 @@ class MessageViewAppKit: NSView {
        ) as? MessageTextView {
       return hit.entityHit(at: hit.convert(locationInSelf, from: self), extraTextRanges: []) != nil
     }
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard let textView = attachedTextHost, !textView.isHidden else { return false }
 
     let locationInText = textView.convert(locationInSelf, from: self)
     guard textView.bounds.contains(locationInText) else { return false }
@@ -1716,13 +1812,13 @@ class MessageViewAppKit: NSView {
   }
 
   private func handleTextLongPress(at location: NSPoint, event: NSEvent) {
-    let locationInSelf = textView.convert(location, to: self)
+    let locationInSelf = textHostView.convert(location, to: self)
     MessageGestureTrace.debug(
       "MessageView.handleTextLongPress messageId=\(message.messageId) eventNumber=\(event.eventNumber) point=\(MessageGestureTrace.point(locationInSelf))"
     )
 
     if let result = interactiveHitTestResult(locationInSelf) {
-      guard let text = result.view as? MessageTextView, text.onTextLongPress != nil else {
+      guard let text = result.view as? any MessageTextSurface, text.onTextLongPress != nil else {
         MessageGestureTrace.debug(
           "MessageView.handleTextLongPress messageId=\(message.messageId) blocked=interactive target=\(result.name)"
         )
@@ -1848,7 +1944,7 @@ class MessageViewAppKit: NSView {
 //    view.layer?.backgroundColor = NSColor.red.cgColor
 //    reactionsView = view
 
-    if hasText, textView.superview != nil {
+    if hasText, let textView = attachedTextHost {
       if reactionsOutsideBubble {
         addSubview(reactionsView!)
       } else {
@@ -2503,7 +2599,7 @@ class MessageViewAppKit: NSView {
 
     // Text
 
-    if let text = layout.text {
+    if let text = layout.text, let textView = attachedTextHost {
       textViewWidthConstraint = textView.widthAnchor
         .constraint(equalToConstant: text.size.width)
       textViewHeightConstraint = textView.heightAnchor
@@ -2856,7 +2952,7 @@ class MessageViewAppKit: NSView {
 
     // Text can appear/disappear when a view is reused for a different message.
     syncTextViewForCurrentProps()
-    if let text = props.layout.text, textView.superview != nil {
+    if let text = props.layout.text, let textView = attachedTextHost {
       var constraintsToActivate: [NSLayoutConstraint] = []
       if textViewWidthConstraint == nil {
         textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: text.size.width)
@@ -3365,6 +3461,15 @@ class MessageViewAppKit: NSView {
 
     richBlockContentView?.prepareForReuse()
     richBlockContentView?.removeFromSuperview()
+    if usesCoreText {
+      coreTextView?.setMessageAttributedString(
+        attributedString,
+        isRtl: props.isRtl,
+        layoutSize: props.layout.text?.size ?? .zero,
+        linkColor: linkColor
+      )
+      return
+    }
     textView.setAccessibilityElement(true)
     textView.setAccessibilityRole(.textArea)
     textView.setAccessibilityChildren(nil)
@@ -3483,7 +3588,7 @@ class MessageViewAppKit: NSView {
 
   private func boundsChange(scrollView: NSScrollView, clipView: NSClipView) {
     guard feature_relayoutOnBoundsChange else { return }
-    guard hasText else { return }
+    guard hasText, !usesCoreText else { return }
     // guard textView.inLiveResize else { return }
 
     let visibleRect = scrollView.documentVisibleRect
@@ -4281,7 +4386,9 @@ class MessageViewAppKit: NSView {
     self.props = props
     syncBubbleTail(animated: animate)
 
-    if textView.textContainer?.size != props.layout.text?.size ?? .zero {
+    if usesCoreText {
+      coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0)
+    } else if isNativeTextViewLoaded, textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
       textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
@@ -4304,9 +4411,10 @@ class MessageViewAppKit: NSView {
         DispatchQueue.main.async {
           // Avoid forcing TextKit 2 viewport layout on macOS 27; crash reports show
           // AppKit throwing from this path during NSTableView row install.
-          guard MessageTextConfiguration.useTextKit2ViewportWorkarounds else { return }
+          guard MessageTextConfiguration.useTextKit2ViewportWorkarounds,
+                let self, !self.usesCoreText, self.isNativeTextViewLoaded else { return }
           // Fixes text display issues going blank
-          self?.textView.textLayoutManager?.textViewportLayoutController
+          self.textView.textLayoutManager?.textViewportLayoutController
             .layoutViewport()
         }
       }
@@ -5065,12 +5173,12 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
   }
 
   private func isTextViewPoint(_ point: NSPoint) -> Bool {
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard let textView = attachedTextHost, !textView.isHidden else { return false }
     return textView.bounds.contains(textView.convert(point, from: self))
   }
 
   private func isTextPoint(_ point: NSPoint) -> Bool {
-    guard textView.superview != nil, !textView.isHidden else {
+    guard let textView = attachedTextHost, !textView.isHidden else {
       MessageGestureTrace.trace("MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) result=false reason=noTextView")
       return false
     }
@@ -5083,7 +5191,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       return false
     }
 
-    guard let messageTextView = textView as? MessageTextView else {
+    guard let messageTextView = textSurface else {
       MessageGestureTrace.trace(
         "MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) textPoint=\(MessageGestureTrace.point(pointInText)) result=true reason=plainTextView"
       )
@@ -5564,17 +5672,20 @@ extension MessageViewAppKit: MessageTextSelectionSource {
     if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
       return richBlockContentView.textSelectionProjection()
     }
-    guard let textView = textView as? MessageTextView, !textView.isHiddenOrHasHiddenAncestor,
-          (textView.textStorage?.length ?? 0) > 0
+    guard let textView = textSurface, textView.superview != nil, !textView.isHiddenOrHasHiddenAncestor,
+          textView.surfaceText.length > 0
     else { return nil }
     return .single(textView)
   }
 
   func textSelectionPressRegion() -> CGRect? {
-    let container: NSView = if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
-      richBlockContentView
+    let container: NSView
+    if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
+      container = richBlockContentView
+    } else if let host = attachedTextHost {
+      container = host
     } else {
-      textView
+      return nil
     }
     guard container.window != nil, !container.isHiddenOrHasHiddenAncestor else { return nil }
     // The text with a margin for imprecise presses, and the whole bubble around it.
@@ -5587,6 +5698,6 @@ extension MessageViewAppKit: MessageTextSelectionSource {
 
   func isInteractiveForTextSelection(at point: NSPoint) -> Bool {
     guard let result = interactiveHitTestResult(point) else { return false }
-    return !(result.view is NSTextView)
+    return !(result.view is NSTextView) && !(result.view is any MessageTextSurface)
   }
 }

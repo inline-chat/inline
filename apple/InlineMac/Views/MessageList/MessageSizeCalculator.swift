@@ -2453,7 +2453,9 @@ class MessageSizeCalculator {
     width: CGFloat,
     message _: FullMessage? = nil
   ) -> NSSize {
-    let size = messageTextMeasurer.measure(attributedString, width: width)
+    // The Core Text renderer is measured with its own layout, so the box fits what it draws.
+    let size = CoreTextMessageText.measuredSize(attributedString, width: width, extraWidth: Self.extraSafeWidth)
+      ?? messageTextMeasurer.measure(attributedString, width: width)
 
     #if DEBUG
     log.trace("calculateSizeForText \(attributedString.string) width \(width) resulting in size \(size)")
