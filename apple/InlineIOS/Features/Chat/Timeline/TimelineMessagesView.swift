@@ -8,8 +8,8 @@ import Logger
 import Translation
 import UIKit
 
-/// The message list on `InlineTimeline`, hosted by `ChatContainerView` behind the
-/// `experimental.iosTimeline` switch.
+/// The message list on `InlineTimeline`, hosted by `ChatContainerView`: the default list. Builds with
+/// developer tools can switch back to the collection view (`experimental.iosTimeline`).
 ///
 /// Rows come from the view model's row feed and are shown by the production `MessageView`, planned
 /// exactly as the collection view's cell plans it. The container owns the keyboard and the composer

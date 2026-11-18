@@ -19,7 +19,7 @@ struct ExperimentalView: View {
   private var customContextMenuEnabled = true
 
   @AppStorage(TimelineFeature.preferenceKey)
-  private var timelineEnabled = false
+  private var timelineEnabled = true
 
   @AppStorage(MessageAlbumView.layoutStyleKey)
   private var albumLayout = AlbumLayoutStyle.telegram.rawValue
