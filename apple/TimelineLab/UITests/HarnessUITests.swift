@@ -1050,4 +1050,51 @@ final class HarnessUITests: XCTestCase {
     Thread.sleep(forTimeInterval: 0.8)
     shot("vo-focus-top")
   }
+  /// Opens the pushed chat eight times through the app's read-then-push path (`--timeline-harness-push
+  /// --timeline-harness-prepare`); each open logs `TIMELINE_DEBUG chat-open` with its phases.
+  func testPreparedOpens() {
+    launch(["--timeline-harness-push", "--timeline-harness-prepare"])
+    // The harness pushes the chat at setup; start from the list.
+    if app.navigationBars.buttons.firstMatch.exists { app.navigationBars.buttons.firstMatch.tap() }
+    Thread.sleep(forTimeInterval: 1)
+    let open = app.buttons["harnessOpenChat"]
+    for i in 0 ..< 8 {
+      guard open.waitForExistence(timeout: 4) else { print("[UITEST] no open button at \(i)"); break }
+      open.tap()
+      Thread.sleep(forTimeInterval: 1.5)
+      if i == 0 { shot("prepared-open") }
+      app.navigationBars.buttons.firstMatch.tap()
+      Thread.sleep(forTimeInterval: 1.2)
+    }
+  }
+  /// Reactions as the app sends them (the harness publishes each twice, a round trip apart): a double tap
+  /// adds the quick reaction, another removes it, and one is picked from the menu. Stamped for video.
+  func testReactions() {
+    launch()
+    Thread.sleep(forTimeInterval: 1)
+    let stamp = { (what: String) in print("[UITEST] \(what) t=\(String(format: "%.3f", Date().timeIntervalSince1970))") }
+    stamp("double-tap-add")
+    coord(250, 360).doubleTap()
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("reaction-added")
+    stamp("double-tap-remove")
+    coord(250, 360).doubleTap()
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("reaction-removed")
+    stamp("menu-open")
+    coord(250, 360).press(forDuration: 0.6)
+    Thread.sleep(forTimeInterval: 0.8)
+    shot("reaction-menu")
+    let emoji = app.buttons.matching(NSPredicate(format: "label IN %@", ["👍", "❤️", "😂", "🔥", "🙏", "👀", "🎉", "💯"])).firstMatch
+    if emoji.exists {
+      stamp("menu-pick")
+      emoji.tap()
+    } else {
+      print("[UITEST] no emoji in the menu")
+      coord(30, 120).tap()
+    }
+    Thread.sleep(forTimeInterval: 1.5)
+    shot("reaction-picked")
+    stamp("done")
+  }
 }
