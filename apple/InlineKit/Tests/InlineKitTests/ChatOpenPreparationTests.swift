@@ -106,6 +106,39 @@ struct ChatOpenPreparationTests {
     #expect(read.calls == 1)
   }
 
+  @Test("a prefetch on press starts the read the open then shares, and never reads twice")
+  func prefetchOnPress() async throws {
+    let read = ControlledRead()
+    let preparation = ChatOpenPreparation { _ in try await read.run() }
+    let peer = InlineKit.Peer.user(id: 4)
+
+    preparation.prefetch(peer: peer)
+    preparation.prefetch(peer: peer)
+    while read.calls == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    #expect(preparation.isPreparing(peer: peer))
+    let opener = Task { @MainActor in await preparation.state(for: peer) != nil }
+    read.complete(.success(Self.emptyState))
+    #expect(await opener.value)
+    preparation.prefetch(peer: peer)
+    #expect(read.calls == 1)
+    #expect(preparation.readyState(for: peer) != nil)
+  }
+
+  @Test("a press that did not open its chat drops its window, so the next open reads again")
+  func discardAfterPress() async throws {
+    let read = ControlledRead()
+    let preparation = ChatOpenPreparation { _ in try await read.run() }
+    let peer = InlineKit.Peer.user(id: 5)
+
+    preparation.prefetch(peer: peer)
+    while read.calls == 0 { try await Task.sleep(for: .milliseconds(5)) }
+    read.complete(.success(Self.emptyState))
+    while preparation.readyState(for: peer) == nil { try await Task.sleep(for: .milliseconds(5)) }
+    preparation.discard(peer: peer)
+    #expect(preparation.readyState(for: peer) == nil)
+    #expect(!preparation.isPreparing(peer: peer))
+  }
+
   @Test("a failed read leaves the list to read its own window")
   func failedRead() async {
     let preparation = ChatOpenPreparation { _ in throw CancellationError() }

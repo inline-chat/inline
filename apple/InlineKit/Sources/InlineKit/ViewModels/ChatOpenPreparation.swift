@@ -18,6 +18,13 @@ public final class ChatOpenPreparation {
     let startedAt: ContinuousClock.Instant
     var isFinished = false
     var state: InitialState?
+    /// When the read ended; a window counts as fresh for `freshness` from then.
+    var finishedAt: ContinuousClock.Instant?
+
+    func isFresh(at now: ContinuousClock.Instant, for freshness: Duration) -> Bool {
+      guard isFinished else { return true }
+      return now - (finishedAt ?? startedAt) < freshness
+    }
   }
 
   private let read: Read
@@ -50,28 +57,46 @@ public final class ChatOpenPreparation {
   /// The chat's window, read unless a fresh one exists or is being read. Nil when the read failed;
   /// the list then reads its window itself.
   public func state(for peer: Peer) async -> InitialState? {
-    let now = clock.now
-    entries = entries.filter { !$0.value.isFinished || now - $0.value.startedAt < Self.freshness }
+    startIfNeeded(peer)
     if let entry = entries[peer], entry.isFinished {
       return entry.state
-    }
-    if entries[peer] == nil {
-      entries[peer] = Entry(startedAt: now)
-      let read = read
-      Task { [weak self] in
-        let state = try? await read(peer)
-        self?.finish(peer: peer, startedAt: now, state: state)
-      }
     }
     return await withCheckedContinuation { waiters.append((peer, $0)) }
   }
 
+  /// Starts reading a chat's window ahead of a likely open, without waiting for it: a chat-list row
+  /// pressed is released about 100 ms later, and the read runs in that time instead of after it.
+  public func prefetch(peer: Peer) {
+    startIfNeeded(peer)
+  }
+
+  /// Starts a read unless a fresh one exists or one is running.
+  private func startIfNeeded(_ peer: Peer) {
+    let now = clock.now
+    entries = entries.filter { $0.value.isFresh(at: now, for: Self.freshness) }
+    guard entries[peer] == nil else { return }
+    entries[peer] = Entry(startedAt: now)
+    let read = read
+    Task { [weak self] in
+      let state = try? await read(peer)
+      self?.finish(peer: peer, startedAt: now, state: state)
+    }
+  }
+
   /// A fresh window already read, so a view can be built from it in its first frame.
   public func readyState(for peer: Peer) -> InitialState? {
-    guard let entry = entries[peer], entry.isFinished, clock.now - entry.startedAt < Self.freshness else {
-      return nil
-    }
+    guard let entry = entries[peer], entry.isFinished, entry.isFresh(at: clock.now, for: Self.freshness) else { return nil }
     return entry.state
+  }
+
+  /// A press that did not open its chat (it became a scroll or a context menu) drops what it read, so a
+  /// later open within the freshness window does not show a window read before, say, Mark as Read. A read
+  /// still running is left to an opener already waiting for it.
+  public func discard(peer: Peer) {
+    guard let entry = entries[peer] else { return }
+    if entry.isFinished || !waiters.contains(where: { $0.peer == peer }) {
+      entries[peer] = nil
+    }
   }
 
   /// A read for this chat is running, so a view opening it waits for that rather than reading again.
@@ -82,6 +107,7 @@ public final class ChatOpenPreparation {
   private func finish(peer: Peer, startedAt: ContinuousClock.Instant, state: InitialState?) {
     guard entries[peer]?.startedAt == startedAt else { return }
     entries[peer]?.isFinished = true
+    entries[peer]?.finishedAt = clock.now
     entries[peer]?.state = state
     let finished = waiters.filter { $0.peer == peer }
     waiters.removeAll { $0.peer == peer }
