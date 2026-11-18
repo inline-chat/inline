@@ -20,6 +20,8 @@ type AcknowledgedChannelWaiter<T> = {
   reject: (error: Error) => void
 }
 
+type DeliveryKeys = string | readonly string[] | null
+
 type AcknowledgedChannelItem<T> = {
   value: T
   bytes: number
@@ -146,9 +148,9 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
   private iteratorClaimed = false
   private consumption: {
     handler: (value: T) => Promise<void>
-    key: (value: T) => string | null
+    key: (value: T) => DeliveryKeys
     concurrency: number
-    active: Map<AcknowledgedChannelItem<T>, string | null>
+    active: Map<AcknowledgedChannelItem<T>, readonly string[] | null>
     resolve: () => void
     reject: (error: Error) => void
   } | null = null
@@ -225,7 +227,7 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
   /** Process independent keys concurrently without acknowledging queued work.
    * A null key is a global barrier. Rejection fails the stream, retaining cursors.
    */
-  consume(handler: (value: T) => Promise<void>, key: (value: T) => string | null, concurrency = 8): Promise<void> {
+  consume(handler: (value: T) => Promise<void>, key: (value: T) => DeliveryKeys, concurrency = 8): Promise<void> {
     if (this.iteratorClaimed)
       return Promise.reject(new ChannelConsumerError("AcknowledgedAsyncChannel supports one consumer"))
     if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
@@ -244,10 +246,13 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
     if (!owner || this.closed) return
     try {
       while (owner.active.size < owner.concurrency && this.queue.length > 0) {
-        if ([...owner.active.values()].includes(null)) return
-        const keys = new Set(owner.active.values())
+        const reserved = new Set<string>()
+        for (const active of owner.active.values()) {
+          if (active === null) return
+          for (const key of active) reserved.add(key)
+        }
         let index = -1
-        let key: string | null = null
+        let keys: readonly string[] | null = null
         for (let i = 0; i < this.queue.length; i++) {
           const candidate = this.queue[i]!
           const candidateKey = owner.key(candidate.value)
@@ -255,15 +260,19 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
             if (i === 0 && owner.active.size === 0) index = i
             break
           }
-          if (!keys.has(candidateKey)) {
+          const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey
+          if (!candidateKeys.some((key) => reserved.has(key))) {
             index = i
-            key = candidateKey
+            keys = candidateKeys
             break
           }
+          // A waiting item reserves all its keys: later work must not pass it
+          // on its free key while it is waiting for the other one.
+          for (const key of candidateKeys) reserved.add(key)
         }
         if (index < 0) return
         const item = this.queue.splice(index, 1)[0]!
-        owner.active.set(item, key)
+        owner.active.set(item, keys)
         void Promise.resolve()
           .then(() => owner.handler(item.value))
           .then(

@@ -171,6 +171,38 @@ it("isolates chat handlers without early cursor acknowledgement or same-chat ove
   await consuming
 })
 
+it("chat access waits for its chat and user cursor while unrelated messages keep flowing", async () => {
+  const { c, t } = await setup({ lastUserSeq: 1, lastSeqByChatId: { "10": 1, "20": 1, "30": 1 } })
+  await result(t, updatesRpcs(t)[0]!.id, {
+    oneofKind: "getUpdates", getUpdates: { seq: 1n, date: 100n, final: true,
+      resultType: GetUpdatesResult_ResultType.EMPTY, updates: [], skippedSequences: [] },
+  })
+  await flush()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const completed: string[] = []
+  const consuming = c.consumeEvents(async (event) => {
+    if (!("chatId" in event)) return
+    if (event.kind === "message.new" && event.chatId === 10n && event.seq === 2) await held
+    completed.push(`${event.kind}:${event.chatId}`)
+  })
+  const access = (chatId: bigint, seq: number) => Update.create({
+    seq, date: 100n, update: { oneofKind: "userRemovedFromChat", userRemovedFromChat: { chatId } },
+  })
+  // The first access change is free to run. The next is behind the held chat,
+  // and the third must wait for the second's user cursor. Its chat waits too.
+  await emit(t, [message(10n, 2), access(20n, 2), access(10n, 3), access(20n, 4), message(20n, 2), message(30n, 2)])
+  await flush()
+  expect(completed).toEqual(["chat.access.removed:20", "message.new:30"])
+  expect(c.exportState()).toMatchObject({ lastUserSeq: 2, lastSeqByChatId: { "10": 1, "20": 1, "30": 2 } })
+  release()
+  await flush()
+  expect(completed.slice(2)).toEqual(["message.new:10", "chat.access.removed:10", "chat.access.removed:20", "message.new:20"])
+  expect(c.exportState()).toMatchObject({ lastUserSeq: 4, lastSeqByChatId: { "10": 2, "20": 2, "30": 2 } })
+  await c.close()
+  await consuming
+})
+
 it("closing during a held handler neither commits it nor revives recovery", async () => {
   const { c, t } = await setup()
   let release!: () => void

@@ -544,7 +544,11 @@ export class InlineSdkClient {
   consumeEvents(handler: (event: InlineInboundEvent) => Promise<void>, options?: { concurrency?: number }): Promise<void> {
     return this.eventStream.consume(handler, (event) => {
       const bucket = this.bucketForEvent(event)
-      if (bucket?.kind === "user") return null
+      if (bucket?.kind === "user") {
+        // Keep the shared cursor ordered and serialize with the affected chat.
+        // Account-wide events still fence every handler.
+        return "chatId" in event && typeof event.chatId === "bigint" ? ["user", `chat:${event.chatId}`] : null
+      }
       if (bucket) return this.updateBucketKey(bucket)
       return "chatId" in event && typeof event.chatId === "bigint" ? `chat:${event.chatId}` : null
     }, options?.concurrency).catch(async (error: unknown) => {
