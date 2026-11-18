@@ -550,7 +550,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         let resized = abs(slot.height - placement.height) > 0.01 || abs(slot.width - width) > 0.01
         place(slot, y: y, width: width, height: placement.height)
         if resized || changed.contains(placement.id) {
-          rows.update(placement.id, slot.row, width, animates ? timing : .none)
+          updateRow(placement.id, slot.row, width: width, timing: animates ? timing : .none)
           slot.screen = nil
         }
         if animates, carousel == nil { slot.view.layer.addTrack(timing, keyPath: "position.y", from: moved) }
@@ -1423,6 +1423,18 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     } else {
       rebakeIfEndsChanged(now: now)
     }
+  }
+
+  /// Asks the host to update a row. This pass places rows with actions off, which also turns off the
+  /// `UIView` animations a row runs inside its update (a reaction popping in, its neighbours sliding, the
+  /// time moving): an animated update gets actions back for that call, as a row updated outside the list
+  /// has them, so its contents move with it instead of jumping while its height animates.
+  private func updateRow(_ id: ID, _ row: UIView, width: CGFloat, timing: TimelineTiming) {
+    guard timing != .none else { return rows.update(id, row, width, timing) }
+    CATransaction.begin()
+    CATransaction.setDisableActions(false)
+    rows.update(id, row, width, timing)
+    CATransaction.commit()
   }
 
   /// Rows that loaded during the fling can bring an end into reach, or take one away. The rest of
