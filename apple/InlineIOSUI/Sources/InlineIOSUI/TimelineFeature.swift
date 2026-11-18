@@ -4,12 +4,14 @@ import Foundation
 @_exported import TimelineUIKit
 #endif
 
-/// The new iOS message list (`InlineTimeline`), behind a switch read when a chat is built.
+/// The iOS message list (`InlineTimeline`), read when a chat is built. It is the default; builds that show
+/// developer tools keep a switch to go back to the collection view list.
 public enum TimelineFeature {
   public static let preferenceKey = "experimental.iosTimeline"
 
-  /// Off unless the build shows developer tools and the switch is on.
+  /// On, unless the build shows developer tools and its switch was turned off.
   public static func isEnabled(defaults: UserDefaults = .standard, allowsOverride: Bool) -> Bool {
-    allowsOverride && defaults.bool(forKey: preferenceKey)
+    guard allowsOverride else { return true }
+    return defaults.object(forKey: preferenceKey) as? Bool ?? true
   }
 }
