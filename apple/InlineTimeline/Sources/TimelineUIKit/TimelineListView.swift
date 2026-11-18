@@ -275,6 +275,25 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// A pin as last applied. Its lift is a function of the scroll position, so this keeps the two
   /// numbers that function needs, taken with the content at its layer's model value (the end of a
   /// running flight), and the flight its path was baked for.
+  /// Rows new to the data that take over a pin shown on screen, from this change: the old pin's centre on
+  /// screen (in this view) and how far the row starts from its place.
+  private var avatarArrivals: [ID: (from: CGFloat, offset: CGFloat)] = [:]
+
+  /// The centre on screen (in this view) of each pin shown now, by the span it belongs to.
+  private func shownPins() -> [ID: CGFloat] {
+    var shown: [ID: CGFloat] = [:]
+    let me = layer.presentation() ?? layer
+    for (id, slot) in slots {
+      guard let pinned = slot.pin, !pinned.view.isHidden, pinned.view.window != nil,
+            let pin = rows.pin(id, slot.row), pin.view === pinned.view else { continue }
+      let presented = pinned.view.layer.presentation() ?? pinned.view.layer
+      let frame = presented.convert(presented.bounds, to: me)
+      guard frame.maxY > 0, frame.minY < bounds.height else { continue }
+      shown[pin.spanStart] = frame.midY
+    }
+    return shown
+  }
+
   private struct PinState {
     let view: UIView
     /// How far the pin's resting bottom is below the visible area's bottom edge.
@@ -522,6 +541,10 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     let animates = timing.isAnimated && window != nil
     // A jump that keeps no placed row: the screen slides out and the destination in next to it.
     let carousel: CGFloat? = animates && change.isDisjoint ? jump.flatMap { carouselTravel(change, towards: $0) } : nil
+    // Where each span's pin (a sender's avatar) is on screen before this change, so one that moves to a row
+    // new to the data (the sender's next message) travels there instead of vanishing and fading in again.
+    let pinsShown = animates && carousel == nil ? shownPins() : [:]
+    avatarArrivals = [:]
     if let carousel { parkScreenForCarousel(travel: carousel, timing: timing) }
 
     // Keep one surviving row's content coordinate, so a scroll moves `content` and nothing else.
@@ -570,9 +593,15 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         // caller (or a system transition running a layout pass) happens to be in.
         UIView.performWithoutAnimation { slot.row.layoutIfNeeded() }
         if animates, carousel == nil {
-          // A row placed for the first time travels with its neighbours; one new to the data fades in.
-          slot.view.layer.addTrack(timing, keyPath: "position.y", from: (change.offsets[placement.id] ?? 0) + originDelta)
-          if change.inserted.contains(placement.id) {
+          // A row placed for the first time travels with its neighbours; one new to the data fades in,
+          // unless it takes over a pin shown on screen: it slides in, and the pin travels from where it was.
+          let offset = change.offsets[placement.id] ?? 0
+          slot.view.layer.addTrack(timing, keyPath: "position.y", from: offset + originDelta)
+          let arriving = change.inserted.contains(placement.id)
+            ? rows.pin(placement.id, slot.row).flatMap { pinsShown[$0.spanStart] } : nil
+          if let arriving {
+            avatarArrivals[placement.id] = (from: arriving, offset: offset)
+          } else if change.inserted.contains(placement.id) {
             slot.view.layer.addTrack(timing, keyPath: "opacity", from: -1)
           }
         }
@@ -713,6 +742,16 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       if slot.pin == nil { slot.view.layer.zPosition = 1 }
       if slot.pin?.lift != next.lift || slot.pin == nil {
         layer.setValue(-next.lift, forKeyPath: "transform.translation.y")
+      }
+      if slot.pin == nil, let arrival = avatarArrivals.removeValue(forKey: placement.id),
+         let track = timing.track(
+           keyPath: "transform.translation.y",
+           // The row starts `offset` from its place on screen; the pin starts where the old one is.
+           from: arrival.from - pin.view.convert(pin.view.bounds, to: self).midY - arrival.offset
+         )
+      {
+        pinTrackCount &+= 1
+        layer.add(track, forKey: "\(Self.pinKey).\(pinTrackCount)")
       }
       slot.pin = next
       if let flight {
