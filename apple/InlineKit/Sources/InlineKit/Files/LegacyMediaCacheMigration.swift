@@ -9,7 +9,7 @@ import Logger
 /// database references (plus native partial downloads, which carry our own suffix) are moved.
 /// Nothing else in the old folders is touched.
 enum LegacyMediaCacheMigration {
-  static let markerName = ".legacy-media-moved-v1"
+  static let markerName = ".legacy-media-moved-v2"
   static let kinds: [FileLocalCacheDirectory] = [.photos, .videos, .documents, .voices]
 
   private static let log = Log.scoped("LegacyMediaCacheMigration")
@@ -22,11 +22,12 @@ enum LegacyMediaCacheMigration {
   }
 
   /// Runs once per media root, synchronously, right after the database opens.
-  static func runIfNeeded(database: AppDatabase) {
+  static func runIfNeeded(
+    database: AppDatabase, legacyRoot: URL = FileHelpers.getApplicationSupportDirectory(),
+    newRoot: URL = FileHelpers.mediaCacheRoot()
+  ) {
     #if os(macOS)
     let fileManager = FileManager.default
-    let legacyRoot = FileHelpers.getApplicationSupportDirectory()
-    let newRoot = FileHelpers.mediaCacheRoot()
     guard legacyRoot.standardizedFileURL != newRoot.standardizedFileURL else { return }
     let marker = newRoot.appendingPathComponent(markerName)
     guard !fileManager.fileExists(atPath: marker.path) else { return }
@@ -37,18 +38,28 @@ enum LegacyMediaCacheMigration {
     if hasLegacyFolders {
       let span = PerformanceTrace.begin("LegacyMediaCacheMigration", category: .launch)
       let referenced: [FileLocalCacheDirectory: Set<String>]
+      let draftsComplete: Bool
       do {
-        referenced = try database.dbWriter.read { db in try referencedLocalPaths(db) }
+        (referenced, draftsComplete) = try database.dbWriter.read { db in
+          var complete = true
+          let names = try MediaCacheSweep.referencedNames(db) { _ in complete = false }
+          return (names, complete)
+        }
       } catch {
         span.end("success=0")
         log.error("Failed to read cached media paths; will retry next launch", error: error)
         return
       }
-      let result = moveReferencedFiles(from: legacyRoot, to: newRoot, referenced: referenced)
+      // The v1 pass has already handled partial downloads in the global folders.
+      let needsPartials = !fileManager.fileExists(atPath: newRoot.appendingPathComponent(".legacy-media-moved-v1").path)
+      let result = moveReferencedFiles(from: legacyRoot, to: newRoot, referenced: referenced, includePartials: needsPartials)
       span.end("moved=\(result.moved) skipped=\(result.skipped) failed=\(result.failed)")
       log.info("Moved legacy media: moved=\(result.moved) skipped=\(result.skipped) failed=\(result.failed)")
       // Leave the marker unwritten so the remaining files move on a later launch.
-      guard result.failed == 0 else { return }
+      guard result.failed == 0, draftsComplete else {
+        log.warning("Media migration incomplete; will retry remaining files next launch")
+        return
+      }
     }
 
     do {
@@ -92,6 +103,7 @@ enum LegacyMediaCacheMigration {
     from legacyRoot: URL,
     to newRoot: URL,
     referenced: [FileLocalCacheDirectory: Set<String>],
+    includePartials: Bool = true,
     fileManager: FileManager = .default
   ) -> Result {
     var result = Result()
@@ -101,7 +113,7 @@ enum LegacyMediaCacheMigration {
       guard fileManager.fileExists(atPath: source.path) else { continue }
 
       var names = referenced[kind] ?? []
-      if kind == .documents || kind == .videos {
+      if includePartials && (kind == .documents || kind == .videos) {
         // Native partial downloads carry our own suffix; moving them keeps their progress.
         let contents = (try? fileManager.contentsOfDirectory(atPath: source.path)) ?? []
         names.formUnion(contents.filter {

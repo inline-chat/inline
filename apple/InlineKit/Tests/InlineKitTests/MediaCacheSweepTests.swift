@@ -50,6 +50,46 @@ struct MediaCacheSweepTests {
     #expect(MediaCacheSweep.runIfDue(database: database, root: root, now: later, folders: folders) == .init())
   }
 
+  #if os(macOS)
+  @Test func v1UpgradeRecoversDraftOnlyVoiceFromLegacyStorage() throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let legacy = root.appendingPathComponent("legacy", isDirectory: true)
+    let scoped = root.appendingPathComponent("scoped", isDirectory: true)
+    let database = AppDatabase.empty()
+    try database.dbWriter.write { db in
+      try saveDraft(db, media: .voice(.with { $0.voiceID = -1; $0.localRelativePath = "draft.m4a" }))
+    }
+    _ = try write(scoped, ".legacy-media-moved-v1", modified: old)
+    _ = try write(folders(in: legacy)[.voices]!, "draft.m4a", modified: old)
+    LegacyMediaCacheMigration.runIfNeeded(database: database, legacyRoot: legacy, newRoot: scoped)
+    let restored = folders(in: scoped)[.voices]!.appendingPathComponent("draft.m4a")
+    #expect(try Data(contentsOf: restored) == Data("data".utf8))
+    #expect(FileManager.default.fileExists(atPath: scoped.appendingPathComponent(LegacyMediaCacheMigration.markerName).path))
+    LegacyMediaCacheMigration.runIfNeeded(database: database, legacyRoot: legacy, newRoot: scoped)
+    #expect(try Data(contentsOf: restored) == Data("data".utf8))
+  }
+
+  @Test func aDamagedDraftDoesNotStrandReadableRecordings() throws {
+    let root = try makeRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let legacy = root.appendingPathComponent("old", isDirectory: true)
+    let scoped = root.appendingPathComponent("current", isDirectory: true)
+    let database = AppDatabase.empty()
+    try database.dbWriter.write { db in
+      try saveDraft(db, media: .voice(.with { $0.localRelativePath = "readable.m4a" }))
+      try db.execute(
+        sql: "INSERT INTO \(Drafts2Row.databaseTableName) (peerKey, text, attachments, updatedAt, revision) VALUES (?, '', ?, 0, 1)",
+        arguments: ["user_6", Data("damaged".utf8)]
+      )
+    }
+    _ = try write(folders(in: legacy)[.voices]!, "readable.m4a", modified: old)
+    LegacyMediaCacheMigration.runIfNeeded(database: database, legacyRoot: legacy, newRoot: scoped)
+    #expect(try Data(contentsOf: folders(in: scoped)[.voices]!.appendingPathComponent("readable.m4a")) == Data("data".utf8))
+    #expect(!FileManager.default.fileExists(atPath: scoped.appendingPathComponent(LegacyMediaCacheMigration.markerName).path))
+  }
+  #endif
+
   @Test func aDraftThatCannotBeReadStopsTheSweep() throws {
     let root = try makeRoot()
     defer { try? FileManager.default.removeItem(at: root) }

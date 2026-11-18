@@ -73,7 +73,9 @@ enum MediaCacheSweep {
   }
 
   /// Every cache name the database or a draft refers to, by folder.
-  static func referencedNames(_ db: Database) throws -> [FileLocalCacheDirectory: Set<String>] {
+  static func referencedNames(
+    _ db: Database, onUnreadableDraft: (Error) throws -> Void = { throw $0 }
+  ) throws -> [FileLocalCacheDirectory: Set<String>] {
     var names = try LegacyMediaCacheMigration.referencedLocalPaths(db)
     // Never set today, and resolved elsewhere; kept in every folder to be safe.
     let files = try String.fetchAll(db, sql: "SELECT localPath FROM \(File.databaseTableName) WHERE localPath IS NOT NULL AND localPath != ''")
@@ -83,9 +85,13 @@ enum MediaCacheSweep {
       db, sql: "SELECT attachments FROM \(Drafts2Row.databaseTableName) WHERE attachments IS NOT NULL"
     )
     for blob in blobs {
-      // A draft that cannot be read might hold any file: throw, so nothing is removed.
-      for attachment in try JSONDecoder().decode(Drafts2AttachmentBlob.self, from: blob).attachments {
-        insert(attachment.media, into: &names)
+      do {
+        for attachment in try JSONDecoder().decode(Drafts2AttachmentBlob.self, from: blob).attachments {
+          insert(attachment.media, into: &names)
+        }
+      } catch {
+        // Deletion must stop. Migration can still recover every readable attachment.
+        try onUnreadableDraft(error)
       }
     }
     return names
