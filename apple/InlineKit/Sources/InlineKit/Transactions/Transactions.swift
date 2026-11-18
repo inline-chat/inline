@@ -184,6 +184,10 @@ public class Transactions: @unchecked Sendable {
           )
         }
       } catch {
+        // A resumed send owns no optimistic state of its own: its row belongs to the run that is
+        // still in the cache (a Retry tapped while the failed run is leaving). Rolling back would
+        // delete that row; the caller puts it back to failed instead.
+        guard runOptimistic else { return }
         let submissionId = UUID()
         let task = Task { [weak self] in
           await transaction.transaction.rollback()
@@ -447,10 +451,14 @@ public protocol Transaction: Codable, Sendable, Identifiable {
 
   /// Set for a message send with attachments, so background time can follow it.
   var pendingMediaSend: PendingMediaSend? { get }
+
+  /// Message sends run in their own lane of the runner, apart from other mutations.
+  var runsInSendLane: Bool { get }
 }
 
 extension Transaction {
   public var pendingMediaSend: PendingMediaSend? { nil }
+  public var runsInSendLane: Bool { false }
   public func retryLimit(for error: Error) -> Int { config.maxRetries }
   public func waitsForConnection(after error: Error) -> Bool { false }
   public func retryDelay(afterAttempt attempt: Int, error: Error) -> TimeInterval { config.retryDelay }

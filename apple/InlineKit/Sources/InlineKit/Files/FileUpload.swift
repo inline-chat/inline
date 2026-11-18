@@ -260,6 +260,12 @@ public actor FileUploader {
 
   // MARK: - Progress Tracking
 
+  /// A send joining an upload already running must not reset its progress to processing.
+  private func publishProcessingUnlessRunning(uploadId: String) {
+    guard uploadTasks[uploadId] == nil else { return }
+    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+  }
+
   private func updateProgress(uploadId: String, token: UUID, progress: UploadProgressSnapshot) {
     guard uploadTasks[uploadId] != nil, activeUploadTokens[uploadId] == token else { return }
     publishProgress(uploadId: uploadId, progress: progress)
@@ -432,7 +438,7 @@ public actor FileUploader {
     guard let localPhotoId = photoInfo.photo.id else { throw FileUploadError.invalidPhotoId }
     let uploadId = getUploadId(photoId: localPhotoId)
 
-    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    publishProcessingUnlessRunning(uploadId: uploadId)
 
     try await startUpload(
       media: .photo(photoInfo),
@@ -477,7 +483,7 @@ public actor FileUploader {
     }
 
     let uploadId = getUploadId(videoId: localVideoId)
-    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    publishProcessingUnlessRunning(uploadId: uploadId)
 
     let thumbnailPayload = try? thumbnailData(from: resolvedVideoInfo.thumbnail)
     let videoMetadata = ApiClient.VideoUploadMetadata(
@@ -550,7 +556,7 @@ public actor FileUploader {
     )
 
     let uploadId = getUploadId(voiceId: localVoiceId)
-    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    publishProcessingUnlessRunning(uploadId: uploadId)
 
     try await startUpload(
       media: .voice(voiceContent),
@@ -672,8 +678,13 @@ public actor FileUploader {
     case .photo:
       publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
       // A retry or resume reuses the body staged by the first attempt, so compressing again
-      // would only burn CPU and battery on output that is thrown away.
-      if await FileNativeUploadStagingStore.shared.hasStagedBody(logicalID: uploadId) {
+      // would only burn CPU and battery on output that is thrown away. The staging key is
+      // owner-scoped like the coordinator's, and the upload reads the staged (compressed) body,
+      // so its size checks measure what is sent, not the original.
+      if let owner = Auth.shared.getCurrentUserId(),
+         let staged = await FileNativeUploadStagingStore.shared.stagedBody(logicalID: "\(owner):\(uploadId)")
+      {
+        uploadUrl = staged
         break
       }
       do {
@@ -1410,10 +1421,10 @@ public actor FileUploader {
       try Task.checkCancellation()
       return result
     } else {
-      // not found
-      Log.shared.warning("[FileUploader] Upload not found for \(uploadId)")
-      throw FileUploadError.failedToUpload
-      // return UploadResult(photoId: nil, videoId: nil, documentId: nil)
+      // Not running and not finished: the attempt this send joined ended (failed or was
+      // cancelled) between joining and waiting. The send retries and starts it again.
+      Log.shared.warning("[FileUploader] Upload not running for \(uploadId)")
+      throw FileUploadError.uploadNotRunning
     }
   }
 }
@@ -1434,6 +1445,7 @@ public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProv
   case uploadAlreadyCompleted
   case uploadCancelled
   case uploadTimeout
+  case uploadNotRunning
 
   public var errorDescription: String? {
     switch self {
@@ -1461,6 +1473,8 @@ public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProv
         "The upload was cancelled."
       case .uploadTimeout:
         "The upload timed out."
+      case .uploadNotRunning:
+        "The upload stopped before it finished."
     }
   }
 
@@ -1481,6 +1495,7 @@ public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProv
     case .uploadAlreadyCompleted: "file_upload:already_completed"
     case .uploadCancelled: "file_upload:cancelled"
     case .uploadTimeout: "file_upload:timeout"
+    case .uploadNotRunning: "file_upload:not_running"
     }
   }
 }

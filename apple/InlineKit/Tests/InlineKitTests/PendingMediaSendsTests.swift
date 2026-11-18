@@ -30,6 +30,53 @@ struct PendingMediaSendsTests {
     await MediaSendGate.shared.release("\(run)-text")
   }
 
+  @Test func sendsRunInTheirOwnLaneSoOtherWorkCannotHoldThemBack() async throws {
+    let actor = TransactionsActor(waitForConnection: {}, pendingMediaSends: PendingMediaSends())
+    let run = UUID().uuidString
+    let general = (0 ..< 4).map { "\(run)-general-\($0)" }
+    let waiting = "\(run)-general-waits"
+    let sends = (0 ..< 6).map { "\(run)-send-\($0)" }
+    for id in general + [waiting] { await actor.queue(transaction: GatedMediaSend(id: id, hasMedia: false)) }
+    // Sends queued behind a full general lane start at once.
+    for id in sends { await actor.queue(transaction: GatedMediaSend(id: id, inSendLane: true)) }
+    try await waitUntil { await MediaSendGate.shared.startedAll(general + sends) }
+    #expect(await !MediaSendGate.shared.startedAll([waiting]))
+    for id in general + sends { await MediaSendGate.shared.release(id) }
+    try await waitUntil { await MediaSendGate.shared.startedAll([waiting]) }
+    await MediaSendGate.shared.release(waiting)
+  }
+
+  @Test func expiryDeletesMovingSendsWithTheRestOfTheirAlbumAndLeavesWaitingOnes() {
+    let now = ContinuousClock.now
+    func send(_ id: String, album: Int64? = nil) -> PendingMediaSend {
+      PendingMediaSend(transactionId: id, chatId: 1, peerId: .thread(id: 1), temporaryMessageId: -1, media: [], groupedId: album)
+    }
+    let current = [
+      send("moving"), send("waiting"), send("stalled"), send("uploaded"),
+      send("albumMoving", album: 7), send("albumUploaded", album: 7), send("albumWaiting", album: 7),
+      send("otherAlbum", album: 8), send("notInTask"),
+      // Album 9 was released early (another item's upload failed): an uploaded item is on its way.
+      send("releasedMoving", album: 9), send("releasedSending", album: 9),
+    ]
+    let fractions: [String: Double] = [
+      "moving": 0.5, "waiting": 0, "stalled": 0.4, "uploaded": 1,
+      "albumMoving": 0.3, "albumUploaded": 1, "albumWaiting": 0, "otherAlbum": 0, "notInTask": 0.5,
+      "releasedMoving": 0.6, "releasedSending": 1,
+    ]
+    let lastMoved: [String: ContinuousClock.Instant] = [
+      "moving": now - .seconds(2), "stalled": now - .seconds(60), "albumMoving": now - .seconds(1), "notInTask": now,
+      "releasedMoving": now - .seconds(1),
+    ]
+    let held: Set<String> = ["albumMoving", "albumUploaded", "albumWaiting"]
+    let deleted = PendingMediaSends.expiredSendsToDelete(
+      current: current,
+      taskSendIDs: Set(current.map(\.transactionId)).subtracting(["notInTask"]),
+      fractions: fractions, lastMoved: lastMoved, now: now, movingWindow: .seconds(15),
+      isHeldForAlbum: held.contains
+    )
+    #expect(Set(deleted.map(\.transactionId)) == ["moving", "albumMoving", "albumUploaded", "albumWaiting", "releasedMoving"])
+  }
+
   @Test func clearingTheQueueEmptiesTheSet() async throws {
     let sends = PendingMediaSends()
     let actor = TransactionsActor(waitForConnection: {}, pendingMediaSends: sends)
@@ -91,6 +138,9 @@ private struct GatedMediaSend: Transaction {
   var config = TransactionConfig(maxRetries: 0, retryDelay: 0, executionTimeout: 0)
   var fails = false
   var hasMedia = true
+  var inSendLane = false
+
+  var runsInSendLane: Bool { inSendLane }
 
   func execute() async throws {
     try await MediaSendGate.shared.wait(id)
@@ -111,11 +161,14 @@ private struct GatedMediaSend: Transaction {
 private actor MediaSendGate {
   static let shared = MediaSendGate()
   private var released: Set<String> = []
+  private var started: Set<String> = []
 
   func release(_ id: String) { released.insert(id) }
+  func startedAll(_ ids: [String]) -> Bool { started.isSuperset(of: ids) }
 
   /// Polls so a cancelled send stops waiting.
   func wait(_ id: String) async throws {
+    started.insert(id)
     while !released.contains(id) {
       try await Task.sleep(for: .milliseconds(5))
     }

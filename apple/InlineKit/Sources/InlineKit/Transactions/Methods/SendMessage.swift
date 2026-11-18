@@ -741,15 +741,16 @@ public struct TransactionSendMessage: Transaction {
     Log.shared.error("Failed to send message", error: error)
 
     if !attachments.isEmpty {
-      NotificationCenter.default.post(
-        name: .mediaSendFailed,
-        object: nil,
-        userInfo: [
+      // Observers show a toast (SwiftUI `onReceive` delivers on the posting thread).
+      let chatId = chatId, temporaryMessageId = temporaryMessageId
+      let description = mediaSendFailureDescription(error: error)
+      await MainActor.run {
+        NotificationCenter.default.post(name: .mediaSendFailed, object: nil, userInfo: [
           "chatId": chatId,
           "temporaryMessageId": temporaryMessageId,
-          "message": mediaSendFailureDescription(error: error),
-        ]
-      )
+          "message": description,
+        ])
+      }
     }
 
     guard let currentUserId = Auth.getCurrentUserId() else {

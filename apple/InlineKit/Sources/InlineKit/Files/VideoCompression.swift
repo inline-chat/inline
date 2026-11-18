@@ -41,9 +41,48 @@ public actor VideoCompressor {
   public static let shared = VideoCompressor()
   private let log = Log.scoped("VideoCompressor")
 
+  /// Exports at once. An album starts every item's upload together; unbounded, ten exports
+  /// competed for the encoder, each running into its 10-minute deadline (after which the
+  /// original, possibly too large, file is sent). The deadline starts when an export does.
+  static let maximumConcurrentExports = 2
+  private var runningExports = 0
+  private var exportWaiters: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
+
   private init() {}
 
+  private func acquireExportSlot() async throws {
+    if runningExports < Self.maximumConcurrentExports, exportWaiters.isEmpty {
+      runningExports += 1
+      return
+    }
+    let id = UUID()
+    let granted = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard !Task.isCancelled else { return continuation.resume(returning: false) }
+        exportWaiters.append((id, continuation))
+      }
+    } onCancel: {
+      Task { await self.cancelExportWaiter(id) }
+    }
+    guard granted else { throw CancellationError() }
+  }
+
+  private func releaseExportSlot() {
+    if exportWaiters.isEmpty {
+      runningExports -= 1
+    } else {
+      exportWaiters.removeFirst().continuation.resume(returning: true)
+    }
+  }
+
+  private func cancelExportWaiter(_ id: UUID) {
+    guard let index = exportWaiters.firstIndex(where: { $0.id == id }) else { return }
+    exportWaiters.remove(at: index).continuation.resume(returning: false)
+  }
+
   func normalizeToMP4(at sourceURL: URL) async throws -> VideoCompressionResult {
+    try await acquireExportSlot()
+    defer { releaseExportSlot() }
     let box = PreparationAssetBox(AVURLAsset(url: sourceURL))
     return try await TransferPreparation.withDeadline(seconds: 600, cancel: { box.asset.cancelLoading() }) { [self] in
       try await normalizeToMP4Unbounded(at: sourceURL, asset: box.asset)
@@ -104,6 +143,8 @@ public actor VideoCompressor {
   }
 
   public func compressVideo(at sourceURL: URL, options: VideoCompressionOptions) async throws -> VideoCompressionResult {
+    try await acquireExportSlot()
+    defer { releaseExportSlot() }
     let box = PreparationAssetBox(AVURLAsset(url: sourceURL))
     return try await TransferPreparation.withDeadline(seconds: 600, cancel: { box.asset.cancelLoading() }) { [self] in
       try await compressVideoUnbounded(at: sourceURL, asset: box.asset, options: options)

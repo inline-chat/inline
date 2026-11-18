@@ -47,6 +47,7 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
   private let createResponsesLost: Int
   private let finishFailure: UploadFailure?
   private let emptyMissing: Bool
+  private let alwaysMissing: Bool
   private let processingForever: Bool
   private let partDelay: Duration
   private var accepted = false
@@ -62,6 +63,7 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
     createResponsesLost: Int = 0,
     finishFailure: UploadFailure? = nil,
     emptyMissing: Bool = false,
+    alwaysMissing: Bool = false,
     processingForever: Bool = false,
     partDelay: Duration = .zero
   ) {
@@ -71,6 +73,7 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
     self.createResponsesLost = createResponsesLost
     self.finishFailure = finishFailure
     self.emptyMissing = emptyMissing
+    self.alwaysMissing = alwaysMissing
     self.processingForever = processingForever
     self.partDelay = partDelay
   }
@@ -124,6 +127,13 @@ private actor UploadRPCMock: NativeUploadRPCTransport {
       if emptyMissing {
         var finish = FinishUploadResult()
         finish.missing = UploadMissingParts()
+        return .finishUpload(finish)
+      }
+      if alwaysMissing {
+        var missing = UploadMissingParts()
+        missing.partIndices = [0]
+        var finish = FinishUploadResult()
+        finish.missing = missing
         return .finishUpload(finish)
       }
       if let finishFailure {
@@ -613,6 +623,25 @@ struct NativeUploadTests {
     #expect(await transport.inlineData == Data([1, 2, 3]))
     #expect(progress.recordedValues().last == 3)
     #expect(await staging.wasDiscarded())
+  }
+
+  @Test("stops re-sending parts a server keeps reporting missing")
+  func missingPartRoundsAreBounded() async throws {
+    let source = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-always-missing-\(UUID().uuidString)")
+    try Data([1, 2, 3]).write(to: source)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let transport = UploadRPCMock(partFailureMode: .beforeAcceptanceOnce, alwaysMissing: true)
+    let coordinator = DurableUploadCoordinator(
+      transport: transport, staging: PassthroughUploadStaging(), ownerScope: { "test-owner" }
+    )
+    await #expect(throws: NativeMediaUploadError.self) {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:always-missing", fileURL: source, fileName: "photo.jpg", mimeType: "image/jpeg", kind: .photo
+      ), progress: { _, _ in })
+    }
+    let finishes = await transport.calledMethods().filter { $0 == .finishUpload }.count
+    #expect(finishes == DurableUploadCoordinator.maximumMissingPartRounds + 1)
   }
 
   @Test("rejects empty missing-parts result instead of looping finish")
@@ -1604,8 +1633,9 @@ struct NativeUploadTests {
       )
     }
 
+    // Generous: under a full parallel suite, task start-up can take well over a second.
     func waitForStarted(_ count: Int) async throws {
-      for _ in 0 ..< 200 {
+      for _ in 0 ..< 2_000 {
         if await transport.started().count == count { break }
         try await Task.sleep(for: .milliseconds(5))
       }
@@ -1632,12 +1662,14 @@ struct NativeUploadTests {
     #expect(progress.recordedValues() == (0 ... 6).map { Int64($0 * 524_288) })
   }
 
-  @Test("the part window grows under 1 s, halves over 2 s, and stays within its limits")
+  @Test("the part window grows under 5 s, holds to 15 s, halves beyond, and stays within its limits")
   func partWindowRule() {
     #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .milliseconds(300)) == 5)
+    // A long round trip alone keeps growing the window.
+    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .milliseconds(2_500)) == 5)
     #expect(DurableUploadCoordinator.adaptedPartWindow(8, after: .milliseconds(300)) == 8)
-    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .milliseconds(1_500)) == 4)
-    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .seconds(3)) == 2)
-    #expect(DurableUploadCoordinator.adaptedPartWindow(2, after: .seconds(3)) == 2)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .seconds(10)) == 4)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(4, after: .seconds(20)) == 2)
+    #expect(DurableUploadCoordinator.adaptedPartWindow(2, after: .seconds(20)) == 2)
   }
 }

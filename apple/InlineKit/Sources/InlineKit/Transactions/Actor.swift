@@ -10,6 +10,7 @@ actor TransactionsActor {
   private struct ActiveTransaction {
     let transactionId: String
     let task: Task<Void, Never>
+    let inSendLane: Bool
   }
 
   private struct CancelMarker {
@@ -25,6 +26,12 @@ actor TransactionsActor {
   private var currentTask: Task<Void, Never>?
   private var activeTransactions: [UUID: ActiveTransaction] = [:]
   private let maxConcurrentTransactions = 4
+  /// Message sends run in their own lane. A media send holds its slot through its upload and,
+  /// in an album, until every item's upload settles; sharing the 4 general slots let one chat's
+  /// album hold back a photo sent to another chat. Bytes in flight are bounded by the upload part
+  /// window and video exports by the compressor, so this cap only bounds waiting tasks. Sends of
+  /// one chat still go out in admission order (`OutgoingSendOrder`): the lane is FIFO.
+  static let maxConcurrentSends = 24
   private let maxCancelMarkers = 4_096
 
   private let workSignals: AsyncStream<Void>
@@ -270,29 +277,39 @@ actor TransactionsActor {
 
   // MARK: - Private Methods
 
-  private func dequeue() -> (any Transaction)? {
-    guard !queue.isEmpty else { return nil }
-    return queue.removeFirst()
-  }
-
+  /// Starts queued transactions in admission order while their lane has room. A full lane never
+  /// holds back the other one, and each lane stays in admission order.
   private func fillAvailableSlots() {
     guard isRunning, !isClearing else { return }
-    while activeTransactions.count < maxConcurrentTransactions,
-          let transaction = dequeue() {
-      startTransaction(transaction)
+    var running = activeTransactions.values.reduce(into: (general: 0, sends: 0)) {
+      if $1.inSendLane { $0.sends += 1 } else { $0.general += 1 }
+    }
+    var index = 0
+    while index < queue.count {
+      let inSendLane = queue[index].runsInSendLane
+      let hasRoom = inSendLane
+        ? running.sends < Self.maxConcurrentSends
+        : running.general < maxConcurrentTransactions
+      guard hasRoom else {
+        index += 1
+        continue
+      }
+      if inSendLane { running.sends += 1 } else { running.general += 1 }
+      startTransaction(queue.remove(at: index))
     }
   }
 
   private func startTransaction(_ transaction: consuming any Transaction) {
     let token = UUID()
     let transactionId = transaction.id
+    let inSendLane = transaction.runsInSendLane
     let transactionForTask = consume transaction
     let task = Task { [weak self] in
       guard let self else { return }
       await self.run(transaction: transactionForTask)
       await self.transactionDidFinish(token: token)
     }
-    activeTransactions[token] = ActiveTransaction(transactionId: transactionId, task: task)
+    activeTransactions[token] = ActiveTransaction(transactionId: transactionId, task: task, inSendLane: inSendLane)
   }
 
   private func transactionDidFinish(token: UUID) {

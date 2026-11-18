@@ -221,10 +221,10 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     self.copyRequiresFullAllocation = copyRequiresFullAllocation
   }
 
-  /// True when an earlier attempt already staged this upload's body, which `stage` reuses.
-  public func hasStagedBody(logicalID: String) -> Bool {
+  /// The body an earlier attempt already staged for this upload, which `stage` reuses.
+  public func stagedBody(logicalID: String) -> URL? {
     let body = root.appendingPathComponent("\(Self.fileName(for: logicalID)).body")
-    return FileManager.default.fileExists(atPath: body.path)
+    return FileManager.default.fileExists(atPath: body.path) ? body : nil
   }
 
   public func stage(logicalID: String, sourceURL: URL) throws -> URL {
@@ -601,9 +601,11 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static let hashReadSize = 1_048_576
   private static let partSize = 524_288
   private static let maximumPartCount: UInt32 = 1_000
-  /// Parts in flight across every upload adapt to per-part latency, like downloads: grow by one
-  /// under 1 s, halve over 2 s or after a failed attempt. A fixed 2-3 parts capped a
-  /// high-latency link at 1-2 MB/s.
+  /// Parts in flight across every upload adapt to how long a part takes: grow by one when a part
+  /// is accepted within 5 s, halve over 15 s or after a failed attempt. A long round trip alone
+  /// is not congestion (a far server needs more parts in flight, not fewer); a part that takes
+  /// many seconds means the link is shared too thinly and later parts risk their timeouts.
+  /// Telegram runs 3 parallel parts per file, 30 with its boosted setting.
   static let partWindowLimits = 2 ... 8
   static let initialPartWindow = 4
   private static let maximumPartAttempts = 2
@@ -803,6 +805,7 @@ public actor DurableUploadCoordinator: MediaUploading {
       progress(durableAcceptedBytes, byteCount)
 
       var finishReconciliationAttempts = 0
+      var missingPartRounds = 0
       let processingClock = ContinuousClock()
       var processingDeadline: ContinuousClock.Instant?
       do {
@@ -951,6 +954,10 @@ public actor DurableUploadCoordinator: MediaUploading {
             guard !missing.partIndices.isEmpty,
                   missing.partIndices.allSatisfy({ $0 < created.partCount }) else {
               throw NativeMediaUploadError.invalidGeometry
+            }
+            missingPartRounds += 1
+            guard missingPartRounds <= Self.maximumMissingPartRounds else {
+              throw NativeMediaUploadError.unexpectedResponse
             }
             accepted.subtract(missing.partIndices)
           case let .processing(processing):
@@ -1317,10 +1324,15 @@ public actor DurableUploadCoordinator: MediaUploading {
   }
 
   static func adaptedPartWindow(_ window: Int, after latency: Duration) -> Int {
-    if latency < .seconds(1) { return min(window + 1, partWindowLimits.upperBound) }
-    if latency > .seconds(2) { return max(window / 2, partWindowLimits.lowerBound) }
+    if latency < .seconds(5) { return min(window + 1, partWindowLimits.upperBound) }
+    if latency > .seconds(15) { return max(window / 2, partWindowLimits.lowerBound) }
     return window
   }
+
+  /// Rounds of re-sending parts the server reports missing at finish before the attempt fails
+  /// (and the send retries with a fresh state probe), so a server that keeps losing parts can't
+  /// hold a send forever.
+  static let maximumMissingPartRounds = 3
 
   private func cancelPartTransferWaiter(_ id: UUID) {
     guard let index = partTransferWaiters.firstIndex(where: { $0.id == id }) else {

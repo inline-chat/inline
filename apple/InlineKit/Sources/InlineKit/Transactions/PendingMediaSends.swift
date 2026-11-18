@@ -11,6 +11,8 @@ public struct PendingMediaSend: Sendable {
   public let peerId: Peer
   public let temporaryMessageId: Int64
   public let media: [FileMediaItem]
+  /// Set when the send is one item of an album.
+  public var groupedId: Int64? = nil
 }
 
 /// The media sends this process is working on, from admission until they succeed, fail or are
@@ -71,9 +73,15 @@ extension TransactionSendMessage {
       chatId: chatId,
       peerId: peerId,
       temporaryMessageId: temporaryMessageId,
-      media: attachments.map(\.media)
+      media: attachments.map(\.media),
+      groupedId: groupedId
     )
   }
+
+  /// Media sends only. A text send keeps its execution timeout, which would run while it waits
+  /// its turn behind the chat's uploads, so it stays in the general lane, where it starts only
+  /// when a slot frees up (as before). Each lane is FIFO, so cross-lane turns cannot deadlock.
+  public var runsInSendLane: Bool { !attachments.isEmpty }
 }
 
 public extension PendingMediaSends {
@@ -108,6 +116,55 @@ public extension PendingMediaSends {
     }
     for send in deleted {
       MessagesPublisher.shared.messagesDeleted(messageIds: [send.temporaryMessageId], peer: send.peerId)
+    }
+  }
+}
+
+public extension PendingMediaSends {
+  /// The sends to give up on when the system ends background time early (Mo, 2026-11-15, as
+  /// Telegram does): those whose upload was moving within `movingWindow`. A send that never
+  /// started or stalled (waiting for the network) stays queued, and one whose upload finished is
+  /// already being sent. An album goes or stays whole: if any item goes, every unsent item of it
+  /// goes too, so recipients never get half an album.
+  static func expiredSendsToDelete(
+    current: [PendingMediaSend],
+    taskSendIDs: Set<String>,
+    fractions: [String: Double],
+    lastMoved: [String: ContinuousClock.Instant],
+    now: ContinuousClock.Instant,
+    movingWindow: Duration
+  ) -> [PendingMediaSend] {
+    expiredSendsToDelete(
+      current: current, taskSendIDs: taskSendIDs, fractions: fractions, lastMoved: lastMoved,
+      now: now, movingWindow: movingWindow,
+      isHeldForAlbum: { AlbumSendBarrier.shared.isRegistered(transactionId: $0) }
+    )
+  }
+
+  /// `isHeldForAlbum`: the item still waits for its album's uploads, so it has not been sent.
+  internal static func expiredSendsToDelete(
+    current: [PendingMediaSend],
+    taskSendIDs: Set<String>,
+    fractions: [String: Double],
+    lastMoved: [String: ContinuousClock.Instant],
+    now: ContinuousClock.Instant,
+    movingWindow: Duration,
+    isHeldForAlbum: (String) -> Bool
+  ) -> [PendingMediaSend] {
+    let moving = Set(current.compactMap { send -> String? in
+      let id = send.transactionId
+      guard taskSendIDs.contains(id), let fraction = fractions[id], fraction > 0, fraction < 1,
+            let moved = lastMoved[id], now - moved < movingWindow else { return nil }
+      return id
+    })
+    let albums = Set(current.filter { moving.contains($0.transactionId) }.compactMap(\.groupedId))
+    return current.filter { send in
+      let id = send.transactionId
+      if moving.contains(id) { return true }
+      guard let album = send.groupedId, albums.contains(album) else { return false }
+      // A sibling whose upload finished and that the album no longer holds is already on its way
+      // to the server (the album was released, e.g. by another item's failed upload): leave it.
+      return (fractions[id] ?? 0) < 1 || isHeldForAlbum(id)
     }
   }
 }
