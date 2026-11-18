@@ -203,6 +203,45 @@ it("chat access waits for its chat and user cursor while unrelated messages keep
   await consuming
 })
 
+it("delivers an independent message while a recovered chat-access grant waits on a held chat", async () => {
+  const { c, t } = await setup({ lastUserSeq: 1 })
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const completed: string[] = []
+  const consuming = c.consumeEvents(async (event) => {
+    if (!("chatId" in event)) return
+    if (event.kind === "message.new" && event.chatId === 10n) await held
+    completed.push(`${event.kind}:${event.chatId}`)
+  })
+  try {
+    await emit(t, [message(10n, 2)])
+    await flush()
+    await result(t, updatesRpcs(t)[0]!.id, {
+      oneofKind: "getUpdates",
+      getUpdates: {
+        seq: 2n, date: 100n, final: true, resultType: GetUpdatesResult_ResultType.SLICE,
+        updates: [Update.create({ seq: 2, date: 100n, update: {
+          oneofKind: "userAddedToChat", userAddedToChat: { chatId: 10n },
+        } })],
+        skippedSequences: [],
+      },
+    })
+    await flush()
+    await emit(t, [message(20n, 2)])
+    await flush()
+    expect(completed).toEqual(["message.new:20"])
+    expect(c.exportState()).toMatchObject({ lastUserSeq: 1, lastSeqByChatId: { "10": 1, "20": 2 } })
+    release()
+    await flush()
+    expect(completed).toEqual(["message.new:20", "message.new:10", "chat.access.added:10"])
+    expect(c.exportState()).toMatchObject({ lastUserSeq: 2, lastSeqByChatId: { "10": 2, "20": 2 } })
+  } finally {
+    release()
+    await c.close()
+    await consuming
+  }
+})
+
 it("closing during a held handler neither commits it nor revives recovery", async () => {
   const { c, t } = await setup()
   let release!: () => void
