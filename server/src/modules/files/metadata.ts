@@ -179,11 +179,18 @@ export const getVideoMetadataAndValidate = async (
 
 const maxDocumentFileSize = MEDIA_UPLOAD_MAX_BYTES.document
 
+export function decodedDocumentName(rawName: string | undefined): string | undefined {
+  const name = decodeFileName(rawName, "document")
+  if (name === "." || name === ".." || name.includes("/") || name.includes("\\") || name.includes("\0")) return undefined
+  return name
+}
+
 export const getDocumentMetadataAndValidate = async (
   file: File,
 ): Promise<{ mimeType: string; fileName: string; extension: string }> => {
   // it contains %20 stuff so we need to decode it
-  let fileName = decodeFileName(file.name, "document")
+  const fileName = decodedDocumentName(file.name)
+  if (!fileName) throw badRequest("Invalid document file name")
 
   let size = file.size
   let mimeType = file.type.trim()

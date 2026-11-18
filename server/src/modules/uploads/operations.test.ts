@@ -185,6 +185,14 @@ describe("native upload operations", () => {
     expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0])
   })
 
+  test("requires a flat document name before reserving an upload", async () => {
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), new MemoryPartStore(), finalizer)
+    await expect(operations.create({
+      clientUploadId: new Uint8Array(16), fileName: "folder%2Fnotes.pdf", mimeType: "application/pdf",
+      byteCount: 1n, sha256: new Uint8Array(32), kind: UploadKind.DOCUMENT, metadata: { oneofKind: undefined },
+    }, context(1, 2))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+  })
+
   test("rejects impossible media sizes before reserving quota or looking up an owner", async () => {
     let ownerLookups = 0
     class Repository extends InlineUploadRepository {

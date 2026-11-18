@@ -16,7 +16,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { createHash } from "node:crypto"
 import { MAX_FILE_SIZE } from "@in/server/config"
-import { MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/metadata"
+import { decodedDocumentName, MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/metadata"
 import {
   INLINE_UPLOAD_MAX_PARTS,
   InlineUploadAdmissionCapacityError,
@@ -96,6 +96,7 @@ const validateCreate = (input: CreateUploadInput): InlineUploadMetadata => {
       !fileName || fileName.length > 255 || fileName.includes("\0") ||
       !mimeType || mimeType.length > 255 || input.byteCount <= 0n ||
       input.byteCount > BigInt(Math.min(MAX_FILE_SIZE, MEDIA_UPLOAD_MAX_BYTES[kind]))) return badRequest()
+  if (kind === "document" && !decodedDocumentName(fileName)) return badRequest()
   const partCount = Number((input.byteCount + BigInt(INLINE_TRANSFER_PART_SIZE - 1)) /
     BigInt(INLINE_TRANSFER_PART_SIZE))
   if (partCount < 1 || partCount > INLINE_UPLOAD_MAX_PARTS) return badRequest()
