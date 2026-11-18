@@ -166,15 +166,41 @@ enum CoreTextMessageText {
   static func layout(_ text: NSAttributedString, isRtl: Bool, width: CGFloat) -> TextLayout {
     installAppKitLineMetrics()
     let width = max(1, ceil(width))
-    let key = LayoutKey(text: MessageText(layoutText(text)), style: style(for: text, isRtl: isRtl))
-    if let entry = layouts.object(forKey: key),
-       entry.layout.size.width <= width + 0.01, width <= entry.width + 0.01
-    {
-      return entry.layout
-    }
+    let key = LayoutKey(text: layoutMessageText(text), style: style(for: text, isRtl: isRtl))
+    let entry = layouts.object(forKey: key)
+    if let fitting = entry?.layout(fitting: width) { return fitting }
     let layout = TextLayouter.layout(key.text, style: key.style, maximumWidth: width, grid: PixelGrid(scale: 2))
-    layouts.setObject(LayoutEntry(layout: layout, width: width), forKey: key, cost: max(1, text.length))
+    // Keep the other widths this text was laid out at: the main chat and a reply pane, or a
+    // reused row asking at a narrower width, otherwise evict each other.
+    layouts.setObject(
+      LayoutEntry(adding: (layout, width), to: entry),
+      forKey: key,
+      cost: max(1, text.length)
+    )
     return layout
+  }
+
+  /// `layoutText(text)` as `MessageText`, remembered per string object. Building it walks and
+  /// copies the whole string, which made even a cache hit cost up to 300 µs on long messages.
+  /// Cached message strings are never mutated after they are made; the length check guards
+  /// against a mutable string that is anyway.
+  private static func layoutMessageText(_ text: NSAttributedString) -> MessageText {
+    let memo = layoutTextMemo.withLock { $0.object(forKey: text) }
+    if let memo, memo.length == text.length { return memo.text }
+    let made = MessageText(layoutText(text))
+    layoutTextMemo.withLock { $0.setObject(LayoutTextMemo(text: made, length: text.length), forKey: text) }
+    return made
+  }
+
+  private static let layoutTextMemo = Mutex(NSMapTable<NSAttributedString, LayoutTextMemo>.weakToStrongObjects())
+
+  private final class LayoutTextMemo: NSObject, @unchecked Sendable {
+    let text: MessageText
+    let length: Int
+    init(text: MessageText, length: Int) {
+      self.text = text
+      self.length = length
+    }
   }
 
   private static let layouts: NSCache<LayoutKey, LayoutEntry> = {
@@ -198,12 +224,17 @@ enum CoreTextMessageText {
     }
   }
 
+  /// A text's layouts at up to three widths, newest first. Each serves any width from its
+  /// widest line up to the width it was made for.
   private final class LayoutEntry: NSObject, @unchecked Sendable {
-    let layout: TextLayout
-    let width: CGFloat
-    init(layout: TextLayout, width: CGFloat) {
-      self.layout = layout
-      self.width = width
+    let layouts: [(layout: TextLayout, width: CGFloat)]
+
+    init(adding new: (TextLayout, CGFloat), to entry: LayoutEntry?) {
+      layouts = Array(([new] + (entry?.layouts ?? [])).prefix(3))
+    }
+
+    func layout(fitting width: CGFloat) -> TextLayout? {
+      layouts.first { $0.layout.size.width <= width + 0.01 && width <= $0.width + 0.01 }?.layout
     }
   }
 
@@ -223,10 +254,18 @@ enum CoreTextMessageText {
 /// one rounded descent above the bottom. Measured against TextKit 2 on macOS 27, glyphs and
 /// color emoji drawn there match its pixels at 1x and 2x.
 enum AppKitLineMetrics {
-  private static let cache = Mutex<[String: FontLineMetrics]>([:])
+  /// Keyed by the font itself (`CFEqual`/`CFHash`): building a name-and-size string per line
+  /// cost more than the lookup.
+  private struct FontKey: Hashable, @unchecked Sendable {
+    let font: CTFont
+    static func == (lhs: FontKey, rhs: FontKey) -> Bool { CFEqual(lhs.font, rhs.font) }
+    func hash(into hasher: inout Hasher) { hasher.combine(CFHash(font)) }
+  }
+
+  private static let cache = Mutex<[FontKey: FontLineMetrics]>([:])
 
   static func metrics(for font: CTFont) -> FontLineMetrics {
-    let key = "\(CTFontCopyPostScriptName(font))|\(CTFontGetSize(font))"
+    let key = FontKey(font: font)
     if let cached = cache.withLock({ $0[key] }) { return cached }
     let height = NSLayoutManager().defaultLineHeight(for: font as NSFont)
     let descent = CTFontGetDescent(font).rounded()

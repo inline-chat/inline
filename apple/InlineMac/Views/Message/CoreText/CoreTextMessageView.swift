@@ -2,6 +2,7 @@ import AppKit
 import CoreText
 import InlineKit
 import InlineMessageLayout
+import Logger
 import TextProcessing
 
 /// Message text drawn by Inline's Core Text renderer instead of `NSTextView`.
@@ -28,7 +29,13 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   /// Code blocks and the rounded backgrounds drawn behind them.
   private var codeBlocks: [CodeBlockBox] = []
 
+  private let backgroundView = CoreTextBackgroundView()
   private let glyphView = CoreTextGlyphView()
+  /// A width change waiting for the next layout pass. A reused row gets the new message's
+  /// width before its text, so laying out right away would typeset the old text for nothing.
+  private var needsLayoutRebuild = false
+  private var linkElements: [CoreTextLinkElement]?
+  private static let log = Log.scoped("CoreTextMessageView")
 
   var onEntityClick: ((NSPoint, NSEvent) -> Bool)?
   var onTextLongPress: ((NSPoint, NSEvent) -> Void)?
@@ -39,7 +46,7 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   var listSelectionRange: NSRange? {
     didSet {
       guard listSelectionRange != oldValue else { return }
-      glyphView.selectionBands = listSelectionRange.map { selectionBands(for: $0) } ?? []
+      backgroundView.selectionBands = listSelectionRange.map { selectionBands(for: $0) } ?? []
     }
   }
 
@@ -51,6 +58,7 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     super.init(frame: frameRect)
     wantsLayer = true
     layerContentsRedrawPolicy = .never
+    addSubview(backgroundView)
     addSubview(glyphView)
     setAccessibilityElement(true)
     setAccessibilityRole(.staticText)
@@ -79,35 +87,61 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     layoutSize: CGSize,
     linkColor: NSColor?
   ) {
-    let unchanged = text.isEqual(to: surfaceText) && isRtl == self.isRtl
-      && layoutSize.width == layoutWidth && linkColor == self.linkColor
-    guard !unchanged else { return }
-    surfaceText = text.copy() as! NSAttributedString
+    // Cached strings come back as the same object; compare contents only when they don't.
+    let sameText = text === surfaceText || text.isEqual(to: surfaceText)
+    let sameStyle = isRtl == self.isRtl && linkColor == self.linkColor
+    guard !(sameText && sameStyle && layoutSize.width == layoutWidth) else { return }
+    if !sameText { surfaceText = text.copy() as! NSAttributedString }
     self.isRtl = isRtl
     self.layoutWidth = layoutSize.width
     self.linkColor = linkColor
-    indexEntities()
+    if !(sameText && sameStyle) {
+      indexEntities()
+      linkElements = nil
+      backgroundView.paint = nil
+      glyphView.paint = CoreTextMessageText.paint(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
+    }
     rebuildLayout()
+    if !sameText { NSAccessibility.post(element: self, notification: .valueChanged) }
+    #if DEBUG
+    checkMeasuredHeight(layoutSize.height)
+    #endif
   }
 
-  /// The text container width changed (the row resized) without new text.
+  /// The text container width changed (the row resized) without new text. The layout follows
+  /// on the next layout pass, unless new text arrives first.
   func setLayoutWidth(_ width: CGFloat) {
     guard width != layoutWidth else { return }
     layoutWidth = width
-    rebuildLayout()
+    needsLayoutRebuild = true
+    needsLayout = true
   }
 
+  /// Lays the current text out at the current width. Paint doesn't depend on width.
   private func rebuildLayout() {
-    glyphView.paint = CoreTextMessageText.paint(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
+    needsLayoutRebuild = false
     textLayout = CoreTextMessageText.layout(surfaceText, isRtl: isRtl, width: layoutWidth)
       .aligned(toWidth: max(1, layoutWidth))
     glyphView.textLayout = textLayout
     codeBlocks = Self.codeBlocks(in: surfaceText, layout: textLayout, width: max(1, layoutWidth))
-    glyphView.codeBlocks = codeBlocks
-    glyphView.selectionBands = listSelectionRange.map { selectionBands(for: $0) } ?? []
+    backgroundView.codeBlocks = codeBlocks
+    backgroundView.paint = glyphView.paint
+    backgroundView.selectionBands = listSelectionRange.map { selectionBands(for: $0) } ?? []
     window?.invalidateCursorRects(for: self)
-    NSAccessibility.post(element: self, notification: .valueChanged)
   }
+
+  #if DEBUG
+  /// The row was sized from `MessageSizeCalculator`'s layout of the same text (its height plus
+  /// one point). A different height here means the two strings reduced to different layout
+  /// text, and the bubble no longer fits what is drawn.
+  private func checkMeasuredHeight(_ boxHeight: CGFloat) {
+    guard boxHeight > 1, surfaceText.length > 0 else { return }
+    let drawn = ceil(textLayout.size.height) + 1
+    if abs(drawn - boxHeight) > 0.5 {
+      Self.log.warning("Core Text layout height \(drawn) differs from the measured box \(boxHeight)")
+    }
+  }
+  #endif
 
   private func indexEntities() {
     let text = surfaceText
@@ -141,11 +175,15 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     guard surfaceText.length > 0 else { return }
     // Colors are painted, so a new appearance doesn't touch the layout.
     glyphView.paint = CoreTextMessageText.paint(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
+    backgroundView.paint = glyphView.paint
   }
 
   override func layout() {
     super.layout()
-    glyphView.frame = bounds.insetBy(dx: -Self.bleed, dy: -Self.bleed)
+    let drawingFrame = bounds.insetBy(dx: -Self.bleed, dy: -Self.bleed)
+    backgroundView.frame = drawingFrame
+    glyphView.frame = drawingFrame
+    if needsLayoutRebuild { rebuildLayout() }
   }
 
   // MARK: Geometry
@@ -468,7 +506,9 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     let anchor = rects.dropFirst().reduce(first) { $0.union($1) }
     let helper = NativeTextMenuHelper.shared
     helper.present(surfaceText.attributedSubstring(from: range), over: anchor, in: self)
-    for item in helper.menu(for: event)?.items ?? [] where item.title.hasPrefix("Look Up") || item.title.hasPrefix("Translate") {
+    // Look Up and Translate both use the Reveal framework's action; titles are localized.
+    let revealAction = NSSelectorFromString("_rvMenuItemAction")
+    for item in helper.menu(for: event)?.items ?? [] where item.action == revealAction {
       let copy = item.copy() as! NSMenuItem
       // Items aimed at the first responder still go to the text they were made for.
       if copy.target == nil { copy.target = helper }
@@ -476,7 +516,11 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     }
     if menu.items.isEmpty, let word = lookUpWord(at: index) {
       let title = (surfaceText.string as NSString).substring(with: word)
-      let item = NSMenuItem(title: "Look Up “\(title)”", action: #selector(lookUpFromMenu(_:)), keyEquivalent: "")
+      let item = NSMenuItem(
+        title: String(localized: "Look Up “\(title)”"),
+        action: #selector(lookUpFromMenu(_:)),
+        keyEquivalent: ""
+      )
       item.target = self
       item.representedObject = index
       menu.addItem(item)
@@ -547,6 +591,43 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     return window.convertToScreen(convert(union, to: nil))
   }
 
+  /// Links and mentions as their own elements, so VoiceOver lists them and can press them.
+  /// A rich message's host keeps the children its message view gave it.
+  override func accessibilityChildren() -> [Any]? {
+    guard surfaceText.length > 0 else { return super.accessibilityChildren() }
+    if linkElements == nil {
+      let string = surfaceText.string as NSString
+      linkElements = entityRanges.compactMap { range in
+        let rects = rects(for: range)
+        guard let first = rects.first else { return nil }
+        let element = CoreTextLinkElement(range: range, owner: self)
+        element.setAccessibilityLabel(string.substring(with: range))
+        element.setAccessibilityFrameInParentSpace(rects.dropFirst().reduce(first) { $0.union($1) })
+        element.setAccessibilityParent(self)
+        return element
+      }
+    }
+    return linkElements
+  }
+
+  /// Presses an entity the way a click on it would.
+  fileprivate func pressEntity(_ range: NSRange) -> Bool {
+    guard let window, let rect = rects(for: range).first else { return false }
+    let point = NSPoint(x: rect.midX, y: rect.midY)
+    guard let event = NSEvent.mouseEvent(
+      with: .leftMouseDown,
+      location: convert(point, to: nil),
+      modifierFlags: [],
+      timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window.windowNumber,
+      context: nil,
+      eventNumber: Int.random(in: 1_000_000 ... Int(Int32.max)),
+      clickCount: 1,
+      pressure: 1
+    ) else { return false }
+    return onEntityClick?(point, event) ?? false
+  }
+
   override func accessibilityRange(for point: NSPoint) -> NSRange {
     guard let window else { return NSRange(location: NSNotFound, length: 0) }
     let local = convert(window.convertPoint(fromScreen: point), from: nil)
@@ -557,21 +638,16 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   }
 }
 
-/// Draws a prepared layout. It sits `CoreTextMessageView.bleed` outside its owner on every side
-/// so overhanging ink isn't clipped, and never takes events.
+/// Code block backgrounds and the list's selection, beneath the glyphs, as MessageTextView
+/// draws them. Its own view, so a selection drag repaints these rectangles, not the text.
 @MainActor
-final class CoreTextGlyphView: NSView {
-  var textLayout: TextLayout = .empty {
-    didSet { needsDisplay = true }
-  }
-
-  /// Colors and decorations for the layout's text (`CoreTextMessageText.paint`).
-  var paint = NSAttributedString() {
-    didSet { needsDisplay = true }
-  }
-
+final class CoreTextBackgroundView: NSView {
   var codeBlocks: [CodeBlockBox] = [] {
     didSet { if codeBlocks != oldValue { needsDisplay = true } }
+  }
+
+  var paint: NSAttributedString? {
+    didSet { if paint !== oldValue { needsDisplay = true } }
   }
 
   /// List selection, in the owner's coordinates.
@@ -597,19 +673,17 @@ final class CoreTextGlyphView: NSView {
   override func hitTest(_: NSPoint) -> NSView? { nil }
 
   override func draw(_ dirtyRect: NSRect) {
-    guard let context = NSGraphicsContext.current?.cgContext else { return }
+    guard !codeBlocks.isEmpty || !selectionBands.isEmpty,
+          let context = NSGraphicsContext.current?.cgContext else { return }
     let bleed = CoreTextMessageView.bleed
-    context.saveGState()
     context.translateBy(x: bleed, y: bleed)
     let rect = dirtyRect.offsetBy(dx: -bleed, dy: -bleed)
-
-    // Code block backgrounds, then the selection, then text, as MessageTextView draws them.
     let box = bounds.insetBy(dx: bleed, dy: bleed).offsetBy(dx: -bleed, dy: -bleed)
     for block in codeBlocks where block.rect.intersects(rect) {
       let blockRect = block.rect.intersection(box)
       guard !blockRect.isNull else { continue }
-      let value = paint.length > block.range.location
-        ? paint.attribute(CoreTextMessageText.codeBlockColorKey, at: block.range.location, effectiveRange: nil)
+      let value = (paint?.length ?? 0) > block.range.location
+        ? paint?.attribute(CoreTextMessageText.codeBlockColorKey, at: block.range.location, effectiveRange: nil)
         : nil
       let color: CGColor = value != nil ? (value as! CGColor) : NSColor.labelColor.withAlphaComponent(0.08).cgColor
       context.setFillColor(color)
@@ -621,13 +695,98 @@ final class CoreTextGlyphView: NSView {
       ))
       context.fillPath()
     }
-
     if !selectionBands.isEmpty {
       context.setFillColor(NSColor.selectedTextBackgroundColor.cgColor)
       for band in selectionBands where band.intersects(rect) {
         context.fill(band)
       }
     }
+  }
+}
+
+/// Draws a prepared layout: highlights, decorations and glyphs. It sits
+/// `CoreTextMessageView.bleed` outside its owner on every side so overhanging ink isn't clipped,
+/// and never takes events.
+@MainActor
+final class CoreTextGlyphView: NSView {
+  var textLayout: TextLayout = .empty {
+    didSet {
+      inkGapCache.removeAll()
+      needsDisplay = true
+    }
+  }
+
+  /// Colors and decorations for the layout's text (`CoreTextMessageText.paint`).
+  var paint = NSAttributedString() {
+    didSet {
+      colorRuns = Self.colorRuns(in: paint)
+      inkGapCache.removeAll()
+      needsDisplay = true
+    }
+  }
+
+  /// Foreground colors by text range, in order, so drawing doesn't look up each glyph.
+  private var colorRuns: [(range: NSRange, color: CGColor)] = []
+  /// Where underlines skip glyphs, per line and underlined range; glyph outlines are costly.
+  private var inkGapCache: [InkGapKey: [ClosedRange<CGFloat>]] = [:]
+
+  private struct InkGapKey: Hashable {
+    let line: Int
+    let location: Int
+    let length: Int
+  }
+
+  override var isFlipped: Bool { true }
+  override var isOpaque: Bool { false }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
+    setAccessibilityElement(false)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_: NSPoint) -> NSView? { nil }
+
+  private static func colorRuns(in paint: NSAttributedString) -> [(range: NSRange, color: CGColor)] {
+    var runs: [(range: NSRange, color: CGColor)] = []
+    let key = NSAttributedString.Key(kCTForegroundColorAttributeName as String)
+    paint.enumerateAttribute(key, in: NSRange(location: 0, length: paint.length)) { value, range, _ in
+      guard let value else { return }
+      runs.append((range, value as! CGColor))
+    }
+    return runs
+  }
+
+  /// The color of the text at `index`, by binary search over the color runs.
+  private func color(at index: Int, fallback: CGColor) -> CGColor {
+    var low = 0
+    var high = colorRuns.count - 1
+    while low <= high {
+      let middle = (low + high) / 2
+      let range = colorRuns[middle].range
+      if index < range.location {
+        high = middle - 1
+      } else if index >= NSMaxRange(range) {
+        low = middle + 1
+      } else {
+        return colorRuns[middle].color
+      }
+    }
+    return fallback
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    guard let context = NSGraphicsContext.current?.cgContext else { return }
+    let bleed = CoreTextMessageView.bleed
+    context.saveGState()
+    context.translateBy(x: bleed, y: bleed)
+    let rect = dirtyRect.offsetBy(dx: -bleed, dy: -bleed)
 
     let text = paint
     let fullRange = NSRange(location: 0, length: text.length == textLayout.length ? text.length : 0)
@@ -657,14 +816,8 @@ final class CoreTextGlyphView: NSView {
     if fullRange.length > 0 {
       drawDecorations(in: context, text: text, fullRange: fullRange, visible: visible)
     }
-    let foregroundKey = NSAttributedString.Key(kCTForegroundColorAttributeName as String)
     let fallback = NSColor.labelColor.cgColor
-    func color(at index: Int) -> CGColor {
-      guard index >= 0, index < fullRange.length,
-            let value = text.attribute(foregroundKey, at: index, effectiveRange: nil)
-      else { return fallback }
-      return value as! CGColor
-    }
+    let hasPaint = fullRange.length > 0
     for line in textLayout.lines where line.frame.intersects(visible) {
       context.saveGState()
       context.translateBy(x: line.frame.minX, y: line.baseline)
@@ -677,9 +830,9 @@ final class CoreTextGlyphView: NSView {
         var indices = [CFIndex](repeating: 0, count: count)
         CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
         var start = 0
-        var current = color(at: indices[0])
+        var current = hasPaint ? color(at: indices[0], fallback: fallback) : fallback
         for glyph in 1 ... count {
-          let next = glyph < count ? color(at: indices[glyph]) : nil
+          let next = glyph < count ? (hasPaint ? color(at: indices[glyph], fallback: fallback) : fallback) : nil
           guard glyph == count || next != current else { continue }
           context.setFillColor(current)
           context.textPosition = .zero
@@ -718,13 +871,26 @@ final class CoreTextGlyphView: NSView {
         let font = (text.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont) ?? .systemFont(ofSize: 13)
         let thickness = (CTFontGetUnderlineThickness(font) * scale).rounded(.up) / scale
         context.setFillColor(color)
-        for line in textLayout.lines where NSIntersectionRange(line.range, range).length > 0 && line.frame.intersects(visible) {
+        for (lineIndex, line) in textLayout.lines.enumerated()
+          where NSIntersectionRange(line.range, range).length > 0 && line.frame.intersects(visible)
+        {
           let boxes = textLayout.rects(for: NSIntersectionRange(line.range, range))
           guard let first = boxes.first else { continue }
           let span = boxes.dropFirst().reduce(first) { $0.union($1) }
           let top = ((center(font, line.baseline) - thickness / 2) * scale).rounded() / scale
           let band = CGRect(x: span.minX, y: top, width: span.width, height: thickness)
-          let gaps = skipsInk ? inkGaps(in: band, line: line, range: range) : []
+          let gaps: [ClosedRange<CGFloat>]
+          if skipsInk {
+            let key = InkGapKey(line: lineIndex, location: range.location, length: range.length)
+            if let cached = inkGapCache[key] {
+              gaps = cached
+            } else {
+              gaps = inkGaps(in: band, line: line, range: range)
+              inkGapCache[key] = gaps
+            }
+          } else {
+            gaps = []
+          }
           var x = band.minX
           for gap in gaps.sorted(by: { $0.lowerBound < $1.lowerBound }) + [band.maxX ... band.maxX] {
             let left = snap(x), right = snap(min(gap.lowerBound, band.maxX))
@@ -792,6 +958,8 @@ final class NativeTextMenuHelper: NSTextView {
     helper.textContainerInset = .zero
     helper.textContainer?.lineFragmentPadding = 0
     helper.alphaValue = 0.01
+    // Invisible, and not part of the message's text for VoiceOver.
+    helper.setAccessibilityElement(false)
     return helper
   }()
 
@@ -810,4 +978,23 @@ final class NativeTextMenuHelper: NSTextView {
   override func hitTest(_: NSPoint) -> NSView? { nil }
   override func draw(_: NSRect) {}
   override var acceptsFirstResponder: Bool { false }
+}
+
+/// A link or mention inside a Core Text message, for accessibility.
+@MainActor
+final class CoreTextLinkElement: NSAccessibilityElement {
+  let range: NSRange
+  private weak var owner: CoreTextMessageView?
+
+  init(range: NSRange, owner: CoreTextMessageView) {
+    self.range = range
+    self.owner = owner
+    super.init()
+    setAccessibilityRole(.link)
+    setAccessibilityElement(true)
+  }
+
+  override func accessibilityPerformPress() -> Bool {
+    owner?.pressEntity(range) ?? false
+  }
 }

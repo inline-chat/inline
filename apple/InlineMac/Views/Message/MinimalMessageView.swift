@@ -909,6 +909,7 @@ class MinimalMessageViewAppKit: NSView {
     clearTextViewConstraints()
     usesCoreText = coreText
     needsUpdateConstraints = true
+    setupBoundsChangeObserver()
   }
 
   private lazy var nativeTextView: NSTextView = {
@@ -3423,7 +3424,8 @@ class MinimalMessageViewAppKit: NSView {
 
     // Experimental in build 66
     // Adjust viewport instead of layouting
-    if superview != nil, window != nil, let clipView = enclosingScrollView?.contentView {
+    // Only NSTextView needs it: the Core Text view has no viewport to keep laid out.
+    if superview != nil, window != nil, !usesCoreText, let clipView = enclosingScrollView?.contentView {
       // Register for both frame and bounds changes
 //      NotificationCenter.default.addObserver(
 //        self,
