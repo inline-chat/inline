@@ -52,7 +52,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   /// The menu starts closing.
   var onWillDismiss: (() -> Void)?
   /// The row under the menu changed while it was open (a reaction picked from it): the bubble that flew
-  /// back fades out over the row instead of being swapped for it, so the change does not snap in.
+  /// back fades out over the row more slowly, so the change does not snap in.
   var fadesPreviewOnLanding = false
   /// The menu is gone and the source shows again.
   var onDidDismiss: (() -> Void)?
@@ -425,9 +425,12 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
         previewHost.alpha = 0
       }
     } completion: { [self] _ in
-      guard target != nil, fadesPreviewOnLanding else { return finish() }
+      guard target != nil else { return finish() }
+      // The row shows again under the landed bubble, which then fades, before the overlay goes. The menu's
+      // own window leaves the screen ahead of the commit that shows the row, so taking both down in one
+      // turn left a frame with neither: the row blinked as a menu without the keyboard closed.
       source.setHidden(false)
-      UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseOut]) { [self] in
+      UIView.animate(withDuration: fadesPreviewOnLanding ? 0.16 : 0.05, delay: 0, options: [.curveEaseOut]) { [self] in
         previewHost.alpha = 0
       } completion: { _ in
         finish()
