@@ -813,7 +813,8 @@ final class HarnessUITests: XCTestCase {
 
   /// A reply's quote jumps to its original far above; the scroll button brings the reader back to the newest.
   func testReplyJumpAndBack() {
-    launch(["--timeline-harness-focus", "341"])
+    // 352 replies to 347; neither is in one of the fixture's albums (341 is, in the 339-341 album).
+    launch(["--timeline-harness-focus", "352"])
     Thread.sleep(forTimeInterval: 1.5)
     shot("quote-start")
     // A reply's text reads "Reply to <sender>, <quote>, <text>"; its quote sits right above the text.
