@@ -183,5 +183,20 @@ struct AlbumMosaicTests {
       #expect(mosaic.tiles.allSatisfy { $0.frame.width >= 40 && $0.frame.height > 0 }, "\(ratios)")
     }
   }
+
+  @Test("Islands flow like words, shrink to stay in two lines, and never pass the width")
+  func islands() {
+    let wide = AlbumMosaic.Metrics(width: 520, maxHeight: 400)
+    let four = AlbumMosaic.layout(style: .islands, aspectRatios: [1.5, 1, 0.75, 1.5], metrics: wide, grid: grid)
+    #expect(four.rows.count <= 2)
+    #expect(four.size.width <= 520)
+    #expect(four.tileCornerRadius > 0)
+    let ten = AlbumMosaic.layout(style: .islands, aspectRatios: Array(repeating: 1.5, count: 10), metrics: wide, grid: grid)
+    #expect(ten.tiles.count == 10)
+    #expect(ten.tiles.allSatisfy { $0.frame.maxX <= 520.5 && $0.frame.height >= 72 })
+    let two = AlbumMosaic.layout(style: .islands, aspectRatios: [1, 1], metrics: wide, grid: grid)
+    #expect(two.rows == [2])
+    #expect(two.tiles[0].frame.height == 120)
+  }
 }
 

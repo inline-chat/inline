@@ -19,6 +19,9 @@ public enum AlbumLayoutStyle: String, CaseIterable, Sendable {
   case strip
   /// Large cards, one at a time, with the next one peeking; swipe to page.
   case cards
+  /// Separate rounded tiles at their own shapes, flowing into lines like words (the Mac's
+  /// minimal style): as wide as the space allows, in at most two lines while they can shrink.
+  case islands
 
   public var title: String {
     switch self {
@@ -29,6 +32,7 @@ public enum AlbumLayoutStyle: String, CaseIterable, Sendable {
       case .stack: "Stack"
       case .strip: "Strip"
       case .cards: "Cards"
+      case .islands: "Islands"
     }
   }
 }
@@ -48,6 +52,7 @@ public extension AlbumMosaic {
       case .stack: return stack(ratios, metrics: metrics, grid: grid)
       case .strip: return strip(ratios, metrics: metrics, grid: grid)
       case .cards: return cards(ratios.count, metrics: metrics, grid: grid)
+      case .islands: return islands(ratios, metrics: metrics, grid: grid)
     }
   }
 
@@ -197,5 +202,61 @@ public extension AlbumMosaic {
       contentSize: CGSize(width: contentWidth, height: cardHeight),
       scrolling: count > 1 ? .paging(cardWidth + spacing) : .none, tileCornerRadius: 16
     )
+  }
+
+  // MARK: - Islands
+
+  /// Island tiles' heights: the largest that keeps an album in two lines, down to the smallest.
+  static let islandHeights: ClosedRange<CGFloat> = 72 ... 120
+
+  static func islands(_ ratios: [CGFloat], metrics: Metrics, grid: PixelGrid) -> AlbumMosaic {
+    let spacing: CGFloat = 6
+    func width(_ ratio: CGFloat, height: CGFloat) -> CGFloat {
+      min(grid.round(min(max(height * ratio, height * 0.6), height * 1.8)), metrics.width)
+    }
+    /// Items per line, greedily, like words.
+    func lines(height: CGFloat) -> [Int] {
+      var lines: [Int] = []
+      var used: CGFloat = 0
+      for ratio in ratios {
+        let tile = width(ratio, height: height)
+        if let last = lines.indices.last, used + spacing + tile <= metrics.width {
+          lines[last] += 1
+          used += spacing + tile
+        } else {
+          lines.append(1)
+          used = tile
+        }
+      }
+      return lines
+    }
+    var height = islandHeights.upperBound
+    var rows = lines(height: height)
+    while rows.count > 2, height > islandHeights.lowerBound {
+      height = max(islandHeights.lowerBound, height - 8)
+      rows = lines(height: height)
+    }
+    // Past two lines at the smallest height, lines keep coming, but never past `maxHeight`:
+    // the tiles shrink below the floor instead.
+    let total = CGFloat(rows.count) * height + CGFloat(rows.count - 1) * spacing
+    if total > metrics.maxHeight, rows.count > 1 {
+      height = max(24, (metrics.maxHeight - CGFloat(rows.count - 1) * spacing) / CGFloat(rows.count))
+      rows = lines(height: height)
+    }
+    var tiles: [Tile] = []
+    var index = 0
+    var y: CGFloat = 0
+    for count in rows {
+      var x: CGFloat = 0
+      for _ in 0 ..< count {
+        let tileWidth = width(ratios[index], height: height)
+        tiles.append(Tile(frame: CGRect(x: x, y: y, width: tileWidth, height: height), corners: []))
+        x += tileWidth + spacing
+        index += 1
+      }
+      y += height + spacing
+    }
+    let size = CGSize(width: tiles.map(\.frame.maxX).max() ?? 0, height: tiles.map(\.frame.maxY).max() ?? 0)
+    return AlbumMosaic(size: size, tiles: tiles, rows: rows, tileCornerRadius: 8)
   }
 }
