@@ -278,7 +278,7 @@ struct MessageViewContent {
   // MARK: - Pieces
 
   /// The band of the bubble's colour around photos, videos and albums (as Telegram draws media).
-  static let mediaInset: CGFloat = 2
+  static let mediaInset: CGFloat = 1
 
   /// The widest content a bubble in this row can hold inside its padding.
   private static func maximumContentWidth(context: MessageRowContext, outgoing: Bool) -> CGFloat {

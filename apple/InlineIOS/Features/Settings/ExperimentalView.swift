@@ -96,7 +96,8 @@ struct ExperimentalView: View {
             title: "Album Layout"
           ) {
             Picker("Album Layout", selection: $albumLayout) {
-              ForEach(AlbumLayoutStyle.allCases, id: \.rawValue) { style in
+              // Islands are the Mac's minimal style.
+              ForEach(AlbumLayoutStyle.allCases.filter { $0 != .islands }, id: \.rawValue) { style in
                 Text(style.title).tag(style.rawValue)
               }
             }
