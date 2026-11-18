@@ -145,6 +145,31 @@ describe("AcknowledgedAsyncChannel", () => {
 })
 
 describe("Acknowledged concurrent consumption", () => {
+  it("preserves order within the independent pool across a busy global barrier and close", async () => {
+    type Event = { id: number; key: string | null; settings?: boolean }
+    const channel = new AcknowledgedAsyncChannel<Event>(5)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const started: number[] = []
+    const pending = [
+      channel.send({ id: 1, key: null }),
+      channel.send({ id: 2, key: "chat" }),
+      channel.send({ id: 3, key: "chat", settings: true }),
+      channel.send({ id: 4, key: "chat", settings: true }),
+      channel.send({ id: 5, key: "other", settings: true }),
+    ]
+    const consuming = channel.consume(async (event) => {
+      started.push(event.id)
+      if (event.id === 1 || event.id === 3) await held
+    }, (event) => event.key, 1, { accepts: (event) => !!event.settings, concurrency: 2 })
+    expect(await pending[4]).toBe(true)
+    expect(started.sort()).toEqual([1, 3, 5])
+    channel.close()
+    expect(await Promise.all(pending)).toEqual([false, false, false, false, true])
+    release()
+    await consuming
+  })
+
   it("keeps global barriers ordered and counts held receipts against capacity", async () => {
     const channel = new AcknowledgedAsyncChannel<{ key: string | null; id: number }>(4)
     let release!: () => void

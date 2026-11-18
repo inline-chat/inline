@@ -150,6 +150,7 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
     handler: (value: T) => Promise<void>
     key: (value: T) => DeliveryKeys
     concurrency: number
+    independent?: { accepts: (value: T) => boolean; concurrency: number }
     active: Map<AcknowledgedChannelItem<T>, readonly string[] | null>
     resolve: () => void
     reject: (error: Error) => void
@@ -225,18 +226,23 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
   }
 
   /** Process independent keys concurrently without acknowledging queued work.
-   * A null key is a global barrier. Rejection fails the stream, retaining cursors.
+   * Each pool observes its own barriers and keys. Both share the buffer and close lifecycle.
    */
-  consume(handler: (value: T) => Promise<void>, key: (value: T) => DeliveryKeys, concurrency = 8): Promise<void> {
+  consume(
+    handler: (value: T) => Promise<void>,
+    key: (value: T) => DeliveryKeys,
+    concurrency = 8,
+    independent?: { accepts: (value: T) => boolean; concurrency: number },
+  ): Promise<void> {
     if (this.iteratorClaimed)
       return Promise.reject(new ChannelConsumerError("AcknowledgedAsyncChannel supports one consumer"))
-    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    if (![concurrency, independent?.concurrency ?? 1].every((limit) => Number.isSafeInteger(limit) && limit >= 1)) {
       return Promise.reject(new ChannelConsumerError("Consumer concurrency must be a positive safe integer"))
     }
     if (this.closed) return this.failure ? Promise.reject(this.failure) : Promise.resolve()
     this.iteratorClaimed = true
     return new Promise<void>((resolve, reject) => {
-      this.consumption = { handler, key, concurrency, active: new Map(), resolve, reject }
+      this.consumption = { handler, key, concurrency, independent, active: new Map(), resolve, reject }
       this.pumpConsumption()
     })
   }
@@ -245,52 +251,63 @@ export class AcknowledgedAsyncChannel<T> implements AsyncIterable<T> {
     const owner = this.consumption
     if (!owner || this.closed) return
     try {
-      while (owner.active.size < owner.concurrency && this.queue.length > 0) {
-        const reserved = new Set<string>()
-        for (const active of owner.active.values()) {
-          if (active === null) return
-          for (const key of active) reserved.add(key)
-        }
-        let index = -1
-        let keys: readonly string[] | null = null
-        for (let i = 0; i < this.queue.length; i++) {
-          const candidate = this.queue[i]!
-          const candidateKey = owner.key(candidate.value)
-          if (candidateKey === null) {
-            if (i === 0 && owner.active.size === 0) index = i
-            break
-          }
-          const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey
-          if (!candidateKeys.some((key) => reserved.has(key))) {
-            index = i
-            keys = candidateKeys
-            break
-          }
-          // A waiting item reserves all its keys: later work must not pass it
-          // on its free key while it is waiting for the other one.
-          for (const key of candidateKeys) reserved.add(key)
-        }
-        if (index < 0) return
-        const item = this.queue.splice(index, 1)[0]!
-        owner.active.set(item, keys)
-        void Promise.resolve()
-          .then(() => owner.handler(item.value))
-          .then(
-            () => {
-              if (this.consumption !== owner) return
-              owner.active.delete(item)
-              this.bufferedBytes -= item.bytes
-              item.acknowledge(true)
-              this.pumpConsumption()
-            },
-            (error: unknown) => {
-              if (this.consumption === owner)
-                this.fail(error instanceof Error ? error : new Error("Inbound handler failed"))
-            }
-          )
-      }
+      if (owner.independent) this.pumpPool(owner, true, owner.independent.concurrency)
+      this.pumpPool(owner, false, owner.concurrency)
     } catch (error) {
       this.fail(error instanceof Error ? error : new Error("Inbound routing failed"))
+    }
+  }
+
+  private pumpPool(owner: NonNullable<typeof this.consumption>, independent: boolean, limit: number) {
+    const belongs = (item: AcknowledgedChannelItem<T>) => (owner.independent?.accepts(item.value) ?? false) === independent
+    while (this.queue.length > 0) {
+      const reserved = new Set<string>()
+      let running = 0
+      for (const [item, active] of owner.active) {
+        if (!belongs(item)) continue
+        if (++running >= limit) return
+        if (active === null) return
+        for (const key of active) reserved.add(key)
+      }
+      let index = -1
+      let keys: readonly string[] | null = null
+      for (let i = 0; i < this.queue.length; i++) {
+        const candidate = this.queue[i]!
+        if (!belongs(candidate)) continue
+        const candidateKey = owner.key(candidate.value)
+        if (candidateKey === null) {
+          if (running === 0) index = i
+          break
+        }
+        if (!belongs(candidate)) continue
+        const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey
+        if (!candidateKeys.some((key) => reserved.has(key))) {
+          index = i
+          keys = candidateKeys
+          break
+        }
+        // A waiting item reserves all its keys: later work must not pass it
+        // on its free key while it is waiting for the other one.
+        for (const key of candidateKeys) reserved.add(key)
+      }
+      if (index < 0) return
+      const item = this.queue.splice(index, 1)[0]!
+      owner.active.set(item, keys)
+      void Promise.resolve()
+        .then(() => owner.handler(item.value))
+        .then(
+          () => {
+            if (this.consumption !== owner) return
+            owner.active.delete(item)
+            this.bufferedBytes -= item.bytes
+            item.acknowledge(true)
+            this.pumpConsumption()
+          },
+          (error: unknown) => {
+            if (this.consumption === owner)
+              this.fail(error instanceof Error ? error : new Error("Inbound handler failed"))
+          }
+        )
     }
   }
 

@@ -538,10 +538,13 @@ export class InlineSdkClient {
   /** Runs unrelated chat/space handlers concurrently while preserving each bucket's
    * order. Cursors acknowledge handler completion, never queue admission. Events
    * without a bucket act as barriers; this and events() share one consumer.
+   * Set settingsConcurrency to give deadline-bound bot settings reads and mutations
+   * additional handler slots. They remain ordered with each other in each chat.
    * Closing rejects pending receipts without joining arbitrary host work. Hosts
    * should cancel their handlers using their own lifecycle AbortSignal.
    */
-  consumeEvents(handler: (event: InlineInboundEvent) => Promise<void>, options?: { concurrency?: number }): Promise<void> {
+  consumeEvents(handler: (event: InlineInboundEvent) => Promise<void>, options?: { concurrency?: number; settingsConcurrency?: number }): Promise<void> {
+    const settings = options?.settingsConcurrency
     return this.eventStream.consume(handler, (event) => {
       const bucket = this.bucketForEvent(event)
       if (bucket?.kind === "user") {
@@ -551,7 +554,10 @@ export class InlineSdkClient {
       }
       if (bucket) return this.updateBucketKey(bucket)
       return "chatId" in event && typeof event.chatId === "bigint" ? `chat:${event.chatId}` : null
-    }, options?.concurrency).catch(async (error: unknown) => {
+    }, options?.concurrency, settings === undefined ? undefined : {
+      concurrency: settings,
+      accepts: (event) => event.kind === "bot.chatSettings.request" || event.kind === "bot.chatSettings.item.invoke",
+    }).catch(async (error: unknown) => {
       if (!(error instanceof ChannelConsumerError)) await this.close()
       throw error
     })

@@ -242,6 +242,42 @@ it("delivers an independent message while a recovered chat-access grant waits on
   }
 })
 
+it("answers a private settings request while all durable handler slots are busy", async () => {
+  const { c, t } = await setup()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const messages: bigint[] = []
+  const consuming = c.consumeEvents(async (event) => {
+    if (event.kind === "message.new") {
+      messages.push(event.chatId)
+      await held
+    } else if (event.kind === "bot.chatSettings.request") {
+      await c.answerBotChatSettings({ requestId: event.requestId, response: {
+        result: { oneofKind: "document", document: { version: 1, revision: "ready", sections: [] } },
+      } })
+    }
+  }, { concurrency: 2, settingsConcurrency: 2 })
+  try {
+    await emit(t, [message(10n, 2), message(20n, 2)])
+    await flush()
+    expect(messages).toEqual([10n, 20n])
+    await t.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "message", message: {
+      payload: { oneofKind: "bot", bot: { event: { oneofKind: "chatSettingsRequested",
+        chatSettingsRequested: { chatId: 10n, requestId: 123n, actorUserId: 7n, version: 1 },
+      } } },
+    } } }))
+    await flush()
+    const answer = t.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.ANSWER_BOT_CHAT_SETTINGS)
+    expect(answer?.body).toMatchObject({ rpcCall: { input: { answerBotChatSettings: { requestId: 123n } } } })
+    expect(c.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 1 })
+    await result(t, answer!.id, { oneofKind: "answerBotChatSettings", answerBotChatSettings: {} })
+  } finally {
+    release()
+    await c.close()
+    await consuming
+  }
+})
+
 it("closing during a held handler neither commits it nor revives recovery", async () => {
   const { c, t } = await setup()
   let release!: () => void
