@@ -6,6 +6,7 @@ import InlineProtocol
 import Logger
 import SwiftUI
 import QuartzCore
+import RealtimeV2
 
 public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
@@ -659,6 +660,8 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   private static func isCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
+    // A newer history load superseded this fetch; RealtimeV2 treats it the same way.
+    if case .staleHistory = error as? TransactionExecutionError { return true }
     return (error as? URLError)?.code == .cancelled
   }
 }

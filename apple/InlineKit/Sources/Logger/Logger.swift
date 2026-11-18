@@ -232,8 +232,56 @@ struct LogSourceLocation: Sendable {
 }
 
 enum SentryLogPolicy {
+  /// Expected while offline, reconnecting or backgrounded. The caller retries or
+  /// the next sync reconciles, so these stay breadcrumbs instead of issues.
+  /// `transaction:timeout` is left out: it also covers saved user actions that
+  /// expired before sending.
+  static let transientErrorCategories: Set<String> = [
+    "cancelled",
+    "realtime_rpc:not_connected",
+    "realtime_rpc:timeout",
+    "realtime_rpc:commit_outcome_unknown",
+    "realtime_rpc:capacity_exceeded",
+    "transaction:commit_outcome_unknown",
+    "transaction:rejected_before_execution",
+  ]
+
   static func shouldReport(http: HTTPLogMetadata?) -> Bool {
     http?.statusCode != 429
+  }
+
+  static func shouldReport(errorCategory: String?) -> Bool {
+    guard let errorCategory else { return true }
+    return !transientErrorCategories.contains(errorCategory)
+  }
+
+  /// Network failures the device recovers from on its own. Follows
+  /// `NSUnderlyingErrorKey`, since wrappers such as Sparkle's download error
+  /// carry the URL error underneath.
+  static func isTransientNetworkError(_ error: Error) -> Bool {
+    var current: NSError? = error as NSError
+    var depth = 0
+    while let nsError = current, depth < 4 {
+      if nsError.domain == NSURLErrorDomain {
+        switch nsError.code {
+          case NSURLErrorCancelled,
+            NSURLErrorTimedOut,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorSecureConnectionFailed,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorCannotConnectToHost,
+            NSURLErrorCannotFindHost,
+            NSURLErrorDNSLookupFailed,
+            NSURLErrorDataNotAllowed:
+            return true
+          default:
+            return false
+        }
+      }
+      current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+      depth += 1
+    }
+    return false
   }
 
   static func fingerprint(entry: LogEntry, errorCategory: String?, http: HTTPLogMetadata?) -> [String] {
@@ -620,20 +668,7 @@ private actor SentryReporter {
     if error is CancellationError {
       return false
     }
-
-    let nsError = error as NSError
-    guard nsError.domain == NSURLErrorDomain else { return true }
-
-    switch nsError.code {
-      case NSURLErrorCancelled,
-        NSURLErrorTimedOut,
-        NSURLErrorNotConnectedToInternet,
-        NSURLErrorSecureConnectionFailed,
-        NSURLErrorNetworkConnectionLost:
-        return false
-      default:
-        return true
-    }
+    return !SentryLogPolicy.isTransientNetworkError(error)
   }
 
   func addBreadcrumb(_ entry: LogEntry) {
@@ -654,6 +689,10 @@ private actor SentryReporter {
     guard SentrySDK.isEnabled else { return }
     guard SentryLogPolicy.shouldReport(http: http) else { return }
     if let originalError, !shouldReport(originalError) { return }
+    guard SentryLogPolicy.shouldReport(errorCategory: errorCategory) else {
+      addBreadcrumb(entry)
+      return
+    }
 
     // Scope copying and capture are synchronous in sentry-cocoa. Keep that work on
     // this serial reporter actor so an ordinary handled error cannot stall the UI.

@@ -204,8 +204,15 @@ public extension Transaction {
   }
 
   func failed(error: TransactionError) async {
-    Log.scoped(transactionFailureLogScope(method: method))
-      .error("Transaction failed", error: error)
+    let log = Log.scoped(transactionFailureLogScope(method: method))
+    // Ephemeral work is dropped with `.timeout` when it is submitted offline,
+    // the connection drops, or it ages out of the queue. That is its contract,
+    // not a failure worth an issue; durable mutations still report.
+    if case .timeout = error, ephemeralConfig != nil {
+      log.warning("Ephemeral transaction dropped: \(error.privacySafeErrorCategory)")
+      return
+    }
+    log.error("Transaction failed", error: error)
   }
 
   func commitOutcomeUnknown() async {}

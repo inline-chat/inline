@@ -692,7 +692,7 @@ private func normalizedAvatarIdentityValue(_ value: String?) -> String? {
   return trimmed
 }
 
-private enum UserAvatarCacheError: Error {
+enum UserAvatarCacheError: Error {
   case userNotFound(Int64)
   case stalePhoto
 }
