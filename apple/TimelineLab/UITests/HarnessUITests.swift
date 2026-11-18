@@ -1098,4 +1098,45 @@ final class HarnessUITests: XCTestCase {
     shot("reaction-picked")
     stamp("done")
   }
+  /// Catching a fling: held still, held then dragged on (both ways), and a quick tap. Each step is stamped so
+  /// the probe (`--timeline-harness-probe`) and the video can be cut at the touch.
+  func testCatches() {
+    launch()
+    let stamp = { (what: String) in print("[UITEST] \(what) t=\(String(format: "%.3f", Date().timeIntervalSince1970))") }
+    for i in 0 ..< 2 {
+      drag(190, 180, 190, 560, v: 3000)
+      Thread.sleep(forTimeInterval: 0.25)
+      stamp("catch-hold-\(i)")
+      coord(190, 330).press(forDuration: 0.8)
+      Thread.sleep(forTimeInterval: 1)
+    }
+    for (i, toY) in [520.0, 160.0].enumerated() {
+      drag(190, 180, 190, 560, v: 3000)
+      Thread.sleep(forTimeInterval: 0.25)
+      stamp("catch-drag-\(i)")
+      // Down, a pause, then a slow drag on: as a finger that stops the list and keeps scrolling.
+      coord(190, 330).press(forDuration: 0.15, thenDragTo: coord(190, CGFloat(toY)), withVelocity: 250, thenHoldForDuration: 0.3)
+      Thread.sleep(forTimeInterval: 1.2)
+    }
+    for i in 0 ..< 2 {
+      drag(190, 180, 190, 560, v: 3000)
+      Thread.sleep(forTimeInterval: 0.25)
+      stamp("catch-tap-\(i)")
+      coord(300, 330).press(forDuration: 0.05)
+      Thread.sleep(forTimeInterval: 1)
+    }
+    // Back at the newest message: a fling past it, caught by a tap while it bounces, springs back.
+    script("Jump far up")
+    Thread.sleep(forTimeInterval: 0.3)
+    if scrollButton.waitForExistence(timeout: 2) { scrollButton.tap() }
+    Thread.sleep(forTimeInterval: 1.5)
+    for i in 0 ..< 2 {
+      drag(190, 500, 190, 180, v: 3000)
+      Thread.sleep(forTimeInterval: 0.08)
+      stamp("bounce-tap-\(i)")
+      coord(300, 330).press(forDuration: 0.05)
+      Thread.sleep(forTimeInterval: 1.2)
+    }
+    stamp("done")
+  }
 }
