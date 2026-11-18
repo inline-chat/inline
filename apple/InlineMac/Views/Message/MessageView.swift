@@ -4401,6 +4401,7 @@ class MessageViewAppKit: NSView {
   private func updatePropsAndUpdateLayout(
     props: MessageViewProps,
     disableTextRelayout _: Bool = false,
+    textFollows: Bool = false,
     animate: Bool = false
   ) {
     // update internal props (must update so contentView is recalced)
@@ -4408,13 +4409,16 @@ class MessageViewAppKit: NSView {
     syncBubbleTail(animated: animate)
 
     if usesCoreText {
-      coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0)
+      // When the next message's text follows (row reuse), a width set before the layout pass
+      // below would lay the previous message's text out again at the new width.
+      if !textFollows { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
     } else if isNativeTextViewLoaded, textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
       textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
 
     layoutSubtreeIfNeeded()
+    if textFollows, usesCoreText { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
 
     needsUpdateConstraints = true
 
@@ -4501,7 +4505,7 @@ class MessageViewAppKit: NSView {
     updateReplyThreadSummaryView(for: props)
 
     // Update props and reflect changes
-    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
+    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, textFollows: true, animate: animate)
 
     // Reactions
     // TODO: Reactions are not updating as expected

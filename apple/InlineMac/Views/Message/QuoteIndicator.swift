@@ -10,12 +10,12 @@ extension NSView {
   /// readable. The boxes come from the layout already on screen; nothing is laid out again.
   /// Returns false when the message doesn't show that text, for example while it is translated.
   func highlightQuote(_ quote: String, color: CGColor) -> Bool {
-    guard let (textView, range) = quoteTextView(quote), let container = textView.superview else {
+    guard let (textView, lineRects) = quoteLines(quote), let container = textView.superview else {
       Self.quoteLog.info("quote not found in message text")
       return false
     }
-    let rects = textView.quoteLineRects(range).map { textView.convert($0, to: container) }
-    Self.quoteLog.info("quote range \(range) in \(type(of: textView)) rects \(rects)")
+    let rects = lineRects.map { textView.convert($0, to: container) }
+    Self.quoteLog.info("quote in \(type(of: textView)) rects \(rects)")
     guard !rects.isEmpty else { return false }
 
     clearQuoteHighlight(in: container)
@@ -47,9 +47,7 @@ extension NSView {
 
   /// Where `quote` sits in `target`'s coordinates, for scrolling it into view.
   func quoteRect(_ quote: String, in target: NSView) -> CGRect? {
-    guard let (textView, range) = quoteTextView(quote) else { return nil }
-    let rects = textView.quoteLineRects(range)
-    guard let first = rects.first else { return nil }
+    guard let (textView, rects) = quoteLines(quote), let first = rects.first else { return nil }
     return textView.convert(rects.dropFirst().reduce(first) { $0.union($1) }, to: target)
   }
 
@@ -59,14 +57,22 @@ extension NSView {
     }
   }
 
-  private func quoteTextView(_ quote: String) -> (NSTextView, NSRange)? {
+  /// The text view showing `quote` and one box per line of it, in that view's coordinates.
+  private func quoteLines(_ quote: String) -> (NSView, [CGRect])? {
     for subview in subviews where !subview.isHiddenOrHasHiddenAncestor {
+      // The right-click helper holds a copy of the clicked word, not message text.
+      if subview is NativeTextMenuHelper { continue }
+      if let textView = subview as? CoreTextMessageView,
+         let range = ReplyQuote.range(of: quote, in: textView.surfaceText.string)
+      {
+        return (textView, textView.rects(for: range))
+      }
       if let textView = subview as? NSTextView,
          let range = ReplyQuote.range(of: quote, in: textView.string)
       {
-        return (textView, range)
+        return (textView, textView.quoteLineRects(range))
       }
-      if let match = subview.quoteTextView(quote) { return match }
+      if let match = subview.quoteLines(quote) { return match }
     }
     return nil
   }

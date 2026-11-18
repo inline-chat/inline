@@ -97,7 +97,6 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
     self.linkColor = linkColor
     if !(sameText && sameStyle) {
       indexEntities()
-      linkElements = nil
       backgroundView.paint = nil
       glyphView.paint = CoreTextMessageText.paint(surfaceText, linkColor: linkColor, appearance: effectiveAppearance)
     }
@@ -120,6 +119,8 @@ final class CoreTextMessageView: NSView, MessageTextSurface {
   /// Lays the current text out at the current width. Paint doesn't depend on width.
   private func rebuildLayout() {
     needsLayoutRebuild = false
+    // Link elements carry frames from the layout; the next VoiceOver read makes new ones.
+    linkElements = nil
     textLayout = CoreTextMessageText.layout(surfaceText, isRtl: isRtl, width: layoutWidth)
       .aligned(toWidth: max(1, layoutWidth))
     glyphView.textLayout = textLayout
