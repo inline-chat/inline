@@ -8,6 +8,7 @@ COPY package.json bun.lock bunfig.toml ./
 COPY cli/package.json ./cli/package.json
 COPY server ./server
 COPY landing ./landing
+COPY web ./web
 COPY packages ./packages
 COPY plugins ./plugins
 COPY scripts ./scripts

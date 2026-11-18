@@ -10,9 +10,11 @@
 !server/**
 !landing/
 !landing/package.json
-!landing/packages/
-!landing/packages/*/
-!landing/packages/*/package.json
+!web/
+!web/package.json
+!web/packages/
+!web/packages/*/
+!web/packages/*/package.json
 !packages/
 !packages/*/
 !packages/*/package.json

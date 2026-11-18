@@ -16,8 +16,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check web app and client packages
+        run: |
+          bun run --cwd web typecheck
+          bun run --cwd web lint
+          bun run --cwd web test
+          bun run --cwd web test:packages
+          bun run --cwd web build
+
   landing:
-    name: Landing and browser client
+    name: Landing
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -37,16 +61,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Check landing and browser client
+      - name: Check landing
         run: |
           bun run --cwd landing build
           bun run --cwd landing typecheck
           bun run --cwd landing lint
           bun run --cwd landing test
-          bun run --cwd landing/packages/client test
-          for package in auth ids log protocol; do
-            bun run --cwd "landing/packages/$package" test
-          done
       - name: Install Chromium for browser acceptance
         working-directory: landing
         run: bun x playwright install --with-deps chromium
