@@ -14,6 +14,7 @@ import UIKit
 /// - `--timeline-harness-count N` seeds N messages (420).
 /// - `--timeline-harness-collection` shows the collection view list instead, for comparison.
 /// - `--timeline-harness-push` pushes the chat onto a stack, so it can be swiped back.
+/// - `--timeline-harness-prepare` (with push) reads the chat's window before each push, as the app does.
 /// - `--timeline-legacy-rows` shows every message with the older view, to check the fallback rows.
 /// - `--timeline-harness-uncached` keeps the history below the newest 30 messages "on the server",
 ///   so an unread opening has to fetch around its line. `--timeline-harness-fetch-ms N` sets the
@@ -44,12 +45,27 @@ struct TimelineHarnessRootView: View {
 
   private static var pushes: Bool { CommandLine.arguments.contains("--timeline-harness-push") }
 
+  /// With `--timeline-harness-prepare` the push waits for the chat's window read, as the app's router
+  /// does, and is traced (`ChatOpen`); otherwise it pushes at once with the window read at setup.
+  private func openChat() {
+    guard CommandLine.arguments.contains("--timeline-harness-prepare"), let peer = model.fixture?.peer else {
+      path = ["chat"]
+      return
+    }
+    ChatOpenTrace.begin(peer: peer)
+    Task { @MainActor in
+      if let state = await ChatOpenPreparation.shared.state(for: peer) { model.initialState = state }
+      ChatOpenTrace.prepared(peer: peer)
+      path = ["chat"]
+    }
+  }
+
   var body: some View {
     NavigationStack(path: $path) {
       Group {
         if Self.pushes {
           List {
-            Button("Open chat") { path = ["chat"] }
+            Button("Open chat") { openChat() }
               .accessibilityIdentifier("harnessOpenChat")
           }
           .navigationTitle("Harness")
@@ -108,6 +124,10 @@ final class TimelineHarnessModel {
       TimelineMessageMenu.debugHoldAction = TimelineHarnessRootView.argument("--timeline-harness-hold-action")
         .flatMap(MessageGestureAction.init(rawValue:))
       TimelineMessageMenu.debugPrefersSystemMenu = arguments.contains("--timeline-harness-system-menu")
+      // Reactions stand in for the server: saved and published, then published again a round trip later.
+      MessageViewActions.debugReactionMutation = { [weak fixture] _, emoji, messageId, _ in
+        Task { @MainActor in try? await fixture?.toggleReaction(emoji: emoji, messageId: messageId) }
+      }
       ComposeDebugOverrides.send = { send in
         Task { @MainActor in
           if let editing = send.editingMessageId {

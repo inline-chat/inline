@@ -11,12 +11,27 @@ import UIKit
 /// current view's copy goes away with it.
 @MainActor
 enum MessageViewActions {
+  #if DEBUG
+  /// The chat harness stands in for the server: (adds, emoji, message id, chat id).
+  static var debugReactionMutation: ((Bool, String, Int64, Int64) -> Void)?
+  #endif
+
   /// Queues a reaction change on the durable RealtimeV2 transaction queue (same pattern as macOS).
   static func sendReactionMutation(_ transaction: AddReactionTransaction) {
+    #if DEBUG
+    if let debug = debugReactionMutation {
+      return debug(true, transaction.context.emoji, transaction.context.messageId, transaction.context.chatId)
+    }
+    #endif
     Task(priority: .userInitiated) { await Api.realtime.sendQueued(transaction) }
   }
 
   static func sendReactionMutation(_ transaction: DeleteReactionTransaction) {
+    #if DEBUG
+    if let debug = debugReactionMutation {
+      return debug(false, transaction.context.emoji, transaction.context.messageId, transaction.context.chatId)
+    }
+    #endif
     Task(priority: .userInitiated) { await Api.realtime.sendQueued(transaction) }
   }
 
