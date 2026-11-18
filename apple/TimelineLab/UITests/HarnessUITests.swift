@@ -1245,4 +1245,17 @@ final class HarnessUITests: XCTestCase {
     }
     stamp("done")
   }
+  /// Messages arriving from the sender of the last group: the sender's avatar slides down with the group to
+  /// the newest message instead of vanishing and fading in there. The first starts a group of its own (the
+  /// fixture's last message was sent through an agent); the next ones join it. Stamped for video.
+  func testIncomingAvatar() {
+    launch()
+    Thread.sleep(forTimeInterval: 1)
+    for i in 0 ..< 4 {
+      print("[UITEST] receive-\(i) t=\(String(format: "%.3f", Date().timeIntervalSince1970))")
+      script("Receive")
+      Thread.sleep(forTimeInterval: 1.5)
+    }
+    shot("incoming-avatar-end")
+  }
 }
