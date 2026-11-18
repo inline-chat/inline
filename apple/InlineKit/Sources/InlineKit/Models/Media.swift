@@ -176,7 +176,7 @@ public struct Document: Codable, Sendable, Equatable, Hashable, Identifiable, Fe
   /// Keep a safe extension for Quick Look. The display name never determines the destination.
   func newDownloadCacheName() -> String {
     let id = UUID().uuidString
-    guard let fileName, FileHelpers.isPlainCacheName(fileName) else { return id }
+    guard let fileName, FileHelpers.isPlainCacheName(fileName), !fileName.contains("\\") else { return id }
     let ext = (fileName as NSString).pathExtension
     guard (1 ... 16).contains(ext.utf8.count),
           ext.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) })

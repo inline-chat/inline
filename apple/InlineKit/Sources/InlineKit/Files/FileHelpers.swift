@@ -11,8 +11,9 @@ public enum FileLocalCacheDirectory: Sendable {
 }
 
 public enum FileHelpers {
+  /// A single POSIX filename in the local Apple cache. A backslash is a literal character here.
   static func isPlainCacheName(_ name: String) -> Bool {
-    !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains("\0")
+    !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\0")
   }
 
   public static func getToBeUploadedDirectory() -> URL {

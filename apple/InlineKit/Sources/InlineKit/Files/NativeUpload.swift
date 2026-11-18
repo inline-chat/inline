@@ -55,7 +55,8 @@ public struct NativeMediaUploadRequest: Sendable {
   ) {
     self.logicalID = logicalID
     self.fileURL = fileURL
-    self.fileName = fileName
+    // Backslash is legal on the device. Document upload names must be portable.
+    self.fileName = kind == .document ? fileName.replacingOccurrences(of: "\\", with: "_") : fileName
     self.mimeType = mimeType
     self.kind = kind
     self.thumbnailFileUniqueID = thumbnailFileUniqueID

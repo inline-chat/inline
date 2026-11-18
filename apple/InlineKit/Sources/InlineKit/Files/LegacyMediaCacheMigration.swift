@@ -190,6 +190,6 @@ enum LegacyMediaCacheMigration {
   /// Cache paths are flat names. Anything with a separator or a parent reference could
   /// resolve outside our folders, so it is never moved.
   static func isPlainFileName(_ name: String) -> Bool {
-    !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\0")
+    FileHelpers.isPlainCacheName(name)
   }
 }
