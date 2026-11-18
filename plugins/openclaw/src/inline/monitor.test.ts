@@ -97,6 +97,7 @@ type MonitorHarness = {
 }
 
 type MonitorSetup = {
+  onEventsConsumed?: () => void
   stateDir?: string
   eventClient?: import("@inline-chat/realtime-sdk").InlineSdkClient
   me?: {
@@ -1129,6 +1130,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         consumeEvents = async (handle: (event: any) => Promise<void>) => {
           if (setup.eventClient) return setup.eventClient.consumeEvents(handle)
           for await (const event of eventsGenerator()) await handle(event)
+          setup.onEventsConsumed?.()
         }
       },
     }
@@ -15910,7 +15912,10 @@ describe("inline/monitor durable inbound recovery", () => {
     let releaseBurst!: () => void
     const stopGate = new Promise<void>((resolve) => { releaseStop = resolve })
     const burstGate = new Promise<void>((resolve) => { releaseBurst = resolve })
+    let admitted!: () => void
+    const allAdmitted = new Promise<void>((resolve) => { admitted = resolve })
     const harness = await setupMonitorHarness({
+      onEventsConsumed: admitted,
       events: [
         { kind: "message.new", chatId: 7n, message: { ...request.msg, message: "cancel this earlier input" } },
         { kind: "message.new", chatId: 7n, message: { ...request.msg, id: 992n, message: "/stop" } },
@@ -15924,8 +15929,14 @@ describe("inline/monitor durable inbound recovery", () => {
       else if (reads === 2) await burstGate
       return []
     })
-    const handle = await start(harness, { debounceMs: 40 })
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    let handle: Awaited<ReturnType<typeof start>> | undefined
     try {
+      handle = await start(harness, { debounceMs: 40 })
+      // Model a single burst regardless of how long the real inbox writes take.
+      await allAdmitted
+      await vi.advanceTimersByTimeAsync(40)
+      vi.useRealTimers()
       await waitFor(() => expect(reads).toBe(2))
       expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
       releaseStop()
@@ -15935,7 +15946,7 @@ describe("inline/monitor durable inbound recovery", () => {
       expect(harness.calls.dispatchReply.mock.calls.map((call) => call[0]?.ctx?.Body)).toEqual(["/stop", "keep this later input"])
       await handle.done
       await vi.waitFor(async () => expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries()).toEqual([]))
-    } finally { releaseStop(); releaseBurst(); await handle.stop() }
+    } finally { vi.useRealTimers(); releaseStop(); releaseBurst(); await handle?.stop() }
   })
 
   it("keeps an SDK receipt unacknowledged when its durable admission write fails", async () => {
