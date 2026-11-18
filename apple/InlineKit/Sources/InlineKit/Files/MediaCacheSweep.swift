@@ -28,9 +28,10 @@ enum MediaCacheSweep {
 
   /// Sweeps once a day, a while after launch, off the main thread.
   static func scheduleIfDue(database: AppDatabase) {
-    // Extensions do not own the cache. A profile named "default" shares the unnamed profile's
-    // media folder but not its database, so neither could tell the other's files apart.
-    guard !Bundle.main.bundlePath.hasSuffix(".appex"), ProjectConfig.userProfile != "default" else { return }
+    guard !Bundle.main.bundlePath.hasSuffix(".appex") else { return }
+    #if !os(macOS)
+    guard ProjectConfig.userProfile != "default" else { return }
+    #endif
     Task.detached(priority: .background) {
       try? await Task.sleep(for: launchDelay)
       _ = runIfDue(database: database)

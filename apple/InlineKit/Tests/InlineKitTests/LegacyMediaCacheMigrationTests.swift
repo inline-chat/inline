@@ -39,7 +39,12 @@ struct LegacyMediaCacheMigrationTests {
       bundleIdentifier: "chat.inline.InlineMac",
       userProfile: nil
     )
-    #expect(defaultProfile.lastPathComponent == "default")
+    let namedDefault = FileHelpers.mediaCacheRoot(
+      applicationSupportDirectory: support, bundleIdentifier: "chat.inline.InlineMac", userProfile: "default"
+    )
+    #expect(defaultProfile != namedDefault)
+    #expect(!defaultProfile.path.contains("/Media/default"))
+    #expect(!namedDefault.path.contains("/Media/default"))
     #expect(defaultProfile != support)
   }
   #endif
@@ -59,7 +64,7 @@ struct LegacyMediaCacheMigrationTests {
     try write("other doc", to: legacy.appendingPathComponent("Documents/taxes.pdf"))
     try write("voice", to: legacy.appendingPathComponent("Voices/V1.m4a"))
 
-    let result = LegacyMediaCacheMigration.moveReferencedFiles(
+    let result = LegacyMediaCacheMigration.transferReferencedFiles(
       from: legacy,
       to: scoped,
       referenced: [
@@ -69,7 +74,7 @@ struct LegacyMediaCacheMigrationTests {
       ]
     )
 
-    #expect(result == .init(moved: 5, skipped: 0, failed: 0))
+    #expect(result == .init(transferred: 5, skipped: 0, failed: 0))
     let fm = FileManager.default
     #expect(fm.fileExists(atPath: scoped.appendingPathComponent("Photos/IMG-server-1-y.jpg").path))
     #expect(fm.fileExists(atPath: scoped.appendingPathComponent("Documents/ABC_report.pdf").path))
@@ -93,13 +98,13 @@ struct LegacyMediaCacheMigrationTests {
     try write("new", to: scoped.appendingPathComponent("Videos/a.mp4"))
     try write("secret", to: legacy.appendingPathComponent("secret.txt"))
 
-    let result = LegacyMediaCacheMigration.moveReferencedFiles(
+    let result = LegacyMediaCacheMigration.transferReferencedFiles(
       from: legacy,
       to: scoped,
       referenced: [.videos: ["a.mp4", "../secret.txt"]]
     )
 
-    #expect(result == .init(moved: 0, skipped: 2, failed: 0))
+    #expect(result == .init(transferred: 0, skipped: 2, failed: 0))
     let kept = try String(contentsOf: scoped.appendingPathComponent("Videos/a.mp4"), encoding: .utf8)
     #expect(kept == "new")
     #expect(FileManager.default.fileExists(atPath: legacy.appendingPathComponent("Videos/a.mp4").path))

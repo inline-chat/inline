@@ -147,11 +147,17 @@ public enum FileHelpers {
     userProfile: String?
   ) -> URL {
     #if os(macOS)
-    let profile = userProfile.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
-    return applicationSupportDirectory
-      .appendingPathComponent(bundleIdentifier ?? "chat.inline", isDirectory: true)
-      .appendingPathComponent("Media", isDirectory: true)
-      .appendingPathComponent(profile, isDirectory: true)
+    let appRoot = applicationSupportDirectory.appendingPathComponent(bundleIdentifier ?? "chat.inline", isDirectory: true)
+    // Previously both databases used Media/default. Preserve that directory for recovery.
+    guard let userProfile, !userProfile.isEmpty else {
+      return appRoot.appendingPathComponent("ProfileMedia/unnamed", isDirectory: true)
+    }
+    if userProfile.caseInsensitiveCompare("default") == .orderedSame {
+      return appRoot.appendingPathComponent("ProfileMedia/named", isDirectory: true)
+        .appendingPathComponent(userProfile, isDirectory: true)
+    }
+    return appRoot.appendingPathComponent("Media", isDirectory: true)
+      .appendingPathComponent(userProfile, isDirectory: true)
     #else
     return applicationSupportDirectory
     #endif
