@@ -308,6 +308,24 @@ describe("InlineBotClient", () => {
     expect(seenUrl).not.toContain("skip=")
   })
 
+  it("maps non-envelope proxy responses to a typed error with the HTTP status", async () => {
+    const html = `<html><body><h1>502 Bad Gateway</h1>${"x".repeat(400)}</body></html>`
+    const htmlClient = new InlineBotClient({
+      token: "t",
+      fetch: (async () =>
+        new Response(html, { status: 502, headers: { "content-type": "text/html" } })) as any,
+    })
+
+    const res = await htmlClient.getMe()
+    expect(res).toEqual({ ok: false, error_code: 502, description: html.slice(0, 200) })
+
+    const emptyClient = new InlineBotClient({
+      token: "t",
+      fetch: (async () => new Response("", { status: 503 })) as any,
+    })
+    expect(await emptyClient.getMe()).toEqual({ ok: false, error_code: 503, description: "HTTP 503" })
+  })
+
   it("uses GET for getMyCommands", async () => {
     let seenUrl = ""
     let seenMethod = ""

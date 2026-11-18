@@ -132,4 +132,19 @@ describe("McpSessionManager", () => {
     expect(mgr.get(sessionId!)).toBeNull()
     expect(externalClosed).toBeGreaterThanOrEqual(1)
   })
+
+  it("stops the idle sweep on dispose", async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval")
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval")
+    try {
+      const mgr = new McpSessionManager({ idleTimeoutMs: 20 })
+      const sweep = setIntervalSpy.mock.results[0]?.value
+      expect(sweep).toBeDefined()
+      mgr.dispose()
+      expect(clearIntervalSpy).toHaveBeenCalledWith(sweep)
+    } finally {
+      setIntervalSpy.mockRestore()
+      clearIntervalSpy.mockRestore()
+    }
+  })
 })

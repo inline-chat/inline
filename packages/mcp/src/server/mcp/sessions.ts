@@ -15,19 +15,26 @@ export type McpSession = {
 export class McpSessionManager {
   private readonly sessions = new Map<string, McpSession>()
   private readonly idleTimeoutMs: number
+  private readonly idleSweep: ReturnType<typeof setInterval>
 
   constructor(options?: { idleTimeoutMs?: number }) {
     this.idleTimeoutMs = options?.idleTimeoutMs ?? 15 * 60 * 1000
 
     // Best-effort idle cleanup.
-    setInterval(() => {
+    this.idleSweep = setInterval(() => {
       const now = Date.now()
       for (const s of this.sessions.values()) {
         if (now - s.lastUsedAtMs > this.idleTimeoutMs) {
           void this.close(s.sessionId)
         }
       }
-    }, Math.min(60_000, this.idleTimeoutMs)).unref?.()
+    }, Math.min(60_000, this.idleTimeoutMs))
+    this.idleSweep.unref?.()
+  }
+
+  /** Stops the idle sweep. Open sessions stay registered until closed. */
+  dispose(): void {
+    clearInterval(this.idleSweep)
   }
 
   get(sessionId: string): McpSession | null {
