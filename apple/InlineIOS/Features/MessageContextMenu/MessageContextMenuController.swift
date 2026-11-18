@@ -147,6 +147,12 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     scrollView.showsVerticalScrollIndicator = false
     scrollView.delaysContentTouches = false
     scrollView.canCancelContentTouches = true
+    // The menu draws its own backdrop. The automatic edge effects blurred the strip under the status bar
+    // on their own: at once as the menu opened, and until its window went as it closed.
+    if #available(iOS 26.0, *) {
+      scrollView.topEdgeEffect.isHidden = true
+      scrollView.bottomEdgeEffect.isHidden = true
+    }
     scrollView.delegate = self
     scrollView.blocksPan = { [weak self] point in
       guard let self, let selectionView else { return false }
