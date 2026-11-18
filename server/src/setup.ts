@@ -130,7 +130,3 @@ export const setup = new Elysia({ name: "setup" })
     }),
   )
   .error("INLINE_ERROR", InlineError)
-// .onError(({ code, error }) => {
-//   Log.shared.error("Top level error " + code, error)
-//   // TODO: Return something
-// })

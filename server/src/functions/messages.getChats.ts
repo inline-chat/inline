@@ -1,19 +1,16 @@
 import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
 import { resolveFocusForViewer } from "@in/server/modules/privacy/focusStatus"
-import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { Chat, ChatListOffset, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { Log } from "@in/server/utils/log"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { withHistoryReadSnapshot } from "@in/server/modules/message/historySnapshot"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, sql } from "drizzle-orm"
 import {
   chatParticipantGroups,
-  chats,
   dialogs,
   spaces,
   members,
@@ -23,7 +20,6 @@ import {
   users,
   type DbChat,
   type DbDialog,
-  type DbNewDialog,
   type DbUser,
   type DbFile,
 } from "@in/server/db/schema"
@@ -57,8 +53,6 @@ type Output = {
   nextOffset?: ChatListOffset
 }
 
-const log = new Log("functions.getChats")
-
 // Discover candidates through scoped roots or explicit target grants, never by
 // scanning every home subthread. The access projection below remains the sole
 // authority for what may be returned, including retained grants after revocation.
@@ -68,110 +62,6 @@ async function getCompleteCatalogChatIds(currentUserId: number, query: Pick<type
     select id as "chatId" from catalog order by id
   `)
   return rows.map((row) => row.chatId)
-}
-
-async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise<void> {
-  try {
-    const allMembers = await db
-      .selectDistinct({ userId: members.userId })
-      .from(members)
-      .innerJoin(spaces, eq(members.spaceId, spaces.id))
-      .where(
-        and(
-          inArray(
-            members.spaceId,
-            db.select({ spaceId: members.spaceId }).from(members).where(eq(members.userId, currentUserId)),
-          ),
-          isNull(spaces.deleted),
-        ),
-      )
-
-    const otherUserIds = allMembers.map((m) => m.userId).filter((id) => id !== currentUserId)
-
-    if (otherUserIds.length === 0) return
-
-    const chatPairs = otherUserIds.map((userId) => ({
-      minUserId: Math.min(currentUserId, userId),
-      maxUserId: Math.max(currentUserId, userId),
-    }))
-
-    const existingChats = await db
-      .select({ id: chats.id, type: chats.type, minUserId: chats.minUserId, maxUserId: chats.maxUserId })
-      .from(chats)
-      .where(and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))))
-
-    const existingChatSet = new Set(existingChats.map((c) => `${c.minUserId}-${c.maxUserId}`))
-
-    const missingChatPairs = chatPairs.filter((pair) => !existingChatSet.has(`${pair.minUserId}-${pair.maxUserId}`))
-
-    let newChats: typeof existingChats = []
-    if (missingChatPairs.length > 0) {
-      newChats = await db.transaction(async (tx) => {
-        const inserted = await tx
-          .insert(chats)
-          .values(
-            missingChatPairs.map((pair) => ({
-              type: "private" as const,
-              minUserId: pair.minUserId,
-              maxUserId: pair.maxUserId,
-            })),
-          )
-          .onConflictDoNothing()
-          .returning()
-        await syncChatAccess(tx, { kind: "chats", chatIds: inserted.map((chat) => chat.id) })
-        return inserted
-      })
-    }
-
-    const allChatsToProcess = [...existingChats, ...newChats]
-
-    if (allChatsToProcess.length === 0) return
-
-    const existingDialogs = await db
-      .select({ chatId: dialogs.chatId, userId: dialogs.userId })
-      .from(dialogs)
-      .where(
-        inArray(
-          dialogs.chatId,
-          allChatsToProcess.map((c) => c.id),
-        ),
-      )
-
-    const existingDialogSet = new Set(existingDialogs.map((d) => `${d.chatId}-${d.userId}`))
-
-    const dialogsToCreate: DbNewDialog[] = []
-
-    for (const chat of allChatsToProcess) {
-      if (chat.minUserId === null || chat.maxUserId === null) {
-        continue
-      }
-
-      if (!existingDialogSet.has(`${chat.id}-${currentUserId}`)) {
-        dialogsToCreate.push({
-          chatId: chat.id,
-          userId: currentUserId,
-          peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
-          ...dialogOpenDefaultsForChat({ type: "private" }),
-        })
-      }
-
-      const otherUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
-      if (!existingDialogSet.has(`${chat.id}-${otherUserId}`)) {
-        dialogsToCreate.push({
-          chatId: chat.id,
-          userId: otherUserId,
-          peerUserId: currentUserId,
-          ...dialogOpenDefaultsForChat({ type: "private" }),
-        })
-      }
-    }
-
-    if (dialogsToCreate.length > 0) {
-      await db.insert(dialogs).values(dialogsToCreate).onConflictDoNothing()
-    }
-  } catch (error) {
-    log.error("Failed to ensure private chats for space members", { currentUserId, error })
-  }
 }
 
 type CatalogWhere = NonNullable<NonNullable<Parameters<typeof db.query.chats.findMany>[0]>["where"]>
