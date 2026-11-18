@@ -194,29 +194,6 @@ extension ChatInfoView {
     }
   }
 
-  func formatSectionDate(_ date: Date) -> String {
-    let calendar = Calendar.current
-    let now = Date()
-
-    if calendar.isDateInToday(date) {
-      return "Today"
-    } else if calendar.isDateInYesterday(date) {
-      return "Yesterday"
-    } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "EEEE"
-      return formatter.string(from: date)
-    } else if calendar.isDate(date, equalTo: now, toGranularity: .year) {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "MMM d"
-      return formatter.string(from: date)
-    } else {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "MMM d, yyyy"
-      return formatter.string(from: date)
-    }
-  }
-
   var chatInfoHeader: some View {
     VStack {
       if isDM, let userInfo = chatItem.userInfo {

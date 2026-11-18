@@ -2,30 +2,6 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
-struct UserProfileSection: View {
-  let currentUser: UserInfo?
-
-  var body: some View {
-    Section(header: Text("Account")) {
-      if let user = currentUser {
-        NavigationLink {
-          ExperimentalProfileView()
-        } label: {
-          ProfileRow(userInfo: user)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-
-      } else {
-        Button("Set up profile") {
-          // TODO: Add profile setup
-        }
-      }
-    }
-  }
-}
-
 struct ProfileRow: View {
   let userInfo: UserInfo
   var user: User {
@@ -54,15 +30,15 @@ struct ProfileRow: View {
         Text(fullName)
           .font(.body)
           .fontWeight(.medium)
-            
+
         if !isChatInfo {
           Text(user.email ?? "")
             .font(.callout)
-              
+
         } else {
           Text("@\(user.username ?? "")")
             .font(.callout)
-              
+
         }
       }
     }

@@ -24,7 +24,7 @@ struct MediaTabView: View {
         LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(mediaViewModel.groupedMediaMessages, id: \.date) { group in
             ChatInfoDateSection(
-              dateText: formatDate(group.date),
+              dateText: ChatInfoSectionDate.text(for: group.date),
               headerInsets: EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16)
             ) {
               LazyVGrid(columns: columns, spacing: gridSpacing) {
@@ -248,25 +248,6 @@ struct MediaTabView: View {
       )
     }
     presenter.present(activityViewController, animated: true)
-  }
-
-  private func formatDate(_ date: Date) -> String {
-    let calendar = Calendar.current
-    let now = Date()
-
-    if calendar.isDateInToday(date) {
-      return "Today"
-    } else if calendar.isDateInYesterday(date) {
-      return "Yesterday"
-    } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "EEEE"
-      return formatter.string(from: date)
-    } else {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "MMMM d, yyyy"
-      return formatter.string(from: date)
-    }
   }
 
   private func topViewController(from controller: UIViewController? = nil) -> UIViewController? {
