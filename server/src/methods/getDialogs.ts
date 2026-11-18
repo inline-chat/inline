@@ -95,7 +95,9 @@ export const handler = async (
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   const spaceId = normalizeId(input.spaceId)
-  if (spaceId && isNaN(spaceId)) {
+  // NaN is falsy, so the old `spaceId && isNaN(spaceId)` never rejected a
+  // malformed id; it skipped the membership check and failed in the queries below.
+  if (Number.isNaN(spaceId)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
   const currentUserId = context.currentUserId

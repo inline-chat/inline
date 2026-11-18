@@ -1,6 +1,5 @@
 import { assertOtpDeliveryAllowed } from "@in/server/modules/auth/otpDeliveryBudget"
 import { InlineError } from "@in/server/types/errors"
-import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
@@ -57,10 +56,7 @@ export const handler = async (
 
     await assertOtpDeliveryAllowed({ channel: "sms", contact: formattedPhoneNumber, ip: context.ip })
 
-    // Check the signup gate before spending a provider request on an unknown contact.
     await prelude.sendCode(formattedPhoneNumber)
-
-    Log.shared.debug("sending sms code to", { phoneNumber: formattedPhoneNumber })
 
     const needsInviteCode = await isInviteCodeRequired(existingUser)
     const isLogin = isLoginUser(existingUser)

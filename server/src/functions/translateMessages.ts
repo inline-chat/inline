@@ -45,7 +45,7 @@ export async function translateMessages(
     }
 
     if (validMessageIds.length === 0) {
-      throw new Error("No valid message IDs provided")
+      throw RealtimeRpcError.BadRequestWithReason("No valid message IDs provided")
     }
 
     log.debug("Starting translation request", {
@@ -75,7 +75,7 @@ export async function translateMessages(
       where: and(
         eq(translations.chatId, chat.id),
         eq(translations.language, input.language),
-        inArray(translations.messageId, input.messageIds),
+        inArray(translations.messageId, validMessageIds),
       ),
     })
 

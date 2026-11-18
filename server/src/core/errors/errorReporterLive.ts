@@ -5,6 +5,7 @@ import {
   Layer,
   Option,
 } from "effect"
+import { HttpApiError } from "effect/unstable/httpapi"
 import { Log } from "@in/server/utils/log"
 import {
   ErrorReporter,
@@ -61,11 +62,23 @@ const inlineReporter: ErrorReporterShape = {
 
 const effectReporter = EffectErrorReporter.make(
   ({ error, severity, attributes, fiber }) => {
-    safeLogError("Effect boundary failure", error, {
+    const metadata = {
       ...attributes,
       ...requestMetadata(fiber.context),
       severity,
-    })
+    }
+    // A request that fails schema decoding is the caller's 400, not a server
+    // fault. Effect leaves HttpApiSchemaError unannotated, unlike its other
+    // HttpApiError classes, so it would otherwise surface as a Sentry issue.
+    if (HttpApiError.HttpApiSchemaError.is(error)) {
+      try {
+        log.warn("Rejected malformed HTTP request", { ...metadata, kind: error.kind })
+      } catch {
+        // Observability must never replace the failure it is reporting.
+      }
+      return
+    }
+    safeLogError("Effect boundary failure", error, metadata)
   },
 )
 

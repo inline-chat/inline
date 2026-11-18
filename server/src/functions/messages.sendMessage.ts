@@ -1478,8 +1478,10 @@ async function sendNotifications(input: SendPushForMsgInput) {
   let messageText = input.unencryptedText
   let messageEntities = input.unencryptedEntities
 
-  const senderNameInfo = await getCachedUserName(messageInfo.message.fromId)
-  const senderPhoto = await getCachedUserProfilePhoto(messageInfo.message.fromId)
+  const [senderNameInfo, senderPhoto] = await Promise.all([
+    getCachedUserName(messageInfo.message.fromId),
+    getCachedUserProfilePhoto(messageInfo.message.fromId),
+  ])
 
   const recipientUserIds = updateGroup.userIds.filter((userId) => userId !== currentUserId)
   const dialogNotificationSettingsByUserId = await getInheritedDialogNotificationSettings(chat.id, recipientUserIds)

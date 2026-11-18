@@ -211,6 +211,9 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
             } else {
               log.debug("realtime connectionInit rejected", rejectionMetadata)
             }
+          } else if (e instanceof RealtimeRpcError && e.codeNumber < 500) {
+            // The socket closed mid-handshake or hit the per-user connection cap.
+            log.warn("realtime connectionInit rejected", { ...metadata, errorCodeName: e.codeName })
           } else {
             log.error("error handling message in connectionInit", e, metadata)
           }
