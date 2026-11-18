@@ -211,7 +211,7 @@ async function consumeEvents() {
         meId, meUsername, signal: inboundAbort.signal,
         resolveSender: resolveInboundSender, deliver,
       })
-    })
+    }, { settingsConcurrency: 4 })
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false })
@@ -1245,7 +1245,7 @@ type SidecarClient = {
   close(): Promise<void>
   getDiagnostics(): unknown
   events(): AsyncIterable<GenericInboundEvent>
-  consumeEvents(handler: (event: GenericInboundEvent) => Promise<void>): Promise<void>
+  consumeEvents(handler: (event: GenericInboundEvent) => Promise<void>, options?: { settingsConcurrency?: number }): Promise<void>
   getChat(params: { chatId: bigint }): Promise<{
     chatId: bigint
     title: string

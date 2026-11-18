@@ -257,12 +257,12 @@
     },
     "plugins/hermes-agent": {
       "name": "@inline-chat/hermes-agent-adapter",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "bin": {
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.26",
+        "@inline-chat/realtime-sdk": "0.0.27",
         "yaml": "2.9.0",
       },
       "devDependencies": {

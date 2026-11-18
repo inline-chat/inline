@@ -54,6 +54,13 @@ Unsupported or intentionally limited:
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 - Progress for turns Hermes starts on its own. Scheduled (cron) turns and late background sub-agent results post only their answer.
 
+## Release 1.2.2
+
+The Agent Settings sheet can open while Hermes is handling a message in the same
+chat or while all ordinary message handlers are busy. The sidecar reserves four
+SDK handler slots for settings requests and changes. Requests in the same chat
+retain their order.
+
 ## Release 1.2.1
 
 Messages containing Unicode line or paragraph separators now reach the gateway
@@ -256,7 +263,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- The 1.2.1 sidecar bundles `@inline-chat/realtime-sdk@0.0.26` and protocol
+- The 1.2.2 sidecar bundles `@inline-chat/realtime-sdk@0.0.27` and protocol
   `0.0.17`. The catalog and npm package ship the same sidecar.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.

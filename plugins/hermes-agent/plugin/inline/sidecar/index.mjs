@@ -49558,17 +49558,17 @@ class AcknowledgedAsyncChannel {
     else
       waiter.resolve({ value: undefined, done: true });
   }
-  consume(handler, key, concurrency = 8) {
+  consume(handler, key, concurrency = 8, independent) {
     if (this.iteratorClaimed)
       return Promise.reject(new ChannelConsumerError("AcknowledgedAsyncChannel supports one consumer"));
-    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    if (![concurrency, independent?.concurrency ?? 1].every((limit) => Number.isSafeInteger(limit) && limit >= 1)) {
       return Promise.reject(new ChannelConsumerError("Consumer concurrency must be a positive safe integer"));
     }
     if (this.closed)
       return this.failure ? Promise.reject(this.failure) : Promise.resolve();
     this.iteratorClaimed = true;
     return new Promise((resolve, reject) => {
-      this.consumption = { handler, key, concurrency, active: new Map, resolve, reject };
+      this.consumption = { handler, key, concurrency, independent, active: new Map, resolve, reject };
       this.pumpConsumption();
     });
   }
@@ -49577,51 +49577,66 @@ class AcknowledgedAsyncChannel {
     if (!owner || this.closed)
       return;
     try {
-      while (owner.active.size < owner.concurrency && this.queue.length > 0) {
-        const reserved = new Set;
-        for (const active of owner.active.values()) {
-          if (active === null)
-            return;
-          for (const key of active)
-            reserved.add(key);
-        }
-        let index = -1;
-        let keys = null;
-        for (let i = 0;i < this.queue.length; i++) {
-          const candidate = this.queue[i];
-          const candidateKey = owner.key(candidate.value);
-          if (candidateKey === null) {
-            if (i === 0 && owner.active.size === 0)
-              index = i;
-            break;
-          }
-          const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey;
-          if (!candidateKeys.some((key) => reserved.has(key))) {
-            index = i;
-            keys = candidateKeys;
-            break;
-          }
-          for (const key of candidateKeys)
-            reserved.add(key);
-        }
-        if (index < 0)
-          return;
-        const item = this.queue.splice(index, 1)[0];
-        owner.active.set(item, keys);
-        Promise.resolve().then(() => owner.handler(item.value)).then(() => {
-          if (this.consumption !== owner)
-            return;
-          owner.active.delete(item);
-          this.bufferedBytes -= item.bytes;
-          item.acknowledge(true);
-          this.pumpConsumption();
-        }, (error) => {
-          if (this.consumption === owner)
-            this.fail(error instanceof Error ? error : new Error("Inbound handler failed"));
-        });
-      }
+      if (owner.independent)
+        this.pumpPool(owner, true, owner.independent.concurrency);
+      this.pumpPool(owner, false, owner.concurrency);
     } catch (error) {
       this.fail(error instanceof Error ? error : new Error("Inbound routing failed"));
+    }
+  }
+  pumpPool(owner, independent, limit) {
+    const belongs = (item) => (owner.independent?.accepts(item.value) ?? false) === independent;
+    while (this.queue.length > 0) {
+      const reserved = new Set;
+      let running = 0;
+      for (const [item, active] of owner.active) {
+        if (!belongs(item))
+          continue;
+        if (++running >= limit)
+          return;
+        if (active === null)
+          return;
+        for (const key of active)
+          reserved.add(key);
+      }
+      let index = -1;
+      let keys = null;
+      for (let i = 0;i < this.queue.length; i++) {
+        const candidate = this.queue[i];
+        if (!belongs(candidate))
+          continue;
+        const candidateKey = owner.key(candidate.value);
+        if (candidateKey === null) {
+          if (running === 0)
+            index = i;
+          break;
+        }
+        if (!belongs(candidate))
+          continue;
+        const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey;
+        if (!candidateKeys.some((key) => reserved.has(key))) {
+          index = i;
+          keys = candidateKeys;
+          break;
+        }
+        for (const key of candidateKeys)
+          reserved.add(key);
+      }
+      if (index < 0)
+        return;
+      const item = this.queue.splice(index, 1)[0];
+      owner.active.set(item, keys);
+      Promise.resolve().then(() => owner.handler(item.value)).then(() => {
+        if (this.consumption !== owner)
+          return;
+        owner.active.delete(item);
+        this.bufferedBytes -= item.bytes;
+        item.acknowledge(true);
+        this.pumpConsumption();
+      }, (error) => {
+        if (this.consumption === owner)
+          this.fail(error instanceof Error ? error : new Error("Inbound handler failed"));
+      });
     }
   }
   [Symbol.asyncIterator]() {
@@ -54247,6 +54262,7 @@ class InlineSdkClient {
     return this.eventStream;
   }
   consumeEvents(handler, options) {
+    const settings = options?.settingsConcurrency;
     return this.eventStream.consume(handler, (event) => {
       const bucket = this.bucketForEvent(event);
       if (bucket?.kind === "user") {
@@ -54255,7 +54271,10 @@ class InlineSdkClient {
       if (bucket)
         return this.updateBucketKey(bucket);
       return "chatId" in event && typeof event.chatId === "bigint" ? `chat:${event.chatId}` : null;
-    }, options?.concurrency).catch(async (error) => {
+    }, options?.concurrency, settings === undefined ? undefined : {
+      concurrency: settings,
+      accepts: (event) => event.kind === "bot.chatSettings.request" || event.kind === "bot.chatSettings.item.invoke"
+    }).catch(async (error) => {
       if (!(error instanceof ChannelConsumerError))
         await this.close();
       throw error;
@@ -58583,7 +58602,7 @@ async function consumeEvents() {
         resolveSender: resolveInboundSender,
         deliver
       });
-    });
+    }, { settingsConcurrency: 4 });
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false });
