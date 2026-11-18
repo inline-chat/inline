@@ -1930,6 +1930,7 @@ private struct ChatInfoDocumentRow: NSViewRepresentable {
   }
 }
 
+@MainActor
 private func chatInfoDateLabel(_ date: Date) -> String {
   let calendar = Calendar.current
   let now = Date()
@@ -1941,14 +1942,29 @@ private func chatInfoDateLabel(_ date: Date) -> String {
     return "Yesterday"
   }
   if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "EEEE"
-    return formatter.string(from: date)
+    return ChatInfoDateLabelFormatters.weekday.string(from: date)
   }
 
-  let formatter = DateFormatter()
-  formatter.dateFormat = "MMMM d, yyyy"
-  return formatter.string(from: date)
+  return ChatInfoDateLabelFormatters.fullDate.string(from: date)
+}
+
+@MainActor
+private enum ChatInfoDateLabelFormatters {
+  static let weekday: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+    formatter.dateFormat = "EEEE"
+    return formatter
+  }()
+
+  static let fullDate: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+    formatter.dateFormat = "MMMM d, yyyy"
+    return formatter
+  }()
 }
 
 // TODO: Previews

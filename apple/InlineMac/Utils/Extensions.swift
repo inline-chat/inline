@@ -56,23 +56,6 @@ public extension NSAttributedString {
     return (fs!, textSize)
   }
 
-  var trimNewLinesToSpace: NSAttributedString {
-    replaceNewlinesWithSpaces(in: self)
-  }
-
-  func replaceNewlinesWithSpaces(in attributedString: NSAttributedString) -> NSAttributedString {
-    // Create a mutable copy of the input attributed string
-    let mutableAttributedString = NSMutableAttributedString(attributedString: attributedString)
-
-    // Replace all occurrences of newline characters with space characters
-    let range = NSRange(location: 0, length: mutableAttributedString.length)
-    let newlineRegex = try! NSRegularExpression(pattern: "\\n")
-    newlineRegex.replaceMatches(in: mutableAttributedString.mutableString, options: [], range: range, withTemplate: " ")
-
-    // Return the modified attributed string
-    return mutableAttributedString
-  }
-
   var range: NSRange {
     NSMakeRange(0, length)
   }
