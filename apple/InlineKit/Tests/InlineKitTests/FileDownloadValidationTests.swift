@@ -80,6 +80,19 @@ struct FileDownloadValidationTests {
     }
   }
 
+  @Test("A web page standing in for a file is rejected unless the file is one")
+  func rejectsHTMLInPlaceOfTheFile() throws {
+    let portal = try response(status: 200, headers: ["Content-Type": "text/html; charset=utf-8"])
+    let file = URL(fileURLWithPath: "/tmp/report.pdf")
+    #expect(throws: FileDownloadValidationError.unexpectedContentType("text/html")) {
+      try DownloadedFileValidation.validateContentType(portal, for: file)
+    }
+    try DownloadedFileValidation.validateContentType(portal, for: URL(fileURLWithPath: "/tmp/page.HTML"))
+    try DownloadedFileValidation.validateContentType(response(status: 200, headers: ["Content-Type": "application/pdf"]), for: file)
+    try DownloadedFileValidation.validateContentType(response(status: 200), for: file)
+    try DownloadedFileValidation.validateContentType(nil, for: file)
+  }
+
   @Test("CDN validation still rejects an unreadable materialized file")
   func rejectsMissingCDNFile() {
     #expect(throws: (any Error).self) {

@@ -381,7 +381,9 @@ public actor FileCache: Sendable {
     recentFailures[photoID] = (source, Date().addingTimeInterval(cooldown))
   }
 
-  /// Re-fetches the photo's message and returns the photo again if a newer link arrived.
+  /// Re-fetches the photo's message and returns the photo again if a newer link arrived. A
+  /// fetch that did not run, because one ran within the last minute, may still have stored a
+  /// newer link: the photo is read either way, and its link used if it has not expired.
   private func refreshedPhoto(
     photoID: Int64,
     reloadMessage: Message?,
@@ -401,9 +403,8 @@ public actor FileCache: Sendable {
           .map { ($0.peerId, $0.messageId) }
       }
     }
-    guard let owner, await linkRefresher.refresh(peer: owner.peer, messageId: owner.messageId) else {
-      return nil
-    }
+    guard let owner else { return nil }
+    let refreshed = await linkRefresher.refresh(peer: owner.peer, messageId: owner.messageId)
     let fresh = try? await database.dbWriter.read { db in
       try Photo
         .filter(Photo.Columns.photoId == photoID)
@@ -412,7 +413,8 @@ public actor FileCache: Sendable {
         .fetchOne(db)
     }
     guard let fresh, let source = fresh.downloadSourceKey(),
-          let url = URL(string: source.cdnURL), url != staleURL
+          let url = URL(string: source.cdnURL), url != staleURL,
+          refreshed || !MediaLinkExpiry.isExpired(url)
     else { return nil }
     return (fresh, url, source)
   }

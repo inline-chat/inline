@@ -26,8 +26,8 @@ public enum NativeFileDownloadError: Error, LocalizedError, Sendable {
 /// Sidecar of a resumable partial (`<file>.inline-partial.json`).
 /// v1 described a contiguous prefix: the body's length, rounded down to a part.
 /// v2 lists the parts present in a sparse body as half-open `[start, end)` part-index ranges.
-/// The body is fsynced before every map write, and the map is replaced atomically, so it never
-/// claims bytes that are not on disk; parts past the body's length are distrusted on open.
+/// The body's writes are ordered before every map write, and the map is replaced atomically, so
+/// it never claims bytes that are not on disk; parts past the body's length are distrusted on open.
 private struct NativeDownloadRecord: Codable {
   let v: Int
   let accountID: Int64
@@ -45,10 +45,12 @@ public enum NativeDownloadPriority: Int, Comparable, Sendable {
 }
 
 /// One owner for native downloads. Every file shares one window of part slots: it adapts to
-/// per-part latency (grow by one under 1 s, halve over 2 s or on a transient failure) and is
+/// per-part latency (grow by one under 5 s, halve over 15 s or on a transient failure) and is
 /// granted by priority, then round-robin, so a small file is never stuck behind a large one.
 /// Parts land at their own offsets in a sparse partial whose map survives relaunch.
 /// A slot remains owned until its request returns, including after cancellation.
+/// Callers asking for the same file share one transfer; a caller that is cancelled leaves it to
+/// the others, and the transfer stops only when no caller is left.
 public actor NativeDownloadManager {
   public static let shared = NativeDownloadManager()
   public struct Key: Hashable, Sendable {
@@ -86,13 +88,10 @@ public actor NativeDownloadManager {
       self.priority = priority; self.stallBudget = stallBudget; self.transport = transport
     }
   }
-  private struct Publication: Sendable {
-    let destinations: [UUID: Result<URL, any Error>]
-  }
   private struct Entry {
     let id: UUID
     let request: Request
-    let task: Task<Publication, any Error>
+    let task: Task<Void, Never>
     var destinations: [UUID: URL]
     var priority: NativeDownloadPriority
     var lastProgress = ContinuousClock.now
@@ -106,6 +105,11 @@ public actor NativeDownloadManager {
     /// Parts written to `body`, readable by a player while the file downloads.
     var present = IndexSet()
     var body: URL?
+    /// Callers still waiting, each answered with its own path once the file is published.
+    var callers: [UUID: CheckedContinuation<URL, any Error>] = [:]
+    /// The last caller left, so the transfer is stopping. A new caller waits for it to let go
+    /// of the partial, then starts over.
+    var abandoned = false
   }
   private enum SlotGrant { case denied, granted(part: Int?) }
   private struct PartWaiter {
@@ -158,6 +162,13 @@ public actor NativeDownloadManager {
     try request.validateAccount()
     let key = request.key
     guard stoppedAccounts[key.accountID] == nil, stoppedKeys[key] == nil else { throw CancellationError() }
+    // Joining a transfer that is already stopping would only fail with it.
+    while let existing = entries[key], existing.abandoned {
+      await existing.task.value
+      try Task.checkCancellation()
+      try request.validateAccount()
+      guard stoppedAccounts[key.accountID] == nil, stoppedKeys[key] == nil else { throw CancellationError() }
+    }
     if let existing = entries[key], existing.request.accountToken != request.accountToken {
       block(key)
       await drain(key)
@@ -166,63 +177,81 @@ public actor NativeDownloadManager {
       try request.validateAccount()
       guard stoppedAccounts[key.accountID] == nil, stoppedKeys[key] == nil, entries[key] == nil else { throw CancellationError() }
     }
-    let observerID = UUID()
-    let task: Task<Publication, any Error>
+    let caller = UUID()
+    let id: UUID
     if var entry = entries[key] {
-      entry.observers[observerID] = progress
-      entry.destinations[observerID] = request.destination
+      entry.observers[caller] = progress
+      entry.destinations[caller] = request.destination
       entry.priority = max(entry.priority, request.priority)
       if let message = request.message, !entry.locations.contains(message) {
         entry.locations.append(message)
       }
       entries[key] = entry
       if entry.total > 0 { progress(entry.received, entry.total) }
-      task = entry.task
+      id = entry.id
     } else {
-      let id = UUID()
-      task = Task {
+      let entryID = UUID()
+      let task = Task {
+        let outcome: Result<URL, any Error>
         do {
           try Task.checkCancellation()
-          let result = try await Self.materialize(request, owner: self, id: id)
-          let publication = self.publishDestinations(result, key: key, id: id)
-          self.completeStreams(key, id: id, file: result)
-          self.finished(key, id: id)
-          return publication
+          outcome = .success(try await Self.materialize(request, owner: self, id: entryID))
         } catch {
-          self.finished(key, id: id)
-          throw error
+          outcome = .failure(error)
         }
+        self.finished(key, id: entryID, outcome: outcome)
       }
-      entries[key] = Entry(id: id, request: request, task: task, destinations: [observerID: request.destination],
-        priority: request.priority, locations: request.message.map { [$0] } ?? [], observers: [observerID: progress])
+      entries[key] = Entry(id: entryID, request: request, task: task, destinations: [caller: request.destination],
+        priority: request.priority, locations: request.message.map { [$0] } ?? [], observers: [caller: progress])
       if key.accountID > 0 { knownDirectories[key.accountID, default: []].insert(request.destination.deletingLastPathComponent()) }
+      id = entryID
     }
-    defer {
-      if var entry = entries[key] {
-        entry.observers.removeValue(forKey: observerID); entry.destinations.removeValue(forKey: observerID)
-        entries[key] = entry
+    // Successful atomic publication wins over a cancellation arriving later.
+    let result = try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, any Error>) in
+        guard entries[key]?.id == id else { continuation.resume(throwing: CancellationError()); return }
+        entries[key]?.callers[caller] = continuation
+        if Task.isCancelled { leave(key, id: id, caller: caller) }
       }
-    }
-    return try await withTaskCancellationHandler {
-      // Successful atomic publication wins over a cancellation arriving later.
-      let publication = try await task.value
-      guard let destination = publication.destinations[observerID] else { throw NativeFileDownloadError.invalidResponse }
-      let result = try destination.get()
-      do { try request.validateAccount() }
-      catch { try? FileManager.default.removeItem(at: result); throw error }
-      return result
     } onCancel: {
-      task.cancel()
+      Task { await self.leave(key, id: id, caller: caller) }
     }
+    do { try request.validateAccount() }
+    catch { try? FileManager.default.removeItem(at: result); throw error }
+    return result
   }
 
-  /// Give every attached cache owner its own path before any caller can remove
-  /// the original result. No completed-file registry survives this shared task.
-  private func publishDestinations(_ source: URL, key: Key, id: UUID) -> Publication {
-    guard let entry = entries[key], entry.id == id else { return Publication(destinations: [:]) }
+  /// A cancelled caller stops waiting and leaves the file to the callers still waiting. The
+  /// last caller instead stops the transfer and is answered once it has settled, so the partial
+  /// is free again by the time it returns.
+  private func leave(_ key: Key, id: UUID, caller: UUID) {
+    guard var entry = entries[key], entry.id == id, let continuation = entry.callers[caller] else { return }
+    entry.observers[caller] = nil
+    guard entry.callers.count == 1 else {
+      entry.callers[caller] = nil
+      entry.destinations[caller] = nil
+      entries[key] = entry
+      continuation.resume(throwing: CancellationError())
+      return
+    }
+    entry.abandoned = true
+    entries[key] = entry
+    entry.task.cancel()
+    cancelWaiters(id: id)
+  }
+
+  /// Give every waiting cache owner its own path before any caller can remove the original
+  /// result, then answer it. No completed-file registry survives this shared task, so a path no
+  /// waiting caller asked for goes: its caller left before publication.
+  /// Returns a published path that still exists, for players reading the finished file.
+  @discardableResult
+  private func publish(_ source: URL, entry: Entry) -> URL? {
     var linked: [URL: Result<URL, any Error>] = [source: .success(source)]
-    var destinations: [UUID: Result<URL, any Error>] = [:]
-    for (observer, destination) in entry.destinations {
+    for (caller, continuation) in entry.callers {
+      guard let destination = entry.destinations[caller] else {
+        continuation.resume(throwing: NativeFileDownloadError.invalidResponse)
+        continue
+      }
       if linked[destination] == nil {
         do {
           try FileManager.default.linkItem(at: source, to: destination)
@@ -231,9 +260,11 @@ public actor NativeDownloadManager {
           linked[destination] = .failure(error)
         }
       }
-      destinations[observer] = linked[destination]
+      continuation.resume(with: linked[destination] ?? .failure(NativeFileDownloadError.invalidResponse))
     }
-    return Publication(destinations: destinations)
+    if entry.callers.keys.contains(where: { entry.destinations[$0] == source }) { return source }
+    try? FileManager.default.removeItem(at: source)
+    return linked.values.lazy.compactMap { try? $0.get() }.first { $0 != source }
   }
 
   /// Moves every running download of this message up to `priority`, for a caller that joins a
@@ -437,7 +468,7 @@ public actor NativeDownloadManager {
     guard let entry = entries[key] else { return }
     entry.task.cancel()
     cancelWaiters(id: entry.id)
-    _ = await entry.task.result
+    await entry.task.value
   }
 
   public func stopAll(accountID: Int64, cacheDirectories: [URL] = []) async {
@@ -448,7 +479,7 @@ public actor NativeDownloadManager {
     }
     let owned = entries.filter { $0.key.accountID == accountID }
     for entry in owned.values { entry.task.cancel(); cancelWaiters(id: entry.id) }
-    for entry in owned.values { _ = await entry.task.result }
+    for entry in owned.values { await entry.task.value }
     let directories = (knownDirectories.removeValue(forKey: accountID) ?? []).union(cacheDirectories)
     for directory in directories { purge(accountID: accountID, directory: directory) }
   }
@@ -468,21 +499,41 @@ public actor NativeDownloadManager {
     }
   }
 
-  /// Active duplicate references are tracked; idle provenance belongs to the
-  /// first owner. Legacy records without IDs remain resumable and expire normally.
   public func discard(message: FileMessageLocation, accountID: Int64, cacheDirectories: [URL]) async {
-    let owned = entries.filter { $0.key.accountID == accountID && $0.value.locations.contains(message) }
+    await discard(messages: [message], accountID: accountID, cacheDirectories: cacheDirectories)
+  }
+
+  private struct MessageRef: Hashable {
+    let chatID: Int64
+    let messageID: Int64
+  }
+
+  /// Active duplicate references are tracked: a running file stops, and loses its partial, only
+  /// when deleted messages were all that used it; otherwise it keeps going for the rest. Idle
+  /// provenance belongs to the first owner. Legacy records without IDs remain resumable and
+  /// expire normally. Each folder is listed once for the whole batch, not once per message.
+  public func discard(messages: [FileMessageLocation], accountID: Int64, cacheDirectories: [URL]) async {
+    let deleted = Set(messages.map { MessageRef(chatID: $0.chatID, messageID: $0.messageID) })
+    guard !deleted.isEmpty else { return }
+    var owned: [Key: Entry] = [:]
+    for (key, entry) in entries where key.accountID == accountID {
+      let remaining = entry.locations.filter { !deleted.contains(MessageRef(chatID: $0.chatID, messageID: $0.messageID)) }
+      guard remaining.count < entry.locations.count else { continue }
+      if remaining.isEmpty { owned[key] = entry } else { entries[key]?.locations = remaining }
+    }
     for key in owned.keys { block(key) }
     defer { for key in owned.keys { unblock(key) } }
     for entry in owned.values { entry.task.cancel(); cancelWaiters(id: entry.id) }
-    for entry in owned.values { _ = await entry.task.result }
+    for entry in owned.values { await entry.task.value }
     for entry in owned.values {
       Self.removePartial(fileUniqueID: entry.request.fileUniqueID, directory: entry.request.destination.deletingLastPathComponent(), accountID: accountID)
     }
     for directory in cacheDirectories {
       for body in Self.partialFiles(in: directory) where !isOwned(body) {
         Self.removeIdlePartial(body) { saved in
-          saved?.accountID == accountID && saved?.chatID == message.chatID && saved?.messageID == message.messageID
+          guard let saved, saved.accountID == accountID, let chatID = saved.chatID, let messageID = saved.messageID
+          else { return false }
+          return deleted.contains(MessageRef(chatID: chatID, messageID: messageID))
         }
       }
     }
@@ -601,10 +652,11 @@ public actor NativeDownloadManager {
     grantWaiting()
   }
 
-  /// A part under 1 s grows the window by one; one over 2 s halves it.
+  /// A part under 5 s grows the window by one; one over 15 s halves it; between, it holds. A
+  /// part's latency includes the round trip, so a far server alone must not cap the window.
   func adaptWindow(after latency: Duration) {
-    if latency < .seconds(1) { window = min(window + 1, windowLimits.upperBound) }
-    else if latency > .seconds(2) { window = max(window / 2, windowLimits.lowerBound) }
+    if latency < .seconds(5) { window = min(window + 1, windowLimits.upperBound) }
+    else if latency > .seconds(15) { window = max(window / 2, windowLimits.lowerBound) }
   }
 
   /// A transient failure is congestion until proven otherwise.
@@ -667,8 +719,17 @@ public actor NativeDownloadManager {
     }
   }
 
-  private func finished(_ key: Key, id: UUID) {
+  /// Answers every caller still waiting with the transfer's outcome, then retires the entry.
+  private func finished(_ key: Key, id: UUID, outcome: Result<URL, any Error>) {
     guard let entry = entries[key], entry.id == id else { return }
+    switch outcome {
+    case let .success(file):
+      // The original goes when no waiting caller asked for it; players read a linked copy.
+      let kept = publish(file, entry: entry)
+      completeStreams(key, id: id, file: kept ?? file)
+    case let .failure(error):
+      for continuation in entry.callers.values { continuation.resume(throwing: error) }
+    }
     cancelWaiters(id: id)
     entries.removeValue(forKey: key)
     lastGrant.removeValue(forKey: key)
@@ -734,8 +795,16 @@ public actor NativeDownloadManager {
   }
 
   /// Flushes the body to stable storage, past the drive cache that a plain fsync leaves on Darwin.
+  /// Costly, so only a finished file pays it, right before it is published.
   private static func fullSync(_ descriptor: Int32) throws {
     if fcntl(descriptor, F_FULLFSYNC) == 0 { return }
+    guard fsync(descriptor) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+  }
+
+  /// Orders the body's writes before any later write, such as the map that claims them. That is
+  /// all the map needs, and far cheaper than a full flush once a second per file.
+  private static func barrierSync(_ descriptor: Int32) throws {
+    if fcntl(descriptor, F_BARRIERFSYNC) == 0 { return }
     guard fsync(descriptor) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
   }
 
@@ -831,7 +900,7 @@ public actor NativeDownloadManager {
         present.insert(index)
         // Bytes reach disk before the map that claims them; at most one map write a second.
         if persistent, ContinuousClock.now - lastMapWrite >= .seconds(1) {
-          try fullSync(descriptor)
+          try barrierSync(descriptor)
           try writeMap()
         }
         await owner.received(present, total: total, body: body, key: request.key, id: id)
@@ -862,7 +931,7 @@ public actor NativeDownloadManager {
       guard present.count == partCount(total: total), try handle.seekToEnd() == total else {
         throw NativeFileDownloadError.invalidResponse
       }
-      try handle.synchronize()
+      try fullSync(descriptor)
       try Task.checkCancellation(); try request.validateAccount()
       // Players stop reading the body by path; they move to the published file.
       await owner.received(present, total: total, body: nil, key: request.key, id: id)
@@ -882,15 +951,17 @@ public actor NativeDownloadManager {
       return destination
     } catch {
       // Stopping never discards verified bytes; only a file the server refuses or corrupts goes.
-      // A CDN failure says nothing about bytes already verified, so those stay too.
+      // A CDN failure says nothing about bytes already verified, so those stay too, unless the
+      // CDN's object changed under them.
+      let cdnFailure = error as? CDNRangeError
       retain = persistent && !present.isEmpty && total > 0 && (try? request.validateAccount()) != nil &&
-        (error is CancellationError || error is CDNRangeError ||
+        (error is CancellationError || (cdnFailure != nil && cdnFailure != .objectChanged) ||
          NativeFileDownloader.isRetryableTransportFailure(error) || (error as? POSIXError)?.code == .EEXIST)
       if retain {
         // Rename did not free the body pathname on EEXIST, so the original flock still protects
         // restoring the map for complete-body recovery. A map is written only over synced bytes;
         // if the sync fails the previous map stays, claiming less.
-        if (try? fullSync(descriptor)) != nil {
+        if (try? barrierSync(descriptor)) != nil {
           try? encodeRecord(request, total: total, parts: present).write(to: metadata, options: .atomic)
         }
       }
@@ -1173,15 +1244,17 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
     validateAccount: @Sendable () throws -> Void,
     request: @Sendable (any NativeFilePartFetching, Duration?) -> NativeDownloadManager.Request
   ) async throws -> NativeDownloadOutcome {
+    let nativeRequest = request(native, link == nil ? nil : fallbackStallBudget)
     do {
-      let file = try await manager.download(request(native, link == nil ? nil : fallbackStallBudget), progress: progress)
+      let file = try await manager.download(nativeRequest, progress: progress)
       return NativeDownloadOutcome(file: file, fallback: nil)
     } catch {
       guard let link, !Task.isCancelled, !(error is CancellationError), !isPermissionFailure(error),
             (error as? POSIXError)?.code != .EEXIST, (try? validateAccount()) != nil
       else { throw error }
       do {
-        let file = try await manager.download(request(CDNRangeSource(link: link), nil), progress: progress)
+        let source = CDNRangeSource(link: link, acceptsHTML: DownloadedFileValidation.mayBeHTML(nativeRequest.destination))
+        let file = try await manager.download(request(source, nil), progress: progress)
         return NativeDownloadOutcome(file: file, fallback: error)
       } catch let cdnError {
         if Task.isCancelled || cdnError is CancellationError { throw cdnError }
@@ -1190,12 +1263,15 @@ struct NativeMessageFileDownload: NativeFilePartFetching {
     }
   }
 
+  /// Only explicit refusals. The server answers 400 both for a file this message cannot reach
+  /// and for a legacy file it has no size or path for, and 404 for one it cannot find; the client
+  /// cannot tell them apart, and the signed CDN link may still serve the legacy ones.
   static func isPermissionFailure(_ error: any Error) -> Bool {
     if error is AuthStorageError { return true }
     if case .inaccessible? = error as? NativeFileDownloadError { return true }
     if case .notAuthorized? = error as? RealtimeDirectRpcError { return true }
     if case let .rpcError(code, _, status)? = error as? RealtimeDirectRpcError {
-      return [400, 401, 403, 404].contains(status) || code == .unauthenticated
+      return status == 401 || status == 403 || code == .unauthenticated
     }
     return false
   }
