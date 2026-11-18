@@ -51,6 +51,9 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
 
   /// The menu starts closing.
   var onWillDismiss: (() -> Void)?
+  /// The row under the menu changed while it was open (a reaction picked from it): the bubble that flew
+  /// back fades out over the row instead of being swapped for it, so the change does not snap in.
+  var fadesPreviewOnLanding = false
   /// The menu is gone and the source shows again.
   var onDidDismiss: (() -> Void)?
   private(set) var isDismissing = false
@@ -421,8 +424,14 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
       } else {
         previewHost.alpha = 0
       }
-    } completion: { _ in
-      finish()
+    } completion: { [self] _ in
+      guard target != nil, fadesPreviewOnLanding else { return finish() }
+      source.setHidden(false)
+      UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseOut]) { [self] in
+        previewHost.alpha = 0
+      } completion: { _ in
+        finish()
+      }
     }
   }
 

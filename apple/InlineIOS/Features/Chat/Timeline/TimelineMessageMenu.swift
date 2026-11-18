@@ -504,6 +504,9 @@ final class TimelineMessageMenu: NSObject {
       return
     }
     pendingCustomReaction = controller == nil ? nil : sourceID
+    // The reacted row keeps its shape until the bubble lands on it, then takes the reaction with its own
+    // motion: the chips slide as the new one grows in, instead of the row changing under the bubble.
+    if controller != nil, let sourceID { liveSourceID = sourceID }
     toggle()
     guard let controller else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak controller] in
@@ -518,6 +521,10 @@ final class TimelineMessageMenu: NSObject {
 extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
   /// Rows changed: a row that now shows the reaction picked from UIKit's menu closes it.
   func rowsDidUpdate(_ ids: Set<ChatRowID>) {
+    // The bubble the menu lifted no longer matches its row: it fades onto the row as it lands.
+    if let controller, !controller.isDismissing, let source = sourceID, source != liveSourceID, ids.contains(source) {
+      controller.fadesPreviewOnLanding = true
+    }
     if let id = pendingCustomReaction, ids.contains(id), let controller {
       // The row has the reaction: the bubble flies back onto its new shape now.
       pendingCustomReaction = nil
