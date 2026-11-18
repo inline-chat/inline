@@ -35,7 +35,7 @@ export const getSpaceMembers = async (
 
       const timeZoneVisible = min
         ? new Set<number>()
-        : await resolveTimeZoneVisibility(context.currentUserId, usersWithPhotos.map((u) => u.user))
+        : await resolveTimeZoneVisibility(tx, context.currentUserId, usersWithPhotos.map((u) => u.user))
 
       return {
         members: activeMembers.map((member) => Encoders.member(member)),

@@ -734,8 +734,8 @@ async function hydrateChats(
     return peerUserId == null ? [] : [peerUserId]
   }))
   const dmPeers = Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id))
-  const timeZoneVisible = await resolveTimeZoneVisibility(currentUserId, dmPeers)
-  const focusByUserId = await resolveFocusForViewer(currentUserId, dmPeers.filter((user) => user.bot !== true))
+  const timeZoneVisible = await resolveTimeZoneVisibility(tx, currentUserId, dmPeers)
+  const focusByUserId = await resolveFocusForViewer(tx, currentUserId, dmPeers.filter((user) => user.bot !== true))
   const encodedUsers = Array.from(usersById.values()).map((user) =>
     Encoders.user({
       user,
