@@ -767,7 +767,19 @@ private struct ExperimentalChatListView: View {
           .buttonStyle(ChatRowButtonStyle(isActive: isLit(item)) { isPressed in
             if isPressed {
               pressedChat = item.peer
-            } else if pressedChat == item.peer {
+              // The window is read while the finger is down, so the push after release rarely waits.
+              ChatOpenPreparation.shared.prefetch(peer: item.peer)
+            } else {
+              // A press that ends without opening the chat (a scroll, a context menu) drops its read. The
+              // tap's push, if any, is asked for after the press ends.
+              let peer = item.peer
+              DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                guard router.pendingPreparedDestination != destination, !router.selectedTabPath.contains(destination)
+                else { return }
+                ChatOpenPreparation.shared.discard(peer: peer)
+              }
+            }
+            if !isPressed, pressedChat == item.peer {
               pressedChat = nil
             }
           })

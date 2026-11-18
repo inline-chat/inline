@@ -1663,6 +1663,8 @@ private extension MessagesCollectionView {
     private let chatId: Int64
     private let spaceId: Int64?
     private let isPreview: Bool
+    /// The chat-open trace ends with the first non-empty snapshot this list applies, once.
+    private var didTraceOpen = false
     private var theme: IOSThemeSnapshot
     var onVisibleMessagesChanged: (([Int64]?) -> Void)?
     /// `.next` draws supported message kinds with the next message view.
@@ -3927,6 +3929,10 @@ private extension MessagesCollectionView {
         span.end(
           "sections=\(sectionCount) items=\(itemCount) animated=\(animatingDifferences) duration_ms=\(durationMs)"
         )
+        if itemCount > 0, !self.isPreview, !self.didTraceOpen {
+          self.didTraceOpen = true
+          ChatOpenTrace.listOpened(peer: self.peerId, list: "collection")
+        }
         PerformanceTrace.slowBreadcrumb(
           "slow iOS messages snapshot apply",
           category: "messages.ios",

@@ -953,6 +953,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       if unreadFetchBoundary != nil { return }
     }
     hasOpened = true
+    if !isPreview { ChatOpenTrace.listOpened(peer: peer, list: "timeline") }
     self.snapshot = snapshot
     rebuildDayRows()
     var scroll = TimelineScroll<ChatRowID>.latest

@@ -438,7 +438,12 @@ extension Destination {
   /// is built from it in its first frame.
   @MainActor func preparationBeforeShowing() -> (@MainActor @Sendable () async -> Void)? {
     guard let peer = chatPeer else { return nil }
-    return { _ = await ChatOpenPreparation.shared.state(for: peer) }
+    // The router asks for this as it is asked to show the chat, and pushes as soon as it returns.
+    ChatOpenTrace.begin(peer: peer)
+    return {
+      _ = await ChatOpenPreparation.shared.state(for: peer)
+      ChatOpenTrace.prepared(peer: peer)
+    }
   }
 
   /// The conversation represented by the visible route, including child pages
