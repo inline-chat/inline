@@ -464,6 +464,36 @@ public final class DebugChatFixture {
     }
   }
 
+  /// The current user's reaction toggled as the app sends one: saved (or removed) and published at once, as
+  /// the transaction's optimistic step does, then published again a round trip later, as the server's
+  /// `UpdateReaction` is applied (its save finds the reaction already there and publishes all the same).
+  public func toggleReaction(emoji: String, messageId: Int64, roundTrip: Duration = .milliseconds(300)) async throws {
+    let chatId = chatId
+    let userId = currentUserId
+    try await database.dbWriter.write { db in
+      let mine = Reaction.filter(Column("chatId") == chatId && Column("messageId") == messageId)
+        .filter(Column("userId") == userId && Column("emoji") == emoji)
+      if try mine.fetchCount(db) > 0 {
+        _ = try mine.deleteAll(db)
+      } else {
+        _ = try Reaction.save(db, reaction: Reaction(id: 90_000_000 + messageId * 100 + Int64(emoji.unicodeScalars.first?.value ?? 0) % 100, messageId: messageId, userId: userId, emoji: emoji, date: Date(), chatId: chatId))
+      }
+    }
+    try publishUpdate(messageId: messageId)
+    try await Task.sleep(for: roundTrip)
+    try publishUpdate(messageId: messageId)
+  }
+
+  private func publishUpdate(messageId: Int64) throws {
+    let chatId = chatId
+    let currentUserId = currentUserId
+    guard let message = try database.reader.read({ db in
+      try FullMessage.queryRequest(currentUserId: currentUserId)
+        .filter(Column("chatId") == chatId && Column("messageId") == messageId).fetchOne(db)
+    }) else { return }
+    publisher.publisher.send(.update(.init(message: message, animated: true, peer: peer)))
+  }
+
   /// A message is deleted, wherever it is.
   public func delete(messageId: Int64) throws {
     let chatId = chatId
