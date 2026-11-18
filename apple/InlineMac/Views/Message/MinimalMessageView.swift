@@ -409,6 +409,42 @@ class MinimalMessageViewAppKit: NSView {
     return view
   }()
 
+  /// An album's islands, in its photo's place (`props.album`). The photo view keeps the slot's
+  /// constraints and stays hidden under it.
+  private var albumGridView: MessageAlbumGridView?
+
+  private func syncAlbumGrid() {
+    guard let album = props.album, props.layout.photo != nil, photoView.superview != nil else {
+      albumGridView?.removeFromSuperview()
+      albumGridView = nil
+      photoView.isHidden = false
+      return
+    }
+    photoView.isHidden = true
+    let grid = albumGridView ?? {
+      let grid = MessageAlbumGridView()
+      grid.translatesAutoresizingMaskIntoConstraints = false
+      contentView.addSubview(grid, positioned: .above, relativeTo: photoView)
+      NSLayoutConstraint.activate([
+        grid.topAnchor.constraint(equalTo: photoView.topAnchor),
+        grid.leadingAnchor.constraint(equalTo: photoView.leadingAnchor),
+        grid.widthAnchor.constraint(equalTo: photoView.widthAnchor),
+        grid.heightAnchor.constraint(equalTo: photoView.heightAnchor),
+      ])
+      albumGridView = grid
+      return grid
+    }()
+    grid.configure(
+      album: album,
+      availableWidth: props.layout.albumAvailableWidth ?? props.layout.photo?.size.width ?? 0,
+      style: .islands,
+      scrollState: scrollState,
+      isRightToLeft: userInterfaceLayoutDirection == .rightToLeft,
+      roundsTop: false,
+      roundsBottom: false
+    )
+  }
+
   private lazy var videoView: NewVideoView = {
     let view = NewVideoView(fullMessage, scrollState: scrollState, roundsAllCorners: true)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -2253,6 +2289,7 @@ class MinimalMessageViewAppKit: NSView {
 
     defer {
       NSLayoutConstraint.activate(constraints)
+      syncAlbumGrid()
     }
 
     // Note:
@@ -3469,6 +3506,31 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
+    // An album goes as a whole: sent items on the server, sends in flight cancelled, failed
+    // ones locally.
+    if let album = props.album {
+      let peerId = message.peerId
+      let chatId = message.chatId
+      let sent = album.items.map(\FullMessage.message.messageId).filter { $0 > 0 }
+      let cancelled = album.items.filter { $0.message.messageId <= 0 && PendingMessageCanceller.cancel($0) }
+      let local = album.items.filter { item in
+        item.message.messageId <= 0 && !cancelled.contains { $0.id == item.id }
+      }.map(\FullMessage.message.messageId)
+      if !local.isEmpty {
+        Task {
+          _ = try? await AppDatabase.shared.dbWriter.write { db in
+            try Message.deleteMessages(db, messageIds: local, chatId: chatId)
+          }
+          await MainActor.run { MessagesPublisher.shared.messagesDeleted(messageIds: local, peer: peerId) }
+        }
+      }
+      if !sent.isEmpty {
+        Task(priority: .userInitiated) { @MainActor in
+          try await Api.realtime.send(.deleteMessages(messageIds: sent, peerId: peerId, chatId: chatId))
+        }
+      }
+      return
+    }
     if message.status == .failed {
       let messageId = message.messageId
       let chatId = message.chatId
@@ -3809,7 +3871,8 @@ class MinimalMessageViewAppKit: NSView {
 
   @objc private func forwardMessage() {
     if let forwardMessages = dependencies?.forwardMessages {
-      forwardMessages.present(messages: [fullMessage])
+      // An album forwards as a whole and stays one album in the destination.
+      forwardMessages.present(messages: props.album?.items ?? [fullMessage])
       return
     }
 
@@ -3823,7 +3886,7 @@ class MinimalMessageViewAppKit: NSView {
 
     weak var weakHostingController: NSViewController?
     let rootView = ForwardMessagesSheet(
-      messages: [fullMessage],
+      messages: props.album?.items ?? [fullMessage],
       onSelect: { [weak self] destination, selection in
         guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
           Log.shared.error("Forward nav failed: missing destination chat id")
@@ -4253,9 +4316,11 @@ class MinimalMessageViewAppKit: NSView {
     syncForwardHeaderView(for: props)
 
     // Photo
-    if hasPhoto {
+    // Under an album the photo view only holds the slot: nothing to load.
+    if hasPhoto, props.album == nil {
       photoView.update(with: fullMessage)
     }
+    syncAlbumGrid()
 
     // Video
     if hasVideo {
@@ -4318,6 +4383,7 @@ class MinimalMessageViewAppKit: NSView {
       // disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
       disableTextRelayout: true
     )
+    syncAlbumGrid()
 
     if let richBlockPlan = props.layout.richBlockContent,
        let richBlockContentView
@@ -4349,8 +4415,10 @@ class MinimalMessageViewAppKit: NSView {
       if hasPhoto {
         if scrollState == .idle {
           photoView.setIsScrolling(false)
+          albumGridView?.setIsScrolling(false)
         } else {
           photoView.setIsScrolling(true)
+          albumGridView?.setIsScrolling(true)
         }
       }
       if hasVideo {
@@ -5059,7 +5127,7 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
         forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
         if ExperimentalFeatureFlags.quickForwardEnabled, let dependencies,
            dependencies.forwardMessages != nil {
-          forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
+          forwardItem.submenu = ForwardMessageMenu.make(messages: props.album?.items ?? [fullMessage], dependencies: dependencies)
         }
         menu.addItem(forwardItem)
         if message.messageId > 0,
@@ -5197,8 +5265,8 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       }
     }
 
-    // Add photo actions
-    if hasPhoto {
+    // Add photo actions (an album's photos open one at a time, from their tiles)
+    if hasPhoto, props.album == nil {
       let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
       copyItem.target = photoView
       copyItem.isEnabled = true

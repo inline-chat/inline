@@ -47,7 +47,8 @@ final class ChatRowListViewModel {
   private var albumByLead: [Int64: MessageAlbum] = [:]
   private var leadByMember: [Int64: Int64] = [:]
 
-  /// Whether rows collapse albums. Off for the minimal style, which has no album grid yet.
+  /// Whether rows collapse albums (both styles draw them: a grid in bubbles, islands when
+  /// minimal). Off draws one row per message.
   var groupsAlbums = true {
     didSet {
       guard groupsAlbums != oldValue else { return }

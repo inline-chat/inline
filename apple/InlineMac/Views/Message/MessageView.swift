@@ -2688,6 +2688,9 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: layout.photoContentViewTop
       )
+      photoViewLeadingConstraint = photoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: photo.spacing.left
+      )
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
       photoViewWidthConstraint = photoView.widthAnchor
         .constraint(equalToConstant: photo.size.width)
@@ -2695,7 +2698,7 @@ class MessageViewAppKit: NSView {
         photoViewTopConstraint!,
         photoViewHeightConstraint!,
         photoViewWidthConstraint!,
-        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+        photoViewLeadingConstraint!,
       ])
     }
 
@@ -2706,6 +2709,9 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: layout.videoContentViewTop
       )
+      videoViewLeadingConstraint = videoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: video.spacing.left
+      )
       videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
       videoViewWidthConstraint = videoView.widthAnchor
         .constraint(equalToConstant: video.size.width)
@@ -2713,7 +2719,7 @@ class MessageViewAppKit: NSView {
         videoViewTopConstraint!,
         videoViewHeightConstraint!,
         videoViewWidthConstraint!,
-        videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
+        videoViewLeadingConstraint!,
       ])
     }
   }
@@ -2728,6 +2734,9 @@ class MessageViewAppKit: NSView {
   private var photoViewHeightConstraint: NSLayoutConstraint?
   private var photoViewWidthConstraint: NSLayoutConstraint?
   private var photoViewTopConstraint: NSLayoutConstraint?
+  /// Follows the media frame inset (`MessageSizeCalculator.mediaFrameInset`), which a reused view can change.
+  private var photoViewLeadingConstraint: NSLayoutConstraint?
+  private var videoViewLeadingConstraint: NSLayoutConstraint?
 
   private var videoViewHeightConstraint: NSLayoutConstraint?
   private var videoViewWidthConstraint: NSLayoutConstraint?
@@ -2984,6 +2993,9 @@ class MessageViewAppKit: NSView {
       if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
         photoViewTopConstraint.constant = props.layout.photoContentViewTop
       }
+      if let photoViewLeadingConstraint, photoViewLeadingConstraint.constant != photo.spacing.left {
+        photoViewLeadingConstraint.constant = photo.spacing.left
+      }
     } else if let photo = props.layout.photo {
       if photoView.superview == nil {
         contentView.addSubview(photoView)
@@ -2992,13 +3004,16 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: props.layout.photoContentViewTop
       )
+      photoViewLeadingConstraint = photoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: photo.spacing.left
+      )
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
       photoViewWidthConstraint = photoView.widthAnchor.constraint(equalToConstant: photo.size.width)
       NSLayoutConstraint.activate([
         photoViewTopConstraint!,
         photoViewHeightConstraint!,
         photoViewWidthConstraint!,
-        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+        photoViewLeadingConstraint!,
       ])
     }
 
@@ -3019,6 +3034,9 @@ class MessageViewAppKit: NSView {
       if videoViewTopConstraint.constant != props.layout.videoContentViewTop {
         videoViewTopConstraint.constant = props.layout.videoContentViewTop
       }
+      if let videoViewLeadingConstraint, videoViewLeadingConstraint.constant != video.spacing.left {
+        videoViewLeadingConstraint.constant = video.spacing.left
+      }
     } else if let video = props.layout.video {
       // Set up constraints if they didn't exist (e.g. view reused for a different message)
       if videoView.superview == nil {
@@ -3028,13 +3046,16 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: props.layout.videoContentViewTop
       )
+      videoViewLeadingConstraint = videoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: video.spacing.left
+      )
       videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
       videoViewWidthConstraint = videoView.widthAnchor.constraint(equalToConstant: video.size.width)
       NSLayoutConstraint.activate([
         videoViewTopConstraint!,
         videoViewHeightConstraint!,
         videoViewWidthConstraint!,
-        videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
+        videoViewLeadingConstraint!,
       ])
     }
 
@@ -4369,7 +4390,8 @@ class MessageViewAppKit: NSView {
     syncForwardHeaderView(for: props)
 
     // Photo
-    if hasPhoto {
+    // Under an album the photo view only holds the slot: nothing to load.
+    if hasPhoto, props.album == nil {
       photoView.update(with: fullMessage)
     }
     syncAlbumGrid()
@@ -5205,7 +5227,7 @@ extension MessageViewAppKit: NSMenuDelegate {
         forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
         if ExperimentalFeatureFlags.quickForwardEnabled, let dependencies,
            dependencies.forwardMessages != nil {
-          forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
+          forwardItem.submenu = ForwardMessageMenu.make(messages: props.album?.items ?? [fullMessage], dependencies: dependencies)
         }
         menu.addItem(forwardItem)
         if message.messageId > 0,

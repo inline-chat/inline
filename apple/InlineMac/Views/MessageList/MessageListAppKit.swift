@@ -192,8 +192,6 @@ class MessageListAppKit: NSViewController {
     )
     let renderStyle = AppSettings.shared.messageRenderStyle
     messageRenderStyle = renderStyle
-    // The minimal style has no album grid yet: its rows stay one per message.
-    chatRows.groupsAlbums = renderStyle == .bubble
     usesAvatarOverlay = AppConfig.macMessageAvatarOverlayEnabled
     state = ChatsManager
       .get(
@@ -4085,7 +4083,7 @@ class MessageListAppKit: NSViewController {
       renderStyle: messageRenderStyle,
       interactionMode: interactionMode(for: row),
       replyThreadTitle: replyThreadTitle(for: message),
-      album: chatRows.groupsAlbums ? chatRows.album(forStableId: message.id) : nil
+      album: chatRows.album(forStableId: message.id)
     )
   }
 

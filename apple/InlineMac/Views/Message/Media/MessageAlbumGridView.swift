@@ -7,11 +7,12 @@ import InlineMessageLayout
 /// grid and puts this view in that photo's place; each tile is the item's own media view, so
 /// loading, Quick Look, video playback and upload progress work per item.
 final class MessageAlbumGridView: NSView {
-  /// The grid for `album`, at most `availableWidth` wide (the widest single photo).
-  static func mosaic(for album: MessageAlbum, availableWidth: CGFloat) -> AlbumMosaic {
+  /// The grid for `album`, at most `availableWidth` wide: Telegram's arrangement in bubbles,
+  /// islands (separate tiles flowing into lines) in the minimal style.
+  static func mosaic(for album: MessageAlbum, availableWidth: CGFloat, style: AlbumLayoutStyle = .telegram) -> AlbumMosaic {
     let width = max(1, availableWidth)
     return AlbumMosaic.layout(
-      style: .telegram,
+      style: style,
       aspectRatios: album.items.map(aspectRatio),
       // About Telegram's 300 × 380 box, scaled to the width.
       metrics: .init(width: width, maxHeight: width * 380 / 300, spacing: 2),
@@ -46,6 +47,8 @@ final class MessageAlbumGridView: NSView {
 
   private var tiles: [Int64: Tile] = [:]
   private var frames: [Int64: CGRect] = [:]
+  /// Tiles round themselves (islands) instead of the grid rounding its outer corners.
+  private var tileCornerRadius: CGFloat = 0
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -68,14 +71,17 @@ final class MessageAlbumGridView: NSView {
   func configure(
     album: MessageAlbum,
     availableWidth: CGFloat,
+    style: AlbumLayoutStyle = .telegram,
     scrollState: MessageListScrollState,
     isRightToLeft: Bool,
     roundsTop: Bool,
     roundsBottom: Bool
   ) {
-    let mosaic = Self.mosaic(for: album, availableWidth: availableWidth)
+    let mosaic = Self.mosaic(for: album, availableWidth: availableWidth, style: style)
     let ids = Set(album.items.map(\.id))
-    for (id, tile) in tiles where !ids.contains(id) {
+    let rebuildsTiles = mosaic.tileCornerRadius != tileCornerRadius
+    tileCornerRadius = mosaic.tileCornerRadius
+    for (id, tile) in tiles where !ids.contains(id) || rebuildsTiles {
       tile.view.removeFromSuperview()
       tiles[id] = nil
       frames[id] = nil
@@ -98,8 +104,8 @@ final class MessageAlbumGridView: NSView {
     let flipped = layer?.contentsAreFlipped() ?? isFlipped
     let top: CACornerMask = flipped ? [.layerMinXMinYCorner, .layerMaxXMinYCorner] : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
     let bottom: CACornerMask = flipped ? [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] : [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-    if roundsTop { corners.formUnion(top) }
-    if roundsBottom { corners.formUnion(bottom) }
+    if tileCornerRadius == 0, roundsTop { corners.formUnion(top) }
+    if tileCornerRadius == 0, roundsBottom { corners.formUnion(bottom) }
     layer?.cornerRadius = corners.isEmpty ? 0 : radius
     layer?.maskedCorners = corners
     needsLayout = true
@@ -127,14 +133,18 @@ final class MessageAlbumGridView: NSView {
       }
     }
     let tile: Tile
+    // Grid tiles are square (the grid rounds the album's outer corners); islands round their own.
+    let roundsAllCorners = tileCornerRadius > 0
+    let reduction = roundsAllCorners
+      ? max(0, Theme.messageBubbleCornerRadius - 1 - tileCornerRadius)
+      : .greatestFiniteMagnitude
     if isVideo {
-      let view = NewVideoView(item, scrollState: scrollState)
-      // Square tiles; the grid rounds the album's outer corners.
-      view.cornerRadiusReduction = .greatestFiniteMagnitude
+      let view = NewVideoView(item, scrollState: scrollState, roundsAllCorners: roundsAllCorners)
+      view.cornerRadiusReduction = reduction
       tile = .video(view)
     } else {
-      let view = NewPhotoView(item, scrollState: scrollState)
-      view.cornerRadiusReduction = .greatestFiniteMagnitude
+      let view = NewPhotoView(item, scrollState: scrollState, roundsAllCorners: roundsAllCorners)
+      view.cornerRadiusReduction = reduction
       tile = .photo(view)
     }
     tile.view.translatesAutoresizingMaskIntoConstraints = true

@@ -294,8 +294,7 @@ struct DeveloperMessageFixture {
       isRtl: isRtl,
       translated: false,
       renderStyle: style,
-      // The minimal style draws albums as separate messages, as the list does.
-      album: style == .bubble ? album : nil
+      album: album
     )
   }
 }

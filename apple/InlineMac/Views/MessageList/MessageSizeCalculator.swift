@@ -83,6 +83,9 @@ class MessageSizeCalculator {
   static let bubbleMessageActionRowHeight: CGFloat = 28
   static let minimalMessageActionRowHeight: CGFloat = 24
   static let replyThreadSummaryHeight: CGFloat = ReplyThreadSummaryView.height(hasTitle: false)
+  /// The band of the bubble's color around photos, videos and albums in bubbles.
+  static let mediaFrameInset: CGFloat = 1
+
   private func hasBubbleColor(
     style: RenderStyle,
     emojiMessage: Bool,
@@ -825,6 +828,9 @@ class MessageSizeCalculator {
       isPngPhotoWithoutCaption: isPngPhotoWithoutCaption
     )
     let usesOutgoingBubbleStyle = isOutgoing && hasBubbleColor
+    // Media sit inside a thin band of the bubble's color (as on iOS), when the bubble has one,
+    // so they are sized for the width less that band.
+    let mediaInset: CGFloat = hasBubbleColor ? Self.mediaFrameInset : 0
     let richTextStyleKey = richTextStyleKey(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
     let bubbleContentHorizontalInset = horizontalBubbleInset(for: .bubble)
 
@@ -899,13 +905,13 @@ class MessageSizeCalculator {
       }
 
       if let album = props.album {
-        albumAvailableWidth = min(parentAvailableWidth, maxMediaSide)
+        albumAvailableWidth = min(parentAvailableWidth - 2 * mediaInset, maxMediaSide)
         photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: albumAvailableWidth!).size
       } else if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: width,
           height: height,
-          parentAvailableWidth: parentAvailableWidth,
+          parentAvailableWidth: parentAvailableWidth - 2 * mediaInset,
           hasCaption: hasText,
           maxSide: Self.stickerMaxSide
         )
@@ -913,7 +919,7 @@ class MessageSizeCalculator {
         photoSize = calculatePhotoSize(
           width: width,
           height: height,
-          parentAvailableWidth: parentAvailableWidth,
+          parentAvailableWidth: parentAvailableWidth - 2 * mediaInset,
           hasCaption: hasText,
           maxSide: maxMediaSide
         )
@@ -921,7 +927,7 @@ class MessageSizeCalculator {
         videoSize = calculatePhotoSize(
           width: width,
           height: height,
-          parentAvailableWidth: parentAvailableWidth,
+          parentAvailableWidth: parentAvailableWidth - 2 * mediaInset,
           hasCaption: hasText,
           maxSide: maxMediaSide
         )
@@ -972,9 +978,9 @@ class MessageSizeCalculator {
     // to ensure text doesn't overflow the bubble bounds
     if hasMedia, let photoSize {
       // Photos strictly constrain text width
-      availableWidth = photoSize.width - (bubbleContentHorizontalInset * 2)
+      availableWidth = photoSize.width + 2 * mediaInset - (bubbleContentHorizontalInset * 2)
     } else if hasMedia, let videoSize {
-      availableWidth = videoSize.width - (bubbleContentHorizontalInset * 2)
+      availableWidth = videoSize.width + 2 * mediaInset - (bubbleContentHorizontalInset * 2)
     } else if hasDocument {
       // Documents don't restrict text width like photos - text can use full parent width
       availableWidth = parentAvailableWidth - (bubbleContentHorizontalInset * 2)
@@ -1247,15 +1253,19 @@ class MessageSizeCalculator {
 
     // MARK: - Photo
 
+    func framedMediaSpacing() -> NSEdgeInsets {
+      .init(
+        top: forwardHeaderPlan == nil && replyPlan == nil ? mediaInset : 0,
+        left: mediaInset,
+        bottom: hasText ? Theme.messageTextAndPhotoSpacing : mediaInset,
+        right: mediaInset
+      )
+    }
+
     if let photoSize {
       photoPlan = LayoutPlan(size: .zero, spacing: .zero)
       photoPlan!.size = photoSize
-
-      if hasText {
-        photoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
-      } else {
-        photoPlan!.spacing = .zero
-      }
+      photoPlan!.spacing = framedMediaSpacing()
     }
 
     // MARK: - Video
@@ -1263,12 +1273,7 @@ class MessageSizeCalculator {
     if let videoSize {
       videoPlan = LayoutPlan(size: .zero, spacing: .zero)
       videoPlan!.size = videoSize
-
-      if hasText {
-        videoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
-      } else {
-        videoPlan!.spacing = .zero
-      }
+      videoPlan!.spacing = framedMediaSpacing()
     }
 
     // MARK: - Document
@@ -1452,7 +1457,7 @@ class MessageSizeCalculator {
       let timeWidth = timePlan!.size.width + timePlan!.spacing.horizontalTotal
       let totalWidth = textWidth + timeWidth
 
-      let mediaWidth = photoPlan?.size.width ?? videoPlan?.size.width ?? 0
+      let mediaWidth = (photoPlan?.size.width ?? videoPlan?.size.width ?? 0) + 2 * mediaInset
       if totalWidth > mediaWidth {
         isSingleLine = false
       }
@@ -1518,14 +1523,12 @@ class MessageSizeCalculator {
       bubbleWidth = max(bubbleWidth, replyPlan.size.width + replyPlan.spacing.horizontalTotal)
     }
     if let photoPlan {
-      bubbleHeight += photoPlan.size.height
-      bubbleHeight += photoPlan.spacing.bottom
-      bubbleWidth = photoPlan.size.width
+      bubbleHeight += photoPlan.spacing.top + photoPlan.size.height + photoPlan.spacing.bottom
+      bubbleWidth = photoPlan.size.width + photoPlan.spacing.left + photoPlan.spacing.right
     }
     if let videoPlan {
-      bubbleHeight += videoPlan.size.height
-      bubbleHeight += videoPlan.spacing.bottom
-      bubbleWidth = videoPlan.size.width
+      bubbleHeight += videoPlan.spacing.top + videoPlan.size.height + videoPlan.spacing.bottom
+      bubbleWidth = videoPlan.size.width + videoPlan.spacing.left + videoPlan.spacing.right
     }
     if let documentPlan {
       bubbleHeight += documentPlan.size.height
@@ -1878,8 +1881,9 @@ class MessageSizeCalculator {
       }
 
       if let album = props.album {
-        albumAvailableWidth = min(parentAvailableWidth, Self.minimalMediaMaxWidth)
-        photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: albumAvailableWidth!).size
+        // Islands may run wider than one photo: the whole line, wrapping into a second.
+        albumAvailableWidth = parentAvailableWidth
+        photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: parentAvailableWidth, style: .islands).size
       } else if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: mediaIntrinsicWidth,
