@@ -268,6 +268,79 @@ extension TextLayout {
   }
 }
 
+/// Line breaks for very long paragraphs: pasted logs, minified JSON, base64.
+///
+/// `CTTypesetterSuggestLineBreak` gets slower the further into a paragraph it starts, so one
+/// long paragraph costs time quadratic in its length (48k characters took about a second). This
+/// finds each break with a typesetter over the next couple of thousand characters instead, and
+/// the caller still makes the line from the whole text's typesetter, so string indices stay the
+/// text's own. Breaks are the same: a window only answers for lines that end well before it does.
+struct LongParagraphBreaker {
+  /// Paragraphs longer than this (UTF-16) use windows; shorter ones are faster without.
+  static let threshold = 4096
+  /// Texts longer than this take the long path (see `TextLayouter.layout`), with room under
+  /// Core Text's 10,000 UTF-16 work limit.
+  static let longTextLength = 8000
+  static let windowLength = 2048
+  /// A break this close to a window's end may depend on text past it, so a new window starts.
+  static let margin = 64
+
+  let text: NSAttributedString
+  private var window: (typesetter: CTTypesetter, start: Int, length: Int)?
+
+  init(text: NSAttributedString) {
+    self.text = text
+  }
+
+  mutating func suggestLineBreak(at start: Int, width: CGFloat, direction: TextDirection) -> Int {
+    var length = Self.windowLength
+    while true {
+      let window = window(at: start, length: length, direction: direction)
+      let local = start - window.start
+      let count = CTTypesetterSuggestLineBreak(window.typesetter, local, Double(width))
+      let reachesTextEnd = window.start + window.length >= text.length
+      if reachesTextEnd || local + count <= window.length - Self.margin {
+        return count
+      }
+      if window.start == start {
+        // One line runs past the whole window (a long unbroken token): widen it.
+        length *= 2
+      }
+      self.window = nil
+    }
+  }
+
+  private mutating func window(at start: Int, length: Int, direction: TextDirection) -> (typesetter: CTTypesetter, start: Int, length: Int) {
+    if let window, window.start <= start, start < window.start + window.length - Self.margin {
+      return window
+    }
+    let range = NSRange(location: start, length: min(length, text.length - start))
+    let slice = NSMutableAttributedString(attributedString: text.attributedSubstring(from: range))
+    // A slice starting mid-paragraph could pick a different base direction from its own first
+    // letter; give it the paragraph's.
+    let string = slice.string as NSString
+    if TextDirection.firstStrong(in: string, range: NSRange(location: 0, length: string.length), fallback: direction) != direction {
+      var writingDirection: CTWritingDirection = direction == .rightToLeft ? .rightToLeft : .leftToRight
+      let style = withUnsafeBytes(of: &writingDirection) { bytes in
+        var setting = CTParagraphStyleSetting(
+          spec: .baseWritingDirection,
+          valueSize: MemoryLayout<CTWritingDirection>.size,
+          value: bytes.baseAddress!
+        )
+        return CTParagraphStyleCreate(&setting, 1)
+      }
+      slice.addAttribute(
+        NSAttributedString.Key(kCTParagraphStyleAttributeName as String),
+        value: style,
+        range: NSRange(location: 0, length: slice.length)
+      )
+    }
+    let made = (TextLayouter.makeTypesetter(slice), start, range.length)
+    window = made
+    return made
+  }
+}
+
 public enum TextLayouter {
   /// Breaks `text` into lines no wider than `maximumWidth`.
   public static func layout(
@@ -284,9 +357,17 @@ public enum TextLayouter {
     }
 
     let string = attributed.string as NSString
-    let typesetter = CTTypesetterCreateWithAttributedString(
-      withBaseDirections(attributed, string: string, style: style) as CFAttributedString
-    )
+    let typesetString = withBaseDirections(attributed, string: string, style: style)
+    // Past Core Text's work limit (10,000 UTF-16 on macOS 27, measured) the default typesetter
+    // stops shaping the whole text: no kerning or ligatures, Arabic-script letters don't join,
+    // and right-to-left lines break short. Long texts get an unbounded typesetter for their
+    // lines and windows for their breaks, which keeps both linear.
+    let isLong = length > LongParagraphBreaker.longTextLength
+    let typesetter = isLong
+      ? makeTypesetter(typesetString)
+      : CTTypesetterCreateWithAttributedString(typesetString as CFAttributedString)
+    var breaker = LongParagraphBreaker(text: typesetString)
+    var paragraphEnd = 0
     var lines: [TextLayout.Line] = []
     var y: CGFloat = 0
     var widest: CGFloat = 0
@@ -301,6 +382,7 @@ public enum TextLayouter {
       if firstInParagraph {
         paragraphDirection = direction(of: string, from: start, style: style)
         paragraph = TextParagraphMetrics.at(start, in: attributed)
+        paragraphEnd = NSMaxRange(paragraphContent(of: string, from: start))
         if start > 0, let paragraph { y = grid.round(y + paragraph.spacingBefore) }
       }
       if start > 0, style.lineHeight == .fontDefault {
@@ -315,7 +397,9 @@ public enum TextLayouter {
         return tail < 0 ? -tail : max(0, width - tail)
       }()
       let breakWidth = max(1, width - leadingIndent - trailingIndent)
-      var count = CTTypesetterSuggestLineBreak(typesetter, start, Double(breakWidth))
+      var count = isLong || paragraphEnd - start > LongParagraphBreaker.threshold
+        ? breaker.suggestLineBreak(at: start, width: breakWidth, direction: paragraphDirection)
+        : CTTypesetterSuggestLineBreak(typesetter, start, Double(breakWidth))
       if count <= 0 {
         // Narrower than one cluster: take the cluster anyway rather than loop forever.
         count = string.rangeOfComposedCharacterSequence(at: start).length
@@ -376,6 +460,16 @@ public enum TextLayouter {
       size: CGSize(width: grid.ceil(widest), height: grid.ceil(y)),
       maximumWidth: width
     )
+  }
+
+  /// A typesetter without Core Text's work limit. Past it, the default one stops shaping and
+  /// breaks lines short: in 12k characters of Persian, a line came out with 76 unjoined glyphs
+  /// 482 points wide instead of 81 glyphs at 409. Breaks are found through
+  /// `LongParagraphBreaker` windows, so no single call does unbounded work.
+  static func makeTypesetter(_ text: NSAttributedString) -> CTTypesetter {
+    let options = [kCTTypesetterOptionAllowUnboundedLayout: true] as CFDictionary
+    return CTTypesetterCreateWithAttributedStringAndOptions(text as CFAttributedString, options)
+      ?? CTTypesetterCreateWithAttributedString(text as CFAttributedString)
   }
 
   /// Widths beyond any screen mean "unbounded"; clamping keeps them usable as cache keys.
