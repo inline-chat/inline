@@ -210,6 +210,15 @@ class MessageTextView: NSTextView {
     MessageListTextSelection.owner(of: self) != nil
   }
 
+  /// Inside the list, only the list moves its rows. Once a text view has fallen back to TextKit 1
+  /// (reading `layoutManager` does that), AppKit re-centers its old visible text whenever row
+  /// layout resizes it. A row entering from the top then scrolls the whole list up by hundreds of
+  /// points while the user scrolls up.
+  override func scrollToVisible(_ rect: NSRect) -> Bool {
+    if listOwnsSelection { return false }
+    return super.scrollToVisible(rect)
+  }
+
   /// The list started a selection drag from this press, so it is no longer a hold.
   func cancelPendingTextHold() {
     cancelTextHold(reason: "listSelection")
