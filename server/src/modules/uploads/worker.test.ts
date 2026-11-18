@@ -15,7 +15,7 @@ import { filePartHashes, files, inlineUploads } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { ApiError, InlineError } from "@in/server/types/errors"
-import type { MediaUploadFinalizer } from "./finalizer"
+import { UploadMediaFinalizer, type MediaUploadFinalizer } from "./finalizer"
 import {
   MultipartStorageUnavailableError,
   MultipartUploadNotFoundError,
@@ -863,8 +863,9 @@ describe("native upload multipart worker", () => {
     body: Uint8Array
     inline?: boolean
     multipart?: MemoryMultipartStore
+    repository?: InlineUploadRepository
   }) => {
-    const repository = new InlineUploadRepository()
+    const repository = options.repository ?? new InlineUploadRepository()
     const staging = options.staging ?? new BatchingPartStore()
     const multipart = options.multipart ?? new MemoryMultipartStore()
     const buffer = options.buffer ?? new UploadGroupBuffer()
@@ -1010,6 +1011,138 @@ describe("native upload multipart worker", () => {
     await expect(operations.create({ ...input, clientUploadId: new Uint8Array(16).fill(151), inlineData: body.subarray(1) },
       requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     expect((await db.select().from(inlineUploads)).length).toBe(rows)
+  })
+
+  test("stores a ten-part upload with one PUT even after a group wake", async () => {
+    let released = 0
+    class Repository extends InlineUploadRepository {
+      override async releaseProcessingClaim(input: Parameters<InlineUploadRepository["releaseProcessingClaim"]>[0]) {
+        const result = await super.releaseProcessingClaim(input)
+        released += 1
+        return result
+      }
+    }
+    const user = await testUtils.createUser("native-upload-ten-part-put@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    // Ten parts, one byte short of 5 MiB: exactly one storage group.
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 10 - 1)
+    for (let index = 0; index < body.length; index += 997) body[index] = index % 251
+    const multipart = new PuttingMultipartStore()
+    const { worker, operations, repository } = pipeline({
+      body, multipart, finalizerFor: makeFinalizer, repository: new Repository(),
+    })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 143)
+    expect(created.partCount).toBe(10)
+    // A group wake from any source (an older process, a resumed queue) must not open a session.
+    worker.wake((await repository.get(created.uploadId, owner))!.id, 1)
+    await waitFor(() => released >= 1)
+    expect(multipart.createCount).toBe(0)
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+    expect(multipart.putCount).toBe(1)
+    expect(multipart.createCount).toBe(0)
+    expect(multipart.uploadPartCounts.size).toBe(0)
+  })
+
+  test("an inline finish whose request aborted during the claim does not hold the request", async () => {
+    const request = new AbortController()
+    class Repository extends InlineUploadRepository {
+      override async claimProcessing(uploadDbId?: number) {
+        // Only the in-request claim takes this upload; the poll never does.
+        if (uploadDbId === undefined) return undefined
+        const claim = await super.claimProcessing(uploadDbId)
+        request.abort()
+        return claim
+      }
+    }
+    const user = await testUtils.createUser("native-upload-inline-aborted@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new Repository()
+    const staging = new BatchingPartStore()
+    const buffer = new UploadGroupBuffer()
+    const body = new Uint8Array([3, 1, 4, 1, 5])
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const base = makeFinalizer(body)
+    const finalizer: MediaUploadFinalizer = {
+      ...base,
+      prepareBufferedPublication: async (input) => { await blocked; return base.prepareBufferedPublication(input) },
+    }
+    const worker = createWorker(repository, staging, new PuttingMultipartStore(), finalizer, {
+      concurrency: 1, pollIntervalMs: 20, groupBuffer: buffer, inlineFinishTimeoutMs: 10_000,
+    })
+    const operations = new NativeUploadOperations(repository, staging, finalizer, () => {}, undefined, undefined, {
+      groupBuffer: buffer,
+    })
+    worker.start()
+    try {
+      const created = await saveBody(operations, requestContext, body, 144)
+      expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
+      const upload = (await repository.get(created.uploadId, owner))!
+      const outcome = await Promise.race([
+        worker.processNow({ id: upload.id, partCount: upload.partCount, kind: upload.kind }, request.signal),
+        Bun.sleep(2_000).then(() => "held" as const),
+      ])
+      // The claimed task continues as ordinary worker work.
+      expect(outcome).toBe("running")
+      release()
+      await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    } finally {
+      release()
+    }
+  })
+
+  test("cancel and expiry remove an unpublished single-PUT object once", async () => {
+    class CountingStore extends PuttingMultipartStore {
+      removes = 0
+      override async remove(key: string): Promise<void> {
+        this.removes += 1
+        await super.remove(key)
+      }
+    }
+    const user = await testUtils.createUser("native-upload-unpublished-object@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const repository = new InlineUploadRepository()
+    const staging = new MemoryPartStore()
+    const multipart = new CountingStore()
+    // The production wiring: publication cleanup removes through the same object store.
+    const finalizer = new UploadMediaFinalizer(staging, (key) => multipart.remove(key))
+    const worker = createWorker(repository, staging, multipart, finalizer, {
+      concurrency: 1, pollIntervalMs: 20, expiryCleanupIntervalMs: 20,
+    })
+    const operations = new NativeUploadOperations(repository, staging, finalizer, () => {},
+      (upload) => worker.discardStorage(upload))
+    // A single-group PUT that a crash left before publication.
+    const leaveObject = async (clientByte: number) => {
+      const body = new Uint8Array([clientByte, 2, 7])
+      const created = await saveBody(operations, requestContext, body, clientByte)
+      expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
+      const upload = (await repository.get(created.uploadId, owner))!
+      const key = `files/${inlineUploadPublicationPath(upload.resultFileUniqueId!)}`
+      multipart.objects.set(key, { bytes: body, etag: "unpublished" })
+      return { created, key }
+    }
+
+    const canceled = await leaveObject(145)
+    expect((await operations.cancel({ uploadId: canceled.created.uploadId }, requestContext)).canceled).toBe(true)
+    expect(multipart.objects.has(canceled.key)).toBe(false)
+    expect(multipart.removes).toBe(1)
+
+    const expired = await leaveObject(146)
+    await db.update(inlineUploads).set({ status: "failed", expiresAt: new Date(0), hardExpiresAt: new Date(0) })
+      .where(eq(inlineUploads.uploadId, Buffer.from(expired.created.uploadId)))
+    worker.start()
+    await waitFor(async () => await repository.get(expired.created.uploadId, owner) === undefined)
+    await worker.stop()
+    expect(multipart.objects.has(expired.key)).toBe(false)
+    expect(multipart.removes).toBe(2)
   })
 
   test("keeps multipart for uploads larger than one storage group", async () => {

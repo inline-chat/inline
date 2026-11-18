@@ -50,31 +50,37 @@ const makeDecrypt = (library: ReturnType<typeof openLibrary>): IgeDecrypt => {
       return nodeAesBackend.igeDecrypt(ciphertext, key, iv)
     }
     const schedule = new Uint8Array(AES_KEY_BYTES)
+    // OpenSSL advances the IV in place; never touch the caller's copy.
+    const ivCopy = iv.slice(0, 2 * BLOCK_BYTES)
     try {
       if (AES_set_decrypt_key(ptr(key), 256, ptr(schedule)) !== 0) {
         return nodeAesBackend.igeDecrypt(ciphertext, key, iv)
       }
       const output = new Uint8Array(ciphertext.length)
-      // OpenSSL advances the IV in place; never touch the caller's copy.
-      const ivCopy = iv.slice(0, 2 * BLOCK_BYTES)
       AES_ige_encrypt(ptr(ciphertext), ptr(output), ciphertext.length, ptr(schedule), ptr(ivCopy), 0)
       return output
     } finally {
       schedule.fill(0)
+      ivCopy.fill(0)
     }
   }
 }
 
-/** True when `decrypt` matches the JS implementation, including on offset views. */
+/**
+ * True when `decrypt` matches the JS implementation, including on offset views. An odd offset
+ * leaves every pointer unaligned, the case OpenSSL handles on a separate path from aligned input.
+ */
 const selfTest = (decrypt: IgeDecrypt): boolean => {
-  for (const length of [16, 48, 4_096, 64 * 1_024]) {
-    const key = new Uint8Array(randomBytes(32))
-    const iv = new Uint8Array(randomBytes(32))
-    const backing = new Uint8Array(randomBytes(length + 24))
-    const ciphertext = backing.subarray(24)
-    const expected = nodeAesBackend.igeDecrypt(ciphertext, key, iv)
-    const actual = decrypt(ciphertext, key, iv)
-    if (!Buffer.from(actual).equals(Buffer.from(expected))) return false
+  for (const offset of [24, 7]) {
+    for (const length of [16, 48, 4_096, 64 * 1_024]) {
+      const view = (byteCount: number) => new Uint8Array(randomBytes(byteCount + offset)).subarray(offset)
+      const key = view(32)
+      const iv = view(32)
+      const ciphertext = view(length)
+      const expected = nodeAesBackend.igeDecrypt(ciphertext, key, iv)
+      const actual = decrypt(ciphertext, key, iv)
+      if (!Buffer.from(actual).equals(Buffer.from(expected))) return false
+    }
   }
   return true
 }

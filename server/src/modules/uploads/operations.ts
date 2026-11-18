@@ -339,7 +339,8 @@ export class NativeUploadOperations {
     if (encoded.bytes.byteLength < 1 || encoded.bytes.byteLength > MAX_STORED_FRAME_BYTES) {
       return badRequest()
     }
-    const storedSha256 = createHash("sha256").update(encoded.bytes).digest()
+    // The identity codec stores the input bytes as they are; hash them once.
+    const storedSha256 = encoded.bytes === input.data ? sha256 : createHash("sha256").update(encoded.bytes).digest()
     const hashDoneAt = Date.now()
     throwIfAborted(signal)
     // Durability: a part is acknowledged only after its staging object exists.
@@ -394,7 +395,19 @@ export class NativeUploadOperations {
     if (accepted.kind === "terminal") {
       // Unknown, foreign, expired, or no longer uploading; the cache may be stale.
       this.#geometry.drop(input.uploadId)
-      return badRequest()
+      if (accepted.durableObjectKey !== objectKey) return badRequest()
+      // A stale cache let a late resend of an accepted part rewrite its content-addressed staging
+      // object. Answer as the cache-miss path does. Staging cleanup runs when an upload completes,
+      // fails or is canceled and may already be done, so remove the rewrite then; while processing
+      // the worker may still read it, and an expired upload's reaper has yet to remove it.
+      const upload = await this.repository.getPartGeometry(input.uploadId, owner)
+      if (upload?.status !== "processing" && upload?.status !== "uploading") {
+        await this.partStore.remove(objectKey).catch((error) => {
+          log.warn("Upload late staging object cleanup failed", { error })
+        })
+      }
+      if (upload?.status !== "processing" && upload?.status !== "complete") return badRequest()
+      return { alreadyPresent: true, outcome: "already_present", hashDoneAt, objectStoreDoneAt, acceptDoneAt }
     }
     if (accepted.kind === "conflict") return badRequest()
     // The staged frame is durable; this copy only spares the worker a read.

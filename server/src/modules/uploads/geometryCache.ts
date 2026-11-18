@@ -125,11 +125,12 @@ export const isPartAccepted = (geometry: UploadGeometry, partIndex: number): boo
 /**
  * Marks a part accepted. Returns the storage group number (1-based, matching
  * multipart part numbers) when this part completed a full ten-frame group;
- * the tail group is compacted by finish.
+ * the tail group, and an upload that is a single group, is stored by finish.
  */
 export const markPartAccepted = (geometry: UploadGeometry, partIndex: number): number | undefined => {
   if (isPartAccepted(geometry, partIndex)) return undefined
   geometry.accepted[partIndex >> 3]! |= 1 << (partIndex & 7)
+  if (geometry.partCount <= FRAMES_PER_STORAGE_GROUP) return undefined
   const group = Math.floor(partIndex / FRAMES_PER_STORAGE_GROUP)
   const first = group * FRAMES_PER_STORAGE_GROUP
   if (first + FRAMES_PER_STORAGE_GROUP > geometry.partCount) return undefined

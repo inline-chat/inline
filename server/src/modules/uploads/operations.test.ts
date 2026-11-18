@@ -708,10 +708,48 @@ describe("native upload operations", () => {
     const stale = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
     await stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
     expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
-    // The stale process still caches uploading geometry; its resend is terminal.
-    await expect(stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
-      .rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    // The stale process still caches uploading geometry; its resend is terminal, but the part is
+    // in the file, so it is acknowledged like a cache miss would be.
+    expect(await stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .toEqual({ alreadyPresent: true })
+    // The worker may still read the staging object while processing.
     expect(store.objects.size).toBe(1)
+  })
+
+  test("a stale resend after cleanup removes its rewritten staging object", async () => {
+    const user = await testUtils.createUser("native-upload-resend-after-cleanup@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const make = async (fill: number) => {
+      const body = new Uint8Array([fill, fill, fill])
+      const created = await operations.create({
+        clientUploadId: new Uint8Array(16).fill(fill), fileName: `cleaned-${fill}.bin`,
+        mimeType: "application/octet-stream", byteCount: 3n,
+        sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+        metadata: { oneofKind: undefined },
+      }, requestContext)
+      const stale = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+      await stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+      return { created, stale, part: { uploadId: created.uploadId, partIndex: 0, data: body } }
+    }
+
+    // Completed and staging already removed: acknowledged, and the rewrite is not left behind.
+    const done = await make(105)
+    await db.update(inlineUploads).set({ status: "complete" })
+      .where(eq(inlineUploads.uploadId, Buffer.from(done.created.uploadId)))
+    store.objects.clear()
+    expect(await done.stale.savePart(done.part, requestContext)).toEqual({ alreadyPresent: true })
+    expect(store.objects.size).toBe(0)
+
+    // Canceled: still rejected, and the rewrite is removed too.
+    const canceled = await make(106)
+    expect((await operations.cancel({ uploadId: canceled.created.uploadId }, requestContext)).canceled).toBe(true)
+    expect(store.objects.size).toBe(0)
+    await expect(canceled.stale.savePart(canceled.part, requestContext))
+      .rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect(store.objects.size).toBe(0)
   })
 
   test("a part resent after finish in the same process is acknowledged as already present", async () => {
@@ -826,5 +864,32 @@ describe("native upload operations", () => {
     const uploadDbId = wakes[0]?.[0]
     expect(wakes.map(([, group]) => group).sort()).toEqual([1, 2])
     expect(wakes.every(([id]) => id === uploadDbId)).toBeTrue()
+  })
+
+  test("never wakes group compaction for an upload that is one full ten-frame group", async () => {
+    const user = await testUtils.createUser("native-upload-single-group-wakes@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const wakes: Array<number | undefined> = []
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(), new MemoryPartStore(), finalizer,
+      (_uploadDbId, groupNumber) => { wakes.push(groupNumber) },
+    )
+    const requestContext = context(user.id, account.session.id)
+    const part = new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(7)
+    const last = new Uint8Array(INLINE_TRANSFER_PART_SIZE - 1).fill(7)
+    const digest = createHash("sha256")
+    for (let index = 0; index < 9; index += 1) digest.update(part)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(107), fileName: "ten-parts.bin",
+      mimeType: "application/octet-stream", byteCount: BigInt(part.length * 9 + last.length),
+      sha256: digest.update(last).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    expect(created.partCount).toBe(10)
+    for (let partIndex = 0; partIndex < 10; partIndex += 1) {
+      await operations.savePart({ uploadId: created.uploadId, partIndex, data: partIndex === 9 ? last : part }, requestContext)
+    }
+    // Finish stores it with one PUT; an early group pass would open a multipart session instead.
+    expect(wakes).toEqual([])
   })
 })
