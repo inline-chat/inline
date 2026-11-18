@@ -1068,6 +1068,112 @@ final class HarnessUITests: XCTestCase {
       Thread.sleep(forTimeInterval: 1.2)
     }
   }
+
+  /// The custom menu opened and closed with the keyboard down, at the latest messages and a little way up:
+  /// text rows, a row with reactions (and photos when one is on screen), each closed by a tap on the dim and
+  /// the last by Copy. Stamped for video: once the bubble has landed, its row must not blink.
+  func testMenuCloseKeyboardDown() { menuCloseJourney(keyboardUp: false) }
+
+  /// The same with the composer focused. With the simulator's hardware keyboard connected no keyboard shows,
+  /// and the menu has its own window as with the keyboard down.
+  func testMenuCloseKeyboardUp() { menuCloseJourney(keyboardUp: true) }
+
+  func menuCloseJourney(keyboardUp wantsKeyboard: Bool) {
+    launch()
+    if wantsKeyboard { openKeyboard() }
+    let tag = wantsKeyboard ? "kb" : "nokb"
+    menuCloseHolds(tag: "\(tag)-latest", keyboardUp: wantsKeyboard)
+    // A little way up, slowly (no fling), to a row with three reactions.
+    drag(200, 260, 200, 560, v: 600, hold: 0.4)
+    Thread.sleep(forTimeInterval: 1.2)
+    menuCloseHolds(tag: "\(tag)-history", keyboardUp: wantsKeyboard)
+    shot("close-\(tag)-end")
+  }
+
+  /// A short way up into history, then the lowest row's menu opened and closed again and again (Copy, then a
+  /// tap on the dim), keyboard down: the row must not blank once the bubble has landed.
+  func testMenuCloseHistoryRepeat() {
+    launch()
+    drag(200, 260, 200, 560, v: 600, hold: 0.4)
+    Thread.sleep(forTimeInterval: 1.2)
+    let stamp = { (what: String) in print("[UITEST] \(what) t=\(String(format: "%.3f", Date().timeIntervalSince1970))") }
+    let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+    for index in 0 ..< 8 {
+      guard let target = visibleTexts("repeat-\(index)").last(where: { $0.1.maxY < composerTop - 10 }) else { break }
+      stamp("hold \(index) \(target.0.prefix(20)) at \(Int(target.1.midX)),\(Int(target.1.midY))")
+      origin.withOffset(CGVector(dx: target.1.midX, dy: target.1.midY)).press(forDuration: 0.9)
+      Thread.sleep(forTimeInterval: 0.9)
+      let copy = app.buttons["Copy"]
+      if index % 2 == 0, copy.exists {
+        stamp("close-copy \(index)")
+        copy.tap()
+      } else {
+        stamp("close-tap \(index)")
+        coord(target.1.midX < screen.width / 2 ? 360 : 15, 330).tap()
+      }
+      Thread.sleep(forTimeInterval: 1.4)
+    }
+  }
+
+  func menuCloseHolds(tag: String, keyboardUp wantsKeyboard: Bool) {
+    let stamp = { (what: String) in print("[UITEST] \(what) t=\(String(format: "%.3f", Date().timeIntervalSince1970))") }
+    let texts = visibleTexts("close-\(tag)")
+    let top = barBottom + 30, bottom = composerTop - 10
+    var targets: [(String, CGPoint)] = texts
+      .filter { $0.1.minY > top && $0.1.maxY < bottom }
+      .map { ($0.0, CGPoint(x: $0.1.midX, y: $0.1.midY)) }
+    // Photos and the bubbles over reaction pills, from one accessibility snapshot.
+    nonisolated(unsafe) let app = app!
+    let extra: [(String, CGPoint)] = MainActor.assumeIsolated {
+      guard let root = try? app.windows.firstMatch.snapshot() else { return [] }
+      var out: [(String, CGPoint)] = []
+      func walk(_ node: any XCUIElementSnapshot) {
+        let frame = node.frame
+        if node.elementType == .image, frame.width > 80, frame.height > 80, frame.minY > top, frame.maxY < bottom {
+          out.append(("photo", CGPoint(x: frame.midX, y: frame.midY)))
+        }
+        if node.elementType == .button, ["👍", "❤️", "😂"].contains(where: node.label.contains),
+           frame.minY > top + 30, frame.maxY < bottom
+        {
+          // The bubble just above the pill.
+          out.append(("reactions \(node.label.prefix(8))", CGPoint(x: frame.midX, y: frame.minY - 14)))
+        }
+        for child in node.children { walk(child) }
+      }
+      walk(root)
+      return out
+    }
+    print("[UITEST] extra targets \(extra.map { "\($0.0)@\(Int($0.1.x)),\(Int($0.1.y))" })")
+    // One reaction row is enough; media and reactions first, then the text rows from the top, then the newest.
+    var media: [(String, CGPoint)] = []
+    var sawReactions = false
+    for item in extra where item.0 == "photo" || !sawReactions {
+      if item.0 != "photo" { sawReactions = true }
+      media.append(item)
+    }
+    if let newest = targets.popLast() { targets = media + Array(targets.prefix(3)) + [newest] }
+    let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+    for (index, target) in targets.enumerated() {
+      let point = origin.withOffset(CGVector(dx: target.1.x, dy: target.1.y))
+      stamp("hold \(index) \(target.0.prefix(20)) at \(Int(target.1.x)),\(Int(target.1.y))")
+      point.press(forDuration: 0.9)
+      Thread.sleep(forTimeInterval: 0.9)
+      let copy = app.buttons["Copy"]
+      // The last (newest) row is closed with Copy; the rest with a tap on the dim.
+      if index == targets.count - 1, copy.exists {
+        stamp("close-copy \(index)")
+        copy.tap()
+      } else {
+        stamp("close-tap \(index)")
+        // The dim on the side away from the bubble, clear of its actions.
+        coord(target.1.x < screen.width / 2 ? 360 : 15, 330).tap()
+      }
+      Thread.sleep(forTimeInterval: 1.4)
+      stamp("closed \(index) keyboard=\(keyboardUp)")
+      if wantsKeyboard, !keyboardUp { openKeyboard() }
+    }
+  }
+
   /// Reactions as the app sends them (the harness publishes each twice, a round trip apart): a double tap
   /// adds the quick reaction, another removes it, and one is picked from the menu. Stamped for video.
   func testReactions() {
