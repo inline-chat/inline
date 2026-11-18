@@ -721,6 +721,8 @@ final class MessagesCollectionView: UICollectionView {
     guard !isPreview, didPlaceInitialUnread, !isPlacingInitialUnread, !suspendsReadingPlaceCapture,
           bounds.height > 0, !itemsEmpty
     else { return }
+    // A window read ahead for this chat no longer matches where it opens.
+    defer { ChatOpenPreparation.shared.discard(peer: peerId) }
     if coordinator.showsNewestMessage(in: self) {
       ChatReadingPlaceStore.shared.clear(for: peerId)
     } else if let place = coordinator.topVisibleReadingPlace(in: self) {
@@ -3932,6 +3934,7 @@ private extension MessagesCollectionView {
         if itemCount > 0, !self.isPreview, !self.didTraceOpen {
           self.didTraceOpen = true
           ChatOpenTrace.listOpened(peer: self.peerId, list: "collection")
+          ChatOpenPreparation.shared.discard(peer: self.peerId)
         }
         PerformanceTrace.slowBreadcrumb(
           "slow iOS messages snapshot apply",

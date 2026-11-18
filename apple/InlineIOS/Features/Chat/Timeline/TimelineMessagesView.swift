@@ -953,7 +953,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       if unreadFetchBoundary != nil { return }
     }
     hasOpened = true
-    if !isPreview { ChatOpenTrace.listOpened(peer: peer, list: "timeline") }
+    if !isPreview {
+      ChatOpenTrace.listOpened(peer: peer, list: "timeline")
+      // The window read ahead was this open's; a later open reads again, from where this one leaves the chat.
+      ChatOpenPreparation.shared.discard(peer: peer)
+    }
     self.snapshot = snapshot
     rebuildDayRows()
     var scroll = TimelineScroll<ChatRowID>.latest
@@ -1803,9 +1807,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     onVisibleMessagesChanged?(visible.map(\.message.messageId))
   }
 
-  /// Saves where the reader is when the newest message is off screen, and clears it otherwise.
+  /// Saves where the reader is when the newest message is off screen, and clears it otherwise. A window
+  /// read ahead for this chat no longer matches where it opens, so it goes too.
   private func saveReadingPlace() {
     guard !isPreview, hasOpened, let snapshot else { return }
+    defer { ChatOpenPreparation.shared.discard(peer: peer) }
     // The newest message on screen at all: there is no place to keep, as the collection view decided.
     if !viewModel.canLoadNewerFromLocal,
        let newest = snapshot.rows.last(where: { $0.content.message != nil })?.id,
