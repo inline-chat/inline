@@ -370,16 +370,15 @@ private final class ContinuedSends {
     ended = true
     loop?.cancel()
     if !stoppedByApp {
-      // Only sends of this task whose upload was moving. One waiting for the network (never
-      // started, or stalled when the connection dropped) stays queued, and one whose upload
-      // finished is already being sent: leave both.
-      let now = ContinuousClock.now
-      let unsent = PendingMediaSends.shared.current.filter { send in
-        let id = send.transactionId
-        guard sendIDs.contains(id), let fraction = lastFractions[id], fraction > 0, fraction < 1,
-              let moved = lastMoved[id] else { return false }
-        return now - moved < Self.movingWindow
-      }
+      // Sends whose upload was moving, with the rest of their album; see `expiredSendsToDelete`.
+      let unsent = PendingMediaSends.expiredSendsToDelete(
+        current: PendingMediaSends.shared.current,
+        taskSendIDs: sendIDs,
+        fractions: lastFractions,
+        lastMoved: lastMoved,
+        now: .now,
+        movingWindow: Self.movingWindow
+      )
       Log.scoped("BackgroundSends").warning("Continued processing task expired; deleting \(unsent.count) unsent messages")
       // Rows go before the task completes: the process may be killed right after, and a row
       // still sending would be resumed on the next launch.
