@@ -1,0 +1,127 @@
+{
+  "include": [
+    "**/*"
+  ],
+  "exclude": [
+    "dist",
+    "**/node_modules"
+  ],
+  "compilerOptions": {
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES2023"
+    ],
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "target": "ES2023",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "rootDirs": [
+      "."
+    ],
+    "paths": {
+      "~/*": [
+        "./src/*"
+      ],
+      "@inline/client": [
+        "./packages/client/src/index.ts"
+      ],
+      "@inline/client/*": [
+        "./packages/client/src/*"
+      ],
+      "@inline/auth": [
+        "./packages/auth/src/index.ts"
+      ],
+      "@inline/auth/*": [
+        "./packages/auth/src/*"
+      ],
+      "@inline/ids": [
+        "./packages/ids/src/index.ts"
+      ],
+      "@inline/ids/*": [
+        "./packages/ids/src/*"
+      ],
+      "@inline/log": [
+        "./packages/log/src/index.ts"
+      ],
+      "@inline/log/*": [
+        "./packages/log/src/*"
+      ],
+      "@inline/config": [
+        "./packages/config/src/index.ts"
+      ],
+      "@inline/config/*": [
+        "./packages/config/src/*"
+      ],
+      "@inline-chat/protocol": [
+        "../packages/protocol/src/index.ts"
+      ],
+      "@inline-chat/protocol/*": [
+        "../packages/protocol/src/*"
+      ],
+      "@inline/core-protocol": [
+        "./packages/core-protocol/src/index.ts"
+      ],
+      "@inline/core-protocol/*": [
+        "./packages/core-protocol/src/*"
+      ],
+      "@inline/reactive": [
+        "./packages/reactive/src/index.ts"
+      ],
+      "@inline/reactive/*": [
+        "./packages/reactive/src/*"
+      ],
+      "@inline/link": [
+        "./packages/link/src/index.ts"
+      ],
+      "@inline/link/*": [
+        "./packages/link/src/*"
+      ],
+      "@inline/view": [
+        "./packages/view/src/index.ts"
+      ],
+      "@inline/view/*": [
+        "./packages/view/src/*"
+      ],
+      "@inline/ui": [
+        "./packages/ui/src/index.ts"
+      ],
+      "@inline/ui/*": [
+        "./packages/ui/src/*"
+      ],
+      "@inline/chat-ui": [
+        "./packages/chat-ui/src/index.ts"
+      ],
+      "@inline/chat-ui/*": [
+        "./packages/chat-ui/src/*"
+      ],
+      "@inline/composer": [
+        "./packages/composer/src/index.ts"
+      ],
+      "@inline/composer/*": [
+        "./packages/composer/src/*"
+      ],
+      "@inline/timeline": [
+        "./packages/timeline/src/index.ts"
+      ],
+      "@inline/timeline/*": [
+        "./packages/timeline/src/*"
+      ],
+      "@inline/platform": [
+        "./packages/platform/src/index.ts"
+      ],
+      "@inline/platform/*": [
+        "./packages/platform/src/*"
+      ]
+    },
+    "esModuleInterop": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true
+  }
+}

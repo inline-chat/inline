@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="noindex" />
+    <title>Perf lab</title>
+  </head>
+  <body>
+    <div class="perf-layout">
+      <section class="perf-app" aria-label="The app under test">
+        <iframe id="app" title="Inline (demo account)"></iframe>
+      </section>
+      <section class="perf-results" aria-label="Measurements">
+        <header>
+          <h1>Perf lab</h1>
+          <p>
+            The app in demo mode in the frame, driven through its own surfaces and measured against the budgets in
+            <code>web/docs/performance.md</code>. Keep this window in front while it runs. State:
+            <code>globalThis.__perfLab</code>; control: <code>globalThis.__perfLabControl</code>.
+          </p>
+        </header>
+        <div id="controls" class="perf-controls"></div>
+        <p id="status" class="perf-status" role="status">Starting…</p>
+        <ul id="warnings" class="perf-warnings" hidden></ul>
+        <p id="environment" class="perf-environment"></p>
+        <div class="perf-table-wrap">
+          <table id="results" class="perf-table">
+            <thead>
+              <tr>
+                <th scope="col">Moment</th>
+                <th scope="col">Measure and method</th>
+                <th scope="col">Input</th>
+                <th scope="col">n</th>
+                <th scope="col">Median</th>
+                <th scope="col">Worst</th>
+                <th scope="col">Budget</th>
+                <th scope="col">Result</th>
+                <th scope="col">Notes</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <textarea id="markdown" class="perf-markdown" readonly hidden aria-label="Results as Markdown"></textarea>
+      </section>
+    </div>
+    <script type="module" src="/src/lab/perf/main.ts"></script>
+  </body>
+</html>

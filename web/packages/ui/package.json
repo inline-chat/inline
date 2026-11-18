@@ -1,0 +1,54 @@
+{
+  "name": "@inline/ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.tsx",
+      "default": "./src/react/index.tsx"
+    },
+    "./menu-kit": {
+      "types": "./src/react/menu-kit.tsx",
+      "default": "./src/react/menu-kit.tsx"
+    },
+    "./theme": {
+      "types": "./src/theme/index.ts",
+      "default": "./src/theme/index.ts"
+    },
+    "./theme/stylex": {
+      "types": "./src/theme/stylex-binding.ts",
+      "default": "./src/theme/stylex-binding.ts"
+    },
+    "./tokens/*": {
+      "types": "./src/tokens/*.ts",
+      "default": "./src/tokens/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "vitest run --config vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@inline/reactive": "workspace:*",
+    "@stylexjs/stylex": "0.19.1",
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "happy-dom": "20.14.5",
+    "oxlint": "catalog:",
+    "react-dom": "^19.3.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "AGPL-3.0-only",
+  "sideEffects": false
+}

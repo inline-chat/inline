@@ -23,7 +23,7 @@
     {
       "files": [
         "web/src/**/*.{ts,tsx}",
-        "landing/packages/client/src/**/*.{ts,tsx}"
+        "web/packages/client/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": [
         "web/src/testing/**",
@@ -31,6 +31,102 @@
       ],
       "rules": {
         "no-console": "error"
+      }
+    },
+    {
+      "files": [
+        "web/**/*.tsx"
+      ],
+      "excludeFiles": [
+        "web/packages/reactive/src/react/**",
+        "web/packages/client/src/react/**",
+        "web/packages/client/src/database/react.tsx",
+        "web/packages/auth/src/react.tsx",
+        "**/*.{test,spec}.tsx"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "importNames": [
+                  "useEffect",
+                  "useLayoutEffect",
+                  "useInsertionEffect",
+                  "Suspense",
+                  "use",
+                  "lazy"
+                ],
+                "message": "Views do not use effects or Suspense. Use a binding from the reactive package, a ref callback, or a view model. Import React names individually. See web/docs/views.md."
+              }
+            ],
+            "patterns": [
+              {
+                "group": [
+                  "react-router",
+                  "react-router-*",
+                  "@tanstack/react-*",
+                  "react-redux",
+                  "zustand",
+                  "jotai",
+                  "valtio",
+                  "swr",
+                  "mobx-react*"
+                ],
+                "message": "No React-bound router, data or state libraries. See web/docs/views.md."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "web/**/*.ts"
+      ],
+      "excludeFiles": [
+        "web/packages/reactive/src/react/**",
+        "web/packages/reactive/src/solid/**",
+        "web/*.config.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              },
+              {
+                "name": "react-dom",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              },
+              {
+                "name": "react-dom/client",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              },
+              {
+                "name": "react/jsx-runtime",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              },
+              {
+                "name": "solid-js",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              },
+              {
+                "name": "solid-js/web",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              },
+              {
+                "name": "solid-js/store",
+                "message": "Plain .ts files are framework-free. Only view files (.tsx) and the reactive bindings import a view framework. See web/docs/architecture.md."
+              }
+            ]
+          }
+        ]
       }
     },
     {

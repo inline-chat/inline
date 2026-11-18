@@ -1,0 +1,157 @@
+:root {
+  color-scheme: light dark;
+  --perf-bg: light-dark(#ffffff, #1c1c1e);
+  --perf-fg: light-dark(#1c1c1e, #f2f2f7);
+  --perf-muted: light-dark(#6e6e73, #98989d);
+  --perf-line: light-dark(#e5e5ea, #38383a);
+  --perf-pass: light-dark(#1a7f37, #4ade80);
+  --perf-fail: light-dark(#c4001a, #ff6961);
+  --perf-warn: light-dark(#9a6700, #f5c451);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--perf-bg);
+  color: var(--perf-fg);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+.perf-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  height: 100vh;
+}
+
+.perf-app {
+  min-width: 0;
+  border-inline-end: 1px solid var(--perf-line);
+}
+
+.perf-app iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.perf-results {
+  min-width: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+p {
+  margin: 4px 0 8px;
+}
+
+.perf-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block: 8px;
+}
+
+.perf-controls button {
+  font: inherit;
+}
+
+.perf-controls .perf-primary {
+  font-weight: 600;
+}
+
+.perf-status {
+  font-weight: 600;
+}
+
+.perf-status[data-state="error"] {
+  color: var(--perf-fail);
+}
+
+.perf-warnings {
+  margin: 0 0 8px;
+  padding-inline-start: 18px;
+  color: var(--perf-warn);
+}
+
+.perf-environment {
+  color: var(--perf-muted);
+}
+
+.perf-table-wrap {
+  overflow-x: auto;
+}
+
+.perf-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.perf-table th,
+.perf-table td {
+  border-block-end: 1px solid var(--perf-line);
+  padding: 4px 6px;
+  text-align: start;
+  vertical-align: top;
+}
+
+.perf-table td.perf-number {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.perf-table .perf-small {
+  display: block;
+  color: var(--perf-muted);
+}
+
+.perf-table tr[data-info] td {
+  color: var(--perf-muted);
+}
+
+.grade-pass {
+  color: var(--perf-pass);
+  font-weight: 600;
+}
+
+.grade-fail,
+.grade-error {
+  color: var(--perf-fail);
+  font-weight: 600;
+}
+
+.grade-inconclusive,
+.grade-not-measured {
+  color: var(--perf-warn);
+}
+
+.perf-markdown {
+  box-sizing: border-box;
+  width: 100%;
+  height: 240px;
+  margin-block-start: 8px;
+  font: 11px/1.4 ui-monospace, monospace;
+}
+
+@media (max-width: 1000px) {
+  .perf-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 70vh auto;
+    height: auto;
+  }
+
+  .perf-app {
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--perf-line);
+  }
+}

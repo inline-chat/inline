@@ -9,8 +9,7 @@ bun run --cwd landing dev
 
 Configure local services and credentials separately. Do not commit credentials.
 
-The website uses the browser libraries in `packages/` beneath this
-directory.
+The website shares `@inline/config` with the web app in `web/packages/`.
 
 Run checks individually:
 
@@ -19,7 +18,6 @@ bun run --cwd landing build
 bun run --cwd landing typecheck
 bun run --cwd landing lint
 bun run --cwd landing test
-bun run --cwd landing/packages/client test
 ```
 
 Product documentation is in `src/docs/content/`; legal pages are in

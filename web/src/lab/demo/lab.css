@@ -1,0 +1,84 @@
+:root {
+  color-scheme: light dark;
+  --demo-bg: light-dark(#ffffff, #1c1c1e);
+  --demo-fg: light-dark(#1c1c1e, #f2f2f7);
+  --demo-muted: light-dark(#6e6e73, #98989d);
+  --demo-line: light-dark(#e5e5ea, #38383a);
+  --demo-error: light-dark(#c4001a, #ff6961);
+  --demo-selected: light-dark(#e6f0ff, #1f2a3d);
+}
+
+body {
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--demo-bg);
+  color: var(--demo-fg);
+  font: 13px/1.4 system-ui, sans-serif;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+h2 {
+  margin: 12px 0 4px;
+  font-size: 14px;
+}
+
+pre {
+  margin: 0;
+  padding: 6px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--demo-line);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.window {
+  max-height: 520px;
+}
+
+#errors {
+  color: var(--demo-error);
+}
+
+#sidebar {
+  margin: 0;
+  padding-left: 28px;
+  max-height: 760px;
+  overflow: auto;
+}
+
+#sidebar button {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+}
+
+#sidebar li[aria-current="true"] {
+  background: var(--demo-selected);
+}
+
+#sidebar .unread {
+  font-weight: 600;
+}
+
+fieldset {
+  margin: 0 0 8px;
+  border: 1px solid var(--demo-line);
+}
+
+#results {
+  max-height: 240px;
+  overflow: auto;
+  color: var(--demo-muted);
+}

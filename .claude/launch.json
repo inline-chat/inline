@@ -1,0 +1,53 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "server",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd server && bun run dev"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "poo-site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8787",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mo-dev-inline-chat-inline/edb6300b-cf65-4f16-975a-67c4adb6b305/scratchpad/site"
+      ],
+      "port": 8787
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd web && bun run dev"
+      ],
+      "port": 8001
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd web && bun run build && bun run preview"
+      ],
+      "port": 8001
+    },
+    {
+      "name": "web-labs",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd web && bunx vite preview -c tooling/vite.labs.config.ts"
+      ],
+      "port": 8001
+    }
+  ]
+}

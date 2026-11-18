@@ -10,6 +10,7 @@
 - `apple/`: native iOS and macOS clients.
 - `server/`: Bun and TypeScript backend.
 - `landing/`: website and product documentation.
+- `web/`: web app (`app.inline.chat`) and its client packages.
 - `proto/`: canonical protocol schemas.
 - `packages/`: shared TypeScript packages, including the SDK, protocol, bot client, and MCP server.
 - `plugins/`: ChatGPT, OpenClaw, Hermes, and other integrations.

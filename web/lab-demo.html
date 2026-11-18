@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Demo lab</title>
+  </head>
+  <body>
+    <header>
+      <h1>Demo lab</h1>
+      <p>
+        The production core (link → dedicated worker → core host → SQLite) against a simulated server inside the same
+        worker. No network: a seeded account, and controls that make the simulated world move.
+        State for automation: <code>globalThis.__demoLab</code>; actions: <code>globalThis.__demoLabActions</code>.
+      </p>
+      <form id="config">
+        <label>Scale
+          <select id="scale" name="scale">
+            <option value="small">small (20 chats, 2,000 messages)</option>
+            <option value="medium">medium (500 chats, 50,000 messages)</option>
+            <option value="large">large (3,000 chats, 300,000 messages)</option>
+          </select>
+        </label>
+        <label>Seed <input id="seed" name="seed" type="number" min="0" step="1" size="6" /></label>
+        <label>Storage
+          <select id="storage" name="storage">
+            <option value="opfs">OPFS (kept across reloads)</option>
+            <option value="memory">memory (fresh every load)</option>
+          </select>
+        </label>
+        <button type="submit">Connect</button>
+        <button id="reset" type="button">Reset this demo</button>
+      </form>
+    </header>
+
+    <section id="errors-section" hidden>
+      <h2>Errors</h2>
+      <ul id="errors"></ul>
+    </section>
+
+    <main class="demo-grid">
+      <section>
+        <h2>Core</h2>
+        <pre id="core">connecting…</pre>
+        <h2>Simulated world</h2>
+        <pre id="world">waiting for the demo worker…</pre>
+        <h2>Timings</h2>
+        <pre id="timings">–</pre>
+      </section>
+
+      <section>
+        <h2>Sidebar <span id="sidebar-count"></span></h2>
+        <ol id="sidebar"></ol>
+      </section>
+
+      <section>
+        <h2>Chat <span id="chat-title">(pick one in the sidebar)</span></h2>
+        <p>
+          <button id="older" type="button">Load older</button>
+          <button id="mark-read" type="button">Mark read</button>
+          <span id="window-state"></span>
+        </p>
+        <pre id="window" class="window"></pre>
+        <form id="composer">
+          <input id="text" size="40" autocomplete="off" placeholder="Message" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>World controls</h2>
+        <fieldset>
+          <legend>Incoming</legend>
+          <button id="deliver" type="button">Deliver a message to this chat</button>
+          <button id="deliver-anywhere" type="button">…to a recent chat</button>
+          <br />
+          <label>Rate/s <input id="stream-rate" type="number" min="0.1" max="200" step="0.1" value="2" size="4" /></label>
+          <label><input id="stream-here" type="checkbox" /> only this chat</label>
+          <button id="stream-start" type="button">Start stream</button>
+          <button id="stream-stop" type="button">Stop stream</button>
+        </fieldset>
+        <fieldset>
+          <legend>Streaming agent</legend>
+          <label>Updates/s <input id="agent-rate" type="number" min="20" max="60" step="1" value="40" size="3" /></label>
+          <label>Seconds <input id="agent-seconds" type="number" min="1" max="600" step="1" value="10" size="3" /></label>
+          <button id="agent-start" type="button">Start in this chat</button>
+          <button id="agent-stop" type="button">Stop</button>
+        </fieldset>
+        <fieldset>
+          <legend>Network</legend>
+          <button id="offline" type="button">Go offline</button>
+          <button id="online" type="button">Come back online</button>
+          <br />
+          <label>Ack latency ms <input id="latency" type="number" min="0" max="30000" step="50" value="0" size="5" /></label>
+          <label>Loss % <input id="loss" type="number" min="0" max="100" step="1" value="0" size="3" /></label>
+          <button id="faults" type="button">Apply</button>
+        </fieldset>
+        <fieldset>
+          <legend>Another member, in this chat</legend>
+          <button id="other-read" type="button">Read (other device)</button>
+          <button id="other-react" type="button">React to latest</button>
+          <button id="other-edit" type="button">Edit their latest</button>
+          <button id="other-delete" type="button">Delete their latest</button>
+        </fieldset>
+        <h2>Results</h2>
+        <ol id="results" reversed></ol>
+      </section>
+    </main>
+    <script type="module" src="/src/lab/demo/main.ts"></script>
+  </body>
+</html>

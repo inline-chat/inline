@@ -1,0 +1,45 @@
+{
+  "name": "@inline/view",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./features": {
+      "types": "./src/features/index.ts",
+      "default": "./src/features/index.ts"
+    },
+    "./quick-search": {
+      "types": "./src/quick-search/index.ts",
+      "default": "./src/quick-search/index.ts"
+    },
+    "./quick-search/testing": {
+      "types": "./src/quick-search/testing.ts",
+      "default": "./src/quick-search/testing.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "vitest run --config vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@inline/auth": "workspace:*",
+    "@inline/chat-ui": "workspace:*",
+    "@inline/core-protocol": "workspace:*",
+    "@inline/ids": "workspace:*",
+    "@inline/platform": "workspace:*",
+    "@inline/reactive": "workspace:*"
+  },
+  "devDependencies": {
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "AGPL-3.0-only",
+  "sideEffects": false
+}

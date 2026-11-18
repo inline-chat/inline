@@ -1,0 +1,73 @@
+{
+  "name": "@inline/client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./core": {
+      "types": "./src/core.ts",
+      "default": "./src/core.ts"
+    },
+    "./auth": {
+      "types": "./src/auth/index.ts",
+      "default": "./src/auth/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.tsx",
+      "default": "./src/react/index.tsx"
+    },
+    "./sqlite": {
+      "types": "./src/database/sqlite/index.ts",
+      "default": "./src/database/sqlite/index.ts"
+    },
+    "./host": {
+      "types": "./src/host/index.ts",
+      "default": "./src/host/index.ts"
+    },
+    "./queries": {
+      "types": "./src/queries/index.ts",
+      "default": "./src/queries/index.ts"
+    },
+    "./testing/*": {
+      "types": "./src/testing/*.ts",
+      "default": "./src/testing/*.ts"
+    },
+    "./media": {
+      "types": "./src/media/index.ts",
+      "default": "./src/media/index.ts"
+    },
+    "./sqlite/pool-names": {
+      "types": "./src/database/sqlite/sah-pool-registry.ts",
+      "default": "./src/database/sqlite/sah-pool-registry.ts"
+    }
+  },
+  "scripts": {
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src vitest.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@inline-chat/protocol": "workspace:*",
+    "@inline/auth": "workspace:*",
+    "@inline/config": "workspace:*",
+    "@inline/core-protocol": "workspace:*",
+    "@inline/ids": "workspace:*",
+    "@inline/log": "workspace:*",
+    "@msgpack/msgpack": "3.1.3",
+    "@sqlite.org/sqlite-wasm": "3.54.1-build1",
+    "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "AGPL-3.0-only"
+}

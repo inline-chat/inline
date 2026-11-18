@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Service worker lab</title>
+  </head>
+  <body>
+    <h1>Service worker lab</h1>
+    <p>
+      Only does anything in a production build with the service worker plugin, served by
+      <code>vite preview</code>: from <code>web/</code>, <code>bunx vite build -c tooling/vite.labs.config.ts --outDir &lt;dir&gt;</code>
+      then <code>bunx vite preview -c tooling/vite.labs.config.ts --outDir &lt;dir&gt;</code> and open
+      <code>/lab-sw.html</code>. In <code>vite dev</code> registration is disabled and any leftover worker is removed.
+      Unregister here before going back to <code>vite dev</code> on the same port.
+    </p>
+    <p>
+      <button id="check" type="button">Check for update</button>
+      <button id="apply" type="button">Apply update</button>
+      <button id="refresh" type="button">Refresh caches</button>
+      <button id="clear" type="button">Clear caches (sign-out)</button>
+      <button id="unregister" type="button">Unregister</button>
+      <label><input id="unsaved" type="checkbox" /> This tab has unsaved work</label>
+    </p>
+    <h2>Registration</h2>
+    <pre id="state">starting…</pre>
+    <h2>Caches</h2>
+    <pre id="caches">…</pre>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+    <script type="module" src="/src/lab/sw/main.ts"></script>
+  </body>
+</html>

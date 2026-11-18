@@ -1,0 +1,60 @@
+{
+  "name": "@inline/web",
+  "productName": "Inline",
+  "description": "Inline for web",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "size": "bun tooling/measure-initial-js.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint --ignore-path ../.oxlintignore src packages vite.config.ts vitest.config.ts",
+    "test": "vitest run --passWithNoTests",
+    "test:packages": "for dir in packages/*/; do if grep -q '\"test\":' \"$dir/package.json\"; then bun run --cwd \"$dir\" test || exit 1; fi; done"
+  },
+  "dependencies": {
+    "@inline/auth": "workspace:*",
+    "@inline/chat-ui": "workspace:*",
+    "@inline/client": "workspace:*",
+    "@inline/composer": "workspace:*",
+    "@inline/config": "workspace:*",
+    "@inline/core-protocol": "workspace:*",
+    "@inline/ids": "workspace:*",
+    "@inline/link": "workspace:*",
+    "@inline/log": "workspace:*",
+    "@inline/platform": "workspace:*",
+    "@inline/reactive": "workspace:*",
+    "@inline/timeline": "workspace:*",
+    "@inline/ui": "workspace:*",
+    "@inline/view": "workspace:*",
+    "@stylexjs/stylex": "0.19.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@rolldown/plugin-babel": "^0.3.1",
+    "@stylexjs/unplugin": "0.19.1",
+    "@types/babel__core": "^7.20.5",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "^6.3.0",
+    "babel-plugin-react-compiler": "1.0.0",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vite": "^8.3.8",
+    "vitest": "catalog:"
+  },
+  "browserslist": [
+    "chrome >= 123",
+    "edge >= 123",
+    "firefox >= 128",
+    "safari >= 17.5",
+    "ios_saf >= 17.5"
+  ],
+  "license": "AGPL-3.0-only"
+}

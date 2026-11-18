@@ -1,0 +1,32 @@
+{
+ "index.html": {
+  "file": "assets/index-A.js",
+  "src": "index.html",
+  "isEntry": true
+ },
+ "src/app/Shell.tsx": {
+  "file": "assets/Shell-S.js",
+  "src": "src/app/Shell.tsx",
+  "isDynamicEntry": true
+ },
+ "src/features/signin/index.ts": {
+  "file": "assets/signin-I.js",
+  "src": "src/features/signin/index.ts",
+  "isDynamicEntry": true
+ },
+ "packages/auth/src/flows/index.ts": {
+  "file": "assets/flows-L.js",
+  "src": "packages/auth/src/flows/index.ts",
+  "isDynamicEntry": true
+ },
+ "src/features/chat/content-chunk.tsx": {
+  "file": "assets/content-T.js",
+  "src": "src/features/chat/content-chunk.tsx",
+  "isDynamicEntry": true
+ },
+ "src/features/chat/find-chunk.ts": {
+  "file": "assets/find-F.js",
+  "src": "src/features/chat/find-chunk.ts",
+  "isDynamicEntry": true
+ }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@inline/platform",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "vitest run --config vitest.config.ts --passWithNoTests"
+  },
+  "dependencies": {
+    "@inline/reactive": "workspace:*"
+  },
+  "devDependencies": {
+    "happy-dom": "20.14.5",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "license": "AGPL-3.0-only",
+  "sideEffects": false
+}

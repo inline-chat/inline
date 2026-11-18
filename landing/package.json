@@ -9,15 +9,13 @@
     "docs:llms": "bun run docs:check",
     "start": "bun run .output/server/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint --ignore-path ../.oxlintignore src packages vite.config.ts vitest.config.ts",
+    "lint": "oxlint --ignore-path ../.oxlintignore src vite.config.ts vitest.config.ts",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
-    "@inline/client": "workspace:*",
-    "@inline/ids": "workspace:*",
     "@stylexjs/stylex": "0.19.1",
     "@tailwindcss/postcss": "^4.1.13",
     "@tailwindcss/vite": "^4.1.13",

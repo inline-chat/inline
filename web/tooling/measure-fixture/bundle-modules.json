@@ -1,0 +1,114 @@
+{
+ "chunks": [
+  {
+   "fileName": "assets/index-A.js",
+   "modules": [
+    {
+     "id": "src/main.tsx",
+     "rendered": 100,
+     "gzip": 80
+    },
+    {
+     "id": "src/app/boot.ts",
+     "rendered": 300,
+     "gzip": 120
+    }
+   ]
+  },
+  {
+   "fileName": "assets/shared-B.js",
+   "modules": [
+    {
+     "id": "packages/reactive/src/signals.ts",
+     "rendered": 50,
+     "gzip": 40
+    }
+   ]
+  },
+  {
+   "fileName": "assets/Shell-S.js",
+   "modules": [
+    {
+     "id": "src/app/Shell.tsx",
+     "rendered": 80,
+     "gzip": 60
+    },
+    {
+     "id": "node_modules/react-dom/cjs/react-dom-client.production.js",
+     "rendered": 500,
+     "gzip": 180
+    }
+   ]
+  },
+  {
+   "fileName": "assets/kit-K.js",
+   "modules": [
+    {
+     "id": "packages/ui/src/react/Button.tsx",
+     "rendered": 40,
+     "gzip": 30
+    }
+   ]
+  },
+  {
+   "fileName": "assets/signin-I.js",
+   "modules": [
+    {
+     "id": "src/features/signin/index.ts",
+     "rendered": 40,
+     "gzip": 30
+    }
+   ]
+  },
+  {
+   "fileName": "assets/content-T.js",
+   "modules": [
+    {
+     "id": "src/features/chat/content-chunk.tsx",
+     "rendered": 40,
+     "gzip": 30
+    }
+   ]
+  },
+  {
+   "fileName": "assets/heavy-H.js",
+   "modules": [
+    {
+     "id": "src/features/content/heavy.ts",
+     "rendered": 3000,
+     "gzip": 40
+    }
+   ]
+  },
+  {
+   "fileName": "assets/find-F.js",
+   "modules": [
+    {
+     "id": "src/features/find/x.ts",
+     "rendered": 30,
+     "gzip": 25
+    }
+   ]
+  },
+  {
+   "fileName": "assets/polyfill-P.js",
+   "modules": [
+    {
+     "id": "vite/modulepreload-polyfill.js",
+     "rendered": 10,
+     "gzip": 10
+    }
+   ]
+  },
+  {
+   "fileName": "assets/flows-L.js",
+   "modules": [
+    {
+     "id": "packages/auth/src/flows/index.ts",
+     "rendered": 20,
+     "gzip": 20
+    }
+   ]
+  }
+ ]
+}

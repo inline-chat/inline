@@ -185,7 +185,7 @@ async function collectTargets(options: Options): Promise<Target[]> {
     addRepo(relPath);
   }
 
-  for (const relPath of await collectPackageOutputDirs("landing/packages")) {
+  for (const relPath of await collectPackageOutputDirs("web/packages")) {
     addRepo(relPath);
   }
 
@@ -282,7 +282,8 @@ async function collectNodeModulesViteDirs(): Promise<string[]> {
   const relPaths = [
     "node_modules/.vite",
     "landing/node_modules/.vite",
-    "landing/packages/client/node_modules/.vite",
+    "web/node_modules/.vite",
+    "web/packages/client/node_modules/.vite",
     "plugins/openclaw/node_modules/.vite",
     "packages/bot-api/node_modules/.vite",
     "packages/mcp/node_modules/.vite",

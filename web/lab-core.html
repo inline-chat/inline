@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Core lab</title>
+  </head>
+  <body>
+    <h1>Core lab</h1>
+    <p>UI context → link → dedicated worker → core host → SQLite on OPFS. No server is needed: the account stays offline.</p>
+    <p>
+      <label>Draft for chat 5001: <input id="draft" size="40" autocomplete="off" /></label>
+      <button id="save" type="button">Save draft</button>
+    </p>
+    <pre id="out">starting…</pre>
+    <script type="module" src="/src/lab/core/main.ts"></script>
+  </body>
+</html>

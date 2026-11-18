@@ -1,0 +1,18 @@
+/*
+ * Document-level rules only. StyleX compiles into CSS layers, and unlayered
+ * CSS beats layered CSS, so nothing here may set anything a theme or a StyleX
+ * class could need to change (color-scheme, colors, backgrounds, fonts):
+ * the appearance controller puts those on <html>, and the app root sets type
+ * through StyleX tokens (see src/app/README.md, "global.css").
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
