@@ -325,7 +325,14 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     addGestureRecognizer(input.indicatorPan)
     input.startsOnIndicator = { [weak self] point in self?.indicatorTakes(point) ?? false }
     input.onIndicatorPan = { [weak self] pan in self?.handleIndicatorPan(pan) }
-    input.pan.onTouchDown = { [weak self] in self?.catchFlight() }
+    input.pan.onTouchDown = { [weak self] in
+      guard let self else { return }
+      let wasMoving = flight != nil
+      catchFlight()
+      // A finger that stopped the list and goes on scrolling drags it from its first movement. Not on the
+      // scroll indicator, whose own drag takes that touch.
+      if wasMoving, !indicatorTakes(input.pan.location(in: self)) { input.pan.beginsOnFirstMove = true }
+    }
     input.pan.onTouchUpWithoutPan = { [weak self] in self?.tapEnded() }
     input.onPan = { [weak self] pan in self?.handlePan(pan) }
     input.onTick = { [weak self] link in self?.tick(link) }
@@ -1474,10 +1481,12 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
   /// A finger landed: stop exactly where the content is on screen.
   /// A finger that caught a fling lifted without dragging: the content rests where it stopped.
+  /// A touch that stopped the list lifted without dragging. Caught in the bounce past an end, the content
+  /// springs back to it, as after a release; anywhere else it rests where it was stopped.
   private func tapEnded() {
     guard caughtFlight, !isTracking else { return }
     caughtFlight = false
-    rest()
+    release(velocity: 0)
   }
 
   private func catchFlight() {
@@ -1490,7 +1499,8 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       position = Double(origin) + flight.applied - Double(presented.bounds.origin.y)
     }
     self.flight = nil
-    state.margins = .standard
+    // The fling's margins stay until the list rests: shrinking them now would retire rows in the very frame
+    // the finger lands.
     content.layer.removeAnimation(forKey: Self.flightKey)
     endIndicatorFlight()
     input.stopTicking()
@@ -1524,6 +1534,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
   /// Brings the content inside its limits and onto whole pixels, then reports the stop.
   private func rest() {
+    state.margins = .standard
     var update = TimelineUpdate<ID>(viewport: viewport(), scroll: .by(0))
     update.followsBottomInset = false
     update.pinsWhenAtBottom = false

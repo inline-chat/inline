@@ -8,6 +8,11 @@ import UIKit.UIGestureRecognizerSubclass
 /// the finger at once) and keeps raw touch samples for the release velocity.
 final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
   var onTouchDown: (() -> Void)?
+  /// Set while the touch that landed stopped a moving list: the pan begins with the finger's first
+  /// vertical movement, with no dead zone, so a finger that catches the list and goes on scrolling
+  /// moves it at once, as a decelerating scroll view does.
+  var beginsOnFirstMove = false
+  private var touchDownLocation: CGPoint?
   /// The finger lifted (or was cancelled) without the pan beginning: a tap.
   var onTouchUpWithoutPan: (() -> Void)?
   private(set) var samples: [ReleaseVelocity.Sample] = []
@@ -16,6 +21,8 @@ final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
   override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
     if numberOfTouches == 0, let touch = touches.first {
       samples = [ReleaseVelocity.Sample(time: touch.timestamp, position: Double(touch.location(in: nil).y))]
+      touchDownLocation = touch.location(in: nil)
+      beginsOnFirstMove = false
       onTouchDown?()
     }
     super.touchesBegan(touches, with: event)
@@ -29,6 +36,11 @@ final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
       if samples.count > 240 { samples.removeFirst(samples.count - 240) }
     }
     super.touchesMoved(touches, with: event)
+    if beginsOnFirstMove, state == .possible, let start = touchDownLocation, let touch = touches.first {
+      let location = touch.location(in: nil)
+      let dx = abs(location.x - start.x), dy = abs(location.y - start.y)
+      if dy >= 1, dy >= dx { state = .began }
+    }
   }
 
   override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -50,6 +62,8 @@ final class TimelinePanGestureRecognizer: UIPanGestureRecognizer {
   override func reset() {
     super.reset()
     samples.removeAll()
+    beginsOnFirstMove = false
+    touchDownLocation = nil
   }
 
   /// The finger's vertical velocity at release, in window points per second (positive: downward). A
