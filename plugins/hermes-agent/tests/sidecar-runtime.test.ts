@@ -110,6 +110,7 @@ describe("sidecar runtime", () => {
       expect(authorized.body).toMatchObject({ ok: true })
       const health = authorized.body.result as Record<string, unknown>
       expect(health.connected).toBe(false)
+      expect(health.inbound).toEqual({ consumerAttached: false, pending: [] })
       expect(health.connectRetryInitialMs).toBe(100)
       expect(health.connectRetryMaxMs).toBe(100)
       expect(Number(health.connectAttempts)).toBeGreaterThanOrEqual(1)

@@ -136,10 +136,10 @@ const clientOptions: InlineSdkClientOptions = {
     connecting = false
     connectError = redactError(error)
     nextConnectRetryAt = null
-    process.exitCode = 3
     console.error(
       `inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`,
     )
+    void shutdown(78)
   },
   ...(rpcTimeoutMs != null ? { rpcTimeoutMs } : {}),
   logger: {
@@ -191,10 +191,9 @@ async function connectClientLoop() {
       connected = false
       connecting = false
       connectError = redactError(error)
-      process.exitCode = 3
       if (stopping) return
       if (error instanceof InlineSdkAuthenticationError) {
-        await client.close().catch(() => {})
+        await shutdown(78)
         return
       }
       nextConnectRetryAt = new Date(Date.now() + delayMs).toISOString()
@@ -249,6 +248,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         connectRetryMaxMs,
         nextConnectRetryAt,
         diagnostics: safeJson(client.getDiagnostics()),
+        inbound: inboundStream.diagnostics(),
         ...(connectError ? { connectError } : {}),
       },
     })
@@ -1745,6 +1745,12 @@ function attachConsumer(res: ServerResponse) {
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
+  res.flushHeaders()
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded && !res.writableNeedDrain) res.write("\n")
+  }, 20_000)
+  heartbeat.unref()
+  res.once("close", () => clearInterval(heartbeat))
   inboundStream.attach(res)
 }
 

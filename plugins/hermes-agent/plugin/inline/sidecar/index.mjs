@@ -5628,6 +5628,17 @@ class InboundStream {
   stopped = false;
   changed = new Set;
   pending = new Map;
+  diagnostics() {
+    const now = performance.now();
+    return {
+      consumerAttached: this.consumer !== null,
+      pending: [...this.pending.values()].map(({ kind, startedAt, writes }) => ({
+        kind,
+        ageMs: Math.round(now - startedAt),
+        writes
+      }))
+    };
+  }
   attach(consumer) {
     if (this.stopped) {
       consumer.end();
@@ -5667,7 +5678,9 @@ class InboundStream {
     const deliveryId = randomUUID();
     const line = JSON.stringify({ ...event, _inlineDeliveryId: deliveryId }) + `
 `;
-    const receipt = { acknowledged: false };
+    const kind = "kind" in event && typeof event.kind === "string" ? event.kind : "unknown";
+    const receipt = { acknowledged: false, kind, startedAt: performance.now(), writes: 0 };
+    let watchdog;
     this.pending.set(deliveryId, receipt);
     let writtenTo = null;
     try {
@@ -5684,6 +5697,14 @@ class InboundStream {
             }
             writtenTo = owner;
             owner.write(line);
+            receipt.writes++;
+            clearTimeout(watchdog);
+            const delay = Math.min(300000, 60000 * 2 ** Math.min(receipt.writes - 1, 3));
+            watchdog = setTimeout(() => {
+              if (this.consumer === owner && !receipt.acknowledged)
+                owner.destroy();
+            }, delay);
+            watchdog.unref();
           } catch {
             if (this.consumer === owner)
               this.consumer = null;
@@ -5694,6 +5715,7 @@ class InboundStream {
       }
       throw new Error("Inbound stream closed before delivery completed");
     } finally {
+      clearTimeout(watchdog);
       this.pending.delete(deliveryId);
     }
   }
@@ -49556,11 +49578,15 @@ class AcknowledgedAsyncChannel {
       return;
     try {
       while (owner.active.size < owner.concurrency && this.queue.length > 0) {
-        if ([...owner.active.values()].includes(null))
-          return;
-        const keys = new Set(owner.active.values());
+        const reserved = new Set;
+        for (const active of owner.active.values()) {
+          if (active === null)
+            return;
+          for (const key of active)
+            reserved.add(key);
+        }
         let index = -1;
-        let key = null;
+        let keys = null;
         for (let i = 0;i < this.queue.length; i++) {
           const candidate = this.queue[i];
           const candidateKey = owner.key(candidate.value);
@@ -49569,16 +49595,19 @@ class AcknowledgedAsyncChannel {
               index = i;
             break;
           }
-          if (!keys.has(candidateKey)) {
+          const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey;
+          if (!candidateKeys.some((key) => reserved.has(key))) {
             index = i;
-            key = candidateKey;
+            keys = candidateKeys;
             break;
           }
+          for (const key of candidateKeys)
+            reserved.add(key);
         }
         if (index < 0)
           return;
         const item = this.queue.splice(index, 1)[0];
-        owner.active.set(item, key);
+        owner.active.set(item, keys);
         Promise.resolve().then(() => owner.handler(item.value)).then(() => {
           if (this.consumption !== owner)
             return;
@@ -54220,8 +54249,9 @@ class InlineSdkClient {
   consumeEvents(handler, options) {
     return this.eventStream.consume(handler, (event) => {
       const bucket = this.bucketForEvent(event);
-      if (bucket?.kind === "user")
-        return null;
+      if (bucket?.kind === "user") {
+        return "chatId" in event && typeof event.chatId === "bigint" ? ["user", `chat:${event.chatId}`] : null;
+      }
       if (bucket)
         return this.updateBucketKey(bucket);
       return "chatId" in event && typeof event.chatId === "bigint" ? `chat:${event.chatId}` : null;
@@ -58478,8 +58508,8 @@ var clientOptions = {
     connecting = false;
     connectError = redactError(error);
     nextConnectRetryAt = null;
-    process.exitCode = 3;
     console.error(`inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`);
+    shutdown(78);
   },
   ...rpcTimeoutMs != null ? { rpcTimeoutMs } : {},
   logger: {
@@ -58530,11 +58560,10 @@ async function connectClientLoop() {
       connected = false;
       connecting = false;
       connectError = redactError(error);
-      process.exitCode = 3;
       if (stopping)
         return;
       if (error instanceof InlineSdkAuthenticationError) {
-        await client.close().catch(() => {});
+        await shutdown(78);
         return;
       }
       nextConnectRetryAt = new Date(Date.now() + delayMs).toISOString();
@@ -58588,6 +58617,7 @@ async function handleRequest(req, res) {
         connectRetryMaxMs,
         nextConnectRetryAt,
         diagnostics: safeJson(client.getDiagnostics()),
+        inbound: inboundStream.diagnostics(),
         ...connectError ? { connectError } : {}
       }
     });
@@ -59891,6 +59921,14 @@ function attachConsumer(res) {
     "cache-control": "no-cache",
     connection: "keep-alive"
   });
+  res.flushHeaders();
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded && !res.writableNeedDrain)
+      res.write(`
+`);
+  }, 20000);
+  heartbeat.unref();
+  res.once("close", () => clearInterval(heartbeat));
   inboundStream.attach(res);
 }
 async function deliver(event) {

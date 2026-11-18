@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream"
 import { once } from "node:events"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { InboundStream } from "./inbound-stream.js"
 
 const flush = async () => {
@@ -81,6 +81,40 @@ describe("InboundStream lifecycle", () => {
     stream.close()
     old.destroy()
     replacement.destroy()
+  })
+
+  it("expires a silent reader and replays only its unacknowledged receipt", async () => {
+    vi.useFakeTimers()
+    const stream = new InboundStream()
+    const old = new PassThrough()
+    const replacement = new PassThrough()
+    try {
+      const sent = readEvents(old)
+      stream.attach(old)
+      const held = stream.deliver({ kind: "message.new", seq: 1 })
+      const handled = stream.deliver({ kind: "message.new", seq: 2 })
+      stream.acknowledge(sent[1]._inlineDeliveryId)
+      await handled
+      const closed = once(old, "close")
+      await vi.advanceTimersByTimeAsync(60_000)
+      await closed
+      expect(stream.diagnostics()).toEqual({
+        consumerAttached: false, pending: [{ ageMs: 60_000, kind: "message.new", writes: 1 }],
+      })
+      const replay = readEvents(replacement)
+      stream.attach(replacement)
+      await flush()
+      expect(replay).toEqual([sent[0]])
+      stream.acknowledge(replay[0]._inlineDeliveryId)
+      await held
+      await vi.advanceTimersByTimeAsync(600_000)
+      expect(stream.diagnostics()).toEqual({ consumerAttached: true, pending: [] })
+    } finally {
+      stream.close()
+      old.destroy()
+      replacement.destroy()
+      vi.useRealTimers()
+    }
   })
 
   it("acknowledges unrelated concurrent deliveries independently", async () => {

@@ -242,11 +242,11 @@ def _http_post(url, body, headers):
 class HttpxStreamResponse:
     status_code = 200
 
-    async def aiter_lines(self):
+    async def aiter_bytes(self):
         while True:
             await asyncio.sleep(3600)
             if False:
-                yield ""
+                yield b""
 
 class HttpxStreamContext:
     async def __aenter__(self):
@@ -276,6 +276,8 @@ class AsyncClient:
         pass
 
 httpx.AsyncClient = AsyncClient
+httpx.Timeout = lambda *args, **kwargs: None
+httpx.TimeoutException = TimeoutError
 
 sys.modules["gateway"] = gateway
 sys.modules["gateway.config"] = config
@@ -5569,6 +5571,80 @@ async def assert_inbound_receipt_recovery():
     finally:
         inline_adapter_module._INBOUND_RETRY_INITIAL_SECONDS = original_delay
         inline_adapter_module._INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS = original_timeout
+
+async def assert_inbound_stream_recovery():
+    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    handled, acked = [], []
+    async def handle(event):
+        handled.append(event["text"])
+    async def ack(path, body):
+        acked.append(body["deliveryId"])
+    adapter._dispatch_inbound = handle
+    adapter._sidecar_call = ack
+    text = "next\x85line\u2028paragraph\u2029end"
+    record = json.dumps({"_inlineDeliveryId": "receipt", "text": text}, ensure_ascii=False).encode()
+    class Response:
+        async def aiter_bytes(self):
+            for byte in record + b"\n\n" + record + b"\n":
+                yield bytes([byte])
+    async for line in inline_adapter_module._inbound_records(Response()):
+        await adapter._on_inbound(line)
+        await adapter._inbound_deliveries["receipt"]
+    assert handled == [text] and acked == ["receipt", "receipt"]
+    for cause in ("cancel", "timeout", "disconnect"):
+        owner = InlineAdapter(PlatformConfig(extra=trusted_extra))
+        owner._inbound_running = True
+        started = asyncio.Event()
+        recovered = []
+        async def stuck(event):
+            started.set()
+            await asyncio.Event().wait()
+        async def notify():
+            recovered.append(owner.fatal_error)
+        owner._dispatch_inbound = stuck
+        owner._notify_fatal_error = notify
+        with unittest.mock.patch.object(inline_adapter_module, "_INBOUND_DISPATCH_TIMEOUT_SECONDS", 0.02):
+            await owner._on_inbound('{"_inlineDeliveryId":"held"}')
+            task = owner._inbound_deliveries["held"]
+            await started.wait()
+            if cause == "disconnect":
+                await owner.disconnect()
+            elif cause == "cancel":
+                task.cancel()
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 1)
+        assert len(recovered) == (0 if cause == "disconnect" else 1), (cause, recovered)
+        assert "held" not in owner._handled_deliveries
+
+    for code in (1, 78):
+        exited = InlineAdapter(PlatformConfig(extra=trusted_extra))
+        exited._sidecar_proc = types.SimpleNamespace(poll=lambda: code, returncode=code)
+        exited._inbound_running = True
+        exited._http_client = AsyncClient()
+        notified = []
+        async def record_exit():
+            notified.append(exited.fatal_error)
+        exited._notify_fatal_error = record_exit
+        await exited._inbound_loop()
+        assert len(notified) == 1 and notified[0][0] == "SIDECAR_EXITED" and notified[0][2] == (code != 78)
+    starting = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    entered = asyncio.Event()
+    cleaned = []
+    async def wait_start():
+        entered.set()
+        await asyncio.Event().wait()
+    async def stop():
+        cleaned.append("child")
+    starting._start_sidecar = wait_start
+    starting._stop_sidecar = stop
+    starting._release_bot_lock = lambda: cleaned.append("lock")
+    task = asyncio.create_task(starting.connect())
+    await asyncio.wait_for(entered.wait(), 1)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert task.cancelled() and starting._http_client is None and cleaned == ["child", "lock"]
+
+import unittest.mock
+asyncio.run(assert_inbound_stream_recovery())
 
 asyncio.run(assert_inbound_receipt_recovery())
 

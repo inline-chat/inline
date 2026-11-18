@@ -9,7 +9,22 @@ export class InboundStream {
   private consumer: Writable | null = null
   private stopped = false
   private readonly changed = new Set<() => void>()
-  private readonly pending = new Map<string, { acknowledged: boolean }>()
+  private readonly pending = new Map<string, {
+    acknowledged: boolean
+    kind: string
+    startedAt: number
+    writes: number
+  }>()
+
+  diagnostics() {
+    const now = performance.now()
+    return {
+      consumerAttached: this.consumer !== null,
+      pending: [...this.pending.values()].map(({ kind, startedAt, writes }) => ({
+        kind, ageMs: Math.round(now - startedAt), writes,
+      })),
+    }
+  }
 
   attach(consumer: Writable): void {
     if (this.stopped) {
@@ -54,7 +69,9 @@ export class InboundStream {
     }
     const deliveryId = randomUUID()
     const line = JSON.stringify({ ...event, _inlineDeliveryId: deliveryId }) + "\n"
-    const receipt = { acknowledged: false }
+    const kind = "kind" in event && typeof event.kind === "string" ? event.kind : "unknown"
+    const receipt = { acknowledged: false, kind, startedAt: performance.now(), writes: 0 }
+    let watchdog: ReturnType<typeof setTimeout> | undefined
     this.pending.set(deliveryId, receipt)
     let writtenTo: Writable | null = null
     try {
@@ -72,6 +89,15 @@ export class InboundStream {
             // SDK bounds concurrent receipts/backpressure upstream.
             writtenTo = owner
             owner.write(line)
+            receipt.writes++
+            clearTimeout(watchdog)
+            // Replace a reader that never confirmed this write. On attach only
+            // still-pending receipts replay, with the same host delivery IDs.
+            const delay = Math.min(300_000, 60_000 * 2 ** Math.min(receipt.writes - 1, 3))
+            watchdog = setTimeout(() => {
+              if (this.consumer === owner && !receipt.acknowledged) owner.destroy()
+            }, delay)
+            watchdog.unref()
           } catch {
             if (this.consumer === owner) this.consumer = null
           }
@@ -81,6 +107,7 @@ export class InboundStream {
       }
       throw new Error("Inbound stream closed before delivery completed")
     } finally {
+      clearTimeout(watchdog)
       this.pending.delete(deliveryId)
     }
   }

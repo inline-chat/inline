@@ -54,6 +54,22 @@ Unsupported or intentionally limited:
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 - Progress for turns Hermes starts on its own. Scheduled (cron) turns and late background sub-agent results post only their answer.
 
+## Release 1.2.1
+
+Messages containing Unicode line or paragraph separators now reach the gateway
+intact. A stalled inbound reader reconnects and receives its outstanding
+deliveries. The authenticated sidecar health response includes their kind, age
+in milliseconds, and write count under `result.inbound.pending`. Chat access
+updates preserve order within their chat and the user cursor while other chats
+continue receiving messages.
+
+```sh
+npm install -g @inline-chat/hermes-agent-adapter@1.2.1
+inline-hermes install --force
+```
+
+Restart the Hermes gateway to load the installed adapter.
+
 ## Release 1.2.0
 
 Work shows in two output modes, Detailed and Friendly, chosen per chat in
@@ -240,10 +256,8 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- Inline transport: the 1.2.0 candidate sidecar uses `@inline-chat/realtime-sdk@0.0.24` and is
-  bundled into the npm package, so Hermes startup does not run `npm install`.
-  This SDK includes widget calls, submitted forms and focus status; protocol `0.0.16` and SDK
-  `0.0.24` must be published before the adapter's registry-only release preflight.
+- The 1.2.1 sidecar bundles `@inline-chat/realtime-sdk@0.0.26` and protocol
+  `0.0.17`. The catalog and npm package ship the same sidecar.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
 

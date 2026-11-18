@@ -34,7 +34,7 @@ import urllib.request
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NamedTuple, Optional
+from typing import Any, AsyncIterator, Callable, Dict, List, NamedTuple, Optional
 from urllib.parse import quote, urlparse
 
 try:
@@ -88,6 +88,8 @@ _CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS = 2.0
 _INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS = 30.0
 _INBOUND_RETRY_INITIAL_SECONDS = 1.0
 _MAX_INBOUND_DELIVERIES = 16
+_INBOUND_DISPATCH_TIMEOUT_SECONDS = 300.0
+_SIDECAR_AUTH_EXIT = 78
 # Telegram's drop_pending_on_cold_boot, for Inline: updates the server recorded
 # before this gateway process started are acknowledged without waking the agent.
 # A lost or fresh SDK cursor otherwise replays chat history as new messages.
@@ -222,6 +224,13 @@ _INLINE_DISPLAY_DEFAULTS = {
 
 class InlineInboundDeferred(RuntimeError):
     """Pre-effect dependency unavailable; keep the SDK delivery unacknowledged."""
+
+
+class InlineSidecarExited(RuntimeError):
+    def __init__(self, code: int):
+        self.auth_failed = code == _SIDECAR_AUTH_EXIT
+        super().__init__("Inline authentication failed; check the bot credential" if self.auth_failed
+                         else f"Inline sidecar exited with code {code}")
 
 
 class InlineSidecarError(RuntimeError):
@@ -914,6 +923,22 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
     if "home_channel" in platform_cfg:
         extra["home_channel"] = platform_cfg["home_channel"]
     return extra
+
+
+async def _inbound_records(response: Any) -> AsyncIterator[bytes]:
+    # HTTPX aiter_lines treats U+0085, U+2028 and U+2029 in JSON strings as
+    # newlines. The sidecar's NDJSON delimiter is a literal LF byte.
+    partial = bytearray()
+    async for chunk in response.aiter_bytes():
+        lines = chunk.split(b"\n")
+        for line in lines[:-1]:
+            partial.extend(line)
+            if partial.strip():
+                yield bytes(partial)
+            partial.clear()
+        partial.extend(lines[-1])
+    if partial:
+        raise ValueError("Incomplete Inline inbound record")
 
 
 async def _wait_for_exit(proc: subprocess.Popen, timeout: float) -> bool:
@@ -1677,6 +1702,8 @@ class InlineAdapter(BasePlatformAdapter):
         self._inbound_task: Optional[asyncio.Task] = None
         self._bot_settings_tasks: set[asyncio.Task] = set()
         self._inbound_deliveries: Dict[str, asyncio.Task] = {}
+        self._handled_deliveries: OrderedDict[str, bool] = OrderedDict()
+        self._inbound_failure_reported = False
         self._bot_settings_locks: Dict[str, asyncio.Lock] = {}
         self._bot_settings_lock_users: Dict[str, int] = {}
         self._bot_settings_model_catalog_cache: Optional[tuple[float, List[Dict[str, Any]]]] = None
@@ -2695,15 +2722,21 @@ class InlineAdapter(BasePlatformAdapter):
         if self._autostart_sidecar:
             try:
                 await self._start_sidecar()
-            except Exception as exc:
+            except (asyncio.CancelledError, Exception) as exc:
+                try:
+                    await self._stop_sidecar()
+                finally:
+                    await self._http_client.aclose()
+                    self._http_client = None
+                    self._release_bot_lock()
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
                 self._report_error("sidecar.start", exc, handled=False)
-                self._set_fatal_error("SIDECAR_FAILED", f"failed to start Inline sidecar: {exc}", retryable=True)
-                await self._stop_sidecar()
-                await self._http_client.aclose()
-                self._http_client = None
-                self._release_bot_lock()
+                self._set_fatal_error("SIDECAR_FAILED", f"failed to start Inline sidecar: {exc}",
+                                      retryable=not (isinstance(exc, InlineSidecarExited) and exc.auth_failed))
                 return False
         self._inbound_running = True
+        self._inbound_failure_reported = False
         self._inbound_task = asyncio.get_event_loop().create_task(self._inbound_loop())
         self._mark_connected()
         logger.info("[inline] connected via sidecar on %s:%d", self._sidecar_bind, self._sidecar_port)
@@ -2793,12 +2826,12 @@ class InlineAdapter(BasePlatformAdapter):
         )
         self._sidecar_supervisor_task = asyncio.get_event_loop().create_task(self._supervise_sidecar(self._sidecar_proc))
 
-        deadline = time.time() + (self._connect_timeout_ms / 1000.0)
+        deadline = time.monotonic() + (self._connect_timeout_ms / 1000.0)
         last_error: Optional[Exception] = None
         async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
-            while time.time() < deadline:
+            while time.monotonic() < deadline:
                 if self._sidecar_proc.poll() is not None:
-                    raise RuntimeError(f"Inline sidecar exited with code {self._sidecar_proc.returncode}")
+                    raise InlineSidecarExited(self._sidecar_proc.returncode)
                 try:
                     resp = await client.post(
                         f"{self._sidecar_base_url()}/healthz",
@@ -3056,39 +3089,56 @@ class InlineAdapter(BasePlatformAdapter):
 
         task.add_done_callback(finished)
 
+    async def _fail_inbound(self, code: str, message: str, *, retryable: bool = True) -> None:
+        if self._inbound_failure_reported:
+            return
+        self._inbound_failure_reported = True
+        self._inbound_running = False
+        self._set_fatal_error(code, message, retryable=retryable)
+        await self._notify_fatal_error()
+
     async def _inbound_loop(self) -> None:
         if self._http_client is None:
             return
         url = f"{self._sidecar_base_url()}/inbound"
         headers = {"X-Hermes-Sidecar-Token": self._sidecar_token}
+        # Bundled sidecars send an LF heartbeat every 20 seconds. External
+        # sidecars can predate heartbeats and legitimately stay idle.
+        timeout = httpx.Timeout(30.0, read=90.0 if self._sidecar_proc is not None else None)
         backoff = 1.0
         while self._inbound_running:
             try:
-                async with self._http_client.stream("GET", url, headers=headers, timeout=None) as resp:
+                proc = self._sidecar_proc
+                if proc is not None and proc.poll() is not None:
+                    failure = InlineSidecarExited(proc.returncode)
+                    await self._fail_inbound("SIDECAR_EXITED", str(failure), retryable=not failure.auth_failed)
+                    return
+                async with self._http_client.stream("GET", url, headers=headers, timeout=timeout) as resp:
                     if resp.status_code != 200:
                         raise RuntimeError(f"/inbound returned {resp.status_code}")
-                    backoff = 1.0
-                    async for line in resp.aiter_lines():
+                    async for record in _inbound_records(resp):
                         if not self._inbound_running:
-                            break
-                        line = line.strip()
-                        if line:
-                            await self._on_inbound(line)
+                            return
+                        await self._on_inbound(record)
+                        backoff = 1.0
+                raise EOFError("Inline inbound stream ended")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 if not self._inbound_running:
-                    break
+                    return
+                if isinstance(exc, httpx.TimeoutException) and self._sidecar_proc is not None:
+                    await self._fail_inbound("SIDECAR_TIMEOUT", "Inline sidecar stopped responding")
+                    return
                 self._report_error("inbound.stream", exc)
                 logger.warning("[inline] inbound stream dropped (%s); reconnecting in %.1fs", exc, backoff)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 30.0)
 
-    async def _on_inbound(self, line: str) -> None:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            return
+    async def _on_inbound(self, line: str | bytes) -> None:
+        # A damaged record has no trustworthy identity to ACK. Reattach so the
+        # sidecar replays outstanding receipts instead of silently skipping it.
+        event = json.loads(line)
         delivery_id = event.get("_inlineDeliveryId")
         if not isinstance(delivery_id, str) or not delivery_id:
             await self._dispatch_inbound(event)
@@ -3117,21 +3167,26 @@ class InlineAdapter(BasePlatformAdapter):
     async def _consume_inbound_delivery(self, delivery_id: str, event: Dict[str, Any]) -> None:
         try:
             await self._handle_inbound_delivery(delivery_id, event)
+        except asyncio.CancelledError:
+            if self._inbound_running and delivery_id not in self._handled_deliveries:
+                # Native admission can be cancelled independently of disconnect.
+                # Its outcome is unknown. Recover from the durable SDK cursor.
+                await self._fail_inbound("INBOUND_FAILED", "Inline inbound delivery was cancelled")
+            raise
         except Exception as exc:
             # Do not ACK an unexpected failure or silently pin its chat forever.
             # Native notification shields runner teardown/reconnect from the
             # cancellation of this task during adapter.disconnect().
             self._report_error("inbound.delivery", exc)
-            self._set_fatal_error("INBOUND_FAILED", str(exc), retryable=True)
-            await self._notify_fatal_error()
+            await self._fail_inbound("INBOUND_FAILED", str(exc) or type(exc).__name__)
 
     async def _handle_inbound_delivery(self, delivery_id: str, event: Dict[str, Any]) -> None:
         delay = _INBOUND_RETRY_INITIAL_SECONDS
         attempts = 0
-        while True:
+        while delivery_id not in self._handled_deliveries:
             attempts += 1
             try:
-                await self._dispatch_inbound(event)
+                await asyncio.wait_for(self._dispatch_inbound(event), timeout=_INBOUND_DISPATCH_TIMEOUT_SECONDS)
                 break
             except InlineSidecarError as exc:
                 if exc.error_kind not in {"forbidden", "not_found"}:
@@ -3148,6 +3203,9 @@ class InlineAdapter(BasePlatformAdapter):
                 logger.warning("[inline] inbound preflight unavailable; retrying in %.1fs: %s", delay, exc)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
+        # A replay may already be buffered on a replacement stream when the
+        # first ACK succeeds. The same delivery ID must only repeat the ACK.
+        self._remember(self._handled_deliveries, delivery_id, True)
         # A lost ACK response must retry only the ACK, never local commands or
         # model delivery. The endpoint is idempotent, including after reconnect.
         delay = _INBOUND_RETRY_INITIAL_SECONDS
