@@ -100,9 +100,11 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
       let (emoji, reactions) = item
       return GroupedReaction(emoji: emoji, reactions: reactions)
     }
-    // Dictionary order differs between instances and reaction dates are whole seconds, so a tie needs
-    // its own order or the chips swap places whenever the message is rebuilt.
-    .sorted { ($0.maxDate, $0.emoji) < ($1.maxDate, $1.emoji) }
+    // A chip keeps its place when more people add its emoji: chips are ordered by when their emoji was
+    // first used, so a new emoji joins at the end. Dictionary order differs between instances and
+    // reaction dates are whole seconds, so a tie needs its own order or chips swap places whenever the
+    // message is rebuilt.
+    .sorted { ($0.firstDate, $0.emoji) < ($1.firstDate, $1.emoji) }
   }
 
   // stable id
