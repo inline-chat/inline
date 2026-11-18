@@ -1,5 +1,6 @@
 use std::io;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -12,6 +13,21 @@ use super::super::render_inline_text;
 
 const MAX_LOCAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 const ATTACHMENT_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
+
+static ATTACHMENT_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// One pooled client for attachment downloads, carrying the CLI identity.
+fn attachment_http_client() -> io::Result<&'static reqwest::Client> {
+    if let Some(client) = ATTACHMENT_HTTP_CLIENT.get() {
+        return Ok(client);
+    }
+    let client = crate::identity::http_client_builder()
+        .timeout(ATTACHMENT_FETCH_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(io::Error::other)?;
+    Ok(ATTACHMENT_HTTP_CLIENT.get_or_init(|| client))
+}
 
 pub(in crate::bridge) struct InboundContent {
     pub text: String,
@@ -131,13 +147,7 @@ async fn materialize_inbound_attachment(
     if url.scheme() != "https" || url.host_str().is_none() {
         return Err(io::Error::other("attachment URL must use HTTPS").into());
     }
-    let response = reqwest::Client::builder()
-        .timeout(ATTACHMENT_FETCH_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?
-        .get(url)
-        .send()
-        .await?;
+    let response = attachment_http_client()?.get(url).send().await?;
     if !response.status().is_success() {
         return Err(io::Error::other(format!(
             "attachment download returned HTTP {}",
