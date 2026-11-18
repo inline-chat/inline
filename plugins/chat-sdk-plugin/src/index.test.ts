@@ -302,13 +302,13 @@ describe("Inline adapter", () => {
   })
 
   test("downloads fresh attachment URLs without forwarding bot credentials", async () => {
-    const seen: { url: string; headers: Headers }[] = []
+    const seen: { url: string; headers: Headers; signal?: AbortSignal | null }[] = []
     const adapter = createInlineAdapter({
       token: "token",
       webhookSecret: "secret",
       fetch: (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input)
-        seen.push({ url, headers: new Headers(init?.headers) })
+        seen.push({ url, headers: new Headers(init?.headers), signal: init?.signal })
         return url.includes("/getFile")
           ? Response.json({
               ok: true,
@@ -328,6 +328,7 @@ describe("Inline adapter", () => {
     expect(getFileUrl.searchParams.get("message_id")).toBe("1")
     expect(seen[1]?.headers.has("authorization")).toBe(false)
     expect(seen[1]?.url).toBe("https://files.example/fresh")
+    expect(seen[1]?.signal).toBeInstanceOf(AbortSignal)
   })
 
   test("falls back to an id-only getFile when a message has no chat id", async () => {

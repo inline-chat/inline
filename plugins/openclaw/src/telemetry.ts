@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 
 const TELEMETRY_TIMEOUT_MS = 2_000
 const TELEMETRY_DEDUP_MS = 5 * 60_000
+const MAX_DEDUP_ENTRIES = 256
 const MAX_ERROR_MESSAGE_LENGTH = 8_000
 const MAX_STACK_FRAMES = 80
 const SENSITIVE_ENV_NAME = /(?:token|secret|password|api[_-]?key|authorization)/i
@@ -230,6 +231,11 @@ export function reportOpenClawPluginError(
     const key = `${safeTag(operation)}\0${exception.name}\0${redactOpenClawTelemetryText(exception.message)}`
     const now = Date.now()
     if (now - (lastReports.get(key) ?? 0) < TELEMETRY_DEDUP_MS) return
+    if (lastReports.size >= MAX_DEDUP_ENTRIES) {
+      for (const [reportedKey, reportedAt] of lastReports) {
+        if (now - reportedAt >= TELEMETRY_DEDUP_MS) lastReports.delete(reportedKey)
+      }
+    }
     lastReports.set(key, now)
     void sendOpenClawPluginError(operation, exception, options).catch(() => {})
   } catch {
