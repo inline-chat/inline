@@ -145,8 +145,44 @@ public struct Document: Codable, Sendable, Equatable, Hashable, Identifiable, Fe
   public var mimeType: String?
   public var size: Int?
   public var cdnUrl: String?
-  public var localPath: String?
+  private var storedLocalPath: String?
+  public var localPath: String? {
+    get { storedLocalPath.flatMap { FileHelpers.isPlainCacheName($0) ? $0 : nil } }
+    set { storedLocalPath = newValue }
+  }
   public var thumbnailPhotoId: Int64?
+
+  private enum CodingKeys: String, CodingKey {
+    case id, documentId, date, fileName, mimeType, size, cdnUrl, thumbnailPhotoId
+    case storedLocalPath = "localPath"
+  }
+
+  init(
+    id: Int64? = nil, documentId: Int64, date: Date, fileName: String? = nil,
+    mimeType: String? = nil, size: Int? = nil, cdnUrl: String? = nil,
+    localPath: String? = nil, thumbnailPhotoId: Int64? = nil
+  ) {
+    self.id = id
+    self.documentId = documentId
+    self.date = date
+    self.fileName = fileName
+    self.mimeType = mimeType
+    self.size = size
+    self.cdnUrl = cdnUrl
+    storedLocalPath = localPath
+    self.thumbnailPhotoId = thumbnailPhotoId
+  }
+
+  /// Keep a safe extension for Quick Look. The display name never determines the destination.
+  func newDownloadCacheName() -> String {
+    let id = UUID().uuidString
+    guard let fileName, FileHelpers.isPlainCacheName(fileName) else { return id }
+    let ext = (fileName as NSString).pathExtension
+    guard (1 ... 16).contains(ext.utf8.count),
+          ext.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) })
+    else { return id }
+    return id + "." + ext
+  }
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -156,7 +192,7 @@ public struct Document: Codable, Sendable, Equatable, Hashable, Identifiable, Fe
     static let mimeType = Column(CodingKeys.mimeType)
     static let size = Column(CodingKeys.size)
     static let cdnUrl = Column(CodingKeys.cdnUrl)
-    static let localPath = Column(CodingKeys.localPath)
+    static let localPath = Column(CodingKeys.storedLocalPath)
     static let thumbnailPhotoId = Column(CodingKeys.thumbnailPhotoId)
   }
 }

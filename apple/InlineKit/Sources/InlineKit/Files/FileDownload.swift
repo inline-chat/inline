@@ -402,7 +402,7 @@ public final class FileDownloader: NSObject, Sendable {
     let completion: (Result<URL, Error>) -> Void = { [weak self] result in
       self?.finishRequest(id: downloadId, token: requestToken, result: result)
     }
-    let localPath = "\(UUID().uuidString)_\(document.document.fileName ?? "Unknown")"
+    let localPath = document.document.newDownloadCacheName()
     let localUrl = FileCache.getUrl(for: .documents, localPath: localPath)
     log.debug("Starting document download \(document.id) transport=\(nativeDownload == nil ? "cdn" : "native")")
 

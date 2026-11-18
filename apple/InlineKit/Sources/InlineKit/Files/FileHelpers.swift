@@ -11,6 +11,10 @@ public enum FileLocalCacheDirectory: Sendable {
 }
 
 public enum FileHelpers {
+  static func isPlainCacheName(_ name: String) -> Bool {
+    !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\\") && !name.contains("\0")
+  }
+
   public static func getToBeUploadedDirectory() -> URL {
     let fileManager = FileManager.default
     let paths = FileManager.default.urls(
