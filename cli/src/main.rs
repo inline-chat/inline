@@ -7107,7 +7107,54 @@ async fn fetch_message_by_id(
         .ok_or_else(|| CliError::invalid_args("Message not found for that peer.").into())
 }
 
+/// The server caps one history page, so longer ranges are fetched in pages.
+const HISTORY_PAGE_LIMIT: i32 = 500;
+
+/// Messages older than `offset_id`, newest first, up to `limit`.
 async fn fetch_history_messages(
+    realtime: &mut AuthenticatedRealtime,
+    peer: &proto::InputPeer,
+    offset_id: Option<i64>,
+    limit: Option<i32>,
+) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
+    page_history(offset_id, limit, async |offset_id, limit| {
+        fetch_history_page(realtime, peer, offset_id, limit).await
+    })
+    .await
+}
+
+async fn page_history(
+    offset_id: Option<i64>,
+    limit: Option<i32>,
+    mut fetch_page: impl AsyncFnMut(
+        Option<i64>,
+        Option<i32>,
+    ) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>>,
+) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
+    let Some(total) = limit.and_then(|limit| usize::try_from(limit).ok()) else {
+        return fetch_page(offset_id, limit).await;
+    };
+    let mut messages: Vec<proto::Message> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut offset_id = offset_id;
+    while messages.len() < total {
+        let page_limit = (total - messages.len()).min(HISTORY_PAGE_LIMIT as usize);
+        let page = fetch_page(offset_id, Some(page_limit as i32)).await?;
+        let page_len = page.len();
+        let Some(oldest) = page.iter().map(|message| message.id).min() else {
+            break;
+        };
+        // Album completion can return a few rows past the limit, or repeat one.
+        messages.extend(page.into_iter().filter(|message| seen.insert(message.id)));
+        if page_len < page_limit || offset_id == Some(oldest) {
+            break;
+        }
+        offset_id = Some(oldest);
+    }
+    Ok(messages)
+}
+
+async fn fetch_history_page(
     realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     offset_id: Option<i64>,
@@ -8262,6 +8309,65 @@ mod cli_parsing_tests {
         assert_eq!(value["id"], 7);
         assert_eq!(value["message"], "hello");
         assert_eq!(value["translations"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn long_history_limits_are_fetched_in_server_sized_pages() {
+        // A chat with ids 1..=1200; the fake server returns newest first, older than the offset.
+        let mut requests = Vec::new();
+        let messages = page_history(None, Some(1100), async |offset_id, limit| {
+            requests.push((offset_id, limit));
+            let below = offset_id.unwrap_or(1201);
+            let limit = i64::from(limit.unwrap());
+            Ok((1..below)
+                .rev()
+                .take(limit as usize)
+                .map(|id| proto::Message {
+                    id,
+                    ..Default::default()
+                })
+                .collect())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            requests,
+            vec![
+                (None, Some(500)),
+                (Some(701), Some(500)),
+                (Some(201), Some(100))
+            ]
+        );
+        assert_eq!(messages.len(), 1100);
+        assert_eq!(messages.first().map(|m| m.id), Some(1200));
+        assert_eq!(messages.last().map(|m| m.id), Some(101));
+    }
+
+    #[tokio::test]
+    async fn history_paging_stops_at_the_start_of_the_chat_and_skips_repeats() {
+        let mut calls = 0;
+        let messages = page_history(Some(30), Some(1000), async |offset_id, _limit| {
+            calls += 1;
+            // Ids 1..30 exist; the first page repeats its oldest row as album completion can.
+            let below = offset_id.unwrap();
+            let mut page: Vec<proto::Message> = (1..below)
+                .rev()
+                .map(|id| proto::Message {
+                    id,
+                    ..Default::default()
+                })
+                .collect();
+            if let Some(last) = page.last().cloned() {
+                page.push(last);
+            }
+            Ok(page)
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(calls, 1);
+        assert_eq!(messages.len(), 29);
     }
 
     #[test]
