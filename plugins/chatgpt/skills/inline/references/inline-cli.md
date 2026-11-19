@@ -112,6 +112,9 @@ inline messages pin --chat-id CHAT_ID --message-id MESSAGE_ID
 inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title "FOLLOW-UP"
 inline chats follow --chat-id REPLY_THREAD_ID
 inline notifications set-chat --chat-id CHAT_ID --mode mentions
+inline bots settings --json --compact  # read: each owned bot's output mode and who it's shared with
+inline bots settings --all --output-mode friendly --dry-run  # preview a bulk change, then rerun without --dry-run
+inline bots access close --bot-user-id BOT_ID,BOT_ID  # several bots: --bot-user-id ID,ID, --all, --filter TEXT, --except ID
 ```
 
 Run inside a coding agent, the CLI signs what it sends: recipients see “Sent via Claude Code” (or Codex, OpenCode, …) under the message. Add `--as-me` only when the user asks for an unsigned message, and don't add your own agent signature or footer. `--via-bot BOT_ID` signs with a bot the user owns. A person running the CLI in a plain terminal sends unsigned.
