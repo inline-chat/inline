@@ -50,7 +50,7 @@ import {
   markPartAccepted,
   type UploadGeometry,
 } from "./geometryCache"
-import { countTransferWork, transferTraces } from "@in/server/modules/transfers/trace"
+import { countTransferWork, transferTraces, withTransferCounters } from "@in/server/modules/transfers/trace"
 
 const log = new Log("modules/uploads", uploadTraceLogLevel())
 const RETRY_AFTER_SECONDS = 1
@@ -181,13 +181,17 @@ export type NativeUploadOperationsOptions = {
   finishInline?: (
     upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
     signal?: AbortSignal,
+    stored?: Promise<boolean>,
   ) => Promise<"complete" | "running" | "processing">
+  /** Writes a whole file sent with CREATE_UPLOAD to its final key; see NativeUploadWorker.storeEarly. */
+  storeEarly?: (upload: InlineUploadRecord, bytes: Uint8Array) => Promise<boolean>
 }
 
 export class NativeUploadOperations {
   readonly #geometry: UploadGeometryCache
   readonly #groupBuffer: UploadGroupBuffer | undefined
   readonly #finishInline: NativeUploadOperationsOptions["finishInline"]
+  readonly #storeEarly: NativeUploadOperationsOptions["storeEarly"]
 
   constructor(
     private readonly repository: InlineUploadRepository,
@@ -201,6 +205,7 @@ export class NativeUploadOperations {
     this.#geometry = options.geometry ?? new UploadGeometryCache()
     this.#groupBuffer = options.groupBuffer
     this.#finishInline = options.finishInline
+    this.#storeEarly = options.storeEarly
   }
 
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
@@ -242,25 +247,33 @@ export class NativeUploadOperations {
       expiresAt: BigInt(Math.floor(result.upload.expiresAt.getTime() / 1_000)),
       acceptedParts: result.upload.acceptedParts,
     }
-    return input.inlineData === undefined ? created : await this.#finishInlineData(created, input.inlineData, context)
+    return input.inlineData === undefined
+      ? created
+      : await this.#finishInlineData(created, result.upload, owner, input.inlineData, context)
   }
 
   /**
    * Saves a whole single-part file sent with CREATE_UPLOAD and finishes it in the same call, so a
    * small photo costs one round trip instead of create, part and finish. On any failure the
    * upload still exists and the client continues with the ordinary part and finish calls.
+   *
+   * The final object is written alongside staging rather than after it: the client learns the
+   * upload id only from this reply, so nothing can cancel the upload while the write is running.
    */
   async #finishInlineData(
     created: CreateUploadResult,
+    upload: InlineUploadRecord,
+    owner: InlineUploadOwner,
     data: Uint8Array,
     context: HandlerContext,
   ): Promise<CreateUploadResult> {
     if (created.partCount !== 1) return created
+    const stored = this.#startEarlyStore(upload, data, context)
     try {
       if (!created.acceptedParts.includes(0)) {
         await this.savePart({ uploadId: created.uploadId, partIndex: 0, data }, context)
       }
-      const finished = await this.finish({ uploadId: created.uploadId }, context)
+      const finished = await this.#finish({ uploadId: created.uploadId }, context, owner, stored)
       switch (finished.state.oneofKind) {
         case "complete": return { ...created, acceptedParts: [0], complete: finished.state.complete }
         case "missing": return created
@@ -270,7 +283,23 @@ export class NativeUploadOperations {
       if (context.signal?.aborted) throw error
       log.warn("Inline upload data was not finished in create", { error })
       return created
+    } finally {
+      // The write never outlives the request; the worker has usually awaited it already.
+      await stored
     }
+  }
+
+  /** Starts `storeEarly` when this request can finish the upload itself; never rejects. */
+  #startEarlyStore(
+    upload: InlineUploadRecord,
+    data: Uint8Array,
+    context: HandlerContext,
+  ): Promise<boolean> | undefined {
+    const storeEarly = this.#storeEarly
+    if (!storeEarly || !this.#finishInline || upload.status !== "uploading" ||
+        upload.byteCount > INLINE_FINISH_MAX_BYTES) return undefined
+    const trace = transferTraces.touch(uploadTraceKey(upload.id), "upload", context.inlineProtocol ? "v3" : "v2")
+    return withTransferCounters(trace.counters, () => storeEarly(upload, data)).catch(() => false)
   }
 
   async savePart(input: SaveUploadPartInput, context: HandlerContext): Promise<SaveUploadPartResult> {
@@ -484,9 +513,19 @@ export class NativeUploadOperations {
   }
 
   async finish(input: FinishUploadInput, context: HandlerContext): Promise<FinishUploadResult> {
+    return await this.#finish(input, context)
+  }
+
+  /** `owner` is one the same request already resolved; `stored` comes from `#startEarlyStore`. */
+  async #finish(
+    input: FinishUploadInput,
+    context: HandlerContext,
+    resolvedOwner?: InlineUploadOwner,
+    stored?: Promise<boolean>,
+  ): Promise<FinishUploadResult> {
     const startedAt = Date.now()
     throwIfAborted(context.signal)
-    const owner = await this.#owner(context)
+    const owner = resolvedOwner ?? await this.#owner(context)
     throwIfAborted(context.signal)
     const result = await this.repository.requestFinish(input.uploadId, owner)
     if (result.kind !== "missing") this.#geometry.drop(input.uploadId)
@@ -498,11 +537,14 @@ export class NativeUploadOperations {
         return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
       case "queued": {
         const inline = result.byteCount <= INLINE_FINISH_MAX_BYTES && this.#finishInline
-          ? await this.#finishInline({ id: result.uploadDbId, partCount: result.partCount, kind: result.uploadKind }, context.signal)
-            .catch((error) => {
-              log.warn("Native upload inline finish failed", { error, uploadDbId: result.uploadDbId })
-              return "processing" as const
-            })
+          ? await this.#finishInline(
+            { id: result.uploadDbId, partCount: result.partCount, kind: result.uploadKind },
+            context.signal,
+            stored,
+          ).catch((error) => {
+            log.warn("Native upload inline finish failed", { error, uploadDbId: result.uploadDbId })
+            return "processing" as const
+          })
           : "processing"
         log.debug("UPLOAD_TRACE phase=finish_queued", {
           uploadDbId: result.uploadDbId,
@@ -665,6 +707,7 @@ export const nativeUploadOperations = new NativeUploadOperations(
   (uploadDbId) => nativeUploadWorker.cancel(uploadDbId),
   {
     groupBuffer: uploadGroupBuffer,
-    finishInline: (upload, signal) => nativeUploadWorker.processNow(upload, signal),
+    finishInline: (upload, signal, stored) => nativeUploadWorker.processNow(upload, signal, stored),
+    storeEarly: (upload, bytes) => nativeUploadWorker.storeEarly(upload, bytes),
   },
 )

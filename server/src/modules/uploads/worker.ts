@@ -41,6 +41,8 @@ const DEFAULT_POLL_INTERVAL_MS = 2_000
 const MAX_PROCESSING_ATTEMPTS = 12
 const LEASE_RENEW_INTERVAL_MS = Math.min(60_000, INLINE_UPLOAD_PROCESSING_LEASE_MS / 3)
 const DEFAULT_LEASE_RENEW_TIMEOUT_MS = Math.min(5_000, INLINE_UPLOAD_PROCESSING_LEASE_MS / 4)
+/** An ownership check this soon after the lease was confirmed skips the database. */
+const FRESH_LEASE_MS = Math.min(5_000, INLINE_UPLOAD_PROCESSING_LEASE_MS / 6)
 const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS = 5_000
 const STAGING_READ_CONCURRENCY = 4
 const DEFAULT_EXPIRY_CLEANUP_INTERVAL_MS = 60_000
@@ -61,6 +63,8 @@ type WorkerOptions = {
   inlineFinishTimeoutMs?: number
   expiryCleanupIntervalMs?: number
   leaseRenewTimeoutMs?: number
+  /** How soon after a lease was confirmed an ownership check skips the database. */
+  freshLeaseMs?: number
   maximumIdleIntervalMs?: number
   pollIntervalMs?: number
   random?: () => number
@@ -101,6 +105,17 @@ const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
 
 const throwIfAborted = (signal: AbortSignal): void => {
   if (signal.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError")
+}
+
+/**
+ * Both results once neither is running, so a failure never leaves the other's object write in
+ * flight behind cleanup. Rethrows the first failure in argument order.
+ */
+const settleBoth = async <A, B>(first: Promise<A>, second: Promise<B>): Promise<[A, B]> => {
+  const [left, right] = await Promise.allSettled([first, second])
+  if (left.status === "rejected") throw left.reason
+  if (right.status === "rejected") throw right.reason
+  return [left.value, right.value]
 }
 
 const settlesWithin = async (promise: Promise<unknown>, timeoutMs: number): Promise<boolean> =>
@@ -165,6 +180,7 @@ export class NativeUploadWorker {
   readonly #pollIntervalMs: number
   readonly #expiryCleanupIntervalMs: number
   readonly #leaseRenewTimeoutMs: number
+  readonly #freshLeaseMs: number
   readonly #shutdownDrainTimeoutMs: number
   readonly #random: () => number
   readonly #backoff: IdleBackoff
@@ -175,6 +191,8 @@ export class NativeUploadWorker {
   readonly #queued = new Map<number, Set<number> | "full">()
   readonly #activeUploads = new Set<number>()
   readonly #claimControllers = new Map<number, AbortController>()
+  /** When each claim was requested; the database starts its lease no earlier. */
+  readonly #claimRequestedAt = new WeakMap<InlineUploadProcessingClaim, number>()
   readonly #tasks = new Set<Promise<void>>()
   readonly #cleanupTasks = new Set<Promise<void>>()
   #abort = new AbortController()
@@ -198,6 +216,7 @@ export class NativeUploadWorker {
     this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
     this.#expiryCleanupIntervalMs = options.expiryCleanupIntervalMs ?? DEFAULT_EXPIRY_CLEANUP_INTERVAL_MS
     this.#leaseRenewTimeoutMs = options.leaseRenewTimeoutMs ?? DEFAULT_LEASE_RENEW_TIMEOUT_MS
+    this.#freshLeaseMs = Math.min(options.freshLeaseMs ?? FRESH_LEASE_MS, FRESH_LEASE_MS)
     this.#shutdownDrainTimeoutMs = options.shutdownDrainTimeoutMs ?? DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS
     this.#random = options.random ?? Math.random
     this.#groupBuffer = options.groupBuffer ?? new UploadGroupBuffer()
@@ -319,14 +338,16 @@ export class NativeUploadWorker {
    * still holds every group in memory. Returns `complete` when published within
    * the timeout, `running` when this process claimed the work and it continues as
    * an ordinary worker task (no wake is needed), and `processing` when nothing
-   * was claimed here.
+   * was claimed here. `stored` is a `storeEarly` write of this upload's bytes; when
+   * it resolves true the final object is not written again.
    */
   async processNow(
     upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
     signal?: AbortSignal,
+    stored?: Promise<boolean>,
   ): Promise<"complete" | "running" | "processing"> {
     if (!this.#started || this.#activeUploads.has(upload.id) || !this.#holdsInMemory(upload)) return "processing"
-    const claim = await this.repository.claimProcessing(upload.id)
+    const claim = await this.#claim(() => this.repository.claimProcessing(upload.id))
     if (!claim) return "processing"
     if (this.#activeUploads.has(upload.id)) {
       await this.repository.releaseProcessingClaim({ uploadDbId: claim.upload.id, lockToken: claim.lockToken })
@@ -335,7 +356,7 @@ export class NativeUploadWorker {
     }
     this.#queued.delete(upload.id)
     let published = false
-    const task = this.#track(upload.id, async () => { published = await this.#processClaim(claim) })
+    const task = this.#track(upload.id, async () => { published = await this.#processClaim(claim, stored) })
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
     await Promise.race([
@@ -351,6 +372,43 @@ export class NativeUploadWorker {
     if (timer !== undefined) clearTimeout(timer)
     if (onAbort) signal?.removeEventListener("abort", onAbort)
     return published ? "complete" : "running"
+  }
+
+  /**
+   * Writes a whole single-group upload to its final key before it is finished, so the write
+   * overlaps staging; pass the result to `processNow`. Resolves false, never rejects, when the
+   * upload does not qualify or the write failed, and the worker writes it as usual. A key written
+   * for an upload that is never finished goes with the upload: cancel and expiry cleanup both
+   * remove its publication path.
+   */
+  async storeEarly(upload: InlineUploadRecord, bytes: Uint8Array, signal?: AbortSignal): Promise<boolean> {
+    // Only `processNow` here can use the write, and it needs a running worker.
+    if (!this.#started || !this.multipartStore.put || upload.status !== "uploading" ||
+        upload.storageFormat !== IDENTITY_STORAGE_FORMAT || upload.storageUploadId ||
+        upload.partCount > STORAGE_FRAMES_PER_PART || BigInt(bytes.byteLength) !== upload.byteCount ||
+        !sameBytes(createHash("sha256").update(bytes).digest(), upload.sha256)) return false
+    try {
+      await this.multipartStore.put({
+        key: storageKeyFor(upload),
+        bytes,
+        contentType: upload.mimeType,
+        signal,
+      })
+      return true
+    } catch (error) {
+      if (!signal?.aborted) log.warn("Native upload early store failed", { error, uploadDbId: upload.id })
+      return false
+    }
+  }
+
+  /** Claims through `take`, noting when the claim was requested. */
+  async #claim(
+    take: () => Promise<InlineUploadProcessingClaim | undefined>,
+  ): Promise<InlineUploadProcessingClaim | undefined> {
+    const requestedAt = performance.now()
+    const claim = await take()
+    if (claim) this.#claimRequestedAt.set(claim, requestedAt)
+    return claim
   }
 
   /** Every group is either already in the running digest or fully buffered; photos need every frame. */
@@ -492,7 +550,7 @@ export class NativeUploadWorker {
     try {
       this.#pump()
       while (this.#started && this.#active < this.#concurrency) {
-        const claim = await this.repository.claimProcessing()
+        const claim = await this.#claim(() => this.repository.claimProcessing())
         if (!claim) break
         claimed = true
         if (this.#activeUploads.has(claim.upload.id)) {
@@ -525,7 +583,7 @@ export class NativeUploadWorker {
     if (!this.#started || this.#abort.signal.aborted) return
     if (!work) return
     if (work.upload.status === "processing") {
-      const claim = await this.repository.claimProcessing(uploadDbId)
+      const claim = await this.#claim(() => this.repository.claimProcessing(uploadDbId))
       if (!claim) return
       if (!this.#started || this.#abort.signal.aborted) {
         await this.repository.releaseProcessingClaim({
@@ -538,7 +596,7 @@ export class NativeUploadWorker {
       return
     }
     if (work.upload.storageFormat) {
-      const claim = await this.repository.claimUploadingCompaction(uploadDbId)
+      const claim = await this.#claim(() => this.repository.claimUploadingCompaction(uploadDbId))
       if (!claim) return
       await this.#processUploadingClaim(claim)
     }
@@ -551,7 +609,7 @@ export class NativeUploadWorker {
    */
   async #runGroups(uploadDbId: number, groupNumbers: number[], attempt = 0): Promise<void> {
     throwIfAborted(this.#abort.signal)
-    const claim = await this.repository.claimUploadingCompaction(uploadDbId)
+    const claim = await this.#claim(() => this.repository.claimUploadingCompaction(uploadDbId))
     if (!claim) {
       if (attempt < GROUP_CLAIM_RETRIES && this.#started) {
         const retry = setTimeout(() => {
@@ -584,8 +642,15 @@ export class NativeUploadWorker {
     if (this.#abort.signal.aborted) abortFromRoot()
     let heartbeatRenewal: Promise<void> | undefined
     let leaseLost = false
-    const assertOwnership = async (): Promise<void> => {
+    let confirmedAt = this.#claimRequestedAt.get(claim)
+    const confirm = async (renewNow: boolean): Promise<void> => {
       throwIfAborted(controller.signal)
+      // The database starts or extends the lease no earlier than our request, so one confirmed
+      // moments ago is still ours unless the upload was canceled, which the conditional publish
+      // and the next heartbeat both catch. The heartbeat always renews; it keeps the lease alive.
+      if (!renewNow && !leaseLost && confirmedAt !== undefined &&
+          performance.now() - confirmedAt < this.#freshLeaseMs) return
+      const requestedAt = performance.now()
       let renewed = false
       if (!leaseLost) {
         renewed = await this.repository.renew({
@@ -601,10 +666,12 @@ export class NativeUploadWorker {
         controller.abort(new UploadOwnershipLostError())
         throw new UploadOwnershipLostError()
       }
+      confirmedAt = Math.max(confirmedAt ?? requestedAt, requestedAt)
     }
+    const assertOwnership = (): Promise<void> => confirm(false)
     const heartbeat = setInterval(() => {
       if (heartbeatRenewal || controller.signal.aborted) return
-      heartbeatRenewal = assertOwnership().catch((error) => {
+      heartbeatRenewal = confirm(true).catch((error) => {
         leaseLost = true
         controller.abort(error)
       }).finally(() => { heartbeatRenewal = undefined })
@@ -646,7 +713,7 @@ export class NativeUploadWorker {
   }
 
   /** Returns true when this call published the upload. */
-  async #processClaim(claim: InlineUploadProcessingClaim): Promise<boolean> {
+  async #processClaim(claim: InlineUploadProcessingClaim, stored?: Promise<boolean>): Promise<boolean> {
     if (!this.#started || this.#abort.signal.aborted) {
       await this.repository.releaseProcessingClaim({
         uploadDbId: claim.upload.id,
@@ -671,7 +738,7 @@ export class NativeUploadWorker {
 
       let publication
       const singleGroupFrames = claim.upload.storageFormat
-        ? await this.#putSingleGroup(claim, controller.signal, assertOwnership)
+        ? await this.#singleGroupFrames(claim, controller.signal)
         : undefined
       if (!claim.upload.storageFormat) {
         publication = await this.finalizer.preparePublication({
@@ -682,15 +749,19 @@ export class NativeUploadWorker {
           signal: controller.signal,
         })
       } else if (singleGroupFrames) {
-        // Verified and stored above; the digest and frames are already proven.
+        // Verified above; the digest and frames are already proven. The object write and the media
+        // work need only those bytes, so they run together; both finish before anything else.
         this.#digests.delete(claim.upload.id)
-        publication = await this.finalizer.prepareBufferedPublication({
-          upload: claim.upload,
-          frames: bufferedPublicationNeedsBytes(claim.upload.kind) ? singleGroupFrames : undefined,
-          thumbnailPhotoId,
-          assertOwnership,
-          signal: controller.signal,
-        })
+        ;[, publication] = await settleBoth(
+          this.#storeSingleGroup(claim, singleGroupFrames, controller.signal, assertOwnership, stored),
+          this.finalizer.prepareBufferedPublication({
+            upload: claim.upload,
+            frames: bufferedPublicationNeedsBytes(claim.upload.kind) ? singleGroupFrames.frames : undefined,
+            thumbnailPhotoId,
+            assertOwnership,
+            signal: controller.signal,
+          }),
+        )
       } else {
         let work: InlineUploadStorageWork = claim
         let resetCount = 0
@@ -982,14 +1053,13 @@ export class NativeUploadWorker {
    * session (create, upload part, complete and two HEAD checks, plus their manifest statements)
    * proves the same thing with five object-store calls, which dominated small-photo finish time.
    * Every frame is checked against its manifest digest, the whole body against the declared
-   * file digest, and the PUT's MD5 ETag proves what was stored. Returns the verified frames, or
-   * undefined to use multipart.
+   * file digest, and the PUT's MD5 ETag proves what was stored. Returns the verified frames and
+   * body, or undefined to use multipart.
    */
-  async #putSingleGroup(
+  async #singleGroupFrames(
     work: InlineUploadStorageWork,
     signal: AbortSignal,
-    assertOwnership: () => Promise<void>,
-  ): Promise<Uint8Array[] | undefined> {
+  ): Promise<{ frames: Uint8Array[]; bytes: Uint8Array } | undefined> {
     const upload = work.upload
     if (!this.multipartStore.put || upload.storageFormat !== IDENTITY_STORAGE_FORMAT ||
         upload.partCount > STORAGE_FRAMES_PER_PART || upload.storageUploadId ||
@@ -1001,14 +1071,27 @@ export class NativeUploadWorker {
         !sameBytes(createHash("sha256").update(bytes).digest(), upload.sha256)) {
       throw new UploadIntegrityError()
     }
+    return { frames, bytes }
+  }
+
+  /** Writes a verified single-group body, unless `stored` reports that `storeEarly` wrote it. */
+  async #storeSingleGroup(
+    work: InlineUploadStorageWork,
+    verified: { bytes: Uint8Array },
+    signal: AbortSignal,
+    assertOwnership: () => Promise<void>,
+    stored: Promise<boolean> | undefined,
+  ): Promise<void> {
+    // `storeEarly` wrote these bytes: it checked them against the same declared digest.
+    if (stored && await stored) return
+    if (!this.multipartStore.put) throw new UploadIntegrityError()
     await assertOwnership()
     await this.multipartStore.put({
-      key: storageKeyFor(upload),
-      bytes,
-      contentType: upload.mimeType,
+      key: storageKeyFor(work.upload),
+      bytes: verified.bytes,
+      contentType: work.upload.mimeType,
       signal,
     })
-    return frames
   }
 
   /**

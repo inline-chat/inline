@@ -4,6 +4,7 @@ import {
   countTransferWork,
   recordSqlStatement,
   recordStorageOperation,
+  recordStoragePutTime,
 } from "./trace"
 
 describe("transfer traces", () => {
@@ -14,10 +15,11 @@ describe("transfer traces", () => {
         await Promise.resolve()
         recordSqlStatement()
         recordStorageOperation("put")
+        recordStoragePutTime(12)
       })
-      expect(inner.counters).toEqual({ sqlStatements: 1, storagePut: 1, storageGet: 0, storageDelete: 0 })
+      expect(inner.counters).toEqual({ sqlStatements: 1, storagePut: 1, storageGet: 0, storageDelete: 0, storagePutMs: 12 })
     })
-    expect(outer.counters).toEqual({ sqlStatements: 2, storagePut: 1, storageGet: 0, storageDelete: 0 })
+    expect(outer.counters).toEqual({ sqlStatements: 2, storagePut: 1, storageGet: 0, storageDelete: 0, storagePutMs: 12 })
     // Outside any scope nothing is recorded and nothing throws.
     recordSqlStatement()
   })
@@ -43,7 +45,7 @@ describe("transfer traces", () => {
     traces.finish("upload:7", "complete")
     expect(lines).toEqual([{
       direction: "upload", carrier: "v3", bytes: 150, parts: 2, durationMs: 42, peakInFlightBytes: 150,
-      sqlStatements: 1, storageOps: { put: 0, get: 1, delete: 0 }, retries: 0, outcome: "complete",
+      sqlStatements: 1, storageOps: { put: 0, get: 1, delete: 0 }, putMs: 0, retries: 0, outcome: "complete",
     }])
     expect(JSON.stringify(lines)).not.toContain("upload:7")
     expect(traces.openCount).toBe(0)

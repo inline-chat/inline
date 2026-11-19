@@ -1,4 +1,4 @@
-import { recordStorageOperation } from "@in/server/modules/transfers/trace"
+import { recordStorageOperation, recordStoragePutTime } from "@in/server/modules/transfers/trace"
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -234,6 +234,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }): Promise<MultipartUploadedPart> {
     recordStorageOperation("put")
     const md5 = createHash("md5").update(input.bytes).digest()
+    const startedAt = performance.now()
     try {
       const { bucket, client } = this.#requireConfiguration()
       const result = await client.send(new UploadPartCommand({
@@ -252,6 +253,8 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
       if (cause instanceof MultipartIntegrityError) throw cause
       if (isNoSuchUpload(cause)) throw new MultipartUploadNotFoundError({ cause })
       throw new MultipartStorageUnavailableError({ cause })
+    } finally {
+      recordStoragePutTime(performance.now() - startedAt)
     }
   }
 
@@ -295,6 +298,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }): Promise<{ etag: string }> {
     recordStorageOperation("put")
     const md5 = createHash("md5").update(input.bytes).digest()
+    const startedAt = performance.now()
     try {
       const { bucket, client } = this.#requireConfiguration()
       const result = await client.send(new PutObjectCommand({
@@ -311,6 +315,8 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
     } catch (cause) {
       if (cause instanceof MultipartIntegrityError) throw cause
       throw new MultipartStorageUnavailableError({ cause })
+    } finally {
+      recordStoragePutTime(performance.now() - startedAt)
     }
   }
 
