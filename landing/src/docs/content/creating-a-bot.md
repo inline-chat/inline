@@ -98,6 +98,21 @@ inline bots access revoke --bot-user-id 123 --user-id 456
 inline bots access list --bot-user-id 123
 ```
 
+### Many bots at once
+
+`inline bots settings` with no bot lists every bot you own with its output mode and who it's shared with. The settings and access commands take several ids (`--bot-user-id 123,124`), every bot you own (`--all`), or the ones whose name or username matches (`--filter`). Add `--except` to leave some out, `--include-managed` to add bots you're an admin of, and `--dry-run` to preview:
+
+```bash
+inline bots settings
+inline bots settings --all --output-mode friendly
+inline bots settings --bot-user-id 123,124 --output-mode detailed
+inline bots access close --all
+inline bots access grant --all --user-id 456
+inline bots settings --filter hermes --output-mode friendly --dry-run
+```
+
+A bulk change skips bots that are already set, reports each bot, and exits with status 1 if any of them failed. Add `--json` for a result an agent can read. `inline bots access close` leaves people and spaces you shared a bot with on its access list; **Shared With** shows **Only you** once that list is empty too.
+
 Access can name one person (`--user-id`), everyone in a space you're in (`--space-id`), or everyone in a user group (`--group-id`). Bots owned by people with access can use and steer your bot too, but never approve or change its settings.
 
 ## Who Can Message a Bot
