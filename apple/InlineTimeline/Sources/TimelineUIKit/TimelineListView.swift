@@ -26,6 +26,9 @@ public struct TimelineRows<ID: Hashable & Sendable> {
   /// Where a placed row is on screen, for what in it follows the screen rather than the row. Called
   /// for every placed row when that changes, and when a fling starts or stops. Nil costs nothing.
   public var screen: ((ID, UIView, TimelineRowScreen) -> Void)?
+  /// Where a deleted row shrinks to, in its own coordinates: a message's bubble centre. Nil (or a
+  /// nil answer) fades the row without shrinking it.
+  public var removalFocus: ((ID, UIView) -> CGPoint?)?
 
   public init(
     height: @escaping (ID, CGFloat) -> CGFloat,
@@ -35,7 +38,8 @@ public struct TimelineRows<ID: Hashable & Sendable> {
     pin: @escaping (ID, UIView) -> TimelinePin<ID>? = { _, _ in nil },
     spanTop: @escaping (ID, UIView) -> CGFloat = { _, _ in 0 },
     spanEnd: ((ID) -> ID?)? = nil,
-    screen: ((ID, UIView, TimelineRowScreen) -> Void)? = nil
+    screen: ((ID, UIView, TimelineRowScreen) -> Void)? = nil,
+    removalFocus: ((ID, UIView) -> CGPoint?)? = nil
   ) {
     self.height = height
     self.make = make
@@ -45,6 +49,7 @@ public struct TimelineRows<ID: Hashable & Sendable> {
     self.spanTop = spanTop
     self.spanEnd = spanEnd
     self.screen = screen
+    self.removalFocus = removalFocus
   }
 }
 
@@ -593,17 +598,20 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         // caller (or a system transition running a layout pass) happens to be in.
         UIView.performWithoutAnimation { slot.row.layoutIfNeeded() }
         if animates, carousel == nil {
-          // A row placed for the first time travels with its neighbours; one new to the data fades in,
-          // unless it takes over a pin shown on screen: it slides in, and the pin travels from where it was.
-          let offset = change.offsets[placement.id] ?? 0
-          slot.view.layer.addTrack(timing, keyPath: "position.y", from: offset + originDelta)
-          let arriving = change.inserted.contains(placement.id)
-            ? rows.pin(placement.id, slot.row).flatMap { pinsShown[$0.spanStart] } : nil
-          if let arriving {
-            avatarArrivals[placement.id] = (from: arriving, offset: offset)
-          } else if change.inserted.contains(placement.id) {
-            slot.view.layer.addTrack(timing, keyPath: "opacity", from: -1)
+          // A row placed for the first time travels with its neighbours. One new to the data also rises
+          // from 1.6 of its height below, as Telegram brings in a new message, and fades in, unless it takes
+          // over a pin shown on screen: then the pin travels from where it was and the row stays opaque.
+          var offset = change.offsets[placement.id] ?? 0
+          if change.inserted.contains(placement.id) {
+            offset += placement.height * Self.insertionRise
+            if let arriving = rows.pin(placement.id, slot.row).flatMap({ pinsShown[$0.spanStart] }) {
+              avatarArrivals[placement.id] = (from: arriving, offset: offset)
+            } else {
+              Self.fade(slot.view.layer, from: 0, to: 1, duration: Self.insertionFade)
+            }
           }
+          let travel = offset + originDelta
+          slot.view.layer.addTrack(timing, keyPath: "position.y", from: travel)
         }
         if tracksScreen { screenFrom[placement.id] = carousel ?? (change.offsets[placement.id] ?? 0) }
       }
@@ -643,9 +651,9 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     for (id, slot) in slots where !placed.contains(id) {
       slots[id] = nil
       if animates, carousel == nil, leaving.contains(id) {
-        // A deleted row fades where it was while its neighbours close the gap.
-        slot.view.layer.opacity = 0
-        slot.view.layer.addTrack(timing, keyPath: "opacity", from: 1)
+        // A deleted row fades and shrinks into its bubble's centre where it was, while its neighbours
+        // close the gap, as Telegram removes a message.
+        removeAnimated(id, slot)
         content.sendSubviewToBack(slot.view)
         let duration = timing.duration
         Task { @MainActor [weak self] in
@@ -671,6 +679,46 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
     if !change.demands.isEmpty { onDemand?(change.demands) }
     onLayout?(layout)
+  }
+
+  /// Telegram's insertion: the new row starts this many of its heights below its place.
+  private static var insertionRise: CGFloat { 1.6 }
+  private static var insertionFade: CFTimeInterval { 0.2 }
+  /// Telegram's removal: alpha and scale to 0.1 in 0.15 s.
+  private static var removalDuration: CFTimeInterval { 0.15 }
+  private static var removalScale: CGFloat { 0.1 }
+
+  private static func fade(_ layer: CALayer, from: Float, to: Float, duration: CFTimeInterval) {
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = from
+    fade.toValue = to
+    fade.duration = duration
+    fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    fade.fillMode = .backwards
+    layer.add(fade, forKey: "timeline.fade")
+  }
+
+  /// The slot's layer is anchored at its top-left: scaling about that corner and translating by
+  /// what the scale takes off keeps `focus` still for the whole removal.
+  private func removeAnimated(_ id: ID, _ slot: Slot) {
+    let layer = slot.view.layer
+    layer.opacity = 0
+    Self.fade(layer, from: 1, to: 0, duration: Self.removalDuration)
+    guard let focus = rows.removalFocus?(id, slot.row), focus.x.isFinite, focus.y.isFinite else { return }
+    let shrink = 1 - Self.removalScale
+    let timing = CAMediaTimingFunction(name: .easeInEaseOut)
+    for (keyPath, value) in [
+      ("transform.scale", NSNumber(value: Double(Self.removalScale))),
+      ("transform.translation", NSValue(cgSize: CGSize(width: focus.x * shrink, height: focus.y * shrink))),
+    ] as [(String, Any)] {
+      let animation = CABasicAnimation(keyPath: keyPath)
+      animation.toValue = value
+      animation.duration = Self.removalDuration
+      animation.timingFunction = timing
+      animation.fillMode = .forwards
+      animation.isRemovedOnCompletion = false
+      layer.add(animation, forKey: "timeline.remove.\(keyPath)")
+    }
   }
 
   // MARK: - Screen
