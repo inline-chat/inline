@@ -519,6 +519,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     ? await addMentionedParticipants(chat, getMentionedUserIds(entities), context)
     : undefined
 
+  // A bot's silent send is routine status, such as agent and bridge progress:
+  // no unread, no activity and no notifications. A person's silent send still
+  // counts as unread and only skips the push.
+  const countsAsUnread = !(input.sendMode === MessageSendMode.MODE_SILENT && (await senderIsBot()))
+
   let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
   let agentContextUpdate: UpdateSeqAndDate | undefined
@@ -553,6 +558,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           voiceId: dbFullVoice?.id ?? null,
           isSticker: input.isSticker ?? false,
           hasLink: hasLink,
+          countsAsUnread,
           entitiesEncrypted: encryptedEntities?.encrypted ?? null,
           entitiesIv: encryptedEntities?.iv ?? null,
           entitiesTag: encryptedEntities?.authTag ?? null,
