@@ -4328,8 +4328,9 @@ extension GlassComposeAppKit {
     draftEntitySaveTask?.cancel()
     draftEntitySaveTask = nil
 
+    // Drafts2 skips a draft that did not change, and its writer drains on its own queue (the
+    // app flushes it at quit), so leaving a chat no longer waits on a database write.
     saveDraft()
-    drafts2.flushBlocking()
   }
 
   /// Triggers save with a 3s delay which cancels previous Task thus creating a basic debounced
