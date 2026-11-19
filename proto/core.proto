@@ -4077,6 +4077,10 @@ message PrivacySettings {
   // Who can see when a Focus silences the user's notifications. Absent means
   // nobody (the default).
   optional PrivacyRule focus_status = 4;
+
+  // If false, voice messages this user sends are not sent to a transcription
+  // service. Absent means true (the default).
+  optional bool transcribe_voice_messages = 5;
 }
 
 // Who can see one piece of the user's information. The user always sees their own.

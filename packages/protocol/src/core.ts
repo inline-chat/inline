@@ -10966,6 +10966,13 @@ export interface PrivacySettings {
      * @generated from protobuf field: optional PrivacyRule focus_status = 4;
      */
     focusStatus?: PrivacyRule;
+    /**
+     * If false, voice messages this user sends are not sent to a transcription
+     * service. Absent means true (the default).
+     *
+     * @generated from protobuf field: optional bool transcribe_voice_messages = 5;
+     */
+    transcribeVoiceMessages?: boolean;
 }
 /**
  * Who can see one piece of the user's information. The user always sees their own.
@@ -46230,7 +46237,8 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
             { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule },
-            { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule }
+            { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule },
+            { no: 5, name: "transcribe_voice_messages", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<PrivacySettings>): PrivacySettings {
@@ -46256,6 +46264,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
                 case /* optional PrivacyRule focus_status */ 4:
                     message.focusStatus = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.focusStatus);
                     break;
+                case /* optional bool transcribe_voice_messages */ 5:
+                    message.transcribeVoiceMessages = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -46280,6 +46291,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
         /* optional PrivacyRule focus_status = 4; */
         if (message.focusStatus)
             PrivacyRule.internalBinaryWrite(message.focusStatus, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool transcribe_voice_messages = 5; */
+        if (message.transcribeVoiceMessages !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.transcribeVoiceMessages);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
