@@ -54,6 +54,8 @@ final class ChatRouteToolbarTitleModel {
   struct ParentThread: Equatable {
     let peer: Peer
     let title: String
+    /// The parent's message this reply thread hangs off; opening the parent lands on it.
+    let anchorMessageId: Int64?
   }
 
   struct SpaceLink: Equatable {
@@ -484,7 +486,7 @@ final class ChatRouteToolbarTitleModel {
     let parent = ObjectCache.shared.getCachedChat(id: parentChatId) ?? loadedParentChat
     let peer = parentPeer(for: parent, parentChatId: parentChatId)
     let title = parent.map(parentTitle) ?? "Thread"
-    return ParentThread(peer: peer, title: title)
+    return ParentThread(peer: peer, title: title, anchorMessageId: chat.parentMessageId)
   }
 
   private func resolvedBreadcrumb() -> Breadcrumb? {

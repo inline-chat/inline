@@ -345,7 +345,7 @@ struct ChatRouteTitleBar: View {
   private func openParentThread(_ parentThread: ChatRouteToolbarTitleModel.ParentThread) {
     guard !suppressClick else { return }
     if let dependencies {
-      dependencies.requestOpenChat(peer: parentThread.peer)
+      dependencies.requestOpenChat(peer: parentThread.peer, targetMessageId: parentThread.anchorMessageId)
     } else {
       nav.open(.chat(peer: parentThread.peer))
     }
