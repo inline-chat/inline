@@ -1285,6 +1285,9 @@ public final class FileDownloader: NSObject, Sendable {
       if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
       return
     }
+    #if os(macOS)
+    if case let .success(url) = result { FileQuarantine.markDownloaded(url) }
+    #endif
     let completion = downloadCompletions.removeValue(forKey: id)
     let joined = joinedCompletions.removeValue(forKey: token) ?? []
     activeTasks[id] = nil
