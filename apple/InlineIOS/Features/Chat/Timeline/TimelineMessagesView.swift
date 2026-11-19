@@ -164,7 +164,21 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     /// A message newer than the synced history: the list stays at the live end until an update
     /// brings it.
     var awaitsArrival = false
+    /// The landed message flashes; a return to where a reply jump started lands quietly.
+    var highlights = true
   }
+
+  /// A message the reader jumped from to the one its reply quotes. As Telegram keeps them, the scroll
+  /// button goes back to the last of these before it goes to the newest messages, and one is dropped
+  /// once the reader scrolls back down to it.
+  private struct ReplyReturn {
+    var messageId: Int64
+    /// The message has been below the screen since the jump, so coming back down to it can be told
+    /// apart from the jump's own first frames.
+    var hasLeftScreen = false
+  }
+
+  private var replyReturns: [ReplyReturn] = []
 
   private struct Plan {
     var revision: UInt64
@@ -1430,7 +1444,23 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     (list.view(for: id) as? TimelineRowView)?.isSendTargetHidden = false
   }
 
+  /// The scroll button: back to where the last reply jump started, then to the newest messages.
   func scrollToBottom() {
+    let onScreen = Set(visibleMessages().map(\.message.messageId))
+    while let last = replyReturns.popLast() {
+      // A jump that left its reply on screen has nothing to go back to.
+      guard !onScreen.contains(last.messageId) else { continue }
+      #if DEBUG
+      debugLog("TIMELINE_DEBUG reply return \(last.messageId)")
+      #endif
+      focus(last.messageId, requiresExactMessage: false, highlights: false)
+      return
+    }
+    scrollToLatest()
+  }
+
+  private func scrollToLatest() {
+    replyReturns.removeAll()
     endUnreadFetch(placesLine: false)
     ChatReadingPlaceStore.shared.clear(for: peer)
     if viewModel.historyCoverage.isAtCertifiedLiveEnd {
@@ -1497,6 +1527,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   func scrollToMessageWhenAvailable(_ messageID: Int64, requiresExactMessage: Bool) {
+    focus(messageID, requiresExactMessage: requiresExactMessage, highlights: true)
+  }
+
+  private func focus(_ messageID: Int64, requiresExactMessage: Bool, highlights: Bool) {
     // An explicit focus wins over the unread line still being fetched and a return to latest.
     endUnreadFetch(placesLine: false)
     cancelPendingMessageFocus()
@@ -1509,7 +1543,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       ToastManager.shared.showToast("Message unavailable", type: .error, systemImage: "exclamationmark.triangle.fill")
       return
     }
-    pendingFocus = PendingFocus(messageId: messageID, requiresExact: requiresExactMessage, animated: hasOpened)
+    pendingFocus = PendingFocus(
+      messageId: messageID, requiresExact: requiresExactMessage, animated: hasOpened, highlights: highlights
+    )
     // A row already loaded: there now, or where the chat opens (the first layout places it).
     if viewModel.historyCoverage.isCertifiedMessage(messageID) {
       if hasOpened, let snapshot, let focus = resolveFocus(in: snapshot, exactOnly: true) {
@@ -1616,11 +1652,14 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func focusResolved(_ focus: (row: ChatRowID, messageId: Int64, exact: Bool), opening: Bool) {
     let requested = pendingFocus?.messageId
     let animated = pendingFocus?.animated ?? true
+    let highlights = pendingFocus?.highlights ?? true
     pendingFocus = nil
     jumpTask = nil
     #if DEBUG
     debugLog("TIMELINE_DEBUG focus requested=\(requested ?? -1) landed=\(focus.messageId) exact=\(focus.exact) opening=\(opening)")
     #endif
+    // Back where a reply jump started: no flash, and a reply deleted since lands on its neighbour quietly.
+    guard highlights else { return }
     guard focus.exact else {
       if let requested, !(focus.messageId < requested && focus.messageId == highestPositiveMessageId) {
         ToastManager.shared.showToast("Message unavailable. Showing nearby history.", type: .info)
@@ -1659,7 +1698,22 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   @objc private func scrollToRepliedMessage(_ note: Notification) {
     guard let messageId = note.userInfo?["repliedToMessageId"] as? Int64,
           let noteChatId = note.userInfo?["chatId"] as? Int64, noteChatId == chatId, window != nil else { return }
+    // A reply tapped in the list: the scroll button comes back to it (an older message is what replies quote).
+    if let source = note.userInfo?["sourceMessageId"] as? Int64, source > messageId {
+      replyReturns.removeAll { $0.messageId == source }
+      replyReturns.append(ReplyReturn(messageId: source))
+      if replyReturns.count > 32 { replyReturns.removeFirst() }
+    }
     scrollToMessageWhenAvailable(messageId, requiresExactMessage: false)
+  }
+
+  /// Drops the reply returns the reader has scrolled back down to.
+  private func updateReplyReturns() {
+    guard !replyReturns.isEmpty, let newest = messageIdOnScreen() else { return }
+    for index in replyReturns.indices where newest < replyReturns[index].messageId {
+      replyReturns[index].hasLeftScreen = true
+    }
+    replyReturns.removeAll { $0.hasLeftScreen && newest >= $0.messageId }
   }
 
   // MARK: - Status bar, VoiceOver
@@ -1671,7 +1725,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     debugLog("TIMELINE_DEBUG status bar tap")
     #endif
     guard hasOpened, !menu.isActive else { return }
-    scrollToBottom()
+    scrollToLatest()
   }
 
   /// What VoiceOver says after a page: when the messages on screen were sent, and whether the page
@@ -1760,6 +1814,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func layoutChanged() {
     reportPlace()
     prefetchMedia()
+    updateReplyReturns()
     updateAffordance(force: false)
     updateDatePill()
     // While the list moves, read marking runs a few times a second at most.

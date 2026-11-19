@@ -174,7 +174,9 @@ enum MessageViewActions {
       NotificationCenter.default.post(
         name: Notification.Name("ScrollToRepliedMessage"),
         object: nil,
-        userInfo: ["repliedToMessageId": forwardedMessageId, "chatId": message.chatId]
+        userInfo: [
+          "repliedToMessageId": forwardedMessageId, "chatId": message.chatId, "sourceMessageId": message.messageId,
+        ]
       )
       return
     }
@@ -279,13 +281,14 @@ enum MessageViewActions {
     }
   }
 
-  /// Scrolls to the message a reply quotes.
+  /// Scrolls to the message a reply quotes. The reply goes along (`sourceMessageId`): the timeline's scroll
+  /// button comes back to it.
   static func openRepliedMessage(of message: Message) {
     guard let repliedId = message.repliedToMessageId else { return }
     NotificationCenter.default.post(
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil,
-      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
+      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId, "sourceMessageId": message.messageId]
     )
   }
 
