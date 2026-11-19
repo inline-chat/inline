@@ -1,4 +1,5 @@
 import InlineMessageLayout
+import TextProcessing
 import UIKit
 
 /// Inline's own message context menu, after Telegram iOS's context controller.
@@ -31,9 +32,8 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   }
 
   struct SelectableText {
-    var layout: TextLayout
-    /// The text block in the preview's coordinates.
-    var frame: CGRect
+    /// The message's text blocks in the preview's coordinates, and how they copy.
+    var text: MessageSelectableText
     var colors: MessageTextSelectionView.Colors
   }
 
@@ -43,7 +43,8 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     var menu: (_ hasTextSelection: Bool) -> UIMenu
     /// A view above the bubble, such as the reaction bar, sized by its own constraints.
     var accessory: UIView?
-    /// Copies the selected text; the default puts it on the pasteboard as plain text.
+    /// Copies the selected text; the default writes it to the pasteboard with its structure,
+    /// as plain text, Markdown, HTML and RTF.
     var copySelection: ((String) -> Void)?
     /// Replies quoting the selected text; without it the selection offers no Quote.
     var quoteSelection: ((String) -> Void)?
@@ -168,7 +169,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     source.preview.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     previewHost.addSubview(source.preview)
     if let text = source.selectableText {
-      let view = MessageTextSelectionView(layout: text.layout, textFrame: text.frame, colors: text.colors)
+      let view = MessageTextSelectionView(text: text.text.surfaces, colors: text.colors)
       view.frame = previewHost.bounds
       view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
       view.onSelectionChange = { [weak self] _ in self?.selectionChanged() }
@@ -536,20 +537,26 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   }
 
   private func selectionActions() -> [UIAction] {
-    guard let selectionView, selectionView.hasSelection else { return [] }
+    guard let selectionView, selectionView.hasSelection, let text = source.selectableText?.text else { return [] }
+    // The selection as blocks: headings, list items with their markers, code and tables.
+    let document = { [weak selectionView] () -> MessageClipboardDocument? in
+      guard let range = selectionView?.selectedRange else { return nil }
+      let document = text.clipboardDocument(for: range)
+      return document.isEmpty ? nil : document
+    }
     var actions = [
-      UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { [weak self, weak selectionView] _ in
-        guard let text = selectionView?.selectedText else { return }
+      UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { [weak self] _ in
+        guard let document = document() else { return }
         if let copy = self?.content.copySelection {
-          copy(text)
+          copy(document.plainText)
         } else {
-          UIPasteboard.general.string = text
+          MessageClipboard.write(document)
         }
       },
     ]
     if let quote = content.quoteSelection {
-      actions.append(UIAction(title: "Quote", image: UIImage(systemName: "text.quote")) { [weak selectionView] _ in
-        guard let text = selectionView?.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines),
+      actions.append(UIAction(title: "Quote", image: UIImage(systemName: "text.quote")) { _ in
+        guard let text = document()?.plainText.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty else { return }
         quote(text)
       })
@@ -570,6 +577,11 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   /// Drives the menu from device tests.
   var actionsViewForTesting: MessageContextMenuActionsView { actionsView }
   var selectionViewForTesting: MessageTextSelectionView? { selectionView }
+  /// What Copy would write for the current selection.
+  var selectedDocumentForTesting: MessageClipboardDocument? {
+    guard let range = selectionView?.selectedRange, let text = source.selectableText?.text else { return nil }
+    return text.clipboardDocument(for: range)
+  }
   var scrollViewForTesting: UIScrollView { scrollView }
   var accessoryHostForTesting: UIView { accessoryHost }
   var previewHostForTesting: UIView { previewHost }

@@ -159,6 +159,25 @@ final class MessageRichView: UIView {
     views.first { $0.key.path == path }?.value
   }
 
+  /// Sideways offsets of the nodes that scroll (code, tables, albums, diffs), by path.
+  func scrollOffsets() -> [RichPath: CGFloat] {
+    var offsets: [RichPath: CGFloat] = [:]
+    for (key, view) in views {
+      guard let view = view as? RichScrollResetting else { continue }
+      offsets[key.path] = view.horizontalScroll.contentOffset.x
+    }
+    return offsets
+  }
+
+  /// Scrolls nodes to `offsets` instead of their start, so a copy of a row shows what the row
+  /// does. Call after `apply`.
+  func restoreScrollOffsets(_ offsets: [RichPath: CGFloat]) {
+    for (key, view) in views {
+      guard let view = view as? RichScrollResetting, let x = offsets[key.path] else { continue }
+      view.restoreScrollPosition(x)
+    }
+  }
+
   /// Text under `point`, for taps on links and mentions: the node's attributed string and the
   /// character index in it. Covers table cells, which scroll inside their table.
   func textHit(at point: CGPoint) -> (NSAttributedString, Int)? {
@@ -335,6 +354,8 @@ final class MessageRichView: UIView {
 /// Node views that scroll sideways and start over for new content.
 protocol RichScrollResetting: UIView {
   var needsScrollReset: Bool { get set }
+  /// The view's sideways scroller.
+  var horizontalScroll: UIScrollView { get }
 }
 
 extension RichScrollResetting {
@@ -342,11 +363,18 @@ extension RichScrollResetting {
     needsScrollReset = true
     setNeedsLayout()
   }
+
+  /// Shows the content scrolled to `x` instead of its start.
+  func restoreScrollPosition(_ x: CGFloat) {
+    needsScrollReset = false
+    UIView.performWithoutAnimation { horizontalScroll.contentOffset.x = x }
+  }
 }
 
 /// A code block: a filled box with an optional language header and line numbers, and a body
 /// that scrolls sideways instead of wrapping.
 private final class RichCodeView: UIView, RichScrollResetting {
+  var horizontalScroll: UIScrollView { scroll }
   private let header = MessageTextView()
   private let scroll = UIScrollView()
   private let numbers = MessageTextView()
@@ -540,6 +568,7 @@ private final class RichQuoteView: UIView {
 
 /// A table that scrolls sideways when its columns don't fit; the header row is filled.
 private final class RichTableView: UIView, RichScrollResetting {
+  var horizontalScroll: UIScrollView { scroll }
   private let scroll = UIScrollView()
   private let content = UIView()
   private var cellViews: [MessageTextView] = []
@@ -706,6 +735,7 @@ private final class RichImageView: UIView {
 }
 
 private final class RichAlbumView: UIView, RichScrollResetting {
+  var horizontalScroll: UIScrollView { scroll }
   private let scroll = UIScrollView()
   private var items: [RichImageView] = []
   private var frames: [CGRect] = []

@@ -119,7 +119,7 @@ final class MessageMenuActions: NSObject {
 
     if message.hasText, includesTextCopy {
       let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
-        guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled, let text = fullMessage.displayText else {
+        guard let text = fullMessage.displayText else {
           UIPasteboard.general.string = message.text
           return
         }

@@ -9,9 +9,6 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
-  @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
-  private var richMessageCopyEditingEnabled = false
-
   @AppStorage(NextMessageViewFeature.preferenceKey)
   private var nextMessageViewEnabled = true
 
@@ -46,17 +43,6 @@ struct ExperimentalView: View {
       }
 
       Section {
-        SettingsItem(icon: "textformat", iconColor: .purple, title: "Rich Copy & Markdown Editing") {
-          Toggle("Rich Copy & Markdown Editing", isOn: $richMessageCopyEditingEnabled)
-            .labelsHidden()
-        }
-      } header: {
-        Text("Messages")
-      } footer: {
-        Text("Preserve formatting when copying messages. Show Markdown syntax when pasting formatted text or editing a message.")
-      }
-
-      Section {
         SettingsItem(
           icon: "contextualmenu.and.cursorarrow",
           iconColor: .indigo,
@@ -68,6 +54,8 @@ struct ExperimentalView: View {
               if enabled { MessageContextMenuFeature.resetCrashGuard() }
             }
         }
+      } header: {
+        Text("Messages")
       } footer: {
         Text("Holding a message opens Inline's menu, where you can select and quote part of the text. Turn it off to use the system menu. Reopen the chat after changing it.")
       }

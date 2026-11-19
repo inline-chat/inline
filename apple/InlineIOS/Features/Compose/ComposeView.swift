@@ -1728,7 +1728,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
       {
-        // The experiment exposes Markdown syntax; otherwise keep rendered formatting.
+        // Edit as Markdown source; sending parses the markers back into entities.
         if let text = message.message.text {
           let configuration = ProcessEntities.Configuration(
             font: .systemFont(ofSize: 17),
@@ -1738,18 +1738,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             renderPhoneNumbers: false
           )
 
-          let attributedText = ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageMarkdown.editableText(
+          let attributedText = MessageMarkdown.editableText(
             text: text,
             entities: message.message.entities,
             configuration: configuration
-          ) : MessageMarkdown.withQuoteSyntax(
-            ProcessEntities.toAttributedString(
-              text: text,
-              entities: message.message.entities,
-              configuration: configuration
-            ),
-            entities: message.message.entities,
-            attributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
           )
 
           textView.attributedText = attributedText

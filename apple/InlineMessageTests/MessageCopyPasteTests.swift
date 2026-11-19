@@ -8,10 +8,8 @@ import UIKit
 @Suite("iOS formatted message copy and paste", .serialized)
 @MainActor
 struct MessageCopyPasteTests {
-  @Test("Selected message copy adds Markdown only when opted in", arguments: [nil, false, true] as [Bool?])
-  func selectedMessageCopy(enabled: Bool?) throws {
-    let restore = setExperiment(enabled)
-    defer { restore() }
+  @Test("Selected message copy adds Markdown and RTF")
+  func selectedMessageCopy() throws {
     let previousItems = UIPasteboard.general.items
     defer { UIPasteboard.general.items = previousItems }
 
@@ -27,8 +25,7 @@ struct MessageCopyPasteTests {
     view.copy(nil)
 
     #expect(UIPasteboard.general.string == "café bold")
-    #expect(UIPasteboard.general.contains(pasteboardTypes: ["net.daringfireball.markdown"]) == (enabled == true))
-    guard enabled == true else { return }
+    #expect(UIPasteboard.general.contains(pasteboardTypes: ["net.daringfireball.markdown"]))
     #expect(MessageTextPasteboard.markdown() == "**café bold**")
     let rtf = try #require(UIPasteboard.general.data(forPasteboardType: "public.rtf"))
     let rich = try NSAttributedString(data: rtf, options: [.documentType: NSAttributedString.DocumentType.rtf],
@@ -65,10 +62,8 @@ struct MessageCopyPasteTests {
     #expect(combined.fontDescriptor.symbolicTraits.contains([.traitBold, .traitItalic]))
   }
 
-  @Test("Composer uses Markdown only when opted in", arguments: [nil, false, true] as [Bool?])
-  func composerPaste(enabled: Bool?) throws {
-    let restore = setExperiment(enabled)
-    defer { restore() }
+  @Test("Composer pastes formatted text as Markdown")
+  func composerPaste() throws {
     let previousItems = UIPasteboard.general.items
     defer { UIPasteboard.general.items = previousItems }
     copyBoldText()
@@ -83,20 +78,18 @@ struct MessageCopyPasteTests {
     view.selectedRange = NSRange(location: 7, length: 3)
     view.paste(nil)
 
-    #expect(view.text == (enabled == true ? "before **bold** after" : "before bold after"))
-    #expect(view.selectedRange == NSRange(location: enabled == true ? 15 : 11, length: 0))
+    #expect(view.text == "before **bold** after")
+    #expect(view.selectedRange == NSRange(location: 15, length: 0))
     #expect(observer.changes > 0)
     let font = try #require(view.textStorage.attribute(.font, at: 9, effectiveRange: nil) as? UIFont)
     #expect(!font.fontDescriptor.symbolicTraits.contains(.traitBold))
     let sent = ProcessEntities.fromAttributedString(view.attributedText)
     #expect(sent.text == "before bold after")
-    #expect(sent.entities.entities.contains { $0.type == .bold && $0.offset == 7 && $0.length == 4 } == (enabled == true))
+    #expect(sent.entities.entities.contains { $0.type == .bold && $0.offset == 7 && $0.length == 4 })
   }
 
   @Test("Rich text without plain text is available to both composer paste menus")
   func richOnlyPaste() throws {
-    let restore = setExperiment(true)
-    defer { restore() }
     let previousItems = UIPasteboard.general.items
     defer { UIPasteboard.general.items = previousItems }
     let source = NSAttributedString(string: "bold", attributes: [.font: UIFont.boldSystemFont(ofSize: 17)])
@@ -116,10 +109,8 @@ struct MessageCopyPasteTests {
     #expect(standalone.selectedRange == NSRange(location: 15, length: 0))
   }
 
-  @Test("Standalone composer respects the experiment", arguments: [nil, false, true] as [Bool?])
-  func standalonePaste(enabled: Bool?) {
-    let restore = setExperiment(enabled)
-    defer { restore() }
+  @Test("Standalone composer pastes formatted text as Markdown")
+  func standalonePaste() {
     let previousItems = UIPasteboard.general.items
     defer { UIPasteboard.general.items = previousItems }
     copyBoldText()
@@ -128,17 +119,7 @@ struct MessageCopyPasteTests {
     view.text = "before old after"
     view.selectedRange = NSRange(location: 7, length: 3)
     view.paste(nil)
-    #expect(view.text == (enabled == true ? "before **bold** after" : "before bold after"))
-  }
-
-  private func setExperiment(_ enabled: Bool?) -> () -> Void {
-    let defaults = UserDefaults.standard
-    let key = ExperimentalFeatureFlags.richMessageCopyEditingKey
-    let previous = defaults.object(forKey: key)
-    if let enabled { defaults.set(enabled, forKey: key) } else { defaults.removeObject(forKey: key) }
-    return {
-      if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) }
-    }
+    #expect(view.text == "before **bold** after")
   }
 
   private func copyBoldText() {

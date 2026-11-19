@@ -63,7 +63,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// line or node asks once.
   private var requestedRevealLine: Int?
   /// Rich bodies: lists, code, tables and the rest. Created on first use.
-  private var richView: MessageRichView?
+  private(set) var richView: MessageRichView?
 
   override init(frame: CGRect) {
     super.init(frame: frame)

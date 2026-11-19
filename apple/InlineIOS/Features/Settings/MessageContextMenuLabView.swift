@@ -1,6 +1,16 @@
 #if DEBUG || DEBUG_BUILD
 import InlineKit
 import InlineMessageLayout
+import struct InlineProtocol.Block
+import struct InlineProtocol.BlockCode
+import struct InlineProtocol.BlockContent
+import struct InlineProtocol.BlockHeading
+import struct InlineProtocol.BlockList
+import struct InlineProtocol.BlockListItem
+import struct InlineProtocol.BlockQuote
+import struct InlineProtocol.BlockTable
+import struct InlineProtocol.BlockTableRow
+import struct InlineProtocol.BlockText
 import SwiftUI
 import UIKit
 
@@ -437,6 +447,13 @@ final class MessageContextMenuLabController: UIViewController, UIContextMenuInte
 
   var catalogCountForTesting: Int { rows.count }
 
+  /// Scrolls the lab so row `index` shows, for opening its menu where a person would.
+  func scrollToRowForTesting(_ index: Int) {
+    guard rows.indices.contains(index) else { return }
+    scrollView.layoutIfNeeded()
+    scrollView.scrollRectToVisible(rows[index].view.frame, animated: false)
+  }
+
   func focusKeyboardForTesting() -> Bool {
     keyboardField.becomeFirstResponder()
   }
@@ -473,8 +490,71 @@ final class MessageContextMenuLabController: UIViewController, UIContextMenuInte
       Row(message: message(5, "سلام! این پیام فارسی است و باید از راست به چپ نمایش داده شود.", from: ava)),
       Row(message: message(6, "Long-press a word in the preview to select it, then drag the handles.", from: me, out: true)),
       Row(message: message(7, "😀", from: me, out: true)),
+      Row(message: richMessage(9, from: ava)),
       Row(message: message(8, "Near the bottom: this moves up so its menu fits.", from: ava)),
     ]
+  }
+
+  /// An agent answer with every selectable block: a heading, paragraphs, a bullet and a numbered
+  /// list, a quote, code and a table, taller than the screen with its menu.
+  private static func richMessage(_ id: Int64, from user: User) -> FullMessage {
+    var text = ""
+    func add(_ string: String) -> BlockText {
+      if !text.isEmpty { text += "\n" }
+      let start = (text as NSString).length
+      text += string
+      return .with {
+        $0.offset = Int64(start)
+        $0.length = Int64((string as NSString).length)
+      }
+    }
+    func paragraph(_ string: String) -> Block { .with { $0.paragraph = add(string) } }
+    var blocks: [Block] = []
+    blocks.append(.with { $0.heading = .with { $0.text = add("Selection in rich messages"); $0.level = 2 } })
+    blocks.append(paragraph("Long-press any block to select a word, then drag across paragraphs, lists, code and tables."))
+    blocks.append(.with {
+      $0.list = .with { list in
+        list.kind = .unordered
+        list.items = [
+          "Handles move either end, and the loupe follows them.",
+          "Near the top or bottom of the screen the menu scrolls.",
+          "Copy keeps markers, code fences and table cells.",
+        ].map { item in .with { $0.children = [paragraph(item)] } }
+      }
+    })
+    blocks.append(.with {
+      $0.list = .with { list in
+        list.kind = .ordered
+        list.items = ["Select a word", "Drag to extend", "Copy or quote"].map { item in .with { $0.children = [paragraph(item)] } }
+      }
+    })
+    blocks.append(.with {
+      $0.quote = .with { $0.children = [paragraph("A quoted line keeps its rail; selecting it copies the words.")] }
+    })
+    blocks.append(.with {
+      $0.code = .with {
+        $0.text = add("""
+        let range = surfaces.selectionRange(from: anchor, to: focus) // one flat index across every block
+        setSelection(range)
+        """)
+        $0.language = "swift"
+      }
+    })
+    let header = ["Block", "Selectable", "Copies as"].map(add)
+    let rows = [
+      ["Paragraph", "Yes", "Text"],
+      ["List item", "Yes", "• item"],
+      ["Table cell", "Yes", "Tab separated"],
+    ].map { $0.map(add) }
+    blocks.append(.with {
+      $0.table = .with { table in
+        table.rows = ([header] + rows).map { cells in .with { $0.cells = cells } }
+      }
+    })
+    blocks.append(paragraph("Tap outside the selection to clear it, or pick Select All from the menu."))
+    var full = message(id, text, from: user)
+    full.message.blockContentPayload = BlockContentPayload(.with { $0.blocks = blocks })
+    return full
   }
 
   private static func message(_ id: Int64, _ text: String, from user: User, out: Bool = false) -> FullMessage {

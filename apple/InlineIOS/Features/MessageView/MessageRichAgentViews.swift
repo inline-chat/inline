@@ -653,6 +653,7 @@ private final class RichBarView: UIView {
 /// One file's diff: the path and counts, and the unified diff with added and removed lines
 /// tinted, scrolling sideways.
 final class RichDiffView: UIView, RichScrollResetting {
+  var horizontalScroll: UIScrollView { scroll }
   private let icon = UIImageView()
   private let pathLabel = UILabel()
   private let counts = MessageTextView()

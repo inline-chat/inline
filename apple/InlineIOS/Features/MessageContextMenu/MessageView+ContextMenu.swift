@@ -28,6 +28,10 @@ extension MessageView {
     copy.spaceId = spaceId
     copy.isUserInteractionEnabled = false
     copy.apply(content, layout: layout, motion: .immediate)
+    // A fresh view starts code and tables at their beginning; show them where this row has them.
+    if let richView, let copyRich = copy.richView {
+      copyRich.restoreScrollOffsets(richView.scrollOffsets())
+    }
     // The menu lifts the bubble; an avatar beside it would show at the edge of the tail.
     copy.avatarView?.isHidden = true
     copy.untransformedFrame = CGRect(
@@ -54,20 +58,32 @@ extension MessageView {
     blockViews.values.lazy.compactMap { $0.contentView as? DocumentView }.first?.openFile()
   }
 
-  /// The body text for selection in the preview, framed relative to `extent`. Rich bodies and
-  /// streaming text aren't selectable yet.
+  /// The body text for selection in the preview, framed relative to `extent`: a plain body or
+  /// a rich one's paragraphs, lists, quotes, code, tables and card text. Streaming text isn't
+  /// selectable yet.
   func contextMenuSelectableText(
     extent: CGRect,
     colors: MessageTextSelectionView.Colors
   ) -> MessageContextMenuController.SelectableText? {
-    guard let layout, layout.rich == nil, layout.revealedLength == nil, layout.text != nil,
-          textView.layout.length > 0, !textView.isHidden
-    else { return nil }
-    return MessageContextMenuController.SelectableText(
-      layout: textView.layout,
-      frame: textView.textFrame.offsetBy(dx: -extent.minX, dy: -extent.minY),
-      colors: colors
-    )
+    guard let content, let layout, layout.revealedLength == nil else { return nil }
+    if let rich = layout.rich {
+      guard let richView, !richView.isHidden, let frame = layout.frame(.text),
+            !MessageStreamPacer.shared.isStreaming(content.message.id),
+            rich.nodes.allSatisfy({ $0.revealedLength == nil })
+      else { return nil }
+      // The rich view sits at the text frame, in the bubble's coordinates.
+      let origin = CGPoint(
+        x: frame.minX - layout.bubble.frame.minX - extent.minX,
+        y: frame.minY - layout.bubble.frame.minY - extent.minY
+      )
+      guard let text = MessageSelectableText.rich(rich, origin: origin, scrollOffsets: richView.scrollOffsets()) else {
+        return nil
+      }
+      return MessageContextMenuController.SelectableText(text: text, colors: colors)
+    }
+    guard layout.text != nil, textView.layout.length > 0, !textView.isHidden else { return nil }
+    let frame = textView.textFrame.offsetBy(dx: -extent.minX, dy: -extent.minY)
+    return MessageContextMenuController.SelectableText(text: .plain(textView.layout, origin: frame.origin), colors: colors)
   }
 }
 
