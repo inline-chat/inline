@@ -12,6 +12,8 @@ struct ReplyThreadToolbarContext: Equatable {
   struct ParentLink: Equatable {
     let peer: Peer
     let title: String
+    /// The parent's message this reply thread hangs off; opening the parent lands on it.
+    let anchorMessageId: Int64?
   }
 
   let title: String
@@ -107,13 +109,15 @@ enum ReplyThreadToolbarContextLoader {
     if let parentChat {
       return ReplyThreadToolbarContext.ParentLink(
         peer: parentPeer(for: parentChat, parentPeerUserId: parentPeerUserId),
-        title: try parentTitle(for: parentChat, userInfo: parentUserInfo, db: db)
+        title: try parentTitle(for: parentChat, userInfo: parentUserInfo, db: db),
+        anchorMessageId: chat.parentMessageId
       )
     }
 
     return ReplyThreadToolbarContext.ParentLink(
       peer: .thread(id: parentChatId),
-      title: "Thread"
+      title: "Thread",
+      anchorMessageId: chat.parentMessageId
     )
   }
 

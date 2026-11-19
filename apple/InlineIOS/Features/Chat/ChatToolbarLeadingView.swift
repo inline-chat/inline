@@ -243,7 +243,11 @@ struct ChatToolbarLeadingView: View {
 
   private func openParentThread(_ parent: ReplyThreadToolbarContext.ParentLink) {
     guard parent.peer != peerId else { return }
-    router.openPrimaryDestination(.chat(peer: parent.peer))
+    if let anchorMessageId = parent.anchorMessageId {
+      router.openPrimaryDestination(.chatMessage(peer: parent.peer, messageID: anchorMessageId))
+    } else {
+      router.openPrimaryDestination(.chat(peer: parent.peer))
+    }
   }
 
   private func openSpace(_ space: ReplyThreadToolbarContext.SpaceLink) {
