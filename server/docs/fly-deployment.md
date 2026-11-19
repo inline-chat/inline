@@ -86,6 +86,114 @@ The workflow performs these steps:
    completion also requires the worker-activation job. Publication-only runs
    report image publication separately without claiming a server deployment.
 
+### Deploy gate and incident bypass
+
+`require_green` runs beside qualification and must pass before preflight, the
+first production job. There is no branch protection. It reads the push runs of the release commit and gates only on
+these jobs (`GATES` in `scripts/ci/require-green.ts`):
+
+| Workflow | Job | If not green |
+| --- | --- | --- |
+| Server Tests | Server Typecheck, Lint, and Tests | failure fails; cancelled, missing or running is deferred to this deploy's qualify job, which reruns Server Tests on the same commit |
+| Server Tests | Server Linux image and migration commands | as above |
+| Server Tests | Server ARM64 Coolify image and runtime | as above |
+| CI | Shared TypeScript packages | failure or a skipped dependency fails; running is awaited up to 15 minutes |
+| CI | Packed adapters with local Inline server | as above |
+
+The rest of CI (Apple, Rust, OpenClaw/Hermes hosts, catalog parity, workflow
+contracts) does not gate server deploys.
+
+In an incident, never wait for CI: dispatch with `skip_gate` and a `skip_reason`
+(a reason without `skip_gate` is rejected). The gate job then only records the
+reason and actor in the run summary, and preflight proceeds even if the gate job
+itself failed. `skip_gate` also makes the optional route-family probes advisory;
+readiness, bot, send/readback and WebSocket smoke checks still gate.
+
+Every deploy run, including a rollback, holds the `server-deploy-production`
+lock for its whole duration, so releases never interleave. The gate waits for
+running jobs at most 15 minutes (`WAIT_MINUTES`, about qualify's duration), so a
+waiting gate holds the lock no longer than qualification already does. After
+that it fails: dispatch again once CI finishes, or use `skip_gate`.
+
+```sh
+gh workflow run server-deploy.yml --ref main -f skip_gate=true -f skip_reason="incident: login 500s, hotfix abc123"
+```
+
+If the gate fails on a flaky job, rerun that job in CI, then use **Re-run failed
+jobs** in the deploy run. Preflight records the release plan on that later
+attempt because it confirms that no earlier attempt reached migrations or an
+origin; if one did and its plan is gone, start a new dispatch.
+
+### Route-family smoke probes
+
+After each origin is released, `release-smoke.ts` also probes its pinned
+origin: `/v1/getMe` and a tiny `/v1/uploadFile` document, then OAuth
+introspection (an unknown token must be `401 {active:false}`; an active smoke
+grant must match the introspection contract). `release-smoke-v3.ts` performs a
+V3 key exchange and encrypted ping, then `getMe` over V3. A probe whose secret is
+absent is skipped with a notice. Failures on Nuremberg restore its previous image
+before Fly is touched. Preflight never runs these probes, so a route that is
+already broken in production cannot block its own fix. The V3 step is
+`continue-on-error` until it has passed once in production.
+
+Production-environment secrets (all optional):
+
+- `INLINE_SMOKE_USER_TOKEN`: session token of a dedicated non-bot smoke user
+  with no spaces or chats beyond its own. Each release uploads one small text
+  document per origin as this user.
+- `INLINE_SMOKE_MCP_SECRET`: the API's `MCP_INTERNAL_SHARED_SECRET`
+  (`x-inline-mcp-secret`). It can introspect any token, so treat it like the
+  MCP server's own credential.
+- `INLINE_SMOKE_OAUTH_TOKEN`: an access token of a dedicated smoke OAuth grant.
+  Access tokens expire after `MCP_OAUTH_ACCESS_TOKEN_TTL_MS` (default two hours)
+  and refresh tokens rotate, so a stored token works only until it expires. This
+  probe therefore only warns, never fails, until a long-lived smoke grant exists.
+- `INLINE_SMOKE_V3_CREDENTIALS`: the smoke user's V3 permanent key as
+  `{"key":"<base64 256 bytes>","keyId":"<base64 8 bytes>"}`. The workflow passes
+  it to the probe on stdin (`--credentials-stdin`). Create it once
+  with `bun scripts/ci/release-smoke-v3.ts --login <smoke-user-email>` after
+  `bun install` and `bun run --cwd packages/protocol build`.
+
+### Fast rollback to the last release plan
+
+`rollback_to_plan` redeploys the images that served **before** the latest
+release that reached an origin, as recorded in its `server-release-plan` artifact (`fly.digest` and
+`nuremberg` image name/tag/revision, captured by preflight before DDL). It
+skips the gate, qualification and migrations, so Fly is back in minutes
+instead of a revert, a 13-minute qualification and a 20-minute release.
+
+```sh
+gh workflow run server-deploy.yml --ref main -f rollback_to_plan=true
+# Only one origin, or the plan of a specific earlier release run:
+gh workflow run server-deploy.yml --ref main -f rollback_to_plan=true -f origins=fly
+gh workflow run server-deploy.yml --ref main -f rollback_to_plan=true -f rollback_plan_run=<run id>
+```
+
+- Fly and Nuremberg roll back in parallel. Fly accepts Machines that currently
+  fail readiness, blue-greens the recorded digest (verified public and labelled
+  with the recorded revision) over them and then requires passing checks, count
+  and revision. Nuremberg pins and deploys the recorded Coolify image; a failed
+  rollback is not reverted to the bad release and names the deployment to
+  reconcile.
+- Rollback smoke uses the base checks; route-family probes are advisory.
+- The plan is the newest one whose run started replacing Fly or Nuremberg. A
+  newer release that failed earlier (say at migrate) is skipped with a warning,
+  because its baseline is still what is served.
+- A rollback records no plan, so repeating it selects the same plan; an origin
+  that already serves the baseline and passes readiness gets a "nothing to roll
+  back" warning and is left alone (Fly redeploys it if its Machines are failing).
+  To go back further, pass `rollback_plan_run`. Plans expire after 90 days; a
+  bootstrap plan or a non-GHCR baseline is refused.
+- The database stays migrated. The API accepts a database ahead of its packaged
+  head at startup and in readiness (`assertMigrationLedger` in `startup` mode and
+  `assertMigrationHead`, `server/src/db/migrationState.ts`), so the old image
+  serves only if the newer migrations were additive. Do not use it after a
+  contract migration (dropped/renamed columns or changed meaning).
+- Only the image is rolled back: Machine configuration comes from the current
+  `main` `server/fly.toml`. If the bad release changed that file, revert it as well.
+- A rollback waits for a running deploy run (they share one lock). Cancel the
+  bad run first so it cannot finish replacing the origins before the rollback.
+
 After a partial failure use **Re-run failed jobs**: successful jobs and the
 original release plan are retained. Nuremberg resumes a recorded deployment
 and rechecks the exact pin, readiness and smoke paths. Without a usable receipt,
