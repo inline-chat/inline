@@ -7,6 +7,7 @@ struct SettingsSidebarView: View {
   @Bindable var navigation: SettingsNavigationModel
   @Environment(\.auth) private var auth
   @ObservedObject private var settings = AppSettings.shared
+  @AppStorage(DeveloperMode.key) private var developerMode = false
   @FocusState private var focus: SettingsSidebarFocus?
   @State private var selectedSearchItem: SettingsSearchItem?
 
@@ -84,11 +85,11 @@ struct SettingsSidebarView: View {
   }
 
   private var categoryGroups: [[SettingsCategory]] {
-    SettingsCategory.sidebarGroups(isLoggedIn: auth.isLoggedIn)
+    SettingsCategory.sidebarGroups(isLoggedIn: auth.isLoggedIn, developerMode: developerMode)
   }
 
   private var availableCategories: [SettingsCategory] {
-    SettingsCategory.available(isLoggedIn: auth.isLoggedIn)
+    SettingsCategory.available(isLoggedIn: auth.isLoggedIn, developerMode: developerMode)
   }
 
   private var trimmedQuery: String {

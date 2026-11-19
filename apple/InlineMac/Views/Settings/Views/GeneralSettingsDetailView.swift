@@ -164,7 +164,7 @@ struct GeneralSettingsDetailView: View {
         Toggle(isOn: $developerMode) {
           SettingsRowLabel(
             .developerMode,
-            description: "Show chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents."
+            description: "Show the Debug page, plus chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents."
           )
         }
         .settingsSearchAnchor(.developerMode)

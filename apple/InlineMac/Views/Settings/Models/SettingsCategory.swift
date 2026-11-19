@@ -21,7 +21,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 
   /// Sidebar groups, in order. Search uses the same categories so hidden pages never match.
-  static func sidebarGroups(isLoggedIn: Bool) -> [[SettingsCategory]] {
+  /// Debug only shows with Developer Mode on.
+  static func sidebarGroups(isLoggedIn: Bool, developerMode: Bool) -> [[SettingsCategory]] {
     var updates: [SettingsCategory] = []
 #if SPARKLE
     updates.append(.updates)
@@ -31,13 +32,13 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       [.general, .appearance, .notifications, .audioAndVideo],
       isLoggedIn ? [.privacy, .dataStorage, .activeSessions] : [.dataStorage],
       isLoggedIn ? [.connectors, .bots, .hotkeys] : [.hotkeys],
-      updates + [.experimental, .debug],
+      updates + [.experimental] + (developerMode ? [.debug] : []),
     ]
     return groups.filter { !$0.isEmpty }
   }
 
-  static func available(isLoggedIn: Bool) -> [SettingsCategory] {
-    sidebarGroups(isLoggedIn: isLoggedIn).flatMap(\.self)
+  static func available(isLoggedIn: Bool, developerMode: Bool) -> [SettingsCategory] {
+    sidebarGroups(isLoggedIn: isLoggedIn, developerMode: developerMode).flatMap(\.self)
   }
 
   var title: String {
