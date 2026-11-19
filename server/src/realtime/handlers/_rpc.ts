@@ -35,6 +35,7 @@ import { removeChatParticipant } from "@in/server/realtime/handlers/messages.rem
 import { handleTranslateMessages } from "./translateMessages"
 import { handleGetChats } from "./messages.getChats"
 import { handleGetSpaces } from "./space.getSpaces"
+import { getCommonChatsHandler } from "./messages.getCommonChats"
 import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
@@ -793,6 +794,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
     case Method.GET_SPACES: {
       if (call.input.oneofKind !== "getSpaces") throw RealtimeRpcError.BadRequest()
       return { oneofKind: "getSpaces", getSpaces: await handleGetSpaces(call.input.getSpaces, handlerContext) }
+    }
+
+    case Method.GET_COMMON_CHATS: {
+      if (call.input.oneofKind !== "getCommonChats") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "getCommonChats",
+        getCommonChats: await getCommonChatsHandler(call.input.getCommonChats, handlerContext),
+      }
     }
 
     case Method.GET_CHAT: {

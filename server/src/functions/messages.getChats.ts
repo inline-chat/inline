@@ -23,8 +23,6 @@ import {
   type DbUser,
   type DbFile,
 } from "@in/server/db/schema"
-import { DialogsModel } from "@in/server/db/models/dialogs"
-import { getActivityCountsForChats } from "@in/server/modules/activityItems"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { getDialogFolders } from "@in/server/modules/dialogFolders"
@@ -38,6 +36,7 @@ import {
   parseChatListRequest,
   type ChatListRequest,
 } from "@in/server/modules/chatList/pagedChatList"
+import { encodeChatSpaces, encodeViewerDialogs } from "@in/server/modules/chatList/chatListSidecars"
 import { connectionManager } from "@in/server/ws/connections"
 
 // Callers may omit the paging fields; they take their protobuf defaults.
@@ -330,14 +329,9 @@ async function getChatsPage(request: ChatListRequest, context: FunctionContext):
       return chat ? [chat] : []
     })
     const hydrated = await hydrateChats(tx, currentUserId, ordered)
-
-    const spaceIds = [...new Set(ordered.flatMap((chat) => (chat.spaceId == null ? [] : [chat.spaceId])))]
-    const spaceRows = spaceIds.length === 0
-      ? []
-      : await tx.select().from(spaces).where(and(inArray(spaces.id, spaceIds), isNull(spaces.deleted)))
     return {
       ...hydrated,
-      spaces: spaceRows.map((space) => Encoders.space(space, { encodingForUserId: currentUserId })),
+      spaces: await encodeChatSpaces(tx, currentUserId, ordered),
       folders,
       nextOffset,
     }
@@ -589,25 +583,8 @@ async function hydrateChats(
     }))
   }
 
-  // Get unread counts for all dialogs
-  const dialogChatIds = dialogsList.map((d) => d.chatId)
-  const unreadCounts = new Map(
-    (await DialogsModel.getBatchUnreadCounts({ userId: currentUserId, chatIds: dialogChatIds, tx }))
-      .map((row) => [row.chatId, row.unreadCount]),
-  )
-  const activityCounts = await getActivityCountsForChats({
-    userId: currentUserId,
-    chatIds: dialogChatIds,
-    tx,
-  })
-
   // Encode everything to protocol buffer types
-  const encodedDialogs = dialogsList.map((dialog) =>
-    Encoders.dialog(dialog, {
-      unreadCount: unreadCounts.get(dialog.chatId) ?? 0,
-      unreadActivity: activityCounts.get(dialog.chatId),
-    }),
-  )
+  const encodedDialogs = await encodeViewerDialogs(tx, currentUserId, dialogsList)
 
   const usersById = new Map<number, DbUser & { photoFile?: DbFile | null }>()
   for (const user of usersList) {

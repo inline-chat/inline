@@ -1,7 +1,14 @@
 import type { Transaction } from "@in/server/db/types"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { ChatListKind, ChatListOrder, ChatListScope, type ChatListOffset, type GetChatsInput } from "@inline-chat/protocol/core"
+import {
+  ChatListKind,
+  ChatListOrder,
+  ChatListScope,
+  type ChatListOffset,
+  type GetChatsInput,
+  type GetCommonChatsInput,
+} from "@inline-chat/protocol/core"
 import { sql, type SQL } from "drizzle-orm"
 
 export const CHAT_LIST_MAX_LIMIT = 100
@@ -98,10 +105,33 @@ function parseOffset(offset: ChatListOffset, order: ChatListRequest["order"]): C
   return { chatId, date: offset.date }
 }
 
-export function nextOffsetFor(request: ChatListRequest, last: ChatListRow): ChatListOffset {
+export function nextOffsetFor(request: Pick<ChatListRequest, "order">, last: ChatListRow): ChatListOffset {
   return request.order === "recent"
     ? { chatId: BigInt(last.chatId), date: last.activity }
     : { chatId: BigInt(last.chatId) }
+}
+
+export const COMMON_CHATS_DEFAULT_LIMIT = 30
+
+/** A validated GetCommonChats request, always in RECENT order. */
+export type CommonChatsRequest = {
+  targetUserId: number
+  limit: number
+  /** Exclusive start, with its activity date. */
+  offset?: ChatListRequest["offset"]
+}
+
+/** Throws a bad request for an invalid target, the viewer themself, or a bad page. */
+export function parseCommonChatsRequest(input: Partial<GetCommonChatsInput>, viewerUserId: number): CommonChatsRequest {
+  const targetUserId = toDbId(input.userId ?? 0n, "user_id")
+  if (targetUserId === viewerUserId) throw badRequest("user_id must be another user")
+  const limit = input.limit ?? COMMON_CHATS_DEFAULT_LIMIT
+  if (!Number.isInteger(limit) || limit < 1) throw badRequest("limit must be at least 1")
+  return {
+    targetUserId,
+    limit: Math.min(limit, CHAT_LIST_MAX_LIMIT),
+    offset: input.offset ? parseOffset(input.offset, "recent") : undefined,
+  }
 }
 
 /**
@@ -228,35 +258,119 @@ function discoverySql(
   `
 }
 
+/**
+ * Top-level, non-public threads where both users hold an explicit grant: a
+ * participant row or a group grant through one of their groups. Public threads
+ * are left out by design. Discovery only: the access projection decides.
+ */
+function commonChatsDiscoverySql(
+  viewerUserId: number,
+  targetUserId: number,
+  params: { after: CommonChatsRequest["offset"]; limit: number },
+): SQL {
+  const grants = (userId: number) => sql`
+    select cp.chat_id from chat_participants cp where cp.user_id = ${userId}
+    union
+    select cpg.chat_id
+    from user_group_members ugm
+    join chat_participant_groups cpg on cpg.group_id = ugm.group_id
+    where ugm.user_id = ${userId}`
+  const cursor = cursorSql("recent", params.after)
+  return sql`
+    with target_grants as (${grants(targetUserId)}),
+    viewer_grants as (${grants(viewerUserId)})
+    select c.id as "chatId", ${activityKey} as "activity"
+    from target_grants t
+    join viewer_grants v on v.chat_id = t.chat_id
+    join chats c on c.id = t.chat_id
+    where c.type = 'thread'
+      and c.parent_chat_id is null
+      and c.public_thread is distinct from true
+      ${cursor ? sql`and ${cursor}` : sql``}
+    order by ${activityKey} desc, c.id desc
+    limit ${params.limit}
+    /*application='inline-server',operation='common_chats'*/
+  `
+}
+
 type RawRow = { chatId: number; activity: string | number | bigint }
 const toRow = (row: RawRow): ChatListRow => ({ chatId: Number(row.chatId), activity: BigInt(row.activity) })
+
+/**
+ * Reads candidate batches in list order until `wanted` rows pass `allowed` or
+ * candidates run out, so filtering never shortens a page.
+ */
+async function collectAuthorizedRows(
+  tx: Transaction,
+  params: {
+    wanted: number
+    after: ChatListRequest["offset"]
+    discover: (after: ChatListRequest["offset"], limit: number) => SQL
+    allowed: (chatIds: number[]) => Promise<(chatId: number) => boolean>
+  },
+): Promise<ChatListRow[]> {
+  const accepted: ChatListRow[] = []
+  let after = params.after
+  const batchSize = Math.max(params.wanted, FALLBACK_BATCH_SIZE)
+  for (;;) {
+    const batch = (await tx.execute<RawRow>(params.discover(after, batchSize))).map(toRow)
+    if (batch.length === 0) return accepted
+    const isAllowed = await params.allowed(batch.map((row) => row.chatId))
+    for (const row of batch) {
+      if (!isAllowed(row.chatId)) continue
+      accepted.push(row)
+      if (accepted.length === params.wanted) return accepted
+    }
+    if (batch.length < batchSize) return accepted
+    const last = batch[batch.length - 1]!
+    after = { chatId: last.chatId, date: last.activity }
+  }
+}
 
 /**
  * Up to `limit + 1` authorized rows in list order; more than `limit` means the
  * list continues. Read-only: never creates dialogs.
  */
 export async function discoverChatListPage(tx: Transaction, userId: number, request: ChatListRequest): Promise<ChatListRow[]> {
-  const wanted = request.limit + 1
-  const accepted: ChatListRow[] = []
-  let after = request.offset
-  const batchSize = Math.max(wanted, FALLBACK_BATCH_SIZE)
-  for (;;) {
-    const batch = (await tx.execute<RawRow>(discoverySql(userId, request, {
-      after, limit: batchSize,
-    }))).map(toRow)
-    if (batch.length === 0) return accepted
-    const access = await getEffectiveChatAccessUserIds(tx, batch.map((row) => row.chatId), {
-      userIds: [userId],
-      source: "chats.list",
-      committed: true,
-    })
-    for (const row of batch) {
-      if (access.get(row.chatId)?.has(userId) !== true) continue
-      accepted.push(row)
-      if (accepted.length === wanted) return accepted
-    }
-    if (batch.length < batchSize) return accepted
-    const last = batch[batch.length - 1]!
-    after = { chatId: last.chatId, date: last.activity }
-  }
+  return collectAuthorizedRows(tx, {
+    wanted: request.limit + 1,
+    after: request.offset,
+    discover: (after, limit) => discoverySql(userId, request, { after, limit }),
+    allowed: async (chatIds) => {
+      const access = await getEffectiveChatAccessUserIds(tx, chatIds, {
+        userIds: [userId],
+        source: "chats.list",
+        committed: true,
+      })
+      return (chatId) => access.get(chatId)?.has(userId) === true
+    },
+  })
+}
+
+/**
+ * Up to `limit + 1` threads both users can currently access, latest activity
+ * first. More than `limit` means the list continues.
+ */
+export async function discoverCommonChatsPage(
+  tx: Transaction,
+  viewerUserId: number,
+  request: CommonChatsRequest,
+): Promise<ChatListRow[]> {
+  const { targetUserId } = request
+  return collectAuthorizedRows(tx, {
+    wanted: request.limit + 1,
+    after: request.offset,
+    discover: (after, limit) => commonChatsDiscoverySql(viewerUserId, targetUserId, { after, limit }),
+    allowed: async (chatIds) => {
+      const access = await getEffectiveChatAccessUserIds(tx, chatIds, {
+        userIds: [viewerUserId, targetUserId],
+        source: "chats.common",
+        committed: true,
+      })
+      return (chatId) => {
+        const users = access.get(chatId)
+        return users?.has(viewerUserId) === true && users.has(targetUserId)
+      }
+    },
+  })
 }
