@@ -3,19 +3,24 @@ import { and, eq, inArray } from "drizzle-orm"
 import { members, spaces, type DbMember, chatParticipants, integrations } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 
-/** Check if user is creator of space */
-const spaceCreator = async (spaceId: number, currentUserId: number) => {
-  const space = await db._query.spaces.findFirst({
-    where: and(eq(spaces.id, spaceId), eq(spaces.creatorId, currentUserId)),
-  })
+/**
+ * Check if user is a current owner of space. Ownership is the member role,
+ * not `spaces.creatorId`: a creator who left the space is no longer an owner.
+ * Fails with the creator-required error that clients already handle.
+ */
+const spaceOwner = async (spaceId: number, currentUserId: number) => {
+  const [row] = await db
+    .select({ deleted: spaces.deleted })
+    .from(members)
+    .innerJoin(spaces, eq(spaces.id, members.spaceId))
+    .where(and(eq(members.spaceId, spaceId), eq(members.userId, currentUserId), eq(members.role, "owner")))
+    .limit(1)
 
-  // Check if space that we are trying to use as creator exists
-  if (space === undefined) {
+  if (row === undefined) {
     throw new InlineError(InlineError.ApiError.SPACE_CREATOR_REQUIRED)
   }
 
-  // Check if space is deleted, which means we can't use it
-  if (space.deleted !== null) {
+  if (row.deleted !== null) {
     throw new InlineError(InlineError.ApiError.SPACE_INVALID)
   }
 }
@@ -91,7 +96,7 @@ const hasIntegrationAccess = async (currentUserId: number): Promise<boolean> => 
 }
 
 export const Authorize = {
-  spaceCreator,
+  spaceOwner,
   spaceMember,
   chatParticipant,
   hasIntegrationAccess,

@@ -31,8 +31,9 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   const spaceId = normalizeId(input.spaceId)
 
-  // Authorize if user is creator of space
-  await Authorize.spaceCreator(spaceId, context.currentUserId)
+  // Authorize if user is a current owner of space. The creator who left or
+  // lost ownership no longer has authority over it.
+  await Authorize.spaceOwner(spaceId, context.currentUserId)
 
   // Delete space
   await deleteSpace(spaceId, context.currentUserId)
@@ -82,16 +83,18 @@ const deleteSpace = async (spaceId: number, currentUserId: number) => {
         if (!space || space.deleted !== null) {
           throw new InlineError(InlineError.ApiError.SPACE_INVALID)
         }
-        if (space.creatorId !== currentUserId) {
-          throw new InlineError(InlineError.ApiError.SPACE_CREATOR_REQUIRED)
-        }
 
         const lockedMemberRows = await tx
-          .select({ memberId: members.id, userId: members.userId })
+          .select({ memberId: members.id, userId: members.userId, role: members.role })
           .from(members)
           .where(eq(members.spaceId, spaceId))
           .orderBy(members.userId)
           .for("update")
+        // Recheck ownership under the membership locks: a concurrent leave or
+        // removal must not leave a stale preflight authorizing the delete.
+        if (!lockedMemberRows.some((row) => row.userId === currentUserId && row.role === "owner")) {
+          throw new InlineError(InlineError.ApiError.SPACE_CREATOR_REQUIRED)
+        }
         const lockedMemberUserIds = lockedMemberRows.map((row) => row.userId)
         if (!sameIds(expectedMemberUserIds, lockedMemberUserIds)) {
           throw new SpaceMemberSetChanged(lockedMemberUserIds)
@@ -120,7 +123,7 @@ const deleteSpace = async (spaceId: number, currentUserId: number) => {
             // NOTE(@mo): clear name too?
           })
           .where(eq(spaces.id, spaceId))
-        return lockedMemberRows
+        return lockedMemberRows.map(({ memberId, userId }) => ({ memberId, userId }))
       })
       break
     } catch (error) {
