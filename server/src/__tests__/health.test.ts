@@ -1,14 +1,43 @@
 import { setupTestLifecycle } from "@in/server/__tests__/setup"
 import {
-  createHealthController,
+  makeHealthChecker,
   runHealthChecks,
+  runLivenessCheck,
+  withLifecycleCheck,
   type LivenessHttpResponse,
   type HealthDeps,
   type HealthHttpResponse,
-} from "@in/server/controllers/health"
-import { app } from "@in/server/legacyServer"
+  type HealthLifecycleDeps,
+} from "@in/server/controllers/healthCheck"
+import {
+  executeLiveness,
+  executeReadiness,
+  HealthOperations,
+  makeHealthOperations,
+} from "@in/server/controllers/health.effect"
+import { markServerShuttingDown, resetServerShutdownStateForTests } from "@in/server/lifecycle/shutdownState"
 import { describe, expect, it } from "bun:test"
-import Elysia from "elysia"
+import { Effect } from "effect"
+import { HttpServerResponse } from "effect/unstable/http"
+import { useLiveHttpApp } from "./liveHttpApp"
+
+const app = useLiveHttpApp()
+
+/**
+ * The Effect health routes over injected checks, composed like
+ * `HealthOperationsLive` but with test dependencies.
+ */
+const isolatedHealth = (deps?: Partial<HealthDeps>, lifecycleDeps?: HealthLifecycleDeps) => {
+  const checkHealth = makeHealthChecker(deps)
+  const operations = makeHealthOperations(
+    async () => withLifecycleCheck(await checkHealth(), lifecycleDeps),
+    async () => runLivenessCheck(lifecycleDeps),
+  )
+  const respond = (execute: typeof executeLiveness) =>
+    Effect.runPromise(execute.pipe(Effect.provideService(HealthOperations, operations)))
+      .then((response) => HttpServerResponse.toWeb(response))
+  return { liveness: () => respond(executeLiveness), readiness: () => respond(executeReadiness) }
+}
 
 setupTestLifecycle()
 
@@ -48,13 +77,12 @@ describe("health endpoints", () => {
   })
 
   it("provides process liveness without waiting for the database", async () => {
-    const stalledHealth = createHealthController({
+    const stalledHealth = isolatedHealth({
       checkDatabase: () => new Promise(() => {}),
       timeoutMs: 10,
     })
-    const isolated = new Elysia().use(stalledHealth)
 
-    const response = await isolated.handle(new Request("http://localhost/healthz"))
+    const response = await stalledHealth.liveness()
     expect(response.status).toBe(200)
 
     const json = (await response.json()) as LivenessHttpResponse
@@ -93,10 +121,9 @@ describe("health endpoints", () => {
   })
 
   it("returns HTTP 503 from /readyz when database checks fail", async () => {
-    const failingHealth = createHealthController(failingHealthDeps())
+    const failingHealth = isolatedHealth(failingHealthDeps())
 
-    const isolated = new Elysia().use(failingHealth)
-    const response = await isolated.handle(new Request("http://localhost/readyz"))
+    const response = await failingHealth.readiness()
     expect(response.status).toBe(503)
 
     const json = (await response.json()) as Awaited<ReturnType<typeof runHealthChecks>>
@@ -106,39 +133,35 @@ describe("health endpoints", () => {
   })
 
   it("returns HTTP 503 and lifecycle draining check when server is shutting down", async () => {
-    const drainingHealth = createHealthController(undefined, {
-      getShutdownState: () => ({
-        shuttingDown: true,
-        signal: "SIGTERM",
-        startedAtMs: Date.now(),
-      }),
-    })
+    markServerShuttingDown("SIGTERM")
+    try {
+      const responseDuringShutdown = await app.handle(new Request("http://localhost/healthz"))
+      expect(responseDuringShutdown.status).toBe(503)
 
-    const isolated = new Elysia().use(drainingHealth)
-    const responseDuringShutdown = await isolated.handle(new Request("http://localhost/healthz"))
-    expect(responseDuringShutdown.status).toBe(503)
+      const during = (await responseDuringShutdown.json()) as LivenessHttpResponse
+      expect(during.ok).toBe(false)
+      expect(during.status).toBe("degraded")
+      expect(during.draining).toBe(true)
+      expect(during.checks.lifecycle.ok).toBe(false)
+      expect(during.checks.lifecycle.error).toBe("shutting_down")
+      expect(during.checks.lifecycle.signal).toBe("SIGTERM")
 
-    const during = (await responseDuringShutdown.json()) as LivenessHttpResponse
-    expect(during.ok).toBe(false)
-    expect(during.status).toBe("degraded")
-    expect(during.draining).toBe(true)
-    expect(during.checks.lifecycle.ok).toBe(false)
-    expect(during.checks.lifecycle.error).toBe("shutting_down")
-    expect(during.checks.lifecycle.signal).toBe("SIGTERM")
-
-    const livenessDuringShutdown = await isolated.handle(
-      new Request("http://localhost/livez"),
-    )
-    expect(livenessDuringShutdown.status).toBe(503)
-    expect(await livenessDuringShutdown.json()).toMatchObject({
-      ok: false,
-      draining: true,
-      checks: {
-        lifecycle: {
-          error: "shutting_down",
-          signal: "SIGTERM",
+      const livenessDuringShutdown = await app.handle(
+        new Request("http://localhost/livez"),
+      )
+      expect(livenessDuringShutdown.status).toBe(503)
+      expect(await livenessDuringShutdown.json()).toMatchObject({
+        ok: false,
+        draining: true,
+        checks: {
+          lifecycle: {
+            error: "shutting_down",
+            signal: "SIGTERM",
+          },
         },
-      },
-    })
+      })
+    } finally {
+      resetServerShutdownStateForTests()
+    }
   })
 })

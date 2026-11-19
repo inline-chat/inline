@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../../legacyServer"
+import { useLiveHttpApp } from "../liveHttpApp"
 import { db } from "@in/server/db"
 import { chats, messages, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
 import { generateToken } from "@in/server/utils/auth"
 import { setupTestLifecycle } from "../setup"
+
+const app = useLiveHttpApp()
 
 const ADMIN_ORIGIN = "http://localhost:5174"
 
@@ -58,7 +60,7 @@ const createAdminCookie = async () => {
 describe("Admin activity metrics", () => {
   setupTestLifecycle()
 
-  it("returns 14 UTC daily buckets and the requested active-user audiences", async () => {
+  it("returns 97 UTC daily buckets and the requested active-user audiences", async () => {
     const cookie = await createAdminCookie()
     const [todayUser, weekUser, oldUser, deletedUser, botUser] = await db
       .insert(users)
@@ -108,7 +110,8 @@ describe("Admin activity metrics", () => {
       activeUsers: number
       newUsers: number
     }>
-    expect(dailyActivity).toHaveLength(14)
+    // Calendar-day growth metrics: 96 previous UTC days plus today.
+    expect(dailyActivity).toHaveLength(97)
     expect(dailyActivity.at(-1)).toMatchObject({
       date: startOfUtcDay().toISOString(),
       activeUsers: 2,
