@@ -8,8 +8,9 @@ public enum MessageMotion: Hashable, Sendable {
   case spring(duration: Double, bounce: Double)
 
   /// Content changes: edits, reactions, footer moves. Telegram iOS's message spring: critically
-  /// damped, stiffness 555 at mass 1, which is a 0.27 s response.
-  public static let standard = MessageMotion.spring(duration: 0.27, bounce: 0)
+  /// damped, stiffness 555.027 at mass 1, which is a 0.2667 s response. The timeline's rows move on
+  /// the same spring (`TimelineTiming.standard`), so a row and its bubble's contents stay together.
+  public static let standard = MessageMotion.spring(duration: 0.2667, bounce: 0)
   /// One more revealed line while a message streams.
   public static let streamingLine = MessageMotion.easeInOut(duration: 0.15)
 
