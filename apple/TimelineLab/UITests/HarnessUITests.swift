@@ -782,7 +782,7 @@ final class HarnessUITests: XCTestCase {
     coord(280, 521).press(forDuration: 0.05, thenDragTo: coord(250, 522), withVelocity: 150, thenHoldForDuration: 0.3)
     Thread.sleep(forTimeInterval: 1)
     shot("swipe-partial")
-    let close = app.buttons.matching(NSPredicate(format: "label IN {'Close', 'xmark', 'Cancel'}")).firstMatch
+    let close = app.buttons.matching(NSPredicate(format: "label IN {'Cancel reply', 'Close', 'xmark', 'Cancel'}")).firstMatch
     print("[UITEST] reply bar after partial: \(close.exists)")
     let partial = visibleTexts("swipe-partial")
     if let a = start.last, let b = partial.first(where: { $0.0 == a.0 }) {
@@ -811,7 +811,8 @@ final class HarnessUITests: XCTestCase {
     _ = replied
   }
 
-  /// A reply's quote jumps to its original far above; the scroll button brings the reader back to the newest.
+  /// A reply's quote jumps to its original far above; as in Telegram, the scroll button first brings the reader
+  /// back to the reply (when the jump took it off screen), then to the newest.
   func testReplyJumpAndBack() {
     // 352 replies to 347; neither is in one of the fixture's albums (341 is, in the 339-341 album).
     launch(["--timeline-harness-focus", "352"])
@@ -820,6 +821,7 @@ final class HarnessUITests: XCTestCase {
     // A reply's text reads "Reply to <sender>, <quote>, <text>"; its quote sits right above the text.
     let before = visibleTexts("quote-before")
     let start = before.filter { $0.0.contains("Reply to") }
+    var replyLeftScreen = false
     if let reply = start.first {
       app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         .withOffset(CGVector(dx: reply.1.minX + 30, dy: reply.1.minY - 12)).tap()
@@ -827,10 +829,20 @@ final class HarnessUITests: XCTestCase {
       shot("quote-jumped")
       let jumped = visibleTexts("quote-jumped")
       XCTAssertNotEqual(jumped.map(\.1.minY), before.map(\.1.minY), "the quote tap did not move the list")
+      replyLeftScreen = !jumped.contains { $0.0 == reply.0 }
+      print("[UITEST] reply left the screen \(replyLeftScreen)")
     } else {
       XCTFail("no reply on screen")
     }
     XCTAssertTrue(scrollButton.waitForExistence(timeout: 2), "no scroll button after the jump")
+    if replyLeftScreen, let reply = start.first {
+      if scrollButton.isHittable { scrollButton.tap() }
+      Thread.sleep(forTimeInterval: 1.5)
+      shot("quote-returned")
+      let returned = visibleTexts("quote-returned")
+      XCTAssertTrue(returned.contains { $0.0 == reply.0 }, "the scroll button did not go back to the reply")
+      // Back at the reply nothing flashes: the highlight is the jump's.
+    }
     if scrollButton.isHittable { scrollButton.tap() }
     Thread.sleep(forTimeInterval: 1.5)
     shot("quote-back")
@@ -929,6 +941,75 @@ final class HarnessUITests: XCTestCase {
     let texts = visibleTexts("unread-open")
     XCTAssertFalse(texts.isEmpty, "no rows after the opening")
     print("[UITEST] spinner \(app.activityIndicators.count)")
+  }
+
+  /// Day badges, the unread line and notices grow with the text size (set per launch, so the simulator's own
+  /// setting is untouched): at the default size a day's strip keeps the collection view's 44 pt; at an
+  /// accessibility size it is taller. Leaves screenshots of the unread opening and the notice at both sizes.
+  func testLabelRowsTextSize() {
+    /// Today's day row, a few screens above the newest message (the fixture's three days end now): paged up
+    /// to, with the finger held so the floating date doesn't stand in for it.
+    func dayStrip(_ name: String) -> CGFloat? {
+      let day = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show first message from'")).firstMatch
+      // At an accessibility size the rows are several times taller: up to ~20 screens.
+      for _ in 0 ..< 20 where !day.exists {
+        drag(190, 120, 190, 580, v: 800, hold: 0.3)
+        Thread.sleep(forTimeInterval: 1.2)
+      }
+      guard day.exists else {
+        shot("\(name)-no-day")
+        print("[UITEST] \(name) no day row; buttons \(app.buttons.allElementsBoundByIndex.prefix(12).map { $0.label })")
+        return nil
+      }
+      shot("\(name)-day")
+      print("[UITEST] \(name) day \(day.frame)")
+      return day.frame.height
+    }
+    func run(_ name: String, _ size: [String]) -> CGFloat? {
+      launch(["--timeline-harness-open", "unread"] + size)
+      Thread.sleep(forTimeInterval: 2)
+      shot("\(name)-unread")
+      let line = app.staticTexts["Unread messages"]
+      print("[UITEST] \(name) unread \(line.exists ? "\(line.frame)" : "none")")
+      launch(size)
+      script("Toggle status notice")
+      Thread.sleep(forTimeInterval: 1.5)
+      // At an accessibility size the harness's own Script menu is taller than the screen and the item can be
+      // out of reach: the menu stays open and is closed here (the notice is then only checked at the default).
+      if app.buttons["Receive"].exists {
+        print("[UITEST] \(name) notice item out of reach")
+        coord(190, 30).tap()
+        Thread.sleep(forTimeInterval: 1)
+      }
+      shot("\(name)-notice")
+      return dayStrip(name)
+    }
+    let normal = run("default", [])
+    XCTAssertNotNil(normal, "no day row at the default text size")
+    if let normal { XCTAssertEqual(normal, 44, accuracy: 0.5, "a day's strip changed at the default text size") }
+    let large = run("ax-large", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
+    XCTAssertNotNil(large, "no day row at an accessibility text size")
+    if let normal, let large { XCTAssertGreaterThan(large, normal + 4, "a day's strip did not grow with the text size") }
+  }
+
+  /// The reply bar comes and goes with the keyboard up: the newest row stays on the composer's top through each
+  /// animation. Run with `--timeline-harness-probe`; the probe's `newestMaxY` against `composerTop` shows the gap
+  /// frame by frame (the runner prints each step's time).
+  func testReplyBarFollow() {
+    launch()
+    openKeyboard()
+    for round in 0 ..< 2 {
+      print("[UITEST] reply-bar show \(round) t=\(String(format: "%.3f", Date().timeIntervalSince1970))")
+      drag(280, 250, 150, 252, v: 700, hold: 0.1)
+      Thread.sleep(forTimeInterval: 1.2)
+      shot("reply-bar-\(round)")
+      let cancel = app.buttons["Cancel reply"]
+      XCTAssertTrue(cancel.waitForExistence(timeout: 2), "no reply bar")
+      print("[UITEST] reply-bar hide \(round) t=\(String(format: "%.3f", Date().timeIntervalSince1970))")
+      if cancel.exists { cancel.tap() }
+      Thread.sleep(forTimeInterval: 1.2)
+      shot("reply-bar-gone-\(round)")
+    }
   }
 
   /// Puts the keyboard away with a tap on the list's empty leading margin (a drag would also scroll it).
