@@ -6,7 +6,7 @@ import Testing
 struct MessageLayoutPlannerTests {
   let metrics = MessageLayoutMetrics()
 
-  @Test("Gold standard: adding a reaction narrows the bubble, drops the time and puts the reaction bottom-left")
+  @Test("Gold standard: adding a reaction narrows the bubble, drops the time to the bottom corner and puts the reaction bottom-left")
   func goldStandard() throws {
     // Wide enough that the inline time costs real width.
     let string = "Sounds good, see you tomorrow"
@@ -27,7 +27,8 @@ struct MessageLayoutPlannerTests {
     #expect(time.minY >= text.maxY)
     #expect(reaction.minY >= text.maxY + metrics.reactionsTopSpacing - 0.5)
     #expect(reaction.minX == text.minX)
-    #expect(abs(reaction.midY - time.midY) <= 1)
+    #expect(abs(time.maxY - reaction.maxY) <= 0.5)
+    #expect(abs(after.bubble.body.maxY - time.maxY - metrics.bubbleInsets.bottom) <= 0.5)
     #expect(abs(time.maxX - (after.bubble.body.maxX - metrics.bubbleInsets.trailing)) <= 0.5)
 
     let transition = MessageLayoutTransition(from: before, to: after)

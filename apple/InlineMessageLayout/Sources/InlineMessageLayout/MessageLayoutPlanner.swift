@@ -189,7 +189,8 @@ public enum MessageLayoutPlanner {
       if lastRow.width + m.reactionTimeSpacing + footerWidth <= maximumContentWidth {
         placement = .reactionsRow
         contentWidth = max(bodySize.width, flow.size.width, lastRow.width + m.reactionTimeSpacing + footerWidth)
-        footerTop = reactionsTop + lastRow.midY - footerHeight / 2
+        // The time keeps the bubble's bottom-trailing corner, where it sits without reactions.
+        footerTop = reactionsTop + lastRow.minY + lastRow.height - footerHeight
         contentHeight = reactionsTop + flow.size.height
       } else {
         placement = .below
