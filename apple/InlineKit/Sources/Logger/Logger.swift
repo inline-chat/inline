@@ -284,8 +284,10 @@ enum SentryLogPolicy {
     return false
   }
 
+  /// Groups by call site without the line number, so unrelated edits above a log call
+  /// do not split one issue into a new one every release.
   static func fingerprint(entry: LogEntry, errorCategory: String?, http: HTTPLogMetadata?) -> [String] {
-    var components = ["app-error", entry.fileName, String(entry.line), errorCategory ?? "none"]
+    var components = ["app-error", entry.fileName, entry.function, errorCategory ?? "none"]
     if let http {
       components.append(contentsOf: [
         http.method,

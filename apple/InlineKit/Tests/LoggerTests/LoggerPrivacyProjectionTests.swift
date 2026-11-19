@@ -199,7 +199,7 @@ struct LoggerPrivacyProjectionTests {
       detail: .scrubbed
     )
     #expect(SentryLogPolicy.fingerprint(entry: entry, errorCategory: nil, http: failure) == [
-      "app-error", "ApiClient.swift", "221", "none", "GET", "/v1/getMe", "500",
+      "app-error", "ApiClient.swift", "request()", "none", "GET", "/v1/getMe", "500",
     ])
   }
 
