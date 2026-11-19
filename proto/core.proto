@@ -2685,6 +2685,7 @@ enum Method {
   SET_FOCUS_STATUS = 169;
   GET_SPACES = 170;
   SEND_COMPOSE_SUGGESTION = 171;
+  GET_COMMON_CHATS = 172;
 }
 
 message RpcCall {
@@ -2861,6 +2862,7 @@ message RpcCall {
     SetFocusStatusInput setFocusStatus = 170;
     GetSpacesInput getSpaces = 171;
     SendComposeSuggestionInput sendComposeSuggestion = 172;
+    GetCommonChatsInput getCommonChats = 173;
   }
 }
 
@@ -3039,6 +3041,7 @@ message RpcResult {
     SetFocusStatusResult setFocusStatus = 170;
     GetSpacesResult getSpaces = 171;
     SendComposeSuggestionResult sendComposeSuggestion = 172;
+    GetCommonChatsResult getCommonChats = 173;
   }
 }
 
@@ -4439,6 +4442,27 @@ message GetSpacesInput {}
 
 message GetSpacesResult {
   repeated Space spaces = 1;
+}
+
+// Threads the viewer and another user both have access to, most recently
+// active first. Like Telegram's messages.getCommonChats.
+message GetCommonChatsInput {
+  // The other user, a person or a bot.
+  int64 user_id = 1;
+  // Exclusive start. Pass the previous result's next_offset; absent = first page.
+  optional ChatListOffset offset = 2;
+  // Page size, default 30, capped at 100.
+  optional int32 limit = 3;
+}
+
+message GetCommonChatsResult {
+  repeated Chat chats = 1;
+  // The viewer's dialogs for those chats, including unread counts.
+  repeated Dialog dialogs = 2;
+  // Spaces referenced by the chats.
+  repeated Space spaces = 3;
+  // Pass as `offset` for the next page. Absent: end of list.
+  optional ChatListOffset next_offset = 4;
 }
 
 message TranslateMessagesInput {

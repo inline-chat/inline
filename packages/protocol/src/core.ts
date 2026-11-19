@@ -7176,6 +7176,12 @@ export interface RpcCall {
          */
         sendComposeSuggestion: SendComposeSuggestionInput;
     } | {
+        oneofKind: "getCommonChats";
+        /**
+         * @generated from protobuf field: GetCommonChatsInput getCommonChats = 173;
+         */
+        getCommonChats: GetCommonChatsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -8210,6 +8216,12 @@ export interface RpcResult {
          * @generated from protobuf field: SendComposeSuggestionResult sendComposeSuggestion = 172;
          */
         sendComposeSuggestion: SendComposeSuggestionResult;
+    } | {
+        oneofKind: "getCommonChats";
+        /**
+         * @generated from protobuf field: GetCommonChatsResult getCommonChats = 173;
+         */
+        getCommonChats: GetCommonChatsResult;
     } | {
         oneofKind: undefined;
     };
@@ -11783,6 +11795,59 @@ export interface GetSpacesResult {
      * @generated from protobuf field: repeated Space spaces = 1;
      */
     spaces: Space[];
+}
+/**
+ * Threads the viewer and another user both have access to, most recently
+ * active first. Like Telegram's messages.getCommonChats.
+ *
+ * @generated from protobuf message GetCommonChatsInput
+ */
+export interface GetCommonChatsInput {
+    /**
+     * The other user, a person or a bot.
+     *
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+    /**
+     * Exclusive start. Pass the previous result's next_offset; absent = first page.
+     *
+     * @generated from protobuf field: optional ChatListOffset offset = 2;
+     */
+    offset?: ChatListOffset;
+    /**
+     * Page size, default 30, capped at 100.
+     *
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message GetCommonChatsResult
+ */
+export interface GetCommonChatsResult {
+    /**
+     * @generated from protobuf field: repeated Chat chats = 1;
+     */
+    chats: Chat[];
+    /**
+     * The viewer's dialogs for those chats, including unread counts.
+     *
+     * @generated from protobuf field: repeated Dialog dialogs = 2;
+     */
+    dialogs: Dialog[];
+    /**
+     * Spaces referenced by the chats.
+     *
+     * @generated from protobuf field: repeated Space spaces = 3;
+     */
+    spaces: Space[];
+    /**
+     * Pass as `offset` for the next page. Absent: end of list.
+     *
+     * @generated from protobuf field: optional ChatListOffset next_offset = 4;
+     */
+    nextOffset?: ChatListOffset;
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -18918,7 +18983,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SEND_COMPOSE_SUGGESTION = 171;
      */
-    SEND_COMPOSE_SUGGESTION = 171
+    SEND_COMPOSE_SUGGESTION = 171,
+    /**
+     * @generated from protobuf enum value: GET_COMMON_CHATS = 172;
+     */
+    GET_COMMON_CHATS = 172
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -33595,7 +33664,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
             { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
             { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput },
-            { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput }
+            { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput },
+            { no: 173, name: "getCommonChats", kind: "message", oneof: "input", T: () => GetCommonChatsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -34634,6 +34704,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         sendComposeSuggestion: SendComposeSuggestionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).sendComposeSuggestion)
                     };
                     break;
+                case /* GetCommonChatsInput getCommonChats */ 173:
+                    message.input = {
+                        oneofKind: "getCommonChats",
+                        getCommonChats: GetCommonChatsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getCommonChats)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35159,6 +35235,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SendComposeSuggestionInput sendComposeSuggestion = 172; */
         if (message.input.oneofKind === "sendComposeSuggestion")
             SendComposeSuggestionInput.internalBinaryWrite(message.input.sendComposeSuggestion, writer.tag(172, WireType.LengthDelimited).fork(), options).join();
+        /* GetCommonChatsInput getCommonChats = 173; */
+        if (message.input.oneofKind === "getCommonChats")
+            GetCommonChatsInput.internalBinaryWrite(message.input.getCommonChats, writer.tag(173, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35343,7 +35422,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
             { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
             { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult },
-            { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult }
+            { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult },
+            { no: 173, name: "getCommonChats", kind: "message", oneof: "result", T: () => GetCommonChatsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -36382,6 +36462,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         sendComposeSuggestion: SendComposeSuggestionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).sendComposeSuggestion)
                     };
                     break;
+                case /* GetCommonChatsResult getCommonChats */ 173:
+                    message.result = {
+                        oneofKind: "getCommonChats",
+                        getCommonChats: GetCommonChatsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getCommonChats)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -36907,6 +36993,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SendComposeSuggestionResult sendComposeSuggestion = 172; */
         if (message.result.oneofKind === "sendComposeSuggestion")
             SendComposeSuggestionResult.internalBinaryWrite(message.result.sendComposeSuggestion, writer.tag(172, WireType.LengthDelimited).fork(), options).join();
+        /* GetCommonChatsResult getCommonChats = 173; */
+        if (message.result.oneofKind === "getCommonChats")
+            GetCommonChatsResult.internalBinaryWrite(message.result.getCommonChats, writer.tag(173, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -48496,6 +48585,137 @@ class GetSpacesResult$Type extends MessageType<GetSpacesResult> {
  * @generated MessageType for protobuf message GetSpacesResult
  */
 export const GetSpacesResult = new GetSpacesResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetCommonChatsInput$Type extends MessageType<GetCommonChatsInput> {
+    constructor() {
+        super("GetCommonChatsInput", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "offset", kind: "message", T: () => ChatListOffset },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetCommonChatsInput>): GetCommonChatsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetCommonChatsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetCommonChatsInput): GetCommonChatsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* optional ChatListOffset offset */ 2:
+                    message.offset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.offset);
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetCommonChatsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        /* optional ChatListOffset offset = 2; */
+        if (message.offset)
+            ChatListOffset.internalBinaryWrite(message.offset, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetCommonChatsInput
+ */
+export const GetCommonChatsInput = new GetCommonChatsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetCommonChatsResult$Type extends MessageType<GetCommonChatsResult> {
+    constructor() {
+        super("GetCommonChatsResult", [
+            { no: 1, name: "chats", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Chat },
+            { no: 2, name: "dialogs", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Dialog },
+            { no: 3, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Space },
+            { no: 4, name: "next_offset", kind: "message", T: () => ChatListOffset }
+        ]);
+    }
+    create(value?: PartialMessage<GetCommonChatsResult>): GetCommonChatsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chats = [];
+        message.dialogs = [];
+        message.spaces = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetCommonChatsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetCommonChatsResult): GetCommonChatsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Chat chats */ 1:
+                    message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Dialog dialogs */ 2:
+                    message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated Space spaces */ 3:
+                    message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional ChatListOffset next_offset */ 4:
+                    message.nextOffset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.nextOffset);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetCommonChatsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Chat chats = 1; */
+        for (let i = 0; i < message.chats.length; i++)
+            Chat.internalBinaryWrite(message.chats[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Dialog dialogs = 2; */
+        for (let i = 0; i < message.dialogs.length; i++)
+            Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated Space spaces = 3; */
+        for (let i = 0; i < message.spaces.length; i++)
+            Space.internalBinaryWrite(message.spaces[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional ChatListOffset next_offset = 4; */
+        if (message.nextOffset)
+            ChatListOffset.internalBinaryWrite(message.nextOffset, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetCommonChatsResult
+ */
+export const GetCommonChatsResult = new GetCommonChatsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TranslateMessagesInput$Type extends MessageType<TranslateMessagesInput> {
     constructor() {
