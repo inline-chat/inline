@@ -43,14 +43,51 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
   }
 
-  private func shouldSendAsFile(_ image: UIImage) -> Bool {
+  private nonisolated static func shouldSendAsFile(_ image: UIImage) -> Bool {
     let width = max(image.size.width, 1)
     let height = max(image.size.height, 1)
     let ratio = max(width / height, height / width)
     return ratio > 20 || (width < 50 && height < 50)
   }
 
-  private func makeImageAttachment(_ image: UIImage, optimizePhoto: Bool) throws -> FileMediaItem {
+  /// Saves at most this many images at once; each holds a full-resolution encode in memory.
+  private nonisolated static let imageSaveConcurrency = 2
+
+  /// Saves picked images as attachments off the main actor, keeping their order; nil where one
+  /// failed. Each is a full-resolution JPEG or PNG encode plus a file and a database write, which
+  /// took the main thread for a noticeable time per photo.
+  private nonisolated static func imageAttachments(_ images: [UIImage], optimizePhoto: Bool) async -> [FileMediaItem?] {
+    guard !images.isEmpty else { return [] }
+    return await Task.detached(priority: .userInitiated) {
+      await withTaskGroup(of: (Int, FileMediaItem?).self) { group in
+        @Sendable func save(_ index: Int) -> (Int, FileMediaItem?) {
+          do {
+            return (index, try imageAttachment(images[index], optimizePhoto: optimizePhoto))
+          } catch {
+            Log.shared.error("Failed to save photo attachment", error: error)
+            return (index, nil)
+          }
+        }
+        var items = [FileMediaItem?](repeating: nil, count: images.count)
+        var next = min(imageSaveConcurrency, images.count)
+        for index in 0 ..< next {
+          group.addTask { save(index) }
+        }
+        for await (index, item) in group {
+          items[index] = item
+          if next < images.count {
+            let index = next
+            group.addTask { save(index) }
+            next += 1
+          }
+        }
+        return items
+      }
+    }.value
+  }
+
+  /// Synchronous disk and database work: off the main actor, use `imageAttachments`.
+  private nonisolated static func imageAttachment(_ image: UIImage, optimizePhoto: Bool) throws -> FileMediaItem {
     if shouldSendAsFile(image) {
       let tempDirectory = FileHelpers.getTrueTemporaryDirectory()
       let fileName = "image-\(UUID().uuidString).jpg"
@@ -325,19 +362,18 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func sendImage(_ image: UIImage, caption: String) {
     guard let peerId else { return }
+    let chatId = chatId
+    let replyToMsgId = ChatState.shared.getState(peer: peerId).replyingMessageId
 
     clearAttachments()
+    resetComposeStateAfterPreviewSend()
+    dismissPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
+    clearAttachments()
+    // sendMessageHaptic()
 
-    do {
-      let mediaItem = try makeImageAttachment(image, optimizePhoto: false)
-      let uniqueId = mediaItem.getItemUniqueId()
-      attachmentItems[uniqueId] = mediaItem
-    } catch {
-      Log.shared.error("Failed to save photo", error: error)
-    }
-
-    let didPrepareImage = !attachmentItems.isEmpty
-    for (_, attachment) in attachmentItems {
+    // The preview closes now; the message is sent once the photo is saved off the main thread.
+    Task { @MainActor in
+      guard let attachment = await Self.imageAttachments([image], optimizePhoto: false).first ?? nil else { return }
       Transactions.shared.mutate(
         transaction: .sendMessage(
           .init(
@@ -345,61 +381,61 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
             peerId: peerId,
             chatId: chatId ?? 0,
             mediaItems: [attachment],
-            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+            replyToMsgId: replyToMsgId,
             isSticker: nil,
             entities: nil
           )
         )
       )
+      if let chatId {
+        IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
+      }
     }
-
-    if didPrepareImage, let chatId {
-      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
-    }
-
-    resetComposeStateAfterPreviewSend()
-    dismissPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
-    clearAttachments()
-    // sendMessageHaptic()
   }
 
   func sendMultipleImages(_ photoItems: [PhotoItem]) {
     guard let peerId else { return }
 
+    let chatId = chatId
     let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
-
-    var items: [AlbumSendItem] = []
-    for (index, photoItem) in photoItems.enumerated() {
-      do {
-        let mediaItem = try makeImageAttachment(photoItem.image, optimizePhoto: true)
-        // Each photo keeps its own caption; the album shows the first one.
-        let captionText = photoItem.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
-        items.append(AlbumSendItem(media: mediaItem, text: captionText?.isEmpty == false ? captionText : nil))
-      } catch {
-        Log.shared.error("Failed to save and send photo \(index + 1)", error: error)
-      }
-    }
-    // Photos picked together go out as albums of up to ten.
-    for send in TransactionSendMessage.sends(
-      peerId: peerId,
-      chatId: chatId ?? 0,
-      items: items,
-      replyToMsgId: replyToMessageId
-    ) {
-      Transactions.shared.mutate(transaction: .sendMessage(send))
-    }
-    let didSendImage = !items.isEmpty
-
-    if didSendImage, let chatId {
-      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
+    let images = photoItems.map(\.image)
+    // Each photo keeps its own caption; the album shows the first one.
+    let captions = photoItems.map { photoItem -> String? in
+      let captionText = photoItem.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
+      return captionText?.isEmpty == false ? captionText : nil
     }
 
-    // Clear state and dismiss
+    // Clear state and dismiss now; the photos are saved off the main thread, then sent.
     resetComposeStateAfterPreviewSend()
     dismissMultiPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
     clearAttachments()
     ChatState.shared.clearReplyingMessageId(peer: peerId)
     // sendMessageHaptic()
+
+    Task { @MainActor in
+      let saved = await Self.imageAttachments(images, optimizePhoto: true)
+      var items: [AlbumSendItem] = []
+      for (index, mediaItem) in saved.enumerated() {
+        guard let mediaItem else {
+          Log.shared.error("Failed to save and send photo \(index + 1)")
+          continue
+        }
+        items.append(AlbumSendItem(media: mediaItem, text: captions[index]))
+      }
+      guard !items.isEmpty else { return }
+      // Photos picked together go out as albums of up to ten.
+      for send in TransactionSendMessage.sends(
+        peerId: peerId,
+        chatId: chatId ?? 0,
+        items: items,
+        replyToMsgId: replyToMessageId
+      ) {
+        Transactions.shared.mutate(transaction: .sendMessage(send))
+      }
+      if let chatId {
+        IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
+      }
+    }
   }
 
   func handlePastedImage() {
@@ -430,21 +466,20 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func addImages(_ images: [UIImage]) {
     guard !images.isEmpty else { return }
 
-    var didAddAny = false
-    for image in images {
-      do {
-        let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+    let destination = peerId
+    Task { @MainActor [weak self] in
+      let saved = await Self.imageAttachments(images, optimizePhoto: true)
+      guard let self, peerId == destination else { return }
+      var didAddAny = false
+      for mediaItem in saved.compactMap({ $0 }) {
         let uniqueId = mediaItem.getItemUniqueId()
         attachmentItems[uniqueId] = mediaItem
         didAddAny = true
         Log.shared.debug("Added image attachment with uniqueId: \(uniqueId)")
-      } catch {
-        Log.shared.error("Failed to save photo in attachments", error: error)
       }
-    }
-
-    if didAddAny {
-      handleAttachmentItemsChanged(animated: false)
+      if didAddAny {
+        handleAttachmentItemsChanged(animated: false)
+      }
     }
   }
 
@@ -578,7 +613,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
           }
 
           do {
-            let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+            // Rare (a GIF that is not animated), so saved here rather than off the main thread.
+            let mediaItem = try Self.imageAttachment(image, optimizePhoto: true)
             attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
             completePendingVideoAttachments([pendingId])
           } catch {
@@ -693,13 +729,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       return .failure(.message("Couldn't open that recent photo."))
     }
 
-    do {
-      let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
-      return .success(mediaItem)
-    } catch {
-      Log.shared.error("Failed to save photo in attachments", error: error)
+    guard let mediaItem = await Self.imageAttachments([image], optimizePhoto: true).first ?? nil else {
       return .failure(.message("Couldn't open that recent photo."))
     }
+    return .success(mediaItem)
   }
 
   private func loadRecentImage(from asset: PHAsset) async -> UIImage? {
@@ -833,6 +866,14 @@ extension ComposeView: PHPickerViewControllerDelegate {
         }
       }
 
+      // Save the photos off the main thread before touching the attachments.
+      let pickedImages = loadedItems.compactMap { entry -> (index: Int, image: UIImage)? in
+        guard case let .image(image) = entry.item else { return nil }
+        return (entry.index, image)
+      }
+      let savedImages = await Self.imageAttachments(pickedImages.map(\.image), optimizePhoto: true)
+      let savedImageByIndex = Dictionary(uniqueKeysWithValues: zip(pickedImages.map(\.index), savedImages))
+
       await MainActor.run { [weak self, weak picker] in
         guard let self else { return }
 
@@ -856,15 +897,12 @@ extension ComposeView: PHPickerViewControllerDelegate {
         for entry in sortedEntries {
           let item = entry.item
           switch item {
-          case let .image(image):
-            do {
-              let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
-              let uniqueId = mediaItem.getItemUniqueId()
-              attachmentItems[uniqueId] = mediaItem
-            } catch {
-              Log.shared.error("Failed to save photo in attachments", error: error)
+          case .image:
+            guard let mediaItem = savedImageByIndex[entry.index] ?? nil else {
               cancelQueuedPendingVideoSend()
+              continue
             }
+            attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
           case let .video(videoItem):
             if let pendingId = pendingVideoIdsByIndex[entry.index], isPendingVideoAttachmentCanceled(pendingId) {
               continue
