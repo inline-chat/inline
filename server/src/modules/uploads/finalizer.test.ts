@@ -8,6 +8,7 @@ import type {
 import { UploadIntegrityError, UploadMediaFinalizer } from "./finalizer"
 import type { UploadPartStore } from "./partStore"
 import { FileByteLengthError } from "@in/server/modules/files/readFileBytes"
+import { prepareFileObjectRecord } from "@in/server/modules/files/uploadAFile"
 import { INLINE_MEDIA_UPLOAD_MAX_BYTES, INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
 
 const bytes = new TextEncoder().encode("verified part")
@@ -290,5 +291,39 @@ describe("native upload finalizer integrity", () => {
     await expect(finalizer.prepareBufferedPublication({
       upload: photo, frames: [png.subarray(0, 10)], assertOwnership: async () => {},
     })).rejects.toBeInstanceOf(UploadIntegrityError)
+  })
+
+  test("republishes a staged GPS-tagged photo without its location metadata", async () => {
+    const jpeg = Uint8Array.from(await sharp({
+      create: { width: 120, height: 80, channels: 3, background: { r: 10, g: 20, b: 30 } },
+    })
+      .withMetadata({ orientation: 6 })
+      .withExifMerge({ IFD3: { GPSLatitudeRef: "N", GPSLatitude: "37/1 46/1 30/1" } })
+      .jpeg()
+      .toBuffer())
+    const photo = {
+      ...upload, uploadId: Buffer.alloc(16), kind: "photo", fileName: "located.jpg", mimeType: "image/jpeg",
+      byteCount: BigInt(jpeg.length), sha256: createHash("sha256").update(jpeg).digest(),
+    } as InlineUploadRecord
+    const stored: { bytes: Buffer; path: string | undefined }[] = []
+    const finalizer = new UploadMediaFinalizer(unusedStore, async () => {}, async (file, fileType, metadata, context, identity) => {
+      stored.push({ bytes: Buffer.from(await file.arrayBuffer()), path: identity?.path })
+      return prepareFileObjectRecord(file.size, fileType, metadata, context, identity)
+    })
+
+    // The buffered frames were already stored verbatim; the clean copy must replace them.
+    const publication = await finalizer.prepareBufferedPublication({
+      upload: photo,
+      frames: [jpeg],
+      assertOwnership: async () => {},
+    })
+
+    expect(stored).toHaveLength(1)
+    expect(stored[0]?.path).toBe(publication.file.path)
+    const header = await sharp(stored[0]!.bytes).metadata()
+    expect(header.exif).toBeUndefined()
+    expect({ width: header.width, height: header.height }).toEqual({ width: 80, height: 120 })
+    expect(publication.file.record.fileSize).toBe(stored[0]!.bytes.length)
+    expect(publication.media).toMatchObject({ kind: "photo", width: 80, height: 120, format: "jpeg" })
   })
 })

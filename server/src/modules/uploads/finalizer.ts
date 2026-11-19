@@ -19,6 +19,7 @@ import {
   getPhotoMetadataAndValidate,
   getVideoMetadataAndValidate,
   getVoiceMetadataAndValidate,
+  stripPhotoMetadata,
 } from "@in/server/modules/files/metadata"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
@@ -143,6 +144,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
       if (!r2) throw new Error("R2 is not initialized")
       await r2.file(key).delete()
     },
+    private readonly storeFileObject: typeof uploadFileObject = uploadFileObject,
   ) {}
 
   async preparePublication(input: {
@@ -355,7 +357,12 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         if (metadata.mimeType !== "image/jpeg" && metadata.mimeType !== "image/png") {
           throw new UploadInvalidMediaError()
         }
-        const stripped = await generateStrippedThumbnail(file).catch((error) => {
+        // Camera and location metadata never reach the published object. A
+        // rewritten photo replaces any staged object at the publication key,
+        // which is the same key the staged upload used.
+        const sanitized = await stripPhotoMetadata(file, metadata.mimeType)
+        const photo = sanitized.file
+        const stripped = await generateStrippedThumbnail(photo).catch((error) => {
           log.warn("Failed to generate stripped thumbnail for native upload", {
             error,
             userId: upload.userId,
@@ -364,7 +371,14 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         })
         const encryptedStripped = stripped ? encryptBinary(stripped.bytes) : null
         return {
-          file: await this.#prepareFileObject(file, FileTypes.PHOTO, metadata, upload, signal, alreadyStored),
+          file: await this.#prepareFileObject(
+            photo,
+            FileTypes.PHOTO,
+            metadata,
+            upload,
+            signal,
+            alreadyStored && !sanitized.rewritten,
+          ),
           media: {
             kind: "photo",
             format: metadata.mimeType === "image/jpeg" ? "jpeg" : "png",
@@ -452,7 +466,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     const identity = { fileUniqueId, path }
     const prepared = alreadyStored
       ? prepareFileObjectRecord(file.size, fileType, metadata, { userId: upload.userId }, identity)
-      : await uploadFileObject(file, fileType, metadata, { userId: upload.userId }, identity, signal)
+      : await this.storeFileObject(file, fileType, metadata, { userId: upload.userId }, identity, signal)
     return {
       record: prepared.dbFile,
       path,

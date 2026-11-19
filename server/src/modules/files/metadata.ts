@@ -6,6 +6,7 @@ import {
 } from "@in/server/modules/files/voiceMime"
 import sharp from "sharp"
 import { MEDIA_UPLOAD_MAX_BYTES } from "./limits"
+import { toArrayBufferBackedBytes } from "@in/server/utils/arrayBuffer"
 
 export { MEDIA_UPLOAD_MAX_BYTES } from "./limits"
 
@@ -15,6 +16,13 @@ const validPhotoExtensions = ["jpg", "jpeg", "png", "gif", "webp"]
 const maxFileSize = MEDIA_UPLOAD_MAX_BYTES.photo
 const maxPhotoDimensionSum = 15_000
 const maxPhotoAspectRatio = 20
+/**
+ * Decode bound for every pipeline that reads an uploaded photo: the largest
+ * image the dimension-sum limit admits (a square at the limit, 56.25 MP).
+ * sharp's own default is 268 MP.
+ */
+export const PHOTO_MAX_INPUT_PIXELS = (maxPhotoDimensionSum / 2) ** 2
+const photoTooLargeDescription = "This image is too large to send as a photo. Send it as a file instead."
 
 // Get the width and height of a photo and validate the dimensions
 export const getPhotoMetadataAndValidate = async (
@@ -55,20 +63,23 @@ export const getPhotoMetadataAndValidate = async (
   let width: number | undefined
   let height: number | undefined
 
-  // Get original metadata including orientation
+  // Read dimensions and orientation from the header only; nothing here
+  // decodes pixels.
   try {
-    const pipeline = sharp(await file.arrayBuffer())
-    const originalMetadata = await pipeline.metadata()
+    const originalMetadata = await sharp(await file.arrayBuffer(), {
+      limitInputPixels: PHOTO_MAX_INPUT_PIXELS,
+    }).metadata()
 
     // Swap dimensions if needed based on EXIF orientation
     const shouldSwap =
       originalMetadata.orientation && originalMetadata.orientation >= 5 && originalMetadata.orientation <= 8
     width = shouldSwap ? originalMetadata.height : originalMetadata.width
     height = shouldSwap ? originalMetadata.width : originalMetadata.height
-
-    // Continue processing with auto-orientation
-    await pipeline.rotate().toBuffer() // Ensures image data is properly oriented
   } catch (error) {
+    if (isPixelLimitError(error)) {
+      log.warn("Rejecting photo over the decode pixel limit", { fileName, fileSize: size, mimeType })
+      throw photoDimensionsError(photoTooLargeDescription)
+    }
     log.error("Photo metadata extraction failed", {
       error,
       fileName,
@@ -91,7 +102,7 @@ export const getPhotoMetadataAndValidate = async (
       height,
       maxPhotoDimensionSum,
     })
-    throw photoDimensionsError("This image is too large to send as a photo. Send it as a file instead.")
+    throw photoDimensionsError(photoTooLargeDescription)
   }
 
   const ratio = Math.max(width / height, height / width)
@@ -108,6 +119,44 @@ export const getPhotoMetadataAndValidate = async (
 
   return { width, height, mimeType, fileName, extension }
 }
+
+/**
+ * Removes EXIF, XMP, IPTC and text metadata (camera, GPS location) from a
+ * validated JPEG or PNG before it is stored. EXIF orientation is applied to
+ * the pixels first, so the photo stays upright and keeps the oriented
+ * dimensions `getPhotoMetadataAndValidate` reported; the ICC profile is kept.
+ * Photos without such metadata are returned unchanged, without decoding.
+ */
+export const stripPhotoMetadata = async (file: File, mimeType: string): Promise<{ file: File; rewritten: boolean }> => {
+  if (mimeType !== "image/jpeg" && mimeType !== "image/png") return { file, rewritten: false }
+
+  try {
+    const input = await file.arrayBuffer()
+    const header = await sharp(input, { limitInputPixels: PHOTO_MAX_INPUT_PIXELS }).metadata()
+    const carriesMetadata = header.exif !== undefined
+      || header.xmp !== undefined
+      || header.iptc !== undefined
+      || (header.comments?.length ?? 0) > 0
+    if (!carriesMetadata) return { file, rewritten: false }
+
+    // sharp writes no input metadata unless asked; only the ICC profile is kept.
+    const pipeline = sharp(input, { limitInputPixels: PHOTO_MAX_INPUT_PIXELS }).rotate().keepIccProfile()
+    const output = mimeType === "image/jpeg"
+      ? await pipeline.jpeg({ quality: 92 }).toBuffer()
+      : await pipeline.png().toBuffer()
+    return {
+      file: new File([toArrayBufferBackedBytes(output)], file.name, { type: mimeType }),
+      rewritten: true,
+    }
+  } catch (error) {
+    if (isPixelLimitError(error)) throw photoDimensionsError(photoTooLargeDescription)
+    log.error("Photo metadata stripping failed", { error, fileSize: file.size, mimeType })
+    throw new InlineError(ApiError.PHOTO_INVALID_TYPE)
+  }
+}
+
+const isPixelLimitError = (error: unknown): boolean =>
+  error instanceof Error && error.message.includes("exceeds pixel limit")
 
 const validVideoMimeTypes = ["video/mp4"]
 const validVideoExtensions = ["mp4"]
