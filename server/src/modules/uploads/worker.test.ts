@@ -197,6 +197,57 @@ class PuttingMultipartStore extends MemoryMultipartStore {
   }
 }
 
+/** Holds every final-object PUT until released; the first `failures` PUTs fail. */
+class GatedPuttingMultipartStore extends PuttingMultipartStore {
+  attempts = 0
+  #release!: () => void
+  readonly released = new Promise<void>((resolve) => { this.#release = resolve })
+
+  constructor(private readonly failures = 0, private readonly gated = false) {
+    super()
+  }
+
+  release(): void {
+    this.#release()
+  }
+
+  override async put(input: { key: string; bytes: Uint8Array }): Promise<{ etag: string }> {
+    this.attempts += 1
+    if (this.attempts <= this.failures) throw new MultipartStorageUnavailableError()
+    if (this.gated) await this.released
+    return await super.put(input)
+  }
+}
+
+/** Holds staging writes until released. */
+class GatedPartStore extends BatchingPartStore {
+  writes = 0
+  #release!: () => void
+  readonly released = new Promise<void>((resolve) => { this.#release = resolve })
+
+  release(): void {
+    this.#release()
+  }
+
+  override async put(input: Parameters<MemoryPartStore["put"]>[0]): Promise<string> {
+    this.writes += 1
+    await this.released
+    return await super.put(input)
+  }
+}
+
+class CountingRenewRepository extends InlineUploadRepository {
+  renewCalls = 0
+
+  override async renew(
+    input: Parameters<InlineUploadRepository["renew"]>[0],
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    this.renewCalls += 1
+    return await super.renew(input, signal)
+  }
+}
+
 class LostInstallResponseRepository extends InlineUploadRepository {
   #loseResponse = true
 
@@ -717,6 +768,8 @@ describe("native upload multipart worker", () => {
     const worker = createWorker(repository, staging, multipart, finalizer, {
       concurrency: 1,
       leaseRenewTimeoutMs: 10,
+      // Every ownership check goes to the database.
+      freshLeaseMs: 0,
       pollIntervalMs: 20,
     })
     worker.start()
@@ -862,6 +915,7 @@ describe("native upload multipart worker", () => {
     finalizerFor: (body: Uint8Array) => MediaUploadFinalizer
     body: Uint8Array
     inline?: boolean
+    early?: boolean
     multipart?: MemoryMultipartStore
     repository?: InlineUploadRepository
   }) => {
@@ -876,7 +930,10 @@ describe("native upload multipart worker", () => {
     const operations = new NativeUploadOperations(repository, staging, finalizer,
       (uploadDbId, groupNumber) => worker.wake(uploadDbId, groupNumber), undefined, undefined, {
         groupBuffer: buffer,
-        finishInline: options.inline === false ? undefined : (upload, signal) => worker.processNow(upload, signal),
+        finishInline: options.inline === false
+          ? undefined
+          : (upload, signal, stored) => worker.processNow(upload, signal, stored),
+        storeEarly: options.early === false ? undefined : (upload, bytes) => worker.storeEarly(upload, bytes),
       })
     return { repository, staging, multipart, buffer, worker, operations, finalizer }
   }
@@ -1011,6 +1068,89 @@ describe("native upload multipart worker", () => {
     await expect(operations.create({ ...input, clientUploadId: new Uint8Array(16).fill(151), inlineData: body.subarray(1) },
       requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     expect((await db.select().from(inlineUploads)).length).toBe(rows)
+  })
+
+  test("writes a file sent with create to its final key alongside staging, once", async () => {
+    const user = await testUtils.createUser("native-upload-inline-early-store@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(30_000).fill(9)
+    const staging = new GatedPartStore()
+    const multipart = new GatedPuttingMultipartStore()
+    const repository = new CountingRenewRepository()
+    const { worker, operations } = pipeline({ body, staging, multipart, repository, finalizerFor: makeFinalizer })
+    worker.start()
+    const creating = operations.create({
+      clientUploadId: new Uint8Array(16).fill(152),
+      fileName: "early.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+      inlineData: body,
+    }, requestContext)
+    // The final object is written while the staging write is still running.
+    await waitFor(() => multipart.putCount === 1 && staging.writes === 1)
+    expect(staging.objects.size).toBe(0)
+    staging.release()
+    const created = await creating
+    expect(created.complete?.fileUniqueId).toBeString()
+    // The worker did not write it again, and a fresh claim needed no lease renewal.
+    expect(multipart.attempts).toBe(1)
+    const [stored] = [...multipart.objects.values()]
+    expect(Buffer.from(stored!.bytes).equals(Buffer.from(body))).toBe(true)
+    expect(repository.renewCalls).toBe(0)
+  })
+
+  test("writes the final object in the worker when the early write failed", async () => {
+    const user = await testUtils.createUser("native-upload-inline-early-store-failed@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(20_000).fill(6)
+    const multipart = new GatedPuttingMultipartStore(1)
+    const { worker, operations } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(153),
+      fileName: "early-failed.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+      inlineData: body,
+    }, requestContext)
+    expect(created.complete?.fileUniqueId).toBeString()
+    expect(multipart.attempts).toBe(2)
+    expect(multipart.putCount).toBe(1)
+    const [stored] = [...multipart.objects.values()]
+    expect(Buffer.from(stored!.bytes).equals(Buffer.from(body))).toBe(true)
+  })
+
+  test("never writes early a file that does not match its declared digest", async () => {
+    const user = await testUtils.createUser("native-upload-inline-early-store-digest@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(10_000).fill(2)
+    const multipart = new GatedPuttingMultipartStore()
+    const { worker, operations, repository } = pipeline({ body, multipart, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(154),
+      fileName: "early-digest.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(new Uint8Array(body.byteLength).fill(1)).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+      inlineData: body,
+    }, requestContext)
+    expect(created.complete).toBeUndefined()
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "failed")
+    expect(multipart.attempts).toBe(0)
+    expect(multipart.objects.size).toBe(0)
   })
 
   test("stores a ten-part upload with one PUT even after a group wake", async () => {

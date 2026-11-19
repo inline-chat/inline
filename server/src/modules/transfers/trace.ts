@@ -12,6 +12,8 @@ export type TransferCounters = {
   storagePut: number
   storageGet: number
   storageDelete: number
+  /** Wall time spent in storage writes, summed; overlapping writes each count in full. */
+  storagePutMs: number
 }
 
 type CounterScope = {
@@ -26,6 +28,7 @@ export const emptyTransferCounters = (): TransferCounters => ({
   storagePut: 0,
   storageGet: 0,
   storageDelete: 0,
+  storagePutMs: 0,
 })
 
 /** Runs `operation` with `counters` receiving every statement and storage operation it causes. */
@@ -53,6 +56,11 @@ export const recordStorageOperation = (operation: StorageOperation): void => {
     else if (operation === "get") scope.counters.storageGet += 1
     else scope.counters.storageDelete += 1
   }
+}
+
+/** Adds a finished storage write's duration to every active scope. */
+export const recordStoragePutTime = (milliseconds: number): void => {
+  for (let scope = scopes.getStore(); scope; scope = scope.parent) scope.counters.storagePutMs += milliseconds
 }
 
 export type TransferDirection = "upload" | "download"
@@ -150,6 +158,7 @@ export class TransferTraces {
           get: trace.counters.storageGet,
           delete: trace.counters.storageDelete,
         },
+        putMs: Math.round(trace.counters.storagePutMs),
         retries: trace.retries,
         outcome,
       })

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import { getR2 } from "@in/server/libs/r2"
 import { readFileBytes, FileByteLengthError } from "@in/server/modules/files/readFileBytes"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
-import { recordStorageOperation } from "@in/server/modules/transfers/trace"
+import { recordStorageOperation, recordStoragePutTime } from "@in/server/modules/transfers/trace"
 import {
   createR2S3Configuration,
   storageDeadlineSignal,
@@ -120,6 +120,7 @@ export class R2UploadPartStore implements UploadPartStore {
   }, signal?: AbortSignal): Promise<string> {
     const key = objectKey(input)
     recordStorageOperation("put")
+    const startedAt = performance.now()
     try {
       const written = await this.#writePart(
         key,
@@ -132,6 +133,8 @@ export class R2UploadPartStore implements UploadPartStore {
     } catch (cause) {
       signal?.throwIfAborted()
       throw new UploadPartStorageUnavailableError({ cause })
+    } finally {
+      recordStoragePutTime(performance.now() - startedAt)
     }
     return key
   }
