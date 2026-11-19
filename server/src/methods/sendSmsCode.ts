@@ -1,7 +1,7 @@
 import { assertOtpDeliveryAllowed } from "@in/server/modules/auth/otpDeliveryBudget"
 import { InlineError } from "@in/server/types/errors"
 import { Type } from "@sinclair/typebox"
-import type { Static } from "elysia"
+import type { Static } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"

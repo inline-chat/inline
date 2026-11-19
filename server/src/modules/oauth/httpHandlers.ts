@@ -1,5 +1,5 @@
 import { OauthModel, type OauthAuthRequest } from "@in/server/db/models/oauth"
-import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
+import type { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { oauthConfig } from "@in/server/modules/oauth/config"
 import {
   MCP_SUPPORTED_SCOPES,
@@ -93,10 +93,6 @@ import { captureSignupReferral } from "@in/server/modules/auth/signupAttribution
 import { handler as updateProfile } from "@in/server/methods/updateProfile"
 
 const config = oauthConfig()
-// TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
-// after the post-cutover differential window. Production injects a separately
-// scoped limiter through its Effect Layer.
-const legacyRateLimiter = new InMemoryRateLimiter()
 const PROVIDER_CLEANUP_INTERVAL_MS = 60_000
 const PROVIDER_CLEANUP_BATCH_SIZE = 250
 const PROVIDER_EMAIL_ATTEMPT_COOLDOWN = { max: 1, windowMs: 45_000 } as const
@@ -589,8 +585,8 @@ export async function handleAuthorizeContinue(req: Request): Promise<Response> {
 export async function handleRegister(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -711,8 +707,8 @@ export async function handleAuthorizeGet(url: URL, referrer?: string | null): Pr
 export async function handleAuthorizeSendEmailCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -828,8 +824,8 @@ export async function handleAuthorizeSendEmailCode(
 export async function handleAuthorizeVerifyEmailCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -918,8 +914,8 @@ export async function handleAuthorizeVerifyEmailCode(
 export async function handleAuthorizeSendSmsCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
   sendCode: typeof sendSmsCodeHandler = sendSmsCodeHandler,
 ): Promise<Response> {
   const nowMs = Date.now()
@@ -1024,8 +1020,8 @@ export async function handleAuthorizeSendSmsCode(
 export async function handleAuthorizeVerifySmsCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1268,8 +1264,8 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
 export async function handleToken(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1479,8 +1475,8 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
 
 export async function handleProviderStart(
   request: Request,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1570,8 +1566,8 @@ export async function handleProviderStart(
 
 export async function handleNativeAppleStart(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const endpointRate = rateLimiter.consume({
@@ -1633,8 +1629,8 @@ export async function handleNativeAppleStart(
 
 export async function handleNativeAppleComplete(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const callbackRate = rateLimiter.consume({
     key: `oauth:endpoint:provider-native-apple-complete:${resolveClientIp(clientIpOverride)}`,
@@ -1716,8 +1712,8 @@ async function closeProviderAttemptAfterFailure(
 
 export async function handleNativeAppleContinueInvite(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1778,9 +1774,9 @@ export async function handleNativeAppleContinueInvite(
 export async function handleProviderCallback(
   provider: "google" | "apple",
   request: Request,
-  body?: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  body: unknown,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const callbackRate = rateLimiter.consume({
@@ -1862,8 +1858,8 @@ export async function handleProviderCallback(
 
 export async function handleProviderContinueInvite(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1899,8 +1895,8 @@ export async function handleProviderContinueInvite(
 
 export async function handleProviderSendEmailCode(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1981,8 +1977,8 @@ export async function handleProviderSendEmailCode(
 
 export async function handleProviderVerifyEmailCode(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -2070,8 +2066,8 @@ function isRetryableProviderEmailProofFailure(cause: unknown): boolean {
 
 export async function handleProviderRedeem(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const redeemRate = rateLimiter.consume({

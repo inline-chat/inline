@@ -13,7 +13,7 @@ import {
 } from "@in/server/api-types"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
-import type { Static } from "elysia"
+import type { Static } from "@sinclair/typebox"
 import { Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { and, eq } from "drizzle-orm"

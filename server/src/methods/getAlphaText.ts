@@ -1,7 +1,7 @@
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
-import type { Static } from "elysia"
+import type { Static } from "@sinclair/typebox"
 import { InlineError } from "../types/errors"
 
 export const Input = Type.Object({

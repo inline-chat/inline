@@ -14,9 +14,6 @@ import {
   HttpServer,
 } from "effect/unstable/http"
 import {
-  admin as legacyAdmin,
-} from "./admin"
-import {
   AdminApiGroup,
 } from "./admin.effect"
 import {
@@ -35,7 +32,7 @@ import {
   makePlatformApiBase,
 } from "../core/http/openApi"
 
-interface AdminParityCase {
+interface AdminGuardCase {
   readonly method: "GET" | "POST"
   readonly path: string
   readonly body?: string | undefined
@@ -43,7 +40,7 @@ interface AdminParityCase {
   readonly text: string
   readonly contentType:
     | "json"
-    | "legacy-empty-effect-text"
+    | "text"
     | "empty"
 }
 
@@ -54,20 +51,20 @@ const unauthorized = JSON.stringify({
 
 const malformed = (
   path: string,
-): AdminParityCase => ({
+): AdminGuardCase => ({
   method: "POST",
   path,
   body: "{",
   status: 400,
   text: "Bad Request",
-  contentType: "legacy-empty-effect-text",
+  contentType: "text",
 })
 
 const guarded = (
   method: "GET" | "POST",
   path: string,
   body?: Record<string, unknown>,
-): AdminParityCase => ({
+): AdminGuardCase => ({
   method,
   path,
   ...(body === undefined
@@ -78,7 +75,7 @@ const guarded = (
   contentType: "json",
 })
 
-const cases: readonly AdminParityCase[] = [
+const cases: readonly AdminGuardCase[] = [
   malformed("/admin/auth/send-email-code"),
   malformed("/admin/auth/verify-email-code"),
   malformed("/admin/auth/login"),
@@ -169,7 +166,7 @@ const webHandler = HttpRouter.toWebHandler(
 
 afterAll(() => webHandler.dispose())
 
-const replacementHandle = (request: Request) =>
+const handle = (request: Request) =>
   webHandler.handler(
     request,
     Context.empty() as unknown as Context.Context<unknown>,
@@ -180,95 +177,37 @@ const mediaType = (response: Response) =>
     .get("content-type")
     ?.split(";", 1)[0] ?? null
 
-describe("Admin legacy/Effect differential", () => {
-  it("matches guarded status, body, meaningful headers, and cookies on all 23 routes", async () => {
+describe("Admin route guards", () => {
+  it("rejects malformed and unauthenticated requests with exact status, body, and headers on all 23 routes", async () => {
     expect(cases).toHaveLength(23)
 
     for (const testCase of cases) {
-      const request = () =>
-        new Request(
-          `http://inline.test${testCase.path}`,
-          {
-            method: testCase.method,
-            headers: {
-              origin: "https://admin.inline.chat",
-              "user-agent":
-                "admin-differential-test",
-              ...(testCase.body === undefined
-                ? {}
-                : {
-                    "content-type":
-                      "application/json",
-                  }),
-            },
-            body: testCase.body,
+      const response = await handle(
+        new Request(`http://inline.test${testCase.path}`, {
+          method: testCase.method,
+          headers: {
+            origin: "https://admin.inline.chat",
+            "user-agent": "admin-guard-test",
+            ...(testCase.body === undefined ? {} : { "content-type": "application/json" }),
           },
-        )
-      const legacy =
-        await legacyAdmin.handle(request())
-      const replacement =
-        await replacementHandle(request())
+          body: testCase.body,
+        }),
+      )
 
       expect({
         route: `${testCase.method} ${testCase.path}`,
-        legacy: {
-          status: legacy.status,
-          text: await legacy.text(),
-        },
-        replacement: {
-          status: replacement.status,
-          text: await replacement.text(),
-        },
-      }).toMatchObject({
-        legacy: {
-          status: testCase.status,
-          text: testCase.text,
-        },
-        replacement: {
-          status: testCase.status,
-          text: testCase.text,
-        },
+        status: response.status,
+        text: await response.text(),
+      }).toEqual({
+        route: `${testCase.method} ${testCase.path}`,
+        status: testCase.status,
+        text: testCase.text,
       })
-
-      if (testCase.contentType === "json") {
-        expect({
-          legacy: mediaType(legacy),
-          replacement: mediaType(replacement),
-        }).toEqual({
-          legacy: "application/json",
-          replacement: "application/json",
-        })
-      } else if (
-        testCase.contentType === "empty"
-      ) {
-        expect({
-          legacy: mediaType(legacy),
-          replacement: mediaType(replacement),
-        }).toEqual({
-          legacy: null,
-          replacement: null,
-        })
-      } else {
-        // Equivalent normalization: the legacy plain-text body omitted its
-        // media type; Effect declares that same body as text/plain.
-        expect({
-          legacy: mediaType(legacy),
-          replacement: mediaType(replacement),
-        }).toEqual({
-          legacy: null,
-          replacement: "text/plain",
-        })
-      }
-
-      for (const header of [
-        "set-cookie",
-        "cache-control",
-      ]) {
-        expect(legacy.headers.get(header)).toBeNull()
-        expect(
-          replacement.headers.get(header),
-        ).toBeNull()
-      }
+      expect(mediaType(response)).toBe(
+        testCase.contentType === "json" ? "application/json" : testCase.contentType === "empty" ? null : "text/plain",
+      )
+      expect(response.headers.get("set-cookie")).toBeNull()
+      expect(response.headers.get("cache-control")).toBeNull()
     }
   })
 })

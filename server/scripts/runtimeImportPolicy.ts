@@ -1,6 +1,6 @@
 /**
- * Packages that may remain in the legacy oracle and differential tests but
- * must never enter the deployed server bundle.
+ * Packages that may remain in tests and the retained Elysia realtime test
+ * plugin but must never enter the deployed server bundle.
  */
 export const FORBIDDEN_PRODUCTION_RUNTIME_IMPORT_PATTERN =
   String.raw`^(?:@elysiajs/|elysia(?:$|[-/]))`

@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import { mkdir, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { app } from "../../src/legacyServer"
 import { makeCandidateHttpApplication } from "../../src/core/http/candidateApplication"
 import { gridTranscriptionWorkerPaths } from "../../src/core/http/gridTranscription.effect"
 import { HTTP_RPC_PATH } from "../../src/realtime/httpRpc"
@@ -10,7 +9,6 @@ import {
   type CoreHttpServerHandle,
 } from "../../src/core/http/host"
 
-const manifestPath = resolve(import.meta.dir, "../../src/__tests__/contracts/fixtures/route-manifest.json")
 const candidateManifestPath = resolve(
   import.meta.dir,
   "../../src/__tests__/contracts/fixtures/effect-route-manifest.json",
@@ -79,20 +77,6 @@ const serializeRoutes = (
     sha256,
   }
 }
-
-const legacyRoutes =
-  (app.routes as ReadonlyArray<Route>)
-  .map(({ method, path }) => `${String(method)}\t${path}`)
-  .map((line) => {
-    const separator =
-      line.indexOf("\t")
-    return {
-      method: line.slice(0, separator),
-      path: line.slice(separator + 1),
-    }
-  })
-const legacyManifest =
-  serializeRoutes(legacyRoutes)
 
 const openApiMethods = new Set([
   "delete",
@@ -170,80 +154,6 @@ const candidateRawRoutes: ReadonlyArray<Route> = [
   { method: "WS", path: "/realtime" },
 ]
 
-const normalizeLegacyPath = (
-  path: string,
-): ReadonlyArray<string> => {
-  const optional =
-    path.match(/:([A-Za-z0-9_]+)\?/)
-  if (optional?.[1] !== undefined) {
-    return [
-      path.replace(
-        `/:${optional[1]}?`,
-        "",
-      ),
-      path.replace(
-        `:${optional[1]}?`,
-        `{${optional[1]}}`,
-      ),
-    ]
-  }
-  return [
-    path.replace(
-      /:([A-Za-z0-9_]+)/g,
-      "{$1}",
-    ),
-  ]
-}
-
-const comparableLegacyRoutes =
-  legacyRoutes.flatMap((route) =>
-    route.method === "ALL" ||
-      route.method === "OPTIONS"
-      ? []
-      : normalizeLegacyPath(
-          route.path,
-        ).map((path) => ({
-          method: route.method,
-          path,
-        }))
-  )
-
-const intentionalCandidateOnly =
-  new Set([
-    ...gridTranscriptionWorkerPaths.map((path) => `POST\t${path}`),
-    `POST\t${HTTP_RPC_PATH}`,
-    "DELETE\t/admin/reserved-usernames",
-    "GET\t/",
-    "GET\t/admin/email-campaigns",
-    "GET\t/admin/email-provider-status",
-    "GET\t/admin/reserved-usernames",
-    "GET\t/admin/server-config",
-    "GET\t/email/unsubscribe/{token}",
-    "GET\t/health",
-    "GET\t/healthz",
-    "GET\t/livez",
-    "GET\t/readyz",
-    "POST\t/admin/auth/dev-login",
-    "POST\t/admin/email-campaigns",
-    "POST\t/admin/email-campaigns/preview",
-    "POST\t/admin/email-campaigns/{id}/pause",
-    "POST\t/admin/email-campaigns/{id}/send",
-    "POST\t/admin/email-campaigns/{id}/test",
-    "POST\t/admin/email-provider-test",
-    "POST\t/admin/reserved-usernames",
-    "POST\t/bot/deleteMessages",
-    "POST\t/bot/editMessageActions",
-    "POST\t/bot/forwardMessages",
-    "POST\t/bot/getSpace",
-    "POST\t/bot{token}/deleteMessages",
-    "POST\t/bot{token}/editMessageActions",
-    "POST\t/bot{token}/forwardMessages",
-    "POST\t/bot{token}/getSpace",
-    "POST\t/email/unsubscribe/{token}",
-    "POST\t/v1/space-join/resolve",
-    "PUT\t/admin/server-config",
-  ])
-
 let coreHandle:
   | CoreHttpServerHandle
   | undefined
@@ -310,89 +220,23 @@ try {
         ).values(),
       ),
     )
-  const candidateSet =
-    new Set(
-      routeLines(candidateRoutes),
-    )
-  const legacySet =
-    new Set(
-      routeLines(
-        comparableLegacyRoutes,
-      ),
-    )
-  const missing =
-    [...legacySet].filter(
-      (route) =>
-        !candidateSet.has(route),
-    )
-  const unexpected =
-    [...candidateSet].filter(
-      (route) =>
-        !legacySet.has(route) &&
-        !intentionalCandidateOnly.has(
-          route,
-        ),
-    )
-  if (
-    missing.length > 0 ||
-    unexpected.length > 0
-  ) {
-    throw new Error(
-      [
-        "Candidate served-contract route parity failed.",
-        missing.length > 0
-          ? `Missing:\n${missing.join("\n")}`
-          : "",
-        unexpected.length > 0
-          ? `Unexpected:\n${unexpected.join("\n")}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    )
-  }
-
   if (write) {
     await mkdir(
-      dirname(manifestPath),
+      dirname(candidateManifestPath),
       { recursive: true },
     )
-    await Promise.all([
-      Bun.write(
-        manifestPath,
-        legacyManifest.serialized,
-      ),
-      Bun.write(
-        candidateManifestPath,
-        candidateManifest.serialized,
-      ),
-    ])
-    console.log(
-      `Wrote ${legacyManifest.count} legacy routes to ${manifestPath}`,
+    await Bun.write(
+      candidateManifestPath,
+      candidateManifest.serialized,
     )
     console.log(
       `Wrote ${candidateManifest.count} Effect routes to ${candidateManifestPath}`,
     )
   } else {
-    const [expectedLegacy, expectedCandidate] =
-      await Promise.all([
-        readFile(
-          manifestPath,
-          "utf8",
-        ),
-        readFile(
-          candidateManifestPath,
-          "utf8",
-        ),
-      ])
-    if (
-      expectedLegacy !==
-      legacyManifest.serialized
-    ) {
-      throw new Error(
-        `Legacy route manifest drift: run 'bun run contracts:routes:update' and review ${manifestPath}`,
-      )
-    }
+    const expectedCandidate = await readFile(
+      candidateManifestPath,
+      "utf8",
+    )
     if (
       expectedCandidate !==
       candidateManifest.serialized
@@ -402,10 +246,7 @@ try {
       )
     }
     console.log(
-      `Legacy route manifest matches ${legacyManifest.count} routes (${legacyManifest.sha256})`,
-    )
-    console.log(
-      `Effect served-contract manifest matches ${candidateManifest.count} routes (${candidateManifest.sha256}); contract coverage matches the legacy GET/POST/WS surface.`,
+      `Effect served-contract manifest matches ${candidateManifest.count} routes (${candidateManifest.sha256}).`,
     )
   }
 } finally {

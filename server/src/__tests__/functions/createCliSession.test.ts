@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm"
 import { db, schema } from "@in/server/db"
 import { createCliSession } from "@in/server/functions/user.createCliSession"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { getUserIdFromToken } from "@in/server/controllers/plugins"
+import { getUserIdFromToken } from "@in/server/modules/auth/sessionAuthentication"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 describe("createCliSession", () => {

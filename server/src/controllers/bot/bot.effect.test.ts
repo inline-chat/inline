@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@effect/vitest"
-import { readFileSync } from "node:fs"
 import {
   Context,
   Effect,
@@ -1655,63 +1654,6 @@ describe("Effect Bot routes", () => {
     expect(JSON.stringify(getChatHistory)).not.toContain(
       "(?:[Ee]",
     )
-  })
-
-  it("matches the checked-in legacy oracle's Bot path and method coverage", () => {
-    const legacy = JSON.parse(
-      readFileSync(
-        new URL(
-          "../../__tests__/contracts/fixtures/bot-openapi.json",
-          import.meta.url,
-        ),
-        "utf8",
-      ),
-    ) as {
-      readonly paths: Readonly<
-        Record<string, Readonly<Record<string, unknown>>>
-      >
-    }
-    const effect = OpenApi.fromApi(
-      makeBotApiBase("https://api.inline.chat").add(
-        BotApiGroup,
-      ),
-    )
-    const normalizePath = (path: string) =>
-      path.replace("{token}", ":token")
-    const methodsByPath = (
-      paths: Readonly<
-        Record<string, Readonly<Record<string, unknown>>>
-      >,
-    ) =>
-      Object.fromEntries(
-        Object.entries(paths)
-          .filter(([path]) => path.startsWith("/bot"))
-          .map(([path, methods]) => [
-            normalizePath(path),
-            Object.keys(methods).sort(),
-          ] as const)
-          .sort(([left], [right]) =>
-            left.localeCompare(right),
-          ),
-      )
-
-    const effectMethods = methodsByPath(effect.paths)
-    const legacyMethods = methodsByPath(legacy.paths)
-    for (const [path, methods] of Object.entries(legacyMethods)) {
-      expect(effectMethods[path]).toEqual(methods)
-    }
-    expect(
-      Object.keys(effectMethods).filter((path) => !(path in legacyMethods)),
-    ).toEqual([
-      "/bot:token/deleteMessages",
-      "/bot:token/editMessageActions",
-      "/bot:token/forwardMessages",
-      "/bot:token/getSpace",
-      "/bot/deleteMessages",
-      "/bot/editMessageActions",
-      "/bot/forwardMessages",
-      "/bot/getSpace",
-    ])
   })
 
   it("decodes getContacts queries and keeps mention adds on sendMessage", async () => {

@@ -79,46 +79,25 @@ const makeLiveHandler = async () => {
 }
 
 describe(
-  "AuxiliaryRouteGroupLive compatibility",
+  "AuxiliaryRouteGroupLive",
   () => {
-    it("matches root and health behavior through production adapters", async () => {
-      const [
-        { default: Elysia },
-        { root },
-        { health },
-      ] = await Promise.all([
-        import("elysia"),
-        import("./root"),
-        import("./health"),
-      ])
-      const legacy = new Elysia()
-        .use(root)
-        .use(health)
+    it("serves root and health through production adapters", async () => {
       const live = await makeLiveHandler()
 
       try {
-        const [legacyRoot, effectRoot] =
-          await Promise.all([
-            legacy.handle(
-              new Request("http://localhost/"),
-            ),
-            live.handler(
-              new Request("http://localhost/"),
-            ),
-          ])
-        expect(effectRoot.status).toBe(
-          legacyRoot.status,
+        const effectRoot = await live.handler(
+          new Request("http://localhost/"),
         )
+        expect(effectRoot.status).toBe(200)
         expect(
           effectRoot.headers.get("content-type"),
-        ).toBe(
-          legacyRoot.headers.get("content-type"),
-        )
+        ).toBe("text/html; charset=utf8")
         const effectRootBody =
           await effectRoot.text()
-        const legacyRootBody =
-          await legacyRoot.text()
-        expect(effectRootBody).toBe(legacyRootBody)
+        // The uptime monitor matches this marker and the page's exact layout.
+        expect(effectRootBody).toContain(
+          "inline server is running",
+        )
         expect(effectRootBody).toContain(
           "              padding: 0; \n",
         )
@@ -131,205 +110,110 @@ describe(
           "/healthz",
           "/livez",
         ]) {
-          const [legacyHealth, effectHealth] =
-            await Promise.all([
-              legacy.handle(
-                new Request(
-                  `http://localhost${path}`,
-                ),
-              ),
-              live.handler(
-                new Request(
-                  `http://localhost${path}`,
-                ),
-              ),
-            ])
-          const legacyBody =
-            await legacyHealth.json()
-          const effectBody =
-            await effectHealth.json()
-
-          expect(effectHealth.status).toBe(
-            legacyHealth.status,
+          const effectHealth = await live.handler(
+            new Request(
+              `http://localhost${path}`,
+            ),
           )
-          expect(effectBody).toMatchObject({
-            ok: legacyBody.ok,
-            status: legacyBody.status,
-            draining: legacyBody.draining,
+          expect(effectHealth.status).toBe(200)
+          expect(await effectHealth.json()).toMatchObject({
+            ok: true,
+            status: "ok",
+            draining: false,
             checks: {
-              lifecycle:
-                legacyBody.checks.lifecycle,
+              lifecycle: { ok: true },
             },
           })
         }
 
-        const [legacyReadiness, effectReadiness] =
-          await Promise.all([
-            legacy.handle(
-              new Request(
-                "http://localhost/readyz",
-              ),
-            ),
-            live.handler(
-              new Request(
-                "http://localhost/readyz",
-              ),
-            ),
-          ])
-        const legacyReadinessBody =
-          await legacyReadiness.json()
+        const effectReadiness = await live.handler(
+          new Request(
+            "http://localhost/readyz",
+          ),
+        )
         const effectReadinessBody =
           await effectReadiness.json()
 
-        expect(effectReadiness.status).toBe(
-          legacyReadiness.status,
-        )
         expect(effectReadiness.status).toBe(200)
         expect(effectReadinessBody).toMatchObject({
-          ok: legacyReadinessBody.ok,
-          // The production adapter now reports optional-broker degradation
-          // without withdrawing readiness; liveness compatibility is unchanged.
+          ok: true,
+          // The production adapter reports optional-broker degradation
+          // without withdrawing readiness.
           status: "degraded",
-          draining: legacyReadinessBody.draining,
+          draining: false,
           checks: {
             broker: { ok: false, error: "broker_unavailable" },
-            database: {
-              ok:
-                legacyReadinessBody.checks.database.ok,
-            },
-            lifecycle:
-              legacyReadinessBody.checks.lifecycle,
+            database: { ok: true },
+            lifecycle: { ok: true },
           },
         })
         expect(
           effectReadinessBody.checks.database.error,
-        ).toBe(
-          legacyReadinessBody.checks.database.error,
-        )
+        ).toBeUndefined()
       } finally {
         await live.dispose()
       }
     })
 
-    it("matches legacy malformed-input and callback quirks before dependencies run", async () => {
-      const [
-        { default: Elysia },
-        { waitlist },
-        { there },
-        { media },
-        { integrationsRouter },
-      ] = await Promise.all([
-        import("elysia"),
-        import("./extra/waitlist"),
-        import("./extra/there"),
-        import("./media"),
-        import(
-          "./integrations/integrationsRouter"
-        ),
-      ])
-      const legacy = new Elysia()
-        .use(waitlist)
-        .use(there)
-        .use(media)
-        .use(integrationsRouter)
+    it("keeps the legacy malformed-input and callback responses before dependencies run", async () => {
       const live = await makeLiveHandler()
-      const requests = [
-        new Request(
-          "http://localhost/waitlist/subscribe",
-          {
+      const json = { "content-type": "application/json" }
+      const validation = (on: "body" | "query", property: string) => ({
+        status: 422,
+        contentType: "application/json",
+        json: { type: "validation", on, property },
+      })
+      const cases = [
+        {
+          request: new Request("http://localhost/waitlist/subscribe", { method: "POST", headers: json, body: "{" }),
+          expected: { status: 400, contentType: null, text: "Bad Request" },
+        },
+        {
+          request: new Request("http://localhost/waitlist/subscribe", { method: "POST", headers: json, body: "{}" }),
+          expected: validation("body", "/email"),
+        },
+        {
+          // No content type: the body is not decoded as JSON.
+          request: new Request("http://localhost/waitlist/subscribe", {
             method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: "{",
-          },
-        ),
-        new Request(
-          "http://localhost/waitlist/subscribe",
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: "{}",
-          },
-        ),
-        new Request(
-          "http://localhost/waitlist/subscribe",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              email: "not-decoded@example.com",
-            }),
-          },
-        ),
-        new Request(
-          "http://localhost/api/there/signup",
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: "{}",
-          },
-        ),
-        new Request("http://localhost/file"),
-        new Request(
-          "http://localhost/file?id=INPzxcvbnMASDFGHJKLQW12&exp=1&sig=bad",
-        ),
-        new Request(
-          "http://localhost/integrations/linear/integrate",
-        ),
-        new Request(
-          "http://localhost/integrations/notion/callback",
-        ),
-      ]
+            body: JSON.stringify({ email: "not-decoded@example.com" }),
+          }),
+          expected: validation("body", "root"),
+        },
+        {
+          request: new Request("http://localhost/api/there/signup", { method: "POST", headers: json, body: "{}" }),
+          expected: validation("body", "/email"),
+        },
+        {
+          request: new Request("http://localhost/file"),
+          expected: validation("query", "/id"),
+        },
+        {
+          request: new Request("http://localhost/file?id=INPzxcvbnMASDFGHJKLQW12&exp=1&sig=bad"),
+          expected: { status: 403, contentType: null, text: "forbidden" },
+        },
+        {
+          request: new Request("http://localhost/integrations/linear/integrate"),
+          expected: validation("query", "/token"),
+        },
+        {
+          // OAuth error callbacks may omit the code, so the empty query first
+          // reports the still-required state.
+          request: new Request("http://localhost/integrations/notion/callback"),
+          expected: validation("query", "/state"),
+        },
+      ] as const
 
       try {
-        for (const request of requests) {
-          const [legacyResponse, effectResponse] =
-            await Promise.all([
-              legacy.handle(request.clone()),
-              live.handler(request),
-            ])
-
-          expect(effectResponse.status).toBe(
-            legacyResponse.status,
-          )
-          expect(
-            effectResponse.headers.get(
-              "content-type",
-            ),
-          ).toBe(
-            legacyResponse.headers.get(
-              "content-type",
-            ),
-          )
-          const effectBody =
-            await effectResponse.text()
-          const legacyBody =
-            await legacyResponse.text()
-          if (
-            new URL(request.url).pathname ===
-              "/integrations/notion/callback"
-          ) {
-            // The replacement intentionally accepts OAuth error callbacks
-            // without a code, so an entirely empty query first reports the
-            // still-required state. The legacy oracle rejects code first.
-            expect(
-              JSON.parse(effectBody),
-            ).toMatchObject({
-              property: "/state",
-            })
-            expect(
-              JSON.parse(legacyBody),
-            ).toMatchObject({
-              property: "/code",
-            })
+        for (const { request, expected } of cases) {
+          const response = await live.handler(request)
+          const route = `${request.method} ${request.url}`
+          expect({ route, status: response.status }).toEqual({ route, status: expected.status })
+          expect(response.headers.get("content-type")).toBe(expected.contentType)
+          if ("json" in expected) {
+            expect(await response.json()).toMatchObject(expected.json)
           } else {
-            expect(effectBody).toBe(
-              legacyBody,
-            )
+            expect(await response.text()).toBe(expected.text)
           }
         }
 
@@ -337,34 +221,21 @@ describe(
           "linear",
           "notion",
         ] as const) {
-          const request = new Request(
-            `http://localhost/integrations/${provider}/callback?code=test-code&state=test-state`,
+          const effectResponse = await live.handler(
+            new Request(
+              `http://localhost/integrations/${provider}/callback?code=test-code&state=test-state`,
+            ),
           )
-          const [legacyResponse, effectResponse] =
-            await Promise.all([
-              legacy.handle(request.clone()),
-              live.handler(request),
-            ])
 
-          // The replacement does not redirect an unclaimed callback into an
-          // app scheme. It clears the legacy cookies and reports the expired
-          // browser session directly; valid app handoffs use claimed,
-          // single-use connector state and are covered by the route tests.
-          const effectBody =
-            await effectResponse.json()
-          expect(legacyResponse.status).toBe(302)
-          expect(effectBody).toEqual({
+          // An unclaimed callback is not redirected into an app scheme. It
+          // clears the browser cookies and reports the expired session
+          // directly; valid app handoffs use claimed, single-use connector
+          // state and are covered by the route tests.
+          expect(effectResponse.status).toBe(400)
+          expect(await effectResponse.json()).toEqual({
             error:
               "OAuth session expired or was already used",
           })
-          expect(effectResponse.status).toBe(400)
-          expect(
-            legacyResponse.headers.get(
-              "location",
-            ),
-          ).toContain(
-            `${provider}?success=false&error=missing_cookie`,
-          )
           expect(
             effectResponse.headers.get(
               "location",

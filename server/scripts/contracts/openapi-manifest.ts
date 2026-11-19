@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import { mkdir, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { app } from "../../src/legacyServer"
 import { makeCandidateHttpApplication } from "../../src/core/http/candidateApplication"
 import {
   startCoreHttpServer,
@@ -12,10 +11,8 @@ import { assertValidOpenApiDocument } from "../../src/core/http/openApiValidatio
 const write = process.argv.includes("--write")
 const fixturesDirectory = resolve(import.meta.dir, "../../src/__tests__/contracts/fixtures")
 const documents = [
-  { name: "v1-openapi", path: "/v1/reference/json", source: "legacy" },
-  { name: "bot-openapi", path: "/bot-api-reference/json", source: "legacy" },
-  { name: "effect-v1-openapi", path: "/v1/reference/json", source: "effect" },
-  { name: "effect-bot-openapi", path: "/bot-api-reference/json", source: "effect" },
+  { name: "effect-v1-openapi", path: "/v1/reference/json" },
+  { name: "effect-bot-openapi", path: "/bot-api-reference/json" },
 ] as const
 const requestedDocumentNames = new Set(
   process.argv
@@ -64,21 +61,15 @@ const effectBaseUrl = async (): Promise<string> => {
 
 try {
   for (const document of selectedDocuments) {
-    const response = document.source === "legacy"
-      ? await app.handle(
-          new Request(`http://inline.test${document.path}`),
-        )
-      : await fetch(`${await effectBaseUrl()}${document.path}`)
+    const response = await fetch(`${await effectBaseUrl()}${document.path}`)
     if (!response.ok) {
       throw new Error(
-        `${document.source} OpenAPI capture failed for ${document.path}: HTTP ${response.status}`,
+        `OpenAPI capture failed for ${document.path}: HTTP ${response.status}`,
       )
     }
 
     const body: unknown = await response.json()
-    if (document.source === "effect") {
-      assertValidOpenApiDocument(body, document.name)
-    }
+    assertValidOpenApiDocument(body, document.name)
     const serialized = `${JSON.stringify(canonicalize(body))}\n`
     const fixturePath = resolve(
       fixturesDirectory,

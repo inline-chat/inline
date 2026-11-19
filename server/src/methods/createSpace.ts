@@ -17,7 +17,7 @@ import {
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
-import type { Static } from "elysia"
+import type { Static } from "@sinclair/typebox"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { activateCommittedSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
 import {

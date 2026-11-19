@@ -6,7 +6,7 @@ import { listBots } from "../../functions/bot.listBots"
 import { deleteBot } from "../../functions/bot.deleteBot"
 import { revealBotToken } from "../../functions/bot.revealToken"
 import { rotateBotToken } from "../../functions/bot.rotateToken"
-import { getUserIdFromToken } from "../../controllers/plugins"
+import { getUserIdFromToken } from "../../modules/auth/sessionAuthentication"
 import { db, schema } from "../../db"
 import { eq } from "drizzle-orm"
 

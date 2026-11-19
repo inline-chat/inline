@@ -56,8 +56,7 @@ export interface CandidateHttpApplicationOptions {
 /**
  * Integration-owned aggregate of every accepted replacement route slice.
  *
- * `server/src/index.ts` serves this graph in production. The retained
- * `legacyServer.ts` graph is differential-test evidence only.
+ * `server/src/index.ts` serves this graph in production.
  */
 export const makeCandidateHttpApplication = ({
   apiBaseUrl = "https://api.inline.chat",

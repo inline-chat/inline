@@ -1,9 +1,9 @@
 import { Type } from "@sinclair/typebox"
-import type { Static } from "elysia"
+import type { Static } from "@sinclair/typebox"
 import { InlineError } from "@in/server/types/errors"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { InviteCodesModel, isDevInviteCode, isValidInviteCode, normalizeInviteCode } from "@in/server/db/models/inviteCodes"
-import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
+import type { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
@@ -14,9 +14,6 @@ export const Response = Type.Object({
   valid: Type.Boolean(),
 })
 
-// The Elysia oracle retains its own bounded limiter until cutover. The Effect
-// adapter injects a fresh scoped instance for the replacement listener.
-const legacyLimiter = new InMemoryRateLimiter()
 const perIpRule = { max: 20, windowMs: 10 * 60_000 }
 const perCodeRule = { max: 5, windowMs: 10 * 60_000 }
 
@@ -65,10 +62,6 @@ export const makeCheckInviteCodeHandler = (
 
     return { valid: true }
   }
-
-export const handler = makeCheckInviteCodeHandler(
-  legacyLimiter,
-)
 
 const checkRateLimit = (
   limiter: InMemoryRateLimiter,

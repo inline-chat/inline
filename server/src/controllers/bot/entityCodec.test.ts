@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { MessageEntity_Type } from "@inline-chat/protocol/core"
-import { encodeBotEntities, parseBotEntities } from "./entities"
+import { encodeBotEntities, parseBotEntities } from "./entityCodec"
 
 describe("bot entities", () => {
   test("round-trips range-only v2 styles without payload fields", () => {
