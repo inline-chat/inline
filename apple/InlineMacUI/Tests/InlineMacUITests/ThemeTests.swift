@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import MacTheme
+@testable import MacTheme
 import Testing
 
 @Suite("macOS theme palettes", .serialized)
@@ -229,6 +229,45 @@ struct ThemeTests {
           variant: .dark,
           userDefaults: defaults
         ) == ThemePalette(primary: .init(rgb: 0x623BE2), canvas: .init(rgb: 0x080808))
+      )
+    }
+  }
+
+  @Test("window surface cache follows the stored preset and overrides")
+  func windowSurfaceCacheFollowsPresetAndOverrides() {
+    withUserDefaults { defaults in
+      defaults.set(AppThemePreset.sunset.rawValue, forKey: ThemePreference.selectedPresetKey)
+      let first = Theme.cachedWindowSurfaceColor(variant: .light, userDefaults: defaults)
+      #expect(Theme.cachedWindowSurfaceColor(variant: .light, userDefaults: defaults) === first)
+      #expect(
+        ThemeColorValue(nsColor: first, appearance: ThemeAppearanceVariant.light.nsAppearance)
+          == Theme.resolvedWindowSurfaceColor(preset: .sunset, variant: .light, userDefaults: defaults)
+      )
+
+      defaults.set(AppThemePreset.system.rawValue, forKey: ThemePreference.selectedPresetKey)
+      let system = Theme.cachedWindowSurfaceColor(variant: .light, userDefaults: defaults)
+      #expect(system !== first)
+      #expect(
+        ThemeColorValue(nsColor: system, appearance: ThemeAppearanceVariant.light.nsAppearance)
+          == Theme.resolvedWindowSurfaceColor(preset: .system, variant: .light, userDefaults: defaults)
+      )
+
+      defaults.set(AppThemePreset.sunset.rawValue, forKey: ThemePreference.selectedPresetKey)
+      ThemePaletteOverrides.setColor(
+        ThemeColorValue(rgb: 0x112233),
+        preset: .sunset,
+        variant: .light,
+        role: .canvas,
+        userDefaults: defaults
+      )
+      let customized = Theme.cachedWindowSurfaceColor(variant: .light, userDefaults: defaults)
+      #expect(
+        ThemeColorValue(nsColor: customized, appearance: ThemeAppearanceVariant.light.nsAppearance)
+          == Theme.resolvedWindowSurfaceColor(preset: .sunset, variant: .light, userDefaults: defaults)
+      )
+      #expect(
+        ThemeColorValue(nsColor: customized, appearance: ThemeAppearanceVariant.light.nsAppearance)
+          != ThemeColorValue(nsColor: first, appearance: ThemeAppearanceVariant.light.nsAppearance)
       )
     }
   }

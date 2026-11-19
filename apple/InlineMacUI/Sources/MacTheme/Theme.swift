@@ -74,10 +74,18 @@ public enum Theme {
 
   public static var windowContentBackgroundColor: NSColor {
     .init(name: nil) { appearance in
-      let preset = ThemePreference.selectedPreset()
-      let variant = ThemeAppearanceVariant(appearance: appearance)
-      return resolvedWindowSurfaceColor(preset: preset, variant: variant).nsColor
+      cachedWindowSurfaceColor(variant: ThemeAppearanceVariant(appearance: appearance))
     }
+  }
+
+  /// The window surface for the stored preset and overrides. Resolving it decodes the palette
+  /// overrides and blends two colors, and list rows and the toolbar resolve it on scroll and
+  /// resize frames, so the result is kept until the preset or the overrides change.
+  static func cachedWindowSurfaceColor(
+    variant: ThemeAppearanceVariant,
+    userDefaults: UserDefaults = .standard
+  ) -> NSColor {
+    WindowSurfaceColorCache.color(variant: variant, userDefaults: userDefaults)
   }
 
   public static var settingsWindowBackgroundColor: NSColor {
@@ -475,5 +483,40 @@ extension NSColor {
       resolved = self.usingType(.componentBased) ?? self.usingColorSpace(.deviceRGB) ?? self
     }
     return resolved
+  }
+}
+
+private enum WindowSurfaceColorCache {
+  private struct Key: Equatable {
+    let defaults: ObjectIdentifier
+    let preset: AppThemePreset
+    let overrides: Data?
+  }
+
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var entries: [ThemeAppearanceVariant: (key: Key, color: NSColor)] = [:]
+
+  static func color(variant: ThemeAppearanceVariant, userDefaults: UserDefaults) -> NSColor {
+    let key = Key(
+      defaults: ObjectIdentifier(userDefaults),
+      preset: ThemePreference.selectedPreset(userDefaults: userDefaults),
+      overrides: userDefaults.data(forKey: ThemePaletteOverrides.storageKey)
+    )
+    lock.lock()
+    let cached = entries[variant]
+    lock.unlock()
+    if let cached, cached.key == key {
+      return cached.color
+    }
+
+    let color = Theme.resolvedWindowSurfaceColor(
+      preset: key.preset,
+      variant: variant,
+      userDefaults: userDefaults
+    ).nsColor
+    lock.lock()
+    entries[variant] = (key, color)
+    lock.unlock()
+    return color
   }
 }
