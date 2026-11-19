@@ -6,6 +6,8 @@ import type { DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { editMessage } from "@in/server/functions/messages.editMessage"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
+import { defaultPrivacySettings } from "@in/server/db/models/userSettings/types"
+import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { Log } from "@in/server/utils/log"
 import { transcribeVoiceWithOpenAI, type VoiceTranscriber } from "./openAITranscriber"
 import {
@@ -27,6 +29,13 @@ export type VoiceMessageTranscriptionDeps = {
   transcribeVoice: VoiceTranscriber
   editText: typeof editMessage
   buildContext?: typeof buildVoiceTranscriptionContext
+  senderAllowsTranscription?: (userId: number) => Promise<boolean>
+}
+
+/** The sender's privacy setting decides, since it is their audio. */
+const senderAllowsVoiceTranscription = async (userId: number): Promise<boolean> => {
+  const settings = await getCachedUserSettings(userId)
+  return settings?.privacy.transcribeVoiceMessages ?? defaultPrivacySettings.transcribeVoiceMessages
 }
 
 type VoiceTranscriptionRun = (input: VoiceMessageTranscriptionInput) => Promise<{ didEdit: boolean; text?: string }>
@@ -64,6 +73,16 @@ export async function transcribeAndEditVoiceMessage(
   },
 ): Promise<{ didEdit: boolean; text?: string }> {
   if (!shouldStartTranscription(input.message, input.voice)) {
+    return { didEdit: false }
+  }
+
+  const senderAllows = deps.senderAllowsTranscription ?? senderAllowsVoiceTranscription
+  if (!(await senderAllows(input.message.fromId))) {
+    log.info("Skipping voice transcription: sender turned it off", {
+      chatId: input.message.chatId,
+      messageId: input.message.messageId,
+      voiceId: input.voice.id,
+    })
     return { didEdit: false }
   }
 

@@ -38,6 +38,8 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
       shareTimeZone: legacyShareFlag(timeZoneRule),
       appearInGlobalSearch:
         general?.privacy.appearInGlobalSearch ?? defaultPrivacySettings.appearInGlobalSearch,
+      transcribeVoiceMessages:
+        general?.privacy.transcribeVoiceMessages ?? defaultPrivacySettings.transcribeVoiceMessages,
       timeZone: encodePrivacyRule(timeZoneRule),
       focusStatus: encodePrivacyRule(effectiveFocusRule(general?.privacy)),
     },

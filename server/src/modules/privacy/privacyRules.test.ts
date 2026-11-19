@@ -24,12 +24,21 @@ describe("privacy rules", () => {
   })
 
   test("legacy rows derive the rule from share_time_zone and stay rule-free", () => {
-    const legacy = { shareTimeZone: false, appearInGlobalSearch: true }
+    const legacy = { shareTimeZone: false, appearInGlobalSearch: true, transcribeVoiceMessages: true }
     expect(effectiveTimeZoneRule(legacy)).toEqual({ audience: "nobody", alwaysShare: [], neverShare: [] })
     expect(mergePrivacyPatch(legacy, { appearInGlobalSearch: false, shareTimeZone: false }, owner)).toEqual({
       shareTimeZone: false,
       appearInGlobalSearch: false,
+      transcribeVoiceMessages: true,
     })
+  })
+
+  test("the voice transcription switch changes only when a save carries it", () => {
+    const current = { shareTimeZone: true, appearInGlobalSearch: true, transcribeVoiceMessages: false }
+    expect(mergePrivacyPatch(current, { shareTimeZone: true, appearInGlobalSearch: false }, owner).transcribeVoiceMessages)
+      .toBe(false)
+    expect(mergePrivacyPatch(current, { transcribeVoiceMessages: true }, owner).transcribeVoiceMessages).toBe(true)
+    expect(mergePrivacyPatch(undefined, {}, owner).transcribeVoiceMessages).toBe(true)
   })
 
   test("a rule wins over the flag and is deduplicated without the owner", () => {
@@ -46,6 +55,7 @@ describe("privacy rules", () => {
     const current = {
       shareTimeZone: false,
       appearInGlobalSearch: true,
+      transcribeVoiceMessages: true,
       timeZone: { audience: "nobody" as const, alwaysShare: [2], neverShare: [3] },
     }
     expect(mergePrivacyPatch(current, { shareTimeZone: false, appearInGlobalSearch: false }, owner)).toEqual({
