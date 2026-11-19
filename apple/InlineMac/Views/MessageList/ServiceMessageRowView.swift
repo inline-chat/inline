@@ -275,27 +275,14 @@ final class ServiceMessageViewAppKit: NSView, MessageTableRenderableView, NSMenu
 
   @objc private func deleteMessage() {
     let message = fullMessage.message
-    Task(priority: .userInitiated) { @MainActor in
-      do {
-        try await Api.realtime.send(DeleteMessageTransaction(
+    MessageDeletion.confirm(count: 1, in: window) {
+      Task(priority: .userInitiated) { @MainActor in
+        await MessageDeletion.deleteShowingErrors(
           messageIds: [message.messageId],
           peerId: message.peerId,
           chatId: message.chatId,
-          deferLocalDeletion: message.isGridTranscript
-        ))
-      } catch {
-        let notice: String
-        if let failure = error as? TransactionError,
-           case let .rpcError(rpc) = failure,
-           rpc.errorCode == .spaceAdminRequired
-        {
-          notice = message.isGridTranscript
-            ? "Only the person who started transcription or a space admin can delete this message."
-            : "Only the author or a space admin can delete this message."
-        } else {
-          notice = "Could not delete message. Please try again."
-        }
-        ToastCenter.shared.showError(notice)
+          isGridTranscript: message.isGridTranscript
+        )
       }
     }
   }

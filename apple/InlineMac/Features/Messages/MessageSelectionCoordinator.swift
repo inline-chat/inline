@@ -113,30 +113,20 @@ final class MessageSelectionCoordinator {
       ToastCenter.shared.showError(error.localizedDescription)
       return
     }
-    let alert = NSAlert()
-    alert.alertStyle = .warning
-    alert.messageText = messages.count == 1 ? "Delete this message?" : "Delete \(messages.count) messages?"
-    alert.informativeText = "These messages will be deleted for everyone in this chat. This cannot be undone."
-    let delete = alert.addButton(withTitle: "Delete for Everyone")
-    delete.hasDestructiveAction = true
-    delete.keyEquivalent = ""
-    alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
-    alert.beginSheetModal(for: window) { [weak self] response in
-      guard response == .alertFirstButtonReturn, let self else { return }
+    MessageDeletion.confirm(count: messages.count, in: window) { [weak self] in
+      guard let self else { return }
       self.isDeleting = true
       self.refresh()
       Task { @MainActor [weak self, dependencies = self.dependencies] in
-        do {
-          // Keep messages and selection visible until the server confirms permission and deletion.
-          try await dependencies.realtimeV2.send(DeleteMessageTransaction(
-            messageIds: messages.map(\.message.messageId),
-            peerId: source.peerId,
-            chatId: source.chatId,
-            deferLocalDeletion: true
-          ), expectedAccount: account)
+        // Keep messages and selection visible until the server confirms permission and deletion.
+        if await MessageDeletion.deleteShowingErrors(
+          messageIds: messages.map(\.message.messageId),
+          peerId: source.peerId,
+          chatId: source.chatId,
+          expectedAccount: account,
+          realtime: dependencies.realtimeV2
+        ) {
           self?.list?.clearMessageSelection()
-        } catch {
-          ToastCenter.shared.showError("Could not confirm deletion. \(error.localizedDescription)")
         }
         self?.isDeleting = false
         self?.refresh()

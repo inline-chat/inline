@@ -3710,32 +3710,15 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
-    // An album goes as a whole: sent items on the server, sends in flight cancelled, failed
-    // ones locally.
     if let album = props.album {
-      let peerId = message.peerId
-      let chatId = message.chatId
-      let sent = album.items.map(\FullMessage.message.messageId).filter { $0 > 0 }
-      let cancelled = album.items.filter { $0.message.messageId <= 0 && PendingMessageCanceller.cancel($0) }
-      let local = album.items.filter { item in
-        item.message.messageId <= 0 && !cancelled.contains { $0.id == item.id }
-      }.map(\FullMessage.message.messageId)
-      if !local.isEmpty {
-        Task {
-          _ = try? await AppDatabase.shared.dbWriter.write { db in
-            try Message.deleteMessages(db, messageIds: local, chatId: chatId)
-          }
-          await MainActor.run { MessagesPublisher.shared.messagesDeleted(messageIds: local, peer: peerId) }
-        }
-      }
-      if !sent.isEmpty {
-        Task(priority: .userInitiated) { @MainActor in
-          try await Api.realtime.send(.deleteMessages(messageIds: sent, peerId: peerId, chatId: chatId))
-        }
-      }
+      let sentCount = album.items.count(where: { $0.message.messageId > 0 })
+      guard sentCount > 0 else { return deleteAlbum(album) }
+      MessageDeletion.confirm(count: sentCount, in: window) { [weak self] in self?.deleteAlbum(album) }
       return
     }
-    if message.status == .failed {
+    // Never reached the server: cancel a send in flight, or remove a failed one locally.
+    if message.status == .failed || message.messageId <= 0 {
+      if message.status != .failed, PendingMessageCanceller.cancel(fullMessage) { return }
       let messageId = message.messageId
       let chatId = message.chatId
       let peerId = message.peerId
@@ -3750,13 +3733,40 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    // Delete message
-    Task(priority: .userInitiated) { @MainActor in
-      try await Api.realtime.send(.deleteMessages(
-        messageIds: [message.messageId],
-        peerId: message.peerId,
-        chatId: message.chatId
-      ))
+    let message = message
+    MessageDeletion.confirm(count: 1, in: window) {
+      Task(priority: .userInitiated) { @MainActor in
+        await MessageDeletion.deleteShowingErrors(
+          messageIds: [message.messageId],
+          peerId: message.peerId,
+          chatId: message.chatId
+        )
+      }
+    }
+  }
+
+  /// An album goes as a whole: sent items on the server, sends in flight cancelled, failed
+  /// ones locally.
+  private func deleteAlbum(_ album: MessageAlbum) {
+    let peerId = message.peerId
+    let chatId = message.chatId
+    let sent = album.items.map(\FullMessage.message.messageId).filter { $0 > 0 }
+    let cancelled = album.items.filter { $0.message.messageId <= 0 && PendingMessageCanceller.cancel($0) }
+    let local = album.items.filter { item in
+      item.message.messageId <= 0 && !cancelled.contains { $0.id == item.id }
+    }.map(\FullMessage.message.messageId)
+    if !local.isEmpty {
+      Task {
+        _ = try? await AppDatabase.shared.dbWriter.write { db in
+          try Message.deleteMessages(db, messageIds: local, chatId: chatId)
+        }
+        await MainActor.run { MessagesPublisher.shared.messagesDeleted(messageIds: local, peer: peerId) }
+      }
+    }
+    if !sent.isEmpty {
+      Task(priority: .userInitiated) { @MainActor in
+        await MessageDeletion.deleteShowingErrors(messageIds: sent, peerId: peerId, chatId: chatId)
+      }
     }
   }
 
