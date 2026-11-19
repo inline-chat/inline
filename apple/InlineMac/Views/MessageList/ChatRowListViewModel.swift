@@ -36,7 +36,11 @@ final class ChatRowListViewModel {
 
   let progressiveViewModel: MessagesProgressiveViewModel
 
-  private(set) var messages: [FullMessage] = []
+  private(set) var messages: [FullMessage] = [] {
+    didSet { messagesRevision &+= 1 }
+  }
+  /// Changes whenever `messages` is replaced, so callers can cache per-index derived values.
+  private(set) var messagesRevision = 0
   private(set) var rows: [Row] = []
 
   private var msgIdxById: [Int64: Int] = [:]

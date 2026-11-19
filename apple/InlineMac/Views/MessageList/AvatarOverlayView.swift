@@ -79,10 +79,13 @@ final class MessageAvatarOverlayView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  /// `refreshesContent: false` (scroll frames) only moves avatars that stay on screen; an avatar
+  /// keyed by the same message keeps its sender, and content changes arrive as forced syncs.
   @discardableResult
   func sync(
     items: [MessageAvatarOverlayItem],
-    animate: Bool
+    animate: Bool,
+    refreshesContent: Bool = true
   ) -> MessageAvatarOverlaySyncStats {
     var stats = MessageAvatarOverlaySyncStats(active: active.count)
 
@@ -103,7 +106,7 @@ final class MessageAvatarOverlayView: NSView {
     }
 
     for item in items {
-      apply(item, detached: &detached, animate: animate, stats: &stats)
+      apply(item, detached: &detached, animate: animate, refreshesContent: refreshesContent, stats: &stats)
     }
 
     for entries in detached.values {
@@ -167,6 +170,7 @@ final class MessageAvatarOverlayView: NSView {
     _ item: MessageAvatarOverlayItem,
     detached: inout [ReuseKey: [Entry]],
     animate: Bool,
+    refreshesContent: Bool,
     stats: inout MessageAvatarOverlaySyncStats
   ) {
     guard item.frame.width > 0, item.frame.height > 0 else {
@@ -183,8 +187,10 @@ final class MessageAvatarOverlayView: NSView {
     let entry: Entry
     let canAnimateFrame: Bool
     if let current = active[item.stableId] {
-      current.view.update(userInfo: item.userInfo, size: avatarSize, viaMark: item.viaMark)
-      current.reuseKey = key
+      if refreshesContent {
+        current.view.update(userInfo: item.userInfo, size: avatarSize, viaMark: item.viaMark)
+        current.reuseKey = key
+      }
       entry = current
       canAnimateFrame = animate
     } else {

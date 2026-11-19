@@ -1197,6 +1197,8 @@ class MessageListAppKit: NSViewController {
   }
 
   private func updateMessageViewColors() {
+    // Only bubbles draw the window-anchored gradient; minimal rows ignore bounds changes.
+    guard messageRenderStyle == .bubble else { return }
     let span = PerformanceTrace.begin("BubbleGradientSync", category: .messages)
     defer { span.end() }
     let visibleRange = tableView.rows(in: userVisibleRect())
@@ -1556,7 +1558,8 @@ class MessageListAppKit: NSViewController {
 
     let stats = avatarOverlayView.sync(
       items: items,
-      animate: animate
+      animate: animate,
+      refreshesContent: force
     )
 
     #if DEBUG
@@ -1636,7 +1639,27 @@ class MessageListAppKit: NSViewController {
     )
   }
 
+  /// Group ranges per message index for `chatRows.messagesRevision`. Scroll frames ask for the
+  /// same groups again; grouping compares senders and calendar days.
+  private var avatarGroupRangeCache: [Int: ClosedRange<Int>] = [:]
+  private var avatarGroupRangeCacheRevision = -1
+
   private func avatarGroupRange(containing index: Int) -> ClosedRange<Int> {
+    if avatarGroupRangeCacheRevision != chatRows.messagesRevision {
+      avatarGroupRangeCache.removeAll(keepingCapacity: true)
+      avatarGroupRangeCacheRevision = chatRows.messagesRevision
+    }
+    if let cached = avatarGroupRangeCache[index] {
+      return cached
+    }
+    let range = computeAvatarGroupRange(containing: index)
+    for member in range {
+      avatarGroupRangeCache[member] = range
+    }
+    return range
+  }
+
+  private func computeAvatarGroupRange(containing index: Int) -> ClosedRange<Int> {
     var start = index
     while start > messages.startIndex, canGroup(messages[start - 1], messages[start]) {
       start -= 1
@@ -2318,6 +2341,8 @@ class MessageListAppKit: NSViewController {
   }
 
   private func hideMessageQuickActions() {
+    // Already hidden: nothing to tear down. Scroll frames and clears land here repeatedly.
+    guard quickActionsReactionOverlay != nil || messageQuickActionsView?.isHidden == false else { return }
     let reactionOverlay = quickActionsReactionOverlay
     quickActionsReactionOverlay = nil
     reactionOverlay?.close()
@@ -2597,7 +2622,11 @@ class MessageListAppKit: NSViewController {
     noteClipOriginChange()
     updateMessageViewColors()
     scheduleAvatarOverlaySync(force: false)
-    refreshMessageHoverAfterGeometryChange()
+    // Live and programmatic scrolls clear hover when they start and resolve it once when they
+    // end, so their frames skip the hover pass.
+    if scrollState == .idle, !isUserScrolling, !isProgrammaticScroll {
+      refreshMessageHoverAfterGeometryChange()
+    }
 
     throttle(.milliseconds(32), identifier: boundsThrottleID, by: .mainActor, option: .default) { [
       weak self

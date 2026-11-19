@@ -3576,15 +3576,21 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private static let gradientVectorStep: CGFloat = 4
+
   private func windowGradientVector(for view: NSView) -> (startY: CGFloat, endY: CGFloat)? {
     guard let contentView = window?.contentView else { return nil }
     let windowBounds = contentView.bounds
     let rect = view.convert(view.bounds, to: contentView).standardized
     guard windowBounds.height > 1, rect.height > 1 else { return nil }
 
-    let distanceFromWindowTop = contentView.isFlipped
+    let exactDistanceFromWindowTop = contentView.isFlipped
       ? rect.minY - windowBounds.minY
       : windowBounds.maxY - rect.maxY
+    // Snapped to 4 pt: the lighting overlay spans the window and shifts far less than one
+    // color level per point, and an unchanged vector skips the layer update on scroll frames.
+    let distanceFromWindowTop = (exactDistanceFromWindowTop / Self.gradientVectorStep).rounded()
+      * Self.gradientVectorStep
     return (
       startY: -distanceFromWindowTop / rect.height,
       endY: (windowBounds.height - distanceFromWindowTop) / rect.height
