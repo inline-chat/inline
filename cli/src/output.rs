@@ -572,6 +572,82 @@ pub fn print_users(
     Ok(())
 }
 
+/// One line per bot: output mode and who can message it.
+pub(crate) fn print_bot_overview(rows: &[crate::bots::BotOverviewRow]) {
+    let id_width = id_column_width(rows.iter().map(|row| row.bot_user_id));
+    let mut name_width = display_width("name");
+    let mut username_width = display_width("username");
+    let mut shared_width = display_width("shared with");
+    for row in rows {
+        name_width = name_width.max(display_width(&row.name));
+        if let Some(username) = row.username.as_deref() {
+            username_width = username_width.max(display_width(username));
+        }
+        let shared = row
+            .error
+            .as_deref()
+            .or(row.shared_with.as_deref())
+            .unwrap_or("-");
+        shared_width = shared_width.max(display_width(shared));
+    }
+    let output_width = display_width("detailed");
+    let widths = flexible_widths(
+        &[
+            FlexibleColumn {
+                header: "name",
+                content_width: name_width,
+                min_width: 10,
+                max_width: 28,
+            },
+            FlexibleColumn {
+                header: "username",
+                content_width: username_width,
+                min_width: 8,
+                max_width: 24,
+            },
+            FlexibleColumn {
+                header: "shared with",
+                content_width: shared_width,
+                min_width: 11,
+                max_width: 60,
+            },
+        ],
+        fixed_table_width(&[id_width, output_width], 5),
+    );
+    let (name_width, username_width, shared_width) = (widths[0], widths[1], widths[2]);
+    println!(
+        "{}  {}  {}  {}  {}",
+        header_left("id", id_width),
+        header_right("name", name_width),
+        header_right("username", username_width),
+        header_right("output", output_width),
+        header_right("shared with", shared_width),
+    );
+    for row in rows {
+        let output_mode = match row.output_mode {
+            Some("unset") => "default",
+            Some(mode) => mode,
+            None => "-",
+        };
+        let shared = match (row.error.as_deref(), row.shared_with.as_deref()) {
+            (Some(error), _) => format!("error: {error}"),
+            (None, Some(shared)) => shared.to_string(),
+            (None, None) => "-".to_string(),
+        };
+        println!(
+            "{}  {}  {}  {}  {}",
+            pad_left(&row.bot_user_id.to_string(), id_width),
+            pad_right(&truncate_display(&row.name, name_width), name_width),
+            pad_right(
+                &truncate_display(row.username.as_deref().unwrap_or("-"), username_width),
+                username_width
+            ),
+            pad_right(output_mode, output_width),
+            truncate_display(&shared, shared_width),
+        );
+    }
+}
+
 pub(crate) fn build_user_list(result: &proto::GetChatsResult) -> UserListOutput {
     let users = result.users.iter().map(user_summary).collect();
     UserListOutput { users }
