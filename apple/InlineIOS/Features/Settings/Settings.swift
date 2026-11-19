@@ -10,6 +10,7 @@ struct SettingsView: View {
   @Query(CurrentUser()) var currentUser: UserInfo?
   @Environment(Router.self) private var router
   @Environment(\.dismiss) private var dismiss
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   var body: some View {
     List {
@@ -86,7 +87,7 @@ struct SettingsView: View {
           color: .orange,
           destination: ExperimentalView()
         )
-        if SettingsBuildAudience.showsDebugTools {
+        if developerMode {
           SettingsNavigationRow(
             title: "Debug",
             systemImage: "ladybug.fill",

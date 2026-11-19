@@ -123,7 +123,7 @@ struct GeneralSettingsView: View {
       } header: {
         Text("Developer")
       } footer: {
-        Text("Show chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents.")
+        Text("Show the Debug page, plus chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents.")
       }
     }
     .listStyle(.insetGrouped)
