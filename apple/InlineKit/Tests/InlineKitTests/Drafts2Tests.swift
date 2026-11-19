@@ -72,6 +72,45 @@ struct Drafts2Tests {
     #expect(reloaded?.attachments.count == 1)
   }
 
+  @Test("saving the text a loaded draft already holds keeps its revision")
+  func unchangedTextKeepsRevision() async throws {
+    let db = AppDatabase.empty()
+    let drafts = Drafts2(database: db)
+    let peer: InlineKit.Peer = .thread(id: 24)
+
+    let revision = drafts.updateText(peer: peer, text: "hello mo")
+    #expect(drafts.updateText(peer: peer, text: "hello mo") == revision)
+    #expect(drafts.updateEntities(peer: peer, entities: mentionEntities(), forRevision: revision))
+    #expect(drafts.updateEntities(peer: peer, entities: mentionEntities(), forRevision: revision))
+    #expect(drafts.updateText(peer: peer, text: "hello mo") == revision)
+    await drafts.flush()
+
+    let reloaded = Drafts2(database: db).load(peer: peer)
+    #expect(reloaded?.revision == revision)
+    #expect(reloaded?.entities?.entities.count == 1)
+
+    let emptyPeer: InlineKit.Peer = .user(id: 25)
+    #expect(drafts.load(peer: emptyPeer) == nil)
+    let emptyRevision = drafts.updateText(peer: emptyPeer, text: "")
+    #expect(drafts.updateText(peer: emptyPeer, text: "") == emptyRevision)
+    #expect(drafts.updateText(peer: emptyPeer, text: "typed") > emptyRevision)
+  }
+
+  @Test("empty text still replaces a stored draft that was never loaded")
+  func emptyTextReplacesUnloadedStoredDraft() async throws {
+    let db = AppDatabase.empty()
+    let peer: InlineKit.Peer = .thread(id: 26)
+    let writer = Drafts2(database: db)
+    writer.updateText(peer: peer, text: "stored")
+    await writer.flush()
+
+    let drafts = Drafts2(database: db)
+    drafts.updateText(peer: peer, text: "")
+    await drafts.flush()
+
+    #expect(Drafts2(database: db).load(peer: peer) == nil)
+  }
+
   @Test("legacy draft message imports into Drafts2")
   func legacyDraftMessageImportsIntoDrafts2() {
     let drafts = Drafts2(database: AppDatabase.empty())

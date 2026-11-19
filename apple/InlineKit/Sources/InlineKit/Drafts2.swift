@@ -347,8 +347,13 @@ public final class Drafts2: @unchecked Sendable {
     return nil
   }
 
+  /// Saving the text the loaded draft already holds (a compose leaving a chat it did not
+  /// edit) returns the current revision and writes nothing.
   @discardableResult
   public func updateText(peer: Peer, text: String) -> Int64 {
+    if let revision = unchangedTextRevision(peer: peer, text: text) {
+      return revision
+    }
     let snapshot = stage(peer: peer) { draft in
       draft.text = text
       if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -361,17 +366,21 @@ public final class Drafts2: @unchecked Sendable {
 
   @discardableResult
   public func updateEntities(peer: Peer, entities: MessageEntities?, forRevision revision: Int64) -> Bool {
-    let staged = stateQueue.sync { () -> Drafts2Snapshot? in
+    let staged = stateQueue.sync { () -> (snapshot: Drafts2Snapshot, changed: Bool)? in
       let peerKey = peer.toString()
       guard var draft = cache[peerKey], draft.revision == revision else { return nil }
-      draft.entities = Self.normalizedEntities(entities)
+      let normalized = Self.normalizedEntities(entities)
+      guard draft.entities != normalized else { return (draft, false) }
+      draft.entities = normalized
       draft.updatedAt = Self.nowSeconds()
       cache[peerKey] = draft
-      return draft
+      return (draft, true)
     }
 
     guard let staged else { return false }
-    persist(staged)
+    if staged.changed {
+      persist(staged.snapshot)
+    }
     return true
   }
 
@@ -723,6 +732,20 @@ public final class Drafts2: @unchecked Sendable {
       loadedPeerKeys.insert(peerKey)
       cache[peerKey] = snapshot
       latestRevisionByPeerKey[peerKey] = snapshot.revision
+    }
+  }
+
+  private func unchangedTextRevision(peer: Peer, text: String) -> Int64? {
+    let peerKey = peer.toString()
+    return stateQueue.sync {
+      // An unloaded peer may have a stored draft this text must replace.
+      guard loadedPeerKeys.contains(peerKey) else { return nil }
+      if let draft = cache[peerKey] {
+        return draft.text == text ? draft.revision : nil
+      }
+      // An empty draft has no cache entry; an empty text keeps it empty.
+      guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+      return latestRevisionByPeerKey[peerKey] ?? 0
     }
   }
 
