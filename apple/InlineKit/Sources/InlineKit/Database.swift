@@ -3,6 +3,7 @@ import Foundation
 import GRDB
 import InlineConfig
 import Logger
+import os
 import Sentry
 
 enum DatabaseCredentialPreparationError: Error, Equatable, PrivacySafeErrorCategoryProviding {
@@ -145,9 +146,15 @@ private enum PersistentStoreStartupDiagnostics {
 // MARK: - DB main class
 
 public final class AppDatabase: @unchecked Sendable {
-  private let writerLock = NSLock()
+  private struct Storage: Sendable {
+    let writer: any DatabaseWriter
+    var poolPassphrase: OSAllocatedUnfairLock<String>?
+  }
+
   public let translationPreferences = DialogTranslationPreferences()
-  private var _dbWriter: any DatabaseWriter
+  private let writerLock = NSLock()
+  private let promotionLock = NSLock()
+  private var storage: Storage
   private var preparedDatabaseKey: String?
   private var persistentOpenFailure: PersistentStoreOpenFailure?
   #if DEBUG
@@ -156,7 +163,7 @@ public final class AppDatabase: @unchecked Sendable {
   #endif
 
   public var dbWriter: any DatabaseWriter {
-    writerLock.withLock { _dbWriter }
+    writerLock.withLock { storage.writer }
   }
 
   public var isPersistent: Bool {
@@ -165,7 +172,7 @@ public final class AppDatabase: @unchecked Sendable {
 
   public var persistentStoreAdmission: PersistentStoreAdmission {
     writerLock.withLock {
-      if _dbWriter is DatabasePool {
+      if storage.writer is DatabasePool {
         return .ready
       }
       let failure = persistentOpenFailure ?? PersistentStoreOpenFailure(
@@ -231,8 +238,19 @@ public final class AppDatabase: @unchecked Sendable {
     enableTracing: false
   )
 
-  public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
-    _dbWriter = dbWriter
+  public convenience init(_ dbWriter: any GRDB.DatabaseWriter) throws {
+    try self.init(storage: Storage(writer: dbWriter))
+  }
+
+  convenience init(path: String, passphrase: String) throws {
+    let currentPassphrase = OSAllocatedUnfairLock(initialState: passphrase)
+    let configuration = Self.makeConfiguration { currentPassphrase.withLock { $0 } }
+    let pool = try DatabasePool(path: path, configuration: configuration)
+    try self.init(storage: Storage(writer: pool, poolPassphrase: currentPassphrase))
+  }
+
+  private init(storage: Storage) throws {
+    self.storage = storage
     preparedDatabaseKey = nil
     persistentOpenFailure = nil
     let span = PerformanceTrace.begin("DatabaseMigrate", category: .launch)
@@ -242,13 +260,17 @@ public final class AppDatabase: @unchecked Sendable {
   }
 
   func swapWriter(_ newWriter: any DatabaseWriter) {
+    swapStorage(Storage(writer: newWriter))
+  }
+
+  private func swapStorage(_ newStorage: Storage) {
     do {
-      try translationPreferences.observe(newWriter)
+      try translationPreferences.observe(newStorage.writer)
     } catch {
       Self.log.error("Failed to initialize translation preferences", error: error)
     }
     writerLock.withLock {
-      _dbWriter = newWriter
+      storage = newStorage
       preparedDatabaseKey = nil
       persistentOpenFailure = nil
     }
@@ -1602,6 +1624,12 @@ public extension AppDatabase {
   }
 
   static func makeConfiguration(passphrase: String, _ base: Configuration = Configuration()) -> Configuration {
+    makeConfiguration(base) { passphrase }
+  }
+
+  private static func makeConfiguration(
+    _ base: Configuration = Configuration(), passphrase: @escaping @Sendable () -> String
+  ) -> Configuration {
     var config = base
 
     // Let short-lived contention between database connections finish instead
@@ -1610,7 +1638,7 @@ public extension AppDatabase {
 
     config.prepareDatabase { db in
       db.trace(options: .statement) { log.trace($0.expandedDescription) }
-      try db.usePassphrase(passphrase)
+      try db.usePassphrase(passphrase())
     }
 
     return config
@@ -1633,7 +1661,7 @@ public extension AppDatabase {
       }
     }
 
-    try AppDatabase.changePassphrase(key)
+    try AppDatabase.shared.changePassphrase(key)
     AppDatabase.shared.markCredentialStoragePrepared(for: key)
   }
 
@@ -1849,10 +1877,10 @@ public extension AppDatabase {
         // Reset the database passphrase to a default value
         switch DatabaseKeyStore.getOrCreate() {
           case let .available(key):
-            try AppDatabase.changePassphrase(key)
+            try AppDatabase.shared.changePassphrase(key)
             AppDatabase.shared.markCredentialStoragePrepared(for: key)
           default:
-            try AppDatabase.changePassphrase("123")
+            try AppDatabase.shared.changePassphrase("123")
             AppDatabase.shared.markCredentialStoragePrepared(for: nil)
         }
       } catch {
@@ -1903,20 +1931,23 @@ public extension AppDatabase {
     }
   }
 
-  internal static func changePassphrase(_ passphrase: String) throws {
+  internal func changePassphrase(_ passphrase: String) throws {
+    let current = writerLock.withLock { storage }
     do {
-      if let dbPool = AppDatabase.shared.dbWriter as? DatabasePool {
+      if let dbPool = current.writer as? DatabasePool {
         try dbPool.barrierWriteWithoutTransaction { db in
           try db.changePassphrase(passphrase)
+          // Publish the key only after SQLCipher succeeds, while new readers are still excluded.
+          current.poolPassphrase?.withLock { $0 = passphrase }
           dbPool.invalidateReadOnlyConnections()
         }
-      } else if let dbQueue = AppDatabase.shared.dbWriter as? DatabaseQueue {
+      } else if let dbQueue = current.writer as? DatabaseQueue {
         try dbQueue.write { db in
           try db.changePassphrase(passphrase)
         }
       }
     } catch {
-      log.error("Failed to change passphrase", error: error)
+      Self.log.error("Failed to change passphrase", error: error)
       throw error
     }
   }
@@ -2214,16 +2245,14 @@ public extension AppDatabase {
     func openPersistent(
       passphrase: String,
       candidateLabel: String
-    ) throws -> (db: AppDatabase, pool: DatabasePool) {
+    ) throws -> AppDatabase {
       candidateAttempts += 1
       lastCandidateLabel = candidateLabel
       let span = PerformanceTrace.begin("DatabaseOpenPersistent", category: .launch)
       do {
-        let config = AppDatabase.makeConfiguration(passphrase: passphrase)
-        let pool = try DatabasePool(path: databasePath, configuration: config)
-        let db = try AppDatabase(pool)
+        let db = try AppDatabase(path: databasePath, passphrase: passphrase)
         span.end("success=1")
-        return (db: db, pool: pool)
+        return db
       } catch {
         span.end("success=0")
         throw error
@@ -2249,19 +2278,12 @@ public extension AppDatabase {
       }
     }
 
-    func rotatePassphrase(pool: DatabasePool, to newPassphrase: String) throws {
-      try pool.barrierWriteWithoutTransaction { db in
-        try db.changePassphrase(newPassphrase)
-        pool.invalidateReadOnlyConnections()
-      }
-    }
-
     // If the database file doesn't exist yet, only create it when the keychain is available.
     if fileExists == false {
       switch DatabaseKeyStore.getOrCreate() {
         case let .available(key):
           do {
-            return try admit(openPersistent(passphrase: key, candidateLabel: "new_db_key").db)
+            return try admit(openPersistent(passphrase: key, candidateLabel: "new_db_key"))
           } catch {
             log.error("Failed to create persistent database with dbKey; using in-memory", error: error)
             return admit(openInMemory(after: persistentOpenFailure(for: error, duringMigration: true)))
@@ -2320,12 +2342,8 @@ public extension AppDatabase {
           switch DatabaseKeyStore.getOrCreate() {
             case let .available(newKey) where newKey != candidate.passphrase:
               do {
-                try rotatePassphrase(pool: opened.pool, to: newKey)
-                // Drop the old pool (wrong config) and reopen with the new key.
-                return try admit(openPersistent(
-                  passphrase: newKey,
-                  candidateLabel: "rotated_db_key"
-                ).db)
+                try opened.changePassphrase(newKey)
+                return try admit(openPersistent(passphrase: newKey, candidateLabel: "rotated_db_key"))
               } catch {
                 log.error("Failed to rotate DB passphrase to dbKey; continuing with legacy key", error: error)
               }
@@ -2334,7 +2352,7 @@ public extension AppDatabase {
           }
         }
 
-        return admit(opened.db)
+        return admit(opened)
       } catch {
         if candidate.label == "dbKey" {
           authoritativeKeyError = error
@@ -2365,18 +2383,19 @@ public extension AppDatabase {
   ///
   /// Note: any observers that captured the old `DatabaseReader`/`DatabaseWriter` instance directly
   /// (e.g. GRDB `ValueObservation.publisher(in:)`) must be created *after* this promotion runs.
-  private static func reopenPersistentWriterForShared() -> (any DatabaseWriter)? {
-    let reopened = makeShared()
-    guard reopened.dbWriter is DatabasePool else {
+  internal func promoteToPersistentIfPossible(
+    reopeningWith reopen: @escaping @Sendable () -> AppDatabase
+  ) async -> Bool {
+    await Self.promoteToPersistentIfPossible(self, reopenStorage: {
+      let reopened = reopen()
       switch reopened.persistentStoreAdmission {
         case .ready:
-          break
+          return reopened.writerLock.withLock { reopened.storage }
         case let .retryable(failure), let .terminal(failure):
-          shared.recordPersistentOpenFailure(failure)
+          self.recordPersistentOpenFailure(failure)
+          return nil
       }
-      return nil
-    }
-    return reopened.dbWriter
+    })
   }
 
   @discardableResult
@@ -2384,27 +2403,34 @@ public extension AppDatabase {
     _ db: AppDatabase,
     reopenWriter: @escaping @Sendable () -> (any DatabaseWriter)?
   ) async -> Bool {
+    await promoteToPersistentIfPossible(db, reopenStorage: { reopenWriter().map { Storage(writer: $0) } })
+  }
+
+  private static func promoteToPersistentIfPossible(
+    _ db: AppDatabase,
+    reopenStorage: @escaping @Sendable () -> Storage?
+  ) async -> Bool {
     // Already persistent.
     if db.dbWriter is DatabasePool {
       return false
     }
 
-    let newWriter: (any DatabaseWriter)? = await Task.detached(priority: .userInitiated) {
-      reopenWriter()
+    return await Task.detached(priority: .userInitiated) {
+      // Serialize reopen attempts so a later completion cannot replace an already-rekeyed pool.
+      db.promotionLock.withLock {
+        guard !db.isPersistent, let storage = reopenStorage(), storage.writer is DatabasePool else {
+          return false
+        }
+        db.swapStorage(storage)
+        log.info("Promoted in-memory database to persistent database writer")
+        return true
+      }
     }.value
-
-    guard let newWriter, newWriter is DatabasePool else {
-      return false
-    }
-
-    db.swapWriter(newWriter)
-    log.info("Promoted in-memory database to persistent database writer")
-    return true
   }
 
   @discardableResult
   static func promoteSharedToPersistentIfPossible() async -> Bool {
-    await promoteToPersistentIfPossible(shared, reopenWriter: reopenPersistentWriterForShared)
+    await shared.promoteToPersistentIfPossible(reopeningWith: makeShared)
   }
 
   /// Shared in-memory DB used as the default SwiftUI environment fallback.
