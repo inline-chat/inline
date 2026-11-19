@@ -16,6 +16,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { TranslationModule } from "@in/server/modules/translation2/translation"
 import { TranslationModel } from "@in/server/db/models/translations"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 
 const log = new Log("functions/translateMessages")
 
@@ -27,6 +28,15 @@ type TranslateMessagesFnInput = {
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER
 const CONTEXT_MESSAGE_LIMIT = 5
+// Apple clients send every displayed message that needs translation, without
+// their own bound, so a larger request is clamped to its newest ids, not rejected.
+export const MAX_TRANSLATE_MESSAGE_IDS = 100
+// One bad provider reply loses only its chunk; the other chunks are saved.
+export const TRANSLATION_CHUNK_SIZE = 15
+// Metered per provider call. Opening Home asks for one call per translated
+// chat, so the window has room for a full list at once.
+export const TRANSLATION_PROVIDER_RATE_RULE = { max: 120, windowMs: 60_000 }
+const providerLimiter = new InMemoryRateLimiter({ capacity: 10_000 })
 
 export async function translateMessages(
   input: TranslateMessagesFnInput,
@@ -48,6 +58,16 @@ export async function translateMessages(
       throw RealtimeRpcError.BadRequestWithReason("No valid message IDs provided")
     }
 
+    const requestedMessageIds = Array.from(new Set(validMessageIds))
+      .sort((a, b) => b - a)
+      .slice(0, MAX_TRANSLATE_MESSAGE_IDS)
+    if (requestedMessageIds.length < validMessageIds.length) {
+      log.warn("Clamped translation request to its newest message IDs", {
+        requestedCount: validMessageIds.length,
+        keptCount: requestedMessageIds.length,
+      })
+    }
+
     log.debug("Starting translation request", {
       messageCount: validMessageIds.length,
       language: input.language,
@@ -61,7 +81,7 @@ export async function translateMessages(
     // Get messages
     const msgs = await getMessagesAndTranslations({
       chatId: chat.id,
-      messageIds: validMessageIds,
+      messageIds: requestedMessageIds,
       translationLanguage: input.language,
     })
 
@@ -75,7 +95,7 @@ export async function translateMessages(
       where: and(
         eq(translations.chatId, chat.id),
         eq(translations.language, input.language),
-        inArray(translations.messageId, validMessageIds),
+        inArray(translations.messageId, requestedMessageIds),
       ),
     })
 
@@ -133,24 +153,50 @@ export async function translateMessages(
       })
     }
 
-    // Translate messages
-    const messageTranslations = await TranslationModule.translateMessages({
-      messages: messagesToTranslate,
-      contextMessages,
-      language: input.language,
-      chat,
-      actorId: context.currentUserId,
-    }).catch((error) => {
+    // Translate in chunks so one bad provider reply loses only its chunk.
+    const chunks: (typeof messagesToTranslate)[] = []
+    for (let start = 0; start < messagesToTranslate.length; start += TRANSLATION_CHUNK_SIZE) {
+      const chunk = messagesToTranslate.slice(start, start + TRANSLATION_CHUNK_SIZE)
+      const rate = providerLimiter.consume({
+        key: `translate:${context.currentUserId}`,
+        nowMs: Date.now(),
+        rule: TRANSLATION_PROVIDER_RATE_RULE,
+      })
+      if (!rate.allowed) {
+        if (chunks.length === 0) throw RealtimeRpcError.RateLimit(rate.retryAfterSeconds)
+        break
+      }
+      chunks.push(chunk)
+    }
+
+    const chunkResults = await Promise.allSettled(
+      chunks.map((chunk) =>
+        TranslationModule.translateMessages({
+          messages: chunk,
+          contextMessages,
+          language: input.language,
+          chat,
+          actorId: context.currentUserId,
+        }),
+      ),
+    )
+    const messageTranslations = chunkResults.flatMap((result) => (result.status === "fulfilled" ? result.value : []))
+    const failedChunks = chunkResults.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
+    if (failedChunks.length > 0) {
       log.error("Failed to translate messages", {
-        error,
+        error: failedChunks[0],
+        failedChunkCount: failedChunks.length,
+        chunkCount: chunks.length,
         messageCount: messagesToTranslate.length,
         language: input.language,
       })
-      throw error
-    })
+      // Nothing succeeded: surface the failure so the client can retry.
+      if (failedChunks.length === chunks.length) throw failedChunks[0]
+    }
 
     log.debug("Successfully translated messages", {
       translatedCount: messageTranslations.length,
+      requestedCount: messagesToTranslate.length,
     })
 
     // Insert translations

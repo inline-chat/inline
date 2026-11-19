@@ -199,12 +199,15 @@ function closedDecision(state: BlockDecisionState): BlockDecisionState {
     : state
 }
 
+/** The CLI forwards up to 1,000 selected ids in one call; macOS select-all has no smaller bound. */
+export const MAX_FORWARD_MESSAGE_IDS = 1_000
+
 export const forwardMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
   if (!input.fromPeerId || !input.toPeerId) {
     throw RealtimeRpcError.PeerIdInvalid()
   }
 
-  if (input.messageIds.length === 0) {
+  if (input.messageIds.length === 0 || input.messageIds.length > MAX_FORWARD_MESSAGE_IDS) {
     throw RealtimeRpcError.BadRequest()
   }
 

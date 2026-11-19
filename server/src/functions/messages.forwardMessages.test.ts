@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { BlockDecisionState, type BlockContent } from "@inline-chat/protocol/core"
-import { snapshotForwardedBlockContent } from "./messages.forwardMessages"
+import { forwardMessages, MAX_FORWARD_MESSAGE_IDS, snapshotForwardedBlockContent } from "./messages.forwardMessages"
+
+describe("forward request bounds", () => {
+  test("rejects more ids than one forward may carry before reading any chat", async () => {
+    const peer = { type: { oneofKind: "chat" as const, chat: { chatId: 1n } } }
+    const messageIds = Array.from({ length: MAX_FORWARD_MESSAGE_IDS + 1 }, (_, index) => BigInt(index + 1))
+    await expect(
+      forwardMessages({ fromPeerId: peer, toPeerId: peer, messageIds }, { currentUserId: 1, currentSessionId: 1 }),
+    ).rejects.toMatchObject({ codeName: "BAD_REQUEST" })
+  })
+})
 
 describe("forwarded structural content", () => {
   test("turns in-flight images into an honest immutable snapshot", () => {
