@@ -61,6 +61,9 @@ public final class UserAvatarLayerView: UIView {
 
   /// Shows `userInfo` the way `UserAvatar(userInfo:size:)` does; `viaMark` pins the agent badge to its
   /// corner when an agent sent the message for this user, as `MessageViaAvatar` draws it.
+  /// The photo on screen, if it has loaded; nil while initials show.
+  public var displayedImage: UIImage? { imageView.image }
+
   public func configure(with userInfo: UserInfo, size: CGFloat, viaMark: MessageViaPresentation.Mark? = nil) {
     setBadge(viaMark, size: size)
     let user = userInfo.user
