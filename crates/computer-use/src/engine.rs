@@ -1,14 +1,15 @@
 //! The tools on agent-desktop's macOS engine.
 
 use agent_desktop_core::commands::{
-    self, find::FindArgs, find::FindFilterArgs, find::FindSelectionArgs, helpers::RefArgs,
-    launch::LaunchArgs, list_apps::ListAppsArgs, list_windows::ListWindowsArgs,
-    mouse_click::MouseClickArgs, press::PressArgs, screenshot::ScreenshotArgs, scroll::ScrollArgs,
-    set_value::SetValueArgs, snapshot::SnapshotArgs, type_text::TypeArgs,
+    self, find::FindArgs, find::FindFilterArgs, find::FindSelectionArgs,
+    focus_window::FocusWindowArgs, helpers::RefArgs, launch::LaunchArgs, list_apps::ListAppsArgs,
+    list_windows::ListWindowsArgs, mouse_click::MouseClickArgs, press::PressArgs,
+    scroll::ScrollArgs, set_value::SetValueArgs, snapshot::SnapshotArgs, type_text::TypeArgs,
 };
 use agent_desktop_core::system::launch_options::LaunchOptions;
 use agent_desktop_core::{
-    AppError, CommandContext, Direction, MouseButton, PlatformAdapter, SnapshotSurface,
+    AppError, CommandContext, Deadline, Direction, MouseButton, PlatformAdapter, ScreenshotTarget,
+    SnapshotSurface, WindowFilter,
 };
 use agent_desktop_macos::MacOSAdapter;
 use base64::Engine as _;
@@ -23,11 +24,13 @@ const STATE_HOME_ENV: &str = "AGENT_DESKTOP_HOME";
 
 /// Where the last screenshot sits on screen, so a click at its pixels lands
 /// at the same point.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Shot {
     origin_x: f64,
     origin_y: f64,
     points_per_pixel: f64,
+    /// The captured window, brought forward before a click lands on it.
+    window_id: Option<String>,
 }
 
 pub(crate) struct Engine {
@@ -245,11 +248,24 @@ impl Engine {
         let (Some(x), Some(y)) = (float(args, "x"), float(args, "y")) else {
             return Err(Failure::Input("click needs a ref, or x and y".into()));
         };
-        let Some(shot) = self.last_shot else {
+        let Some(shot) = self.last_shot.clone() else {
             return Err(Failure::Input(
                 "take a screenshot first: x and y are pixels in the last screenshot".into(),
             ));
         };
+        // A physical click goes to whatever is on top at that point, so the
+        // captured window comes forward first.
+        if let Some(window_id) = shot.window_id.clone() {
+            commands::focus_window::execute(
+                FocusWindowArgs {
+                    window_id: Some(window_id),
+                    app: None,
+                    title: None,
+                },
+                adapter,
+            )?;
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
         let screen_x = shot.origin_x + x * shot.points_per_pixel;
         let screen_y = shot.origin_y + y * shot.points_per_pixel;
         let ctx = &self.foreground;
@@ -273,60 +289,73 @@ impl Engine {
         Ok(Output::text(compact(&data)))
     }
 
-    /// A window screenshot (the app's focused or first visible window), or
-    /// the main display without an app.
+    /// A window screenshot without its shadow (the app's focused or first
+    /// visible window), or the main display without an app. Pixels map onto
+    /// the window's screen bounds, so clicks at them land.
     fn screenshot(&mut self, args: &Value) -> Result<Output, Failure> {
         let adapter: &dyn PlatformAdapter = &self.adapter;
         let app = opt(args, "app");
-        let mut window_id = opt(args, "window_id");
-        let mut origin = None;
-        if app.is_some() || window_id.is_some() {
-            let windows = commands::list_windows::execute(
-                ListWindowsArgs {
-                    app: app.clone(),
-                    timeout_ms: None,
-                },
-                adapter,
-            )?;
-            let window = pick_window(&windows, window_id.as_deref()).ok_or_else(|| {
-                Failure::Input(
-                    "no visible window to capture; open_app or list_windows first".into(),
+        let window_id = opt(args, "window_id");
+        let deadline = Deadline::standard().map_err(AppError::from)?;
+        let (image, origin) = if app.is_some() || window_id.is_some() {
+            let windows = adapter
+                .list_windows(
+                    &WindowFilter {
+                        focused_only: false,
+                        app,
+                    },
+                    deadline,
                 )
+                .map_err(AppError::from)?;
+            let summary: Vec<(&str, bool, bool)> = windows
+                .iter()
+                .map(|window| {
+                    (
+                        window.id.as_str(),
+                        window.state.visible.unwrap_or(true),
+                        window.state.is_focused,
+                    )
+                })
+                .collect();
+            let window = pick_window(&summary, window_id.as_deref())
+                .map(|index| &windows[index])
+                .ok_or_else(|| {
+                    Failure::Input(
+                        "no visible window to capture; open_app or list_windows first".into(),
+                    )
+                })?;
+            let bounds = window.bounds.ok_or_else(|| {
+                Failure::Input("that window has no on-screen bounds; bring it on screen".into())
             })?;
-            window_id = window["id"].as_str().map(str::to_owned);
-            let bounds = &window["bounds"];
-            origin = Some((
-                bounds["x"].as_f64().unwrap_or(0.0),
-                bounds["y"].as_f64().unwrap_or(0.0),
-                bounds["width"].as_f64().unwrap_or(0.0),
-            ));
-        }
-        let shot = commands::screenshot::execute(
-            ScreenshotArgs {
-                app: if window_id.is_some() { None } else { app },
-                window_id,
-                screen: origin.is_none().then_some(0),
-                output_path: None,
-            },
-            adapter,
-        )?;
-        let raw = base64::engine::general_purpose::STANDARD
-            .decode(shot["data"].as_str().unwrap_or_default())
-            .map_err(|error| Failure::Input(format!("screenshot data was not base64: {error}")))?;
-        let width = shot["width"].as_u64().unwrap_or(0) as u32;
-        let height = shot["height"].as_u64().unwrap_or(0) as u32;
-        let scale = shot["scale_factor"]
-            .as_f64()
-            .filter(|s| *s > 0.0)
-            .unwrap_or(1.0);
-        let encoded = image::for_model(&raw, width, height)
+            let image = adapter
+                .screenshot_window_frame(window, deadline)
+                .map_err(AppError::from)?;
+            (
+                image,
+                Some((bounds.x, bounds.y, bounds.width, window.id.clone())),
+            )
+        } else {
+            let image = adapter
+                .screenshot(ScreenshotTarget::Screen(0), deadline)
+                .map_err(AppError::from)?;
+            (image, None)
+        };
+        let scale = if image.scale_factor > 0.0 {
+            image.scale_factor
+        } else {
+            1.0
+        };
+        let encoded = image::for_model(&image.data, image.width, image.height)
             .map_err(|error| Failure::Input(format!("could not encode the screenshot: {error}")))?;
-        let (origin_x, origin_y, points_wide) =
-            origin.unwrap_or((0.0, 0.0, f64::from(width) / scale));
+        let (origin_x, origin_y, points_wide, window_id) = match origin {
+            Some((x, y, width, id)) => (x, y, width, Some(id)),
+            None => (0.0, 0.0, f64::from(image.width) / scale, None),
+        };
         self.last_shot = Some(Shot {
             origin_x,
             origin_y,
             points_per_pixel: points_wide / f64::from(encoded.width.max(1)),
+            window_id,
         });
         Ok(Output {
             content: vec![
@@ -363,19 +392,16 @@ fn user_apps(mut data: Value) -> Value {
     data
 }
 
-/// The window to capture: the one asked for, else the focused visible one,
-/// else the first visible one.
-fn pick_window<'a>(windows: &'a Value, id: Option<&str>) -> Option<&'a Value> {
-    let windows = windows.as_array()?;
+/// The window to capture, from (id, visible, focused): the one asked for,
+/// else the focused visible one, else the first visible one.
+fn pick_window(windows: &[(&str, bool, bool)], id: Option<&str>) -> Option<usize> {
     if let Some(id) = id {
-        return windows.iter().find(|window| window["id"] == id);
+        return windows.iter().position(|window| window.0 == id);
     }
-    let visible = |window: &&Value| window["visible"].as_bool().unwrap_or(true);
     windows
         .iter()
-        .filter(visible)
-        .find(|window| window["is_focused"].as_bool() == Some(true))
-        .or_else(|| windows.iter().find(visible))
+        .position(|window| window.1 && window.2)
+        .or_else(|| windows.iter().position(|window| window.1))
 }
 
 /// Runs one command inside the engine's command scope (trace, deadline).
@@ -486,16 +512,15 @@ mod tests {
 
     #[test]
     fn pick_window_prefers_the_named_then_focused_then_first_visible() {
-        let windows = json!([
-            { "id": "w-1", "visible": false, "is_focused": true },
-            { "id": "w-2", "visible": true, "is_focused": false },
-            { "id": "w-3", "visible": true, "is_focused": true },
-        ]);
-        assert_eq!(pick_window(&windows, Some("w-1")).unwrap()["id"], "w-1");
-        assert_eq!(pick_window(&windows, None).unwrap()["id"], "w-3");
-        let unfocused = json!([{ "id": "w-4", "visible": true }]);
-        assert_eq!(pick_window(&unfocused, None).unwrap()["id"], "w-4");
-        assert!(pick_window(&json!([]), None).is_none());
+        let windows = [
+            ("w-1", false, true),
+            ("w-2", true, false),
+            ("w-3", true, true),
+        ];
+        assert_eq!(pick_window(&windows, Some("w-1")), Some(0));
+        assert_eq!(pick_window(&windows, None), Some(2));
+        assert_eq!(pick_window(&[("w-4", true, false)], None), Some(0));
+        assert_eq!(pick_window(&[], None), None);
     }
 
     #[test]
