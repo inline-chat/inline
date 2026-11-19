@@ -54,6 +54,19 @@ Unsupported or intentionally limited:
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 - Progress for turns Hermes starts on its own. Scheduled (cron) turns and late background sub-agent results post only their answer.
 
+## Release 1.2.5
+
+Hermes status lines (context pressure, compression, provider fallback) no
+longer count as the answer: they fold into Detailed progress instead of closing
+it early with "Worked for", and post silently in Friendly mode or outside a
+turn. In Friendly mode, an answer Hermes delivered as an update between tools
+is posted again as the answer, so it notifies, and the silent copy is removed.
+Hermes' busy notice for a message sent mid-turn posts silently, and a Friendly
+answer no longer waits on another chat's progress. Output mode changes made in
+the apps or with `inline bots settings` apply from the bot's next turn, within
+about 15 seconds. When the mode lookup fails in a new chat, the bot's last known
+default applies instead of Detailed.
+
 ## Release 1.2.4
 
 Progress no longer notifies or adds unread badges. Hermes' "⏳ Working"
@@ -272,7 +285,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- The 1.2.4 sidecar bundles `@inline-chat/realtime-sdk@0.0.27` and protocol
+- The 1.2.5 sidecar bundles `@inline-chat/realtime-sdk@0.0.27` and protocol
   `0.0.17`. The catalog and npm package ship the same sidecar.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
