@@ -12,8 +12,11 @@ import { eq } from "drizzle-orm"
 
 // Message identities are PostgreSQL integers. Validate before bigint -> number.
 export const MAX_HISTORY_ID = 2_147_483_647n
-// Preserve public exports and Rust lookahead pages; the wire limit is int32.
+// The wire limit is int32; anything outside it is malformed and rejected.
 export const MAX_HISTORY_LIMIT = 2_147_483_647
+// Larger in-range pages are clamped, not rejected. It stays above 501 so CLI
+// `--limit 500` plus the Rust client's one-row lookahead is never truncated.
+export const MAX_HISTORY_PAGE = 1_000
 
 export function validateHistoryId(id: bigint | undefined): void {
   if (id !== undefined && (id <= 0n || id > MAX_HISTORY_ID)) {
@@ -26,7 +29,7 @@ export function historyLimit(value: number | undefined, fallback: number, allowZ
   if (!Number.isInteger(limit) || limit < (allowZero ? 0 : 1) || limit > MAX_HISTORY_LIMIT) {
     throw RealtimeRpcError.BadRequest()
   }
-  return limit
+  return Math.min(limit, MAX_HISTORY_PAGE)
 }
 
 export function validateHistoryPeer(peer: InputPeer): void {

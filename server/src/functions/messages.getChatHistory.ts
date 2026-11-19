@@ -11,7 +11,7 @@ import {
   historyLimit,
   validateHistoryId,
   withHistorySnapshot,
-  MAX_HISTORY_LIMIT,
+  MAX_HISTORY_PAGE,
 } from "@in/server/modules/message/historySnapshot"
 
 type Input = {
@@ -81,11 +81,14 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
   let afterLimit: number | undefined
   if (mode === "around") {
     const maximumBefore = historyLimit(input.beforeLimit, Math.floor(limit / 2), true)
-    const maximumAfter = historyLimit(input.afterLimit, limit - Math.floor(limit / 2), true)
     // An unspecified after side fills the missing anchor's slot. Leave the
     // default unresolved until the anchor is read in the same snapshot.
     const reservedAnchor = input.includeAnchor !== false && input.afterLimit !== undefined ? 1 : 0
-    if (maximumBefore + maximumAfter + reservedAnchor > MAX_HISTORY_LIMIT) throw RealtimeRpcError.BadRequest()
+    // The whole page is clamped like any other page; the after side gives way first.
+    const maximumAfter = Math.min(
+      historyLimit(input.afterLimit, limit - Math.floor(limit / 2), true),
+      Math.max(MAX_HISTORY_PAGE - maximumBefore - reservedAnchor, 0),
+    )
     beforeLimit = input.beforeLimit === undefined ? undefined : maximumBefore
     afterLimit = input.afterLimit === undefined ? undefined : maximumAfter
   }
