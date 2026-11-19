@@ -73,10 +73,10 @@ let package = Package(
     .package(path: "../InlineThumbnailing"),
     .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
     .package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.0"),
-    .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
+    .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.12.0"),
     // Keep SQLCipher exact so every SwiftPM root and Xcode preview resolves
     // the same binary framework used by GRDBSQLCipher.
-    .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", exact: "4.14.0"),
+    .package(url: "https://github.com/sqlcipher/SQLCipher.swift.git", exact: "4.20.0"),
     .package(url: "https://github.com/inline-chat/GRDBQuery", from: "0.11.5"),
     .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.5.1"),
     .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.38.1"),

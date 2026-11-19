@@ -1,5 +1,5 @@
 {
-  "originHash" : "9613511c66fa69f98e1185f36dfc759206a4159a6aa759e2b9913ff53f55c3f7",
+  "originHash" : "553af72c7399a2fd968866adff3fe9780adf769ae05a35e61dcfc781d5be9c53",
   "pins" : [
     {
       "identity" : "bigint",
@@ -32,8 +32,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/GRDB.swift",
       "state" : {
-        "revision" : "37fa975af1f81d3b89f76cba3d69147d66256d1c",
-        "version" : "7.10.0"
+        "revision" : "0c48af1a5e99d4f82f3953d840229c862d280a82",
+        "version" : "7.12.0"
       }
     },
     {
@@ -95,8 +95,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sqlcipher/SQLCipher.swift.git",
       "state" : {
-        "revision" : "180be9a4dd130d838765a156b709e02f3bc3e7cd",
-        "version" : "4.14.0"
+        "revision" : "e7415c5e6b4fd9b78874bb956aad8a42b08e9966",
+        "version" : "4.20.0"
       }
     },
     {

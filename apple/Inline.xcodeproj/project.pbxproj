@@ -2298,7 +2298,7 @@
 			repositoryURL = "https://github.com/inline-chat/GRDB.swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 7.10.0;
+				minimumVersion = 7.12.0;
 			};
 		};
 		CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */ = {
