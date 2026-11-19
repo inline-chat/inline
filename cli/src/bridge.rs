@@ -483,6 +483,14 @@ fn install_bridge_logger(trace: bool) {
         .filter_module("inline_agent_bridge", level)
         .filter_module("inline_agent_driver_codex", level)
         .filter_module("inline_agent_driver_acp", level)
+        .filter_module("inline_agent_driver_claude", level)
+        .filter_module("inline_agent_driver_opencode", level)
+        .filter_module("inline::claude", level)
+        .filter_module("inline::opencode", level)
+        .filter_module("inline_client", level)
+        // Raw Claude stderr can echo prompts or tokens: keep it out of this
+        // file (`-v` diagnostics scrub each line instead).
+        .filter_module("inline_agent_driver_claude::stderr", log::LevelFilter::Off)
         .write_style(env_logger::WriteStyle::Never)
         .format(|buf, record| {
             use std::io::Write as _;

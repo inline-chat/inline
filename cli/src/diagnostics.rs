@@ -46,6 +46,9 @@ pub(crate) fn init(verbosity: u8) {
         .filter_module("inline_agent_bridge", level)
         .filter_module("inline_agent_driver_codex", level)
         .filter_module("inline_agent_driver_acp", level)
+        .filter_module("inline_agent_driver_claude", level)
+        .filter_module("inline_agent_driver_opencode", level)
+        .filter_module("inline_client", level)
         .write_style(env_logger::WriteStyle::Never)
         .format(|buf, record| {
             let line = format!(
