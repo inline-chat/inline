@@ -1,11 +1,55 @@
 import UIKit
 
+/// The timeline's small labels (day badges, the unread line, notices) grow with the reader's text size
+/// as message text does: 12 pt at the default size, where every row keeps the collection view's height,
+/// up to `maximumPointSize`. A row grows by as much as its text's line does; it never shrinks below
+/// its default height.
+@MainActor
+enum TimelineLabelMetrics {
+  /// The largest accessibility sizes would make a 40 pt date; these labels stop growing here.
+  static let maximumPointSize: CGFloat = 28
+  private static let defaultLine = font(traits: UITraitCollection(preferredContentSizeCategory: .large)).lineHeight
+
+  /// `size` is the point size at the default text size.
+  static func font(size: CGFloat = 12, weight: UIFont.Weight = .regular, traits: UITraitCollection?) -> UIFont {
+    // A view not in a window yet has no text size of its own: the app's is used.
+    let traits = traits?.preferredContentSizeCategory == .unspecified ? nil : traits
+    return UIFontMetrics(forTextStyle: .caption1).scaledFont(
+      for: .systemFont(ofSize: size, weight: weight),
+      maximumPointSize: maximumPointSize * size / 12,
+      compatibleWith: traits
+    )
+  }
+
+  /// Asked on every frame of a scroll (the floating date) and for every label row measured.
+  private static var growthByCategory: [UIContentSizeCategory: CGFloat] = [:]
+
+  /// How much taller than at the default size the labels' rows are.
+  static func growth(_ traits: UITraitCollection) -> CGFloat {
+    let category = traits.preferredContentSizeCategory
+    if let cached = growthByCategory[category] { return cached }
+    let value = growth(line: font(traits: traits).lineHeight)
+    // Without a size of its own the app's is used, which can change.
+    if category != .unspecified { growthByCategory[category] = value }
+    return value
+  }
+
+  static func growth(line: CGFloat) -> CGFloat { max(0, ceil(line - defaultLine)) }
+
+  static func dayRowHeight(_ traits: UITraitCollection) -> CGFloat { 44 + growth(traits) }
+  static func unreadRowHeight(_ traits: UITraitCollection) -> CGFloat { 34 + growth(traits) }
+  static func noticeRowHeight(_ traits: UITraitCollection) -> CGFloat { 30 + growth(traits) }
+  static func actionRowHeight(_ traits: UITraitCollection) -> CGFloat { 44 + growth(traits) }
+}
+
 /// The day badge of the timeline list, drawn like `DateSeparatorView` (which is built for the
-/// inverted collection view): a 12 pt label in a 20 pt capsule, glass while it floats over the
-/// messages, plain text inline. Both take a tap when given one, as every collection view badge did.
+/// inverted collection view): a 12 pt label in a 20 pt capsule at the default text size, growing
+/// with it, glass while it floats over the messages, plain text inline. Both take a tap when given
+/// one, as every collection view badge did.
 @MainActor
 final class TimelineDatePill: UIView {
-  static let height: CGFloat = 44
+  /// The strip a day badge stands in, floating or as a row.
+  static func height(_ traits: UITraitCollection) -> CGFloat { TimelineLabelMetrics.dayRowHeight(traits) }
 
   private let effectView: UIVisualEffectView
   private let label = UILabel()
@@ -32,7 +76,8 @@ final class TimelineDatePill: UIView {
       effectView.clipsToBounds = true
     }
     super.init(frame: .zero)
-    label.font = .systemFont(ofSize: 12, weight: .regular)
+    label.font = TimelineLabelMetrics.font(traits: nil)
+    label.adjustsFontForContentSizeCategory = true
     label.textColor = floating ? .label : .secondaryLabel
     label.textAlignment = .center
     addSubview(effectView)
@@ -41,6 +86,10 @@ final class TimelineDatePill: UIView {
     isAccessibilityElement = true
     accessibilityTraits = .button
     isUserInteractionEnabled = false
+    // The label takes the new size by itself; its capsule is sized here.
+    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (pill: TimelineDatePill, _) in
+      pill.setNeedsLayout()
+    }
   }
 
   @available(*, unavailable)
@@ -56,12 +105,15 @@ final class TimelineDatePill: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    let size = label.sizeThatFits(CGSize(width: bounds.width - 48, height: 20))
+    let capsule = 20 + TimelineLabelMetrics.growth(line: label.font.lineHeight)
+    let size = label.sizeThatFits(CGSize(width: bounds.width - 48, height: capsule))
     let width = min(bounds.width - 32, ceil(size.width) + 16)
     // Two points above centre, as the collection view's badge sits.
-    effectView.frame = CGRect(x: (bounds.width - width) / 2, y: (bounds.height - 20) / 2 - 2, width: width, height: 20)
+    effectView.frame = CGRect(
+      x: (bounds.width - width) / 2, y: (bounds.height - capsule) / 2 - 2, width: width, height: capsule
+    )
     label.frame = effectView.contentView.bounds
-    if #unavailable(iOS 26.0) { effectView.layer.cornerRadius = 10 }
+    if #unavailable(iOS 26.0) { effectView.layer.cornerRadius = capsule / 2 }
   }
 
   /// Only the capsule takes touches; the rest of the strip passes them to the list.

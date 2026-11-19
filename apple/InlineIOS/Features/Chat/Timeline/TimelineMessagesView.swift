@@ -70,6 +70,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   // Floating date
   private let datePill = TimelineDatePill(floating: true)
+  /// The strip the floating date stands in; it grows with the text size.
+  private var datePillHeight: CGFloat { TimelineDatePill.height(traitCollection) }
   /// Where each day starts in the rows, oldest first.
   private var dayRows: [(index: Int, day: Date)] = []
   /// Each message row's sender group, as row indexes, built once per snapshot: the list asks for a
@@ -600,10 +602,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         return messageHeight(row, album.lead, grouping, isThreadAnchor: false, width: width)
       case let .threadParent(message):
         return messageHeight(row, message, Self.threadParentGrouping(message), isThreadAnchor: true, width: width)
-      case .daySeparator: return 44
-      case .unreadLine: return 34
-      case .statusNotice: return 30
-      case .collapsedHistory: return 44
+      // The collection view's heights, growing with the text size (`TimelineLabelMetrics`).
+      case .daySeparator: return TimelineLabelMetrics.dayRowHeight(traitCollection)
+      case .unreadLine: return TimelineLabelMetrics.unreadRowHeight(traitCollection)
+      case .statusNotice: return TimelineLabelMetrics.noticeRowHeight(traitCollection)
+      case .collapsedHistory: return TimelineLabelMetrics.actionRowHeight(traitCollection)
       // The collection view showed the parent alone, without a header.
       case .threadRepliesHeader: return 0
     }
@@ -993,7 +996,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         break
       case .unread:
         // Below where the date pill sits, as the collection view places it.
-        if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(TimelineDatePill.height)) }
+        if snapshot.index(of: .unreadLine) != nil { scroll = .to(.unreadLine, .top(datePillHeight)) }
       case let .saved(place):
         if let row = snapshot.rows.first(where: { Self.chatMessages($0).contains { $0.message.messageId == place.messageId } }) {
           scroll = .to(row.id, .top(place.offset))
@@ -1171,7 +1174,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       case .latest:
         return .latest
       case .unreadLine:
-        return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(TimelineDatePill.height)) : .latest
+        return snapshot.index(of: .unreadLine) != nil ? .to(.unreadLine, .top(datePillHeight)) : .latest
       case let .message(messageId):
         guard let row = snapshot.rows.first(where: { Self.chatMessages($0).contains { $0.message.messageId == messageId } })
         else { return .latest }
@@ -1901,7 +1904,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private func updateDatePill() {
     let layout = list.layout
     let top = layout.viewport.usableTop
-    datePill.frame = CGRect(x: 0, y: datePill.frame.minY, width: bounds.width, height: TimelineDatePill.height)
+    datePill.frame = CGRect(x: 0, y: datePill.frame.minY, width: bounds.width, height: datePillHeight)
     guard hasOpened, !dayRows.isEmpty,
           let topRow = layout.placements.first(where: { $0.maxY > top + 1 }),
           let current = dayRows.last(where: { $0.index <= topRow.index })
@@ -1917,7 +1920,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     if let next = dayRows.first(where: { $0.index > topRow.index }),
        let row = layout.placements.first(where: { $0.index == next.index })
     {
-      y = min(top, row.y - TimelineDatePill.height)
+      y = min(top, row.y - datePillHeight)
     }
     datePill.frame.origin.y = y
     // This runs every frame of a scroll; the title is formatted only when the day changes.

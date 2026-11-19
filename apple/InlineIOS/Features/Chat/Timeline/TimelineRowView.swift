@@ -404,6 +404,9 @@ final class TimelineRowView: UIView {
       let label = UILabel()
       label.textAlignment = .center
       label.adjustsFontForContentSizeCategory = true
+      // The row is one line tall: a long notice at a large text size shrinks to fit rather than cut off.
+      label.adjustsFontSizeToFitWidth = true
+      label.minimumScaleFactor = 0.6
       addSubview(label)
       self.label = label
       return label
@@ -412,23 +415,27 @@ final class TimelineRowView: UIView {
     label.text = text
     switch style {
       case .pill: label.font = .preferredFont(forTextStyle: .footnote)
-      // As `MessageListSeparatorCell` draws it.
-      case .line, .action: label.font = .systemFont(ofSize: 12, weight: .semibold)
+      // As `MessageListSeparatorCell` draws it, growing with the text size as the row does.
+      case .line, .action: label.font = TimelineLabelMetrics.font(weight: .semibold, traits: traitCollection)
       case .plain: label.font = .preferredFont(forTextStyle: .caption1)
-      case .notice: label.font = .systemFont(ofSize: 12)
+      case .notice: label.font = TimelineLabelMetrics.font(traits: traitCollection)
     }
+    // The notice's moon is drawn at its size when shown; a new text size shows the row again.
     label.adjustsFontForContentSizeCategory = style != .notice
     label.textColor = .secondaryLabel
     label.accessibilityLabel = nil
     if style == .notice {
       let line = NSMutableAttributedString()
-      if let moon = UIImage(
-        systemName: "moon.fill", withConfiguration: UIImage.SymbolConfiguration(font: .systemFont(ofSize: 10))
-      )?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal) {
+      let moonFont = TimelineLabelMetrics.font(size: 10, traits: traitCollection)
+      if let moon = UIImage(systemName: "moon.fill", withConfiguration: UIImage.SymbolConfiguration(font: moonFont))?
+        .withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
+      {
         line.append(NSAttributedString(attachment: NSTextAttachment(image: moon)))
         line.addAttribute(.kern, value: 4, range: NSRange(location: 0, length: line.length))
       }
-      line.append(NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 12)]))
+      line.append(NSAttributedString(
+        string: text, attributes: [.font: TimelineLabelMetrics.font(traits: traitCollection)]
+      ))
       label.attributedText = line
       label.accessibilityLabel = text
     }
@@ -475,7 +482,8 @@ final class TimelineRowView: UIView {
     layoutActionsButton()
     if let pill, !pill.isHidden { pill.frame = bounds }
     guard let label, !label.isHidden else { return }
-    let size = label.sizeThatFits(CGSize(width: bounds.width - 32, height: bounds.height))
+    var size = label.sizeThatFits(CGSize(width: bounds.width - 32, height: bounds.height))
+    size.width = min(size.width, max(0, bounds.width - 32))
     label.frame = CGRect(
       x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height
     )
