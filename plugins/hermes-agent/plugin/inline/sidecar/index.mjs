@@ -58323,6 +58323,7 @@ import { randomUUID as randomUUID2 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 var TELEMETRY_TIMEOUT_MS = 2000;
 var TELEMETRY_DEDUP_MS = 5 * 60000;
+var MAX_DEDUP_ENTRIES = 256;
 var MAX_ERROR_MESSAGE_LENGTH = 8000;
 var MAX_STACK_FRAMES = 80;
 var SENSITIVE_ENV_NAME = /(?:token|secret|password|api[_-]?key|authorization)/i;
@@ -58486,6 +58487,12 @@ function reportHermesPluginError(operation, error, options = {}) {
     const now = Date.now();
     if (now - (lastReports.get(key) ?? 0) < TELEMETRY_DEDUP_MS)
       return;
+    if (lastReports.size >= MAX_DEDUP_ENTRIES) {
+      for (const [reportedKey, reportedAt] of lastReports) {
+        if (now - reportedAt >= TELEMETRY_DEDUP_MS)
+          lastReports.delete(reportedKey);
+      }
+    }
     lastReports.set(key, now);
     sendHermesPluginError(operation, exception, options).catch(() => {});
   } catch {}
