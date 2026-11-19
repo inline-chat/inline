@@ -6,9 +6,24 @@ import InlineKit
 import RealtimeV2
 import SwiftUI
 
+/// What chat info adds to the chat's More menu when it shows the same menu
+/// from its own toolbar.
+struct ChatInfoMenuExtras {
+  var managesBot = false
+  var isTranslationEnabled = false
+  var translationUIEnabled = false
+  var onToggleTranslation: () -> Void = {}
+  var onTranslationOptions: () -> Void = {}
+  var onBotSettings: () -> Void = {}
+}
+
 struct ChatToolbarMenuButton: View {
   let peer: Peer
   let dependencies: AppDependencies
+  /// Set when chat info hosts this menu: it hides Chat Info and Rename (chat
+  /// info has Edit) and adds translation and bot settings. IDs stay behind
+  /// Developer Mode, as in the chat's own menu.
+  var chatInfo: ChatInfoMenuExtras? = nil
 
   @Environment(\.realtimeV2) private var realtimeV2
 
@@ -25,9 +40,10 @@ struct ChatToolbarMenuButton: View {
   @State private var pendingTranscript: ChatTranscriptExport?
   @State private var showTranscriptScope = false
 
-  init(peer: Peer, dependencies: AppDependencies) {
+  init(peer: Peer, dependencies: AppDependencies, chatInfo: ChatInfoMenuExtras? = nil) {
     self.peer = peer
     self.dependencies = dependencies
+    self.chatInfo = chatInfo
     _modelHost = StateObject(wrappedValue: PeerBoundObject(
       peer: peer,
       model: ChatToolbarMenuModel(peer: peer, db: dependencies.database)
@@ -41,11 +57,20 @@ struct ChatToolbarMenuButton: View {
   var body: some View {
     let model = model
     Menu {
-      Button("Chat Info", systemImage: "info.circle") {
-        openChatInfo()
-      }
+      if let chatInfo {
+        if chatInfo.managesBot {
+          Button("Bot Settings…", systemImage: "gearshape") {
+            chatInfo.onBotSettings()
+          }
+          Divider()
+        }
+      } else {
+        Button("Chat Info", systemImage: "info.circle") {
+          openChatInfo()
+        }
 
-      Divider()
+        Divider()
+      }
 
       Button("Copy Link", systemImage: "link") {
         ChatMenuActions.copyLink(for: peer)
@@ -64,9 +89,19 @@ struct ChatToolbarMenuButton: View {
         }
       }
 
+      if let chatInfo, chatInfo.translationUIEnabled {
+        Divider()
+        Toggle(isOn: Binding(get: { chatInfo.isTranslationEnabled }, set: { _ in chatInfo.onToggleTranslation() })) {
+          Label("Translate Messages", systemImage: "translate")
+        }
+        Button("Translation Options…", systemImage: "globe") {
+          chatInfo.onTranslationOptions()
+        }
+      }
+
       Divider()
 
-      if peer.isThread, model.state.canRename {
+      if peer.isThread, model.state.canRename, chatInfo == nil {
         Button("Rename Chat...", systemImage: "pencil") {
           showRenameSheet = true
         }

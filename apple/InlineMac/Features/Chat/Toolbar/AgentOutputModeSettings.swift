@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import InlineMacUI
+import InlineUI
 import InlineProtocol
 import SwiftUI
 
@@ -14,6 +15,8 @@ struct AgentOutputModeSettingsRow: View {
     case agentSettings
     /// Only the trailing picker, for a chat info row.
     case chatInfo
+    /// A button in the chat info action row.
+    case actionTile
   }
 
   let peer: InlineKit.Peer
@@ -66,6 +69,25 @@ struct AgentOutputModeSettingsRow: View {
         .accessibilityValue(value)
       }
       .help(canConfigure ? mode.summary : Self.lockReason)
+    case .actionTile:
+      Menu {
+        menuItems
+      } label: {
+        PeerInfoActionTile(
+          String(localized: "Output"),
+          systemImage: mode.systemImage,
+          detail: store.outputModeOverride(peer: peer, botUserID: botUserID)?.title
+            ?? store.defaultOutputMode(botUserID: botUserID).title
+        )
+        .opacity(isUpdating ? 0.6 : 1)
+      }
+      .menuStyle(.button)
+      .menuIndicator(.hidden)
+      .buttonStyle(PeerInfoActionTileButtonStyle())
+      .disabled(!canConfigure || isUpdating)
+      .help(canConfigure ? mode.summary : Self.lockReason)
+      .accessibilityLabel("Output")
+      .accessibilityValue(value)
     }
   }
 

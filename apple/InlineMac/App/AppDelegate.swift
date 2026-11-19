@@ -130,6 +130,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_: Notification) {
+    #if DEBUG
+    if PeerInfoDebugFixture.isRequested {
+      setupMainMenu()
+      PeerInfoMacHarness.show(dependencies: dependencies)
+      return
+    }
+    #endif
     MessageGestureTrace.restoreSetting()
     let launchSpan = PerformanceTrace.begin("ApplicationDidFinish", category: .launch)
     defer { launchSpan.end() }

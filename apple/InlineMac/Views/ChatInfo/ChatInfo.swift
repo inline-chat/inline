@@ -43,11 +43,13 @@ struct ChatInfo: View {
   @EnvironmentStateObject private var participantsState: ChatInfoParticipantsState
   @StateObject private var appSettings = AppSettings.shared
   @StateObject private var avatarPreview = ChatInfoAvatarQuickLookPresenter()
-  @AppStorage(DeveloperMode.key) private var developerMode = false
+  @ObservedObject private var notificationSettings = INUserSettings.current.notification
+  @ObservedObject private var agentStore = AgentWorkStateStore.shared
+  @ObservedObject private var grants = AgentGrantStore.shared
 
   let peerId: Peer
   private let defaultTab: ChatInfoDefaultTab?
-  @State private var selectedTab: ChatInfoTab = .files
+  @State private var selectedTab: PeerInfoTab
   @State private var didApplyDefaultTab = false
   @State private var resourceResolutionFailed = false
   @State private var isOwnerOrAdmin = false
@@ -60,22 +62,43 @@ struct ChatInfo: View {
   @State private var showTranslationOptions = false
   @State private var showAddParticipants = false
   @State private var showRemoveParticipantConfirmation = false
+  @State private var showEditThread = false
+  @State private var showBotAccess = false
   @State private var isTranslationEnabled: Bool
   @State private var selectedParticipantIds: Set<Int64> = []
   @State private var participantPendingRemoval: UserInfo?
   @State private var groupPendingRemoval: UserGroup?
   @State private var showRemoveGroupConfirmation = false
+  @State private var threadsModel: PeerInfoThreadsModel?
+  @State private var ownedBotEditor = OwnedBotEditorPresenter()
 
-  /// The bot this direct chat is with, whose chat info leads with its status and access.
+  private var userInfo: UserInfo? {
+    fullChat.chatItem?.userInfo
+  }
+
+  /// The bot this direct chat is with.
   private var botUserInfo: UserInfo? {
-    guard let userInfo = fullChat.chatItem?.userInfo, userInfo.user.bot else { return nil }
+    guard let userInfo, userInfo.user.bot else { return nil }
     return userInfo
   }
 
+  private var currentChat: Chat? {
+    fullChat.chat ?? fullChat.chatItem?.chat
+  }
+
+  private var subject: PeerInfoSubject {
+    PeerInfoSubject.resolve(
+      peer: peerId,
+      chat: currentChat,
+      user: userInfo?.user,
+      currentUserId: dependencies?.auth.currentUserId
+    )
+  }
+
   private var chatTitle: String {
-    if let userInfo = fullChat.chatItem?.userInfo {
+    if let userInfo {
       userInfo.user.fullName
-    } else if let chat = fullChat.chatItem?.chat {
+    } else if let chat = currentChat {
       chat.humanReadableTitle ?? "Chat"
     } else {
       "Chat"
@@ -86,24 +109,24 @@ struct ChatInfo: View {
     fullChat.chat?.id ?? fullChat.chatItem?.dialog.chatId
   }
 
+  private var dialog: Dialog? {
+    fullChat.chatItem?.dialog
+  }
+
   private var notificationSelection: DialogNotificationSettingSelection {
-    fullChat.chatItem?.dialog.notificationSelection ?? .global
+    dialog?.notificationSelection ?? .global
   }
 
-  private var notificationTitle: String {
-    notificationSelection == .global ? "Default" : notificationSelection.title
+  private var notifications: PeerInfoNotificationsPresentation {
+    PeerInfoNotificationsPresentation(selection: notificationSelection, globalMode: notificationSettings.mode)
   }
 
-  private var visibilitySelection: ChatVisibilitySelection {
-    fullChat.chat?.isPublic == true ? .publicChat : .privateChat
-  }
-
-  private var shouldShowVisibilityRow: Bool {
-    peerId.isThread
+  private var isFollowing: Bool {
+    dialog?.isFollowingThread == true
   }
 
   private var headerIconChat: Chat? {
-    guard var chat = fullChat.chat ?? fullChat.chatItem?.chat else { return nil }
+    guard var chat = currentChat else { return nil }
     chat.emoji = didSyncIconDraft ? Self.normalizedEmoji(iconDraft) : Self.normalizedEmoji(chat.emoji)
     return chat
   }
@@ -124,26 +147,12 @@ struct ChatInfo: View {
     guard peerId.isThread,
           let chat = fullChat.chat,
           chat.spaceId != nil,
+          chat.parentChatId == nil,
           isOwnerOrAdmin || isCreator
     else {
       return false
     }
     return true
-  }
-
-  private var translationBinding: Binding<Bool> {
-    Binding(
-      get: { isTranslationEnabled },
-      set: { newValue in
-        guard newValue != isTranslationEnabled else { return }
-        isTranslationEnabled = newValue
-        TranslationState.shared.setTranslationEnabled(newValue, for: peerId)
-      }
-    )
-  }
-
-  private var shouldShowParticipantsTab: Bool {
-    peerId.isThread && chatId != nil && fullChat.chat?.type != .privateChat
   }
 
   private var canAddParticipants: Bool {
@@ -161,17 +170,46 @@ struct ChatInfo: View {
     return isOwnerOrAdmin || isCreator
   }
 
-  private var availableTabs: [ChatInfoTab] {
-    var tabs: [ChatInfoTab] = []
-    if shouldShowParticipantsTab {
-      tabs.append(.participants)
-    }
-    tabs.append(contentsOf: [.media, .files, .voice, .links])
-    return tabs
+  /// The viewer owns or admins this bot, so its profile and access are theirs to change.
+  private var managesBot: Bool {
+    guard let botUserInfo else { return false }
+    return grants.ownedGrants(botUserID: botUserInfo.user.id) != nil
+  }
+
+  /// Chat info opened from its own chat, so Back returns there.
+  private var cameFromOwnChat: Bool {
+    let index = nav.historyIndex - 1
+    guard nav.history.indices.contains(index) else { return false }
+    return nav.history[index].route == .chat(peer: peerId)
+  }
+
+  private var actions: [PeerInfoAction] {
+    PeerInfoAction.actions(
+      for: subject,
+      context: PeerInfoActionContext(
+        isOverOwnChat: cameFromOwnChat,
+        supportsInChatSearch: true,
+        canAddMembers: canAddParticipants,
+        canShareBot: managesBot,
+        offersOutputMode: botUserInfo.map { agentStore.offersOutputMode(botUserID: $0.user.id) } ?? false
+      )
+    )
+  }
+
+  private var availableTabs: [PeerInfoTab] {
+    PeerInfoTab.tabs(for: subject)
   }
 
   private var availableTabsKey: String {
-    availableTabs.map(\.title).joined(separator: "|")
+    availableTabs.map(\.rawValue).joined(separator: "|")
+  }
+
+  private var canEdit: Bool {
+    switch subject.kind {
+    case .thread, .subthread: canEditChatInfo
+    case .bot: managesBot
+    case .person, .selfChat: false
+    }
   }
 
   private var permissionsTaskKey: String {
@@ -181,7 +219,7 @@ struct ChatInfo: View {
   init(peerId: Peer, defaultTab: ChatInfoDefaultTab? = nil) {
     self.peerId = peerId
     self.defaultTab = defaultTab
-    _selectedTab = State(initialValue: ChatInfoTab(defaultTab))
+    _selectedTab = State(initialValue: PeerInfoTab(defaultTab) ?? (peerId.isThread ? .members : .threads))
     _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peerId))
     _fullChat = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peerId)
@@ -205,45 +243,53 @@ struct ChatInfo: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        header
-        if let botUserInfo {
-          BotChatInfoStatusSection(user: botUserInfo.user)
-          BotChatInfoAccessSection(bot: botUserInfo)
-        }
-        infoCard
+        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+          VStack(spacing: 16) {
+            header
+            if !actions.isEmpty {
+              actionRow
+            }
+            cards
+            PeerInfoMacDeveloperIDs(entries: developerIDs)
+          }
+          .peerInfoColumn()
+          .padding(.top, 18)
+          .padding(.bottom, 18)
 
-        Picker("Tabs", selection: resourceTabSelection) {
-          ForEach(availableTabs, id: \.self) { tab in
-            Text(tab.title).tag(tab)
+          Section {
+            tabContent
+              .peerInfoColumn()
+              .padding(.top, 8)
+              .padding(.bottom, 28)
+          } header: {
+            PeerInfoMacTabBar(tabs: availableTabs, selection: resourceTabSelection)
           }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(maxWidth: .infinity)
-
-        tabContent
       }
-      .frame(maxWidth: .infinity, alignment: .topLeading)
-      .padding(.top, 24)
-      .padding(.bottom, 24)
-      .padding(.horizontal, 16)
-    }
     .frame(maxWidth: .infinity, alignment: .top)
     .navigationTitle(chatTitle)
+    .toolbar { toolbarContent }
     .onAppear {
       ensureSelectedTab()
       updateViewModels()
       syncTranslationState()
       syncIconDraft()
+      startThreadsIfNeeded()
     }
-    .onDisappear { deactivateResources() }
-    .onChange(of: selectedTab) { _, _ in updateViewModels() }
+    .onDisappear {
+      deactivateResources()
+      threadsModel?.stop()
+    }
     .task(id: permissionsTaskKey) {
       await loadVisibilityPermissions()
     }
     .task(id: peerId) {
       await resolveResourceChat()
+    }
+    .task(id: botUserInfo?.user.id) {
+      guard let bot = botUserInfo?.user else { return }
+      grants.ensureLoaded(botUserID: bot.id)
+      await agentStore.loadDirectChatOutputModes(botUserID: bot.id)
     }
     .onChange(of: chatId) { _, _ in
       if chatId != nil {
@@ -256,308 +302,431 @@ struct ChatInfo: View {
       syncIconDraft()
     }
     .onChange(of: availableTabsKey) { _, _ in
-      updateViewModels()
       ensureSelectedTab()
+      updateViewModels()
+      startThreadsIfNeeded()
     }
     .onReceive(TranslationState.shared.subject) { event in
       let (eventPeer, enabled) = event
       guard eventPeer == peerId else { return }
       isTranslationEnabled = enabled
     }
+    .modifier(presentations)
+    .modifier(ownedBotEditor.presentations())
   }
 
+  // MARK: Header
+
   @ViewBuilder
-  var icon: some View {
-    if let userInfo = fullChat.chatItem?.userInfo {
-      Button {
-        avatarPreview.show(userInfo: userInfo, scale: displayScale)
-      } label: {
-        ChatIcon(peer: .user(userInfo), size: 100)
+  private var avatar: some View {
+    if let userInfo {
+      if Self.hasPhoto(userInfo) {
+        Button {
+          avatarPreview.show(userInfo: userInfo, scale: displayScale)
+        } label: {
+          ChatIcon(peer: .user(userInfo), size: 88)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .help("Show Photo")
+        .accessibilityLabel("Show \(userInfo.user.shortDisplayName)’s photo")
+      } else {
+        ChatIcon(peer: .user(userInfo), size: 88)
+          .accessibilityHidden(true)
       }
-      .buttonStyle(.plain)
-      .contentShape(Circle())
-      .help("Open avatar")
     } else if let chat = headerIconChat {
-      if peerId.isThread {
+      if peerId.isThread, canEditChatInfo {
         EmojiTextFieldPicker(
           emoji: chatIconBinding,
-          targetSize: CGSize(width: 100, height: 100),
-          isDisabled: !canEditChatInfo || isSavingIcon,
-          accessibilityLabel: "Chat icon"
+          targetSize: CGSize(width: 88, height: 88),
+          isDisabled: isSavingIcon,
+          accessibilityLabel: "Thread icon"
         ) { _, _, isDisabled in
-          ChatIcon(peer: .chat(chat), size: 100)
+          ChatIcon(peer: .chat(chat), size: 88)
             .opacity(isDisabled ? 0.65 : 1)
+            .overlay(alignment: .bottomTrailing) {
+              Image(systemName: "face.smiling")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(5)
+                .background(.regularMaterial, in: Circle())
+                .accessibilityHidden(true)
+            }
         }
-        .help(canEditChatInfo ? "Change icon" : "")
+        .help("Change Icon")
       } else {
-        ChatIcon(peer: .chat(chat), size: 100)
+        ChatIcon(peer: .chat(chat), size: 88)
+          .accessibilityHidden(true)
       }
+    } else {
+      Circle()
+        .fill(Color.secondary.opacity(0.15))
+        .frame(width: 88, height: 88)
     }
   }
 
   private var header: some View {
-    VStack(spacing: 8) {
-      icon
-        .padding(.top, 4)
+    VStack(spacing: 6) {
+      avatar
+        .padding(.bottom, 4)
 
       Text(chatTitle)
-        .font(.title3)
-        .fontWeight(.semibold)
+        .font(.title2.weight(.semibold))
+        .multilineTextAlignment(.center)
+        .textSelection(.enabled)
+        .accessibilityAddTraits(.isHeader)
 
-      // Bot usernames are mostly noise; the status says more.
-      if let bot = botUserInfo?.user {
-        BotChatInfoStatusLine(user: bot)
-      }
+      subtitle
     }
     .frame(maxWidth: .infinity)
   }
 
-  private var infoCard: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      if botUserInfo != nil {
-        ChatInfoSectionTitle("This Chat")
+  @ViewBuilder
+  private var subtitle: some View {
+    switch subject.kind {
+    case .bot:
+      if let bot = botUserInfo?.user {
+        BotChatInfoStatusLine(user: bot)
       }
-      GroupBox {
-        VStack(alignment: .leading, spacing: 0) {
-          if botUserInfo == nil, let username = fullChat.chatItem?.userInfo?.user.username, !username.isEmpty {
-            infoRow("Username") {
-              Text("@\(username)")
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            }
-
-            Divider()
+    case .person:
+      if let text = PeerInfoSubtitle.person(
+        focusActive: userInfo?.focus?.isActive() == true,
+        localTime: userInfo.flatMap { PeerInfoPersonFields(user: $0.user).localTime }
+      ) {
+        HStack(spacing: 4) {
+          if userInfo?.focus?.isActive() == true {
+            Image(systemName: "moon.fill").font(.caption)
           }
-
-          infoRow("Notifications") {
-            notificationPicker
-          }
-
-          if let user = fullChat.chatItem?.userInfo?.user, user.bot == true {
-            ChatInfoOutputModeRow(botUserID: user.id)
-          }
-
-          if appSettings.translationUIEnabled {
-            Divider()
-
-            infoRow("Translation") {
-              HStack(spacing: 10) {
-                Toggle("Translate messages", isOn: translationBinding)
-                  .labelsHidden()
-                  .toggleStyle(.switch)
-                  .accessibilityLabel("Translate messages")
-
-                Button {
-                  showTranslationOptions = true
-                } label: {
-                  Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 15, weight: .regular))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Translation options")
-                .help("Translation options")
-              }
-            }
-          }
-
-          if shouldShowVisibilityRow {
-            Divider()
-
-            infoRow("Visibility") {
-              visibilityPicker
-            }
-          }
-
-          Divider()
-
-          infoRow("Chat ID") {
-            if let chatId {
-              Button {
-                copyThreadIdToClipboard(chatId)
-              } label: {
-                Text(String(chatId))
-                  .font(.system(.body, design: .monospaced))
-                  .foregroundStyle(.secondary)
-                  .textSelection(.enabled)
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Copy chat ID")
-            } else {
-              Text("—")
-                .foregroundStyle(.secondary)
-            }
-          }
-
-          if developerMode, case let .user(userId) = peerId {
-            Divider()
-
-            infoRow("User ID") {
-              Button {
-                DeveloperIDs.copy(userId, label: "User ID")
-              } label: {
-                Text(String(userId))
-                  .font(.system(.body, design: .monospaced))
-                  .foregroundStyle(.secondary)
-                  .textSelection(.enabled)
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("Copy user ID")
-            }
-          }
+          Text(text)
         }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(.callout)
+        .foregroundStyle(.secondary)
       }
+    case .selfChat:
+      Text("Only you can see this chat")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    case .thread, .subthread:
+      Text(PeerInfoSubtitle.thread(subject: subject, memberCount: memberCount))
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+  }
 
-      if let user = fullChat.chatItem?.userInfo?.user, user.bot == true {
-        ChatInfoOwnedBotSection(botUserID: user.id)
-      }
+  private var memberCount: Int? {
+    guard let model = participantsState.participantsViewModel else { return nil }
+    let count = model.effectiveUserIds.count
+    return count > 0 ? count : model.participants.count
+  }
 
-      if shouldShowVisibilityRow, !canToggleVisibility {
-        Text("Only the chat creator, owner, or admin can change visibility.")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(.horizontal, 4)
+  private static func hasPhoto(_ userInfo: UserInfo) -> Bool {
+    userInfo.user.getLocalURL() != nil || userInfo.user.getRemoteURL() != nil
+      || userInfo.profilePhoto?.first.map { $0.getLocalURL() != nil || $0.getRemoteURL() != nil } == true
+  }
+
+  // MARK: Actions
+
+  private var actionRow: some View {
+    PeerInfoActionRow(count: actions.count) {
+      ForEach(actions) { action in
+        actionButton(action)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .sheet(isPresented: $showVisibilityPicker) {
-      if let chat = fullChat.chat,
-         let spaceId = chat.spaceId,
-         let dependencies
-      {
-        ChatVisibilityParticipantsSheet(
-          spaceId: spaceId,
-          selectedUserIds: $selectedParticipantIds,
-          db: dependencies.database,
-          isPresented: $showVisibilityPicker,
-          onConfirm: { participantIds in
-            updateVisibility(isPublic: false, participantIds: Array(participantIds))
+  }
+
+  @ViewBuilder
+  private func actionButton(_ action: PeerInfoAction) -> some View {
+    switch action {
+    case .open:
+      tileButton(
+        subject.isThread ? "Open" : "Message",
+        systemImage: subject.isThread ? "bubble.left.and.bubble.right" : "message",
+        help: subject.isThread ? "Open this thread" : "Open your chat"
+      ) {
+        dependencies?.requestOpenChat(peer: peerId)
+      }
+    case .search:
+      tileButton("Search", systemImage: "magnifyingglass", help: "Search messages in this chat") {
+        searchInChat()
+      }
+    case .notifications:
+      notificationsButton
+    case .follow:
+      tileButton(
+        isFollowing ? "Following" : "Follow",
+        systemImage: isFollowing ? "checkmark.circle" : "eye",
+        help: ChatToolbarFollowPresentation(isFollowing: isFollowing).tooltip
+      ) {
+        ChatToolbarFollowButton.toggleFollowMode(peer: peerId, isFollowing: isFollowing)
+      }
+      .accessibilityValue(isFollowing ? "On" : "Off")
+    case .output:
+      if let bot = botUserInfo {
+        AgentOutputModeSettingsRow(peer: peerId, botUserID: bot.user.id, style: .actionTile)
+      }
+    case .share:
+      tileButton("Share", systemImage: "person.crop.circle.badge.plus", help: "Choose who can message this bot") {
+        showBotAccess = true
+      }
+    case .addMembers:
+      tileButton("Add", systemImage: "person.badge.plus", help: "Add people or groups to this thread") {
+        showAddParticipants = true
+      }
+    }
+  }
+
+  private func tileButton(
+    _ title: String,
+    systemImage: String,
+    detail: String? = nil,
+    help: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      PeerInfoActionTile(title, systemImage: systemImage, detail: detail)
+    }
+    .buttonStyle(PeerInfoActionTileButtonStyle())
+    .help(help)
+  }
+
+  /// Click mutes or unmutes at once; click and hold, or right-click, for every choice.
+  private var notificationsButton: some View {
+    let notifications = notifications
+    return Menu {
+      notificationMenuItems
+    } label: {
+      PeerInfoActionTile(
+        notifications.isMuted ? "Unmute" : "Mute",
+        systemImage: notifications.isMuted ? "bell.slash.fill" : "bell",
+        detail: notifications.isMuted ? nil : notificationDetail(notifications),
+        isHighlighted: notifications.isMuted
+      )
+    } primaryAction: {
+      setNotifications(notifications.quickToggleSelection, announce: true)
+    }
+    .menuStyle(.button)
+    .menuIndicator(.hidden)
+    .buttonStyle(PeerInfoActionTileButtonStyle())
+    .contextMenu { notificationMenuItems }
+    .help(notifications.isMuted ? "Unmute this chat. Hold for more options." : "Mute this chat. Hold for more options.")
+    .accessibilityLabel(notifications.isMuted ? "Unmute" : "Mute")
+    .accessibilityValue(notifications.accessibilityValue)
+  }
+
+  /// "Mentions" under Mute when only mentions notify, so the row shows the state.
+  private func notificationDetail(_ notifications: PeerInfoNotificationsPresentation) -> String? {
+    switch notifications.effectiveMode {
+    case .mentions, .onlyMentions, .importantOnly: "Mentions"
+    default: nil
+    }
+  }
+
+  @ViewBuilder
+  private var notificationMenuItems: some View {
+    let defaultMode = PeerInfoNotificationsPresentation(selection: .global, globalMode: notificationSettings.mode)
+    Section {
+      notificationMenuItem(.global, title: "Default (\(defaultMode.isMuted ? "Muted" : defaultMode.title == "Mentions" ? "Mentions" : "All Messages"))")
+    }
+    Section("This Chat") {
+      notificationMenuItem(.all, title: "All Messages")
+      notificationMenuItem(.mentions, title: "Mentions Only")
+      notificationMenuItem(.none, title: "None")
+    }
+  }
+
+  private func notificationMenuItem(_ selection: DialogNotificationSettingSelection, title: String) -> some View {
+    Toggle(isOn: Binding(
+      get: { notificationSelection == selection },
+      set: { isOn in if isOn { setNotifications(selection, announce: false) } }
+    )) {
+      Text(title)
+      Text(selection.menuDescription)
+    }
+  }
+
+  private func setNotifications(_ selection: DialogNotificationSettingSelection, announce: Bool) {
+    updateNotificationSettings(selection)
+    guard announce else { return }
+    let next = PeerInfoNotificationsPresentation(selection: selection, globalMode: notificationSettings.mode)
+    ToastCenter.shared.showSuccess(next.isMuted ? "Muted" : "Unmuted")
+  }
+
+  private func searchInChat() {
+    if cameFromOwnChat {
+      nav.goBack()
+    } else {
+      dependencies?.requestOpenChat(peer: peerId)
+    }
+    // The chat view answers Find through the responder chain once it is on screen.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+      NSApp.sendAction(#selector(InChatSearchMenuActions.showInChatSearch(_:)), to: nil, from: nil)
+    }
+  }
+
+  // MARK: Cards
+
+  @ViewBuilder
+  private var cards: some View {
+    switch subject.kind {
+    case .person:
+      if let user = userInfo?.user {
+        PeerInfoPersonCard(user: user)
+      }
+    case .bot:
+      if let bot = botUserInfo {
+        PeerInfoCard {
+          PeerInfoBotAboutRow(user: bot.user)
+          PeerInfoBotRuntimeRow(user: bot.user)
+          PeerInfoBotAccessRow(bot: bot) { ownerId in
+            dependencies?.openChatInfo(peer: .user(id: ownerId))
           }
+        }
+      }
+    case .thread, .subthread:
+      placeCard
+    case .selfChat:
+      EmptyView()
+    }
+  }
+
+  /// Where a thread lives: its space, and for a subthread the chat and message it came from.
+  @ViewBuilder
+  private var placeCard: some View {
+    let space = spaceForThread
+    let parent = parentChat
+    if space != nil || subject.parentChatId != nil {
+      PeerInfoCard {
+        if let space {
+          PeerInfoActionRowButton(
+            caption: nil,
+            title: space.displayName,
+            detail: "Space",
+            kind: .navigation,
+            help: "Show this space in the sidebar",
+            action: { dependencies?.openSpaceContext(id: space.id, name: space.displayName, keeping: peerId) },
+            leading: { SpaceAvatar(space: space, size: 24, cornerRadius: 6) },
+            trailing: { EmptyView() }
+          )
+        }
+        if let parentChatId = subject.parentChatId {
+          PeerInfoActionRowButton(
+            caption: nil,
+            title: parent?.humanReadableTitle ?? "Parent thread",
+            detail: subject.parentMessageId != nil ? "Started from a message here" : "Parent thread",
+            kind: .navigation,
+            help: subject.parentMessageId != nil ? "Show the message this thread started from" : "Open the parent thread",
+            action: {
+              let parentPeer = parent?.deepLinkPeer ?? .thread(id: parentChatId)
+              dependencies?.requestOpenChat(peer: parentPeer, targetMessageId: subject.parentMessageId)
+            },
+            leading: { PeerInfoRowIcon(systemImage: "arrow.turn.up.left", color: .gray) },
+            trailing: { EmptyView() }
+          )
+        }
+      }
+    }
+  }
+
+  /// Raw IDs for Developer Mode, which shows them in a card of their own.
+  private var developerIDs: [(label: String, id: Int64)] {
+    var entries: [(label: String, id: Int64)] = []
+    if let chatId, chatId > 0 { entries.append(("Chat ID", chatId)) }
+    if case let .user(userId) = peerId { entries.append(("User ID", userId)) }
+    return entries
+  }
+
+  private var spaceForThread: Space? {
+    guard let spaceId = subject.spaceId else { return nil }
+    return ObjectCache.shared.getSpace(id: spaceId)
+  }
+
+  private var parentChat: Chat? {
+    guard let parentChatId = subject.parentChatId else { return nil }
+    return ObjectCache.shared.getChat(id: parentChatId)
+  }
+
+  // MARK: Toolbar
+
+  @ToolbarContentBuilder
+  private var toolbarContent: some ToolbarContent {
+    ToolbarItemGroup(placement: .primaryAction) {
+      if canEdit {
+        Button("Edit") { edit() }
+          .help(subject.isThread ? "Edit this thread’s name, icon and visibility" : "Edit this bot’s profile")
+      }
+      if let dependencies {
+        ChatToolbarMenuButton(
+          peer: peerId,
+          dependencies: dependencies,
+          chatInfo: ChatInfoMenuExtras(
+            managesBot: managesBot,
+            isTranslationEnabled: isTranslationEnabled,
+            translationUIEnabled: appSettings.translationUIEnabled,
+            onToggleTranslation: { TranslationState.shared.setTranslationEnabled(!isTranslationEnabled, for: peerId) },
+            onTranslationOptions: { showTranslationOptions = true },
+            onBotSettings: {
+              if let bot = botUserInfo {
+                ownedBotEditor.open(.settings, botUserID: bot.user.id, realtimeV2: realtimeV2)
+              }
+            }
+          )
         )
       }
     }
-    .sheet(isPresented: $showTranslationOptions) {
-      TranslationOptions(peer: peerId)
-    }
-    .sheet(isPresented: $showAddParticipants) {
-      if let chat = fullChat.chat, let dependencies {
-        if let spaceId = chat.spaceId {
-          AddParticipantsSheet(
-            chatId: chat.id,
-            spaceId: spaceId,
-            currentParticipants: participantsState.participantsViewModel?.participants ?? [],
-            currentGroupParticipants: participantsState.participantsViewModel?.groupParticipants ?? [],
-            db: dependencies.database,
-            isPresented: $showAddParticipants
-          )
-        } else {
-          AddHomeParticipantsSheet(
-            chatId: chat.id,
-            currentUserId: dependencies.auth.currentUserId,
-            currentParticipants: participantsState.participantsViewModel?.participants ?? [],
-            db: dependencies.database,
-            isPresented: $showAddParticipants
-          )
-        }
-      }
-    }
-    .confirmationDialog(
-      "Remove participant?",
-      isPresented: $showRemoveParticipantConfirmation,
-      presenting: participantPendingRemoval,
-      actions: { participant in
-        Button("Cancel", role: .cancel) {}
-        Button("Remove", role: .destructive) {
-          removeParticipant(userId: participant.user.id)
-        }
-      },
-      message: { participant in
-        Text("Remove \(participant.user.shortDisplayName) from this chat?")
-      }
-    )
-    .confirmationDialog(
-      "Remove group access?",
-      isPresented: $showRemoveGroupConfirmation,
-      presenting: groupPendingRemoval,
-      actions: { group in
-        Button("Cancel", role: .cancel) {}
-        Button("Remove", role: .destructive) {
-          removeGroupParticipant(groupId: group.id)
-        }
-      },
-      message: { group in
-        Text(
-          "Remove \(group.name) from this chat? Members may still have access through direct participants, parent access, or another group."
-        )
-      }
-    )
   }
 
-  private var notificationPicker: some View {
-    Menu {
-      ForEach(DialogNotificationSettingSelection.allCases, id: \.self) { selection in
-        Button {
-          updateNotificationSettings(selection)
-        } label: {
-          Label(notificationTitle(for: selection), systemImage: selection.iconName)
-        }
+  private func edit() {
+    switch subject.kind {
+    case .thread, .subthread:
+      showEditThread = true
+    case .bot:
+      if let bot = botUserInfo {
+        ownedBotEditor.open(.profile, botUserID: bot.user.id, realtimeV2: realtimeV2)
       }
-    } label: {
-      InlineMenuPickerLabel(
-        title: notificationTitle,
-        systemImage: notificationSelection.iconName,
-        disabled: false
-      )
+    case .person, .selfChat:
+      break
     }
-    .menuStyle(.borderlessButton)
-    .buttonStyle(.plain)
-    .accessibilityLabel("Notifications")
   }
 
-  private func notificationTitle(for selection: DialogNotificationSettingSelection) -> String {
-    selection == .global ? "Default" : selection.title
-  }
-
-  private var visibilityPicker: some View {
-    Menu {
-      ForEach(ChatVisibilitySelection.allCases, id: \.self) { selection in
-        Button(selection.title) {
-          handleVisibilitySelection(selection)
-        }
-      }
-    } label: {
-      InlineMenuPickerLabel(
-        title: visibilitySelection.title,
-        systemImage: "eye",
-        disabled: !canToggleVisibility
-      )
-    }
-    .menuStyle(.borderlessButton)
-    .buttonStyle(.plain)
-    .disabled(!canToggleVisibility)
-    .accessibilityLabel("Visibility")
-  }
-
-  private func infoRow(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-    ChatInfoRow(title, content: content)
-  }
+  // MARK: Tabs
 
   @ViewBuilder
   private var tabContent: some View {
     switch selectedTab {
-      case .files:
-        filesTab
-      case .media:
-        mediaTab
-      case .voice:
-        voiceTab
-      case .links:
-        linksTab
-      case .participants:
-        participantsTab
+    case .files:
+      filesTab
+    case .media:
+      mediaTab
+    case .voice:
+      voiceTab
+    case .links:
+      linksTab
+    case .members:
+      participantsTab
+    case .threads:
+      threadsTab
     }
+  }
+
+  @ViewBuilder
+  private var threadsTab: some View {
+    if let threadsModel {
+      PeerInfoMacThreadsList(model: threadsModel, emptyMessage: subject.isThread
+        ? "No subthreads yet. Reply in a thread to start one."
+        : "No shared threads yet.")
+    } else {
+      resourceResolutionView
+    }
+  }
+
+  private func startThreadsIfNeeded() {
+    guard threadsModel == nil, let source = PeerInfoThreadsModel.source(for: subject) else {
+      threadsModel?.start()
+      return
+    }
+    let model = PeerInfoThreadsModel(source: source)
+    threadsModel = model
+    model.start()
   }
 
   @ViewBuilder
@@ -567,6 +736,35 @@ struct ChatInfo: View {
     } else {
       resourceResolutionView
     }
+  }
+
+  // MARK: Sheets
+
+  private var presentations: some ViewModifier {
+    ChatInfoPresentations(
+      showVisibilityPicker: $showVisibilityPicker,
+      showTranslationOptions: $showTranslationOptions,
+      showAddParticipants: $showAddParticipants,
+      showRemoveParticipantConfirmation: $showRemoveParticipantConfirmation,
+      showRemoveGroupConfirmation: $showRemoveGroupConfirmation,
+      showEditThread: $showEditThread,
+      showBotAccess: $showBotAccess,
+      selectedParticipantIds: $selectedParticipantIds,
+      participantPendingRemoval: participantPendingRemoval,
+      groupPendingRemoval: groupPendingRemoval,
+      peer: peerId,
+      chat: fullChat.chat,
+      bot: botUserInfo,
+      dependencies: dependencies,
+      participants: participantsState.participantsViewModel?.participants ?? [],
+      groupParticipants: participantsState.participantsViewModel?.groupParticipants ?? [],
+      canToggleVisibility: canToggleVisibility,
+      canEditInfo: canEditChatInfo,
+      onConfirmPrivate: { ids in updateVisibility(isPublic: false, participantIds: Array(ids)) },
+      onChooseVisibility: { handleVisibilitySelection($0 ? .publicChat : .privateChat) },
+      onRemoveParticipant: { removeParticipant(userId: $0.user.id) },
+      onRemoveGroup: { removeGroupParticipant(groupId: $0.id) }
+    )
   }
 
   private func showMessageInChat(_ message: Message) {
@@ -644,6 +842,8 @@ struct ChatInfo: View {
       ChatInfoParticipantsList(
         participantsViewModel: participantsViewModel,
         currentUserId: dependencies?.auth.currentUserId,
+        spaceId: currentChat?.spaceId,
+        isPublic: currentChat?.isPublic == true,
         canAddParticipants: canAddParticipants,
         canManageParticipants: canManageParticipants,
         onAddParticipants: {
@@ -651,6 +851,9 @@ struct ChatInfo: View {
         },
         onOpenChatInfo: { userInfo in
           openUserChatInfo(userInfo)
+        },
+        onMessage: { userInfo in
+          dependencies?.requestOpenChat(peer: .user(id: userInfo.user.id))
         },
         onRequestRemove: { userInfo in
           participantPendingRemoval = userInfo
@@ -673,22 +876,19 @@ struct ChatInfo: View {
   }
 
   private func ensureSelectedTab() {
-    if !didApplyDefaultTab {
-      let preferredTab = ChatInfoTab(defaultTab)
-      if availableTabs.contains(preferredTab) {
-        selectedTab = preferredTab
-        didApplyDefaultTab = true
-        return
-      }
+    if !didApplyDefaultTab, let preferredTab = PeerInfoTab(defaultTab), availableTabs.contains(preferredTab) {
+      selectedTab = preferredTab
+      didApplyDefaultTab = true
+      return
     }
 
     guard availableTabs.contains(selectedTab) else {
-      selectedTab = availableTabs.first ?? .files
+      selectedTab = availableTabs.first ?? .media
       return
     }
   }
 
-  private var resourceTabSelection: Binding<ChatInfoTab> {
+  private var resourceTabSelection: Binding<PeerInfoTab> {
     Binding(get: { selectedTab }, set: { tab in
       guard tab != selectedTab else { return }
       deactivateResources()
@@ -725,7 +925,7 @@ struct ChatInfo: View {
       case .voice: voiceMemosState.updateChatId(chatId)
       default: break
     }
-    if shouldShowParticipantsTab {
+    if availableTabs.contains(.members) {
       participantsState.updateChatId(chatId)
     }
   }
@@ -929,32 +1129,26 @@ struct ChatInfo: View {
   }
 }
 
-private enum ChatInfoTab: String, CaseIterable, Hashable {
-  case files
-  case media
-  case voice
-  case links
-  case participants
-
-  init(_ tab: ChatInfoDefaultTab?) {
+extension PeerInfoTab {
+  /// The tab a chat info route asks for, such as Files from a file's menu.
+  init?(_ tab: ChatInfoDefaultTab?) {
     switch tab {
-      case .none:
-        self = .participants
-      case .participants:
-        self = .participants
-      case .files:
-        self = .files
-      case .media:
-        self = .media
-      case .voice:
-        self = .voice
-      case .links:
-        self = .links
+    case .none: return nil
+    case .participants: self = .members
+    case .files: self = .files
+    case .media: self = .media
+    case .voice: self = .voice
+    case .links: self = .links
     }
   }
+}
 
-  var title: String {
-    rawValue.capitalized
+extension View {
+  /// The readable column chat info lays its content in.
+  func peerInfoColumn() -> some View {
+    frame(maxWidth: 640)
+      .frame(maxWidth: .infinity)
+      .padding(.horizontal, 20)
   }
 }
 
@@ -1139,89 +1333,289 @@ private enum ChatInfoAvatarPreviewError: Error {
   case imageEncodingFailed
 }
 
-@MainActor
-private final class ChatInfoMediaState: ObservableObject {
-  @Published private(set) var mediaViewModel: ChatMediaViewModel?
-  private let db: AppDatabase
-  private let peer: Peer
-  private var currentChatId: Int64 = 0
+/// The Members tab: who can read a thread, directly or through a group.
+/// You come first, then owners and admins, then everyone by name.
+private struct ChatInfoParticipantsList: View {
+  @ObservedObject var participantsViewModel: ChatParticipantsWithMembersViewModel
+  let currentUserId: Int64?
+  let spaceId: Int64?
+  let isPublic: Bool
+  let canAddParticipants: Bool
+  let canManageParticipants: Bool
+  let onAddParticipants: () -> Void
+  let onOpenChatInfo: (UserInfo) -> Void
+  let onMessage: (UserInfo) -> Void
+  let onRequestRemove: (UserInfo) -> Void
+  let onRequestRemoveGroup: (UserGroup) -> Void
 
-  init(db: AppDatabase, peer: Peer) {
-    self.db = db
-    self.peer = peer
+  @State private var roles: [Int64: MemberRole] = [:]
+
+  private var sortedParticipants: [UserInfo] {
+    participantsViewModel.participants.sorted { lhs, rhs in
+      let lhsRank = rank(lhs)
+      let rhsRank = rank(rhs)
+      if lhsRank != rhsRank { return lhsRank < rhsRank }
+      let comparison = lhs.user.displayName.localizedCaseInsensitiveCompare(rhs.user.displayName)
+      if comparison == .orderedSame { return lhs.user.id < rhs.user.id }
+      return comparison == .orderedAscending
+    }
   }
 
-  func updateChatId(_ chatId: Int64) {
-    guard chatId > 0, chatId != currentChatId else { return }
-    currentChatId = chatId
-    mediaViewModel?.deactivate()
-    mediaViewModel = ChatMediaViewModel(db: db, chatId: chatId, peer: peer, excludeStickerMedia: true)
+  private func rank(_ info: UserInfo) -> Int {
+    if info.user.id == currentUserId { return 0 }
+    switch roles[info.user.id] {
+    case .owner: return 1
+    case .admin: return 2
+    default: return info.user.bot ? 4 : 3
+    }
+  }
+
+  private var sortedGroups: [UserGroup] {
+    participantsViewModel.groupParticipants.sorted { lhs, rhs in
+      let comparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+      if comparison == .orderedSame { return lhs.id < rhs.id }
+      return comparison == .orderedAscending
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      if isPublic {
+        PeerInfoCard {
+          HStack(spacing: 10) {
+            PeerInfoRowIcon(systemImage: "globe")
+            Text("Everyone in this space can read and join")
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 9)
+        }
+      }
+
+      if !sortedGroups.isEmpty {
+        PeerInfoCard(sortedGroups.count == 1 ? "1 Group" : "\(sortedGroups.count) Groups") {
+          ForEach(sortedGroups) { group in
+            ChatInfoGroupAccessRow(
+              group: group,
+              canRemove: canManageParticipants,
+              onRequestRemove: { onRequestRemoveGroup(group) }
+            )
+          }
+        }
+      }
+
+      PeerInfoCard(sortedParticipants.count == 1 ? "1 Person" : "\(sortedParticipants.count) People") {
+        if canAddParticipants {
+          PeerInfoActionRowButton(
+            title: "Add Members",
+            kind: .action(systemImage: "plus"),
+            help: "Add people or groups to this thread",
+            action: onAddParticipants,
+            leading: { PeerInfoRowIcon(systemImage: "person.badge.plus") },
+            trailing: { EmptyView() }
+          )
+        }
+        ForEach(sortedParticipants, id: \.id) { participant in
+          ChatInfoParticipantRow(
+            participant: participant,
+            role: roles[participant.user.id],
+            isCurrentUser: participant.user.id == currentUserId,
+            canRemove: canManageParticipants && participant.user.id != currentUserId,
+            onOpenChatInfo: { onOpenChatInfo(participant) },
+            onMessage: { onMessage(participant) },
+            onRequestRemove: { onRequestRemove(participant) }
+          )
+        }
+        if sortedParticipants.isEmpty, !canAddParticipants {
+          Text("No one has been added yet.")
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+        }
+      }
+    }
+    .task {
+      await participantsViewModel.refetchParticipants()
+    }
+    .task(id: spaceId) {
+      guard let spaceId else { return }
+      let members = (try? await AppDatabase.shared.reader.read { db in
+        try Member.filter(Member.Columns.spaceId == spaceId).fetchAll(db)
+      }) ?? []
+      roles = Dictionary(members.map { ($0.userId, $0.role) }, uniquingKeysWith: { first, _ in first })
+    }
   }
 }
 
-@MainActor
-private final class ChatInfoDocumentsState: ObservableObject {
-  @Published private(set) var documentsViewModel: ChatDocumentsViewModel?
+private struct ChatInfoGroupAccessRow: View {
+  let group: UserGroup
+  let canRemove: Bool
+  let onRequestRemove: () -> Void
 
-  private let db: AppDatabase
-  private let peer: Peer
-  private var currentChatId: Int64 = 0
+  var body: some View {
+    HStack(spacing: 10) {
+      PeerInfoRowIcon(systemImage: "person.3.fill")
+        .frame(width: 30)
 
-  init(db: AppDatabase, peer: Peer) {
-    self.db = db
-    self.peer = peer
+      VStack(alignment: .leading, spacing: 1) {
+        Text(group.name)
+          .lineLimit(1)
+        Text(subtitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Image(systemName: "minus.circle")
+        }
+        .buttonStyle(.borderless)
+        .help("Remove group access")
+        .accessibilityLabel("Remove \(group.name)")
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 7)
+    .contentShape(Rectangle())
+    .contextMenu {
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Label("Remove Group Access", systemImage: "minus.circle")
+        }
+      }
+    }
+    .accessibilityElement(children: .combine)
   }
 
-  func updateChatId(_ chatId: Int64) {
-    guard chatId > 0 else { return }
-    guard chatId != currentChatId else { return }
-    currentChatId = chatId
-    documentsViewModel?.deactivate()
-    documentsViewModel = ChatDocumentsViewModel(db: db, chatId: chatId, peer: peer)
+  private var subtitle: String {
+    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
+    guard let description = group.description, !description.isEmpty else { return count }
+    return "\(description) · \(count)"
   }
 }
 
-@MainActor
-private final class ChatInfoLinksState: ObservableObject {
-  @Published private(set) var linksViewModel: ChatLinksViewModel?
+private struct ChatInfoParticipantRow: View {
+  let participant: UserInfo
+  let role: MemberRole?
+  let isCurrentUser: Bool
+  let canRemove: Bool
+  let onOpenChatInfo: () -> Void
+  let onMessage: () -> Void
+  let onRequestRemove: () -> Void
 
-  private let db: AppDatabase
-  private let peer: Peer
-  private var currentChatId: Int64 = 0
+  @ObservedObject private var agentStore = AgentWorkStateStore.shared
+  @State private var isHovered = false
 
-  init(db: AppDatabase, peer: Peer) {
-    self.db = db
-    self.peer = peer
+  var body: some View {
+    HStack(spacing: 10) {
+      Button(action: onOpenChatInfo) {
+        HStack(spacing: 10) {
+          UserAvatar(user: participant.user, size: 30)
+            .overlay(alignment: .bottomTrailing) { botDot }
+
+          VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+              Text(participant.user.displayName)
+                .lineLimit(1)
+              if isCurrentUser {
+                Text("You")
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(.secondary)
+              }
+            }
+            if let detail {
+              Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          if let role, role != .member {
+            Text(role == .owner ? "owner" : "admin")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(role == .owner ? Color.purple : Color.green)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 1)
+              .background(
+                (role == .owner ? Color.purple : Color.green).opacity(0.14),
+                in: RoundedRectangle(cornerRadius: 4, style: .continuous)
+              )
+          }
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .help("Show \(participant.user.shortDisplayName)’s info")
+
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Image(systemName: "minus.circle")
+        }
+        .buttonStyle(.borderless)
+        .opacity(isHovered ? 1 : 0.35)
+        .help("Remove from this thread")
+        .accessibilityLabel("Remove \(participant.user.shortDisplayName)")
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+    .background(isHovered ? Color.primary.opacity(0.04) : .clear)
+    .onHover { isHovered = $0 }
+    .contextMenu {
+      if !isCurrentUser {
+        Button("Message", systemImage: "message", action: onMessage)
+      }
+      Button(action: onOpenChatInfo) {
+        if participant.user.bot, isOwnedBot {
+          Label("Manage Bot…", systemImage: "slider.horizontal.3")
+        } else {
+          Label("Show Info", systemImage: "info.circle")
+        }
+      }
+      if canRemove {
+        Divider()
+        Button(role: .destructive, action: onRequestRemove) {
+          Label("Remove from Thread", systemImage: "minus.circle")
+        }
+      }
+    }
+    .task(id: participant.user.id) {
+      if participant.user.bot {
+        AgentGrantStore.shared.ensureLoaded(botUserID: participant.user.id)
+      }
+    }
   }
 
-  func updateChatId(_ chatId: Int64) {
-    guard chatId > 0 else { return }
-    guard chatId != currentChatId else { return }
-    currentChatId = chatId
-    linksViewModel?.deactivate()
-    linksViewModel = ChatLinksViewModel(db: db, chatId: chatId, peer: peer)
-  }
-}
-
-@MainActor
-private final class ChatInfoVoiceMemosState: ObservableObject {
-  @Published private(set) var voiceMemosViewModel: ChatVoiceMemosViewModel?
-
-  private let db: AppDatabase
-  private let peer: Peer
-  private var currentChatId: Int64 = 0
-
-  init(db: AppDatabase, peer: Peer) {
-    self.db = db
-    self.peer = peer
+  /// Bots show whether they can answer; people's presence stays private.
+  private var detail: String? {
+    if participant.user.bot {
+      return BotStatusSummary.make(user: participant.user, runtime: agentStore.runtimeInfo(botUserID: participant.user.id))?.title ?? "bot"
+    }
+    if let username = participant.user.username, !username.isEmpty {
+      return "@\(username)"
+    }
+    return nil
   }
 
-  func updateChatId(_ chatId: Int64) {
-    guard chatId > 0 else { return }
-    guard chatId != currentChatId else { return }
-    currentChatId = chatId
-    voiceMemosViewModel?.deactivate()
-    voiceMemosViewModel = ChatVoiceMemosViewModel(db: db, chatId: chatId, peer: peer)
+  @ViewBuilder
+  private var botDot: some View {
+    if participant.user.bot,
+       let status = BotStatusSummary.make(user: participant.user, runtime: agentStore.runtimeInfo(botUserID: participant.user.id))
+    {
+      Circle()
+        .fill(status.tone.color)
+        .frame(width: 9, height: 9)
+        .overlay(Circle().stroke(Color(nsColor: .controlBackgroundColor), lineWidth: 1.5))
+        .accessibilityHidden(true)
+    }
+  }
+
+  private var isOwnedBot: Bool {
+    participant.user.bot && AgentGrantStore.shared.ownedGrants(botUserID: participant.user.id) != nil
   }
 }
 
@@ -1243,746 +1637,3 @@ private final class ChatInfoParticipantsState: ObservableObject {
     participantsViewModel = ChatParticipantsWithMembersViewModel(db: db, chatId: chatId)
   }
 }
-
-private struct ChatInfoMediaList: View {
-  @ObservedObject var mediaViewModel: ChatMediaViewModel
-  let onShowInChat: (Message) -> Void
-
-  var body: some View {
-    LazyVStack(alignment: .leading, spacing: 12) {
-      ForEach(mediaViewModel.groupedMediaMessages, id: \.date) { group in
-        Text(chatInfoDateLabel(group.date))
-          .font(.system(size: 12, weight: .semibold))
-          .foregroundStyle(.secondary)
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 4)], spacing: 4) {
-          ForEach(group.messages) { media in
-            ChatInfoMediaCell(media: media)
-              // Preserve each occurrence while recreating the AppKit view when its media kind changes.
-              .id(ChatInfoMediaCell.Identity(messageId: media.id, isPhoto: media.photo != nil))
-              .aspectRatio(1, contentMode: .fit)
-              .clipShape(RoundedRectangle(cornerRadius: 8))
-              .contextMenu { Button("Show in Chat") { onShowInChat(media.message) } }
-              .onAppear { Task { await mediaViewModel.loadMoreIfNeeded(currentMessageId: media.message.messageId) } }
-          }
-        }
-      }
-      ChatInfoResourceFooter(
-        state: mediaViewModel.loadState, isEmpty: mediaViewModel.mediaMessages.isEmpty,
-        emptyMessage: "No media found in this chat.", loadMore: mediaViewModel.loadMore, retry: mediaViewModel.retry
-      )
-    }
-    .padding(.horizontal, 16)
-    .task(id: ObjectIdentifier(mediaViewModel)) { await mediaViewModel.loadInitial() }
-    .onDisappear { mediaViewModel.deactivate() }
-  }
-}
-
-private struct ChatInfoMediaCell: NSViewRepresentable {
-  struct Identity: Hashable {
-    let messageId: Int64
-    let isPhoto: Bool
-  }
-
-  let media: MediaMessage
-
-  func makeNSView(context: Context) -> NSView {
-    let message = fullMessage()
-    if media.photo != nil {
-      return NewPhotoView(message, scrollState: .idle, roundsAllCorners: true)
-    }
-    return NewVideoView(message, scrollState: .idle, roundsAllCorners: true)
-  }
-
-  func updateNSView(_ view: NSView, context: Context) {
-    let message = fullMessage()
-    (view as? NewPhotoView)?.update(with: message)
-    (view as? NewVideoView)?.update(with: message)
-  }
-
-  private func fullMessage() -> FullMessage {
-    var message = FullMessage(
-      senderInfo: nil,
-      message: media.message,
-      reactions: [],
-      repliedToMessage: nil,
-      attachments: []
-    )
-    message.photoInfo = media.photo
-    message.videoInfo = media.video
-    return message
-  }
-}
-
-private struct ChatInfoFilesList: View {
-  @ObservedObject var documentsViewModel: ChatDocumentsViewModel
-
-  let onShowInChat: (Message) -> Void
-
-  var body: some View {
-    VStack(spacing: 0) {
-      if !documentsViewModel.documentMessages.isEmpty {
-        LazyVStack(alignment: .leading, spacing: 8) {
-          ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
-            Section {
-              ForEach(group.messages, id: \.id) { documentMessage in
-                ChatInfoDocumentRow(documentMessage: documentMessage)
-                  .contextMenu { Button("Show in Chat") { onShowInChat(documentMessage.message) } }
-                  .padding(.horizontal, 16)
-                  .padding(.vertical, 4)
-                  .onAppear {
-                    Task {
-                      await documentsViewModel.loadMoreIfNeeded(currentMessageId: documentMessage.message.messageId)
-                    }
-                  }
-              }
-            } header: {
-              Text(chatInfoDateLabel(group.date))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-            } footer: {
-              Divider()
-                .padding(.leading, 16)
-            }
-          }
-        }
-      }
-      ChatInfoResourceFooter(
-        state: documentsViewModel.loadState, isEmpty: documentsViewModel.documentMessages.isEmpty,
-        emptyMessage: "No files found in this chat.", loadMore: documentsViewModel.loadMore,
-        retry: documentsViewModel.retry
-      )
-    }
-    .task(id: ObjectIdentifier(documentsViewModel)) {
-      await documentsViewModel.loadInitial()
-    }
-    .onDisappear { documentsViewModel.deactivate() }
-  }
-}
-
-private struct ChatInfoLinksList: View {
-  @ObservedObject var linksViewModel: ChatLinksViewModel
-
-  let onShowInChat: (Message) -> Void
-
-  var body: some View {
-    VStack(spacing: 0) {
-      if !linksViewModel.linkMessages.isEmpty {
-        LazyVStack(alignment: .leading, spacing: 12) {
-          ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
-            Section {
-              ForEach(group.messages, id: \.id) { linkMessage in
-                ChatInfoLinkRow(linkMessage: linkMessage)
-                  .contextMenu { Button("Show in Chat") { onShowInChat(linkMessage.message) } }
-                  .padding(.horizontal, 16)
-                  .onAppear {
-                    Task {
-                      await linksViewModel.loadMoreIfNeeded(currentMessageId: linkMessage.message.messageId)
-                    }
-                  }
-              }
-            } header: {
-              Text(chatInfoDateLabel(group.date))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-            }
-          }
-        }
-      }
-      ChatInfoResourceFooter(
-        state: linksViewModel.loadState, isEmpty: linksViewModel.linkMessages.isEmpty,
-        emptyMessage: "No links found in this chat.", loadMore: linksViewModel.loadMore, retry: linksViewModel.retry
-      )
-    }
-    .task(id: ObjectIdentifier(linksViewModel)) {
-      await linksViewModel.loadInitial()
-    }
-    .onDisappear { linksViewModel.deactivate() }
-  }
-}
-
-private struct ChatInfoVoiceMemosList: View {
-  @ObservedObject var voiceMemosViewModel: ChatVoiceMemosViewModel
-  let accentColor: Color
-
-  let onShowInChat: (Message) -> Void
-
-  var body: some View {
-    VStack(spacing: 0) {
-      if !voiceMemosViewModel.voiceMemoMessages.isEmpty {
-        LazyVStack(alignment: .leading, spacing: 12) {
-          ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
-            Section {
-              ForEach(group.messages) { voiceMemo in
-                ChatInfoVoiceMemoRow(
-                  voiceMemo: voiceMemo,
-                  accentColor: accentColor
-                )
-                .contextMenu { Button("Show in Chat") { onShowInChat(voiceMemo.message) } }
-                .padding(.horizontal, 16)
-                .onAppear {
-                  Task {
-                    await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
-                  }
-                }
-              }
-            } header: {
-              Text(chatInfoDateLabel(group.date))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-            }
-          }
-        }
-      }
-      ChatInfoResourceFooter(
-        state: voiceMemosViewModel.loadState, isEmpty: voiceMemosViewModel.voiceMemoMessages.isEmpty,
-        emptyMessage: "No voice memos found in this chat.", loadMore: voiceMemosViewModel.loadMore,
-        retry: voiceMemosViewModel.retry
-      )
-    }
-    .task(id: ObjectIdentifier(voiceMemosViewModel)) {
-      await voiceMemosViewModel.loadInitial()
-    }
-    .onDisappear { voiceMemosViewModel.deactivate() }
-  }
-}
-
-private struct ChatInfoVoiceMemoRow: View {
-  let voiceMemo: VoiceMemoMessage
-  let accentColor: Color
-
-  var body: some View {
-    HStack(alignment: .center, spacing: 10) {
-      Image(systemName: "waveform")
-        .foregroundStyle(.secondary)
-        .font(.system(size: 14, weight: .semibold))
-        .frame(width: 24, height: 24)
-
-      VStack(alignment: .leading, spacing: 6) {
-        HStack(spacing: 8) {
-          Text("Voice memo")
-            .font(.body)
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-
-          Spacer(minLength: 8)
-
-          if let duration = formatDuration(voiceMemo.voice.duration) {
-            Text(duration)
-              .font(.caption.monospacedDigit())
-              .foregroundStyle(.secondary)
-          }
-        }
-
-        VoiceMessageBubble(
-          message: voiceMemo.message,
-          outgoing: false,
-          maxWidth: 300,
-          mode: .minimal,
-          accentColor: accentColor
-        )
-      }
-    }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 8)
-    .background(
-      RoundedRectangle(cornerRadius: 10)
-        .fill(Color(nsColor: .windowBackgroundColor))
-    )
-  }
-
-  private func formatDuration(_ duration: Int32) -> String? {
-    guard duration > 0 else { return nil }
-    let clamped = Int(duration)
-    let minutes = clamped / 60
-    let seconds = clamped % 60
-    return String(format: "%d:%02d", minutes, seconds)
-  }
-}
-
-private struct ChatInfoLinkRow: View {
-  let linkMessage: LinkMessage
-  @Environment(\.openURL) private var openURL
-
-  private static let detector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link
-    .rawValue)
-
-  private var url: URL? {
-    parseURL(linkMessage.urlPreview?.url) ?? firstURL(from: linkMessage.message.text)
-  }
-
-  private var title: String {
-    if let title = linkMessage.urlPreview?.title?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !title.isEmpty
-    {
-      return title
-    }
-    if let host = url?.host, !host.isEmpty {
-      return host
-    }
-    if let text = linkMessage.message.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !text.isEmpty
-    {
-      return text
-    }
-    return "Link"
-  }
-
-  private var subtitle: String? {
-    if let absolute = url?.absoluteString, !absolute.isEmpty {
-      return absolute
-    }
-    if let text = linkMessage.message.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-       !text.isEmpty
-    {
-      return text
-    }
-    return nil
-  }
-
-  var body: some View {
-    Button {
-      guard let url else { return }
-      openURL(url)
-    } label: {
-      HStack(alignment: .top, spacing: 10) {
-        Image(systemName: "link")
-          .foregroundStyle(.secondary)
-          .font(.system(size: 12, weight: .semibold))
-          .padding(.top, 2)
-
-        VStack(alignment: .leading, spacing: 2) {
-          Text(title)
-            .font(.body)
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-
-          if let subtitle {
-            Text(subtitle)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .lineLimit(2)
-          }
-        }
-
-        Spacer(minLength: 8)
-      }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 8)
-      .background(
-        RoundedRectangle(cornerRadius: 10)
-          .fill(Color(nsColor: .windowBackgroundColor))
-      )
-    }
-    .buttonStyle(.plain)
-    .disabled(url == nil)
-  }
-
-  private func parseURL(_ rawValue: String?) -> URL? {
-    guard let rawValue else { return nil }
-    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
-
-    if let url = URL(string: trimmed),
-       let scheme = url.scheme?.lowercased(),
-       ["http", "https"].contains(scheme)
-    {
-      return url
-    }
-
-    if let url = URL(string: "https://\(trimmed)"),
-       let scheme = url.scheme?.lowercased(),
-       ["http", "https"].contains(scheme)
-    {
-      return url
-    }
-
-    return nil
-  }
-
-  private func firstURL(from text: String?) -> URL? {
-    guard let text, !text.isEmpty, let detector = Self.detector else { return nil }
-    let range = NSRange(text.startIndex..., in: text)
-    var foundURL: URL?
-
-    detector.enumerateMatches(in: text, options: [], range: range) { match, _, stop in
-      guard let matchURL = match?.url else { return }
-      if let parsedURL = parseURL(matchURL.absoluteString) {
-        foundURL = parsedURL
-        stop.pointee = true
-      }
-    }
-
-    return foundURL
-  }
-}
-
-private struct ChatInfoParticipantsList: View {
-  @ObservedObject var participantsViewModel: ChatParticipantsWithMembersViewModel
-  let currentUserId: Int64?
-  let canAddParticipants: Bool
-  let canManageParticipants: Bool
-  let onAddParticipants: () -> Void
-  let onOpenChatInfo: (UserInfo) -> Void
-  let onRequestRemove: (UserInfo) -> Void
-  let onRequestRemoveGroup: (UserGroup) -> Void
-
-  private var sortedParticipants: [UserInfo] {
-    participantsViewModel.participants.sorted { lhs, rhs in
-      let lhsName = lhs.user.displayName.lowercased()
-      let rhsName = rhs.user.displayName.lowercased()
-      if lhsName == rhsName {
-        return lhs.user.id < rhs.user.id
-      }
-      return lhsName < rhsName
-    }
-  }
-
-  private var sortedGroups: [UserGroup] {
-    participantsViewModel.groupParticipants.sorted { lhs, rhs in
-      let comparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-      if comparison == .orderedSame {
-        return lhs.id < rhs.id
-      }
-      return comparison == .orderedAscending
-    }
-  }
-
-  var body: some View {
-    Group {
-      if sortedParticipants.isEmpty, sortedGroups.isEmpty {
-        Text("No access grants found in this chat.")
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .padding(.vertical, 32)
-      } else {
-        VStack(alignment: .leading, spacing: 0) {
-          HStack {
-            Text(accessSummary)
-              .font(.subheadline.weight(.semibold))
-              .foregroundStyle(.secondary)
-
-            Spacer()
-
-            if canAddParticipants {
-              Button {
-                onAddParticipants()
-              } label: {
-                Label("Add", systemImage: "person.badge.plus")
-              }
-              .buttonStyle(.borderless)
-              .controlSize(.small)
-            }
-          }
-          .padding(.horizontal, 16)
-          .padding(.bottom, 8)
-
-          VStack(alignment: .leading, spacing: 0) {
-            if !sortedGroups.isEmpty {
-              ChatInfoAccessSectionHeader(title: "Groups")
-
-              ForEach(sortedGroups) { group in
-                ChatInfoGroupAccessRow(
-                  group: group,
-                  canRemove: canManageParticipants,
-                  onRequestRemove: {
-                    onRequestRemoveGroup(group)
-                  }
-                )
-
-                if group.id != sortedGroups.last?.id || !sortedParticipants.isEmpty {
-                  Divider()
-                    .padding(.leading, 54)
-                }
-              }
-            }
-
-            if !sortedParticipants.isEmpty {
-              ChatInfoAccessSectionHeader(title: "Direct Participants")
-
-              ForEach(sortedParticipants, id: \.id) { participant in
-                ChatInfoParticipantRow(
-                  participant: participant,
-                  isCurrentUser: participant.user.id == currentUserId,
-                  canRemove: canManageParticipants && participant.user.id != currentUserId,
-                  onOpenChatInfo: {
-                    onOpenChatInfo(participant)
-                  },
-                  onRequestRemove: {
-                    onRequestRemove(participant)
-                  }
-                )
-
-                if participant.id != sortedParticipants.last?.id {
-                  Divider()
-                    .padding(.leading, 54)
-                }
-              }
-            }
-          }
-          .background(Color(nsColor: .controlBackgroundColor))
-          .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-          .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .stroke(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5)
-          }
-          .padding(.horizontal, 16)
-        }
-      }
-    }
-    .task {
-      await participantsViewModel.refetchParticipants()
-    }
-  }
-
-  private var accessSummary: String {
-    let direct = "\(sortedParticipants.count) direct"
-    guard !sortedGroups.isEmpty else { return direct }
-    return "\(direct), \(sortedGroups.count) \(sortedGroups.count == 1 ? "group" : "groups")"
-  }
-}
-
-private struct ChatInfoAccessSectionHeader: View {
-  let title: String
-
-  var body: some View {
-    Text(title)
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(.secondary)
-      .padding(.horizontal, 10)
-      .padding(.top, 8)
-      .padding(.bottom, 2)
-  }
-}
-
-private struct ChatInfoGroupAccessRow: View {
-  let group: UserGroup
-  let canRemove: Bool
-  let onRequestRemove: () -> Void
-
-  var body: some View {
-    HStack(spacing: 10) {
-      HStack(spacing: 10) {
-        Image(systemName: "person.3.fill")
-          .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(.white)
-          .frame(width: 28, height: 28)
-          .background(Color.accentColor)
-          .clipShape(Circle())
-
-        VStack(alignment: .leading, spacing: 1) {
-          Text(group.name)
-            .font(.body)
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-
-          Text(subtitle)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-
-        Spacer(minLength: 8)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-
-      if canRemove {
-        Button(role: .destructive, action: onRequestRemove) {
-          Image(systemName: "minus.circle")
-            .font(.system(size: 14, weight: .medium))
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel("Remove group access")
-      }
-    }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 7)
-    .contentShape(Rectangle())
-    .contextMenu {
-      if canRemove {
-        Button(role: .destructive, action: onRequestRemove) {
-          Label("Remove Group Access", systemImage: "minus.circle")
-        }
-      }
-    }
-  }
-
-  private var subtitle: String {
-    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
-    guard let description = group.description, !description.isEmpty else {
-      return count
-    }
-    return "\(description) - \(count)"
-  }
-}
-
-private struct ChatInfoParticipantRow: View {
-  let participant: UserInfo
-  let isCurrentUser: Bool
-  let canRemove: Bool
-  let onOpenChatInfo: () -> Void
-  let onRequestRemove: () -> Void
-
-  var body: some View {
-    HStack(spacing: 10) {
-      HStack(spacing: 10) {
-        Button(action: onOpenChatInfo) {
-          UserAvatar(user: participant.user, size: 28)
-        }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
-        .help("Open User Info")
-
-        VStack(alignment: .leading, spacing: 1) {
-          HStack(spacing: 6) {
-            Text(participant.user.displayName)
-              .font(.body)
-              .foregroundStyle(.primary)
-              .lineLimit(1)
-
-            if isCurrentUser {
-              Text("You")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            }
-          }
-
-          if let username = participant.user.username, !username.isEmpty {
-            Text("@\(username)")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          }
-        }
-
-        Spacer(minLength: 8)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-
-      if canRemove {
-        Button(role: .destructive, action: onRequestRemove) {
-          Image(systemName: "minus.circle")
-            .font(.system(size: 14, weight: .medium))
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel("Remove participant")
-      }
-    }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 7)
-    .contentShape(Rectangle())
-    .contextMenu {
-      // The bot's own chat info carries its profile and settings.
-      if participant.user.bot == true {
-        Button(action: onOpenChatInfo) {
-          if isOwnedBot {
-            Label("Manage Bot…", systemImage: "slider.horizontal.3")
-          } else {
-            Label("Bot Info…", systemImage: "info.circle")
-          }
-        }
-      }
-      if canRemove {
-        Button(role: .destructive, action: onRequestRemove) {
-          Label("Remove Participant", systemImage: "minus.circle")
-        }
-      }
-    }
-    .task(id: participant.user.id) {
-      if participant.user.bot == true {
-        AgentGrantStore.shared.ensureLoaded(botUserID: participant.user.id)
-      }
-    }
-  }
-
-  private var isOwnedBot: Bool {
-    participant.user.bot == true && AgentGrantStore.shared.ownedGrants(botUserID: participant.user.id) != nil
-  }
-}
-
-private struct ChatInfoDocumentRow: NSViewRepresentable {
-  let documentMessage: DocumentMessage
-
-  func makeNSView(context: Context) -> DocumentView {
-    let view = DocumentView(
-      documentInfo: documentMessage.document,
-      fullMessage: makeFullMessage(from: documentMessage)
-    )
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }
-
-  func updateNSView(_ nsView: DocumentView, context: Context) {
-    nsView.update(
-      with: documentMessage.document,
-      fullMessage: makeFullMessage(from: documentMessage)
-    )
-  }
-
-  func sizeThatFits(
-    _ proposal: ProposedViewSize,
-    nsView _: DocumentView,
-    context _: Context
-  ) -> CGSize? {
-    // DocumentView uses manual frames, so SwiftUI cannot infer its height from constraints.
-    let preferredWidth = DocumentPresentationPlan.preferredWidth(for: documentMessage.document)
-    let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? preferredWidth
-
-    return CGSize(
-      width: width,
-      height: DocumentPresentationPlan.preferredHeight(for: documentMessage.document)
-    )
-  }
-
-  private func makeFullMessage(from documentMessage: DocumentMessage) -> FullMessage {
-    FullMessage(
-      senderInfo: nil,
-      message: documentMessage.message,
-      reactions: [],
-      repliedToMessage: nil,
-      attachments: []
-    )
-  }
-}
-
-@MainActor
-private func chatInfoDateLabel(_ date: Date) -> String {
-  let calendar = Calendar.current
-  let now = Date()
-
-  if calendar.isDateInToday(date) {
-    return "Today"
-  }
-  if calendar.isDateInYesterday(date) {
-    return "Yesterday"
-  }
-  if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-    return ChatInfoDateLabelFormatters.weekday.string(from: date)
-  }
-
-  return ChatInfoDateLabelFormatters.fullDate.string(from: date)
-}
-
-@MainActor
-private enum ChatInfoDateLabelFormatters {
-  static let weekday: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.locale = .autoupdatingCurrent
-    formatter.timeZone = .autoupdatingCurrent
-    formatter.dateFormat = "EEEE"
-    return formatter
-  }()
-
-  static let fullDate: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.locale = .autoupdatingCurrent
-    formatter.timeZone = .autoupdatingCurrent
-    formatter.dateFormat = "MMMM d, yyyy"
-    return formatter
-  }()
-}
-
-// TODO: Previews
