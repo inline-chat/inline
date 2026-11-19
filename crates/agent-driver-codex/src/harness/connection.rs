@@ -72,8 +72,9 @@ struct Connection {
 }
 
 impl Connection {
+    /// The process exited, or the peer closed (for example on a corrupt frame).
     fn closed(&self) -> bool {
-        self.control.is_finished()
+        self.control.is_finished() || self.peer.is_closed()
     }
 
     async fn request(&self, request: Request) -> Result<Value, PeerError> {
@@ -1059,8 +1060,15 @@ async fn dispatch(
             }
         }
     }
-    // The connection ended: every pending interaction is gone with it.
+    // The connection ended (the process exited or the peer closed): every
+    // pending interaction is gone with it, and a running turn can no longer
+    // finish, so it completes as `ConnectionLost` instead of staying working.
     if let Some(connection) = connection.upgrade() {
+        log::warn!(
+            target: "inline_agent_driver_codex::harness",
+            "phase=connection_lost process_exited={}",
+            connection.control.is_finished()
+        );
         let sessions: Vec<Arc<SessionInner>> = connection
             .sessions
             .lock()
@@ -1069,11 +1077,19 @@ async fn dispatch(
             .filter_map(Weak::upgrade)
             .collect();
         for session in sessions {
-            let events = session.mapper.lock().expect("mapper poisoned").cancel_all();
+            let events = session
+                .mapper
+                .lock()
+                .expect("mapper poisoned")
+                .connection_lost();
             session.emit_all(events);
             session.emit_all(vec![Event::State {
                 state: RunState::Unknown,
             }]);
+        }
+        // A peer that failed closed leaves a live process nobody can talk to.
+        if !connection.control.is_finished() {
+            let _ = connection.control.shutdown().await;
         }
     }
 }
@@ -1139,11 +1155,13 @@ impl Session for CodexSession {
                         .ok_or_else(|| {
                             SendError::Unknown("turn/start returned no turn id".to_owned())
                         })?;
-                    self.inner
+                    let lost = self
+                        .inner
                         .mapper
                         .lock()
                         .expect("mapper poisoned")
                         .turn_started_by_request(turn.clone());
+                    self.inner.emit_all(lost);
                     InputDisposition::Started { turn }
                 }
                 Delivery::Steer { expected_turn, .. } => InputDisposition::Steered {
@@ -1452,6 +1470,7 @@ fn op_error(error: PeerError) -> OpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use inline_agent_bridge::TurnOutcome;
 
     #[test]
     fn skill_options_keep_enabled_skills_once() {
@@ -1522,5 +1541,148 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(page.data[0].name, "Inline");
+    }
+
+    /// A scripted stand-in for `codex app-server`: answers `initialize`,
+    /// `thread/start` and `turn/start`, starts the turn, then runs `after`.
+    #[cfg(unix)]
+    fn fake_app_server(dir: &std::path::Path, after: &str) -> CodexHarness {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = dir.join("fake-codex");
+        std::fs::write(
+            &executable,
+            format!(
+                r#"#!/bin/sh
+[ "$1" = "app-server" ] && [ -z "$2" ] || exit 1
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | grep -o '"id":[0-9]*' | head -n 1 | cut -d: -f2)
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{{"id":%s,"result":{{}}}}\n' "$id" ;;
+    *'"method":"thread/start"'*)
+      printf '{{"id":%s,"result":{{"thread":{{"id":"thr-1","turns":[]}},"model":"gpt-5"}}}}\n' "$id" ;;
+    *'"method":"turn/start"'*)
+      printf '{{"id":%s,"result":{{"turn":{{"id":"turn-1","status":"inProgress"}}}}}}\n' "$id"
+      printf '{{"method":"turn/started","params":{{"threadId":"thr-1","turn":{{"id":"turn-1","status":"inProgress"}}}}}}\n'
+      {after} ;;
+    *)
+      [ -n "$id" ] && printf '{{"id":%s,"error":{{"code":-32601,"message":"unsupported"}}}}\n' "$id" ;;
+  esac
+done
+"#
+            ),
+        )
+        .expect("write fake app-server");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("make fake app-server executable");
+        CodexHarness::new(CodexHarnessConfig {
+            launch: CodexLaunchConfig {
+                executable,
+                version_policy: crate::CodexVersionPolicy::Any,
+                ..CodexLaunchConfig::default()
+            },
+            source: ExecutableSource::Path,
+            pinned_sha256: None,
+            bridge_version: "0.0.0-test".to_owned(),
+            cache_root: dir.join("cache"),
+        })
+    }
+
+    /// Opens a thread, starts one turn and returns how that turn completed.
+    #[cfg(unix)]
+    async fn run_one_turn(harness: &CodexHarness, folder: &std::path::Path) -> TurnOutcome {
+        use futures_util::StreamExt;
+        use inline_agent_bridge::harness::{InputContent, InputId, Origin, TurnPhase, UserId};
+        let session = harness
+            .open(OpenSpec {
+                mode: OpenMode::Start,
+                folder: folder.to_owned(),
+                settings: Default::default(),
+                instructions: None,
+                title: None,
+                after: None,
+                output_mode: Default::default(),
+            })
+            .await
+            .unwrap_or_else(|error| panic!("open: {error}"));
+        let mut events = session.events();
+        let receipt = session
+            .send(Input {
+                id: InputId::new("input-1").expect("input id"),
+                content: InputContent::text("hello"),
+                origin: Origin::Owner { user: UserId(1) },
+                delivery: Delivery::Turn,
+            })
+            .await
+            .unwrap_or_else(|error| panic!("send: {error:?}"));
+        assert!(matches!(
+            receipt.disposition,
+            InputDisposition::Started { ref turn } if turn.as_str() == "turn-1"
+        ));
+        let outcome = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(envelope) = events.next().await {
+                if let Event::Turn {
+                    turn,
+                    phase: TurnPhase::Completed { outcome, .. },
+                } = envelope.event
+                {
+                    assert_eq!(turn.as_str(), "turn-1");
+                    return outcome;
+                }
+            }
+            panic!("the event stream ended before the turn completed");
+        })
+        .await
+        .expect("the turn must complete instead of staying working");
+        assert!(session.live_work().turn.is_none(), "no turn left running");
+        outcome
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_crash_mid_turn_completes_the_turn_as_connection_lost() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let harness = fake_app_server(dir.path(), "exit 3");
+        assert_eq!(
+            run_one_turn(&harness, dir.path()).await,
+            TurnOutcome::ConnectionLost
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stray_stdout_line_mid_turn_is_skipped() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let harness = fake_app_server(
+            dir.path(),
+            r#"printf 'warning: a tool wrote to stdout\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"turn-1","status":"completed"}}}\n'"#,
+        );
+        assert_eq!(
+            run_one_turn(&harness, dir.path()).await,
+            TurnOutcome::Completed
+        );
+    }
+
+    #[test]
+    fn a_lost_connection_completes_a_turn_whose_start_reply_was_still_in_flight() {
+        let mut mapper = CodexMapper::new("thr-1");
+        // The process died between answering `turn/start` and starting the turn.
+        assert!(mapper.connection_lost().is_empty());
+        let turn = TurnId::new("turn-1").unwrap();
+        let events = mapper.turn_started_by_request(turn.clone());
+        assert!(matches!(
+            events.as_slice(),
+            [Event::Turn {
+                phase: inline_agent_bridge::harness::TurnPhase::Completed {
+                    outcome: TurnOutcome::ConnectionLost,
+                    ..
+                },
+                ..
+            }]
+        ));
+        assert!(mapper.active_turn().is_none());
+        // Reported once, however late the reply is handled.
+        assert!(mapper.turn_started_by_request(turn).is_empty());
     }
 }

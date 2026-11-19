@@ -195,6 +195,11 @@ where
             .ok_or(PeerError::IncomingAlreadyClaimed)
     }
 
+    /// The peer stopped reading and writing; every later request fails.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     pub(crate) fn abort(&self) {
         close_peer(&self.closed, &self.pending, &self.close_tx, || {
             PeerError::Closed
@@ -444,6 +449,7 @@ async fn read_loop<R>(
 {
     let mut reader = BufReader::new(reader);
     let mut wire_sequence = 0u64;
+    let mut skipped_lines = 0u64;
     loop {
         let frame = match tokio::select! {
             _ = close_rx.wait_for(|closed| *closed) => break,
@@ -464,6 +470,28 @@ async fn read_loop<R>(
         };
         let value: Value = match serde_json::from_slice(&frame) {
             Ok(value) => value,
+            // A line that is not a JSON frame at all (a stray print from a
+            // child process, a blank line) is noise, not a protocol failure:
+            // skip it rather than tear down every turn on this connection.
+            Err(_) if !looks_like_json_frame(&frame) => {
+                skipped_lines = skipped_lines.saturating_add(1);
+                if skipped_lines == 1 || skipped_lines.is_multiple_of(100) {
+                    log::warn!(
+                        target: "inline_agent_driver_codex::rpc",
+                        "phase=provider_frame_skipped reason=not_json bytes={} skipped_total={skipped_lines}",
+                        frame.len()
+                    );
+                } else {
+                    log::debug!(
+                        target: "inline_agent_driver_codex::rpc",
+                        "phase=provider_frame_skipped reason=not_json bytes={}",
+                        frame.len()
+                    );
+                }
+                continue;
+            }
+            // A corrupt frame may have been a response or turn event: fail
+            // closed so every waiter learns the connection is gone.
             Err(error) => {
                 let message = error.to_string();
                 close_peer(&closed, &pending, &close_tx, || {
@@ -549,6 +577,15 @@ async fn read_loop<R>(
             break;
         }
     }
+}
+
+/// Whether a frame that failed to parse was meant as a JSON-RPC message.
+/// Codex only writes JSON objects to stdout.
+fn looks_like_json_frame(frame: &[u8]) -> bool {
+    frame
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| *byte == b'{')
 }
 
 fn close_peer(
@@ -804,7 +841,7 @@ mod tests {
             let mut lines = BufReader::new(reader).lines();
             let _ = lines.next_line().await.expect("request read");
             writer
-                .write_all(b"not-json\n")
+                .write_all(b"{\"id\":1,\"result\":\n")
                 .await
                 .expect("malformed response");
         });
@@ -813,6 +850,51 @@ mod tests {
             Err(PeerError::InvalidMessage(message)) if message.contains("malformed JSON")
         ));
         server_task.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn stray_non_json_lines_are_skipped_without_closing_the_stream() {
+        let (client, server) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = tokio::io::split(client);
+        let peer = CodexPeer::new(client_reader, client_writer, 4);
+        let mut incoming = peer.take_incoming().expect("incoming stream");
+        let (reader, mut writer) = tokio::io::split(server);
+        let server_task = tokio::spawn(async move {
+            let mut lines = BufReader::new(reader).lines();
+            let _ = lines.next_line().await.expect("request read");
+            writer
+                .write_all(
+                    b"warning: a tool printed to stdout\n\n   \n[INFO] more noise\n\
+                      {\"id\":1,\"result\":{\"ok\":true}}\n\
+                      stray again\n\
+                      {\"method\":\"turn/started\",\"params\":{\"threadId\":\"t\"}}\n",
+                )
+                .await
+                .expect("frames");
+            (lines, writer)
+        });
+        let result = timeout(
+            Duration::from_secs(1),
+            peer.request("initialize", json!({})),
+        )
+        .await
+        .expect("the response after stray lines must arrive")
+        .expect("request succeeds");
+        assert_eq!(result, json!({"ok": true}));
+        match timeout(Duration::from_secs(1), incoming.recv()).await {
+            Ok(Some(IncomingMessage::Notification {
+                method,
+                wire_sequence,
+                ..
+            })) => {
+                assert_eq!(method, "turn/started");
+                // Skipped lines are not frames: the sequence counts only JSON.
+                assert_eq!(wire_sequence, 2);
+            }
+            other => panic!("expected the notification, got {other:?}"),
+        }
+        assert!(!peer.is_closed());
+        drop(server_task.await.expect("server task"));
     }
 
     #[tokio::test]

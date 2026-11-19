@@ -1658,7 +1658,7 @@ mod tests {
             app_server_args_override: Some(vec![
                 OsString::from("-c"),
                 OsString::from(
-                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"codex_app_server/0.146.0\"}}'; IFS= read -r initialized; printf '%s\\n' 'not-json'; sleep 30",
+                    "IFS= read -r request; printf '%s\\n' '{\"id\":1,\"result\":{\"userAgent\":\"codex_app_server/0.146.0\"}}'; IFS= read -r initialized; printf '%s\\n' '{not-json}'; sleep 30",
                 ),
             ]),
             version_policy: CodexVersionPolicy::Any,
