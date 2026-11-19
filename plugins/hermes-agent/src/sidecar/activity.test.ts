@@ -87,7 +87,7 @@ describe("ActivityHub", () => {
     expect(reads).toEqual(["chat:11", "chat:12", "chat:11"])
   })
 
-  it("falls back to the last known mode, else Detailed, when the lookup fails", async () => {
+  it("falls back to the last known mode, else the bot's last known default, when the lookup fails", async () => {
     let now = 0
     let fail = false
     const { hub, errors } = harness({
@@ -101,8 +101,20 @@ describe("ActivityHub", () => {
     fail = true
     now = 60_000
     expect(await hub.apply("b", chat, { type: "turn.start" })).toEqual({ mode: "friendly" })
-    expect(await hub.apply("c", { chatId: 99n }, { type: "turn.start" })).toEqual({ mode: "detailed" })
+    // A chat never looked up takes the default the bot reported elsewhere.
+    expect(await hub.apply("c", { chatId: 99n }, { type: "turn.start" })).toEqual({ mode: "friendly" })
     expect(errors).toEqual(["mode", "mode"])
+  })
+
+  it("forgets Friendly turns when they end", async () => {
+    const { hub, calls } = harness({ settings: async () => ({ defaultMode: 2 }) })
+    await hub.apply("f1", chat, { type: "turn.start" })
+    await hub.apply("f1", chat, { type: "item", id: "x", state: "running", body: { kind: "read", path: "a.ts" } })
+    expect(hub.size).toBe(1)
+    await hub.apply("f1", chat, { type: "turn.end", outcome: "success" })
+    await hub.flush("f1")
+    expect(hub.size).toBe(0)
+    expect(calls).toEqual([])
   })
 
   it("falls back when the lookup is too slow", async () => {

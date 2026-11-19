@@ -4985,10 +4985,12 @@ async def assert_status_message_coalescing():
     )
     assert first.success
     assert first.message_id == "status-1"
+    # A status line is never the answer: it posts silently.
     assert calls[-1] == ("/send", {
         "target": {"chatId": "99"},
         "text": "Compressing context",
         "parseMarkdown": True,
+        "sendMode": "silent",
     })
 
     updated = await adapter.send_or_update_status(
@@ -5033,6 +5035,7 @@ async def assert_status_message_coalescing():
         "target": {"chatId": "99"},
         "text": "Retrying compression",
         "parseMarkdown": True,
+        "sendMode": "silent",
     })
     assert adapter._status_message_ids[("chatId", "99", "compression")] == "status-3"
 

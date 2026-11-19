@@ -1226,6 +1226,10 @@ class _ActivityTurn:
         # People's messages that arrived mid-turn: Hermes' busy notice replies to them, and
         # that send is not this turn's answer.
         self.later_messages: set[str] = set()
+        # The last update a non-Detailed turn posted quietly: (chat_id, text, reply_to, metadata,
+        # message ids). Hermes counts delivered interim text as its final reply, so a turn can end
+        # with this as its answer; it is then posted again as the answer (see on_processing_complete).
+        self.last_quiet_update: Optional[tuple[str, str, Optional[str], Optional[Dict[str, Any]], List[str]]] = None
         # Worker-thread state below.
         self.rows: Dict[str, Dict[str, Any]] = {}
         # (session, tool call) -> row; None for calls that show no row.
@@ -5685,14 +5689,18 @@ class InlineAdapter(BasePlatformAdapter):
         instead of the chat; in other modes they post silently, so progress never notifies or
         counts as unread. ``_interim_send`` and every other metadata key stay off the wire."""
         interim = bool((metadata or {}).get("_interim_send"))
-        # The "⏳ Working — N min" heartbeat is status wherever it lands.
-        quiet = interim and _is_hermes_heartbeat(content)
+        # The "⏳ Working — N min" heartbeat and Hermes' status lines (send_or_update_status) are
+        # status wherever they land: never the answer, never a notification.
+        status = interim and (bool((metadata or {}).get("_inline_status")) or _is_hermes_heartbeat(content))
+        quiet = status
+        update = False
         turn = None if _ACTIVITY_LOCAL_SEND.get() else self._activity_turn_for_send(chat_id, metadata)
         if turn is not None:
             if interim and self._activity_foldable(content, metadata, actions):
                 if not await self._activity_is_detailed(turn):
                     # What Detailed folds into the progress message posts in the chat quietly.
                     quiet = True
+                    update = not status
                 else:
                     if _is_hermes_heartbeat(content):
                         # The progress message's live timer already says this.
@@ -5712,11 +5720,23 @@ class InlineAdapter(BasePlatformAdapter):
                         raw_response={"inlineActivity": "commentary"},
                         retryable=False,
                     )
-            elif not interim and not (reply_to and str(reply_to) in turn.later_messages):
+            elif not interim and reply_to and str(reply_to) in turn.later_messages:
+                # Hermes' busy notice to a message sent mid-turn. Not the answer, and whoever just
+                # wrote is looking at the chat: no notification or unread for it.
+                quiet = True
+            elif not interim:
                 await self._activity_close_before_answer(turn, content)
-        return await self._send_message(
+        result = await self._send_message(
             chat_id, content, reply_to=reply_to, metadata=metadata, actions=actions, quiet=quiet,
         )
+        if turn is not None and result.success:
+            if update:
+                ids = [str(value) for value in (*(getattr(result, "continuation_message_ids", None) or ()), result.message_id) if value]
+                turn.last_quiet_update = (str(chat_id), str(content), reply_to, metadata, ids)
+            elif not quiet:
+                # Something louder came after it (an approval card, say): no longer the last word.
+                turn.last_quiet_update = None
+        return result
 
     async def _send_message(
         self,
@@ -5850,7 +5870,9 @@ class InlineAdapter(BasePlatformAdapter):
                 return result
             self._status_message_ids.pop(key, None)
 
-        result = await self.send(chat_id, content, metadata=metadata)
+        # A status line (context pressure, compression, provider fallback, lifecycle) is never the
+        # turn's answer: sent as interim it neither closes Detailed progress early nor notifies.
+        result = await self.send(chat_id, content, metadata={**(metadata or {}), "_interim_send": True, "_inline_status": True})
         if result.success and result.message_id:
             self._remember(self._status_message_ids, key, str(result.message_id))
         return result
@@ -6049,7 +6071,12 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         """Replace the processing marker without affecting response delivery."""
+        entry = self._activity_events.get(id(event))
+        turn = entry[1] if entry is not None and entry[0] is event else None
+        answered = turn is None or turn.closed
         self._activity_finish(event, outcome)
+        if not answered:
+            await self._activity_post_unanswered_update(turn, outcome)
         reaction_target = self._processing_reaction_target(event)
         if not reaction_target:
             return
@@ -6143,9 +6170,33 @@ class InlineAdapter(BasePlatformAdapter):
             return
         try:
             self._activity_close(turn, {"outcome": "success", "final": final_text})
+            if turn.mode_ready.is_set() and turn.mode != "detailed":
+                # No progress message to order the answer behind, and the worker thread is
+                # shared by every chat: don't wait on another chat's progress.
+                return
             await asyncio.wait_for(asyncio.wrap_future(turn.pump.flush(turn)), timeout=_ACTIVITY_FINAL_WAIT_SECONDS)
         except Exception as exc:
             _activity_log_failure("answer ordering", exc)
+
+    async def _activity_post_unanswered_update(self, turn: _ActivityTurn, outcome: Any) -> None:
+        """A non-Detailed turn that succeeded without sending an answer, whose last output was a
+        quiet update: Hermes took that update for its final reply (its dedup matches delivered
+        interim text, and some providers deliver the final that way). Post it again as the answer,
+        so it notifies like one, then remove the quiet copy."""
+        update = turn.last_quiet_update
+        name = str(getattr(outcome, "value", outcome) or "").strip().lower()
+        if update is None or name != "success":
+            return
+        chat_id, text, reply_to, metadata, quiet_ids = update
+        turn.last_quiet_update = None
+        try:
+            result = await self._send_message(chat_id, text, reply_to=reply_to, metadata=metadata)
+            if not result.success:
+                return
+            for message_id in quiet_ids:
+                await self.delete_message(chat_id, message_id, metadata=metadata)
+        except Exception as exc:
+            _activity_log_failure("unanswered update", exc)
 
     def _activity_turn_for_send(self, chat_id: Any, metadata: Optional[Dict[str, Any]]) -> Optional[_ActivityTurn]:
         """This adapter's open turn for a Hermes send, matched as Hermes addresses the turn."""

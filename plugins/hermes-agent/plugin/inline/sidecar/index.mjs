@@ -58030,7 +58030,7 @@ function resolveOutputMode(defaultMode, threadOverride) {
   return pick(threadOverride) ?? pick(defaultMode) ?? "detailed";
 }
 // src/sidecar/activity.ts
-var MODE_CACHE_MS = 30000;
+var MODE_CACHE_MS = 5000;
 var MODE_TIMEOUT_MS = 3000;
 var MAX_TURNS = 256;
 
@@ -58038,6 +58038,7 @@ class ActivityHub {
   options;
   turns = new Map;
   modes = new Map;
+  lastDefault;
   now;
   modeCacheMs;
   modeTimeoutMs;
@@ -58063,8 +58064,11 @@ class ActivityHub {
       return { ignored: true };
     const mode = await state.ready;
     state.touchedAt = this.now();
-    if (mode !== "detailed" || !state.stream)
+    if (mode !== "detailed" || !state.stream) {
+      if (event.type === "turn.end")
+        this.end(turnId, state);
       return { mode };
+    }
     state.stream.apply(event, options.at);
     if (event.type === "turn.end")
       this.end(turnId, state);
@@ -58124,13 +58128,14 @@ class ActivityHub {
         })
       ]).finally(() => clearTimeout(timer));
       const mode = resolveOutputMode(settings.defaultMode, settings.override);
+      this.lastDefault = settings.defaultMode;
       this.modes.set(key, { mode, at: this.now() });
       if (this.modes.size > 1024)
         this.modes.delete(this.modes.keys().next().value);
       return mode;
     } catch (error) {
       this.options.onError?.(error, "mode");
-      return cached?.mode ?? "detailed";
+      return cached?.mode ?? resolveOutputMode(this.lastDefault, undefined);
     }
   }
 }
@@ -58845,11 +58850,11 @@ function progressTransport(target) {
     }
   };
 }
-var AGENT_SETTINGS_CACHE_MS = 30000;
+var AGENT_SETTINGS_CACHE_MS = 1e4;
 var agentDefaultOutputMode;
 async function readOutputModeSettings(target) {
   const peerId = inputPeerFromTarget(target);
-  const [defaultMode, participations] = await Promise.all([
+  const [defaultResult, participationsResult] = await Promise.allSettled([
     (async () => {
       if (agentDefaultOutputMode && Date.now() - agentDefaultOutputMode.at < AGENT_SETTINGS_CACHE_MS) {
         return agentDefaultOutputMode.value;
@@ -58868,6 +58873,12 @@ async function readOutputModeSettings(target) {
       getAgentParticipations: { peerId }
     })
   ]);
+  if (participationsResult.status === "rejected")
+    throw participationsResult.reason;
+  if (defaultResult.status === "rejected" && !agentDefaultOutputMode)
+    throw defaultResult.reason;
+  const defaultMode = defaultResult.status === "fulfilled" ? defaultResult.value : agentDefaultOutputMode?.value;
+  const participations = participationsResult.value;
   const list = asOptionalRecord(asOptionalRecord(participations)?.getAgentParticipations)?.participations;
   const mine = Array.isArray(list) && meId != null ? list.map(asOptionalRecord).find((entry) => entry != null && String(entry.botUserId) === meId) : undefined;
   const override = typeof mine?.outputMode === "number" ? mine.outputMode : undefined;

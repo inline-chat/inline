@@ -38,7 +38,8 @@ type TurnState = {
   touchedAt: number
 }
 
-const MODE_CACHE_MS = 30_000
+// Short, so an owner's change (in the apps or `inline bots settings`) applies from the next turn.
+const MODE_CACHE_MS = 5_000
 const MODE_TIMEOUT_MS = 3_000
 const MAX_TURNS = 256
 
@@ -50,6 +51,8 @@ const MAX_TURNS = 256
 export class ActivityHub {
   private readonly turns = new Map<string, TurnState>()
   private readonly modes = new Map<string, { mode: OutputMode; at: number }>()
+  /** The bot's default from the last successful lookup in any chat, for fallbacks. */
+  private lastDefault: number | undefined
   private readonly now: () => number
   private readonly modeCacheMs: number
   private readonly modeTimeoutMs: number
@@ -83,7 +86,10 @@ export class ActivityHub {
     if (!state || state.ended) return { ignored: true }
     const mode = await state.ready
     state.touchedAt = this.now()
-    if (mode !== "detailed" || !state.stream) return { mode }
+    if (mode !== "detailed" || !state.stream) {
+      if (event.type === "turn.end") this.end(turnId, state)
+      return { mode }
+    }
     state.stream.apply(event, options.at)
     if (event.type === "turn.end") this.end(turnId, state)
     return { mode }
@@ -146,13 +152,15 @@ export class ActivityHub {
         }),
       ]).finally(() => clearTimeout(timer))
       const mode = resolveOutputMode(settings.defaultMode, settings.override)
+      this.lastDefault = settings.defaultMode
       this.modes.set(key, { mode, at: this.now() })
       if (this.modes.size > 1_024) this.modes.delete(this.modes.keys().next().value!)
       return mode
     } catch (error) {
       this.options.onError?.(error, "mode")
-      // The last known mode for this chat, else Detailed (unspecified means Detailed).
-      return cached?.mode ?? "detailed"
+      // The last known mode for this chat, else the bot's last known default, else Detailed
+      // (unspecified means Detailed). A Friendly bot stays Friendly in a new chat during an outage.
+      return cached?.mode ?? resolveOutputMode(this.lastDefault, undefined)
     }
   }
 }

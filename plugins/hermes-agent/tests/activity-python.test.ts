@@ -334,6 +334,78 @@ async def friendly_turn():
 
 asyncio.run(friendly_turn())
 
+async def status_lines_are_never_the_answer():
+    # Hermes' status lines (context pressure, compression, fallback) arrive through
+    # send_or_update_status. In Detailed they fold into progress and don't close it early.
+    adapter, log = make_adapter()
+    await adapter.on_processing_start(processing_event())
+    bind()
+    hooks["pre_tool_call"](tool_name="terminal", args={"command": "ls"}, session_id="s1", tool_call_id="c1")
+    await adapter.send_or_update_status("10", "context_pressure", "Context 85% full")
+    hooks["pre_tool_call"](tool_name="terminal", args={"command": "pwd"}, session_id="s1", tool_call_id="c2")
+    await adapter.send("10", "Done.")
+    order = [e.get("id") or e["type"] for e in events_of(log)]
+    assert order.count("turn.end") == 1 and order.index("tool:c2") < order.index("turn.end"), order
+    assert [entry[1]["text"] for entry in log if entry[0] == "chat-send"] == ["Done."]
+    adapter._activity_stop()
+
+    # Friendly, and outside any turn, a status posts quietly and is never the answer.
+    adapter, log = make_adapter(mode="friendly")
+    await adapter.send_or_update_status("10", "lifecycle", "Restarting")
+    event = processing_event()
+    await adapter.on_processing_start(event)
+    bind()
+    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set())
+    await adapter.send_or_update_status("10", "compression", "Compressing context")
+    assert adapter._activity_turn_for_send("10", None) is not None, "a status closed the turn"
+    await adapter.send("10", "All good.")
+    sends = [(entry[1]["text"], entry[1]["quiet"]) for entry in log if entry[0] == "chat-send"]
+    assert sends == [("Restarting", True), ("Compressing context", True), ("All good.", False)], sends
+    adapter._activity_stop()
+
+asyncio.run(status_lines_are_never_the_answer())
+
+async def friendly_answer_left_as_an_update():
+    deleted = []
+    async def delete_message(chat_id, message_id, metadata=None):
+        deleted.append(message_id)
+        return True
+    # Hermes counts delivered interim text as its final reply and sends nothing more: the
+    # quiet update is posted again as the answer, which notifies, and the quiet copy goes.
+    adapter, log = make_adapter(mode="friendly")
+    adapter.delete_message = delete_message
+    event = processing_event()
+    await adapter.on_processing_start(event)
+    bind()
+    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set())
+    await adapter.send("10", "The answer is 42.", metadata={"_interim_send": True})
+    await adapter.send("10", "⏳ Working — 1 min", metadata={"_interim_send": True})
+    await adapter.on_processing_complete(event, "success")
+    sends = [(entry[1]["text"], entry[1]["quiet"]) for entry in log if entry[0] == "chat-send"]
+    assert sends == [("The answer is 42.", True), ("⏳ Working — 1 min", True), ("The answer is 42.", False)], sends
+    assert deleted == ["m1"], deleted
+    adapter._activity_stop()
+
+    # A turn that sent its answer, failed, or ended on something louder keeps its updates.
+    adapter, log = make_adapter(mode="friendly")
+    adapter.delete_message = delete_message
+    for outcome, answer, card in (("success", "All good.", False), ("failure", None, False), ("success", None, True)):
+        event = processing_event()
+        await adapter.on_processing_start(event)
+        wait_for(lambda: adapter._activity_turn_for_send("10", None) is not None and adapter._activity_turn_for_send("10", None).mode_ready.is_set())
+        await adapter.send("10", "Checking.", metadata={"_interim_send": True})
+        if card:
+            await adapter.send("10", "Allow?", metadata={"_interim_send": True}, actions={"rows": []})
+        if answer:
+            await adapter.send("10", answer)
+        await adapter.on_processing_complete(event, outcome)
+    sends = [entry[1]["text"] for entry in log if entry[0] == "chat-send"]
+    assert sends == ["Checking.", "All good.", "Checking.", "Checking.", "Allow?"], sends
+    assert deleted == ["m1"], deleted
+    adapter._activity_stop()
+
+asyncio.run(friendly_answer_left_as_an_update())
+
 async def commentary_that_is_the_answer():
     adapter, log = make_adapter()
     await adapter.on_processing_start(processing_event(thread="55"))
@@ -372,8 +444,10 @@ async def steer_split_and_busy_notice():
     await adapter._dispatch_message(dm(2, "also run the tests"))
     assert len(handled) == 2
     wait_for(lambda: any(e["type"] == "split" for e in events_of(log)))
-    # Hermes' busy notice replies to that message: not this turn's answer.
+    # Hermes' busy notice replies to that message: not this turn's answer, and quiet.
     await adapter.send("20", "Got it, I'll fold that in.", reply_to="dm-2")
+    busy = [entry[1] for entry in log if entry[0] == "chat-send" and entry[1]["text"].startswith("Got it")]
+    assert busy and busy[0]["quiet"] is True, busy
     hooks["pre_tool_call"](tool_name="terminal", args={"command": "make test"}, session_id="s1", tool_call_id="b2")
     await adapter.send("20", "Built and tested.")
     order = [e.get("id") or e["type"] for e in events_of(log)]

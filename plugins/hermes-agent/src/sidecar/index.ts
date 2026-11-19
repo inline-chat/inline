@@ -467,13 +467,14 @@ function progressTransport(target: Target) {
   }
 }
 
-const AGENT_SETTINGS_CACHE_MS = 30_000
+// Short, so an owner's change applies from the next turn; stacked with the hub's per-chat cache.
+const AGENT_SETTINGS_CACHE_MS = 10_000
 let agentDefaultOutputMode: { value: number | undefined; at: number } | undefined
 
 /** This bot's default output mode (cached) and its participation override in the target chat. */
 async function readOutputModeSettings(target: Target): Promise<OutputModeSettings> {
   const peerId = inputPeerFromTarget(target)
-  const [defaultMode, participations] = await Promise.all([
+  const [defaultResult, participationsResult] = await Promise.allSettled([
     (async () => {
       if (agentDefaultOutputMode && Date.now() - agentDefaultOutputMode.at < AGENT_SETTINGS_CACHE_MS) {
         return agentDefaultOutputMode.value
@@ -492,6 +493,11 @@ async function readOutputModeSettings(target: Target): Promise<OutputModeSetting
       getAgentParticipations: { peerId },
     }),
   ])
+  if (participationsResult.status === "rejected") throw participationsResult.reason
+  // A failed settings read keeps the last default it saw, however old.
+  if (defaultResult.status === "rejected" && !agentDefaultOutputMode) throw defaultResult.reason
+  const defaultMode = defaultResult.status === "fulfilled" ? defaultResult.value : agentDefaultOutputMode?.value
+  const participations = participationsResult.value
   const list = asOptionalRecord(asOptionalRecord(participations)?.getAgentParticipations)?.participations
   const mine = Array.isArray(list) && meId != null
     ? list.map(asOptionalRecord).find((entry) => entry != null && String(entry.botUserId) === meId)
