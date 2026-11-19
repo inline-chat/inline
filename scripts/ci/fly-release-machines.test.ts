@@ -122,6 +122,8 @@ test("publish-only keeps full CI and excludes every production job; normal and f
     with: { publish_image: true, publish_only: "${{ inputs.publish_only }}" } })
   expect(workflow.jobs.validate?.steps?.[0]?.env).toEqual({
     PUBLISH_ONLY: "${{ inputs.publish_only }}", BOOTSTRAP: "${{ inputs.bootstrap }}", ORIGINS: "${{ inputs.origins }}",
+    ROLLBACK: "${{ inputs.rollback_to_plan }}", PLAN_RUN: "${{ inputs.rollback_plan_run }}",
+    SKIP_GATE: "${{ inputs.skip_gate }}", SKIP_REASON: "${{ inputs.skip_reason }}",
   })
   for (const id of ["preflight", "migrate", "nuremberg", "deploy", "activate"]) {
     expect(workflow.jobs[id]?.if).toContain("github.ref == 'refs/heads/main'")
@@ -132,12 +134,15 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   // `!cancelled()`/`always()` require every dependency to succeed; the others
   // state their dependency requirements as explicit clauses.
   type Status = "success" | "skipped" | "failure"
-  const status = (id: string, publishOnly: boolean, failed?: string, bootstrap = false, ref = "refs/heads/main", origins = "both"): Status => {
+  const status = (id: string, publishOnly: boolean, failed?: string, bootstrap = false, ref = "refs/heads/main", origins = "both", rollback = false, skipGate = false): Status => {
     const job = workflow.jobs[id]!
     const needs = typeof job.needs === "string" ? [job.needs] : job.needs ?? []
     const results = Object.fromEntries(needs.map((dependency) =>
-      [dependency, status(dependency, publishOnly, failed, bootstrap, ref, origins)]))
+      [dependency, status(dependency, publishOnly, failed, bootstrap, ref, origins, rollback, skipGate)]))
+    // GitHub's implicit success() covers every ancestor, not only direct needs;
+    // jobs below preflight must therefore state their conditions explicitly.
     const custom = /!cancelled\(\)|always\(\)/.test(job.if ?? "")
+    if (!custom && ["migrate", "nuremberg", "deploy", "activate"].includes(id)) throw new Error(`${id} needs an explicit !cancelled() condition`)
     if (!custom && needs.some((dependency) => results[dependency] !== "success")) return "skipped"
     if (job.if !== undefined) {
       const expression = job.if.match(/^\$\{\{\s*(.*?)\s*\}\}$/)?.[1]
@@ -145,6 +150,7 @@ test("publish-only keeps full CI and excludes every production job; normal and f
       const clauses: Record<string, boolean> = {
         "github.ref == 'refs/heads/main'": ref === "refs/heads/main",
         "inputs.publish_only": publishOnly, "!inputs.publish_only": !publishOnly, "inputs.bootstrap": bootstrap,
+        "inputs.rollback_to_plan": rollback, "!inputs.rollback_to_plan": !rollback,
         "!cancelled()": true, "always()": true,
       }
       if (!expression.split(" && ").every((clause) => {
@@ -154,6 +160,10 @@ test("publish-only keeps full CI and excludes every production job; normal and f
         if (success) return results[success[1]!] === "success"
         const done = clause.match(/^\(needs\.(\w+)\.result == 'success' \|\| needs\.\1\.result == 'skipped'\)$/)
         if (done) return results[done[1]!] !== "failure"
+        // The rollback plan selects each origin named by `origins`.
+        const planned = clause.match(/^needs\.rollback_plan\.outputs\.(fly|nuremberg) == 'true'$/)
+        if (planned) return origins === "both" || origins === planned[1]
+        if (clause === "(needs.require_green.result == 'success' || inputs.skip_gate)") return results.require_green === "success" || skipGate
         if (!(clause in clauses)) throw new Error(`Unexpected release condition: ${clause}`)
         return clauses[clause]
       })) return "skipped"
@@ -163,7 +173,7 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   const runnable = (...args: Parameters<typeof status>) => status(...args) !== "skipped"
   for (const [publishOnly, expected] of [
     [true, ["validate", "qualify", "prepared", "summary"]],
-    [false, ["validate", "qualify", "preflight", "migrate", "nuremberg", "deploy", "summary"]],
+    [false, ["validate", "require_green", "qualify", "preflight", "migrate", "nuremberg", "deploy", "summary"]],
   ] as const) {
     expect(Object.keys(workflow.jobs).filter((id) => runnable(id, publishOnly)).sort()).toEqual([...expected].sort())
     for (const [id, job] of Object.entries(workflow.jobs)) {
@@ -178,10 +188,33 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   expect(runnable("qualify", true, "validate")).toBe(false)
   expect(runnable("migrate", false, "preflight")).toBe(false)
   expect(runnable("deploy", false, "migrate")).toBe(false)
+  // A red gate stops every production job before DDL; the outcome is still reported.
+  for (const id of ["preflight", "migrate", "nuremberg", "deploy"]) expect(runnable(id, false, "require_green")).toBe(false)
+  expect(runnable("summary", false, "require_green")).toBe(true)
+  // skip_gate releases even when the gate job itself failed, but never without qualification.
+  for (const id of ["preflight", "migrate", "nuremberg", "deploy"]) {
+    expect(runnable(id, false, "require_green", false, "refs/heads/main", "both", false, true)).toBe(true)
+    expect(runnable(id, false, "qualify", false, "refs/heads/main", "both", false, true)).toBe(false)
+  }
+  expect(runnable("activate", false, "require_green", true, "refs/heads/main", "fly", false, true)).toBe(true)
+  expect(runnable("activate", false, "require_green", true, "refs/heads/main", "fly")).toBe(false)
+  // rollback_to_plan runs only its own jobs: no gate, qualification, migration or release job.
+  const rolledBack = (origins: string) => Object.keys(workflow.jobs)
+    .filter((job) => runnable(job, false, undefined, false, "refs/heads/main", origins, true)).sort()
+  // ...also with skip_gate set.
+  expect(Object.keys(workflow.jobs).filter((job) => runnable(job, false, undefined, false, "refs/heads/main", "both", true, true)).sort())
+    .toEqual(["rollback_fly", "rollback_nuremberg", "rollback_plan", "summary", "validate"])
+  expect(rolledBack("both")).toEqual(["rollback_fly", "rollback_nuremberg", "rollback_plan", "summary", "validate"])
+  expect(rolledBack("fly")).toEqual(["rollback_fly", "rollback_plan", "summary", "validate"])
+  expect(rolledBack("nuremberg")).toEqual(["rollback_nuremberg", "rollback_plan", "summary", "validate"])
+  expect(runnable("rollback_fly", false, "rollback_plan", false, "refs/heads/main", "both", true)).toBe(false)
+  // Fly does not wait for the Nuremberg rollback.
+  expect(runnable("rollback_fly", false, "rollback_nuremberg", false, "refs/heads/main", "both", true)).toBe(true)
+  for (const id of ["rollback_plan", "rollback_nuremberg", "rollback_fly"]) expect(runnable(id, true)).toBe(false)
   expect(JSON.stringify(workflow.jobs.prepared)).not.toContain("secrets.")
   expect(workflow.jobs.prepared?.environment).toBeUndefined()
   expect(Object.keys(workflow.jobs).filter((job) => runnable(job, false, undefined, true, "refs/heads/main", "fly")).sort())
-    .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "summary", "validate"])
+    .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "require_green", "summary", "validate"])
   // Both origins: Nuremberg is released and verified before Fly is touched.
   expect(runnable("deploy", false, "nuremberg")).toBe(false)
   expect(runnable("summary", false, "nuremberg")).toBe(true)
@@ -190,8 +223,8 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   // Manual single-origin releases stay available.
   const ran = (origins: string) => Object.keys(workflow.jobs)
     .filter((job) => runnable(job, false, undefined, false, "refs/heads/main", origins)).sort()
-  expect(ran("fly")).toEqual(["deploy", "migrate", "preflight", "qualify", "summary", "validate"])
-  expect(ran("nuremberg")).toEqual(["migrate", "nuremberg", "preflight", "qualify", "summary", "validate"])
+  expect(ran("fly")).toEqual(["deploy", "migrate", "preflight", "qualify", "require_green", "summary", "validate"])
+  expect(ran("nuremberg")).toEqual(["migrate", "nuremberg", "preflight", "qualify", "require_green", "summary", "validate"])
   expect(runnable("nuremberg", false, "preflight", false, "refs/heads/main", "nuremberg")).toBe(false)
   expect(runnable("nuremberg", false, "migrate", false, "refs/heads/main", "nuremberg")).toBe(false)
   expect(runnable("activate", false, "deploy", true)).toBe(false)
@@ -231,6 +264,7 @@ test("publish-only keeps full CI and excludes every production job; normal and f
               PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref,
               GITHUB_REF_TYPE: refType, GITHUB_REPOSITORY: repository,
               PUBLISH_ONLY: publishOnly, BOOTSTRAP: bootstrap, ORIGINS: "fly",
+              ROLLBACK: "false", PLAN_RUN: "", SKIP_GATE: "false", SKIP_REASON: "",
             } }).exitCode === 0, `${event} ${repository} ${ref} publish-only=${publishOnly} bootstrap=${bootstrap}`).toBe(permitted)
           }
         }
@@ -245,6 +279,7 @@ test("publish-only keeps full CI and excludes every production job; normal and f
         PATH: process.env.PATH, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/main",
         GITHUB_REF_TYPE: "branch", GITHUB_REPOSITORY: "inline-chat/inline",
         PUBLISH_ONLY: "false", BOOTSTRAP: bootstrap, ORIGINS: origins,
+        ROLLBACK: "false", PLAN_RUN: "", SKIP_GATE: "false", SKIP_REASON: "",
       } }).exitCode === 0, `origins=${origins} bootstrap=${bootstrap}`).toBe(permitted)
     }
   }
@@ -453,4 +488,25 @@ test("the publish-only summary records both qualified image digests and rejects 
   expect(execute(image, "ghcr.io/inline-chat/inline-server:latest").exitCode).not.toBe(0)
   expect(execute(image, "").exitCode).not.toBe(0)
   expect(await Bun.file(summaryPath).text()).toBe(output)
+})
+
+test("the rollback inventory accepts an unhealthy release fleet but keeps every identity and topology guard", () => {
+  const run = (machines: unknown[]) => Bun.spawnSync(["jq", "-ce", "-f", resolve(import.meta.dir, "fly-release-machines-rollback.jq")],
+    { stdin: new TextEncoder().encode(JSON.stringify(machines)) })
+  const failing = { ...machine(), checks: [{ status: "critical" }] }
+  const stopped = { ...machine("abc234"), state: "stopped", checks: [] }
+  const dark = { ...machine("dark123"), config: { ...machine().config, services: [] } }
+  const result = run([failing, stopped, dark])
+  expect(result.exitCode, result.stderr.toString()).toBe(0)
+  expect(JSON.parse(result.stdout.toString())).toEqual({ count: 2, ids: "abc123,abc234", digest, revision: "fixture-sha" })
+  // The strict release filter still refuses the same fleet.
+  expect(inspect([failing, stopped]).exitCode).not.toBe(0)
+  for (const broken of [
+    { ...machine(), host_status: "unreachable" },
+    { ...machine(), config: { ...machine().config, metadata: { fly_process_group: "app" } } },
+    { ...machine(), config: { ...machine().config, mounts: [{ volume: "fixture" }] } },
+    { ...machine(), image_ref: { ...machine().image_ref, digest: "latest" } },
+  ]) expect(run([broken]).exitCode).not.toBe(0)
+  expect(run([machine(), { ...machine("abc234"), image_ref: { ...machine().image_ref, digest: "sha256:" + "2".repeat(64) } }]).exitCode).not.toBe(0)
+  expect(run([]).exitCode).not.toBe(0)
 })

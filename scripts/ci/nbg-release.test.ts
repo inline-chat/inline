@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { client, config, preflight, release, type Api, type NbgBaseline, type NbgReceipt } from "./nbg-release"
+import { client, config, preflight, release, rollback, rollbackTarget, type Api, type NbgBaseline, type NbgReceipt } from "./nbg-release"
 
 const SHA = "a".repeat(40)
 const OLD_SHA = "c".repeat(40)
@@ -289,5 +289,76 @@ describe("Nuremberg release API boundary", () => {
       expect(message).not.toContain("DATABASE_URL")
       expect(message).not.toContain("private transport")
     }
+  })
+})
+
+// Rollback swaps the roles: the configured image is the bad release and the
+// recorded baseline (config(env), revision SHA) is the target.
+describe("Nuremberg rollback_to_plan", () => {
+  it("pins, deploys and verifies the recorded baseline even when the bad release is unhealthy", async () => {
+    for (const healthy of [true, false]) {
+      const f = provider({ healthy })
+      const saved: NbgReceipt[] = []
+      let verified = 0
+      const result = await rollback(f.api, config(env), undefined, { ready: f.ready, pause, save: (value) => { saved.push(value) },
+        verify: async () => { verified++; expect(f.host.revision).toBe(SHA) } })
+      expect(result).toMatchObject({ outcome: "published", deployment: "deployment-1", image: env.STANDBY_IMAGE })
+      expect(f.patches()).toEqual([{ docker_registry_image_name: desired().imageName, docker_registry_image_tag: desired().imageTag }])
+      expect(saved).toEqual([{ app: "app1", sha: SHA, image: env.STANDBY_IMAGE, deployment: "deployment-1" }])
+      expect(verified).toBe(1)
+    }
+  })
+
+  it("only verifies an origin already serving the recorded baseline", async () => {
+    const f = provider({ configured: desired(), revision: SHA })
+    let verified = 0
+    expect((await rollback(f.api, config(env), undefined, { ready: f.ready, pause, verify: async () => { verified++ } })).outcome).toBe("already-current")
+    expect(f.queued()).toBe(0)
+    expect(f.patches()).toEqual([])
+    expect(verified).toBe(1)
+  })
+
+  it("resumes this run's recorded rollback deployment instead of queuing another", async () => {
+    const f = provider({ configured: desired(), revision: OLD_SHA })
+    const receipt = f.receipt("rollback-attempt-1", { status: "in_progress" })
+    const result = await rollback(f.api, config(env), receipt, {
+      ready: f.ready, pause: async () => { f.rows.get(receipt.deployment)!.status = "finished" },
+    })
+    expect(result.deployment).toBe("rollback-attempt-1")
+    expect(f.queued()).toBe(0)
+  })
+
+  it("never restores the release being rolled back, and names the deployment to reconcile", async () => {
+    for (const outcome of [{ status: "failed" }, { status: "finished", healthy: false }]) {
+      const f = provider({ outcomes: [outcome] })
+      await expect(rollback(f.api, config(env), undefined, { ready: f.ready, pause })).rejects.toThrow("Nuremberg rollback did not complete (deployment deployment-1)")
+      expect(f.queued()).toBe(1)
+      expect(f.patches()).toHaveLength(1)
+    }
+    const smoke = provider()
+    await expect(rollback(smoke.api, config(env), undefined, { ready: smoke.ready, pause, verify: async () => { throw new Error("smoke failed") } }))
+      .rejects.toThrow("smoke failed. Nuremberg rollback did not complete")
+  })
+
+  it("refuses an unrecorded active deployment or a mismatched receipt before changing the pin", async () => {
+    const busy = provider()
+    busy.receipt("someone-else", { status: "in_progress" })
+    await expect(rollback(busy.api, config(env), undefined, { ready: busy.ready, pause })).rejects.toThrow("unrecorded Coolify deployment")
+    expect(busy.patches()).toEqual([])
+    const f = provider()
+    for (const receipt of [{ ...f.receipt(), sha: OLD_SHA }, { ...f.receipt(), image: "ghcr.io/inline-chat/inline-server@sha256:" + "9".repeat(64) }]) {
+      await expect(rollback(f.api, config(env), receipt, { ready: f.ready, pause })).rejects.toThrow("does not match this rollback")
+    }
+    expect(f.calls).toEqual([])
+  })
+
+  it("accepts only an immutable GHCR baseline recorded for the same Coolify app", () => {
+    const baseline = { app: "app1", imageName: "ghcr.io/inline-chat/inline-server@sha256", imageTag: "b".repeat(64), revision: SHA }
+    expect(rollbackTarget(baseline, "app1")).toEqual({ image: env.STANDBY_IMAGE, revision: SHA })
+    expect(() => rollbackTarget(null, "app1")).toThrow("no Nuremberg baseline")
+    expect(() => rollbackTarget(baseline, "app2")).toThrow("another Coolify app")
+    expect(() => rollbackTarget({ ...baseline, revision: "short" }, "app1")).toThrow("full revision")
+    expect(() => rollbackTarget(previous, "app1")).toThrow("roll it back manually")
+    expect(() => rollbackTarget({ ...baseline, imageTag: "latest" }, "app1")).toThrow("immutable")
   })
 })

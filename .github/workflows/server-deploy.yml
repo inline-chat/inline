@@ -10,6 +10,12 @@ name: Deploy Server
 # "Re-run failed jobs" resumes where it stopped. `origins` releases one origin
 # alone when that is deliberately needed. CI uses public GHCR images and
 # Coolify's API; no host SSH key or registry pull credential is needed.
+#
+# Soft gate: a release waits for the server-relevant CI jobs of its commit
+# (require_green, beside qualification, before any production job). `skip_gate` with a `skip_reason`
+# always bypasses it for incidents. `rollback_to_plan` redeploys the pre-release
+# images that the latest release plan recorded, without the gate, qualification
+# or migrations; see server/docs/fly-deployment.md.
 on:
   workflow_dispatch:
     inputs:
@@ -26,6 +32,22 @@ on:
         description: Create the first API-only Machine, then await protected cutover approval before enabling workers
         type: boolean
         default: false
+      skip_gate:
+        description: "Incident bypass: do not wait for the server-relevant CI jobs of this commit (needs skip_reason; route-family probes become advisory)"
+        type: boolean
+        default: false
+      skip_reason:
+        description: Why the green-CI gate is skipped (required with skip_gate; recorded in the run summary)
+        type: string
+        default: ""
+      rollback_to_plan:
+        description: "Fast rollback: redeploy the pre-release images recorded by the plan of the latest release that reached an origin. Skips the gate, qualification and migrations; the API accepts a database ahead of it. Only safe after additive migrations."
+        type: boolean
+        default: false
+      rollback_plan_run:
+        description: "With rollback_to_plan: the release run id whose plan to use (default: the most recent release plan)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -43,6 +65,10 @@ jobs:
           PUBLISH_ONLY: ${{ inputs.publish_only }}
           BOOTSTRAP: ${{ inputs.bootstrap }}
           ORIGINS: ${{ inputs.origins }}
+          ROLLBACK: ${{ inputs.rollback_to_plan }}
+          PLAN_RUN: ${{ inputs.rollback_plan_run }}
+          SKIP_GATE: ${{ inputs.skip_gate }}
+          SKIP_REASON: ${{ inputs.skip_reason }}
         run: |
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REPOSITORY" = inline-chat/inline
@@ -58,10 +84,69 @@ jobs:
             fly) ;;
             *) exit 1 ;;
           esac
+          case "$ROLLBACK" in
+            true)
+              if [[ "$GITHUB_REF" != refs/heads/main || "$PUBLISH_ONLY" != false || "$BOOTSTRAP" != false ]]; then
+                echo 'rollback_to_plan runs from main without publish_only or bootstrap' >&2
+                exit 1
+              fi
+              [[ -z "$PLAN_RUN" || "$PLAN_RUN" =~ ^[1-9][0-9]*$ ]] || { echo 'rollback_plan_run must be a run id' >&2; exit 1; } ;;
+            false) test -z "$PLAN_RUN" || { echo 'rollback_plan_run requires rollback_to_plan' >&2; exit 1; } ;;
+            *) exit 1 ;;
+          esac
+          if [[ "$SKIP_GATE" == true && -z "${SKIP_REASON//[[:space:]]/}" ]]; then
+            echo 'skip_gate requires a skip_reason' >&2
+            exit 1
+          fi
+          if [[ "$SKIP_GATE" != true && -n "${SKIP_REASON//[[:space:]]/}" ]]; then
+            echo 'skip_reason is only valid with skip_gate' >&2
+            exit 1
+          fi
+
+  require_green:
+    name: Require green CI and Server Tests for this commit
+    needs: validate
+    # Runs beside qualification, so a green commit adds no latency; preflight,
+    # the first production job, waits for it. It gates only on the
+    # server-relevant jobs listed in scripts/ci/require-green.ts, and waits for
+    # running ones at most 15 minutes (about qualify's duration), so a waiting
+    # gate holds the run-level lock no longer than qualification already does.
+    if: ${{ !inputs.publish_only && !inputs.rollback_to_plan }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Record the incident bypass
+        if: ${{ inputs.skip_gate }}
+        env:
+          SKIP_REASON: ${{ inputs.skip_reason }}
+        run: |
+          reason=$(printf '%s' "$SKIP_REASON" | tr '\000-\037\177' ' ' | tr '`<>' '\047\047\047' | tr -s ' ' | cut -c1-300)
+          printf '#### Deploy gate: skipped by %s\n\n> %s\n\nServer-relevant CI was not checked for `%s`.\n\n' \
+            "$GITHUB_ACTOR" "$reason" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Deploy gate skipped by $GITHUB_ACTOR::${reason//%/%25}"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: ${{ !inputs.skip_gate }}
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: scripts/ci
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: ${{ !inputs.skip_gate }}
+        with:
+          bun-version: "1.4.4"
+      - name: Wait for the server-relevant CI jobs of the release commit
+        if: ${{ !inputs.skip_gate }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: bun --no-env-file scripts/ci/require-green.ts --wait
 
   qualify:
     name: Qualify and publish the exact release image
     needs: validate
+    if: ${{ !inputs.rollback_to_plan }}
     permissions:
       contents: read
       packages: write # Only the called, manual publisher receives this permission.
@@ -89,8 +174,10 @@ jobs:
 
   preflight:
     name: Check both origins and save the release plan before DDL
-    needs: qualify
-    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
+    needs: [qualify, require_green]
+    # skip_gate passes even if the gate job itself could not run (checkout,
+    # GitHub API). A rollback skips qualify and therefore preflight and migrate.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && !inputs.publish_only && needs.qualify.result == 'success' && (needs.require_green.result == 'success' || inputs.skip_gate) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
@@ -191,8 +278,20 @@ jobs:
             echo 'created=false' >> "$GITHUB_OUTPUT"
           else
             if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
-              echo 'Original release plan is unavailable; start a new dispatch rather than recapturing a changed baseline.' >&2
-              exit 1
+              # No retained plan: no earlier attempt passed this job, so none can have
+              # migrated or replaced an origin (those jobs need it). Confirm that from
+              # the earlier attempts before recording the baseline now, e.g. on a
+              # rerun after the deploy gate failed.
+              reached=0
+              for ((attempt = 1; attempt < GITHUB_RUN_ATTEMPT; attempt++)); do
+                count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$attempt/jobs?per_page=100" \
+                  --jq '[.jobs[] | select((.name == "Migrate and verify with the qualified image" or .name == "Release and smoke-test the Nuremberg fallback" or .name == "Replace the public Machines and verify readiness") and .conclusion != "skipped")] | length')
+                reached=$((reached + count))
+              done
+              if [[ "$reached" != 0 ]]; then
+                echo 'An earlier attempt reached migrations or an origin, but its release plan is unavailable; start a new dispatch rather than recapturing a changed baseline.' >&2
+                exit 1
+              fi
             fi
             nbg=null
             if [[ "$ORIGINS" != fly ]]; then nbg=$(cat "$RUNNER_TEMP/nbg-baseline.json"); fi
@@ -217,7 +316,8 @@ jobs:
   migrate:
     name: Migrate and verify with the qualified image
     needs: [qualify, preflight]
-    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only }}
+    # Explicit, so a failed gate job bypassed with skip_gate cannot skip it.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && !inputs.publish_only && needs.preflight.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -264,6 +364,7 @@ jobs:
       COOLIFY_APP_UUID: ${{ vars.NBG_COOLIFY_APP_UUID }}
       SMOKE_BOT_TOKEN: ${{ secrets.SMOKE_BOT_TOKEN }}
       SMOKE_CHAT_ID: ${{ vars.SMOKE_CHAT_ID }}
+      INLINE_SMOKE_PROBES: ${{ inputs.skip_gate && 'advisory' || 'required' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -289,7 +390,28 @@ jobs:
         env:
           RELEASE_PLAN: ${{ runner.temp }}/release-plan/release.json
           NBG_STATE_FILE: ${{ runner.temp }}/nbg-state/receipt.json
+          # Optional route-family probes; each absent secret skips its probe with a notice.
+          INLINE_SMOKE_USER_TOKEN: ${{ secrets.INLINE_SMOKE_USER_TOKEN }}
+          INLINE_SMOKE_MCP_SECRET: ${{ secrets.INLINE_SMOKE_MCP_SECRET }}
+          INLINE_SMOKE_OAUTH_TOKEN: ${{ secrets.INLINE_SMOKE_OAUTH_TOKEN }}
         run: bun --no-env-file scripts/ci/nbg-release.ts
+      - name: Probe the V3 protocol on Nuremberg directly
+        # Advisory until a production run confirms the probe; then remove this line.
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          ORIGIN_IP: ${{ secrets.NBG_ORIGIN_IP }}
+          INLINE_SMOKE_V3_CREDENTIALS: ${{ secrets.INLINE_SMOKE_V3_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          # Third-party packages never see the job's deployment credentials.
+          clean=(env -i PATH="$PATH" HOME="$HOME" RUNNER_TEMP="$RUNNER_TEMP")
+          "${clean[@]}" bun install --frozen-lockfile --ignore-scripts
+          "${clean[@]}" bun run --cwd packages/protocol build
+          # The credential travels on stdin, never in an argv or the probe's environment.
+          printf '%s' "$INLINE_SMOKE_V3_CREDENTIALS" | "${clean[@]}" GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+            INLINE_SMOKE_PROBES="$INLINE_SMOKE_PROBES" bun --no-env-file scripts/ci/release-smoke-v3.ts \
+            --origin nuremberg --ip "$ORIGIN_IP" --credentials-stdin
       - name: Verify canonical routing still reaches the unchanged Fly release
         if: inputs.origins == 'nuremberg'
         run: |
@@ -398,10 +520,34 @@ jobs:
           FLY_ORIGIN_IP: ${{ vars.FLY_ORIGIN_IP }}
           SMOKE_BOT_TOKEN: ${{ secrets.SMOKE_BOT_TOKEN }}
           SMOKE_CHAT_ID: ${{ vars.SMOKE_CHAT_ID }}
+          # Route-family probes run against the pinned Fly origin only.
+          INLINE_SMOKE_USER_TOKEN: ${{ secrets.INLINE_SMOKE_USER_TOKEN }}
+          INLINE_SMOKE_MCP_SECRET: ${{ secrets.INLINE_SMOKE_MCP_SECRET }}
+          INLINE_SMOKE_OAUTH_TOKEN: ${{ secrets.INLINE_SMOKE_OAUTH_TOKEN }}
+          INLINE_SMOKE_PROBES: ${{ inputs.skip_gate && 'advisory' || 'required' }}
         run: |
           set -euo pipefail
           bun --no-env-file scripts/ci/release-smoke.ts --origin fly --revision "$GITHUB_SHA" --ip "$FLY_ORIGIN_IP"
           bun --no-env-file scripts/ci/release-smoke.ts --origin canonical --revision "$GITHUB_SHA"
+      - name: Probe the V3 protocol on Fly directly
+        if: ${{ !inputs.bootstrap }}
+        # Advisory until a production run confirms the probe; then remove this line.
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          ORIGIN_IP: ${{ vars.FLY_ORIGIN_IP }}
+          INLINE_SMOKE_PROBES: ${{ inputs.skip_gate && 'advisory' || 'required' }}
+          INLINE_SMOKE_V3_CREDENTIALS: ${{ secrets.INLINE_SMOKE_V3_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          # Third-party packages never see the job's deployment credentials.
+          clean=(env -i PATH="$PATH" HOME="$HOME" RUNNER_TEMP="$RUNNER_TEMP")
+          "${clean[@]}" bun install --frozen-lockfile --ignore-scripts
+          "${clean[@]}" bun run --cwd packages/protocol build
+          # The credential travels on stdin, never in an argv or the probe's environment.
+          printf '%s' "$INLINE_SMOKE_V3_CREDENTIALS" | "${clean[@]}" GITHUB_STEP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+            INLINE_SMOKE_PROBES="$INLINE_SMOKE_PROBES" bun --no-env-file scripts/ci/release-smoke-v3.ts \
+            --origin fly --ip "$ORIGIN_IP" --credentials-stdin
       - name: Verify large live messages across both origins
         if: ${{ !inputs.bootstrap && inputs.origins == 'both' }}
         env:
@@ -420,7 +566,7 @@ jobs:
   activate:
     name: Enable workers on the same qualified bootstrap image
     needs: [qualify, deploy]
-    if: ${{ github.ref == 'refs/heads/main' && !inputs.publish_only && inputs.bootstrap }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && !inputs.publish_only && inputs.bootstrap && needs.deploy.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Required-reviewer protection must be configured before bootstrap dispatch.
@@ -480,9 +626,181 @@ jobs:
           printf 'Activated workers for `%s` at `%s`; one all-role public Machine passed service checks.\n' \
             "$GITHUB_SHA" "$RUNTIME_IMAGE" >> "$GITHUB_STEP_SUMMARY"
 
+  # rollback_to_plan: Fly and Nuremberg roll back in parallel to the images the
+  # latest release plan recorded before that release. No gate, qualification or
+  # migration runs: the API accepts a database ahead of its packaged migration
+  # head (server/src/db/migrationState.ts), and only additive migrations keep an
+  # older image compatible. Re-run failed jobs resumes a partial rollback.
+  rollback_plan:
+    name: Select the recorded pre-release images to roll back to
+    needs: validate
+    if: ${{ inputs.rollback_to_plan }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      plan_run: ${{ steps.plan.outputs.plan_run }}
+      plan_sha: ${{ steps.plan.outputs.plan_sha }}
+      fly: ${{ steps.plan.outputs.fly }}
+      fly_image: ${{ steps.plan.outputs.fly_image }}
+      fly_revision: ${{ steps.plan.outputs.fly_revision }}
+      nuremberg: ${{ steps.plan.outputs.nuremberg }}
+      nbg_baseline: ${{ steps.plan.outputs.nbg_baseline }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: scripts/ci
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - name: Find the latest release plan and its baselines
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGINS: ${{ inputs.origins }}
+          PLAN_RUN_ID: ${{ inputs.rollback_plan_run }}
+          PLAN_DIR: ${{ runner.temp }}/rollback-plan
+        run: bun --no-env-file scripts/ci/rollback-plan.ts
+
+  rollback_nuremberg:
+    name: Roll the Nuremberg fallback back to its recorded image
+    needs: [validate, rollback_plan]
+    if: ${{ !cancelled() && inputs.rollback_to_plan && needs.rollback_plan.result == 'success' && needs.rollback_plan.outputs.nuremberg == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      outcome: ${{ steps.rollback.outputs.outcome }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ROLLBACK_BASELINE: ${{ needs.rollback_plan.outputs.nbg_baseline }}
+      NBG_ORIGIN_IP: ${{ secrets.NBG_ORIGIN_IP }}
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_NBG_TOKEN }}
+      COOLIFY_APP_UUID: ${{ vars.NBG_COOLIFY_APP_UUID }}
+      SMOKE_BOT_TOKEN: ${{ secrets.SMOKE_BOT_TOKEN }}
+      SMOKE_CHAT_ID: ${{ vars.SMOKE_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - name: Restore this run's recorded rollback deployment
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nbg-state"
+          name=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select((.name | startswith("nbg-rollback-state-")) and .expired == false)] | max_by(.id) | .name // empty')
+          if [[ -n "$name" ]]; then
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "$RUNNER_TEMP/nbg-state"
+          fi
+      - name: Pin, deploy and verify the recorded ARM64 image through Coolify
+        id: rollback
+        env:
+          NBG_STATE_FILE: ${{ runner.temp }}/nbg-state/receipt.json
+          INLINE_SMOKE_USER_TOKEN: ${{ secrets.INLINE_SMOKE_USER_TOKEN }}
+          INLINE_SMOKE_MCP_SECRET: ${{ secrets.INLINE_SMOKE_MCP_SECRET }}
+          INLINE_SMOKE_OAUTH_TOKEN: ${{ secrets.INLINE_SMOKE_OAUTH_TOKEN }}
+        run: bun --no-env-file scripts/ci/nbg-release.ts --rollback
+      - name: Retain the rollback receipt even when verification fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nbg-rollback-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/nbg-state/receipt.json
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: true
+
+  rollback_fly:
+    name: Roll the public Fly Machines back to the recorded image
+    needs: [validate, rollback_plan]
+    # Independent of Nuremberg: the primary origin is restored as fast as possible.
+    if: ${{ !cancelled() && inputs.rollback_to_plan && needs.rollback_plan.result == 'success' && needs.rollback_plan.outputs.fly == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    outputs:
+      outcome: ${{ steps.replace.outputs.outcome }}
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      TARGET_IMAGE: ${{ needs.rollback_plan.outputs.fly_image }}
+      TARGET_REVISION: ${{ needs.rollback_plan.outputs.fly_revision }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+        with:
+          version: "0.4.107"
+      - name: Verify the recorded image is public and built from the recorded revision
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_IMAGE" =~ ^ghcr\.io/inline-chat/inline-server@sha256:[a-f0-9]{64}$ ]] || exit 1
+          [[ "$TARGET_REVISION" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/anonymous-registry"
+          DOCKER_CONFIG="$RUNNER_TEMP/anonymous-registry" docker pull --quiet "$TARGET_IMAGE" > /dev/null
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$TARGET_IMAGE")" = "$TARGET_REVISION"
+      - name: Redeploy the recorded digest over the current public Machines
+        id: replace
+        run: |
+          set -euo pipefail
+          test -n "$FLY_API_TOKEN"
+          flyctl machine list --config server/fly.toml --json > "$RUNNER_TEMP/machines-before.json"
+          # Unlike a release, a rollback accepts Machines that fail readiness.
+          current=$(jq -ce -f scripts/ci/fly-release-machines-rollback.jq "$RUNNER_TEMP/machines-before.json")
+          echo "count=$(jq -er '.count' <<< "$current")" >> "$GITHUB_OUTPUT"
+          if jq -e --arg digest "${TARGET_IMAGE##*@}" --arg sha "$TARGET_REVISION" \
+              '.digest == $digest and .revision == $sha' <<< "$current" > /dev/null; then
+            if jq -e -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/machines-before.json" > /dev/null 2>&1; then
+              echo "::warning title=Nothing to roll back on Fly::Fly already serves the recorded baseline $TARGET_REVISION and passes readiness; the selected plan may not be the release you meant (see rollback_plan_run)."
+              echo "outcome=already-current" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Fly runs the recorded image but fails readiness; redeploying it."
+          fi
+          echo "outcome=published" >> "$GITHUB_OUTPUT"
+          # The current main fly.toml supplies Machine configuration; only the image is rolled back.
+          flyctl deploy --config server/fly.toml --image "$TARGET_IMAGE" \
+            --only-machines "$(jq -er '.ids' <<< "$current")" --strategy bluegreen --ha=false \
+            --signal SIGTERM --wait-timeout 5m --yes
+      - name: Verify count, image revision, and service health
+        env:
+          COUNT: ${{ steps.replace.outputs.count }}
+        run: |
+          bash scripts/ci/fly-release-wait.sh "$RUNNER_TEMP/machines-after.json" "$COUNT" "${TARGET_IMAGE##*@}" "$TARGET_REVISION"
+          printf 'Rolled Fly back to `%s` at `%s`; %s public Machine(s) passed Fly service checks.\n' \
+            "$TARGET_REVISION" "$TARGET_IMAGE" "$COUNT" >> "$GITHUB_STEP_SUMMARY"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - name: Smoke-test Fly directly and canonical readiness
+        env:
+          FLY_ORIGIN_IP: ${{ vars.FLY_ORIGIN_IP }}
+          SMOKE_BOT_TOKEN: ${{ secrets.SMOKE_BOT_TOKEN }}
+          SMOKE_CHAT_ID: ${{ vars.SMOKE_CHAT_ID }}
+          INLINE_SMOKE_USER_TOKEN: ${{ secrets.INLINE_SMOKE_USER_TOKEN }}
+          INLINE_SMOKE_MCP_SECRET: ${{ secrets.INLINE_SMOKE_MCP_SECRET }}
+          INLINE_SMOKE_OAUTH_TOKEN: ${{ secrets.INLINE_SMOKE_OAUTH_TOKEN }}
+          # A rollback image may predate a probed route; only the base checks gate.
+          INLINE_SMOKE_PROBES: advisory
+        run: |
+          set -euo pipefail
+          bun --no-env-file scripts/ci/release-smoke.ts --origin fly --revision "$TARGET_REVISION" --ip "$FLY_ORIGIN_IP"
+          # Canonical routing may still reach Nuremberg mid-rollback; check it without a revision.
+          bun --no-env-file scripts/ci/release-smoke.ts --preflight --origin canonical
+
   summary:
     name: Release outcome
-    needs: [validate, qualify, prepared, preflight, migrate, nuremberg, deploy, activate]
+    needs: [validate, require_green, qualify, prepared, preflight, migrate, nuremberg, deploy, activate, rollback_plan, rollback_nuremberg, rollback_fly]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -496,5 +814,7 @@ jobs:
           ORIGINS: ${{ inputs.origins }}
           BOOTSTRAP: ${{ inputs.bootstrap }}
           PUBLISH_ONLY: ${{ inputs.publish_only }}
+          ROLLBACK: ${{ inputs.rollback_to_plan }}
+          SKIP_GATE: ${{ inputs.skip_gate }}
           RESULTS: ${{ toJSON(needs) }}
         run: bash scripts/ci/server-release-summary.sh

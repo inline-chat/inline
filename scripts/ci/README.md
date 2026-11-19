@@ -28,8 +28,17 @@ Scenario receipts and the candidate manifest are retained for seven days. OAuth
 introspection is synthetic and Chat SDK webhook delivery is driven by the fixture;
 this does not qualify the production OAuth issuer or webhook worker.
 
-Hermes and OpenClaw scheduled compatibility checks exercise published packages
-against moving hosts independently of source changes. OpenClaw admission proves
+CI pins every OpenClaw and Hermes host version. The scheduled Hermes and
+OpenClaw compatibility workflows run the moving `latest`/`main` hosts against
+both the published packages and the source candidate; bump the CI pins after
+they pass.
+
+Server deploys are gated (`require_green` in `server-deploy.yml`) only on the
+server-relevant jobs listed in `require-green.ts`: the three Server Tests jobs,
+and CI's `Shared TypeScript packages` and `Packed adapters with local Inline
+server`. Renaming one of those jobs fails the gate until the list is updated.
+
+OpenClaw admission proves
 installation and registration; an actual OpenClaw host message handler against
 Inline remains a separate qualification gap.
 

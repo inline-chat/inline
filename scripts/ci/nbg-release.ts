@@ -3,7 +3,7 @@
 // image, queues a deployment, and verifies its health and direct user paths.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { isIP } from "node:net"
-import { readReady, smoke } from "./release-smoke"
+import { annotate, failed, probeCredentials, readReady, smoke } from "./release-smoke"
 
 const SHA = /^[0-9a-f]{40}$/
 const IMAGE = /^(ghcr\.io\/inline-chat\/inline-server)@(sha256:[0-9a-f]{64})$/
@@ -206,13 +206,122 @@ export async function release(api: Api, c: NbgConfig, previous: NbgBaseline, rec
   }
 }
 
+/**
+ * rollback_to_plan: redeploy the pre-release Coolify image recorded by an earlier
+ * release plan. Unlike release(), a failure does not restore the image being
+ * replaced, because that is the release being rolled back. A recorded receipt
+ * from an earlier attempt of this run is resumed instead of queuing again.
+ */
+export async function rollback(api: Api, c: NbgConfig, receipt?: NbgReceipt, hooks: Hooks = {}) {
+  if (receipt && (receipt.app !== c.app || receipt.sha !== c.sha || receipt.image !== c.image ||
+      typeof receipt.deployment !== "string" || !ID.test(receipt.deployment))) {
+    throw new Error("Saved Nuremberg deployment does not match this rollback")
+  }
+  const ready = hooks.ready ?? ((revision?: string) => readReady(c.ip, revision))
+  const pause = hooks.pause ?? Bun.sleep
+  const now = hooks.now ?? Date.now
+  const status = async (id: string) => String(object(await api("GET", `deployments/${id}`), "deployment").status ?? "")
+  const wait = async (id: string) => {
+    const deadline = now() + 10 * 60_000
+    let failures = 0
+    for (let attempt = 0; attempt < 60 && now() < deadline; attempt++) {
+      try {
+        const current = await status(id)
+        failures = 0
+        if (terminal.has(current)) return current
+      } catch (error) { if (++failures >= 3) throw error }
+      await pause(10_000)
+    }
+    throw new Error("Coolify deployment timed out")
+  }
+  const verify = async () => {
+    const deadline = now() + 2 * 60_000
+    for (let attempt = 0; attempt < 25 && now() < deadline; attempt++) {
+      const current = await state(api, c)
+      if (!same(current, c)) throw new Error("Coolify image pin changed during rollback")
+      if (current.healthy && await ready(c.sha).then(() => true, () => false)) return
+      if (attempt < 24) await pause(5_000)
+    }
+    throw new Error("Nuremberg did not become healthy on the rollback revision")
+  }
+  let deployment: string | undefined
+  try {
+    const before = await state(api, c)
+    const active = (await deployments(api, c)).filter((item) => !terminal.has(String(item.status)))
+    if (active.some((item) => item.deployment_uuid !== receipt?.deployment)) {
+      throw new Error("An unrecorded Coolify deployment is active; cancel or finish it in Coolify, then rerun")
+    }
+    const recorded = receipt && same(before, c) ? await status(receipt.deployment) : undefined
+    let resumed = false
+    if (receipt && recorded && !["failed", "cancelled", "cancelled-by-user", "error"].includes(recorded)) {
+      deployment = receipt.deployment
+      resumed = recorded === "finished"
+    } else if (!receipt && same(before, c) && before.healthy && await ready(c.sha).then(() => true, () => false)) {
+      // Already pinned, healthy and serving the recorded revision: verify only.
+      await hooks.verify?.()
+      return { outcome: "already-current", image: c.image } as const
+    } else {
+      await api("PATCH", `applications/${c.app}`, { docker_registry_image_name: c.imageName, docker_registry_image_tag: c.imageTag })
+      if (!same(await state(api, c), c)) throw new Error("Coolify did not retain the rollback image pin")
+      const queued = object(await api("POST", `deploy?uuid=${c.app}`), "deployment queue")
+      const rows = queued.deployments
+      const item = Array.isArray(rows) && rows.length === 1 ? object(rows[0], "queued deployment") : {}
+      if (typeof item.deployment_uuid !== "string" || !ID.test(item.deployment_uuid) ||
+          (item.resource_uuid !== undefined && item.resource_uuid !== c.app)) throw new Error("Coolify did not queue this application's rollback deployment")
+      deployment = item.deployment_uuid
+      hooks.save?.({ app: c.app, sha: c.sha, image: c.image, deployment })
+    }
+    const result = await wait(deployment)
+    if (result !== "finished") throw new Error(`Coolify rollback deployment ${result}`)
+    await verify()
+    await hooks.verify?.()
+    return { outcome: resumed ? "already-current" : "published", deployment, image: c.image } as const
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Nuremberg rollback failed"
+    throw new Error(`${reason}. Nuremberg rollback did not complete${deployment ? ` (deployment ${deployment})` : ""}; ` +
+      "Coolify may hold the rollback pin or the release being replaced. Reconcile it in Coolify; the Fly rollback is independent.")
+  }
+}
+
+/** The recorded Coolify baseline as an immutable rollback target, or an explanation why it cannot be one. */
+export function rollbackTarget(baseline: unknown, app: string): { image: string; revision: string } {
+  const value = baseline !== null && typeof baseline === "object" && !Array.isArray(baseline) ? baseline as Json : undefined
+  if (!value) throw new Error("The release plan recorded no Nuremberg baseline")
+  if (value.app !== app) throw new Error("The recorded Nuremberg baseline belongs to another Coolify app")
+  if (typeof value.revision !== "string" || !SHA.test(value.revision)) throw new Error("The recorded Nuremberg baseline has no full revision")
+  const image = `${String(value.imageName)}:${String(value.imageTag)}`
+  if (!IMAGE.test(image)) throw new Error("The recorded Nuremberg image is not an immutable inline-server GHCR digest; roll it back manually")
+  return { image, revision: value.revision }
+}
+
 if (import.meta.main) {
   try {
-    const c = config(process.env)
+    // A rollback targets the recorded baseline (rollback-plan.ts), checked against this job's Coolify app.
+    const target = process.argv.includes("--rollback")
+      ? rollbackTarget(JSON.parse(process.env.ROLLBACK_BASELINE || "null"), process.env.COOLIFY_APP_UUID ?? "") : undefined
+    const c = config(target ? { ...process.env, RELEASE_SHA: target.revision, STANDBY_IMAGE: target.image } : process.env)
     const api = client(c)
     if (process.argv.includes("--preflight")) {
       const baseline = await preflight(api, c)
       writeFileSync(process.env.NBG_BASELINE_FILE!, JSON.stringify(baseline))
+    } else if (process.argv.includes("--rollback")) {
+      const stateFile = process.env.NBG_STATE_FILE!
+      const receipt = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, "utf8")) as NbgReceipt : undefined
+      const result = await rollback(api, c, receipt, {
+        save: (value) => writeFileSync(stateFile, JSON.stringify(value)),
+        verify: async () => {
+          const checks = await smoke({ origin: "nuremberg", revision: c.sha, ip: c.ip,
+            token: process.env.SMOKE_BOT_TOKEN ?? "", chatId: process.env.SMOKE_CHAT_ID ?? "",
+            probes: probeCredentials(process.env), advisoryProbes: true })
+          console.log(checks.map((check) => `${check.skipped ? "skip" : check.ok ? "pass" : check.advisory ? "WARN" : "FAIL"}: ${check.name}`).join("\n"))
+          annotate("nuremberg", checks)
+          if (failed(checks)) throw new Error("Nuremberg direct user-path smoke failed after rollback")
+        },
+      })
+      if (result.outcome === "already-current") {
+        console.log(`::warning title=Nothing to roll back on Nuremberg::It already serves the recorded baseline ${c.sha}; the selected plan may not be the release you meant (see rollback_plan_run).`)
+      }
+      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\n`)
     } else {
       const plan = object(JSON.parse(readFileSync(process.env.RELEASE_PLAN!, "utf8")), "release plan")
       if (plan.sha !== c.sha || plan.standby_image !== c.image) throw new Error("Saved release plan differs from the qualified image")
@@ -222,9 +331,11 @@ if (import.meta.main) {
         save: (value) => writeFileSync(stateFile, JSON.stringify(value)),
         verify: async () => {
           const checks = await smoke({ origin: "nuremberg", revision: c.sha, ip: c.ip,
-            token: process.env.SMOKE_BOT_TOKEN ?? "", chatId: process.env.SMOKE_CHAT_ID ?? "" })
-          console.log(checks.map((check) => `${check.ok ? "pass" : "FAIL"}: ${check.name}`).join("\n"))
-          if (checks.some((check) => !check.ok)) throw new Error("Nuremberg direct user-path smoke failed")
+            token: process.env.SMOKE_BOT_TOKEN ?? "", chatId: process.env.SMOKE_CHAT_ID ?? "",
+            probes: probeCredentials(process.env), advisoryProbes: process.env.INLINE_SMOKE_PROBES === "advisory" })
+          console.log(checks.map((check) => `${check.skipped ? "skip" : check.ok ? "pass" : check.advisory ? "WARN" : "FAIL"}: ${check.name}`).join("\n"))
+          annotate("nuremberg", checks)
+          if (failed(checks)) throw new Error("Nuremberg direct user-path smoke failed")
         },
       })
       if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\ndeployment=${result.deployment}\n`)
