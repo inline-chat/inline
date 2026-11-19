@@ -2682,26 +2682,14 @@ class UIMessageView: UIView {
   // }
 
   func showDeleteConfirmation() {
-    guard let viewController = findViewController() else { return }
-
-    let alert = UIAlertController(
-      title: "Delete Message",
-      message: "Are you sure you want to delete this message?",
-      preferredStyle: .alert
-    )
-
-    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-    alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+    MessageViewActions.confirmDeleteMessage(from: findViewController()) { [weak self] in
       guard let self else { return }
       MessageViewActions.sendDeleteMessage(
         messageId: self.message.messageId,
         peerId: self.message.peerId,
         chatId: self.message.chatId
       )
-    })
-
-    viewController.present(alert, animated: true)
+    }
   }
 
   func findViewController() -> UIViewController? {

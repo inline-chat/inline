@@ -575,17 +575,9 @@ final class MessageMenuActions: NSObject {
   // MARK: - Actions
 
   func showDeleteConfirmation(messageId: Int64, peerId: Peer, chatId: Int64) {
-    guard let viewController = presenter() else { return }
-    let alert = UIAlertController(
-      title: "Delete Message",
-      message: "Are you sure you want to delete this message?",
-      preferredStyle: .alert
-    )
-    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-    alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
+    MessageViewActions.confirmDeleteMessage(from: presenter()) {
       MessageViewActions.sendDeleteMessage(messageId: messageId, peerId: peerId, chatId: chatId)
-    })
-    viewController.present(alert, animated: true)
+    }
   }
 
   func showDeleteConfirmationForFailed(messageId: Int64, peerId: Peer, chatId: Int64) {
