@@ -57,6 +57,11 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case focusStatus
 
   // Data & Storage
+  case storageUsage
+  case clearDownloads
+  case chatStorage
+  case keepMedia
+  case cacheLimit
   case autoDownloadMedia
   case autoDownloadFiles
   case autoDownloadVoiceMessages
@@ -129,7 +134,8 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .notifications
     case .appearInGlobalSearch, .shareTimeZone, .focusStatus:
       .privacy
-    case .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages:
+    case .storageUsage, .clearDownloads, .chatStorage, .keepMedia, .cacheLimit,
+         .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages:
       .dataStorage
     case .connectors:
       .connectors
@@ -196,7 +202,12 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: "Appear in Global Search"
     case .shareTimeZone: "Who Can See My Local Time"
     case .focusStatus: "Who Can See My Focus Status"
-    case .autoDownloadMedia: "Media"
+    case .storageUsage: "Storage Usage"
+    case .clearDownloads: "Clear Downloads"
+    case .chatStorage: "Downloads by Chat"
+    case .keepMedia: "Keep Media"
+    case .cacheLimit: "Maximum Size"
+    case .autoDownloadMedia: "Photos and Videos"
     case .autoDownloadFiles: "Files"
     case .autoDownloadVoiceMessages: "Voice Messages"
     case .connectors: "Connectors"
@@ -264,6 +275,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: "Discovery"
     case .shareTimeZone: "Time Zone"
     case .focusStatus: "Focus Status"
+    case .storageUsage: "Storage"
+    case .clearDownloads, .chatStorage: "Downloads"
+    case .keepMedia, .cacheLimit: "Automatic Cleanup"
     case .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages: "Auto-Download"
     case .connectors: "Connectors"
     case .focusInlineHotkey, .gridMicrophoneHotkey: "Global Hotkeys"
@@ -332,6 +346,11 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
     case .shareTimeZone: ["local time", "timezone", "share", "privacy", "exceptions"]
     case .focusStatus: ["do not disturb", "dnd", "notifications silenced", "focus"]
+    case .storageUsage: ["disk", "space", "size", "cache", "usage"]
+    case .clearDownloads: ["clear cache", "delete", "free up space", "remove", "clean"]
+    case .chatStorage: ["chats", "largest", "per chat", "clear", "media"]
+    case .keepMedia: ["auto delete", "remove old", "automatic", "cleanup", "expire"]
+    case .cacheLimit: ["cache size", "limit", "disk", "space", "automatic", "cleanup"]
     case .autoDownloadMedia: ["photos", "images", "videos", "download"]
     case .autoDownloadFiles: ["documents", "attachments", "download"]
     case .autoDownloadVoiceMessages: ["audio", "download"]
