@@ -486,6 +486,58 @@ class ShareState: ObservableObject {
     )
   }
 
+  /// JPEG and PNG photos can embed EXIF GPS; GIF cannot.
+  private nonisolated func canCarryPhotoLocation(mimeType: MIMEType) -> Bool {
+    let lowercased = mimeType.text.lowercased()
+    return lowercased == "image/jpeg" || lowercased == "image/jpg" || lowercased == "image/png"
+  }
+
+  /// A photo sent at its original size must not carry where it was taken. Its metadata is
+  /// rewritten without GPS and its pixels and orientation tag are copied untouched; if ImageIO
+  /// cannot rewrite it, it is re-encoded with the orientation applied and no metadata at all.
+  private nonisolated func locationFreePhotoFile(
+    from url: URL,
+    fileName: String,
+    mimeType: MIMEType,
+    cleanupURLs: [URL]
+  ) throws -> PreparedSharedFile? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()),
+          let sourceType = CGImageSourceGetType(source)
+    else {
+      return nil
+    }
+
+    let tempURL = temporaryURL(suggestedName: fileName, typeIdentifier: sourceType as String)
+    let copied: Bool = autoreleasepool {
+      guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, sourceType, 1, nil) else {
+        return false
+      }
+      let options: [CFString: Any] = [kCGImageMetadataShouldExcludeGPS: true]
+      // Writes the destination itself; it must not be finalized afterwards.
+      return CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil)
+    }
+    guard copied else {
+      try? FileManager.default.removeItem(at: tempURL)
+      return try downsampledPhotoFile(
+        from: source,
+        fileName: jpegFileName(from: fileName),
+        cleanupURLs: cleanupURLs,
+        originalFileSize: nil
+      )
+    }
+
+    return PreparedSharedFile(
+      url: tempURL,
+      fileName: fileName,
+      mimeType: mimeType,
+      fileType: .photo,
+      fileSize: fileSize(for: tempURL) ?? 0,
+      isAnimatedImage: false,
+      videoMetadata: nil,
+      cleanupURLs: cleanupURLs + [tempURL]
+    )
+  }
+
   private nonisolated func shouldSendPhotoAsDocument(at url: URL) -> Bool {
     guard let pixelSize = photoPixelSize(from: url) else { return false }
     let width = max(pixelSize.width, 1)
@@ -1364,6 +1416,16 @@ class ShareState: ObservableObject {
                   cleanupURLs: file.cleanupURLs
                 ) {
         return optimized
+      } else if canCarryPhotoLocation(mimeType: mimeType) {
+        if let stripped = try locationFreePhotoFile(
+          from: file.url,
+          fileName: fileName,
+          mimeType: mimeType,
+          cleanupURLs: file.cleanupURLs
+        ) {
+          return stripped
+        }
+        log.warning(tagged("Could not remove photo location metadata; uploading the original"))
       }
     }
 
