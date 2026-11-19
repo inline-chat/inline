@@ -306,6 +306,19 @@ struct PrivacySettingsView: View {
       } footer: {
         Text("Choose who can see your local time and when a Focus silences your notifications.")
       }
+
+      Section {
+        SettingsItem(
+          icon: "waveform",
+          iconColor: .purple,
+          title: "Transcribe Voice Messages"
+        ) {
+          Toggle("Transcribe Voice Messages", isOn: $privacy.transcribeVoiceMessages)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Voice messages you send are transcribed by an AI service so people can read them. Turn this off to keep your recordings from being sent for transcription.")
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Privacy")
