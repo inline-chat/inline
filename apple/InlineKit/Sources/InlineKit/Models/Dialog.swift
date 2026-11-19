@@ -552,12 +552,21 @@ public extension Dialog {
     "((\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0) AND \(catalogActiveSQL))"
   static let sidebarInboxVisibilitySQL =
     "(\(chatListVisibilitySQL) AND (\"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1))"
+  /// SQL predicate: the dialog's own notification mode is "none" (muted).
+  /// `notificationSettings` holds a serialized `DialogNotificationSettings`; `mode` is field 1 (a varint)
+  /// and protobuf writes it first, so a muted blob starts with tag `0x08` and `MODE_NONE` (3).
+  /// NULL or an empty blob follows the global setting and is not muted.
+  static let mutedSQL = #"COALESCE(substr("dialog"."notificationSettings", 1, 2) = X'0803', 0)"#
   /// SQL predicate for accent/prominent unread state. Queries must join `chat` as `"chat"`.
+  /// Muted chats are never prominent, so they stay out of the Dock badge and accent dots.
   static let prominentUnreadSQL = """
   (
-    "dialog"."peerUserId" IS NOT NULL
-    OR COALESCE("dialog"."followMode" = 'following', 0)
-    OR COALESCE("chat"."type" = 'private', 0)
+    (
+      "dialog"."peerUserId" IS NOT NULL
+      OR COALESCE("dialog"."followMode" = 'following', 0)
+      OR COALESCE("chat"."type" = 'private', 0)
+    )
+    AND NOT \(mutedSQL)
   )
   """
   static let unreadSQL = """

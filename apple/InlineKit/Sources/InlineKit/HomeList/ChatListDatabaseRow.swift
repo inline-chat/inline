@@ -34,6 +34,7 @@ struct ChatListDatabaseRow {
     case pinnedOrder
     case folderID
     case followMode
+    case isMuted
     case chatCreatedBy
     case chatIsPublic
     case chatDate

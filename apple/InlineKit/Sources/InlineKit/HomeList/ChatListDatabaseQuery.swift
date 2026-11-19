@@ -53,6 +53,7 @@ public enum ChatListDatabaseQuery {
         "dialog"."pinnedOrder" AS "pinnedOrder",
         "dialog"."folderId" AS "folderID",
         "dialog"."followMode" AS "followMode",
+        \(Dialog.mutedSQL) AS "isMuted",
         "chat"."createdBy" AS "chatCreatedBy",
         "chat"."isPublic" AS "chatIsPublic",
 
@@ -263,6 +264,7 @@ public enum ChatListDatabaseQuery {
 
     let followMode: String? = row[.followMode]
     let isFollowed = followMode == "following"
+    let isMuted: Bool = row[.isMuted]
     let draftPreview = makeDraftPreview(
       text: row[.draftText],
       hasAttachments: row[.draftHasAttachments],
@@ -299,7 +301,7 @@ public enum ChatListDatabaseQuery {
       unreadMark: row[.unreadMark] ?? false,
       unreadMentionsCount: max(row[.unreadMentionsCount] ?? 0, 0),
       unreadReactionsCount: max(row[.unreadReactionsCount] ?? 0, 0),
-      prominence: peerUserID != nil || isPrivateChat || isFollowed ? .prominent : .standard,
+      prominence: (peerUserID != nil || isPrivateChat || isFollowed) && !isMuted ? .prominent : .standard,
       isOpen: row[.isOpen] ?? false,
       isPinned: row[.isPinned] ?? false,
       isFollowed: isFollowed,
