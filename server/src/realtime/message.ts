@@ -118,6 +118,15 @@ const connectionInitRejectionMetadata = (
 // Cache for lazily-loaded RPC handler to avoid circular import and per-call dynamic import cost
 let rpcHandlerModulePromise: Promise<typeof import("@in/server/realtime/handlers/_rpc")> | null = null
 
+/**
+ * In-flight RPC calls allowed per connection. Clients keep up to 64 calls in
+ * flight; a call beyond that is answered with RATE_LIMIT instead of closing
+ * the socket. Pings, acks and other frames do not count.
+ */
+export const MAX_IN_FLIGHT_RPC_CALLS = 64
+const RPC_IN_FLIGHT_RETRY_AFTER_SECONDS = 1
+const inFlightRpcCalls = new Map<string, number>()
+
 export const handleMessage = async (message: ClientMessage, rootContext: RootContext) => {
   const { ws, connectionId } = rootContext
 
@@ -224,13 +233,25 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         }
         break
 
-      case "rpcCall":
-        // Import lazily to avoid circular dependency with function registry during module init.
-        // Cache the promise so we only pay the dynamic import cost once.
-        const { handleRpcCall } = await (rpcHandlerModulePromise ??= import("@in/server/realtime/handlers/_rpc"))
-        let result = await handleRpcCall(message.body.rpcCall, handlerContext)
-        sendRpcReply(result)
+      case "rpcCall": {
+        const inFlight = inFlightRpcCalls.get(connectionId) ?? 0
+        if (inFlight >= MAX_IN_FLIGHT_RPC_CALLS) {
+          throw RealtimeRpcError.RateLimit(RPC_IN_FLIGHT_RETRY_AFTER_SECONDS)
+        }
+        inFlightRpcCalls.set(connectionId, inFlight + 1)
+        try {
+          // Import lazily to avoid circular dependency with function registry during module init.
+          // Cache the promise so we only pay the dynamic import cost once.
+          const { handleRpcCall } = await (rpcHandlerModulePromise ??= import("@in/server/realtime/handlers/_rpc"))
+          const result = await handleRpcCall(message.body.rpcCall, handlerContext)
+          sendRpcReply(result)
+        } finally {
+          const remaining = (inFlightRpcCalls.get(connectionId) ?? 1) - 1
+          if (remaining > 0) inFlightRpcCalls.set(connectionId, remaining)
+          else inFlightRpcCalls.delete(connectionId)
+        }
         break
+      }
 
       case "ping":
         sendPong(message, message.body.ping.nonce)
