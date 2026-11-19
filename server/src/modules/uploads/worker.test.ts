@@ -25,7 +25,7 @@ import {
   type MultipartUploadedPart,
 } from "./multipartStore"
 import { NativeUploadOperations } from "./operations"
-import type { UploadPartStore } from "./partStore"
+import { UploadPartStorageUnavailableError, type UploadPartStore } from "./partStore"
 import { NativeUploadWorker, storagePartGeometry } from "./worker"
 import { UploadGroupBuffer } from "./groupBuffer"
 
@@ -211,11 +211,38 @@ class GatedPuttingMultipartStore extends PuttingMultipartStore {
     this.#release()
   }
 
-  override async put(input: { key: string; bytes: Uint8Array }): Promise<{ etag: string }> {
+  override async put(input: { key: string; bytes: Uint8Array; signal?: AbortSignal }): Promise<{ etag: string }> {
     this.attempts += 1
     if (this.attempts <= this.failures) throw new MultipartStorageUnavailableError()
-    if (this.gated) await this.released
+    if (this.gated) {
+      await Promise.race([
+        this.released,
+        new Promise<void>((resolve) => {
+          input.signal?.addEventListener("abort", () => resolve(), { once: true })
+          if (input.signal?.aborted) resolve()
+        }),
+      ])
+      if (input.signal?.aborted) throw new MultipartStorageUnavailableError()
+    }
     return await super.put(input)
+  }
+}
+
+/** Staging that is down. */
+class FailingPartStore extends BatchingPartStore {
+  override async put(): Promise<string> {
+    throw new UploadPartStorageUnavailableError()
+  }
+}
+
+class ThumbnailLookupRepository extends InlineUploadRepository {
+  thumbnailLookups = 0
+
+  override async completedPhotoId(
+    ...args: Parameters<InlineUploadRepository["completedPhotoId"]>
+  ): Promise<number | undefined> {
+    this.thumbnailLookups += 1
+    return await super.completedPhotoId(...args)
   }
 }
 
@@ -933,7 +960,7 @@ describe("native upload multipart worker", () => {
         finishInline: options.inline === false
           ? undefined
           : (upload, signal, stored) => worker.processNow(upload, signal, stored),
-        storeEarly: options.early === false ? undefined : (upload, bytes) => worker.storeEarly(upload, bytes),
+        storeEarly: options.early === false ? undefined : (upload, bytes, signal) => worker.storeEarly(upload, bytes, signal),
       })
     return { repository, staging, multipart, buffer, worker, operations, finalizer }
   }
@@ -1126,6 +1153,68 @@ describe("native upload multipart worker", () => {
     expect(multipart.putCount).toBe(1)
     const [stored] = [...multipart.objects.values()]
     expect(Buffer.from(stored!.bytes).equals(Buffer.from(body))).toBe(true)
+  })
+
+  test("a claim that fails before its write waits for the early write, so cleanup removes it", async () => {
+    const user = await testUtils.createUser("native-upload-inline-early-store-thumbnail@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(12_000).fill(3)
+    const multipart = new GatedPuttingMultipartStore(0, true)
+    const repository = new ThumbnailLookupRepository()
+    const { worker, operations } = pipeline({ body, multipart, repository, finalizerFor: makeFinalizer })
+    worker.start()
+    const creating = operations.create({
+      clientUploadId: new Uint8Array(16).fill(155),
+      fileName: "early-thumbnail.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      // No completed photo has this id, so the claim fails as invalid media before its write.
+      thumbnailFileUniqueId: "missing-thumbnail",
+      metadata: { oneofKind: undefined },
+      inlineData: body,
+    }, requestContext)
+    await waitFor(() => repository.thumbnailLookups > 0 && multipart.attempts === 1)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    multipart.release()
+    const created = await creating
+    expect(created.complete).toBeUndefined()
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "failed")
+    expect((await repository.get(created.uploadId, owner))?.failureCode).toBe("invalid_media")
+    expect(multipart.putCount).toBe(1)
+    expect(multipart.objects.size).toBe(0)
+  })
+
+  test("create does not wait for an early write once staging has failed", async () => {
+    const user = await testUtils.createUser("native-upload-inline-early-store-stop@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(8_000).fill(7)
+    const multipart = new GatedPuttingMultipartStore(0, true)
+    const { worker, operations } = pipeline({
+      body, multipart, staging: new FailingPartStore(), finalizerFor: makeFinalizer,
+    })
+    worker.start()
+    const startedAt = performance.now()
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(156),
+      fileName: "early-stop.bin",
+      mimeType: "application/octet-stream",
+      byteCount: BigInt(body.byteLength),
+      sha256: createHash("sha256").update(body).digest(),
+      kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+      inlineData: body,
+    }, requestContext)
+    expect(performance.now() - startedAt).toBeLessThan(5_000)
+    expect(created.complete).toBeUndefined()
+    expect(created.acceptedParts).toEqual([])
+    expect(multipart.attempts).toBe(1)
+    expect(multipart.putCount).toBe(0)
+    multipart.release()
   })
 
   test("never writes early a file that does not match its declared digest", async () => {

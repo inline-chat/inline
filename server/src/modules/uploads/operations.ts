@@ -184,7 +184,7 @@ export type NativeUploadOperationsOptions = {
     stored?: Promise<boolean>,
   ) => Promise<"complete" | "running" | "processing">
   /** Writes a whole file sent with CREATE_UPLOAD to its final key; see NativeUploadWorker.storeEarly. */
-  storeEarly?: (upload: InlineUploadRecord, bytes: Uint8Array) => Promise<boolean>
+  storeEarly?: (upload: InlineUploadRecord, bytes: Uint8Array, signal: AbortSignal) => Promise<boolean>
 }
 
 export class NativeUploadOperations {
@@ -257,8 +257,8 @@ export class NativeUploadOperations {
    * small photo costs one round trip instead of create, part and finish. On any failure the
    * upload still exists and the client continues with the ordinary part and finish calls.
    *
-   * The final object is written alongside staging rather than after it: the client learns the
-   * upload id only from this reply, so nothing can cancel the upload while the write is running.
+   * The final object is written alongside staging rather than after it (see
+   * NativeUploadWorker.storeEarly for who cleans up a write that outlives its upload).
    */
   async #finishInlineData(
     created: CreateUploadResult,
@@ -268,7 +268,8 @@ export class NativeUploadOperations {
     context: HandlerContext,
   ): Promise<CreateUploadResult> {
     if (created.partCount !== 1) return created
-    const stored = this.#startEarlyStore(upload, data, context)
+    const early = this.#startEarlyStore(upload, data, context)
+    const stored = early?.stored
     try {
       if (!created.acceptedParts.includes(0)) {
         await this.savePart({ uploadId: created.uploadId, partIndex: 0, data }, context)
@@ -284,22 +285,27 @@ export class NativeUploadOperations {
       log.warn("Inline upload data was not finished in create", { error })
       return created
     } finally {
-      // The write never outlives the request; the worker has usually awaited it already.
+      // The reply waits for no storage deadline: a write still running here (the finish timed out
+      // or failed early) is stopped, and the worker writes the object itself if it needs it.
+      early?.stop()
       await stored
     }
   }
 
-  /** Starts `storeEarly` when this request can finish the upload itself; never rejects. */
+  /** Starts `storeEarly` when this request can finish the upload itself; `stored` never rejects. */
   #startEarlyStore(
     upload: InlineUploadRecord,
     data: Uint8Array,
     context: HandlerContext,
-  ): Promise<boolean> | undefined {
+  ): { stored: Promise<boolean>; stop: () => void } | undefined {
     const storeEarly = this.#storeEarly
     if (!storeEarly || !this.#finishInline || upload.status !== "uploading" ||
         upload.byteCount > INLINE_FINISH_MAX_BYTES) return undefined
+    const controller = new AbortController()
+    const signal = context.signal ? AbortSignal.any([controller.signal, context.signal]) : controller.signal
     const trace = transferTraces.touch(uploadTraceKey(upload.id), "upload", context.inlineProtocol ? "v3" : "v2")
-    return withTransferCounters(trace.counters, () => storeEarly(upload, data)).catch(() => false)
+    const stored = withTransferCounters(trace.counters, () => storeEarly(upload, data, signal)).catch(() => false)
+    return { stored, stop: () => controller.abort() }
   }
 
   async savePart(input: SaveUploadPartInput, context: HandlerContext): Promise<SaveUploadPartResult> {
@@ -708,6 +714,6 @@ export const nativeUploadOperations = new NativeUploadOperations(
   {
     groupBuffer: uploadGroupBuffer,
     finishInline: (upload, signal, stored) => nativeUploadWorker.processNow(upload, signal, stored),
-    storeEarly: (upload, bytes) => nativeUploadWorker.storeEarly(upload, bytes),
+    storeEarly: (upload, bytes, signal) => nativeUploadWorker.storeEarly(upload, bytes, signal),
   },
 )

@@ -43,6 +43,11 @@ const LEASE_RENEW_INTERVAL_MS = Math.min(60_000, INLINE_UPLOAD_PROCESSING_LEASE_
 const DEFAULT_LEASE_RENEW_TIMEOUT_MS = Math.min(5_000, INLINE_UPLOAD_PROCESSING_LEASE_MS / 4)
 /** An ownership check this soon after the lease was confirmed skips the database. */
 const FRESH_LEASE_MS = Math.min(5_000, INLINE_UPLOAD_PROCESSING_LEASE_MS / 6)
+/**
+ * An early store needs this long before the upload expires: expiry cleanup removes the final key
+ * and then the row, and a write landing after both would be left with no owner.
+ */
+const EARLY_STORE_EXPIRY_MARGIN_MS = 5 * 60_000
 const DEFAULT_SHUTDOWN_DRAIN_TIMEOUT_MS = 5_000
 const STAGING_READ_CONCURRENCY = 4
 const DEFAULT_EXPIRY_CLEANUP_INTERVAL_MS = 60_000
@@ -377,13 +382,16 @@ export class NativeUploadWorker {
   /**
    * Writes a whole single-group upload to its final key before it is finished, so the write
    * overlaps staging; pass the result to `processNow`. Resolves false, never rejects, when the
-   * upload does not qualify or the write failed, and the worker writes it as usual. A key written
-   * for an upload that is never finished goes with the upload: cancel and expiry cleanup both
-   * remove its publication path.
+   * upload does not qualify or the write failed, and the worker writes it as usual. The write is
+   * not fenced: a claim given it waits for it before any cleanup, and a key that lands after
+   * another process's cleanup (a cancel sent after a retried create, a claim by its poll) is
+   * removed with the row at expiry, which is why an upload near expiry does not qualify.
    */
   async storeEarly(upload: InlineUploadRecord, bytes: Uint8Array, signal?: AbortSignal): Promise<boolean> {
+    const latestStart = Math.min(upload.expiresAt.getTime(), upload.hardExpiresAt.getTime()) -
+      EARLY_STORE_EXPIRY_MARGIN_MS
     // Only `processNow` here can use the write, and it needs a running worker.
-    if (!this.#started || !this.multipartStore.put || upload.status !== "uploading" ||
+    if (!this.#started || Date.now() >= latestStart || !this.multipartStore.put || upload.status !== "uploading" ||
         upload.storageFormat !== IDENTITY_STORAGE_FORMAT || upload.storageUploadId ||
         upload.partCount > STORAGE_FRAMES_PER_PART || BigInt(bytes.byteLength) !== upload.byteCount ||
         !sameBytes(createHash("sha256").update(bytes).digest(), upload.sha256)) return false
@@ -820,6 +828,9 @@ export class NativeUploadWorker {
       )
       return true
     } catch (error) {
+      // An early write still running would land after the cleanup below. Shutdown only releases
+      // the claim, so it does not wait (the request stops the write when it ends).
+      if (!this.#abort.signal.aborted) await stored
       // Cancellation may have happened on another process or just before
       // shutdown. Clean a late object write before taking the shutdown path.
       if (await this.#discardCanceledWork(claim.upload.id)) return false
