@@ -213,6 +213,10 @@ class MessageTableCell: NSView {
       // added this to solve the clipping issue in scroll view on last message when it was multiline and initial height
       // was calculated with a wider width during the table view setup
       // Update: commented when I was debugging slow message sending
+      PerformanceTrace.event("CellUnchanged", category: .messages)
+      #if DEBUG
+      MessageListPerfCounters.noteCell(.unchanged)
+      #endif
       return
     }
 
@@ -229,6 +233,11 @@ class MessageTableCell: NSView {
        currentContent.props.layout.hasSameRichBlockTopology(as: props.layout),
        currentContent.props.layout.hasSameConstraintTopology(as: props.layout)
     {
+      let span = PerformanceTrace.begin("CellResize", category: .messages)
+      defer { span.end() }
+      #if DEBUG
+      MessageListPerfCounters.noteCell(.resized)
+      #endif
       self.currentContent = (message, props)
       log.trace("updating message size \(currentContent.message.message.id ?? 0)")
       updateSize()
@@ -264,7 +273,10 @@ class MessageTableCell: NSView {
     // different text
     // currentContent.message.message.text != message.message.text
     {
+      let span = PerformanceTrace.begin("CellReconfigure", category: .messages)
+      defer { span.end() }
       #if DEBUG
+      MessageListPerfCounters.noteCell(.reconfigured)
       log.trace("updating message text and size")
       log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       #endif
@@ -284,8 +296,16 @@ class MessageTableCell: NSView {
 //    new: \(message.debugDescription)
 //    """)
 
+    let span = PerformanceTrace.begin("CellBuild", category: .messages)
+    defer { span.end() }
     currentContent = (message, props)
     updateContent()
+    #if DEBUG
+    MessageListPerfCounters.noteCell(.built)
+    if let messageView {
+      MessageListPerfCounters.noteBuiltRow(messageView)
+    }
+    #endif
   }
 
   func updateTextAndSize(animate: Bool = true) {

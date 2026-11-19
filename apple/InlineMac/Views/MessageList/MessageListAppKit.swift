@@ -1197,6 +1197,8 @@ class MessageListAppKit: NSViewController {
   }
 
   private func updateMessageViewColors() {
+    let span = PerformanceTrace.begin("BubbleGradientSync", category: .messages)
+    defer { span.end() }
     let visibleRange = tableView.rows(in: userVisibleRect())
     guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return }
 
@@ -1494,6 +1496,8 @@ class MessageListAppKit: NSViewController {
     lastAvatarOverlayVisibleRange = range
     lastAvatarOverlayVisibleRect = comparableVisibleRect
 
+    let span = PerformanceTrace.begin("AvatarOverlaySync", category: .messages)
+    defer { span.end() }
     installAvatarOverlayIfNeeded(raise: avatarOverlayNeedsRaise)
     avatarOverlayNeedsRaise = false
     guard avatarOverlayView.superview != nil else { return }
@@ -2467,6 +2471,9 @@ class MessageListAppKit: NSViewController {
 
   @objc private func scrollWheelEnded() {
     log.trace("scroll wheel ended")
+    #if DEBUG
+    MessageListPerfCounters.flush("scroll_end")
+    #endif
     isUserScrolling = false
     scrollState = .idle
     // A discrete wheel tick can end before the first throttled bounds notification.
@@ -2482,6 +2489,9 @@ class MessageListAppKit: NSViewController {
 
   /// Recalculate heights for all items once resize has ended
   @objc private func liveResizeEnded() {
+    #if DEBUG
+    MessageListPerfCounters.flush("resize_end")
+    #endif
     guard feature_updatesHeightsOnLiveResizeEnd else { return }
 
 //    precalculateHeightsInBackground()
@@ -2582,6 +2592,8 @@ class MessageListAppKit: NSViewController {
   private let boundsThrottleID = UUID().uuidString
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    let span = PerformanceTrace.begin("ScrollTick", category: .messages)
+    defer { span.end() }
     noteClipOriginChange()
     updateMessageViewColors()
     scheduleAvatarOverlaySync(force: false)
@@ -2710,6 +2722,9 @@ class MessageListAppKit: NSViewController {
     }
 
     super.viewDidLayout()
+    // One list layout pass per live-resize step; outside live resize this is not a resize step.
+    let resizeSpan = view.inLiveResize ? PerformanceTrace.begin("ResizeStep", category: .messages) : nil
+    defer { resizeSpan?.end() }
     #if DEBUG
     log.trace("viewDidLayout() called, width=\(tableWidth())")
     #endif
@@ -3151,6 +3166,9 @@ class MessageListAppKit: NSViewController {
   override func viewDidDisappear() {
     super.viewDidDisappear()
     log.trace("viewDidDisappear() called")
+    #if DEBUG
+    MessageListPerfCounters.flush("disappear")
+    #endif
     removeLiveResizeObserver()
     clearHoveredMessage()
     activityNavigator?.clearVisible()
@@ -4160,6 +4178,11 @@ class MessageListAppKit: NSViewController {
     with props: MessageViewInputProps,
     tableWidth: CGFloat
   ) -> (NSSize, NSSize, NSSize?, MessageSizeCalculator.LayoutPlans) {
+    let span = PerformanceTrace.begin("HeightMeasure", category: .messages)
+    defer { span.end() }
+    #if DEBUG
+    MessageListPerfCounters.noteMeasure(messageId: rowMessage.id)
+    #endif
     // An album measures as its bubble message with one photo the size of its grid.
     let message = props.album?.bubbleMessage ?? rowMessage
     if message.message.isServiceMessage {

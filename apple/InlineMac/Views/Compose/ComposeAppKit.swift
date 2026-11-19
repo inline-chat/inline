@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import Logger
 
 protocol ComposeImplementation: AnyObject {
   var view: NSView { get }
@@ -113,6 +114,8 @@ final class ComposeAppKit: NSView {
 
   func didLayout() {
     guard !isBlockedByBotAccess else { return }
+    let span = PerformanceTrace.begin("ComposeDidLayout", category: .messages)
+    defer { span.end() }
     implementation.didLayout()
   }
 

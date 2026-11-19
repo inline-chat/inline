@@ -3191,6 +3191,8 @@ extension LegacyComposeAppKit {
   private func requestImmediateDraftPersistenceIfNeeded() {
     guard didRequestFinalDraftPersistence == false else { return }
     didRequestFinalDraftPersistence = true
+    let span = PerformanceTrace.begin("DraftFlush", category: .messages)
+    defer { span.end() }
 
     draftEntitySaveTask?.cancel()
     draftEntitySaveTask = nil
