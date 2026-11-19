@@ -150,7 +150,7 @@ private struct ReplyThreadPaneControls: View {
           .lineLimit(1)
           .truncationMode(.tail)
 
-        if status.isTyping || status.isWorking, let typingText = status.text {
+        if status.isTyping || status.isWorking || status.sendingKind != nil, let typingText = status.text {
           HStack(spacing: 3) {
             if status.isWorking {
               WorkingActivityIndicator(color: Color(nsColor: Theme.accentColor))
@@ -160,6 +160,12 @@ private struct ReplyThreadPaneControls: View {
                 spacing: 1,
                 color: Color(nsColor: Theme.accentColor),
                 lift: 1
+              )
+            } else if let kind = status.sendingKind {
+              SendingActivityIndicator(
+                kind: kind,
+                color: Color(nsColor: Theme.accentColor),
+                size: CGSize(width: 12, height: 9)
               )
             }
 

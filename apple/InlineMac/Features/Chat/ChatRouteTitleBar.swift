@@ -305,7 +305,7 @@ struct ChatRouteTitleBar: View {
           .foregroundStyle(status.usesAccentColor ? Color(nsColor: Theme.accentColor) : Color.secondary)
           .lineLimit(1)
       }
-      .id("subtitle-\(status.usesAccentColor)-\(status.isRecordingVoice)-\(subtitle)")
+      .id("subtitle-\(status.usesAccentColor)-\(status.isRecordingVoice)-\(status.sendingKind?.rawValue ?? "")-\(subtitle)")
       .transition(
         .asymmetric(
           insertion: .opacity.combined(with: .offset(y: -2)),
@@ -329,6 +329,8 @@ struct ChatRouteTitleBar: View {
         maxBarHeight: 9,
         color: Color(nsColor: Theme.accentColor)
       )
+    } else if let kind = status.sendingKind {
+      SendingActivityIndicator(kind: kind, color: Color(nsColor: Theme.accentColor))
     }
   }
 

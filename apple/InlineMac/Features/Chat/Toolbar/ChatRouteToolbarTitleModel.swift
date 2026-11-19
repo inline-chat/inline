@@ -17,12 +17,14 @@ final class ChatRouteToolbarTitleModel {
     case typing(String)
     case working(String)
     case recordingVoice(String)
+    case sending(SendingActivityGlyph.Kind, String)
 
     var text: String? {
       switch self {
       case .none:
         nil
-      case let .text(text), let .typing(text), let .working(text), let .recordingVoice(text):
+      case let .text(text), let .typing(text), let .working(text), let .recordingVoice(text),
+           let .sending(_, text):
         text
       }
     }
@@ -46,8 +48,13 @@ final class ChatRouteToolbarTitleModel {
       return false
     }
 
+    var sendingKind: SendingActivityGlyph.Kind? {
+      if case let .sending(kind, _) = self { return kind }
+      return nil
+    }
+
     var usesAccentColor: Bool {
-      isTyping || isWorking || isRecordingVoice
+      isTyping || isWorking || isRecordingVoice || sendingKind != nil
     }
   }
 
@@ -427,8 +434,12 @@ final class ChatRouteToolbarTitleModel {
       if action == .working {
         return .working("Working")
       }
+      let activityText = ComposeActions.shared.getActivityDisplayText(for: peer) ?? action.toHumanReadable()
       if action == .recordingVoice {
-        return .recordingVoice(Self.textForAnimatedStatus(action.toHumanReadable()))
+        return .recordingVoice(Self.textForAnimatedStatus(activityText))
+      }
+      if let kind = SendingActivityGlyph.Kind(action) {
+        return .sending(kind, Self.textForAnimatedStatus(activityText))
       }
 
       return .text(action.toHumanReadable())

@@ -3696,12 +3696,16 @@ private final class SidebarNativeComposeActivityView: NSView {
 private final class SidebarNativeComposeIndicatorView: NSView {
   private var action: ApiComposeAction?
   private var indicatorLayers: [CAShapeLayer] = []
+  // Sending glyphs are drawn shapes, not layer pulses; they share SwiftUI's drawing.
+  private let sendingGlyph = SendingActivityGlyphView()
 
   override var isFlipped: Bool { true }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
+    sendingGlyph.isHidden = true
+    addSubview(sendingGlyph)
   }
 
   @available(*, unavailable)
@@ -3716,6 +3720,7 @@ private final class SidebarNativeComposeIndicatorView: NSView {
   }
 
   func refreshColor() {
+    sendingGlyph.color = Theme.accentColor
     indicatorLayers.forEach {
       if action == .working {
         $0.strokeColor = Theme.accentColor.cgColor
@@ -3740,15 +3745,24 @@ private final class SidebarNativeComposeIndicatorView: NSView {
   private func rebuildLayers() {
     indicatorLayers.forEach { $0.removeFromSuperlayer() }
     indicatorLayers.removeAll()
-    guard let action,
-          let kind = ComposeActionAnimationInventory.animation(for: action)
-    else { return }
+    let kind = action.flatMap(ComposeActionAnimationInventory.animation(for:))
+    if case let .sending(glyph) = kind {
+      sendingGlyph.color = Theme.accentColor
+      sendingGlyph.kind = glyph
+      sendingGlyph.isHidden = false
+    } else {
+      sendingGlyph.kind = nil
+      sendingGlyph.isHidden = true
+    }
+    guard let kind else { return }
 
     let count = switch kind {
     case .typing, .recordingVoice:
       3
-    case .working, .upload:
+    case .working:
       1
+    case .sending:
+      0
     }
     for index in 0 ..< count {
       let shape = CAShapeLayer()
@@ -3780,7 +3794,7 @@ private final class SidebarNativeComposeIndicatorView: NSView {
       animation.fromValue = kind == .typing ? 0 : 0.45
       animation.toValue = kind == .typing ? -2 : 1
       // Autoreversed, so typing and voice match the 0.74s cycle of the shared indicators.
-      animation.duration = kind == .upload ? 0.8 : 0.37
+      animation.duration = 0.37
       animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
       animation.autoreverses = true
       animation.repeatCount = .infinity
@@ -3793,6 +3807,7 @@ private final class SidebarNativeComposeIndicatorView: NSView {
   }
 
   private func layoutIndicatorLayers() {
+    sendingGlyph.frame = CGRect(x: 0, y: bounds.midY - 6, width: 16, height: 12)
     guard let action,
           let kind = ComposeActionAnimationInventory.animation(for: action)
     else { return }
@@ -3807,16 +3822,8 @@ private final class SidebarNativeComposeIndicatorView: NSView {
         shape.frame = rect
         shape.path = CGPath(ellipseIn: CGRect(origin: .zero, size: rect.size), transform: nil)
       }
-    case .upload:
-      guard let shape = indicatorLayers.first else { return }
-      let rect = CGRect(x: 1, y: bounds.midY - 2, width: 14, height: 4)
-      shape.frame = rect
-      shape.path = CGPath(
-        roundedRect: CGRect(origin: .zero, size: rect.size),
-        cornerWidth: 2,
-        cornerHeight: 2,
-        transform: nil
-      )
+    case .sending:
+      break
     case .recordingVoice:
       for (index, shape) in indicatorLayers.enumerated() {
         let height = CGFloat(5 + index * 3)
