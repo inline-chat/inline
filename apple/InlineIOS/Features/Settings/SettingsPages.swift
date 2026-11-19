@@ -25,6 +25,7 @@ struct GeneralSettingsView: View {
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
   @ObservedObject private var gestureSettings = INUserSettings.current.messageGestures
   @ObservedObject private var composeSettings = INUserSettings.current.compose
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   var body: some View {
     List {
@@ -112,6 +113,17 @@ struct GeneralSettingsView: View {
             title: "Reset Translation Alerts"
           )
         }
+      }
+
+      Section {
+        SettingsItem(icon: "hammer.fill", iconColor: .gray, title: "Developer Mode") {
+          Toggle("Developer Mode", isOn: $developerMode)
+            .labelsHidden()
+        }
+      } header: {
+        Text("Developer")
+      } footer: {
+        Text("Show chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents.")
       }
     }
     .listStyle(.insetGrouped)

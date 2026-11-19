@@ -233,6 +233,17 @@ struct ChatInfoView: View {
     selectedTab = .info
   }
 
+  private var developerIDs: [DeveloperIDs.Entry] {
+    var entries: [DeveloperIDs.Entry] = []
+    if currentChatId > 0 {
+      entries.append(.init(label: "Chat ID", id: currentChatId))
+    }
+    if case let .user(userId) = chatItem.peerId {
+      entries.append(.init(label: "User ID", id: userId))
+    }
+    return entries
+  }
+
   var body: some View {
     ZStack(alignment: .top) {
       ScrollView(.vertical) {
@@ -317,6 +328,8 @@ struct ChatInfoView: View {
                     }
                   ))
               }
+              DeveloperIDsCard(entries: developerIDs)
+                .padding(.top, 12)
             case .media:
               if let model = resources.media {
                 MediaTabView(mediaViewModel: model, onShowInChat: showMessageInChat)
