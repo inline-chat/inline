@@ -72,6 +72,9 @@ export const setupTestDatabase = async () => {
       await withAdmin(base, async (client) => {
         await client.unsafe(`CREATE DATABASE "${name}"${template ? ` TEMPLATE "${template}"` : ""}`)
         created = true
+        // Like CI and production. `timestamp` columns filled by defaultNow() are
+        // read back as UTC; a local server in another zone skews them by hours.
+        await client.unsafe(`ALTER DATABASE "${name}" SET timezone TO 'UTC'`)
       })
       process.env["DATABASE_URL"] = databaseUrl(base, name)
       initDb(process.env["DATABASE_URL"])
