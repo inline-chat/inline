@@ -23,7 +23,6 @@
   },
   "include": [
     "vitest.effect.config.ts",
-    "scripts/core-entry-smoke.ts",
     "scripts/core-http-kernel-smoke.ts",
     "scripts/core-production-smoke.ts",
     "scripts/test-runner.ts",
