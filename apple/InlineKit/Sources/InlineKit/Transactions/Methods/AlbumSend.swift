@@ -133,12 +133,15 @@ public extension TransactionSendMessage {
   ) -> [TransactionSendMessage] {
     var sends: [TransactionSendMessage] = []
     sends.reserveCapacity(items.count)
+    // Message rows keep dates to the millisecond, and sends made in one go share one. Spacing them
+    // keeps their order after a relaunch, when interrupted sends resume oldest first.
+    let firstDate = Date()
     for run in albumSendRuns(items.map(\.media)) {
       let groupedId: Int64? = run.count > 1 ? Int64.random(in: 1 ... Int64.max) : nil
       var ids: [String] = []
       for index in run {
         let item = items[index]
-        let send = TransactionSendMessage(
+        var send = TransactionSendMessage(
           text: item.text,
           peerId: peerId,
           chatId: chatId,
@@ -148,6 +151,7 @@ public extension TransactionSendMessage {
           sendMode: sendMode,
           groupedId: groupedId
         )
+        send.date = firstDate.addingTimeInterval(Double(sends.count) / 1_000)
         ids.append(send.id)
         sends.append(send)
       }

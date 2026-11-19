@@ -128,6 +128,9 @@ struct MessageAlbumsTests {
     let albumId = sends[0].groupedId
     #expect(albumId != nil)
     #expect(sends.allSatisfy { $0.groupedId == albumId })
+    // Each send is a millisecond after the one before, so stored rows keep their order.
+    let milliseconds = sends.map { Int64(($0.date.timeIntervalSince1970 * 1_000).rounded(.down)) }
+    #expect(zip(milliseconds, milliseconds.dropFirst()).allSatisfy { $0 < $1 })
     #expect(AlbumSendBarrier.shared.isRegistered(transactionId: sends[0].id))
     for send in sends {
       AlbumSendBarrier.shared.settle(transactionId: send.id)
