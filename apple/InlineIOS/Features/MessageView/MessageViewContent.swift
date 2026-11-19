@@ -420,6 +420,26 @@ struct MessageViewContent {
     return MessageText(ready)
   }
 
+  /// The signed-in user. Debug builds let the chat harness, which runs signed out, stand in its
+  /// fixture's user so your own reactions draw as yours.
+  static var currentUserId: Int64? {
+    #if DEBUG
+    if let debugCurrentUserId { return debugCurrentUserId }
+    #endif
+    return Auth.shared.getCurrentUserId()
+  }
+
+  #if DEBUG
+  nonisolated(unsafe) static var debugCurrentUserId: Int64?
+  #endif
+
+  /// A tinted pill deepens while pressed and a filled one dims, so the press reads on both.
+  private static func pressed(_ color: UIColor, traits: UITraitCollection) -> UIColor {
+    let resolved = color.resolvedColor(with: traits)
+    let alpha = resolved.cgColor.alpha
+    return resolved.withAlphaComponent(alpha < 1 ? min(1, alpha * 1.7) : 0.82)
+  }
+
   private static func reactionModels(
     _ message: FullMessage,
     outgoing: Bool,
@@ -431,8 +451,10 @@ struct MessageViewContent {
     guard !groups.isEmpty else { return [] }
     let traits = context.traits
     let grid = PixelGrid(scale: context.displayScale)
-    let currentUserID = Auth.shared.getCurrentUserId() ?? 0
+    let currentUserID = currentUserId ?? 0
     let selected = ThemeManager.shared.selected
+    let accent = context.theme.primary.uiColor.resolvedColor(with: traits)
+    let outgoingBubble = context.theme.outgoingBubble.uiColor.resolvedColor(with: traits)
     let emojiFont = UIFont.systemFont(ofSize: 20, weight: .medium)
     let countFont = ChatTypography.font(13, weight: .medium, style: .caption1, compatibleWith: traits)
     // Without a bubble behind them, outgoing pills use darkened incoming colors to stay visible.
@@ -450,6 +472,15 @@ struct MessageViewContent {
       } else {
         (outgoing ? selected.reactionOutgoingSecoundry : selected.reactionIncomingSecoundry) ?? .secondarySystemFill
       }
+      // The count reads on the pill's fill: the bubble's color on your white pill in an outgoing
+      // bubble, white on your accent pill in an incoming one, the tint's color on others.
+      let countColor: UIColor = if isEmoji {
+        UIColor.label
+      } else if outgoing {
+        byCurrentUser ? outgoingBubble : .white
+      } else {
+        byCurrentUser ? .white : accent
+      }
       let emojiLayout = TextLayouter.layout(
         MessageText(NSAttributedString(string: group.emoji, attributes: [.font: emojiFont])),
         maximumWidth: 200,
@@ -459,7 +490,7 @@ struct MessageViewContent {
         ? TextLayouter.layout(
           MessageText(NSAttributedString(
             string: "\(group.reactions.count)",
-            attributes: [.font: countFont, .foregroundColor: isEmoji ? UIColor.label : textColor]
+            attributes: [.font: countFont, .foregroundColor: countColor]
           ).coreTextReady(for: traits)),
           maximumWidth: 200,
           grid: grid
@@ -476,7 +507,7 @@ struct MessageViewContent {
         emojiLayout: emojiLayout,
         countLayout: countLayout,
         background: background,
-        pressedBackground: background.withAlphaComponent(0.82)
+        pressedBackground: pressed(background, traits: traits)
       )
     }
   }

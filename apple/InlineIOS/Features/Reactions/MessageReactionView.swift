@@ -283,26 +283,59 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
       previewProvider: nil
     ) { [weak self] _ in
       guard let self else { return UIMenu(children: []) }
-      return Self.reactorsMenu(for: reactionUsers)
+      return Self.reactorsMenu(for: reactionUsers, scale: traitCollection.displayScale)
     }
   }
 
-  /// Who reacted, newest first; choosing someone opens their profile.
-  static func reactorsMenu(for users: [ReactionUser]) -> UIMenu {
-    let currentUserId = Auth.shared.getCurrentUserId()
-    let userActions = users.sorted { $0.reactedAt > $1.reactedAt }.map { user in
-      let avatarImage: UIImage = if let userInfo = user.userInfo {
-        createAvatarImage(for: userInfo)
-      } else {
-        UIImage(systemName: "person.circle") ?? createDefaultAvatar()
+  /// Who reacted, newest first; choosing someone opens their profile. A menu can't change its
+  /// images once it shows, so photos come from what is already on screen (`shownImages`, by user)
+  /// or cached, and only photos that need a download hold the list back, for at most a moment.
+  static func reactorsMenu(
+    for users: [ReactionUser],
+    shownImages: [Int64: UIImage] = [:],
+    scale: CGFloat
+  ) -> UIMenu {
+    let users = users.sorted { $0.reactedAt > $1.reactedAt }
+    let side = Constants.menuAvatarSize
+    let element = UIDeferredMenuElement.uncached { completion in
+      var images: [Int64: UIImage] = [:]
+      var missing: [(Int64, User)] = []
+      for user in users {
+        if let shown = shownImages[user.userId] {
+          images[user.userId] = resizeImage(shown, to: CGSize(width: side, height: side))
+        } else if let info = user.userInfo {
+          if let cached = UserAvatarMenuImage.cached(for: info.user, side: side, scale: scale) {
+            images[user.userId] = cached
+          } else if UserAvatarMenuImage.hasPhoto(info.user) {
+            missing.append((user.userId, info.user))
+          }
+        }
       }
+      guard !missing.isEmpty else {
+        completion(reactorActions(users, images: images))
+        return
+      }
+      Task { @MainActor in
+        for (userId, user) in missing {
+          images[userId] = await UserAvatarMenuImage.load(for: user, side: side, scale: scale)
+        }
+        completion(reactorActions(users, images: images))
+      }
+    }
+    return UIMenu(children: [element])
+  }
 
+  private static func reactorActions(_ users: [ReactionUser], images: [Int64: UIImage]) -> [UIAction] {
+    let currentUserId = Auth.shared.getCurrentUserId()
+    return users.map { user in
+      let avatarImage: UIImage = images[user.userId]
+        ?? user.userInfo.map { createInitialsAvatar(for: $0, size: Constants.menuAvatarSize) }
+        ?? createDefaultAvatar()
       let userName = if let currentUserId, user.userId == currentUserId {
         "You"
       } else {
         user.displayName
       }
-
       return UIAction(
         title: userName,
         subtitle: timestampString(for: user.reactedAt),
@@ -315,8 +348,6 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
         )
       }
     }
-
-    return UIMenu(children: userActions)
   }
 
   override func contextMenuInteraction(
@@ -527,34 +558,6 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
     configureContainerAppearance()
   }
 
-  private static func createAvatarImage(for userInfo: UserInfo) -> UIImage {
-    // Try to get an already loaded image first
-    if let photo = userInfo.profilePhoto?.first {
-      if let localUrl = photo.getLocalURL() {
-        if let image = UIImage(contentsOfFile: localUrl.path) {
-          return resizeImage(image, to: CGSize(width: Constants.menuAvatarSize, height: Constants.menuAvatarSize))
-        }
-      }
-
-      // Check Nuke's cache for remote images
-      if let remoteUrl = photo.getRemoteURL() {
-        let request = ImageRequest(url: remoteUrl, processors: [.resize(width: Constants.preloadAvatarSize)])
-        if let cachedImage = ImagePipeline.shared.cache.cachedImage(for: request)?.image {
-          return resizeImage(cachedImage, to: CGSize(width: Constants.menuAvatarSize, height: Constants.menuAvatarSize))
-        }
-
-        // Also check without processors in case it was cached differently
-        let simpleRequest = ImageRequest(url: remoteUrl)
-        if let cachedImage = ImagePipeline.shared.cache.cachedImage(for: simpleRequest)?.image {
-          return resizeImage(cachedImage, to: CGSize(width: Constants.menuAvatarSize, height: Constants.menuAvatarSize))
-        }
-      }
-    }
-
-    // Fallback: create initials avatar synchronously
-    return createInitialsAvatar(for: userInfo, size: Constants.menuAvatarSize)
-  }
-
   private static func createInitialsAvatar(for userInfo: UserInfo, size: CGFloat) -> UIImage {
     let user = userInfo.user
     let nameForInitials = AvatarColorUtility.formatNameForHashing(
@@ -623,8 +626,15 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
       let circlePath = UIBezierPath(ovalIn: rect)
       circlePath.addClip()
 
-      // Draw the image within the circular clip
-      image.draw(in: rect)
+      // Aspect fill within the circle, like the avatar views; photos are not always square.
+      let ratio = max(size.width / max(image.size.width, 1), size.height / max(image.size.height, 1))
+      let drawn = CGSize(width: image.size.width * ratio, height: image.size.height * ratio)
+      image.draw(in: CGRect(
+        x: (size.width - drawn.width) / 2,
+        y: (size.height - drawn.height) / 2,
+        width: drawn.width,
+        height: drawn.height
+      ))
     }
     return resizedImage.withRenderingMode(.alwaysOriginal)
   }

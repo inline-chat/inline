@@ -103,8 +103,11 @@ final class MessageReactionPillView: UIControl {
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
     guard let users = model?.users, !users.isEmpty else { return nil }
+    // Photos the pill already shows go into the menu as they are, without waiting for a load.
+    let shown = avatarViews.compactMapValues(\.displayedImage)
+    let scale = traitCollection.displayScale
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-      MessageReactionView.reactorsMenu(for: users)
+      MessageReactionView.reactorsMenu(for: users, shownImages: shown, scale: scale)
     }
   }
 
@@ -295,6 +298,7 @@ final class MessageReactionPillView: UIControl {
 
   @objc private func handleTap() {
     guard let model else { return }
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
     onTap?(model.emoji)
   }
 

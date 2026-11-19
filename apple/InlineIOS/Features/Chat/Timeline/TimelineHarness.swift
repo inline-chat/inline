@@ -124,6 +124,8 @@ final class TimelineHarnessModel {
       TimelineMessageMenu.debugHoldAction = TimelineHarnessRootView.argument("--timeline-harness-hold-action")
         .flatMap(MessageGestureAction.init(rawValue:))
       TimelineMessageMenu.debugPrefersSystemMenu = arguments.contains("--timeline-harness-system-menu")
+      // Signed out, the harness's fixture user stands in as you, so your reactions draw as yours.
+      MessageViewContent.debugCurrentUserId = fixture.currentUserId
       // Reactions stand in for the server: saved and published, then published again a round trip later.
       MessageViewActions.debugReactionMutation = { [weak fixture] _, emoji, messageId, _ in
         Task { @MainActor in try? await fixture?.toggleReaction(emoji: emoji, messageId: messageId) }

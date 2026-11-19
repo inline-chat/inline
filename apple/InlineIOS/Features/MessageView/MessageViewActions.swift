@@ -130,7 +130,7 @@ enum MessageViewActions {
   }
 
   static func toggleReaction(_ emoji: String, on message: FullMessage) {
-    let currentUserID = Auth.shared.getCurrentUserId() ?? 0
+    let currentUserID = MessageViewContent.currentUserId ?? 0
     let model = message.message
     if message.reactions.contains(where: { $0.reaction.emoji == emoji && $0.reaction.userId == currentUserID }) {
       sendReactionMutation(.deleteReaction(emoji: emoji, message: model))
