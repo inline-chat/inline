@@ -137,6 +137,10 @@ struct FakeHarness {
     missing: Mutex<Vec<String>>,
     catalog_scopes: Mutex<Vec<CatalogScope>>,
     commands: Mutex<HashMap<PathBuf, Vec<inline_agent_bridge::DriverCommand>>>,
+    /// When set, each listing waits for a permit: a slow harness.
+    catalog_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// Listings fail while set.
+    catalog_fails: std::sync::atomic::AtomicBool,
 }
 
 impl HarnessDriver for FakeHarness {
@@ -158,6 +162,16 @@ impl HarnessDriver for FakeHarness {
 
     fn catalog<'a>(&'a self, scope: CatalogScope) -> DriverFuture<'a, Catalog> {
         Box::pin(async move {
+            let gate = self.catalog_gate.lock().unwrap().clone();
+            if let Some(gate) = gate {
+                gate.acquire().await.unwrap().forget();
+            }
+            if self.catalog_fails.load(Ordering::SeqCst) {
+                self.catalog_scopes.lock().unwrap().push(scope);
+                return Err(inline_agent_bridge::DriverError::Unavailable(
+                    "plugins did not finish activating".into(),
+                ));
+            }
             let commands = scope
                 .folder
                 .as_ref()
@@ -247,6 +261,8 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         missing: Mutex::new(vec![]),
         catalog_scopes: Mutex::new(vec![]),
         commands: Mutex::new(HashMap::new()),
+        catalog_gate: Mutex::new(None),
+        catalog_fails: std::sync::atomic::AtomicBool::new(false),
     });
     (runtime(&mut cleanup, harness.clone()), harness, cleanup)
 }
@@ -1004,6 +1020,89 @@ fn selected(item: &inline_client::BotChatSettingsItem) -> &str {
         inline_client::BotChatSettingsControl::Select { value, .. } => value,
         other => panic!("not a select: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn a_slow_listing_never_holds_requests_that_have_an_old_one() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    let first = runtime.catalog().await;
+    assert_eq!(first.permission_modes.len(), 1);
+    // The harness now takes as long as it likes, and the listing is old.
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *harness.catalog_gate.lock().unwrap() = Some(gate.clone());
+    runtime.catalog.as_mut().unwrap().0 -= CATALOG_TTL;
+    let answered = tokio::time::timeout(Duration::from_millis(500), runtime.catalog())
+        .await
+        .expect("an old listing is answered without waiting");
+    assert_eq!(answered, first);
+    let _ = runtime.catalog().await;
+    assert_eq!(runtime.catalog_refreshing.len(), 1, "one listing at a time");
+    // The listing arrives in the loop, and the apps hear of it from there.
+    gate.add_permits(1);
+    let mut catalogs = runtime.catalog_rx.take().unwrap();
+    // The first listing's copy comes first and is ignored: a waiter kept it.
+    while !runtime.catalog_refreshing.is_empty() {
+        let refresh = catalogs.recv().await.unwrap();
+        runtime.apply_catalog(refresh);
+    }
+    assert!(runtime.catalog.as_ref().unwrap().0.elapsed() < CATALOG_TTL);
+    assert!(runtime.publish_pending);
+}
+
+#[tokio::test]
+async fn with_no_listing_a_request_waits_a_bounded_time() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *harness.catalog_gate.lock().unwrap() = Some(gate);
+    let started = std::time::Instant::now();
+    let catalog = runtime.catalog().await;
+    let waited = started.elapsed();
+    assert!(waited >= CATALOG_WAIT, "{waited:?}");
+    assert!(waited < CATALOG_WAIT + Duration::from_secs(2), "{waited:?}");
+    assert_eq!(catalog, Catalog::default());
+    // Still in flight: a second request joins it rather than listing again.
+    assert_eq!(runtime.catalog_refreshing.len(), 1);
+}
+
+#[tokio::test]
+async fn a_failing_listing_backs_off_instead_of_retrying_every_request() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    harness.catalog_fails.store(true, Ordering::SeqCst);
+    let _ = runtime.catalog().await;
+    for _ in 0..5 {
+        let _ = runtime.catalog().await;
+        let _ = runtime.chat_settings(9, 1, 1, None).await;
+    }
+    assert_eq!(harness.catalog_scopes.lock().unwrap().len(), 1);
+    assert_eq!(
+        runtime.catalog_failures[&CatalogKey::Installation].1,
+        CATALOG_RETRY
+    );
+    // Once the backoff passes it is asked again, and a success clears it.
+    harness.catalog_fails.store(false, Ordering::SeqCst);
+    runtime
+        .catalog_failures
+        .get_mut(&CatalogKey::Installation)
+        .unwrap()
+        .0 -= CATALOG_RETRY;
+    let catalog = runtime.catalog().await;
+    assert_eq!(catalog.permission_modes.len(), 1);
+    assert!(runtime.catalog_failures.is_empty());
+}
+
+#[tokio::test]
+async fn a_busy_work_answers_with_a_toast_instead_of_holding_the_agent() {
+    let (mut runtime, _harness, _cleanup) = fixture(false);
+    runtime.works.insert(9, WorkHandle::silent());
+    let started = std::time::Instant::now();
+    let toast = runtime
+        .ask(9, |reply| Command::Session {
+            op: SessionOp::Mode("plan".to_owned()),
+            reply,
+        })
+        .await;
+    assert!(started.elapsed() < WORK_ANSWER_TIMEOUT + Duration::from_secs(2));
+    assert!(toast.unwrap().contains("busy"));
 }
 
 #[tokio::test]

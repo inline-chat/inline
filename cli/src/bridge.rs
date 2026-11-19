@@ -115,6 +115,9 @@ const PROVIDER_ID: &str = "codex";
 const LEGACY_CONFIG_VERSION: u32 = 3;
 const ACCOUNT_CONFIG_VERSION: u32 = 4;
 const ACCOUNT_SECRETS_VERSION: u32 = 2;
+/// A file of this name in the account folder makes the service log trace
+/// detail (scrubbed metadata only) without a flag.
+const TRACE_MARKER: &str = "trace";
 const SCHEDULING_SCAN_BATCH_SIZE: usize = 64;
 const TURN_LANE_PROMOTION_QUEUE_CAPACITY: usize = 32;
 // Interactive settings should fail fast, but a cold Claude session can need
@@ -571,6 +574,9 @@ pub async fn run_service(
             _ = &mut termination => return Ok(()),
         }
     }
+    // The service manager starts `bridge run` without flags, so a `trace`
+    // file in the account folder turns on trace detail across restarts.
+    let trace = trace || paths.root.join(TRACE_MARKER).is_file();
     match run_owned_service(&paths, trace).await {
         Ok(()) => {
             service_ledger.clear();

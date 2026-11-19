@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::FutureExt as _;
 use inline_agent_bridge::HostToolResult;
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
@@ -87,6 +88,75 @@ const JOIN_REPLY_CHAIN: usize = 5;
 const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
 /// Parents followed to find a thread tree's root, the loop cap's scope.
 const LOOP_SCOPE_DEPTH: usize = 8;
+/// The first wait before a listing that failed is asked for again; it
+/// doubles up to [`MAX_CATALOG_RETRY`].
+const CATALOG_RETRY: Duration = Duration::from_secs(30);
+const MAX_CATALOG_RETRY: Duration = Duration::from_secs(600);
+/// How long startup waits for the harness's first listing before it takes
+/// messages; a slower listing arrives later and is published then.
+const FIRST_CATALOG_WAIT: Duration = Duration::from_secs(10);
+/// How long a request with no listing at all waits for the one in flight.
+const CATALOG_WAIT: Duration = Duration::from_secs(3);
+/// How long the runtime waits for a work's answer. A work opening its
+/// session or running a command must not hold every other chat.
+const WORK_ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
+/// A runtime step slower than this is logged by name.
+const SLOW_STEP: Duration = Duration::from_secs(2);
+
+/// Whose listing a catalog is: the installation's, or a thread's folder and
+/// session for harnesses whose commands depend on them (ACP, OpenCode).
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum CatalogKey {
+    Installation,
+    Chat {
+        folder: PathBuf,
+        session: Option<String>,
+    },
+}
+
+/// A listing the harness finished in the background.
+struct CatalogRefresh {
+    key: CatalogKey,
+    generation: u64,
+    result: Result<Catalog, String>,
+}
+
+/// A listing in flight, which a request with no listing yet can wait on.
+#[derive(Clone)]
+struct PendingCatalog {
+    key: CatalogKey,
+    generation: u64,
+    listing: futures_util::future::Shared<
+        futures_util::future::BoxFuture<'static, Result<Catalog, String>>,
+    >,
+}
+
+/// Logs a runtime step that held the event loop, by name and duration only.
+fn note_slow(step: &str, started: Instant) {
+    let elapsed = started.elapsed();
+    if elapsed >= SLOW_STEP {
+        log::warn!(
+            target: "inline::bridge::v2",
+            "slow step={step} ms={}",
+            elapsed.as_millis()
+        );
+    }
+}
+
+/// The name a slow event is logged under.
+fn event_step(event: &ClientEvent) -> &'static str {
+    match event {
+        ClientEvent::MessageStored { .. } => "message",
+        ClientEvent::MessageActionInvoked { .. } => "action",
+        ClientEvent::MessageFormSubmitted { .. } => "form",
+        ClientEvent::MessageWidgetCalled { .. } => "widget",
+        ClientEvent::BotInteraction { .. } => "interaction",
+        ClientEvent::ChatUpserted { .. } => "chat",
+        ClientEvent::AgentAccessChanged { .. } => "access",
+        ClientEvent::AgentSessionControlRequested { .. } => "session_control",
+        _ => "event",
+    }
+}
 
 /// Identity and settings of one v2 agent.
 #[derive(Clone, Debug)]
@@ -313,6 +383,17 @@ pub(crate) struct Runtime {
     known_sessions: HashMap<i64, bool>,
     /// The harness's pickers, refreshed now and then.
     catalog: Option<(tokio::time::Instant, Catalog)>,
+    /// Thread listings for harnesses whose commands depend on the folder.
+    chat_catalogs: HashMap<CatalogKey, (tokio::time::Instant, Catalog)>,
+    /// Listings being fetched in the background, one per key at a time.
+    catalog_refreshing: HashMap<CatalogKey, PendingCatalog>,
+    catalog_generation: u64,
+    /// Listings that failed: when, and how long until the next try.
+    catalog_failures: HashMap<CatalogKey, (tokio::time::Instant, Duration)>,
+    catalog_tx: mpsc::UnboundedSender<CatalogRefresh>,
+    catalog_rx: Option<mpsc::UnboundedReceiver<CatalogRefresh>>,
+    /// A new installation listing the apps haven't been sent yet.
+    publish_pending: bool,
     /// The folders registered with the bridge, which threads pick from with
     /// the agent's own and the harness's.
     folder_source: Option<FolderSource>,
@@ -354,6 +435,7 @@ impl Runtime {
         let ledger = Arc::new(Ledger::open(&config.ledger_path)?);
         let (moves_tx, moves) = mpsc::unbounded_channel();
         let (lead_tx, lead) = mpsc::unbounded_channel();
+        let (catalog_tx, catalog_rx) = mpsc::unbounded_channel();
         if let Some(tools) = &tools {
             tools.set_lead(lead_tx.clone(), config.dm_chat_id);
         }
@@ -426,6 +508,13 @@ impl Runtime {
             bound_projects: HashMap::new(),
             known_sessions: HashMap::new(),
             catalog: None,
+            chat_catalogs: HashMap::new(),
+            catalog_refreshing: HashMap::new(),
+            catalog_generation: 0,
+            catalog_failures: HashMap::new(),
+            catalog_tx,
+            catalog_rx: Some(catalog_rx),
+            publish_pending: false,
             folder_source: None,
             reconnect: Reconnect::default(),
             reported_health: None,
@@ -519,7 +608,8 @@ impl Runtime {
             }
         };
         self.recover().await;
-        self.publish_capabilities().await;
+        let mut catalogs = self.catalog_rx.take().expect("run once");
+        self.first_catalog().await;
         let _skill_sync = self.skills.clone().map(SkillPublisher::spawn);
         self.startup_activity.take();
         let mut heartbeat = tokio::time::interval(self.heartbeat().await);
@@ -530,21 +620,35 @@ impl Runtime {
         let mut connection = tokio::time::interval(CONNECTION_CHECK);
         connection.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let result = loop {
+            if std::mem::take(&mut self.publish_pending) {
+                let started = Instant::now();
+                self.publish_capabilities().await;
+                note_slow("publish_capabilities", started);
+            }
             tokio::select! {
                 biased;
                 _ = &mut shutdown => break Ok(()),
                 // Before any delivery, so a subthread's first reply finds its work.
                 Some((from, to)) = moves.recv() => self.moved_work(from, to),
-                Some(request) = lead.recv() => self.lead_request(request).await,
+                Some(refresh) = catalogs.recv() => self.apply_catalog(refresh),
+                Some(request) = lead.recv() => {
+                    let started = Instant::now();
+                    self.lead_request(request).await;
+                    note_slow("lead", started);
+                }
                 _ = connection.tick() => {
+                    let started = Instant::now();
                     self.keep_connected().await;
                     // A harness that needs setup shows in the apps right away.
                     if self.reported_health.as_ref() != Some(&self.agent.harness.describe().health) {
                         self.heartbeat().await;
                     }
+                    note_slow("connection", started);
                 }
                 _ = heartbeat.tick() => {
+                    let started = Instant::now();
                     let interval = self.heartbeat().await;
+                    note_slow("heartbeat", started);
                     if interval != heartbeat.period() {
                         heartbeat = tokio::time::interval(interval);
                         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -555,7 +659,9 @@ impl Runtime {
                     let Some(delivery) = delivery else {
                         break Err("Inline bot event stream closed".to_owned());
                     };
+                    let started = Instant::now();
                     let failure = self.handle(delivery.event()).await.err().map(|error| error.to_string());
+                    note_slow(event_step(delivery.event()), started);
                     if let Some(error) = failure {
                         log::warn!(target: "inline::bridge::v2", "event handling failed: {error}");
                         // Never silently: tell the sender this message was not taken.
@@ -570,9 +676,11 @@ impl Runtime {
                     }
                     // The input is in the ledger (or was refused visibly), so
                     // the delivery can be acknowledged.
+                    let acked = Instant::now();
                     if let Err(error) = delivery.ack().await {
                         break Err(error.to_string());
                     }
+                    note_slow("ack", acked);
                 }
             }
         };
@@ -694,16 +802,16 @@ impl Runtime {
     /// heartbeats reuse the last listing (listing can start a harness
     /// process) for up to ten minutes, so the harness's own folders, such as
     /// Codex projects, still reach the apps.
+    ///
+    /// Listing never runs here: a stale or missing listing is asked for in
+    /// the background, and published when it arrives.
     async fn publish_capabilities(&mut self) {
         let catalog = match &self.catalog {
             Some((at, catalog)) if at.elapsed() < CAPABILITIES_REFRESH => catalog.clone(),
-            Some(_) => self.catalog().await,
+            Some(_) => self.cached_catalog(),
             None => {
-                let catalog = self.catalog().await;
-                if self.catalog.is_none() {
-                    return;
-                }
-                catalog
+                self.cached_catalog();
+                return;
             }
         };
         let folders = self
@@ -1379,39 +1487,49 @@ impl Runtime {
         }
     }
 
-    /// The harness's pickers, kept for a minute.
+    /// The harness's pickers, kept for a minute. Listing can start a harness
+    /// process and wait on it for a long time, so an old listing is answered
+    /// at once and refreshed in the background; with none yet, the one in
+    /// flight is waited for at most [`CATALOG_WAIT`].
     async fn catalog(&mut self) -> Catalog {
-        if let Some((at, catalog)) = &self.catalog
-            && at.elapsed() < CATALOG_TTL
-        {
-            return catalog.clone();
-        }
-        match self
-            .agent
-            .harness
-            .catalog(CatalogScope {
-                folder: Some(self.config.folder.clone()),
-                session: None,
-            })
-            .await
-        {
-            Ok(catalog) => {
-                self.agent.record_limits(&catalog.usage);
-                self.catalog = Some((tokio::time::Instant::now(), catalog.clone()));
-                catalog
+        let scope = CatalogScope {
+            folder: Some(self.config.folder.clone()),
+            session: None,
+        };
+        if let Some((at, catalog)) = &self.catalog {
+            let catalog = catalog.clone();
+            if at.elapsed() >= CATALOG_TTL {
+                self.request_catalog(CatalogKey::Installation, scope);
             }
-            Err(error) => {
-                log::warn!(target: "inline::bridge::v2", "catalog unavailable: {error}");
-                self.catalog
-                    .as_ref()
-                    .map(|(_, catalog)| catalog.clone())
-                    .unwrap_or_default()
-            }
+            return catalog;
         }
+        let listing = self.request_catalog(CatalogKey::Installation, scope);
+        self.wait_for_catalog(listing, CATALOG_WAIT).await;
+        self.cached_catalog()
+    }
+
+    /// The installation listing as it is, asking for a newer one when it is
+    /// old; never waits.
+    fn cached_catalog(&mut self) -> Catalog {
+        let fresh = matches!(&self.catalog, Some((at, _)) if at.elapsed() < CATALOG_TTL);
+        if !fresh {
+            self.request_catalog(
+                CatalogKey::Installation,
+                CatalogScope {
+                    folder: Some(self.config.folder.clone()),
+                    session: None,
+                },
+            );
+        }
+        self.catalog
+            .as_ref()
+            .map(|(_, catalog)| catalog.clone())
+            .unwrap_or_default()
     }
 
     /// ACP commands and settings can depend on the thread's project. Do not
-    /// reuse the installation-wide catalog for a different folder.
+    /// reuse the installation-wide commands for a different folder: until the
+    /// thread's own listing arrives, it gets the installation's pickers alone.
     async fn catalog_for_chat(&mut self, chat_id: i64) -> Catalog {
         if !matches!(
             self.config.vocabulary,
@@ -1419,26 +1537,176 @@ impl Runtime {
         ) {
             return self.catalog().await;
         }
-        match self
-            .agent
-            .harness
-            .catalog(CatalogScope {
-                folder: Some(self.thread_folder(chat_id)),
-                session: self
-                    .works
-                    .get(&chat_id)
-                    .and_then(WorkHandle::catalog_session),
-            })
-            .await
+        let folder = self.thread_folder(chat_id);
+        let session = self
+            .works
+            .get(&chat_id)
+            .and_then(WorkHandle::catalog_session);
+        let key = CatalogKey::Chat {
+            folder: folder.clone(),
+            session: session.as_ref().map(|session| session.as_str().to_owned()),
+        };
+        let scope = CatalogScope {
+            folder: Some(folder),
+            session,
+        };
+        if let Some((at, catalog)) = self.chat_catalogs.get(&key) {
+            let catalog = catalog.clone();
+            if at.elapsed() >= CATALOG_TTL {
+                self.request_catalog(key, scope);
+            }
+            return catalog;
+        }
+        let listing = self.request_catalog(key.clone(), scope);
+        self.wait_for_catalog(listing, CATALOG_WAIT).await;
+        if let Some((_, catalog)) = self.chat_catalogs.get(&key) {
+            return catalog.clone();
+        }
+        let mut catalog = self.catalog().await;
+        catalog.commands.clear();
+        catalog.agents.clear();
+        catalog.skills.clear();
+        catalog
+    }
+
+    /// Lists in the background, once per key at a time, and not again
+    /// until a failure's backoff has passed. Returns the listing in flight.
+    fn request_catalog(&mut self, key: CatalogKey, scope: CatalogScope) -> Option<PendingCatalog> {
+        if let Some(pending) = self.catalog_refreshing.get(&key) {
+            return Some(pending.clone());
+        }
+        if let Some((at, retry)) = self.catalog_failures.get(&key)
+            && at.elapsed() < *retry
         {
+            return None;
+        }
+        self.catalog_generation += 1;
+        let generation = self.catalog_generation;
+        let harness = self.agent.harness.clone();
+        let listing = async move {
+            let started = Instant::now();
+            let result = harness
+                .catalog(scope)
+                .await
+                .map_err(|error| error.to_string());
+            note_slow("catalog", started);
+            result
+        }
+        .boxed()
+        .shared();
+        let pending = PendingCatalog {
+            key: key.clone(),
+            generation,
+            listing: listing.clone(),
+        };
+        self.catalog_refreshing.insert(key.clone(), pending.clone());
+        // Driven to the end even when no one waits, then handed to the loop.
+        let tx = self.catalog_tx.clone();
+        tokio::spawn(async move {
+            let result = listing.await;
+            let _ = tx.send(CatalogRefresh {
+                key,
+                generation,
+                result,
+            });
+        });
+        Some(pending)
+    }
+
+    /// Waits a bounded time for a listing in flight and keeps it if it came.
+    async fn wait_for_catalog(&mut self, pending: Option<PendingCatalog>, limit: Duration) {
+        let Some(pending) = pending else {
+            return;
+        };
+        match tokio::time::timeout(limit, pending.listing).await {
+            Ok(result) => {
+                self.apply_catalog(CatalogRefresh {
+                    key: pending.key,
+                    generation: pending.generation,
+                    result,
+                });
+            }
+            Err(_) => log::warn!(
+                target: "inline::bridge::v2",
+                "slow step=catalog_wait ms={} (answered without a listing)",
+                limit.as_millis()
+            ),
+        }
+    }
+
+    /// Keeps a finished listing, or backs off after a failure. A new
+    /// installation listing is marked for publishing to the apps. A result
+    /// already kept by a waiter, or overtaken by a newer request, is ignored.
+    fn apply_catalog(&mut self, refresh: CatalogRefresh) {
+        let CatalogRefresh {
+            key,
+            generation,
+            result,
+        } = refresh;
+        if self
+            .catalog_refreshing
+            .get(&key)
+            .is_none_or(|pending| pending.generation != generation)
+        {
+            return;
+        }
+        self.catalog_refreshing.remove(&key);
+        let now = tokio::time::Instant::now();
+        match result {
             Ok(catalog) => {
+                self.catalog_failures.remove(&key);
                 self.agent.record_limits(&catalog.usage);
-                catalog
+                match key {
+                    CatalogKey::Installation => {
+                        self.catalog = Some((now, catalog));
+                        // Published from the loop, not from the handler that
+                        // happened to wait for it.
+                        self.publish_pending = true;
+                    }
+                    CatalogKey::Chat { .. } => {
+                        // Threads come and go; old listings would only be refreshed.
+                        self.chat_catalogs
+                            .retain(|_, (at, _)| at.elapsed() < CAPABILITIES_REFRESH);
+                        self.chat_catalogs.insert(key, (now, catalog));
+                    }
+                }
             }
             Err(error) => {
-                log::warn!(target: "inline::bridge::v2", "chat={chat_id} catalog unavailable: {error}");
-                Catalog::default()
+                let retry = self
+                    .catalog_failures
+                    .get(&key)
+                    .map_or(CATALOG_RETRY, |(_, retry)| {
+                        retry.saturating_mul(2).min(MAX_CATALOG_RETRY)
+                    });
+                let first = !self.catalog_failures.contains_key(&key);
+                self.catalog_failures
+                    .retain(|_, (at, retry)| at.elapsed() < retry.saturating_mul(4));
+                self.catalog_failures.insert(key, (now, retry));
+                // Once per failing streak; the retries are quiet.
+                if first {
+                    log::warn!(target: "inline::bridge::v2", "catalog unavailable: {error}");
+                } else {
+                    log::debug!(target: "inline::bridge::v2", "catalog still unavailable: {error}");
+                }
             }
+        }
+    }
+
+    /// The first listing, waited for briefly before messages are taken so
+    /// the apps and the first thread see the harness's pickers. A slower one
+    /// is published when it arrives.
+    async fn first_catalog(&mut self) {
+        let listing = self.request_catalog(
+            CatalogKey::Installation,
+            CatalogScope {
+                folder: Some(self.config.folder.clone()),
+                session: None,
+            },
+        );
+        self.wait_for_catalog(listing, FIRST_CATALOG_WAIT).await;
+        self.publish_pending = false;
+        if self.catalog.is_some() {
+            self.publish_capabilities().await;
         }
     }
 
@@ -1529,11 +1797,11 @@ impl Runtime {
         {
             return false;
         }
-        self.catalog_for_chat(chat_id)
-            .await
-            .commands
-            .iter()
-            .any(|command| command.name == name)
+        let knows = |catalog: &Catalog| catalog.commands.iter().any(|command| command.name == name);
+        let catalog = self.catalog_for_chat(chat_id).await;
+        // A thread whose own listing hasn't arrived yet forwards what the
+        // installation knows, rather than refusing a real command.
+        knows(&catalog) || (catalog.commands.is_empty() && knows(&self.catalog().await))
     }
 
     /// The folders threads pick from: the agent's own, the harness's in
@@ -1608,7 +1876,16 @@ impl Runtime {
                     })
                     .await
                     .map_err(|_| stopped())?;
-                answer.await.map_err(|_| stopped())??;
+                tokio::time::timeout(WORK_ANSWER_TIMEOUT, answer)
+                    .await
+                    .map_err(|_| {
+                        log::warn!(target: "inline::bridge::v2", "slow step=work_folder chat={chat_id}");
+                        format!(
+                            "{} is busy starting this thread; try the folder again in a moment.",
+                            self.config.agent_name
+                        )
+                    })?
+                    .map_err(|_| stopped())??;
             }
             _ => {
                 let known = self
@@ -2209,7 +2486,18 @@ impl Runtime {
         if work.tx.send(command(reply)).await.is_err() {
             return Some("This work stopped. Mention the agent to start it again.".to_owned());
         }
-        answer.await.unwrap_or(None)
+        // The command is queued in order either way; a work still opening its
+        // session answers later, and the rest of the agent keeps going.
+        match tokio::time::timeout(WORK_ANSWER_TIMEOUT, answer).await {
+            Ok(answer) => answer.unwrap_or(None),
+            Err(_) => {
+                log::warn!(target: "inline::bridge::v2", "slow step=work_answer chat={chat_id}");
+                Some(format!(
+                    "{} is busy; this applies as soon as it's ready.",
+                    self.config.agent_name
+                ))
+            }
+        }
     }
 
     async fn answer(&self, interaction_id: InlineId, toast: Option<String>) {

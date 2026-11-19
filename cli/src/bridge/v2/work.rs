@@ -394,6 +394,29 @@ pub(crate) struct WorkHandle {
 }
 
 impl WorkHandle {
+    /// A work that takes commands and never answers, like one stuck opening
+    /// its session.
+    #[cfg(test)]
+    pub(crate) fn silent() -> Self {
+        let (tx, mut rx) = mpsc::channel::<AdmittedCommand>(64);
+        let (_phase_tx, phase) = watch::channel(WorkPhase::Idle);
+        let task = tokio::spawn(async move {
+            // Kept, so their reply senders never resolve.
+            let mut kept = Vec::new();
+            while let Some(command) = rx.recv().await {
+                kept.push(command);
+            }
+        });
+        Self {
+            tx: CommandSender(tx),
+            phase,
+            agent_session_id: Arc::new(AtomicI64::new(0)),
+            catalog_session: Arc::new(std::sync::Mutex::new(None)),
+            last_turn: Arc::new(std::sync::Mutex::new(None)),
+            task,
+        }
+    }
+
     pub(crate) fn catalog_session(&self) -> Option<ProviderSessionId> {
         if self.task.is_finished() {
             return None;
