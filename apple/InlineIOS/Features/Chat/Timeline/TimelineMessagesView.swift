@@ -2034,6 +2034,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       else { return }
       menuActions.presentForwardSheet(fullMessage)
     }
+    // The server's rule: anyone in a DM, in a space your own messages or any as an admin.
+    let canDeleteMessage = MessageDeletePolicy.checker(peer: peer)
+    actions.canDelete = { item in item.message.map(canDeleteMessage) ?? false }
     actions.delete = { item in
       guard let message = item.message else { return }
       MessageViewActions.sendDeleteMessage(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
