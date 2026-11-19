@@ -1797,7 +1797,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     guard !isPreview, hasOpened, let window, !isHidden, alpha > 0.01,
           window.windowScene?.activationState == .foregroundActive,
           UIApplication.shared.applicationState == .active,
-          unreadFetchBoundary == nil, pendingFocus == nil, let chatId
+          // A focus waiting for its message to sync keeps the list at the live end, whose rows are read
+          // as usual: the message may never arrive (deleted, or the push ran ahead of a failed sync).
+          unreadFetchBoundary == nil, pendingFocus == nil || pendingFocus?.awaitsArrival == true, let chatId
     else {
       if window == nil || UIApplication.shared.applicationState != .active { onVisibleMessagesChanged?(nil) }
       return
@@ -1814,6 +1816,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     if distanceFromBottom <= 12, viewModel.historyCoverage.isAtCertifiedLiveEnd {
       // Only the real live end stands for every message; a window's bottom does not.
+      #if DEBUG
+      if pendingFocus != nil { debugLog("TIMELINE_DEBUG read all while a focus awaits its message") }
+      #endif
       UnreadManager.shared.readAll(peer, chatId: chatId)
     } else {
       if viewModel.historyCoverage != lastReadCoverage {
