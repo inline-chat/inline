@@ -370,6 +370,9 @@ class MinimalMessageViewAppKit: NSView {
     return label
   }()
 
+  /// Set once `forwardHeaderLabel` is built. Rows without a forward header never build it.
+  private var forwardHeaderLabelIfLoaded: NSTextField?
+
   private lazy var forwardHeaderLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -384,6 +387,7 @@ class MinimalMessageViewAppKit: NSView {
       action: #selector(handleForwardHeaderClick)
     )
     label.addGestureRecognizer(clickGesture)
+    forwardHeaderLabelIfLoaded = label
     return label
   }()
 
@@ -404,10 +408,14 @@ class MinimalMessageViewAppKit: NSView {
     return view
   }()
 
+  /// Set once `photoView` is built. Reads that must not build the photo view use this.
+  private var photoViewIfLoaded: NewPhotoView?
+
   private lazy var photoView: NewPhotoView = {
     let view = NewPhotoView(fullMessage, scrollState: scrollState, roundsAllCorners: true)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.cornerRadiusReduction = 3
+    photoViewIfLoaded = view
     return view
   }()
 
@@ -416,10 +424,10 @@ class MinimalMessageViewAppKit: NSView {
   private var albumGridView: MessageAlbumGridView?
 
   private func syncAlbumGrid() {
-    guard let album = props.album, props.layout.photo != nil, photoView.superview != nil else {
+    guard let album = props.album, props.layout.photo != nil, photoViewIfLoaded?.superview != nil else {
       albumGridView?.removeFromSuperview()
       albumGridView = nil
-      photoView.isHidden = false
+      photoViewIfLoaded?.isHidden = false
       return
     }
     photoView.isHidden = true
@@ -713,8 +721,8 @@ class MinimalMessageViewAppKit: NSView {
 
   private func syncForwardHeaderView(for props: MessageViewProps) {
     guard props.layout.hasForwardHeader else {
-      if forwardHeaderLabel.superview != nil {
-        forwardHeaderLabel.removeFromSuperview()
+      if let forwardHeaderLabelIfLoaded, forwardHeaderLabelIfLoaded.superview != nil {
+        forwardHeaderLabelIfLoaded.removeFromSuperview()
       }
       NSLayoutConstraint.deactivate([
         forwardHeaderTopConstraint,
@@ -788,6 +796,10 @@ class MinimalMessageViewAppKit: NSView {
     return view
   }()
 
+  /// Set once `replyThreadSummaryView` is built. Only rows whose layout has a reply thread
+  /// summary build it; reads that must not build it use this.
+  private var replyThreadSummaryViewIfLoaded: ReplyThreadSummaryView?
+
   private lazy var replyThreadSummaryView: ReplyThreadSummaryView = {
     let view = ReplyThreadSummaryView(style: embeddedReplyStyle)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -809,6 +821,7 @@ class MinimalMessageViewAppKit: NSView {
     view.menuProvider = { [weak self] in
       self?.makeReplyThreadSummaryMenu()
     }
+    replyThreadSummaryViewIfLoaded = view
     return view
   }()
 
@@ -819,16 +832,14 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func updateReplyThreadSummaryView(for props: MessageViewProps) {
-    replyThreadSummaryView.setStyle(embeddedReplyStyle)
-    guard shouldShowReplyThreadSummary(for: props) else {
-      replyThreadSummaryView.clear()
-      return
-    }
-    guard let summary = message.threadCard else {
-      replyThreadSummaryView.clear()
+    guard shouldShowReplyThreadSummary(for: props), let summary = message.threadCard else {
+      replyThreadSummaryViewIfLoaded?.setStyle(embeddedReplyStyle)
+      replyThreadSummaryViewIfLoaded?.clear()
       return
     }
 
+    let replyThreadSummaryView = installReplyThreadSummaryViewIfNeeded()
+    replyThreadSummaryView.setStyle(embeddedReplyStyle)
     replyThreadSummaryView.update(
       kind: summary.kind,
       messageCount: summary.messageCount,
@@ -837,6 +848,45 @@ class MinimalMessageViewAppKit: NSView {
       title: props.replyThreadTitle
     )
     replyThreadSummaryView.isHidden = false
+  }
+
+  /// Setup adds the summary for rows whose layout has one. This covers a row that starts
+  /// showing one later without being rebuilt.
+  @discardableResult
+  private func installReplyThreadSummaryViewIfNeeded() -> ReplyThreadSummaryView {
+    let view = replyThreadSummaryView
+    guard view.superview == nil else { return view }
+    contentView.addSubview(view)
+    if !isInitialUpdateConstraint, replyThreadSummaryViewTopConstraint == nil {
+      NSLayoutConstraint.activate(makeReplyThreadSummaryConstraints(for: view))
+    }
+    return view
+  }
+
+  private func makeReplyThreadSummaryConstraints(for view: ReplyThreadSummaryView) -> [NSLayoutConstraint] {
+    let layout = props.layout
+    let replyThreadSummaryLayout = layout.replyThreadSummary
+    let showsReplyThreadSummary = shouldShowReplyThreadSummary(for: props)
+    let top = view.topAnchor.constraint(
+      equalTo: contentView.topAnchor,
+      constant: layout.replyThreadSummaryContentViewTop
+    )
+    let leading = view.leadingAnchor.constraint(
+      equalTo: contentView.leadingAnchor,
+      constant: replyThreadSummaryLayout?.spacing.left ?? 0
+    )
+    let trailing = view.trailingAnchor.constraint(
+      equalTo: contentView.trailingAnchor,
+      constant: -(replyThreadSummaryLayout?.spacing.right ?? 0)
+    )
+    let height = view.heightAnchor.constraint(
+      equalToConstant: showsReplyThreadSummary ? (replyThreadSummaryLayout?.size.height ?? 0) : 0
+    )
+    replyThreadSummaryViewTopConstraint = top
+    replyThreadSummaryViewLeadingConstraint = leading
+    replyThreadSummaryViewTrailingConstraint = trailing
+    replyThreadSummaryViewHeightConstraint = height
+    return [top, leading, trailing, height]
   }
 
   private func recentReplyThreadAuthors() -> [UserInfo] {
@@ -1360,7 +1410,9 @@ class MinimalMessageViewAppKit: NSView {
       contentView.addSubview(replyView)
     }
 
-    contentView.addSubview(replyThreadSummaryView)
+    if props.layout.hasReplyThreadSummary {
+      contentView.addSubview(replyThreadSummaryView)
+    }
 
     if hasPhoto {
       contentView.addSubview(photoView)
@@ -2655,31 +2707,9 @@ class MinimalMessageViewAppKit: NSView {
       )
     }
 
-    let replyThreadSummaryLayout = layout.replyThreadSummary
-    let showsReplyThreadSummary = shouldShowReplyThreadSummary(for: props)
-    replyThreadSummaryViewTopConstraint = replyThreadSummaryView.topAnchor.constraint(
-      equalTo: contentView.topAnchor,
-      constant: layout.replyThreadSummaryContentViewTop
-    )
-    replyThreadSummaryViewLeadingConstraint = replyThreadSummaryView.leadingAnchor.constraint(
-      equalTo: contentView.leadingAnchor,
-      constant: replyThreadSummaryLayout?.spacing.left ?? 0
-    )
-    replyThreadSummaryViewTrailingConstraint = replyThreadSummaryView.trailingAnchor.constraint(
-      equalTo: contentView.trailingAnchor,
-      constant: -(replyThreadSummaryLayout?.spacing.right ?? 0)
-    )
-    replyThreadSummaryViewHeightConstraint = replyThreadSummaryView.heightAnchor.constraint(
-      equalToConstant: showsReplyThreadSummary ? (replyThreadSummaryLayout?.size.height ?? 0) : 0
-    )
-    constraints.append(
-      contentsOf: [
-        replyThreadSummaryViewTopConstraint!,
-        replyThreadSummaryViewLeadingConstraint!,
-        replyThreadSummaryViewTrailingConstraint!,
-        replyThreadSummaryViewHeightConstraint!,
-      ]
-    )
+    if let replyThreadSummaryView = replyThreadSummaryViewIfLoaded, replyThreadSummaryView.superview === contentView {
+      constraints.append(contentsOf: makeReplyThreadSummaryConstraints(for: replyThreadSummaryView))
+    }
 
     // Document
     if let document = layout.document {
@@ -2977,7 +3007,7 @@ class MinimalMessageViewAppKit: NSView {
       replyThreadSummaryViewLeadingConstraint.constant = summaryPlan?.spacing.left ?? 0
       replyThreadSummaryViewTrailingConstraint.constant = -(summaryPlan?.spacing.right ?? 0)
       replyThreadSummaryViewHeightConstraint.constant = showSummary ? (summaryPlan?.size.height ?? 0) : 0
-      replyThreadSummaryView.isHidden = !showSummary
+      replyThreadSummaryViewIfLoaded?.isHidden = !showSummary
     }
 
     if let forwardHeader = props.layout.forwardHeader {
@@ -3929,13 +3959,13 @@ class MinimalMessageViewAppKit: NSView {
       && action.usesCurrentWindowPresentation
 
     if useInlineSpinner {
-      replyThreadSummaryView.setLoading(true)
+      replyThreadSummaryViewIfLoaded?.setLoading(true)
     }
 
     Task { @MainActor in
       defer {
         if useInlineSpinner {
-          replyThreadSummaryView.setLoading(false)
+          replyThreadSummaryViewIfLoaded?.setLoading(false)
         }
       }
 
@@ -4797,7 +4827,7 @@ class MinimalMessageViewAppKit: NSView {
     shineEffectView?.stopAnimation()
     shineEffectView?.removeFromSuperview()
     shineEffectView = nil
-    replyThreadSummaryView.clear()
+    replyThreadSummaryViewIfLoaded?.clear()
     updateHoverState(false)
 
     // Re-setup translation state observation
@@ -4916,6 +4946,7 @@ extension MinimalMessageViewAppKit {
     }
 
     if shouldShowReplyThreadSummary(for: props),
+       let replyThreadSummaryView = replyThreadSummaryViewIfLoaded,
        replyThreadSummaryView.superview != nil,
        !replyThreadSummaryView.isHidden {
       let pointInSummary = replyThreadSummaryView.convert(point, from: self)
