@@ -27,7 +27,7 @@ final class TimelineProbe: NSObject {
       .appendingPathComponent("timeline-probe.csv")
     super.init()
     try? FileManager.default.removeItem(at: url)
-    lines.append("t,target,presented,settled,tracking,decelerating,fingerY,listMaxY,keyboardTop,composerTop")
+    lines.append("t,target,presented,settled,tracking,decelerating,fingerY,listMaxY,keyboardTop,composerTop,newestMaxY")
     let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
     let maximum = Float(UIScreen.main.maximumFramesPerSecond)
     link.preferredFrameRateRange = CAFrameRateRange(minimum: maximum, maximum: maximum, preferred: maximum)
@@ -56,10 +56,17 @@ final class TimelineProbe: NSObject {
     if let composer, let layer = composer.layer.presentation(), let windowLayer = window.layer.presentation() {
       composerTop = layer.convert(layer.bounds, to: windowLayer).minY
     }
+    // The bottom row's presented bottom: with `composerTop`, the gap a composer change should keep.
+    var newestMaxY: CGFloat = -1
+    if let last = list.layout.placements.last, let row = list.view(for: last.id),
+       let layer = row.layer.presentation(), let windowLayer = window.layer.presentation()
+    {
+      newestMaxY = layer.convert(layer.bounds, to: windowLayer).maxY
+    }
     lines.append(String(
-      format: "%.5f,%.5f,%.2f,%.2f,%d,%d,%.1f,%.1f,%.1f,%.1f", link.timestamp, link.targetTimestamp,
+      format: "%.5f,%.5f,%.2f,%.2f,%d,%d,%.1f,%.1f,%.1f,%.1f,%.1f", link.timestamp, link.targetTimestamp,
       d.presentedScrollPosition, d.scrollPosition, list.isTracking ? 1 : 0, list.isDecelerating ? 1 : 0, finger,
-      frame.maxY, keyboardTop, composerTop
+      frame.maxY, keyboardTop, composerTop, newestMaxY
     ))
     if link.timestamp - lastFlush > 1 { flush() }
   }

@@ -403,9 +403,11 @@ public class ChatContainerView: UIView {
     reportComposeBottomOffsetIfNeeded()
     if usesTimeline, !isApplyingKeyboard {
       // The composer grew or the size changed: the list follows inside whatever animation this
-      // layout pass belongs to.
+      // layout pass belongs to. The composer's height changes (the reply and edit bars, a new line)
+      // run in `UIView.animate`, whose default curve is ease-in-out; on another curve the newest row
+      // strayed up to 20 pt from the composer while the reply bar came and went.
       let inherited = UIView.inheritedAnimationDuration
-      reportComposeArea(inherited > 0 ? .curve(duration: inherited, c1x: 0.25, c1y: 0.1, c2x: 0.25, c2y: 1) : .none)
+      reportComposeArea(inherited > 0 ? .curve(duration: inherited, c1x: 0.42, c1y: 0, c2x: 0.58, c2y: 1) : .none)
     }
   }
 
