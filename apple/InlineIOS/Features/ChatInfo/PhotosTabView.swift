@@ -2,204 +2,248 @@ import Foundation
 import InlineKit
 import Logger
 import Nuke
-import NukeUI
 import SwiftUI
 import UIKit
 
+/// The Media tab: an edge-to-edge grid of square thumbnails under month titles, newest
+/// first, like Photos and Telegram's shared media.
+///
+/// It is the content of a section in the chat info page's scroll view and owns no scroll
+/// view of its own. Scrolling stays light because:
+/// - one `LazyVGrid` holds every month, so cells are realized only near the viewport;
+/// - each cell is one UIKit view whose image is decoded at its pixel size, shown from
+///   the memory cache in the first frame when it's there, and never animates a spinner;
+/// - cells are `Equatable` over their display data, so model updates skip unchanged cells;
+/// - an appearing cell does an index compare for pagination and prefetching, not a task.
 struct MediaTabView: View {
   @ObservedObject var mediaViewModel: ChatMediaViewModel
   let onShowInChat: (Message) -> Void
 
-  private let gridSpacing: CGFloat = 2
-  private let minItemSize: CGFloat = 100
-  @State private var prefetchTask: Task<Void, Never>?
+  @State private var model = ChatInfoResourceMediaModel()
 
-  private var columns: [GridItem] {
-    [GridItem(.adaptive(minimum: minItemSize), spacing: gridSpacing)]
-  }
+  private static let spacing: CGFloat = 1
+  /// Three columns on every iPhone in portrait, more on wider layouts.
+  private static let columns = [GridItem(.adaptive(minimum: 110), spacing: spacing)]
 
   var body: some View {
+    let sections = model.sections(for: mediaViewModel.mediaMessages)
     VStack(spacing: 0) {
-      if !mediaViewModel.mediaMessages.isEmpty {
-        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-          ForEach(mediaViewModel.groupedMediaMessages, id: \.date) { group in
-            ChatInfoDateSection(
-              dateText: ChatInfoSectionDate.text(for: group.date),
-              headerInsets: EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16)
-            ) {
-              LazyVGrid(columns: columns, spacing: gridSpacing) {
-                ForEach(group.messages) { mediaMessage in
-                  mediaCell(for: mediaMessage)
-                    .onAppear {
-                      Task {
-                        await mediaViewModel.loadMoreIfNeeded(currentMessageId: mediaMessage.message.id)
-                      }
-                    }
-                }
+      if !sections.isEmpty {
+        LazyVGrid(columns: Self.columns, spacing: Self.spacing) {
+          ForEach(sections) { section in
+            Section {
+              ForEach(section.items) { item in
+                ChatInfoResourceMediaCell(
+                  item: item,
+                  model: model,
+                  onOpen: openGallery,
+                  onShowInChat: onShowInChat
+                )
+                .equatable()
+                .onAppear { model.itemAppeared(item.index, window: mediaViewModel) }
               }
-              .padding(.vertical, 12)
+            } header: {
+              ChatInfoResourceSectionHeader(title: section.title, inset: 16)
             }
           }
         }
-        .padding(.horizontal, 8)
       }
+
       ChatInfoResourceFooter(
-        state: mediaViewModel.loadState, isEmpty: mediaViewModel.mediaMessages.isEmpty,
-        emptyMessage: "No media found in this chat.", loadMore: mediaViewModel.loadMore, retry: mediaViewModel.retry
+        state: mediaViewModel.loadState,
+        rowCount: mediaViewModel.mediaMessages.count,
+        empty: .init(systemImage: "photo.on.rectangle", message: "No media yet"),
+        onReachEnd: { model.pager.requestMore(mediaViewModel) },
+        retry: { model.pager.retry(mediaViewModel) }
       )
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .frame(maxWidth: .infinity, alignment: .top)
     .task {
+      #if DEBUG
+      await ChatInfoResourceHarness.seedIfRequested()
+      #endif
       await mediaViewModel.loadInitial()
-    }
-    .onAppear(perform: prefetchVisible)
-    .onChange(of: mediaViewModel.mediaMessages.count) { _, _ in
-      prefetchVisible()
     }
     .onDisappear {
       mediaViewModel.deactivate()
-      prefetchTask?.cancel()
-      prefetchTask = nil
-    }
-  }
-
-  private func mediaCell(for mediaMessage: MediaMessage) -> some View {
-    ZStack {
-      Rectangle()
-        .fill(Color(.systemGray5))
-
-      MediaGridThumbnailView(
-        url: thumbnailURL(for: mediaMessage),
-        cornerRadius: 8
-      ) { imageView in
-        presentMedia(mediaMessage, from: imageView)
-      }
-
-      if let videoInfo = mediaMessage.video {
-        MediaVideoOverlay(duration: videoInfo.video.duration)
-          .allowsHitTesting(false)
-      }
-    }
-    .aspectRatio(1, contentMode: .fill)
-    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    .contextMenu {
-      Button {
-        onShowInChat(mediaMessage.message)
-      } label: {
-        Label("Show in Chat", systemImage: "text.bubble")
-      }
-      switch mediaMessage.kind {
-        case let .photo(photoInfo):
-          Button {
-            savePhoto(photoInfo)
-          } label: {
-            Label("Save Photo", systemImage: "square.and.arrow.down")
-          }
-          if let url = photoURL(for: photoInfo) {
-            Button {
-              shareMedia(url: url)
-            } label: {
-              Label("Share", systemImage: "square.and.arrow.up")
-            }
-          }
-        case let .video(videoInfo):
-          Button {
-            saveVideo(videoInfo)
-          } label: {
-            Label("Save Video", systemImage: "square.and.arrow.down")
-          }
-          if let url = videoURL(for: videoInfo) {
-            Button {
-              shareMedia(url: url)
-            } label: {
-              Label("Share", systemImage: "square.and.arrow.up")
-            }
-          }
-        case .none:
-          EmptyView()
-      }
+      model.prefetcher.stop()
     }
   }
 
   /// Opens the chat's media gallery at this item, paging through all of the chat's media.
-  private func presentMedia(_ mediaMessage: MediaMessage, from sourceView: UIView) {
-    guard let anchor = MediaGalleryItem(
-      message: mediaMessage.message,
-      photo: mediaMessage.photo,
-      video: mediaMessage.video
-    ) else { return }
+  private func openGallery(_ item: ChatInfoResourceMediaItem, from sourceView: ChatInfoResourceThumbnailView) {
+    let media = item.media
+    guard let anchor = MediaGalleryItem(message: media.message, photo: media.photo, video: media.video) else { return }
 
     var actions = MediaGalleryViewController.Actions()
-    actions.showInChat = { item in
-      if let message = item.message { onShowInChat(message) }
+    actions.showInChat = { galleryItem in
+      if let message = galleryItem.message { onShowInChat(message) }
     }
-    let canDeleteMessage = MessageDeletePolicy.checker(peer: mediaMessage.message.peerId)
-    actions.canDelete = { item in item.message.map(canDeleteMessage) ?? false }
-    actions.delete = { item in
-      guard let message = item.message else { return }
+    let canDeleteMessage = MessageDeletePolicy.checker(peer: media.message.peerId)
+    actions.canDelete = { galleryItem in galleryItem.message.map(canDeleteMessage) ?? false }
+    actions.delete = { galleryItem in
+      guard let message = galleryItem.message else { return }
       MessageViewActions.sendDeleteMessage(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
     }
+    let registry = model.registry
     let viewer = MediaGalleryViewController(
-      source: ChatMediaGallerySource(
-        chatId: mediaMessage.message.chatId,
-        peer: mediaMessage.message.peerId,
-        anchor: anchor
-      ),
+      source: ChatMediaGallerySource(chatId: media.message.chatId, peer: media.message.peerId, anchor: anchor),
       initialItemID: anchor.id,
-      sourceImage: (sourceView as? LazyImageView)?.imageView.image,
-      sourceCornerRadius: 8,
+      sourceImage: sourceView.imageView.image,
+      sourceCornerRadius: 0,
       actions: actions,
-      // Grid cells aren't addressable by item, so only the opening item flies back.
-      sourceViewProvider: { [weak sourceView] item in item.id == anchor.id ? sourceView : nil }
+      // Gallery items use message ids, so it can close into any thumbnail still on screen.
+      sourceViewProvider: { [weak registry] galleryItem in registry?.view(for: galleryItem.id) }
     )
-    topViewController()?.present(viewer, animated: false)
+    activeTopViewController()?.present(viewer, animated: false)
+  }
+}
+
+/// A media message prepared for display once per page, not per cell render.
+struct ChatInfoResourceMediaItem: Identifiable, Equatable {
+  let id: Int64
+  /// Position in the whole grid, for pagination and prefetching.
+  let index: Int
+  let media: MediaMessage
+  let thumbnail: ChatInfoResourceThumbnailContent
+
+  @MainActor
+  init(media: MediaMessage, index: Int) {
+    id = media.id
+    self.index = index
+    self.media = media
+    let date = ChatInfoResourceFormat.rowDate(media.message.date)
+    if let video = media.video {
+      let duration = video.video.duration.flatMap { $0 > 0 ? ChatInfoResourceFormat.duration($0) : nil }
+      thumbnail = ChatInfoResourceThumbnailContent(
+        photo: video.thumbnail,
+        badgeText: duration,
+        accessibilityLabel: [String(localized: "Video"), duration, date].compactMap(\.self).joined(separator: ", ")
+      )
+    } else {
+      thumbnail = ChatInfoResourceThumbnailContent(
+        photo: media.photo,
+        accessibilityLabel: [String(localized: "Photo"), date].joined(separator: ", ")
+      )
+    }
+  }
+}
+
+/// State the media tab keeps across renders: sections, pagination, prefetching and
+/// the thumbnails on screen. Plain reference state; none of it drives rendering.
+@MainActor
+final class ChatInfoResourceMediaModel {
+  let pager = ChatInfoResourcePager()
+  let registry = ChatInfoResourceViewRegistry()
+  /// About four rows ahead on a phone.
+  let prefetcher = ChatInfoResourceThumbnailPrefetcher(lookahead: 18)
+  private let cache = ChatInfoResourceSectionCache<MediaMessage, ChatInfoResourceMediaItem>()
+
+  func sections(for rows: [MediaMessage]) -> [ChatInfoResourceSection<ChatInfoResourceMediaItem>] {
+    cache.sections(for: rows, date: \.message.date, id: \.message.messageId) { media, placement in
+      ChatInfoResourceMediaItem(media: media, index: placement.index)
+    }
   }
 
-  private func thumbnailURL(for mediaMessage: MediaMessage) -> URL? {
-    if let photo = mediaMessage.photo {
-      return photoURL(for: photo)
+  func itemAppeared(_ index: Int, window: ChatMediaViewModel) {
+    let items = cache.items
+    // Start the next page about two screens before the end.
+    pager.itemAppeared(at: index, count: items.count, lookahead: 36, in: window)
+    prefetcher.itemAppeared(at: index) { range in
+      items[range.clamped(to: items.indices)].compactMap(\.thumbnail.url)
     }
-    if let thumbnail = mediaMessage.video?.thumbnail {
-      return photoURL(for: thumbnail)
-    }
-    return nil
+  }
+}
+
+private struct ChatInfoResourceMediaCell: View, Equatable {
+  let item: ChatInfoResourceMediaItem
+  let model: ChatInfoResourceMediaModel
+  let onOpen: (ChatInfoResourceMediaItem, ChatInfoResourceThumbnailView) -> Void
+  let onShowInChat: (Message) -> Void
+
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.item == rhs.item && lhs.model === rhs.model
   }
 
-  private func photoURL(for photoInfo: PhotoInfo) -> URL? {
-    guard let photoSize = photoInfo.bestPhotoSize() else { return nil }
-
-    if let localPath = photoSize.localPath {
-      return FileCache.getUrl(for: .photos, localPath: localPath)
-    }
-
-    if let cdnUrl = photoSize.cdnUrl {
-      return URL(string: cdnUrl)
-    }
-
-    return nil
+  var body: some View {
+    Color.clear
+      .aspectRatio(1, contentMode: .fit)
+      .overlay {
+        ChatInfoResourceThumbnail(
+          id: item.id,
+          content: item.thumbnail,
+          registry: model.registry,
+          onPixelSize: { [prefetcher = model.prefetcher] in prefetcher.update(pixelSize: $0) },
+          onTap: { [item, onOpen] view in onOpen(item, view) }
+        )
+      }
+      .contentShape(.contextMenuPreview, Rectangle())
+      .contextMenu {
+        ChatInfoResourceMediaMenu(media: item.media, onShowInChat: onShowInChat)
+      }
   }
+}
 
-  private func videoURL(for videoInfo: VideoInfo) -> URL? {
-    if let localPath = videoInfo.video.localPath {
-      let localUrl = FileCache.getUrl(for: .videos, localPath: localPath)
-      if FileManager.default.fileExists(atPath: localUrl.path) {
-        return localUrl
+/// Show in Chat, Save and Share. URLs resolve when an action runs, never while the
+/// menu is built, since a video's local file has to be checked on disk.
+private struct ChatInfoResourceMediaMenu: View {
+  let media: MediaMessage
+  let onShowInChat: (Message) -> Void
+
+  var body: some View {
+    Button {
+      onShowInChat(media.message)
+    } label: {
+      Label("Show in Chat", systemImage: "text.bubble")
+    }
+    if let photo = media.photo {
+      Button {
+        Self.savePhoto(photo)
+      } label: {
+        Label("Save Photo", systemImage: "square.and.arrow.down")
+      }
+      if Self.photoURL(for: photo) != nil {
+        Button {
+          if let url = Self.photoURL(for: photo) { Self.share(url) }
+        } label: {
+          Label("Share", systemImage: "square.and.arrow.up")
+        }
+      }
+    } else if let video = media.video {
+      Button {
+        Self.saveVideo(video)
+      } label: {
+        Label("Save Video", systemImage: "square.and.arrow.down")
+      }
+      if video.video.localPath != nil || video.video.cdnUrl != nil {
+        Button {
+          if let url = Self.videoURL(for: video) { Self.share(url) }
+        } label: {
+          Label("Share", systemImage: "square.and.arrow.up")
+        }
       }
     }
-
-    if let cdnUrl = videoInfo.video.cdnUrl {
-      return URL(string: cdnUrl)
-    }
-
-    return nil
   }
 
-  private func savePhoto(_ photoInfo: PhotoInfo) {
-    guard let url = photoURL(for: photoInfo) else {
+  private static func photoURL(for photo: PhotoInfo) -> URL? {
+    ChatInfoResourceThumbnailContent(photo: photo).url
+  }
+
+  private static func videoURL(for video: VideoInfo) -> URL? {
+    if let localPath = video.video.localPath {
+      let localURL = FileCache.getUrl(for: .videos, localPath: localPath)
+      if FileManager.default.fileExists(atPath: localURL.path) {
+        return localURL
+      }
+    }
+    return video.video.cdnUrl.flatMap(URL.init(string:))
+  }
+
+  private static func savePhoto(_ photo: PhotoInfo) {
+    guard let url = photoURL(for: photo) else {
       Log.shared.error("MediaTabView: no photo URL available for saving")
       return
     }
-
     Task {
       do {
         let image = try await ImagePipeline.shared.image(for: url)
@@ -210,188 +254,35 @@ struct MediaTabView: View {
     }
   }
 
-  private func saveVideo(_ videoInfo: VideoInfo) {
-    if let localUrl = videoURL(for: videoInfo), localUrl.isFileURL {
-      UISaveVideoAtPathToSavedPhotosAlbum(localUrl.path, nil, nil, nil)
-      return
-    }
-
-    guard let remoteUrl = videoURL(for: videoInfo) else {
+  private static func saveVideo(_ video: VideoInfo) {
+    guard let url = videoURL(for: video) else {
       Log.shared.error("MediaTabView: no video URL available for saving")
       return
     }
-
+    if url.isFileURL {
+      UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
+      return
+    }
     Task {
       do {
-        let (tempUrl, _) = try await URLSession.shared.download(from: remoteUrl)
-        UISaveVideoAtPathToSavedPhotosAlbum(tempUrl.path, nil, nil, nil)
+        let (tempURL, _) = try await URLSession.shared.download(from: url)
+        UISaveVideoAtPathToSavedPhotosAlbum(tempURL.path, nil, nil, nil)
       } catch {
         Log.shared.error("MediaTabView: failed to download video for saving", error: error)
       }
     }
   }
 
-  private func shareMedia(url: URL) {
-    guard let presenter = topViewController() else {
+  private static func share(_ url: URL) {
+    guard let presenter = activeTopViewController() else {
       Log.shared.error("MediaTabView: unable to find presenter for share sheet")
       return
     }
-
-    let activityViewController = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    if let popoverController = activityViewController.popoverPresentationController {
-      popoverController.sourceView = presenter.view
-      popoverController.sourceRect = CGRect(
-        x: presenter.view.bounds.midX,
-        y: presenter.view.bounds.midY,
-        width: 1,
-        height: 1
-      )
+    let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    if let popover = controller.popoverPresentationController {
+      popover.sourceView = presenter.view
+      popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
     }
-    presenter.present(activityViewController, animated: true)
-  }
-
-  private func topViewController(from controller: UIViewController? = nil) -> UIViewController? {
-    let baseController: UIViewController?
-    if let controller {
-      baseController = controller
-    } else {
-      let scene = UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .first { $0.activationState == .foregroundActive }
-
-      baseController = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController ??
-        UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController
-    }
-
-    guard let baseController else { return nil }
-
-    if let navigationController = baseController as? UINavigationController {
-      return topViewController(from: navigationController.visibleViewController)
-    } else if let tabController = baseController as? UITabBarController {
-      return topViewController(from: tabController.selectedViewController)
-    } else if let presented = baseController.presentedViewController {
-      return topViewController(from: presented)
-    }
-
-    return baseController
-  }
-
-  private func prefetchVisible() {
-    prefetchTask?.cancel()
-    let urls = mediaViewModel.mediaMessages.prefix(60).compactMap { thumbnailURL(for: $0) }
-    guard !urls.isEmpty else { return }
-
-    prefetchTask = Task.detached(priority: .utility) {
-      for url in urls {
-        guard !Task.isCancelled else { return }
-        _ = try? await ImagePipeline.shared.image(for: url)
-      }
-    }
-  }
-}
-
-private struct MediaGridThumbnailView: UIViewRepresentable {
-  let url: URL?
-  let cornerRadius: CGFloat
-  let onTap: (LazyImageView) -> Void
-
-  func makeUIView(context: Context) -> LazyImageView {
-    let imageView = LazyImageView()
-    imageView.contentMode = .scaleAspectFill
-    imageView.imageView.contentMode = .scaleAspectFill
-    imageView.clipsToBounds = true
-    imageView.layer.cornerRadius = cornerRadius
-    imageView.priority = .high
-
-    let indicator = UIActivityIndicatorView(style: .medium)
-    indicator.color = .secondaryLabel
-    indicator.startAnimating()
-    imageView.placeholderView = indicator
-
-    let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
-    imageView.addGestureRecognizer(tapGesture)
-    imageView.isUserInteractionEnabled = true
-
-    return imageView
-  }
-
-  func updateUIView(_ uiView: LazyImageView, context: Context) {
-    context.coordinator.onTap = { [weak uiView] in
-      guard let uiView else { return }
-      onTap(uiView)
-    }
-
-    let currentUrl = uiView.request?.url ?? uiView.url
-    guard currentUrl != url else { return }
-
-    uiView.imageView.image = nil
-    if let indicator = uiView.placeholderView as? UIActivityIndicatorView {
-      url == nil ? indicator.stopAnimating() : indicator.startAnimating()
-    }
-
-    if let url {
-      uiView.request = ImageRequest(url: url)
-    } else {
-      uiView.url = nil
-    }
-  }
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator()
-  }
-
-  class Coordinator {
-    var onTap: (() -> Void)?
-
-    @objc func handleTap() {
-      onTap?()
-    }
-  }
-}
-
-private struct MediaVideoOverlay: View {
-  let duration: Int?
-
-  var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: [.clear, .black.opacity(0.35)],
-        startPoint: .center,
-        endPoint: .bottom
-      )
-
-      VStack {
-        Spacer()
-        HStack {
-          Image(systemName: "play.fill")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white)
-
-          Spacer()
-
-          if let durationText = formatDuration(duration) {
-            Text(durationText)
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(.white)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 3)
-              .background(.black.opacity(0.5), in: Capsule())
-          }
-        }
-        .padding(8)
-      }
-    }
-  }
-
-  private func formatDuration(_ duration: Int?) -> String? {
-    guard let duration, duration > 0 else { return nil }
-    let mins = duration / 60
-    let secs = duration % 60
-    if mins >= 60 {
-      let hours = mins / 60
-      let remMins = mins % 60
-      return String(format: "%d:%02d:%02d", hours, remMins, secs)
-    }
-    return String(format: "%d:%02d", mins, secs)
+    presenter.present(controller, animated: true)
   }
 }

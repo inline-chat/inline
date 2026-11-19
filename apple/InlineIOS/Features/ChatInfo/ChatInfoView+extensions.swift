@@ -195,82 +195,137 @@ extension ChatInfoView {
   }
 
   var chatInfoHeader: some View {
-    VStack {
+    VStack(spacing: 6) {
       if isDM, let userInfo = chatItem.userInfo {
-        let avatarSize: CGFloat = 82
-        if hasProfilePhoto(userInfo) {
-          ParticipantAvatarView(userInfo: userInfo, size: avatarSize)
-            .frame(width: avatarSize, height: avatarSize)
-        } else {
-          UserAvatar(userInfo: userInfo, size: avatarSize)
-            .frame(width: avatarSize, height: avatarSize)
-        }
-        VStack(spacing: -3) {
-          Text(userInfo.user.firstName ?? "User")
-            .font(.title2)
-            .fontWeight(.semibold)
-          if userInfo.user.bot {
-            // Bot usernames are mostly noise; the status says more.
-            BotInfoStatusLine(user: userInfo.user)
-          } else if let username = userInfo.user.username {
-            Text("@\(username)")
-              .font(.callout)
-              .foregroundColor(.secondary)
+        let avatarSize: CGFloat = 92
+        Group {
+          if hasProfilePhoto(userInfo) {
+            ParticipantAvatarView(userInfo: userInfo, size: avatarSize)
+              .accessibilityLabel("Show \(userInfo.user.shortDisplayName)’s photo")
+              .accessibilityAddTraits(.isButton)
           } else {
-            Text(userInfo.user.firstName ?? "user")
-              .font(.callout)
-              .foregroundColor(.secondary)
+            UserAvatar(userInfo: userInfo, size: avatarSize)
+              .accessibilityHidden(true)
           }
+        }
+        .frame(width: avatarSize, height: avatarSize)
+        .padding(.bottom, 4)
+
+        Text(userInfo.user.fullName)
+          .font(.title2.weight(.semibold))
+          .multilineTextAlignment(.center)
+          .accessibilityAddTraits(.isHeader)
+          .contextMenu {
+            Button("Copy Name", systemImage: "doc.on.doc") {
+              PeerInfoIOSPasteboard.copy(userInfo.user.fullName, toast: "Copied name")
+            }
+          }
+        dmSubtitle(userInfo)
+      } else if isEditingInfo {
+        VStack(spacing: 12) {
+          Button {
+            toggleEmojiPicker()
+          } label: {
+            ThreadIconView(
+              ThreadIconDescriptor(
+                emoji: draftEmoji,
+                title: draftTitle,
+                isReplyThread: currentChat?.isReplyThread == true,
+                accessibilityLabel: draftTitle
+              ),
+              size: .large(92),
+              shape: .circle
+            )
+            .overlay(alignment: .bottomTrailing) {
+              Image(systemName: "face.smiling")
+                .font(.footnote.weight(.semibold))
+                .padding(6)
+                .background(.regularMaterial, in: Circle())
+            }
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Choose thread icon")
+          .emojiPicker(
+            isPresented: $isEmojiPickerPresented,
+            selectedEmoji: $draftEmoji
+          )
+
+          TextField("Thread Name", text: $draftTitle)
+            .font(.title2.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
+            .focused($isTitleFocused)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .background(
+              Color(uiColor: .secondarySystemGroupedBackground),
+              in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
         }
       } else {
-        if isEditingInfo {
-          VStack(spacing: 12) {
-            Button {
-              toggleEmojiPicker()
-            } label: {
-              ThreadIconView(
-                ThreadIconDescriptor(
-                  emoji: draftEmoji,
-                  title: draftTitle,
-                  isReplyThread: currentChat?.isReplyThread == true,
-                  accessibilityLabel: draftTitle
-                ),
-                size: .large(100),
-                shape: .circle
-              )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Choose chat emoji")
-            .emojiPicker(
-              isPresented: $isEmojiPickerPresented,
-              selectedEmoji: $draftEmoji
-            )
-
-            TextField("Chat Title", text: $draftTitle)
-              .font(.title2)
-              .fontWeight(.semibold)
-              .multilineTextAlignment(.center)
-              .textInputAutocapitalization(.never)
-              .autocorrectionDisabled(true)
-              .focused($isTitleFocused)
-          }
-        } else {
+        Button {
+          if canEditChatInfo { startEditingChatInfo() }
+        } label: {
           ThreadIconView(
             currentChat.map(ThreadIconDescriptor.init(chat:)) ?? ThreadIconDescriptor(
               emoji: nil,
               title: chatTitle,
               accessibilityLabel: chatTitle
             ),
-            size: .large(100),
+            size: .large(92),
             shape: .circle
           )
-
-          Text(chatTitle)
-            .font(.title2)
-            .fontWeight(.semibold)
         }
+        .buttonStyle(.plain)
+        .disabled(!canEditChatInfo)
+        .accessibilityLabel(canEditChatInfo ? "Edit thread" : chatTitle)
+        .padding(.bottom, 4)
+
+        Text(chatTitle)
+          .font(.title2.weight(.semibold))
+          .multilineTextAlignment(.center)
+          .accessibilityAddTraits(.isHeader)
+
+        Text(PeerInfoSubtitle.thread(subject: subject, memberCount: threadMemberCount))
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
       }
     }
+    .frame(maxWidth: .infinity)
+  }
+
+  @ViewBuilder
+  private func dmSubtitle(_ userInfo: UserInfo) -> some View {
+    switch subject.kind {
+    case .bot:
+      // Bot usernames are mostly noise; the status says more.
+      BotInfoStatusLine(user: userInfo.user)
+    case .selfChat:
+      Text("Only you can see this chat")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+    default:
+      let focused = userInfo.focus?.isActive() == true
+      if let text = PeerInfoSubtitle.person(
+        focusActive: focused,
+        localTime: PeerInfoPersonFields(user: userInfo.user).localTime
+      ) {
+        Label {
+          Text(text)
+        } icon: {
+          if focused { Image(systemName: "moon.fill") }
+        }
+        .labelStyle(.titleAndIcon)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var threadMemberCount: Int? {
+    let count = participantsWithMembersViewModel.effectiveUserIds.count
+    return count > 0 ? count : (participantsWithMembersViewModel.participants.isEmpty ? nil : participantsWithMembersViewModel.participants.count)
   }
 
   private func hasProfilePhoto(_ userInfo: UserInfo) -> Bool {
@@ -296,7 +351,6 @@ extension ChatInfoView {
     guard canEditChatInfo else { return }
     emojiPickerPresentationGeneration &+= 1
     let generation = emojiPickerPresentationGeneration
-    selectedTab = .info
     draftTitle = chatTitle
     draftEmoji = currentChat?.emoji ?? ""
     isEditingInfo = true
@@ -305,7 +359,6 @@ extension ChatInfoView {
       try? await Task.sleep(for: .milliseconds(100))
       guard emojiPickerPresentationGeneration == generation,
             isEditingInfo,
-            selectedTab == .info,
             !isSavingInfo
       else { return }
       isTitleFocused = true
@@ -382,136 +435,6 @@ extension ChatInfoView {
         }
       }
     }
-  }
-
-  @ViewBuilder
-  var chatInfoContent: some View {
-    if isPrivate {
-      privateChatSection
-
-    } else {
-      publicChatSection
-    }
-
-    if !documentMessages.isEmpty {
-      documentsSection
-    }
-  }
-
-  var privateChatSection: some View {
-    Section {
-      if let userInfo = chatItem.userInfo {
-        ProfileRow(userInfo: userInfo, isChatInfo: true)
-      }
-    }
-  }
-
-  @ViewBuilder
-  var publicChatSection: some View {
-    Section {
-      Label("Type", systemImage: currentChat?.isPublic != true ? "lock.fill" : "person.2.fill")
-
-      Spacer()
-
-      Text(currentChat?.isPublic != true ? "Private" : "Public")
-    }
-
-    if currentChat?.isPublic != true {
-      participantsSection
-    }
-  }
-
-  var participantsSection: some View {
-    Section("Participants") {
-      if canAddParticipants {
-        Button(action: {
-          isSearching = true
-        }) {
-          Label("Add Participant", systemImage: "person.badge.plus")
-        }
-      }
-      ForEach(participantsWithMembersViewModel.participants) { userInfo in
-        ProfileRow(userInfo: userInfo, isChatInfo: true)
-          .swipeActions {
-            if canManageParticipants {
-              Button(role: .destructive, action: {
-                guard currentChatId != 0 else {
-                  Log.shared.error("No chat ID found when trying to remove participant")
-                  return
-                }
-                Task {
-                  do {
-                    try await Api.realtime.send(.removeChatParticipant(
-                      chatID: currentChatId,
-                      userID: userInfo.user.id
-                    ))
-                  } catch {
-                    Log.shared.error("Failed to remove participant", error: error)
-                  }
-                }
-              }) {
-                Text("Remove")
-              }
-            }
-          }
-      }
-
-      ForEach(participantsWithMembersViewModel.groupParticipants) { group in
-        HStack(spacing: 10) {
-          Image(systemName: "person.3.fill")
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 32)
-            .background(Color.accentColor)
-            .clipShape(Circle())
-
-          VStack(alignment: .leading, spacing: 2) {
-            Text(group.name)
-            Text(group.memberCount == 1 ? "1 person" : "\(group.memberCount) people")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-          }
-        }
-        .swipeActions {
-          if canManageParticipants {
-            Button(role: .destructive, action: {
-              removeGroupParticipant(group)
-            }) {
-              Text("Remove")
-            }
-          }
-        }
-      }
-    }
-  }
-
-  var documentsSection: some View {
-    ForEach(documentMessages, id: \.id) { documentMessage in
-      DocumentRow(
-        documentMessage: documentMessage,
-        chatId: currentChatId == 0 ? nil : currentChatId
-      )
-    }
-  }
-
-  private func createFullMessage(from documentInfo: DocumentInfo) -> FullMessage? {
-    let message = Message(
-      messageId: documentInfo.document.documentId,
-      fromId: 1,
-      date: documentInfo.document.date,
-      text: nil,
-      peerUserId: nil,
-      peerThreadId: currentChatId == 0 ? nil : currentChatId,
-      chatId: currentChatId,
-      documentId: documentInfo.document.id
-    )
-
-    return FullMessage(
-      senderInfo: nil,
-      message: message,
-      reactions: [],
-      repliedToMessage: nil,
-      attachments: []
-    )
   }
 
   var searchSheet: some View {

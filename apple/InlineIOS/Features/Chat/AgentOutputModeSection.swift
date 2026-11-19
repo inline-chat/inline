@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 /// Output in a chat's Agent Settings and in a bot's chat info: one row for
@@ -13,6 +14,8 @@ struct AgentOutputModeSection: View {
     case card
     /// One row with a symbol tile, in a bot's chat info overview.
     case tile
+    /// A button in the chat info action row.
+    case actionTile
   }
 
   let peer: Peer
@@ -47,7 +50,7 @@ struct AgentOutputModeSection: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal, 16)
           .padding(.bottom, 12)
-      case .tile:
+      case .tile, .actionTile:
         menu
       }
     }
@@ -73,7 +76,14 @@ struct AgentOutputModeSection: View {
         }
       }
     } label: {
-      if style == .tile {
+      if style == .actionTile {
+        PeerInfoActionTile(
+          String(localized: "Output"),
+          systemImage: store.outputMode(peer: peer, botUserID: botUserID) == .friendly ? "text.bubble" : "list.bullet.rectangle",
+          detail: (threadMode ?? defaultMode).title
+        )
+        .opacity(isUpdating ? 0.6 : 1)
+      } else if style == .tile {
         tileLabel(value: threadMode?.title ?? defaultTitle)
       } else {
         cardLabel(value: threadMode?.title ?? defaultTitle)

@@ -2,48 +2,58 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+/// The Files tab: inset grouped month cards of file rows, newest first.
+///
+/// Content for a section of the chat info page's scroll view; it has no scroll view
+/// of its own. Rows are sliced card segments in one lazy stack, so a month with
+/// hundreds of files never builds as one view.
 struct DocumentsTabView: View {
   @ObservedObject var documentsViewModel: ChatDocumentsViewModel
   let peerUserId: Int64?
   let peerThreadId: Int64?
   let onShowInChat: (Message) -> Void
 
+  @State private var model = ChatInfoResourceListModel<DocumentMessage, ChatInfoResourceListItem<DocumentMessage>>()
+
   var body: some View {
-    VStack(spacing: 16) {
-      if !documentsViewModel.documentMessages.isEmpty {
-        // Documents content without scroll
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-          ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
-            ChatInfoDateSection(
-              dateText: ChatInfoSectionDate.text(for: group.date),
-              headerInsets: EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 0)
-            ) {
-              // Documents for this date
-              ForEach(group.messages, id: \.id) { documentMessage in
-                DocumentRow(
-                  documentMessage: documentMessage,
-                  chatId: peerThreadId,
-                  onShowInChat: { onShowInChat(documentMessage.message) }
-                )
-                .padding(.bottom, 4)
-                .onAppear {
-                  Task {
-                    await documentsViewModel.loadMoreIfNeeded(currentMessageId: documentMessage.message.id)
-                  }
-                }
-              }
-            }
+    let sections = model.cache.sections(
+      for: documentsViewModel.documentMessages,
+      date: \.message.date,
+      id: \.message.messageId
+    ) { document, placement in
+      ChatInfoResourceListItem(id: document.id, placement: placement, row: document)
+    }
+
+    LazyVStack(spacing: 0) {
+      ForEach(sections) { section in
+        Section {
+          ForEach(section.items) { item in
+            DocumentRow(
+              documentMessage: item.row,
+              chatId: peerThreadId,
+              onShowInChat: { onShowInChat(item.row.message) }
+            )
+            .chatInfoResourceRow(item.placement.position)
+            .onAppear { model.itemAppeared(item.placement.index, window: documentsViewModel) }
           }
+        } header: {
+          ChatInfoResourceSectionHeader(title: section.title)
         }
       }
+
       ChatInfoResourceFooter(
-        state: documentsViewModel.loadState, isEmpty: documentsViewModel.documentMessages.isEmpty,
-        emptyMessage: "No files found in this chat.", loadMore: documentsViewModel.loadMore,
-        retry: documentsViewModel.retry
+        state: documentsViewModel.loadState,
+        rowCount: documentsViewModel.documentMessages.count,
+        empty: .init(systemImage: "doc", message: "No files yet"),
+        onReachEnd: { model.pager.requestMore(documentsViewModel) },
+        retry: { model.pager.retry(documentsViewModel) }
       )
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .frame(maxWidth: .infinity, alignment: .top)
     .task {
+      #if DEBUG
+      await ChatInfoResourceHarness.seedIfRequested()
+      #endif
       await documentsViewModel.loadInitial()
     }
     .onDisappear { documentsViewModel.deactivate() }

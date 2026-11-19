@@ -4,13 +4,288 @@ import InlineUI
 import SwiftUI
 import UIKit
 
+/// The Links tab: month cards with one row per message: the preview's image or a site
+/// monogram, the page title and description, and each link in the message.
+///
+/// Finding links runs `NSDataDetector` and a regex over the message text. It used to
+/// run for every message on every render; now it runs once per message and is reused
+/// across pages until that message changes.
 struct LinksTabView: View {
   @ObservedObject var linksViewModel: ChatLinksViewModel
   let onShowInChat: (InlineKit.Message) -> Void
 
+  @State private var model = ChatInfoResourceLinksModel()
+
+  var body: some View {
+    let sections = model.sections(for: linksViewModel.linkMessages)
+
+    LazyVStack(spacing: 0) {
+      ForEach(sections) { section in
+        Section {
+          ForEach(section.items) { item in
+            ChatInfoResourceLinkRow(item: item, onShowInChat: onShowInChat)
+              .equatable()
+              .chatInfoResourceRow(item.placement.position)
+              .onAppear { model.list.itemAppeared(item.placement.index, window: linksViewModel) }
+          }
+        } header: {
+          ChatInfoResourceSectionHeader(title: section.title)
+        }
+      }
+
+      ChatInfoResourceFooter(
+        state: linksViewModel.loadState,
+        rowCount: linksViewModel.linkMessages.count,
+        empty: .init(systemImage: "link", message: "No links yet"),
+        onReachEnd: { model.list.pager.requestMore(linksViewModel) },
+        retry: { model.list.pager.retry(linksViewModel) }
+      )
+    }
+    .frame(maxWidth: .infinity, alignment: .top)
+    .task {
+      #if DEBUG
+      await ChatInfoResourceHarness.seedIfRequested()
+      #endif
+      await linksViewModel.loadInitial()
+    }
+    .onDisappear { linksViewModel.deactivate() }
+  }
+}
+
+/// A message's links prepared for display.
+struct ChatInfoResourceLinkItem: Identifiable, Equatable {
+  let id: Int64
+  let placement: ChatInfoResourcePlacement
+  let message: InlineKit.Message
+  let title: String
+  let subtitle: String?
+  let links: [LinkRowItem]
+  let thumbnail: ChatInfoResourceThumbnailContent?
+  let monogram: String
+  let detail: String
+
+  var primaryURL: URL? {
+    links.lazy.compactMap(\.url).first
+  }
+}
+
+/// Sections plus a per-message memo of parsed links.
+@MainActor
+final class ChatInfoResourceLinksModel {
+  let list = ChatInfoResourceListModel<LinkMessage, ChatInfoResourceLinkItem>()
+
+  private struct Parsed {
+    let source: LinkMessage
+    let content: Content
+  }
+
+  private struct Content {
+    let title: String
+    let subtitle: String?
+    let links: [LinkRowItem]
+    let thumbnail: ChatInfoResourceThumbnailContent?
+    let monogram: String
+  }
+
+  private var parsed: [Int64: Parsed] = [:]
+
+  func sections(for rows: [LinkMessage]) -> [ChatInfoResourceSection<ChatInfoResourceLinkItem>] {
+    var next: [Int64: Parsed] = [:]
+    next.reserveCapacity(rows.count)
+    var didBuild = false
+    let sections = list.cache.sections(for: rows, date: \.message.date, id: \.message.messageId) { row, placement in
+      didBuild = true
+      let content: Content
+      if let cached = parsed[row.id], cached.source == row {
+        content = cached.content
+      } else {
+        content = Self.content(for: row)
+      }
+      next[row.id] = Parsed(source: row, content: content)
+      return ChatInfoResourceLinkItem(
+        id: row.id,
+        placement: placement,
+        message: row.message,
+        title: content.title,
+        subtitle: content.subtitle,
+        links: content.links,
+        thumbnail: content.thumbnail,
+        monogram: content.monogram,
+        detail: ChatInfoResourceFormat.rowDate(row.message.date)
+      )
+    }
+    if didBuild { parsed = next }
+    return sections
+  }
+
+  private static func content(for row: LinkMessage) -> Content {
+    let message = row.message
+    var links = ChatInfoResourceLinkParser.linkItems(for: message, linkMessages: [row])
+    let trimmedText = message.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if links.isEmpty {
+      links = [LinkRowItem(
+        id: "\(message.messageId)-fallback",
+        messageId: message.messageId,
+        text: trimmedText.isEmpty ? String(localized: "Link") : trimmedText,
+        url: nil
+      )]
+    }
+
+    let preview = row.urlPreview
+    let host = links.lazy.compactMap { $0.url?.host() }.first.map(Self.displayHost)
+    // Link detection fills in a preview whose title is just the URL; that's no title.
+    let hasRealTitle = preview.map { $0.title?.isEmpty == false && $0.title != $0.url } ?? false
+    let display = preview?.displayContent(maxDescriptionLength: 180)
+    let title = (hasRealTitle ? display?.title : nil) ?? preview?.displaySource ?? host ?? links[0].text
+
+    var subtitle = hasRealTitle ? display?.subtitle : nil
+    if subtitle == nil, !trimmedText.isEmpty, !links.contains(where: { $0.text == trimmedText }) {
+      subtitle = trimmedText
+    }
+
+    let photo = row.photoInfo
+    let thumbnail: ChatInfoResourceThumbnailContent? =
+      photo?.hasDisplayablePreview == true || InlineTinyThumbnailDecoder.strippedBytes(from: photo) != nil
+        ? ChatInfoResourceThumbnailContent(photo: photo)
+        : nil
+    let monogram = (preview?.displaySource ?? host ?? title).first.map { String($0).uppercased() } ?? "#"
+
+    return Content(title: title, subtitle: subtitle, links: links, thumbnail: thumbnail, monogram: monogram)
+  }
+
+  private static func displayHost(_ host: String) -> String {
+    host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+  }
+}
+
+struct LinkRowItem: Identifiable, Equatable {
+  let id: String
+  let messageId: Int64
+  let text: String
+  let url: URL?
+}
+
+private struct ChatInfoResourceLinkRow: View, Equatable {
+  let item: ChatInfoResourceLinkItem
+  let onShowInChat: (InlineKit.Message) -> Void
+
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.item == rhs.item
+  }
+
+  var body: some View {
+    HStack(alignment: .top, spacing: ChatInfoResourceMetrics.tileSpacing) {
+      tile
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(item.title)
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          Text(item.detail)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        if let subtitle = item.subtitle {
+          Text(subtitle)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+        ForEach(item.links) { link in
+          Button {
+            openLink(link.url)
+          } label: {
+            Text(link.text)
+              .font(.subheadline)
+              .foregroundStyle(.tint)
+              .lineLimit(1)
+              .truncationMode(.middle)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .buttonStyle(.plain)
+          .disabled(link.url == nil)
+          .accessibilityAddTraits(.isLink)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .padding(.horizontal, ChatInfoResourceMetrics.rowHorizontalPadding)
+    .padding(.vertical, ChatInfoResourceMetrics.rowVerticalPadding + 2)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
+    // The row opens its first link; each link line opens its own.
+    .onTapGesture { openLink(item.primaryURL) }
+    .accessibilityElement(children: .contain)
+    .contextMenu {
+      if let url = item.primaryURL {
+        Button {
+          openLink(url)
+        } label: {
+          Label("Open Link", systemImage: "safari")
+        }
+        Button {
+          UIPasteboard.general.url = url
+        } label: {
+          Label("Copy Link", systemImage: "doc.on.doc")
+        }
+      }
+      Button {
+        onShowInChat(item.message)
+      } label: {
+        Label("Show in Chat", systemImage: "text.bubble")
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var tile: some View {
+    let shape = RoundedRectangle(cornerRadius: ChatInfoResourceMetrics.tileCornerRadius, style: .continuous)
+    Group {
+      if let thumbnail = item.thumbnail {
+        ChatInfoResourceThumbnail(
+          id: item.id,
+          content: thumbnail,
+          cornerRadius: ChatInfoResourceMetrics.tileCornerRadius
+        )
+      } else {
+        Text(item.monogram)
+          .font(.system(size: 18, weight: .semibold, design: .rounded))
+          .foregroundStyle(.white)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(Self.tint(for: item.monogram).gradient, in: shape)
+      }
+    }
+    .frame(width: ChatInfoResourceMetrics.tileSize, height: ChatInfoResourceMetrics.tileSize)
+    .accessibilityHidden(true)
+  }
+
+  private func openLink(_ url: URL?) {
+    guard let url else { return }
+    InAppBrowser.shared.open(url)
+  }
+
+  private static let tints: [UIColor] = [
+    .systemBlue, .systemIndigo, .systemPurple, .systemPink, .systemRed,
+    .systemOrange, .systemGreen, .systemTeal, .systemCyan,
+  ]
+
+  /// A stable color per letter, as Telegram tints link monograms.
+  private static func tint(for monogram: String) -> Color {
+    let scalar = monogram.unicodeScalars.first.map { Int($0.value) } ?? 0
+    return Color(uiColor: tints[scalar % tints.count])
+  }
+}
+
+/// Finds a message's links from entities, data detection, a fallback pattern and its
+/// previews, in text order and without duplicates.
+enum ChatInfoResourceLinkParser {
   private static let allowedLinkSchemes: Set<String> = ["http", "https"]
-  private static let linkDetector: NSDataDetector? = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link
-    .rawValue)
+  private static let linkDetector: NSDataDetector? = try? NSDataDetector(
+    types: NSTextCheckingResult.CheckingType.link.rawValue
+  )
 
   private static let fallbackLinkRegex: NSRegularExpression? = {
     let pattern = "(?i)\\b((?:https?://)?(?:[a-z0-9-]+\\.)+[a-z]{2,}(?:/[^\\s]*)?)"
@@ -19,95 +294,13 @@ struct LinksTabView: View {
 
   private static let linkTrimCharacters = CharacterSet(charactersIn: ".,;:!?)]}\"'")
 
-  var body: some View {
-    VStack(spacing: 16) {
-      if !linksViewModel.linkMessages.isEmpty {
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-          ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
-            let items = linkGroups(for: group)
-            ChatInfoDateSection(
-              dateText: ChatInfoSectionDate.text(for: group.date),
-              headerInsets: EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 0)
-            ) {
-              ForEach(items) { item in
-                LinkRow(group: item)
-                  .contextMenu {
-                    Button { onShowInChat(item.message) } label: {
-                      Label("Show in Chat", systemImage: "text.bubble")
-                    }
-                  }
-                  .padding(.bottom, 4)
-                  .onAppear {
-                    Task {
-                      await linksViewModel.loadMoreIfNeeded(currentMessageId: item.messageId)
-                    }
-                  }
-              }
-            }
-          }
-        }
-      }
-      ChatInfoResourceFooter(
-        state: linksViewModel.loadState, isEmpty: linksViewModel.linkMessages.isEmpty,
-        emptyMessage: "No links found in this chat.", loadMore: linksViewModel.loadMore, retry: linksViewModel.retry
-      )
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .task {
-      await linksViewModel.loadInitial()
-    }
-    .onDisappear { linksViewModel.deactivate() }
-  }
-
-  private func linkGroups(for group: LinkMessageGroup) -> [LinkRowGroup] {
-    let groupedByMessageId = Dictionary(grouping: group.messages) { $0.message.messageId }
-    var orderedMessageIds: [Int64] = []
-    var seenMessageIds = Set<Int64>()
-
-    for linkMessage in group.messages {
-      let messageId = linkMessage.message.messageId
-      if seenMessageIds.insert(messageId).inserted {
-        orderedMessageIds.append(messageId)
-      }
-    }
-
-    var items: [LinkRowGroup] = []
-
-    for messageId in orderedMessageIds {
-      guard let messageEntries = groupedByMessageId[messageId],
-            let message = messageEntries.first?.message
-      else { continue }
-
-      var messageItems = linkItems(for: message, linkMessages: messageEntries)
-      if messageItems.isEmpty {
-        let trimmedText = message.text?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = trimmedText?.isEmpty == false ? trimmedText ?? "Link" : "Link"
-        messageItems = [LinkRowItem(
-          id: "\(messageId)-fallback",
-          messageId: messageId,
-          text: text,
-          url: nil
-        )]
-      }
-
-      items.append(LinkRowGroup(
-        id: messageId,
-        messageId: messageId,
-        message: message,
-        links: messageItems
-      ))
-    }
-
-    return items
-  }
-
   private struct LinkCandidate {
     let order: Int
     let range: NSRange?
     let item: LinkRowItem
   }
 
-  private func linkItems(
+  static func linkItems(
     for message: InlineKit.Message,
     linkMessages: [LinkMessage]
   ) -> [LinkRowItem] {
@@ -134,7 +327,7 @@ struct LinksTabView: View {
     return sorted.map(\.item)
   }
 
-  private func appendEntityCandidates(
+  private static func appendEntityCandidates(
     from message: InlineKit.Message,
     text: String,
     candidates: inout [LinkCandidate],
@@ -160,7 +353,7 @@ struct LinksTabView: View {
     }
   }
 
-  private func appendFallbackCandidates(
+  private static func appendFallbackCandidates(
     from text: String,
     messageId: Int64,
     candidates: inout [LinkCandidate],
@@ -171,7 +364,7 @@ struct LinksTabView: View {
     appendRegexCandidates(from: text, messageId: messageId, candidates: &candidates, order: &order)
   }
 
-  private func appendPreviewCandidates(
+  private static func appendPreviewCandidates(
     from linkMessages: [LinkMessage],
     messageId: Int64,
     candidates: inout [LinkCandidate],
@@ -199,7 +392,7 @@ struct LinksTabView: View {
     }
   }
 
-  private func appendDetectorCandidates(
+  private static func appendDetectorCandidates(
     from text: String,
     messageId: Int64,
     candidates: inout [LinkCandidate],
@@ -239,7 +432,7 @@ struct LinksTabView: View {
     }
   }
 
-  private func appendRegexCandidates(
+  private static func appendRegexCandidates(
     from text: String,
     messageId: Int64,
     candidates: inout [LinkCandidate],
@@ -270,7 +463,7 @@ struct LinksTabView: View {
     }
   }
 
-  private func linkCandidate(
+  private static func linkCandidate(
     from entity: InlineProtocol.MessageEntity,
     index: Int,
     text: String,
@@ -326,7 +519,7 @@ struct LinksTabView: View {
     }
   }
 
-  private func entityRange(for entity: InlineProtocol.MessageEntity, in text: String) -> NSRange? {
+  private static func entityRange(for entity: InlineProtocol.MessageEntity, in text: String) -> NSRange? {
     let offset = Int(entity.offset)
     let length = Int(entity.length)
     guard offset >= 0, length > 0 else { return nil }
@@ -335,7 +528,7 @@ struct LinksTabView: View {
     return range
   }
 
-  private func appendCandidate(
+  private static func appendCandidate(
     _ item: LinkRowItem,
     range: NSRange?,
     candidates: inout [LinkCandidate],
@@ -369,11 +562,11 @@ struct LinksTabView: View {
     order += 1
   }
 
-  private func sanitizeLinkText(_ value: String) -> String {
+  private static func sanitizeLinkText(_ value: String) -> String {
     value.trimmingCharacters(in: Self.linkTrimCharacters.union(.whitespacesAndNewlines))
   }
 
-  private func normalizedKey(for item: LinkRowItem) -> String? {
+  private static func normalizedKey(for item: LinkRowItem) -> String? {
     if let url = item.url {
       return normalizedKey(for: url)
     }
@@ -384,7 +577,7 @@ struct LinksTabView: View {
     return trimmed.isEmpty ? nil : trimmed
   }
 
-  private func normalizedKey(for url: URL) -> String {
+  private static func normalizedKey(for url: URL) -> String {
     guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
       return url.absoluteString
     }
@@ -393,7 +586,7 @@ struct LinksTabView: View {
     return components.string ?? url.absoluteString
   }
 
-  private func urlFromString(_ value: String) -> URL? {
+  private static func urlFromString(_ value: String) -> URL? {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
 
@@ -412,127 +605,5 @@ struct LinksTabView: View {
     }
 
     return nil
-  }
-}
-
-private struct LinkRowItem: Identifiable {
-  let id: String
-  let messageId: Int64
-  let text: String
-  let url: URL?
-}
-
-private struct LinkRowGroup: Identifiable {
-  let id: Int64
-  let messageId: Int64
-  let message: InlineKit.Message
-  let links: [LinkRowItem]
-}
-
-private struct LinkRow: View {
-  let group: LinkRowGroup
-
-  var body: some View {
-    HStack(alignment: .top, spacing: 9) {
-      linkIconCircle
-      linkData
-      Spacer()
-    }
-    .frame(maxWidth: .infinity)
-    .padding(.vertical, contentVPadding)
-    .padding(.horizontal, contentHPadding)
-    .background {
-      fileBackgroundRect
-    }
-    .padding(.horizontal, contentHMargin)
-    .contentShape(RoundedRectangle(cornerRadius: fileWrapperCornerRadius))
-  }
-
-  private func openLink(_ url: URL?) {
-    guard let url else { return }
-    InAppBrowser.shared.open(url)
-  }
-
-  private var linkIconCircle: some View {
-    ZStack(alignment: .top) {
-      RoundedRectangle(cornerRadius: linkIconCornerRadius)
-        .fill(fileCircleFill)
-        .frame(width: fileCircleSize, height: fileCircleSize)
-
-      Image(systemName: "link")
-        .foregroundColor(linkIconColor)
-        .font(.system(size: 11))
-        .padding(.top, linkIconTopPadding)
-    }
-  }
-
-  private var linkData: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      ForEach(group.links) { item in
-        Button {
-          openLink(item.url)
-        } label: {
-          Text(item.text)
-            .font(.body)
-            .foregroundColor(.blue)
-            .lineLimit(nil)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .disabled(item.url == nil)
-      }
-    }
-  }
-
-  private var fileCircleSize: CGFloat {
-    25
-  }
-
-  private var linkIconCornerRadius: CGFloat {
-    6
-  }
-
-  private var linkIconTopPadding: CGFloat {
-    5
-  }
-
-  private var fileCircleFill: Color {
-    .primary.opacity(0.04)
-  }
-
-  private var contentVPadding: CGFloat {
-    14
-  }
-
-  private var contentHPadding: CGFloat {
-    14
-  }
-
-  private var contentHMargin: CGFloat {
-    16
-  }
-
-  private var fileWrapperCornerRadius: CGFloat {
-    18
-  }
-
-  private var linkIconColor: Color {
-    .secondary
-  }
-
-  private var fileBackgroundRect: some View {
-    RoundedRectangle(cornerRadius: fileWrapperCornerRadius)
-      .fill(fileBackgroundColor)
-  }
-
-  private var fileBackgroundColor: Color {
-    Color(UIColor { traitCollection in
-      if traitCollection.userInterfaceStyle == .dark {
-        UIColor(hex: "#141414") ?? UIColor.systemGray6
-      } else {
-        UIColor(hex: "#F8F8F8") ?? UIColor.systemGray6
-      }
-    })
   }
 }

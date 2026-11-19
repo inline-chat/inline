@@ -23,6 +23,8 @@ struct InlineApp: App {
       #if DEBUG
       if TimelineHarnessRootView.isRequested {
         TimelineHarnessRootView()
+      } else if PeerInfoHarnessRootView.isRequested {
+        PeerInfoHarnessRootView()
       } else {
         InlineSceneRoot(appDelegate: appDelegate)
       }

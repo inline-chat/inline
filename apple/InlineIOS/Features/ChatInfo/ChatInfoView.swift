@@ -6,6 +6,7 @@ import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
+import Translation
 
 struct ChatInfoView: View {
   let chatItem: SpaceChatItem
@@ -25,7 +26,7 @@ struct ChatInfoView: View {
   @EnvironmentObject var nav: Navigation
   @Environment(Router.self) var router
   @Environment(\.dismiss) private var dismiss
-  @State var selectedTab: ChatInfoTab
+  @State var selectedTab: PeerInfoTab
   @State var showMakePublicAlert = false
   @State var showMakePrivateSheet = false
   @State var showClearHistorySheet = false
@@ -43,16 +44,25 @@ struct ChatInfoView: View {
   @State var notificationSelection: DialogNotificationSettingSelection
   @State private var notificationMutationGeneration: UInt64 = 0
   @State private var canChangeVisibility = false
+  /// False when opened from a member list or another profile, so Message leads.
+  let isOverOwnChat: Bool
+  @AppStorage(DeveloperMode.key) private var developerMode = false
+  @ObservedObject var globalNotifications = INUserSettings.current.notification
+  @ObservedObject private var agentGrants = AgentGrantStore.shared
+  @ObservedObject private var agentStore = AgentWorkStateStore.shared
+  @State var currentDialog: Dialog?
+  @State var threadsModel: PeerInfoThreadsModel?
+  @State var managedBot: UserInfo?
+  @State var showTranslationOptions = false
+  @State var pushedInfoItem: SpaceChatItem?
+  @State var showBotAccess = false
+  @State var showOwnedBotSettings = false
+  @State var botSettingsModel = IOSBotsSettingsModel()
+  @State var pendingDestructiveAction: ChatDestructiveAction?
+  @State var participantToRemove: UserInfo?
+  @State var groupToRemove: UserGroup?
 
   @Environment(\.appDatabase) var database
-
-  var availableTabs: [ChatInfoTab] {
-    [.info, .media, .voice, .files, .links]
-  }
-
-  var documentMessages: [DocumentMessage] {
-    resources.files?.documentMessages ?? []
-  }
 
   var currentChat: Chat? {
     chat ?? chatItem.chat
@@ -197,9 +207,16 @@ struct ChatInfoView: View {
     return presentedChatItem.id == chatItem.id
   }
 
-  init(chatItem: SpaceChatItem, isPresentedModally: Bool = false, initiallyEditingInfo: Bool = false) {
+  init(
+    chatItem: SpaceChatItem,
+    isPresentedModally: Bool = false,
+    initiallyEditingInfo: Bool = false,
+    isOverOwnChat: Bool = true
+  ) {
     self.chatItem = chatItem
     self.isPresentedModally = isPresentedModally
+    self.isOverOwnChat = isOverOwnChat
+    _currentDialog = State(initialValue: chatItem.dialog)
     _isEditingInfo = State(initialValue: initiallyEditingInfo)
     _draftTitle = State(initialValue: initiallyEditingInfo ? (chatItem.chat?.title ?? "") : "")
     _draftEmoji = State(initialValue: initiallyEditingInfo ? (chatItem.chat?.emoji ?? "") : "")
@@ -230,141 +247,52 @@ struct ChatInfoView: View {
     ))
     _notificationSelection = State(initialValue: chatItem.dialog.notificationSelection)
 
-    selectedTab = .info
-  }
-
-  private var developerIDs: [DeveloperIDs.Entry] {
-    var entries: [DeveloperIDs.Entry] = []
-    if currentChatId > 0 {
-      entries.append(.init(label: "Chat ID", id: currentChatId))
-    }
-    if case let .user(userId) = chatItem.peerId {
-      entries.append(.init(label: "User ID", id: userId))
-    }
-    return entries
+    let subject = PeerInfoSubject.resolve(
+      peer: chatItem.peerId,
+      chat: chatItem.chat,
+      user: chatItem.userInfo?.user,
+      currentUserId: Auth.shared.getCurrentUserId()
+    )
+    _selectedTab = State(initialValue: PeerInfoTab.tabs(for: subject).first ?? .media)
   }
 
   var body: some View {
-    ZStack(alignment: .top) {
-      ScrollView(.vertical) {
-        LazyVStack(spacing: 18) {
+    ScrollView(.vertical) {
+      LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+        VStack(spacing: 18) {
           chatInfoHeader
             .padding(.horizontal, 24)
 
-          ChatInfoTabBar(tabs: availableTabs, selection: chatInfoTabSelection)
-            .padding(.vertical, 8)
-            .padding(.bottom, 12)
-        }
-        // }
-        // Tab Content
-        VStack {
-          switch selectedTab {
-            case .info:
-              if isDM, let bot = chatItem.userInfo, bot.user.bot {
-                BotChatInfoOverview(bot: bot, notificationSelection: notificationSelectionBinding)
-              } else if isDM {
-                DirectMessageInfoTabView(
-                  username: directMessageUsername,
-                  notificationSelection: notificationSelectionBinding
-                )
-              } else {
-                InfoTabView()
-                  .environmentObject(ChatInfoViewEnvironment(
-                    isSearching: $isSearching,
-                    isPrivate: isPrivate,
-                    isDM: isDM,
-                    canAddParticipants: canAddParticipants,
-                    canManageParticipants: canManageParticipants,
-                    canChangeVisibility: canChangeChatVisibility,
-                    participants: participantsWithMembersViewModel.participants,
-                    groupParticipants: participantsWithMembersViewModel.groupParticipants,
-                    chatId: currentChatId,
-                    chatItem: chatItem,
-                    notificationSelection: notificationSelection,
-                    spaceMembersViewModel: spaceMembersViewModel,
-                    space: space,
-                    removeParticipant: { userInfo in
-                      guard currentChatId != 0 else {
-                        Log.shared.error("No chat ID found when trying to remove participant")
-                        return
-                      }
-                      Task {
-                        do {
-                          try await Api.realtime.send(.removeChatParticipant(
-                            chatID: currentChatId,
-                            userID: userInfo.user.id
-                          ))
-                        } catch {
-                          Log.shared.error("Failed to remove participant", error: error)
-                        }
-                      }
-                    },
-                    removeGroupParticipant: { group in
-                      removeGroupParticipant(group)
-                    },
-                    openParticipantChat: { userInfo in
-                      UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                      if router.tracksHistory {
-                        router.resetTransientPresentation()
-                        router.openPrimaryDestination(.chat(peer: Peer.user(id: userInfo.user.id)))
-                      } else {
-                        nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
-                      }
-                    },
-                    updateNotificationSelection: { selection in
-                      updateNotificationSelection(selection)
-                    },
-                    requestMakePublic: {
-                      showMakePublicAlert = true
-                    },
-                    requestMakePrivate: {
-                      guard !isDM else { return }
-                      if let currentUserId = Auth.shared.getCurrentUserId() {
-                        selectedVisibilityParticipants = [currentUserId]
-                      } else {
-                        selectedVisibilityParticipants = []
-                      }
-                      showMakePrivateSheet = true
-                    }
-                  ))
-              }
-              DeveloperIDsCard(entries: developerIDs)
-                .padding(.top, 12)
-            case .media:
-              if let model = resources.media {
-                MediaTabView(mediaViewModel: model, onShowInChat: showMessageInChat)
-              } else {
-                resourceResolutionView
-              }
-            case .voice:
-              if let model = resources.voice {
-                VoiceMemosTabView(voiceMemosViewModel: model, onShowInChat: showMessageInChat)
-              } else {
-                resourceResolutionView
-              }
-            case .files:
-              if let model = resources.files {
-                DocumentsTabView(
-                  documentsViewModel: model,
-                  peerUserId: chatItem.dialog.peerUserId,
-                  peerThreadId: currentChatId > 0 ? currentChatId : nil,
-                  onShowInChat: showMessageInChat
-                )
-              } else {
-                resourceResolutionView
-              }
-            case .links:
-              if let model = resources.links {
-                LinksTabView(linksViewModel: model, onShowInChat: showMessageInChat)
-              } else {
-                resourceResolutionView
-              }
+          if isEditingInfo {
+            editingCards
+          } else {
+            if !actions.isEmpty {
+              actionRow
+            }
+            cards
+            DeveloperIDsCard(entries: developerIDs)
+              .padding(.horizontal, -16)
           }
         }
-        .animation(.easeInOut(duration: 0.3), value: selectedTab)
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 18)
+
+        if !isEditingInfo {
+          Section {
+            tabContent
+              .padding(.top, 6)
+              .padding(.bottom, 32)
+          } header: {
+            ChatInfoTabBar(tabs: availableTabs, selection: chatInfoTabSelection, title: { $0.title })
+              .padding(.vertical, 8)
+              .background(Color(uiColor: .systemGroupedBackground))
+          }
+        }
       }
-      .coordinateSpace(name: "mainScroll")
     }
+    .background(Color(uiColor: .systemGroupedBackground))
+    .coordinateSpace(name: "mainScroll")
     .onAppear {
       if isEditingInfo {
         startEditingChatInfo()
@@ -373,12 +301,12 @@ struct ChatInfoView: View {
       resources.select(selectedTab)
       subscribeToChatUpdates()
       subscribeToDialogNotificationUpdates()
+      startThreadsIfNeeded()
       Task {
         if !isDM {
           if let spaceId = chatItem.chat?.spaceId {
             await spaceMembersViewModel.refetchMembers()
             await userGroupsViewModel.loadIfNeeded()
-            // Fetch space information
             do {
               space = try await database.reader.read { db in
                 try Space.fetchOne(db, id: spaceId)
@@ -389,14 +317,11 @@ struct ChatInfoView: View {
           }
           await participantsWithMembersViewModel.refetchParticipants()
         }
-
-        if !availableTabs.contains(selectedTab) {
-          selectedTab = availableTabs.first ?? .files
-        }
       }
     }
     .onDisappear {
       resources.deactivate()
+      threadsModel?.stop()
       chatSubscription?.cancel()
       chatSubscription = nil
       dialogNotificationSubscription?.cancel()
@@ -416,11 +341,20 @@ struct ChatInfoView: View {
       resources.select(selectedTab)
     }
     .onChange(of: selectedTab) { _, tab in resources.select(tab) }
+    .onChange(of: availableTabs) { _, tabs in
+      if !tabs.contains(selectedTab) { selectedTab = tabs.first ?? .media }
+      startThreadsIfNeeded()
+    }
     .task(id: chatItem.peerId) {
       if currentChatId <= 0 {
         do { _ = try await Api.realtime.send(.getChat(peer: chatItem.peerId)) }
         catch { resources.resolutionFailed = true }
       }
+    }
+    .task(id: botUserID) {
+      guard let botUserID else { return }
+      AgentGrantStore.shared.ensureLoaded(botUserID: botUserID)
+      await AgentWorkStateStore.shared.loadDirectChatOutputModes(botUserID: botUserID)
     }
     .task(id: visibilityPermissionKey) {
       await refreshVisibilityPermission()
@@ -432,7 +366,7 @@ struct ChatInfoView: View {
       if let chatId = notification.userInfo?["chatId"] as? Int64,
          chatId == currentChatId
       {
-        nav.pop()
+        if isPresentedAsSheet { dismiss() } else { nav.pop() }
       }
     }
     .sheet(
@@ -480,9 +414,28 @@ struct ChatInfoView: View {
         spaceId: canClearSpaceHistory ? currentChat?.spaceId : nil
       )
     }
-    .alert("Make Chat Public", isPresented: $showMakePublicAlert) {
+    .sheet(item: $managedBot) { bot in
+      OwnedBotAccessSheet(bot: bot, participants: participantsWithMembersViewModel.participants)
+    }
+    .sheet(isPresented: $showTranslationOptions) {
+      TranslationOptions(peer: chatItem.peerId)
+    }
+    .navigationDestination(item: $pushedInfoItem) { item in
+      ChatInfoView(chatItem: item, isPresentedModally: false, isOverOwnChat: false)
+    }
+    .navigationDestination(isPresented: $showBotAccess) {
+      if let bot = chatItem.userInfo {
+        BotAccessView(bot: bot)
+      }
+    }
+    .navigationDestination(isPresented: $showOwnedBotSettings) {
+      if let botUserID {
+        OwnedBotSettingsDestination(botUserID: botUserID, model: botSettingsModel)
+      }
+    }
+    .alert("Make Thread Public", isPresented: $showMakePublicAlert) {
       Button("Cancel", role: .cancel) {}
-      Button("Make Public", role: .destructive) {
+      Button("Make Public") {
         guard currentChatId != 0 else { return }
         Task {
           do {
@@ -498,45 +451,60 @@ struct ChatInfoView: View {
         }
       }
     } message: {
-      Text("People without access to public chats will lose access to this thread.")
+      Text("Everyone in this space will be able to read and join it. People without access to public chats will lose access.")
     }
-    .toolbar {
-      if canEditChatInfo {
-        if isEditingInfo {
-          ToolbarItem(placement: .cancellationAction) {
-            Button("Cancel") {
-              cancelEditingChatInfo()
-            }
-            .disabled(isSavingInfo)
-          }
-          ToolbarItem(placement: .confirmationAction) {
-            Button(isSavingInfo ? "Saving..." : "Save") {
-              saveChatInfo()
-            }
-            .disabled(!canSaveChatInfo || isSavingInfo)
-          }
-        } else {
-          if isPresentedAsSheet {
-            ToolbarItem(placement: .cancellationAction) {
-              Button {
-                dismiss()
-              } label: {
-                Image(systemName: "xmark")
-              }
-              .accessibilityLabel("Close")
-            }
-          }
+    .alert(
+      pendingDestructiveAction?.title ?? "",
+      isPresented: Binding(get: { pendingDestructiveAction != nil }, set: { if !$0 { pendingDestructiveAction = nil } }),
+      presenting: pendingDestructiveAction
+    ) { action in
+      Button("Cancel", role: .cancel) {}
+      Button(action.shortTitle, role: .destructive) { performDestructiveAction(action) }
+    } message: { action in
+      Text(action.confirmationMessage(chatTitle: chatTitle))
+    }
+    .confirmationDialog(
+      "Remove from this thread?",
+      isPresented: Binding(get: { participantToRemove != nil }, set: { if !$0 { participantToRemove = nil } }),
+      titleVisibility: .visible,
+      presenting: participantToRemove
+    ) { participant in
+      Button("Remove \(participant.user.shortDisplayName)", role: .destructive) { removeParticipant(participant) }
+    } message: { participant in
+      Text("\(participant.user.shortDisplayName) will lose access unless a group or the space still gives it.")
+    }
+    .confirmationDialog(
+      "Remove group access?",
+      isPresented: Binding(get: { groupToRemove != nil }, set: { if !$0 { groupToRemove = nil } }),
+      titleVisibility: .visible,
+      presenting: groupToRemove
+    ) { group in
+      Button("Remove \(group.name)", role: .destructive) { removeGroupParticipant(group) }
+    } message: { group in
+      Text("Members may still have access directly, through the parent thread, or through another group.")
+    }
+    .toolbar { toolbarContent }
+  }
 
-          ToolbarItem(placement: .primaryAction) {
-            Button {
-              startEditingChatInfo()
-            } label: {
-              Image(systemName: "pencil")
-            }
-            .accessibilityLabel("Edit chat info")
-          }
+  // MARK: Toolbar
+
+  @ToolbarContentBuilder
+  private var toolbarContent: some ToolbarContent {
+    if isEditingInfo {
+      ToolbarItem(placement: .cancellationAction) {
+        Button("Cancel") {
+          cancelEditingChatInfo()
         }
-      } else if isPresentedAsSheet {
+        .disabled(isSavingInfo)
+      }
+      ToolbarItem(placement: .confirmationAction) {
+        Button(isSavingInfo ? "Saving…" : "Done") {
+          saveChatInfo()
+        }
+        .disabled(!canSaveChatInfo || isSavingInfo)
+      }
+    } else {
+      if isPresentedAsSheet {
         ToolbarItem(placement: .cancellationAction) {
           Button {
             dismiss()
@@ -546,21 +514,312 @@ struct ChatInfoView: View {
           .accessibilityLabel("Close")
         }
       }
-
-      if canClearHistory {
+      if canEditFromToolbar {
         ToolbarItem(placement: .primaryAction) {
-          Menu {
-            Button(role: .destructive) {
-              showClearHistorySheet = true
-            } label: {
-              Label("Delete History...", systemImage: "trash")
-            }
-          } label: {
-            Image(systemName: "ellipsis.circle")
+          Button("Edit") {
+            editFromToolbar()
           }
-          .accessibilityLabel("More")
         }
       }
+      ToolbarItem(placement: .primaryAction) {
+        moreMenu
+      }
+    }
+  }
+
+  private var moreMenu: some View {
+    Menu {
+      if botUserID != nil, managesBot {
+        Button("Bot Settings", systemImage: "gearshape") { showOwnedBotSettings = true }
+        Divider()
+      }
+      Button("Copy Link", systemImage: "link") { copyChatLink() }
+        .disabled(currentChatId <= 0)
+      if developerMode {
+        if currentChatId > 0 {
+          Button("Copy Chat ID", systemImage: "number") { DeveloperIDs.copy(currentChatId, label: "Chat ID") }
+        }
+        if case let .user(userId) = chatItem.peerId {
+          Button("Copy User ID", systemImage: "number") { DeveloperIDs.copy(userId, label: "User ID") }
+        }
+      }
+      Button("Translation", systemImage: "translate") { showTranslationOptions = true }
+      if let nextPinned = nextPinnedState {
+        Divider()
+        Button(nextPinned ? "Pin" : "Unpin", systemImage: nextPinned ? "pin" : "pin.slash") {
+          updatePinned(nextPinned)
+        }
+      }
+      if canClearHistory || destructiveAction != nil {
+        Divider()
+        if canClearHistory {
+          Button("Delete History…", systemImage: "trash", role: .destructive) {
+            showClearHistorySheet = true
+          }
+        }
+        if let destructiveAction {
+          Button(destructiveAction.title + "…", systemImage: destructiveAction.systemImage, role: .destructive) {
+            pendingDestructiveAction = destructiveAction
+          }
+        }
+      }
+    } label: {
+      Image(systemName: "ellipsis")
+    }
+    .accessibilityLabel("More")
+  }
+
+  // MARK: Actions
+
+  private var actionRow: some View {
+    PeerInfoActionRow(count: actions.count) {
+      ForEach(actions) { action in
+        actionButton(action)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func actionButton(_ action: PeerInfoAction) -> some View {
+    switch action {
+    case .open:
+      tile(subject.isThread ? "Open" : "Message", systemImage: subject.isThread ? "bubble.left.and.bubble.right" : "message") {
+        openChat(chatItem.peerId)
+      }
+    case .search:
+      EmptyView()
+    case .notifications:
+      notificationsButton
+    case .follow:
+      tile(isFollowing ? "Following" : "Follow", systemImage: isFollowing ? "checkmark.circle" : "eye") {
+        toggleFollow()
+      }
+      .accessibilityValue(isFollowing ? "On" : "Off")
+      .accessibilityHint(isFollowing ? "Stops surfacing this thread for every new message" : "Surfaces this thread for every new message")
+    case .output:
+      if let botUserID {
+        AgentOutputModeSection(peer: chatItem.peerId, botUserID: botUserID, style: .actionTile)
+      }
+    case .share:
+      tile("Share", systemImage: "person.crop.circle.badge.plus") {
+        showBotAccess = true
+      }
+      .accessibilityHint("Choose who can message this bot")
+    case .addMembers:
+      tile("Add", systemImage: "person.badge.plus") {
+        isSearching = true
+      }
+      .accessibilityHint("Adds people or groups to this thread")
+    }
+  }
+
+  private func tile(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    Button {
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+      action()
+    } label: {
+      PeerInfoActionTile(title, systemImage: systemImage)
+    }
+    .buttonStyle(PeerInfoActionTileButtonStyle())
+  }
+
+  /// Tap mutes or unmutes at once; long-press for every choice.
+  private var notificationsButton: some View {
+    let notifications = PeerInfoNotificationsPresentation(selection: notificationSelection, globalMode: globalNotifications.mode)
+    return Menu {
+      DialogNotificationSettingsMenuContent(
+        selection: notificationSelectionBinding,
+        globalMode: globalNotifications.mode
+      )
+    } label: {
+      PeerInfoActionTile(
+        notifications.isMuted ? "Unmute" : "Mute",
+        systemImage: notifications.isMuted ? "bell.slash.fill" : "bell",
+        detail: notifications.effectiveMode == .mentions || notifications.effectiveMode == .onlyMentions ? "Mentions" : nil,
+        isHighlighted: notifications.isMuted
+      )
+    } primaryAction: {
+      UIImpactFeedbackGenerator(style: .light).impactOccurred()
+      let next = notifications.quickToggleSelection
+      updateNotificationSelection(next)
+      let nextState = PeerInfoNotificationsPresentation(selection: next, globalMode: globalNotifications.mode)
+      ToastManager.shared.showToast(
+        nextState.isMuted ? "Muted" : "Unmuted",
+        type: .success,
+        systemImage: nextState.isMuted ? "bell.slash.fill" : "bell.fill"
+      )
+    }
+    .buttonStyle(PeerInfoActionTileButtonStyle())
+    .accessibilityLabel(notifications.isMuted ? "Unmute" : "Mute")
+    .accessibilityValue(notifications.accessibilityValue)
+    .accessibilityHint("Double-tap to switch. Touch and hold for more options.")
+  }
+
+  // MARK: Cards
+
+  @ViewBuilder
+  private var cards: some View {
+    switch subject.kind {
+    case .person:
+      if let user = chatItem.userInfo?.user {
+        PeerInfoIOSPersonCard(user: user)
+      }
+    case .bot:
+      if let bot = chatItem.userInfo {
+        PeerInfoIOSBotCard(bot: bot) { ownerId in
+          pushInfo(for: .user(id: ownerId))
+        }
+      }
+    case .thread, .subthread:
+      PeerInfoIOSPlaceCard(
+        subject: subject,
+        space: space,
+        parent: subject.parentChatId.flatMap { ObjectCache.shared.getChat(id: $0) },
+        onOpenParent: openParent
+      )
+    case .selfChat:
+      EmptyView()
+    }
+  }
+
+  /// Visibility, while editing a space thread.
+  @ViewBuilder
+  private var editingCards: some View {
+    if let chat = currentChat, chat.spaceId != nil, chat.parentChatId == nil {
+      PeerInfoIOSCard(
+        "Visibility",
+        footer: chat.isPublic == true
+          ? "Everyone in this space can read and join this thread."
+          : canChangeChatVisibility
+            ? "Only the people and groups you add can read this thread."
+            : "Only the people and groups added can read this thread. The creator or a space admin can change this."
+      ) {
+        HStack {
+          Label(chat.isPublic == true ? "Public" : "Private", systemImage: chat.isPublic == true ? "person.2" : "lock")
+            .frame(maxWidth: .infinity, alignment: .leading)
+          if canChangeChatVisibility {
+            Button(chat.isPublic == true ? "Make Private" : "Make Public") {
+              if chat.isPublic == true {
+                selectedVisibilityParticipants = Auth.shared.getCurrentUserId().map { [$0] } ?? []
+                showMakePrivateSheet = true
+              } else {
+                showMakePublicAlert = true
+              }
+            }
+          }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+      }
+    }
+  }
+
+  // MARK: Tabs
+
+  @ViewBuilder
+  private var tabContent: some View {
+    switch selectedTab {
+    case .members:
+      PeerInfoIOSMembersList(
+        participants: participantsWithMembersViewModel,
+        roles: memberRoles,
+        isPublic: currentChat?.isPublic == true,
+        canAdd: canAddParticipants,
+        canRemove: canManageParticipants,
+        onAdd: { isSearching = true },
+        onOpen: { pushInfo(for: .user(id: $0.user.id)) },
+        onMessage: { openChat(.user(id: $0.user.id)) },
+        onManageBot: { managedBot = $0 },
+        onRemove: { participantToRemove = $0 },
+        onRemoveGroup: { groupToRemove = $0 }
+      )
+    case .threads:
+      if let threadsModel {
+        PeerInfoIOSThreadsList(
+          model: threadsModel,
+          emptyMessage: subject.isThread ? "No subthreads yet." : "No shared threads yet.",
+          onOpen: { openChat($0.peer) },
+          onShowInfo: { pushInfo(for: $0.peer) }
+        )
+      } else {
+        resourceResolutionView
+      }
+    case .media:
+      if let model = resources.media {
+        MediaTabView(mediaViewModel: model, onShowInChat: showMessageInChat)
+      } else {
+        resourceResolutionView
+      }
+    case .voice:
+      if let model = resources.voice {
+        VoiceMemosTabView(voiceMemosViewModel: model, onShowInChat: showMessageInChat)
+      } else {
+        resourceResolutionView
+      }
+    case .files:
+      if let model = resources.files {
+        DocumentsTabView(
+          documentsViewModel: model,
+          peerUserId: chatItem.dialog.peerUserId,
+          peerThreadId: currentChatId > 0 ? currentChatId : nil,
+          onShowInChat: showMessageInChat
+        )
+      } else {
+        resourceResolutionView
+      }
+    case .links:
+      if let model = resources.links {
+        LinksTabView(linksViewModel: model, onShowInChat: showMessageInChat)
+      } else {
+        resourceResolutionView
+      }
+    }
+  }
+
+  private func startThreadsIfNeeded() {
+    guard threadsModel == nil, let source = PeerInfoThreadsModel.source(for: subject) else {
+      threadsModel?.start()
+      return
+    }
+    let model = PeerInfoThreadsModel(source: source)
+    threadsModel = model
+    model.start()
+  }
+
+  // MARK: Navigation
+
+  /// Leaves chat info for a chat: closes the sheet and opens it in the app.
+  private func openChat(_ peer: Peer) {
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    if isPresentedAsSheet { dismiss() }
+    if router.tracksHistory {
+      router.resetTransientPresentation()
+      router.openPrimaryDestination(.chat(peer: peer))
+    } else {
+      nav.push(.chat(peer: peer))
+    }
+  }
+
+  /// Opens another peer's info on top of this one, without leaving the sheet.
+  private func pushInfo(for peer: Peer) {
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    if let item = FullChatViewModel.cachedChatItem(peer: peer) {
+      pushedInfoItem = item
+    } else {
+      // No local chat yet: the chat itself is the profile until it loads.
+      openChat(peer)
+    }
+  }
+
+  private func openParent() {
+    guard let parentChatId = subject.parentChatId else { return }
+    let parentPeer = ObjectCache.shared.getChat(id: parentChatId)?.deepLinkPeer ?? .thread(id: parentChatId)
+    if isPresentedAsSheet { dismiss() }
+    if let messageId = subject.parentMessageId, router.tracksHistory {
+      router.resetTransientPresentation()
+      router.openPrimaryDestination(.chatMessage(peer: parentPeer, messageID: messageId))
+    } else {
+      openChat(parentPeer)
     }
   }
 
@@ -619,6 +878,7 @@ struct ChatInfoView: View {
         },
         receiveValue: { dialog in
           notificationSelection = dialog?.notificationSelection ?? .global
+          currentDialog = dialog
         }
       )
   }
@@ -684,7 +944,7 @@ struct ChatInfoView: View {
     )
   }
 
-  private var chatInfoTabSelection: Binding<ChatInfoTab> {
+  private var chatInfoTabSelection: Binding<PeerInfoTab> {
     Binding(
       get: { selectedTab },
       set: { newTab in
@@ -873,531 +1133,6 @@ private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
   }
 }
 
-private struct DirectMessageInfoTabView: View {
-  let username: String?
-  @Binding var notificationSelection: DialogNotificationSettingSelection
-
-  var body: some View {
-    VStack(spacing: 0) {
-      if let username {
-        LabeledContent {
-          Text("@\(username)")
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-        } label: {
-          Text("Username")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-
-        Divider()
-          .padding(.horizontal, 16)
-      }
-
-      DialogNotificationSettingsRows(selection: $notificationSelection)
-    }
-    .background(Color(uiColor: .secondarySystemGroupedBackground))
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    .padding(.horizontal, 16)
-  }
-}
-
-private struct DialogNotificationSettingsRows: View {
-  @Binding var selection: DialogNotificationSettingSelection
-  @EnvironmentObject private var notificationSettings: NotificationSettingsManager
-
-  var body: some View {
-    LabeledContent {
-      Menu {
-        DialogNotificationSettingsMenuContent(
-          selection: $selection,
-          globalMode: notificationSettings.mode
-        )
-      } label: {
-        Label {
-          Text(DialogNotificationSettingsPresentation.title(
-            for: selection,
-            globalMode: notificationSettings.mode
-          ))
-        } icon: {
-          Image(systemName: DialogNotificationSettingsPresentation.iconName(
-            for: selection,
-            globalMode: notificationSettings.mode
-          ))
-        }
-        .foregroundStyle(.secondary)
-        .labelStyle(.titleAndIcon)
-      }
-    } label: {
-      Text("Notifications")
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 12)
-
-    Text(selectionDescription)
-      .font(.footnote)
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 16)
-      .padding(.bottom, 12)
-  }
-
-  private var selectionDescription: LocalizedStringResource {
-    selection == .global
-      ? DialogNotificationSettingsPresentation.globalDescription
-      : DialogNotificationSettingsPresentation.overrideDescription
-  }
-}
-
-struct InfoTabView: View {
-  @EnvironmentObject var chatInfoView: ChatInfoViewEnvironment
-  @State var participantToRemove: UserInfo?
-  @State var showRemoveAlert = false
-  @State var groupToRemove: UserGroup?
-  @State var showRemoveGroupAlert = false
-  @ObservedObject private var agentGrants = AgentGrantStore.shared
-  /// The owned bot whose access the avatar badges show, when several are here.
-  @State private var preferredBadgeBotID: Int64?
-  @State private var managedBot: UserInfo?
-  /// A bot's own chat info, opened from its avatar.
-  @State private var botInfoItem: SpaceChatItem?
-
-  private var cardBackgroundColor: Color {
-    Color(uiColor: .secondarySystemGroupedBackground)
-  }
-
-  private var rowDivider: some View {
-    Divider()
-      .padding(.horizontal, 16)
-  }
-
-  var body: some View {
-    VStack(spacing: 12) {
-      visibilitySection
-      notificationsCard
-      participantsSection
-    }
-    .padding(.horizontal, 16)
-    .alert("Remove Participant", isPresented: $showRemoveAlert) {
-      Button("Cancel", role: .cancel) {}
-      Button("Remove", role: .destructive) {
-        if let participant = participantToRemove {
-          chatInfoView.removeParticipant(participant)
-        }
-      }
-    } message: {
-      if let participant = participantToRemove {
-        Text("Are you sure you want to remove \(participant.user.firstName ?? "this user") from the chat?")
-      }
-    }
-    .alert("Remove Group Access", isPresented: $showRemoveGroupAlert) {
-      Button("Cancel", role: .cancel) {}
-      Button("Remove", role: .destructive) {
-        if let group = groupToRemove {
-          chatInfoView.removeGroupParticipant(group)
-        }
-      }
-    } message: {
-      if let group = groupToRemove {
-        Text(
-          "Remove \(group.name) from this thread? Members may still have access through direct participants, parent access, or another group."
-        )
-      }
-    }
-    .sheet(item: $managedBot) { bot in
-      OwnedBotAccessSheet(bot: bot, participants: chatInfoView.participants)
-    }
-    .sheet(item: $botInfoItem) { item in
-      NavigationStack {
-        ChatInfoView(chatItem: item, isPresentedModally: true)
-      }
-    }
-  }
-
-  /// A bot's avatar opens its chat info: status, access and settings. Without a
-  /// local chat with the bot yet, opening the chat creates one.
-  private func openBotInfo(_ userInfo: UserInfo) {
-    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    if let item = FullChatViewModel.cachedChatItem(peer: .user(id: userInfo.user.id)) {
-      botInfoItem = item
-    } else {
-      chatInfoView.openParticipantChat(userInfo)
-    }
-  }
-
-  private var visibilitySection: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("Thread Visibility")
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 4)
-
-      VStack(spacing: 0) {
-        LabeledContent {
-          Label {
-            Text(chatInfoView.isPrivate ? "Private" : "Public")
-          } icon: {
-            Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
-          }
-          .foregroundStyle(.secondary)
-          .labelStyle(.titleAndIcon)
-        } label: {
-          Text("Access")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-
-        if chatInfoView.canChangeVisibility {
-          rowDivider
-
-          Button {
-            if chatInfoView.isPrivate {
-              chatInfoView.requestMakePublic()
-            } else {
-              chatInfoView.requestMakePrivate()
-            }
-          } label: {
-            Label(
-              chatInfoView.isPrivate ? "Make Public" : "Make Private",
-              systemImage: chatInfoView.isPrivate ? "person.2.fill" : "lock.fill"
-            )
-            .frame(maxWidth: .infinity, minHeight: 44)
-          }
-          .buttonStyle(.bordered)
-          .padding(12)
-        }
-      }
-      .background(cardBackgroundColor)
-      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-  }
-
-  private var notificationsCard: some View {
-    VStack(spacing: 0) {
-      DialogNotificationSettingsRows(selection: notificationSelectionBinding)
-    }
-    .background(cardBackgroundColor)
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  @ViewBuilder
-  private var participantsSection: some View {
-    if !chatInfoView.isDM, chatInfoView.isPrivate {
-      participantsCard
-    } else {
-      participantsSummaryCard
-    }
-  }
-
-  private var participantsCard: some View {
-    VStack(spacing: 0) {
-      LabeledContent {
-        Text(accessSummary)
-          .foregroundStyle(.secondary)
-      } label: {
-        Text("Access")
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-
-      rowDivider
-
-      HStack(spacing: 8) {
-        Text("Direct Participants")
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        agentAccessLegend
-      }
-      .padding(.horizontal, 16)
-      .padding(.top, 12)
-
-      participantsGrid
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-
-      if !chatInfoView.groupParticipants.isEmpty {
-        rowDivider
-
-        VStack(alignment: .leading, spacing: 10) {
-          Text("Group Access")
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
-
-          ForEach(chatInfoView.groupParticipants) { group in
-            groupAccessRow(group)
-          }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-      }
-    }
-    .background(cardBackgroundColor)
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private var accessSummary: String {
-    let direct = "\(chatInfoView.participants.count) direct"
-    let groupCount = chatInfoView.groupParticipants.count
-    guard groupCount > 0 else { return direct }
-    return "\(direct), \(groupCount) \(groupCount == 1 ? "group" : "groups")"
-  }
-
-  private var participantsSummaryCard: some View {
-    VStack(spacing: 0) {
-      LabeledContent {
-        Text("\(chatInfoView.spaceMembersViewModel.members.count)")
-          .foregroundStyle(.secondary)
-      } label: {
-        Text("Participants")
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-
-      rowDivider
-
-      Text(
-        "\(chatInfoView.spaceMembersViewModel.members.count) \(chatInfoView.spaceMembersViewModel.members.count == 1 ? "member" : "members") of \(chatInfoView.space?.displayName ?? "this space") are participants of this chat. New members will have access by default."
-      )
-      .font(.footnote)
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 12)
-    }
-    .background(cardBackgroundColor)
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private var participantsGrid: some View {
-    // Computed once per render rather than per avatar.
-    let ownedBots = Set(ownedBotIDs)
-    let badgeBotName = badgeBotID.map(botName)
-    let badged = badgedUserIDs
-    return LazyVGrid(columns: [
-      GridItem(.flexible()),
-      GridItem(.flexible()),
-      GridItem(.flexible()),
-      GridItem(.flexible()),
-    ], spacing: 16) {
-      if chatInfoView.canAddParticipants {
-        Button(action: {
-          chatInfoView.isSearching = true
-        }) {
-          VStack(spacing: 4) {
-            Circle()
-              .fill(Color(.systemGray6))
-              .frame(width: 68, height: 68)
-              .overlay {
-                Image(systemName: "plus")
-                  .font(.title)
-                  .foregroundColor(.secondary)
-              }
-
-            Text("Add")
-              .font(.callout)
-              .lineLimit(1)
-          }
-        }
-        .buttonStyle(.plain)
-      }
-
-      // Existing participants
-
-      ForEach(chatInfoView.participants) { userInfo in
-        VStack(spacing: 4) {
-          ParticipantAvatarView(
-            userInfo: userInfo,
-            size: 68,
-            onTap: userInfo.user.bot ? { openBotInfo(userInfo) } : nil
-          )
-          .frame(width: 68, height: 68)
-          .overlay(alignment: .bottomTrailing) {
-            if badged.contains(userInfo.user.id) {
-              AgentAccessBadge()
-            }
-          }
-          .accessibilityElement(children: .ignore)
-          .accessibilityLabel(avatarAccessibilityLabel(
-            userInfo,
-            canUseBot: badged.contains(userInfo.user.id) ? badgeBotName : nil,
-            isOwnedBot: ownedBots.contains(userInfo.user.id)
-          ))
-
-          Text(userInfo.user.shortDisplayName)
-            .font(.callout)
-            .foregroundColor(.primary)
-            .lineLimit(1)
-        }
-        .contextMenu {
-          if chatInfoView.canManageParticipants {
-            Button(role: .destructive, action: {
-              let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-              impactFeedback.impactOccurred()
-              participantToRemove = userInfo
-              showRemoveAlert = true
-            }) {
-              Label("Remove Participant", systemImage: "minus.circle")
-            }
-          }
-          if userInfo.user.bot {
-            Button {
-              openBotInfo(userInfo)
-            } label: {
-              Label("Bot Info", systemImage: "info.circle")
-            }
-          }
-          if ownedBots.contains(userInfo.user.id) {
-            Button {
-              managedBot = userInfo
-            } label: {
-              Label("Manage Bot Access", systemImage: "person.badge.key")
-            }
-          }
-        }
-
-        .transition(.asymmetric(
-          insertion: .scale(scale: 0.8).combined(with: .opacity),
-          removal: .scale(scale: 0.8).combined(with: .opacity)
-        ))
-      }
-    }
-    .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
-    .animation(.easeInOut(duration: 0.2), value: badged)
-    .task(id: participantBotIDs) {
-      // Owned bots' lists come back in full; others' only answer for the viewer.
-      for botUserID in participantBotIDs {
-        agentGrants.ensureLoaded(botUserID: botUserID)
-      }
-    }
-  }
-
-  // MARK: Bot access badges
-
-  private var participantBotIDs: [Int64] {
-    chatInfoView.participants.filter(\.user.bot).map(\.user.id)
-  }
-
-  /// Bots here the viewer owns; only their access lists are visible.
-  private var ownedBotIDs: [Int64] {
-    OwnedAgentGrants.ownedBotIDs(among: participantBotIDs, owned: agentGrants.ownedGrantsByBotUserID)
-  }
-
-  private var badgeBotID: Int64? {
-    OwnedAgentGrants.selectedBotID(preferred: preferredBadgeBotID, among: ownedBotIDs)
-  }
-
-  private var badgedUserIDs: Set<Int64> {
-    guard let badgeBotID else { return [] }
-    return agentGrants.ownedGrants(botUserID: badgeBotID)?.userIDs ?? []
-  }
-
-  private func botName(_ botUserID: Int64) -> String {
-    chatInfoView.participants.first { $0.user.id == botUserID }?.user.shortDisplayName ?? "Bot"
-  }
-
-  private func avatarAccessibilityLabel(_ userInfo: UserInfo, canUseBot: String?, isOwnedBot: Bool) -> String {
-    var label = userInfo.user.shortDisplayName
-    if let canUseBot {
-      label += ", can use \(canUseBot)"
-    }
-    if isOwnedBot {
-      label += ", your bot"
-    }
-    return label
-  }
-
-  @ViewBuilder
-  private var agentAccessLegend: some View {
-    if let badgeBotID {
-      if ownedBotIDs.count > 1 {
-        Menu {
-          Picker("Show Access For", selection: Binding(
-            get: { badgeBotID },
-            set: { preferredBadgeBotID = $0 }
-          )) {
-            ForEach(ownedBotIDs, id: \.self) { botUserID in
-              Text(botName(botUserID)).tag(botUserID)
-            }
-          }
-        } label: {
-          HStack(spacing: 3) {
-            agentAccessLegendLabel(badgeBotID)
-            Image(systemName: "chevron.up.chevron.down")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(.secondary)
-          }
-        }
-        .accessibilityLabel("Show access for \(botName(badgeBotID))")
-      } else {
-        agentAccessLegendLabel(badgeBotID)
-          .accessibilityElement(children: .combine)
-      }
-    }
-  }
-
-  private func agentAccessLegendLabel(_ botUserID: Int64) -> some View {
-    HStack(spacing: 4) {
-      AgentAccessBadge(size: 13)
-      Text("\(botName(botUserID)) access")
-        .lineLimit(1)
-    }
-    .font(.footnote)
-    .foregroundStyle(.secondary)
-  }
-
-  private func groupAccessRow(_ group: UserGroup) -> some View {
-    HStack(spacing: 10) {
-      Image(systemName: "person.3.fill")
-        .font(.callout.weight(.semibold))
-        .foregroundStyle(.white)
-        .frame(width: 36, height: 36)
-        .background(Color.accentColor)
-        .clipShape(Circle())
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text(group.name)
-          .font(.callout)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-        Text(groupSubtitle(group))
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-      }
-
-      Spacer()
-    }
-    .contextMenu {
-      if chatInfoView.canManageParticipants {
-        Button(role: .destructive, action: {
-          let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-          impactFeedback.impactOccurred()
-          groupToRemove = group
-          showRemoveGroupAlert = true
-        }) {
-          Label("Remove Group Access", systemImage: "minus.circle")
-        }
-      }
-    }
-  }
-
-  private func groupSubtitle(_ group: UserGroup) -> String {
-    let count = group.memberCount == 1 ? "1 person" : "\(group.memberCount) people"
-    guard let description = group.description, !description.isEmpty else {
-      return count
-    }
-    return "\(description) - \(count)"
-  }
-
-  private var notificationSelectionBinding: Binding<DialogNotificationSettingSelection> {
-    Binding(
-      get: { chatInfoView.notificationSelection },
-      set: { chatInfoView.updateNotificationSelection($0) }
-    )
-  }
-}
-
 struct ParticipantAvatarView: UIViewRepresentable {
   let userInfo: UserInfo
   let size: CGFloat
@@ -1563,7 +1298,7 @@ private final class ChatInfoResourcesState: ObservableObject {
     links?.deactivate()
   }
 
-  func select(_ tab: ChatInfoTab) {
+  func select(_ tab: PeerInfoTab) {
     if tab != .media {
       media?.deactivate()
     }
@@ -1595,6 +1330,190 @@ private final class ChatInfoResourcesState: ObservableObject {
           links = ChatLinksViewModel(db: db, chatId: chatId, peer: peer)
         }
       default: break
+    }
+  }
+}
+
+// MARK: - Peer info model
+
+extension ChatInfoView {
+  var subject: PeerInfoSubject {
+    PeerInfoSubject.resolve(
+      peer: chatItem.peerId,
+      chat: currentChat,
+      user: chatItem.userInfo?.user,
+      currentUserId: Auth.shared.getCurrentUserId()
+    )
+  }
+
+  var availableTabs: [PeerInfoTab] {
+    PeerInfoTab.tabs(for: subject)
+  }
+
+  /// Raw IDs for Developer Mode's card.
+  var developerIDs: [DeveloperIDs.Entry] {
+    var entries: [DeveloperIDs.Entry] = []
+    if currentChatId > 0 { entries.append(.init(label: "Chat ID", id: currentChatId)) }
+    if case let .user(userId) = chatItem.peerId { entries.append(.init(label: "User ID", id: userId)) }
+    return entries
+  }
+
+  var botUserID: Int64? {
+    guard let user = chatItem.userInfo?.user, user.bot else { return nil }
+    return user.id
+  }
+
+  /// The viewer owns or admins this bot.
+  var managesBot: Bool {
+    guard let botUserID else { return false }
+    return AgentGrantStore.shared.ownedGrants(botUserID: botUserID) != nil
+  }
+
+  var actions: [PeerInfoAction] {
+    PeerInfoAction.actions(
+      for: subject,
+      context: PeerInfoActionContext(
+        isOverOwnChat: isOverOwnChat,
+        supportsInChatSearch: false,
+        canAddMembers: canAddParticipants && !isDM,
+        canShareBot: managesBot,
+        offersOutputMode: botUserID.map { AgentWorkStateStore.shared.offersOutputMode(botUserID: $0) } ?? false
+      )
+    )
+  }
+
+  var isFollowing: Bool {
+    currentDialog?.isFollowingThread == true
+  }
+
+  var memberRoles: [Int64: MemberRole] {
+    Dictionary(spaceMembersViewModel.members.map { ($0.userId, $0.role) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  /// Edit covers a thread's name and icon, and a managed bot's profile.
+  var canEditFromToolbar: Bool {
+    switch subject.kind {
+    case .thread, .subthread: canEditChatInfo
+    case .bot: managesBot
+    case .person, .selfChat: false
+    }
+  }
+
+  func editFromToolbar() {
+    switch subject.kind {
+    case .thread, .subthread:
+      startEditingChatInfo()
+    case .bot:
+      showOwnedBotSettings = true
+    case .person, .selfChat:
+      break
+    }
+  }
+
+  var destructiveAction: ChatDestructiveAction? {
+    ChatDestructiveActionResolver.action(peer: chatItem.peerId, chat: currentChat)
+  }
+
+  var nextPinnedState: Bool? {
+    guard let dialog = currentDialog else { return nil }
+    if dialog.pinned == true { return false }
+    let isInboxEligible = dialog.open && dialog.archived != true && dialog.chatListHidden != true
+    return isInboxEligible ? true : nil
+  }
+
+  func updatePinned(_ pinned: Bool) {
+    let peer = chatItem.peerId
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await Api.realtime.send(.updateDialogOrder(peerId: peer, pinned: pinned))
+        ToastManager.shared.showToast(pinned ? "Pinned" : "Unpinned", type: .success, systemImage: pinned ? "pin.fill" : "pin.slash")
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update pin state", error: error)
+        ToastManager.shared.showToast("Couldn’t update pin", type: .error, systemImage: "exclamationmark.triangle")
+      }
+    }
+  }
+
+  func toggleFollow() {
+    let peer = chatItem.peerId
+    let follow = !isFollowing
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await Api.realtime.send(.updateDialogFollowMode(peerId: peer, selection: follow ? .following : .unfollowed))
+        ToastManager.shared.showToast(
+          follow ? "Following" : "Unfollowed",
+          description: follow
+            ? "New messages will appear in Open Chats."
+            : "Only mentions and replies can bring this thread back.",
+          type: .success,
+          systemImage: follow ? "eye.fill" : "eye.slash.fill"
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        Log.shared.error("Failed to update follow state", error: error)
+        ToastManager.shared.showToast("Couldn’t update follow", type: .error, systemImage: "exclamationmark.triangle.fill")
+      }
+    }
+  }
+
+  func copyChatLink() {
+    guard currentChatId > 0, let url = InlineDeepLink.chat(id: currentChatId).webURL else {
+      ToastManager.shared.showToast("Couldn’t copy link", type: .error, systemImage: "exclamationmark.triangle")
+      return
+    }
+    PeerInfoIOSPasteboard.copy(url.absoluteString, toast: "Copied link")
+  }
+
+  func removeParticipant(_ userInfo: UserInfo) {
+    guard currentChatId != 0 else { return }
+    let chatId = currentChatId
+    Task {
+      do {
+        try await Api.realtime.send(.removeChatParticipant(chatID: chatId, userID: userInfo.user.id))
+        await participantsWithMembersViewModel.refetchParticipants()
+      } catch {
+        Log.shared.error("Failed to remove participant", error: error)
+        ToastManager.shared.showToast("Couldn’t remove \(userInfo.user.shortDisplayName)", type: .error, systemImage: "exclamationmark.triangle")
+      }
+    }
+  }
+
+  /// Deletes or leaves the thread with the same account fencing as macOS, so
+  /// an account switch mid-request never touches the wrong local data.
+  func performDestructiveAction(_ action: ChatDestructiveAction) {
+    pendingDestructiveAction = nil
+    let peer = chatItem.peerId
+    let auth = Auth.shared.handle
+    let token: AuthAccountMutationToken
+    do {
+      token = try auth.beginAccountMutation()
+    } catch {
+      ToastManager.shared.showToast(action.failureTitle, type: .error, systemImage: "exclamationmark.triangle")
+      return
+    }
+    let writer = database.dbWriter
+    Task(priority: .userInitiated) {
+      do {
+        switch action {
+        case .delete:
+          _ = try await Api.realtime.send(.deleteChat(peerId: peer), expectedAccount: token)
+        case .leave:
+          guard let chatId = peer.asThreadId() else { return }
+          _ = try await Api.realtime.send(.removeChatParticipant(chatID: chatId, userID: token.userID), expectedAccount: token)
+          try await Chat.deleteFromLocalDatabase(peerId: peer, databaseWriter: writer, auth: auth, accountToken: token)
+        }
+        try auth.validateAccountMutation(token)
+        ToastManager.shared.showToast(action.successTitle, type: .success, systemImage: action.systemImage)
+        if isPresentedAsSheet { dismiss() }
+        router.resetTransientPresentation()
+      } catch {
+        Log.shared.error(action.failureTitle, error: error)
+        guard (try? auth.validateAccountMutation(token)) != nil else { return }
+        ToastManager.shared.showToast(action.failureTitle, type: .error, systemImage: "exclamationmark.triangle")
+      }
     }
   }
 }

@@ -1,120 +1,188 @@
+import Combine
 import Foundation
 import InlineKit
 import InlineUI
+import Observation
 import SwiftUI
 
+/// The Voice tab: month cards of voice messages, newest first.
+///
+/// Rows are static until played. `VoiceMessageBubble` observes the shared player, which
+/// publishes on every playback tick and checks the file on disk in `body`, so only the
+/// selected message gets one; every other row is two lines of text and a play glyph.
+/// Tapping a row plays it inline, downloading first when needed.
 struct VoiceMemosTabView: View {
   @ObservedObject var voiceMemosViewModel: ChatVoiceMemosViewModel
   let onShowInChat: (Message) -> Void
 
+  @State private var model = ChatInfoResourceListModel<VoiceMemoMessage, ChatInfoResourceListItem<VoiceMemoMessage>>()
+  private var selection: ChatInfoResourceVoiceSelection { .shared }
+
   var body: some View {
-    VStack(spacing: 16) {
-      if !voiceMemosViewModel.voiceMemoMessages.isEmpty {
-        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-          ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
-            ChatInfoDateSection(
-              dateText: ChatInfoSectionDate.text(for: group.date),
-              headerInsets: EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 0)
-            ) {
-              ForEach(group.messages) { voiceMemo in
-                VoiceMemoRow(
-                  voiceMemo: voiceMemo,
-                  onShowInChat: {
-                    onShowInChat(voiceMemo.message)
-                  }
-                )
-                .padding(.bottom, 4)
-                .onAppear {
-                  Task {
-                    await voiceMemosViewModel.loadMoreIfNeeded(currentMessageId: voiceMemo.message.messageId)
-                  }
-                }
-              }
-            }
+    let sections = model.cache.sections(
+      for: voiceMemosViewModel.voiceMemoMessages,
+      date: \.message.date,
+      id: \.message.messageId
+    ) { voiceMemo, placement in
+      ChatInfoResourceListItem(id: voiceMemo.id, placement: placement, row: voiceMemo)
+    }
+    let current = selection.current
+
+    LazyVStack(spacing: 0) {
+      ForEach(sections) { section in
+        Section {
+          ForEach(section.items) { item in
+            ChatInfoResourceVoiceRow(
+              voiceMemo: item.row,
+              isSelected: current == ChatInfoResourceVoiceSelection.Key(item.row.message),
+              onShowInChat: onShowInChat
+            )
+            .equatable()
+            .chatInfoResourceRow(item.placement.position)
+            .onAppear { model.itemAppeared(item.placement.index, window: voiceMemosViewModel) }
           }
+        } header: {
+          ChatInfoResourceSectionHeader(title: section.title)
         }
       }
+
       ChatInfoResourceFooter(
-        state: voiceMemosViewModel.loadState, isEmpty: voiceMemosViewModel.voiceMemoMessages.isEmpty,
-        emptyMessage: "No voice memos found in this chat.", loadMore: voiceMemosViewModel.loadMore,
-        retry: voiceMemosViewModel.retry
+        state: voiceMemosViewModel.loadState,
+        rowCount: voiceMemosViewModel.voiceMemoMessages.count,
+        empty: .init(systemImage: "waveform", message: "No voice messages yet"),
+        onReachEnd: { model.pager.requestMore(voiceMemosViewModel) },
+        retry: { model.pager.retry(voiceMemosViewModel) }
       )
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .frame(maxWidth: .infinity, alignment: .top)
     .task {
+      #if DEBUG
+      await ChatInfoResourceHarness.seedIfRequested()
+      #endif
       await voiceMemosViewModel.loadInitial()
     }
     .onDisappear { voiceMemosViewModel.deactivate() }
   }
 }
 
-private struct VoiceMemoRow: View {
+/// Which voice message the shared player has selected (playing, paused or downloading),
+/// published only when the selection changes rather than on every playback tick.
+@MainActor
+@Observable
+final class ChatInfoResourceVoiceSelection {
+  struct Key: Hashable {
+    let chatId: Int64
+    let messageId: Int64
+
+    init(chatId: Int64, messageId: Int64) {
+      self.chatId = chatId
+      self.messageId = messageId
+    }
+
+    init(_ message: Message) {
+      self.init(chatId: message.chatId, messageId: message.messageId)
+    }
+  }
+
+  static let shared = ChatInfoResourceVoiceSelection()
+
+  private(set) var current: Key?
+  @ObservationIgnored private var subscription: AnyCancellable?
+
+  private init() {
+    let player = SharedAudioPlayer.shared
+    subscription = player.$state.map(\.item)
+      .combineLatest(player.$loadingVoice.map { $0?.item })
+      .map { playing, loading -> Key? in
+        guard let item = loading ?? playing, item.kind == .voice else { return nil }
+        return Key(chatId: item.chatId, messageId: item.messageId)
+      }
+      .removeDuplicates()
+      .sink { [weak self] key in
+        MainActor.assumeIsolated {
+          self?.current = key
+        }
+      }
+  }
+}
+
+private struct ChatInfoResourceVoiceRow: View, Equatable {
   let voiceMemo: VoiceMemoMessage
-  let onShowInChat: () -> Void
+  let isSelected: Bool
+  let onShowInChat: (Message) -> Void
+
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.voiceMemo == rhs.voiceMemo && lhs.isSelected == rhs.isSelected
+  }
+
+  private var accent: Color {
+    Color(ThemeManager.shared.selected.accent)
+  }
+
+  private var detailText: String {
+    let date = ChatInfoResourceFormat.rowDate(voiceMemo.message.date)
+    guard voiceMemo.voice.duration > 0 else { return date }
+    return "\(ChatInfoResourceFormat.duration(Int(voiceMemo.voice.duration))) · \(date)"
+  }
 
   var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: "waveform")
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundStyle(Color(ThemeManager.shared.selected.accent))
-        .frame(width: 42, height: 42)
-        .background(Circle().fill(.primary.opacity(0.04)))
-
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 8) {
-          Text("Voice memo")
-            .font(.body)
-            .foregroundStyle(.primary)
-
-          Spacer(minLength: 8)
-
-          if let duration = formatDuration(voiceMemo.voice.duration) {
-            Text(duration)
-              .font(.callout.monospacedDigit())
-              .foregroundStyle(.secondary)
-          }
+    Group {
+      if isSelected {
+        // The bubble owns play, pause, seek and download here; no row button around it.
+        VStack(alignment: .leading, spacing: 6) {
+          header(symbol: "waveform")
+          VoiceMessageBubble(message: voiceMemo.message, outgoing: false, mode: .minimal, accentColor: accent)
+            .padding(.leading, ChatInfoResourceMetrics.tileSize + ChatInfoResourceMetrics.tileSpacing)
         }
-
-        VoiceMessageBubble(
-          message: voiceMemo.message,
-          outgoing: false,
-          maxWidth: 300,
-          mode: .minimal
-        )
+        .padding(.horizontal, ChatInfoResourceMetrics.rowHorizontalPadding)
+        .padding(.vertical, ChatInfoResourceMetrics.rowVerticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      } else {
+        Button {
+          SharedAudioPlayer.shared.requestVoicePlayback(for: voiceMemo.message)
+        } label: {
+          header(symbol: "play.fill")
+            .padding(.horizontal, ChatInfoResourceMetrics.rowHorizontalPadding)
+            .padding(.vertical, ChatInfoResourceMetrics.rowVerticalPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ChatInfoResourceRowButtonStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Voice message, \(detailText)"))
+        .accessibilityHint("Plays the voice message")
+        .accessibilityAddTraits(.isButton)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.vertical, 14)
-    .padding(.horizontal, 14)
-    .background {
-      RoundedRectangle(cornerRadius: 18)
-        .fill(fileBackgroundColor)
-    }
-    .padding(.horizontal, 16)
+    .animation(.smooth(duration: 0.25), value: isSelected)
     .contextMenu {
       Button {
-        onShowInChat()
+        onShowInChat(voiceMemo.message)
       } label: {
         Label("Show in Chat", systemImage: "text.bubble")
       }
     }
   }
 
-  private var fileBackgroundColor: Color {
-    Color(UIColor { traitCollection in
-      if traitCollection.userInterfaceStyle == .dark {
-        UIColor(hex: "#141414") ?? UIColor.systemGray6
-      } else {
-        UIColor(hex: "#F8F8F8") ?? UIColor.systemGray6
+  private func header(symbol: String) -> some View {
+    HStack(spacing: ChatInfoResourceMetrics.tileSpacing) {
+      Image(systemName: symbol)
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundStyle(accent)
+        .frame(width: ChatInfoResourceMetrics.tileSize, height: ChatInfoResourceMetrics.tileSize)
+        .background(accent.opacity(0.14), in: Circle())
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Voice message")
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+        Text(detailText)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
       }
-    })
-  }
-
-  private func formatDuration(_ duration: Int32) -> String? {
-    guard duration > 0 else { return nil }
-    let clamped = Int(duration)
-    let minutes = clamped / 60
-    let seconds = clamped % 60
-    return String(format: "%d:%02d", minutes, seconds)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
   }
 }

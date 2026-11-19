@@ -7,6 +7,10 @@ import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// A file in the Files tab: a 40 pt type tile (or the file's thumbnail), the name, and
+/// "size · date". Tapping downloads, cancels or opens the file, as the tile shows.
+///
+/// The row draws only its content; `chatInfoResourceRow(_:)` adds the card around it.
 struct DocumentRow: View {
   // MARK: - Properties
 
@@ -38,14 +42,14 @@ struct DocumentRow: View {
 
   // MARK: - Computed Properties
 
-  /// The file URL for the document if it exists locally
+  /// The file URL for the document if it exists locally. Checks the disk, so call it
+  /// from actions and state changes, not from `body`.
   var documentURL: URL? {
     guard let localPath = document.localPath else {
       return nil
     }
 
-    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
-    let fileURL = cacheDirectory.appendingPathComponent(localPath)
+    let fileURL = ChatInfoResourceFiles.documents.appendingPathComponent(localPath)
 
     // Only return the URL if the file actually exists
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -69,18 +73,21 @@ struct DocumentRow: View {
   // MARK: - Body
 
   var body: some View {
-    HStack(spacing: 9) {
-      fileIconCircleButton
-      fileData
-      Spacer()
+    Button(action: viewTapped) {
+      HStack(spacing: ChatInfoResourceMetrics.tileSpacing) {
+        fileTile
+        fileData
+      }
+      .padding(.horizontal, ChatInfoResourceMetrics.rowHorizontalPadding)
+      .padding(.vertical, ChatInfoResourceMetrics.rowVerticalPadding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
     }
-    .frame(maxWidth: .infinity)
-    .padding(.vertical, contentVPadding)
-    .padding(.horizontal, contentHPadding)
-    .background {
-      fileBackgroundRect
-    }
-    .padding(.horizontal, contentHMargin)
+    .buttonStyle(ChatInfoResourceRowButtonStyle())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(accessibilityTitle)
+    .accessibilityHint(accessibilityActionHint)
+    .accessibilityAddTraits(.isButton)
     .contextMenu {
       switch documentState {
         case .needsDownload:
@@ -107,9 +114,6 @@ struct DocumentRow: View {
           Label("Show in Chat", systemImage: "text.bubble")
         }
       }
-    }
-    .onTapGesture {
-      viewTapped()
     }
     .onAppear {
       setupInitialState()

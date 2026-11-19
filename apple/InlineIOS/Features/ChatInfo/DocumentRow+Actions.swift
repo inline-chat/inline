@@ -7,19 +7,6 @@ import SwiftUI
 import UIKit
 
 extension DocumentRow {
-  func fileIconButtonTapped() {
-    switch documentState {
-      case .needsDownload:
-        downloadFile()
-
-      case .downloading:
-        cancelDownload()
-
-      case .locallyAvailable:
-        openFile()
-    }
-  }
-
   func viewTapped() {
     guard !isBeingRemoved else { return }
 
