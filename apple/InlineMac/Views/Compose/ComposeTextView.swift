@@ -63,9 +63,22 @@ class ComposeNSTextView: NSTextView {
     if window == nil { resetPastedLinks() }
   }
 
+  /// Return, keypad Enter, Tab and Escape commit or cancel an input method's marked text (Japanese, Chinese,
+  /// Korean). They must reach the input context instead of the compose shortcuts, or Return sends half-typed text.
+  private static let markedTextCommitKeyCodes: Set<UInt16> = [36, 76, 48, 53]
+
+  /// The Return/Tab/Escape event handed to the input method while it had marked text.
+  private var inputMethodKeyEvent: NSEvent?
+
   override func keyDown(with event: NSEvent) {
+    if hasMarkedText(), Self.markedTextCommitKeyCodes.contains(event.keyCode) {
+      inputMethodKeyEvent = event
+      defer { inputMethodKeyEvent = nil }
+      super.keyDown(with: event)
+      return
+    }
+
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    let actionModifiers = modifiers.intersection([.command, .control, .option, .shift])
     if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "b" {
       toggleBold(self)
       return
@@ -84,28 +97,8 @@ class ComposeNSTextView: NSTextView {
     }
 
     // Handle return key
-    if event.keyCode == 36 {
-      if actionModifiers == [.option] {
-        if let delegate = delegate as? ComposeTextViewDelegate,
-           delegate.textViewDidPressOptionReturn(self) {
-          return
-        }
-      } else if event.modifierFlags.contains(.command) {
-        if let delegate = delegate as? ComposeTextViewDelegate {
-          if delegate.textViewDidPressCommandReturn(self) {
-            return
-          }
-        }
-      } else if !event.modifierFlags.contains(.shift), !event.modifierFlags.contains(.control),
-                !event.modifierFlags.contains(.option)
-      {
-        if let delegate = delegate as? ComposeTextViewDelegate {
-          // TODO: Improve this logic to only call return if actually return handler handles it
-          if delegate.textViewDidPressReturn(self) {
-            return
-          }
-        }
-      }
+    if event.keyCode == 36, handleReturnKey(event) {
+      return
     }
 
     // Handle arrow up key
@@ -165,6 +158,33 @@ class ComposeNSTextView: NSTextView {
     isHandlingKeyDown = true
     defer { isHandlingKeyDown = false }
     super.keyDown(with: event)
+  }
+
+  private func handleReturnKey(_ event: NSEvent) -> Bool {
+    guard let delegate = delegate as? ComposeTextViewDelegate else { return false }
+    let actionModifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+    if actionModifiers == [.option] {
+      return delegate.textViewDidPressOptionReturn(self)
+    } else if event.modifierFlags.contains(.command) {
+      return delegate.textViewDidPressCommandReturn(self)
+    } else if !event.modifierFlags.contains(.shift), !event.modifierFlags.contains(.control),
+              !event.modifierFlags.contains(.option)
+    {
+      // TODO: Improve this logic to only call return if actually return handler handles it
+      return delegate.textViewDidPressReturn(self)
+    }
+    return false
+  }
+
+  override func doCommand(by selector: Selector) {
+    // A Korean input method commits its syllable on Return and then passes the Return on as a
+    // newline; give that its compose meaning (send). Japanese and Chinese ones consume it.
+    if selector == #selector(insertNewline(_:)), let event = inputMethodKeyEvent, event.keyCode == 36,
+       !hasMarkedText(), handleReturnKey(event)
+    {
+      return
+    }
+    super.doCommand(by: selector)
   }
 
   override func insertText(_ insertString: Any, replacementRange: NSRange) {

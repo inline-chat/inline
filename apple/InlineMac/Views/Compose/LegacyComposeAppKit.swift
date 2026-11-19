@@ -1722,6 +1722,8 @@ class LegacyComposeAppKit: NSView {
   // Send the message
   func send(sendMode: MessageSendMode? = nil, interpretInlineCommands: Bool = true) {
     guard messageList?.isMessageSelectionActive != true else { return }
+    // An input method is still composing; its marked text is not final.
+    guard !textEditor.textView.hasMarkedText() else { return }
     textEditor.textView.resetPastedLinks()
     if voiceViewModel.phase == .review {
       sendVoiceRecording()

@@ -2634,6 +2634,8 @@ class GlassComposeAppKit: NSView {
   /// Send the message
   func send(sendMode: MessageSendMode? = nil, interpretInlineCommands: Bool = true) {
     guard messageList?.isMessageSelectionActive != true else { return }
+    // An input method is still composing; its marked text is not final.
+    guard !textEditor.textView.hasMarkedText() else { return }
     textEditor.textView.resetPastedLinks()
     if case let .newThread(context) = usage {
       sendNewThread(using: context, intent: .openThread)
@@ -2856,6 +2858,7 @@ class GlassComposeAppKit: NSView {
     intent: NewThreadComposeSubmissionIntent
   ) {
     guard canSend, !isSubmittingNewThread, !currentVoiceActive else { return }
+    guard !textEditor.textView.hasMarkedText() else { return }
     guard let authorUserID = dependencies.auth.currentUserId else {
       ToastCenter.shared.showError("You're signed out. Please log in again.")
       return
