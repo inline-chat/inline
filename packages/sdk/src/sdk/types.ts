@@ -485,6 +485,7 @@ export const rpcInputKindByMethod = {
   131: "updateBotAgent",
   132: "deleteBotAgent",
   170: "getSpaces",
+  172: "getCommonChats",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -556,6 +557,7 @@ export const rpcResultKindByMethod = {
   131: "updateBotAgent",
   132: "deleteBotAgent",
   170: "getSpaces",
+  172: "getCommonChats",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

@@ -2498,6 +2498,11 @@ describe("InlineSdkClient", () => {
     expect(rpcResultKindByMethod[Method.GET_SPACES]).toBe("getSpaces")
   })
 
+  it("invoke() validates the common chats RPC shape", () => {
+    expect(rpcInputKindByMethod[Method.GET_COMMON_CHATS]).toBe("getCommonChats")
+    expect(rpcResultKindByMethod[Method.GET_COMMON_CHATS]).toBe("getCommonChats")
+  })
+
   it("emits normalized inbound events and performs chat catch-up when state store is provided", async () => {
     const transport = new MockTransport()
     const store = new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 1 } })
