@@ -35,6 +35,7 @@ enum MediaCacheSweep {
     Task.detached(priority: .background) {
       try? await Task.sleep(for: launchDelay)
       _ = runIfDue(database: database)
+      await StorageUsageService(database: { database }).applyAutomaticCleanupIfDue()
     }
   }
 
