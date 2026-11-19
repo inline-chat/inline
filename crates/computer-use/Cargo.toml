@@ -1,0 +1,20 @@
+[package]
+name = "inline-computer-use"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Computer use for agents: a stdio MCP server that reads and operates macOS apps."
+
+[dependencies]
+base64 = "0.22.1"
+serde_json.workspace = true
+
+# The engine: accessibility-tree snapshots with refs, background input, and
+# screenshots (vercel-labs/agent-desktop, Apache-2.0), pinned by revision.
+[target.'cfg(target_os = "macos")'.dependencies]
+agent-desktop-core = { git = "https://github.com/vercel-labs/agent-desktop", rev = "e8934a5e95e1d212c74ead95cd3e4701c04eca31" }
+agent-desktop-macos = { git = "https://github.com/vercel-labs/agent-desktop", rev = "e8934a5e95e1d212c74ead95cd3e4701c04eca31" }
