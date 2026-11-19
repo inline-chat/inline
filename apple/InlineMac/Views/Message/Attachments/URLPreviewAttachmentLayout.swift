@@ -81,14 +81,15 @@ enum URLPreviewAttachmentLayout {
   static let authorFont: NSFont = .systemFont(ofSize: 12, weight: .medium)
   static let authorSubtitleFont: NSFont = .systemFont(ofSize: 11)
   static let compactDescriptionFont: NSFont = .systemFont(ofSize: 12)
-  static let largeDescriptionFont: NSFont = Theme.messageTextFont
+  /// Large previews describe the page in the chat font, at the chat size.
+  static var largeDescriptionFont: NSFont { ChatTypography.current.font }
 
   private static let compactTitleMeasurer = TextMeasurer(font: titleFont, lineBreakMode: .byTruncatingTail)
   private static let largeTitleMeasurer = TextMeasurer(font: titleFont)
   private static let compactDescriptionMeasurer = TextMeasurer(font: compactDescriptionFont, lineBreakMode: .byTruncatingTail)
   private static let authorMeasurer = TextMeasurer(font: authorFont, lineBreakMode: .byTruncatingTail)
   private static let authorSubtitleMeasurer = TextMeasurer(font: authorSubtitleFont, lineBreakMode: .byTruncatingTail)
-  private static let largeDescriptionMeasurer = TextMeasurer(font: largeDescriptionFont)
+  private static var largeDescriptionMeasurer: TextMeasurer { TextMeasurer(font: largeDescriptionFont) }
 
   static func mode(for fullAttachment: FullAttachment) -> Mode {
     guard let preview = fullAttachment.urlPreview else { return .compact }

@@ -32,7 +32,7 @@ struct RichBlockPalette {
     self.tertiary = tertiary
     self.link = link
     subtleFill = primary.withAlphaComponent(0.045)
-    codeFill = primary.withAlphaComponent(0.065)
+    codeFill = primary.withAlphaComponent(0.06)
     separator = primary.withAlphaComponent(0.14)
     placeholder = primary.withAlphaComponent(0.075)
   }

@@ -67,9 +67,12 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   /// Photos and videos sent with the row's message, drawn as one grid in its photo's place.
   var album: MessageAlbum? = nil
   var layout: MessageSizeCalculator.LayoutPlans
+  /// A typography change must rebuild the text, not just resize the existing view.
+  var typographyRevision: Int = ChatTypography.current.revision
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
-    firstInGroup == rhs.firstInGroup &&
+    typographyRevision == rhs.typographyRevision &&
+      firstInGroup == rhs.firstInGroup &&
       lastInGroup == rhs.lastInGroup &&
       (renderStyle == .bubble || startsAfterDaySeparator == rhs.startsAfterDaySeparator) &&
       isLastMessage == rhs.isLastMessage &&

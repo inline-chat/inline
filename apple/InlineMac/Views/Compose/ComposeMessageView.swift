@@ -15,7 +15,7 @@ class ComposeMessageView: NSView {
   private var onClose: () -> Void
   private var kind: Kind = .replying
   private var heightConstraint: NSLayoutConstraint!
-  private let defaultHeight: CGFloat = Theme.embeddedMessageHeight
+  private var defaultHeight: CGFloat { Theme.embeddedMessageHeight }
   private let buttonSize: CGFloat = Theme.composeButtonSize
 
   // MARK: - Constants

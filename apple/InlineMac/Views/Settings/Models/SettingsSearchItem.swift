@@ -39,7 +39,10 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case compactToolbar
   case centeredChats
   case fonts
+  case fallbackFont
+  case codeFont
   case fontSize
+  case lineSpacing
 
   // Audio and Video
   case inputDevice
@@ -119,6 +122,15 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 
   var id: String { rawValue }
 
+  /// The row a search result scrolls to. Font options live in the Message Text
+  /// customization sheet, so they land on the row that opens it.
+  var searchAnchor: SettingsSearchItem {
+    switch self {
+    case .fallbackFont, .codeFont, .lineSpacing: .fonts
+    default: self
+    }
+  }
+
   var category: SettingsCategory {
     switch self {
     case .profile, .username, .email, .phone, .technicalDetails, .signOut:
@@ -128,7 +140,8 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
          .openReplyThreadsInSidePane, .openChatsCleanup, .developerMode:
       .general
     case .appearance, .theme, .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
-         .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize:
+         .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize,
+         .lineSpacing, .fallbackFont, .codeFont:
       .appearance
     case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds:
       .audioAndVideo
@@ -193,8 +206,11 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .unreadBadgeStyle: "Unread Badge Style"
     case .compactToolbar: "Compact Toolbar"
     case .centeredChats: "Centered Chats"
-    case .fonts: "Fonts"
-    case .fontSize: "Size"
+    case .fonts: "Font"
+    case .fallbackFont: "Fallback Font"
+    case .codeFont: "Code Font"
+    case .fontSize: "Text Size"
+    case .lineSpacing: "Line Spacing"
     case .inputDevice: "Input Device"
     case .outputDevice: "Output Device"
     case .autoUnmuteOnJoin: "Auto-Unmute on Join"
@@ -272,7 +288,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .unreadBadgeStyle: "Badges"
     case .compactToolbar: "Toolbar"
     case .centeredChats: "Chat Layout"
-    case .fonts, .fontSize: "Typography"
+    case .fonts, .fallbackFont, .codeFont, .fontSize, .lineSpacing: "Messages"
     case .inputDevice, .outputDevice: "Devices"
     case .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds: "Grid"
     case .dockBadge: "Dock"
@@ -341,8 +357,11 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .unreadBadgeStyle: ["count", "dot", "unread"]
     case .compactToolbar: ["titlebar", "height"]
     case .centeredChats: ["width", "column", "layout", "composer"]
-    case .fonts: ["font family", "typeface", "text"]
-    case .fontSize: ["font size", "text size", "bigger", "smaller", "zoom"]
+    case .fonts: ["font family", "typeface", "typography", "serif", "rounded", "monospace"]
+    case .fontSize: ["font size", "text size", "bigger", "smaller", "zoom", "typography"]
+    case .lineSpacing: ["line height", "leading", "spacing", "typography"]
+    case .fallbackFont: ["fallback", "script", "language", "persian", "arabic", "cjk", "typography"]
+    case .codeFont: ["monospace", "code", "programming", "mono", "typography"]
     case .inputDevice: ["microphone", "mic"]
     case .outputDevice: ["speaker", "headphones"]
     case .autoUnmuteOnJoin: ["microphone", "call", "room"]

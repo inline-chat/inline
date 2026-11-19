@@ -48,7 +48,9 @@ enum CoreTextMessageText {
       tailIndent: style.tailIndent,
       lineSpacing: style.lineSpacing,
       spacingBefore: style.paragraphSpacingBefore,
-      spacingAfter: style.paragraphSpacing
+      spacingAfter: style.paragraphSpacing,
+      minimumLineHeight: style.minimumLineHeight,
+      maximumLineHeight: style.maximumLineHeight
     )
   }
 

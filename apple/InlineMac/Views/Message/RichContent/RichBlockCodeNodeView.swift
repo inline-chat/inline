@@ -4,7 +4,7 @@ import InlineSyntaxHighlighting
 final class RichBlockCodeNodeView: RichBlockRenderableView {
   private let languageLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 10, weight: .medium)
+    label.font = .systemFont(ofSize: RichBlockCodeMetrics.labelFontSize, weight: .regular)
     label.lineBreakMode = .byTruncatingTail
     return label
   }()
@@ -18,10 +18,16 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     button.image = NSImage(
       systemSymbolName: "doc.on.doc",
       accessibilityDescription: "Copy code"
-    )?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+    )?.withSymbolConfiguration(.init(pointSize: RichBlockCodeMetrics.copyIconSize, weight: .regular))
     button.toolTip = "Copy code"
     button.setAccessibilityLabel("Copy code")
     return button
+  }()
+
+  private let headerDivider: NSView = {
+    let view = NSView(frame: .zero)
+    view.wantsLayer = true
+    return view
   }()
 
   private let gutter = RichBlockCodeGutterView(frame: .zero)
@@ -107,6 +113,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     copyButton.target = self
     copyButton.action = #selector(copyCode)
     addSubview(languageLabel)
+    addSubview(headerDivider)
     addSubview(gutter)
     addSubview(surface)
     // Without a language header the button overlays the text surface, so it
@@ -151,13 +158,16 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     gutter.isHidden = !showsGutter
     languageLabel.stringValue = code.language.map(RichBlockCodeMetrics.displayLanguage) ?? ""
     languageLabel.isHidden = code.language == nil
-    languageLabel.textColor = context.palette.secondary
-    copyButton.contentTintColor = context.palette.secondary
+    headerDivider.isHidden = code.language == nil
+    languageLabel.textColor = context.palette.primary.withAlphaComponent(RichBlockCodeMetrics.labelAlpha)
+    headerDivider.layer?.backgroundColor = context.palette.primary
+      .withAlphaComponent(RichBlockCodeMetrics.dividerAlpha).cgColor
+    copyButton.contentTintColor = context.palette.primary.withAlphaComponent(RichBlockCodeMetrics.copyIconAlpha)
     layer?.backgroundColor = context.palette.codeFill.cgColor
     gutter.apply(
       lineCount: code.lineCount,
       font: RichBlockCodeMetrics.gutterFont,
-      color: context.palette.tertiary
+      color: context.palette.primary.withAlphaComponent(RichBlockCodeMetrics.lineNumberAlpha)
     )
     let input = HighlightInput(
       baseText: text,
@@ -219,7 +229,14 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
       width: max(0, bounds.width - 80),
       height: RichBlockCodeMetrics.headerControlHeight
     )
-    let copyButtonSize = CGSize(width: 16, height: 16)
+    let copyButtonSize = CGSize(width: RichBlockCodeMetrics.copyButtonSide, height: RichBlockCodeMetrics.copyButtonSide)
+    let dividerHeight = 1 / max(1, window?.backingScaleFactor ?? 2)
+    headerDivider.frame = CGRect(
+      x: 0,
+      y: RichBlockCodeMetrics.languageHeaderHeight - dividerHeight,
+      width: bounds.width,
+      height: dividerHeight
+    )
     let copyY: CGFloat = if hasLanguage {
       max(
         RichBlockCodeMetrics.headerControlTopInset,
@@ -251,7 +268,11 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
         + gutterWidth
         + (gutterWidth > 0 ? RichBlockCodeMetrics.gutterContentGap : 0),
       y: bodyY,
-      width: RichBlockCodeMetrics.bodyWidth(containerWidth: bounds.width, gutterWidth: gutterWidth),
+      width: RichBlockCodeMetrics.bodyWidth(
+        containerWidth: bounds.width,
+        gutterWidth: gutterWidth,
+        hasLanguage: hasLanguage
+      ),
       height: bodyHeight
     )
     surface.layoutSubtreeIfNeeded()
@@ -277,7 +298,7 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     copyButton.image = NSImage(
       systemSymbolName: symbolName,
       accessibilityDescription: label
-    )?.withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+    )?.withSymbolConfiguration(.init(pointSize: RichBlockCodeMetrics.copyIconSize, weight: .regular))
     copyButton.toolTip = label
     copyButton.setAccessibilityLabel(label)
   }

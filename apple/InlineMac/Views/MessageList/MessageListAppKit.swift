@@ -223,6 +223,12 @@ class MessageListAppKit: NSViewController {
       name: .richBlockLayoutStateDidChange,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(chatTypographyDidChange),
+      name: ChatTypography.didChangeNotification,
+      object: nil
+    )
 
     // observe data
     chatRows.observe { [weak self] update in
@@ -2074,6 +2080,40 @@ class MessageListAppKit: NSViewController {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+  }
+
+  /// Coalesces bursts (a dragged size slider, a held shortcut) into one reload per run loop turn.
+  private var typographyReloadScheduled = false
+
+  @objc private func chatTypographyDidChange(_ notification: Notification) {
+    guard !typographyReloadScheduled else { return }
+    typographyReloadScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      typographyReloadScheduled = false
+      reloadForTypographyChange()
+    }
+  }
+
+  /// Every row re-measures and rebuilds its text: row props carry the typography
+  /// revision, so no cell keeps text laid out with the previous font.
+  private func reloadForTypographyChange() {
+    guard isViewLoaded, !isDisposed, tableView.numberOfRows > 0 else { return }
+    let wasAtBottom = shouldKeepBottomPinned
+    let anchors = wasAtBottom ? [] : viewport.anchors()
+
+    clearHoveredMessage()
+    tableView.reloadData()
+    tableView.layoutSubtreeIfNeeded()
+    if wasAtBottom {
+      scrollToBottom(animated: false)
+    } else if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+      viewport.restore(anchor)
+    }
+    maintainReadingHoldIfNeeded()
+    syncAvatarOverlayAfterTableLayout()
+    textSelection.setNeedsRefresh()
+    scheduleMessageHoverRefresh()
   }
 
   @objc private func richBlockLayoutStateDidChange(_ notification: Notification) {

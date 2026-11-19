@@ -3381,17 +3381,13 @@ class MessageViewAppKit: NSView {
     } else {
       let codeBlockBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.05)
       let inlineCodeBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.06)
-      let processed = ProcessEntities.toAttributedString(
+      let processed = MessageTextTypography.attributedText(
         text: text,
         entities: entities,
-        configuration: .init(
-          font: ChatTypography.current.font(sized: props.layout.fontSize),
-          boldWeight: .semibold,
-          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
-          palette: richTextPalette,
-          codeBlockBackgroundColor: codeBlockBackgroundColor,
-          inlineCodeBackgroundColor: inlineCodeBackgroundColor
-        )
+        fontSize: props.layout.fontSize,
+        palette: richTextPalette,
+        codeBlockBackgroundColor: codeBlockBackgroundColor,
+        inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
       let linkMatches = LinkDetector.shared.applyLinkStyling(
         to: processed,

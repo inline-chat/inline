@@ -12,7 +12,6 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     static let contentSpacing: CGFloat = 6
     static let verticalPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 6
-    static let height: CGFloat = Theme.embeddedMessageHeight
     static let photoWidth: CGFloat = 32
     static let photoHeight: CGFloat = 32
   }
@@ -106,12 +105,20 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     return .systemFont(ofSize: size, weight: weight)
   }
 
+  /// Reply previews read in the chat font at the chat size; the pinned header
+  /// keeps its own compact text.
   private var messageFont: NSFont {
     if kind == .pinnedInHeader {
       return .systemFont(ofSize: max(10, Theme.messageTextFont.pointSize - 1))
     }
-    return Theme.messageTextFont
+    return ChatTypography.current.font
   }
+
+  private var expandedHeight: CGFloat {
+    kind == .pinnedInHeader ? Theme.pinnedMessageHeight : Theme.embeddedMessageHeight
+  }
+
+  private var isCollapsed = false
 
   private var textColor: NSColor {
     if style == .colored {
@@ -241,7 +248,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     rectangleTopConstraint = rectangleView.topAnchor.constraint(equalTo: topAnchor)
     rectangleBottomConstraint = rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
-    heightConstraint = heightAnchor.constraint(equalToConstant: Constants.height)
+    heightConstraint = heightAnchor.constraint(equalToConstant: expandedHeight)
     nameLabelHeightConstraint = nameLabel.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight)
     nameLabelTopConstraint = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding)
     messageLabelBottomConstraint = messageLabel.bottomAnchor.constraint(
@@ -301,7 +308,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   }
 
   func setCollapsed(_ collapsed: Bool) {
-    let height = collapsed ? 0 : Constants.height
+    isCollapsed = collapsed
+    let height = collapsed ? 0 : expandedHeight
     let nameHeight = collapsed ? 0 : Theme.messageNameLabelHeight
     let verticalPadding = collapsed ? 0 : Constants.verticalPadding
 
@@ -450,6 +458,9 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     // Update visuals after setting senderNameForColor
     nameLabel.font = senderFont
     messageLabel.font = messageFont
+    if !isCollapsed {
+      heightConstraint?.constant = expandedHeight
+    }
     updateLabelLayout()
     applyResolvedStyle()
 
@@ -662,7 +673,7 @@ extension EmbeddedMessageView {
     case compose
   }
 
-  static let height: CGFloat = Theme.embeddedMessageHeight
+  static var height: CGFloat { Theme.embeddedMessageHeight }
 
   convenience init() {
     self.init(style: .colored)

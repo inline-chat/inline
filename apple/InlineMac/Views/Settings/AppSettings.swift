@@ -258,55 +258,154 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  // MARK: - Chat typography
+
+  // Stored as strings so hand-edited defaults (fallback family lists, fractional
+  // sizes) keep working. Every change applies live through `ChatTypography.apply`.
+
   @Published var chatFontFamilies: String {
     didSet {
-      Self.persistOptionalString(
-        chatFontFamilies,
-        forKey: ChatTypography.fontFamiliesDefaultsKey
-      )
+      Self.persistOptionalString(chatFontFamilies, forKey: ChatTypography.fontFamiliesDefaultsKey)
+      applyChatTypography()
     }
   }
 
   @Published var chatFontSize: String {
     didSet {
-      Self.persistOptionalString(
-        chatFontSize,
-        forKey: ChatTypography.fontSizeDefaultsKey
-      )
+      Self.persistOptionalString(chatFontSize, forKey: ChatTypography.fontSizeDefaultsKey)
+      applyChatTypography()
     }
   }
 
-  var chatTypographyNeedsRestart: Bool {
-    ChatTypography.current.source != ChatTypography.Source(
+  @Published var chatLineHeight: String {
+    didSet {
+      Self.persistOptionalString(chatLineHeight, forKey: ChatTypography.lineHeightDefaultsKey)
+      applyChatTypography()
+    }
+  }
+
+  @Published var chatCodeFontFamily: String {
+    didSet {
+      Self.persistOptionalString(chatCodeFontFamily, forKey: ChatTypography.codeFontFamilyDefaultsKey)
+      applyChatTypography()
+    }
+  }
+
+  var chatTypographySource: ChatTypography.Source {
+    ChatTypography.Source(
       fontFamilies: chatFontFamilies,
-      fontSize: chatFontSize
+      fontSize: chatFontSize,
+      lineHeight: chatLineHeight,
+      codeFontFamily: chatCodeFontFamily
     )
   }
 
   var hasChatTypographyOverrides: Bool {
-    !chatFontFamilies.isEmpty || !chatFontSize.isEmpty
+    !chatFontFamilies.isEmpty || !chatFontSize.isEmpty || !chatLineHeight.isEmpty
+      || !chatCodeFontFamily.isEmpty
   }
 
-  var chatFontSizeStepperValue: Double {
+  /// The main message font: empty for System, a design token, or a family name.
+  /// Setting it keeps any fallback fonts.
+  var chatPrimaryFontFamily: String {
     get {
-      let value = Double(chatFontSize.trimmingCharacters(in: .whitespacesAndNewlines))
-      return value.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-        ?? Double(ChatTypography.systemPointSize)
+      let primary = ChatTypography.familyList(chatFontFamilies).first ?? ""
+      return primary.caseInsensitiveCompare(ChatTypography.SystemDesign.standard.token) == .orderedSame ? "" : primary
     }
+    set { setChatFontFamilies(primary: newValue, fallbacks: chatFallbackFontFamilies) }
+  }
+
+  /// Fonts for characters the main font lacks (other scripts, symbols), in order.
+  var chatFallbackFontFamilies: [String] {
+    Array(ChatTypography.familyList(chatFontFamilies).dropFirst())
+  }
+
+  /// The first fallback font; empty for none. Setting it keeps any further fallbacks.
+  var chatFallbackFontFamily: String {
+    get { chatFallbackFontFamilies.first ?? "" }
+    set {
+      let rest = chatFallbackFontFamilies.dropFirst()
+      setChatFontFamilies(
+        primary: chatPrimaryFontFamily,
+        fallbacks: (newValue.isEmpty ? [] : [newValue]) + rest
+      )
+    }
+  }
+
+  private func setChatFontFamilies(primary: String, fallbacks: [String]) {
+    let fallbacks = fallbacks.filter { $0.caseInsensitiveCompare(primary) != .orderedSame }
+    if fallbacks.isEmpty {
+      chatFontFamilies = primary
+    } else {
+      let head = primary.isEmpty ? ChatTypography.SystemDesign.standard.token : primary
+      chatFontFamilies = ChatTypography.familyString([head] + fallbacks)
+    }
+  }
+
+  /// Message text size in points; setting the default size clears the override.
+  var chatPointSize: CGFloat {
+    get { ChatTypography.current.pointSize }
     set {
       guard newValue.isFinite else { return }
-      let value = max(1, newValue)
-      if value <= Double(Int.max), value.rounded() == value {
-        chatFontSize = String(Int(value))
-      } else {
-        chatFontSize = String(value)
-      }
+      let size = min(max(newValue, ChatTypography.minimumPointSize), ChatTypography.maximumPointSize)
+      chatFontSize = size == ChatTypography.defaultPointSize ? "" : ChatTypography.format(size)
+    }
+  }
+
+  var canIncreaseChatTextSize: Bool {
+    ChatTypography.nextLargerSize(than: chatPointSize) != nil
+  }
+
+  var canDecreaseChatTextSize: Bool {
+    ChatTypography.nextSmallerSize(than: chatPointSize) != nil
+  }
+
+  var isChatTextSizeDefault: Bool {
+    chatPointSize == ChatTypography.defaultPointSize
+  }
+
+  func increaseChatTextSize() {
+    guard let size = ChatTypography.nextLargerSize(than: chatPointSize) else { NSSound.beep(); return }
+    chatPointSize = size
+  }
+
+  func decreaseChatTextSize() {
+    guard let size = ChatTypography.nextSmallerSize(than: chatPointSize) else { NSSound.beep(); return }
+    chatPointSize = size
+  }
+
+  func resetChatTextSize() {
+    chatFontSize = ""
+  }
+
+  /// Line height as a multiple of the font size; the default clears the override.
+  var chatLineHeightValue: CGFloat {
+    get { ChatTypography.current.lineHeight }
+    set {
+      guard newValue.isFinite else { return }
+      let value = min(max(newValue, ChatTypography.minimumLineHeight), ChatTypography.maximumLineHeight)
+      chatLineHeight = value == ChatTypography.defaultLineHeight ? "" : ChatTypography.format(value)
     }
   }
 
   func resetChatTypography() {
-    chatFontFamilies = ""
+    resetChatTextStyle()
     chatFontSize = ""
+  }
+
+  /// Fonts and spacing back to defaults; the text size stays.
+  func resetChatTextStyle() {
+    chatFontFamilies = ""
+    chatLineHeight = ""
+    chatCodeFontFamily = ""
+  }
+
+  var hasChatTextStyleOverrides: Bool {
+    !chatFontFamilies.isEmpty || !chatLineHeight.isEmpty || !chatCodeFontFamily.isEmpty
+  }
+
+  private func applyChatTypography() {
+    ChatTypography.apply(chatTypographySource)
   }
 
   @Published var preferredEmojiSkinTone: EmojiSkinTone {
@@ -511,6 +610,8 @@ final class AppSettings: ObservableObject {
     let chatTypographySource = ChatTypography.storedSource()
     chatFontFamilies = chatTypographySource.fontFamilies
     chatFontSize = chatTypographySource.fontSize
+    chatLineHeight = chatTypographySource.lineHeight
+    chatCodeFontFamily = chatTypographySource.codeFontFamily
 
     preferredEmojiSkinTone = EmojiSkinTonePreferenceStore.current()
 

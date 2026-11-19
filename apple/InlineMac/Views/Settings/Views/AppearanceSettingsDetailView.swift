@@ -75,7 +75,7 @@ struct AppearanceSettingsDetailView: View {
         SettingsSectionHeader("Sidebar")
       }
 
-      MessagesAppearanceSettingsSection(settings: appSettings)
+      MessageTextSettingsSection(settings: appSettings)
 
       EmojiSkinToneSettingsSection(selection: $appSettings.preferredEmojiSkinTone)
 
@@ -103,100 +103,8 @@ struct AppearanceSettingsDetailView: View {
       } header: {
         SettingsSectionHeader("Chat Layout")
       }
-
-      ChatTypographySettingsSection(settings: appSettings)
     }
     .settingsFormStyle()
-  }
-}
-
-private struct MessagesAppearanceSettingsSection: View {
-  @ObservedObject var settings: AppSettings
-
-  var body: some View {
-    Section {
-      LabeledContent {
-        Picker("Message Style", selection: $settings.messageRenderStyle) {
-          ForEach(MessageRenderStyle.allCases, id: \.self) { style in
-            Text(style.title).tag(style)
-          }
-        }
-        .labelsHidden()
-        .pickerStyle(.segmented)
-        .frame(width: 220, alignment: .trailing)
-      } label: {
-        SettingsRowLabel(
-          .messageStyle,
-          description: "Choose how messages are arranged in chats."
-        )
-      }
-      .settingsSearchAnchor(.messageStyle)
-    } header: {
-      SettingsSectionHeader("Messages")
-    }
-  }
-}
-
-private struct ChatTypographySettingsSection: View {
-  @ObservedObject var settings: AppSettings
-
-  var body: some View {
-    Section {
-      LabeledContent {
-        HStack(spacing: 8) {
-          TextField(
-            "Font Families",
-            text: $settings.chatFontFamilies,
-            prompt: Text("System")
-          )
-          .labelsHidden()
-          .frame(width: 220)
-
-          Button("Reset") {
-            settings.resetChatTypography()
-          }
-          .disabled(!settings.hasChatTypographyOverrides)
-        }
-      } label: {
-        SettingsRowLabel(
-          .fonts,
-          description: "Comma-separated font families or faces, in fallback order."
-        )
-      }
-      .settingsSearchAnchor(.fonts)
-
-      LabeledContent {
-        HStack(spacing: 6) {
-          TextField(
-            "Font Size",
-            text: $settings.chatFontSize,
-            prompt: Text(systemPointSizeLabel)
-          )
-          .labelsHidden()
-          .frame(width: 72)
-
-          Stepper("Font Size", value: $settings.chatFontSizeStepperValue)
-            .labelsHidden()
-            .fixedSize()
-        }
-      } label: {
-        SettingsRowLabel(.fontSize)
-      }
-      .settingsSearchAnchor(.fontSize)
-    } header: {
-      SettingsSectionHeader(
-        "Typography",
-        subtitle: "Power-user controls for message text."
-      )
-    } footer: {
-      if settings.chatTypographyNeedsRestart {
-        Text("Restart Inline to apply typography changes.")
-      }
-    }
-  }
-
-  private var systemPointSizeLabel: String {
-    String(format: "%g", Double(ChatTypography.systemPointSize))
   }
 }
 

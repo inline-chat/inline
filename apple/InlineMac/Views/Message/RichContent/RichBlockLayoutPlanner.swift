@@ -141,6 +141,14 @@ final class RichBlockLayoutPlanner {
   private init() {
     cache.countLimit = 256
     cache.totalCostLimit = 24 * 1_024 * 1_024
+    // Plan keys don't include code fonts or code size; drop plans from the old typography.
+    NotificationCenter.default.addObserver(
+      forName: ChatTypography.didChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [cache] _ in
+      cache.removeAllObjects()
+    }
   }
 
   func plan(
@@ -407,21 +415,19 @@ final class RichBlockLayoutPlanner {
   ) -> NSMutableAttributedString {
     let value = NSMutableAttributedString(attributedString: slice)
     let fullRange = NSRange(location: 0, length: value.length)
+    var slicePointSize = baseFontSize
     switch role {
     case .paragraph:
       break
     case let .heading(level):
-      let clamped = min(max(level, 1), 6)
-      let scale = [1.22, 1.14, 1.07, 1.02, 1.0, 1.0][clamped - 1]
+      slicePointSize = ChatTypography.headingPointSize(level: level, at: baseFontSize)
       PlatformFontTraits.applyBaseFont(
-        ChatTypography.current.font(
-          sized: baseFontSize * scale,
-          weight: clamped == 1 ? .semibold : .medium
-        ),
+        ChatTypography.current.font(sized: slicePointSize, weight: ChatTypography.headingWeight),
         to: value
       )
     case .footer:
-      PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize * 0.82), to: value)
+      slicePointSize = baseFontSize * 0.82
+      PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: slicePointSize), to: value)
       value.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: fullRange)
     case .disclosureSummary:
       PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize, weight: .regular), to: value)
@@ -431,7 +437,10 @@ final class RichBlockLayoutPlanner {
     let paragraph = NSMutableParagraphStyle()
     paragraph.baseWritingDirection = isRTL ? .rightToLeft : .leftToRight
     paragraph.alignment = isRTL ? .right : .left
+    paragraph.lineSpacing = MessageTextTypography.lineSpacing(fontSize: baseFontSize)
     value.addAttribute(.paragraphStyle, value: paragraph, range: fullRange)
+    // Base-font application rebuilds monospaced runs as SF Mono.
+    MessageTextTypography.applyCodeFont(to: value, fontSize: slicePointSize)
     return value
   }
 
@@ -481,6 +490,7 @@ final class RichBlockLayoutPlanner {
     case .center: .center
     case .right: .right
     }
+    paragraph.lineSpacing = MessageTextTypography.lineSpacing(fontSize: baseFontSize)
     value.addAttribute(.paragraphStyle, value: paragraph, range: range)
     if isHeader {
       PlatformFontTraits.applyBaseFont(ChatTypography.current.font(sized: baseFontSize, weight: .semibold), to: value)
@@ -583,7 +593,8 @@ final class RichBlockLayoutPlanner {
       }
     }
 
-    private static let blockSpacing: CGFloat = 8
+    /// Around lists, quotes, code and other non-text blocks.
+    private var blockSpacing: CGFloat { ChatTypography.space(.block, at: baseFontSize) }
     private static let albumHeight: CGFloat = 126
     private static let albumItemSpacing: CGFloat = 6
     private static let tableHorizontalPadding: CGFloat = 10
@@ -706,7 +717,7 @@ final class RichBlockLayoutPlanner {
           guard let range = BlockContentSpan.fallbackRange(
             at: index, in: blocks, text: attributedText.string as NSString, bounds: bounds
           ) else { continue }
-          if index > 0 { height += Self.blockSpacing }
+          if index > 0 { height += blockSpacing }
           let fallback = InlineProtocol.BlockText.with {
             $0.offset = Int64(range.lowerBound)
             $0.length = Int64(range.count)
@@ -727,6 +738,59 @@ final class RichBlockLayoutPlanner {
       return true
     }
 
+    /// Whitespace between two sibling blocks, from the chat spacing scale. Gaps
+    /// between text blocks add back the line spacing the earlier one drops after
+    /// its last line, so they match the same gap in plain text.
+    private func gap(
+      before block: InlineProtocol.Block,
+      after previous: InlineProtocol.Block,
+      parent: BlockContentPath
+    ) -> CGFloat {
+      let space: ChatTypography.Space
+      if Self.isList(block), case .listItem? = parent.components.last {
+        space = .listItem
+      } else if Self.isHeading(block) {
+        space = .headingAbove
+      } else if Self.isHeading(previous) {
+        space = .headingBelow
+      } else if Self.isParagraph(block), Self.isParagraph(previous) {
+        space = .paragraph
+      } else {
+        space = .block
+      }
+      let base = ChatTypography.space(space, at: baseFontSize)
+      // Same spacing the text blocks' own lines use, so the gap reads as plain text's.
+      return Self.isText(block) && Self.isText(previous)
+        ? base + MessageTextTypography.lineSpacing(fontSize: baseFontSize)
+        : base
+    }
+
+    private static func isHeading(_ block: InlineProtocol.Block) -> Bool {
+      if case .heading? = block.kind { return true }
+      return false
+    }
+
+    private static func isParagraph(_ block: InlineProtocol.Block) -> Bool {
+      if case .paragraph? = block.kind { return true }
+      return false
+    }
+
+    private static func isList(_ block: InlineProtocol.Block) -> Bool {
+      if case .list? = block.kind { return true }
+      return false
+    }
+
+    private static func isText(_ block: InlineProtocol.Block) -> Bool {
+      isHeading(block) || isParagraph(block) || isList(block)
+    }
+
+    /// Blocks with their own fill that reads as a card inside the bubble.
+    private static func isFilled(_ block: InlineProtocol.Block) -> Bool {
+      if case .quote? = block.kind { return true }
+      if case .code? = block.kind { return true }
+      return false
+    }
+
     private mutating func layout(
       blockAt index: Int,
       of blocks: [InlineProtocol.Block],
@@ -738,27 +802,23 @@ final class RichBlockLayoutPlanner {
       fullBleedContainer: (x: CGFloat, width: CGFloat)?
     ) -> Bool {
       let block = blocks[index]
-      if index == 0, case .heading? = block.kind {
-        height += parent.components.isEmpty ? 6 : 4
-      } else if index > 0 {
-        let startsNestedList: Bool = if case .list? = block.kind,
-                                       case .listItem? = parent.components.last
-        {
-          true
-        } else {
-          false
+      let isRoot = parent.components.isEmpty
+      if index == 0 {
+        // A heading sits visually high and a filled block flush with the bubble's
+        // top; give either a little room so it is inset like the bubble's sides.
+        if isRoot, Self.isHeading(block) || Self.isFilled(block) {
+          height += ChatTypography.space(.bubbleEdge, at: baseFontSize)
         }
-        let adjoinsQuote: Bool = if case .quote? = block.kind { true }
-          else if case .quote? = blocks[index - 1].kind { true }
-          else { false }
-        height += startsNestedList ? RichBlockListMetrics.itemSpacing
-          : adjoinsQuote ? RichBlockQuoteMetrics.adjacentSpacing : Self.blockSpacing
-        if case let .heading(heading)? = block.kind {
-          height += heading.level <= 2 ? 7 : 5
-        }
+      } else {
+        height += gap(before: block, after: blocks[index - 1], parent: parent)
       }
       let path = BlockContentPath(parent.components + [.block(index)])
-      let isTerminalRoot = parent.components.isEmpty && index == blocks.count - 1
+      let isTerminalRoot = isRoot && index == blocks.count - 1
+      defer {
+        if isTerminalRoot, Self.isFilled(block) {
+          height += ChatTypography.space(.bubbleEdge, at: baseFontSize)
+        }
+      }
       return layout(
         block: block,
         path: path,
@@ -866,7 +926,7 @@ final class RichBlockLayoutPlanner {
           recordMeasuredFrame(nodes[index].frame)
         }
         guard expanded, !disclosure.children.isEmpty else { return true }
-        height += Self.blockSpacing
+        height += blockSpacing
         return layout(
           blocks: disclosure.children,
           parent: path,
@@ -969,12 +1029,15 @@ final class RichBlockLayoutPlanner {
         if case .listItem = component { return true }
         return false
       }
-      let logicalInset = RichBlockListMetrics.leadingInset
+      let logicalInset = ChatTypography.space(.listInset, at: baseFontSize)
         + (isNested ? RichBlockListMetrics.nestedIndent : 0)
       let listWidth = max(1, width - logicalInset)
       let childWidth = max(1, listWidth - markerWidth)
       for (itemIndex, item) in list.items.enumerated() {
-        if itemIndex > 0 { height += RichBlockListMetrics.itemSpacing }
+        if itemIndex > 0 {
+          height += ChatTypography.space(.listItem, at: baseFontSize)
+            + MessageTextTypography.lineSpacing(fontSize: baseFontSize)
+        }
         // Each item reads in its own direction, so its marker sits on its own leading side.
         let isRTL = BlockContentDirection.direction(of: item) ?? listIsRTL
         let listX = isRTL ? x : x + logicalInset
@@ -1034,7 +1097,8 @@ final class RichBlockLayoutPlanner {
       let gutterWidth = language == nil ? 0 : RichBlockCodeMetrics.gutterWidth(lineCount: lineCount)
       let bodyWidth = RichBlockCodeMetrics.bodyWidth(
         containerWidth: width,
-        gutterWidth: gutterWidth
+        gutterWidth: gutterWidth,
+        hasLanguage: hasLanguage
       )
       let bodyHeight = textHeight(attributed, width: bodyWidth)
       let frame = CGRect(
@@ -1076,15 +1140,16 @@ final class RichBlockLayoutPlanner {
         frame: CGRect(x: x, y: startY, width: width, height: 0),
         kind: .quote(.init(isRTL: isRTL))
       ))
-      height += RichBlockQuoteMetrics.verticalInset
-      let contentX = x + (isRTL ? RichBlockQuoteMetrics.trailingInset : RichBlockQuoteMetrics.leadingInset)
+      let quoteMetrics = RichBlockQuoteMetrics(baseFontSize: baseFontSize)
+      height += quoteMetrics.verticalInset
+      let contentX = x + (isRTL ? quoteMetrics.trailingInset : quoteMetrics.leadingInset)
       let precedingMaxX = measuredMaxX
       measuredMaxX = 0
       guard layout(
         blocks: quote.children,
         parent: path,
         x: contentX,
-        width: max(1, width - RichBlockQuoteMetrics.leadingInset - RichBlockQuoteMetrics.trailingInset),
+        width: max(1, width - quoteMetrics.leadingInset - quoteMetrics.trailingInset),
         depth: depth,
         inheritedDirection: isRTL,
         fullBleedContainer: nil,
@@ -1092,10 +1157,10 @@ final class RichBlockLayoutPlanner {
       ) else { return false }
       let quotedContentMaxX = measuredMaxX
       let endingInset = isRTL
-        ? RichBlockQuoteMetrics.leadingInset
-        : RichBlockQuoteMetrics.trailingInset
+        ? quoteMetrics.leadingInset
+        : quoteMetrics.trailingInset
       measuredMaxX = max(precedingMaxX, quotedContentMaxX + endingInset)
-      height += RichBlockQuoteMetrics.verticalInset
+      height += quoteMetrics.verticalInset
       nodes[decorationIndex].frame.size.height = max(1, height - startY)
       return true
     }

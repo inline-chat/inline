@@ -427,7 +427,7 @@ class ComposeNSTextView: NSTextView {
       var attributes = typingAttributes
       attributes[.inlineCode] = enabled ? true : nil
       attributes[.font] = enabled
-        ? NSFont.monospacedSystemFont(ofSize: ComposeTextEditor.font.pointSize, weight: .regular)
+        ? ComposeTextEditor.codeFont
         : ComposeTextEditor.font
       typingAttributes = attributes
     } else if let textStorage {
@@ -437,7 +437,7 @@ class ComposeNSTextView: NSTextView {
         textStorage.addAttribute(.inlineCode, value: true, range: range)
         textStorage.addAttribute(
           .font,
-          value: NSFont.monospacedSystemFont(ofSize: ComposeTextEditor.font.pointSize, weight: .regular),
+          value: ComposeTextEditor.codeFont,
           range: range
         )
       } else {

@@ -1583,6 +1583,11 @@ class GlassComposeAppKit: NSView {
   private func setupTextEditor() {
     // Set the delegate if needed
     textEditor.delegate = self
+    textEditor.onTypographyDidChange = { [weak self] in
+      guard let self else { return }
+      updateContentHeight(for: textEditor.textView)
+      updateHeight(animate: false)
+    }
 
     // Configure text input settings
     textEditor.textView.isAutomaticSpellingCorrectionEnabled = AppSettings.shared.automaticSpellCorrection

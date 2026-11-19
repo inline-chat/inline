@@ -118,9 +118,9 @@ struct SettingsRootView: View {
     try? await Task.sleep(for: .milliseconds(80))
     guard !Task.isCancelled else { return }
     withAnimation(.easeInOut(duration: 0.25)) {
-      proxy.scrollTo(item, anchor: .center)
+      proxy.scrollTo(item.searchAnchor, anchor: .center)
     }
-    highlightedSearchItem = item
+    highlightedSearchItem = item.searchAnchor
     navigation.pendingSearchItem = nil
   }
 

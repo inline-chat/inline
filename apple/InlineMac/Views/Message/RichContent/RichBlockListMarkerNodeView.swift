@@ -34,12 +34,13 @@ final class RichBlockListMarkerNodeView: RichBlockRenderableView {
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
+    let markerGap = RichBlockListMetrics.markerGap(for: marker, baseFontSize: font.pointSize)
     if marker == "•" {
       let diameter = RichBlockListMetrics.unorderedDiameter(baseFontSize: font.pointSize)
       let lineHeight = ceil(font.ascender - font.descender + font.leading)
       let markerX = isRTL
-        ? RichBlockListMetrics.markerContentGap
-        : bounds.width - RichBlockListMetrics.markerContentGap - diameter
+        ? markerGap
+        : bounds.width - markerGap - diameter
       let rect = CGRect(
         x: floor(markerX),
         y: floor((min(bounds.height, lineHeight) - diameter) / 2) + 1,
@@ -54,8 +55,8 @@ final class RichBlockListMarkerNodeView: RichBlockRenderableView {
     if marker == "☐" || marker == "☑" {
       let side = min(12, max(9, font.pointSize * 0.72))
       let markerX = isRTL
-        ? RichBlockListMetrics.markerContentGap
-        : bounds.width - RichBlockListMetrics.markerContentGap - side
+        ? markerGap
+        : bounds.width - markerGap - side
       let rect = CGRect(
         x: floor(markerX) + 0.5,
         y: floor((min(bounds.height, font.pointSize * 1.25) - side) / 2) + 1.5,
@@ -85,15 +86,15 @@ final class RichBlockListMarkerNodeView: RichBlockRenderableView {
     paragraph.baseWritingDirection = isRTL ? .rightToLeft : .leftToRight
     let markerRect = isRTL
       ? CGRect(
-        x: RichBlockListMetrics.markerContentGap,
+        x: markerGap,
         y: 0,
-        width: max(0, bounds.width - RichBlockListMetrics.markerContentGap),
+        width: max(0, bounds.width - markerGap),
         height: bounds.height
       )
       : CGRect(
         x: 0,
         y: 0,
-        width: max(0, bounds.width - RichBlockListMetrics.markerContentGap),
+        width: max(0, bounds.width - markerGap),
         height: bounds.height
       )
     (marker as NSString).draw(
