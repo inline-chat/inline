@@ -3252,8 +3252,19 @@ class MessageListAppKit: NSViewController {
     guard let newWidth = measurementWidth() else { return }
 
     if abs(newWidth - lastKnownWidth) > 0.5 {
+      let previousWidth = lastKnownWidth
       lastKnownWidth = newWidth
-      recalculateHeightsOnWidthChange(buffer: 3, duringLiveResize: true)
+      // Message plans depend on the row width only through the capped message width, so a
+      // change inside the cap (a wide window) leaves them as they are. Service rows size
+      // against the whole row and still re-measure.
+      let messageWidthUnchanged =
+        sizeCalculator.getAvailableWidth(tableWidth: previousWidth, renderStyle: messageRenderStyle)
+          == sizeCalculator.getAvailableWidth(tableWidth: newWidth, renderStyle: messageRenderStyle)
+      recalculateHeightsOnWidthChange(
+        buffer: 3,
+        duringLiveResize: true,
+        serviceRowsOnly: messageWidthUnchanged
+      )
     }
   }
 
@@ -3732,7 +3743,8 @@ class MessageListAppKit: NSViewController {
 
   private func recalculateHeightsOnWidthChange(
     buffer: Int = 0,
-    duringLiveResize: Bool = false
+    duringLiveResize: Bool = false,
+    serviceRowsOnly: Bool = false
   ) {
     heightRecalcCount += 1
 
@@ -3762,7 +3774,11 @@ class MessageListAppKit: NSViewController {
     }
 
     // First, immediately update visible rows
-    let rowsToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
+    var rowsToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
+    if serviceRowsOnly {
+      rowsToUpdate = rowsToUpdate.filteredIndexSet { message(forRow: $0)?.message.isServiceMessage == true }
+      guard !rowsToUpdate.isEmpty else { return }
+    }
     let shouldSignpost = heightRecalcCount <= 80
     let signpostID = OSSignpostID(log: Self.signpostLog)
     if shouldSignpost {
