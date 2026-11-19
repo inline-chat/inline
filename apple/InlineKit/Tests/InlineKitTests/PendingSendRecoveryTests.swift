@@ -44,6 +44,18 @@ struct PendingSendRecoveryTests {
     #expect(plan.fail == [-2, -4, -5])
   }
 
+  @Test("sends that share a stored date resume in the order their rows were written")
+  @MainActor
+  func tiesResumeInInsertionOrder() {
+    let now = Date()
+    let rows = [(Int64(-30), Int64(12)), (-10, 10), (-20, 11)].map { messageId, globalId in
+      var message = outgoing(id: messageId, age: 5, now: now)
+      message.globalId = globalId
+      return message
+    }
+    #expect(PendingSendRecovery.plan(for: rows, now: now).resume == [-10, -20, -30])
+  }
+
   @Test("recovered send reuses the interrupted row's identity")
   @MainActor
   func recoveredTransactionKeepsIdentity() throws {

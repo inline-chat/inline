@@ -27,7 +27,9 @@ public enum PendingSendRecovery {
   /// Pure selection so the policy is testable without a running queue.
   static func plan(for messages: [Message], now: Date, window: TimeInterval = automaticResumeWindow) -> Plan {
     var plan = Plan()
-    for message in messages.sorted(by: { $0.date < $1.date }) {
+    // Insertion order breaks ties: rows store dates to the millisecond, and an album's items, sent
+    // together before their dates were spaced, can share one.
+    for message in messages.sorted(by: { ($0.date, $0.globalId ?? 0) < ($1.date, $1.globalId ?? 0) }) {
       let isRecoverable = message.randomId != nil
         && !(message.transactionId ?? "").isEmpty
         && now.timeIntervalSince(message.date) <= window
