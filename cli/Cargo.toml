@@ -24,6 +24,7 @@ inline-agent-driver-claude = { path = "../crates/agent-driver-claude" }
 inline-dots = { path = "../crates/dots" }
 inline-relay = { path = "../crates/relay" }
 inline-client = { path = "../crates/client" }
+inline-computer-use = { path = "../crates/computer-use" }
 inline-protocol = { path = "../crates/protocol" }
 inline-sdk = { path = "../crates/sdk" }
 libc = "0.2"

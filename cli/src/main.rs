@@ -616,6 +616,20 @@ One-pass review:
         #[command(subcommand)]
         command: CliCommand,
     },
+    #[command(about = "Let agents read and operate apps on this Mac")]
+    ComputerUse {
+        #[command(subcommand)]
+        command: ComputerUseCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ComputerUseCommand {
+    #[command(
+        about = "Serve computer-use tools over stdio MCP",
+        after_help = "Inline's agent bridge gives this server to Claude, OpenCode and Amp sessions.\nTo use it in another agent:\n  claude mcp add computer -- inline computer-use mcp"
+    )]
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -666,6 +680,7 @@ impl Command {
                 SetupCommand::Hermes(_) => "setup_hermes",
                 SetupCommand::Openclaw(_) => "setup_openclaw",
             },
+            Self::ComputerUse { .. } => "computer_use_mcp",
             Self::Agents { command } => match command {
                 agents::AgentsCommand::Discover => "agents_discover",
                 agents::AgentsCommand::Setup(_) => "agents_setup",
@@ -3029,6 +3044,18 @@ fn main() {
         }
     };
 
+    // Stdout is the MCP channel: nothing else may run or print first.
+    if let Command::ComputerUse {
+        command: ComputerUseCommand::Mcp,
+    } = &cli.command
+    {
+        if let Err(error) = inline_computer_use::serve_stdio() {
+            eprintln!("computer-use: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if let Command::Completion { shell } = &cli.command {
         let result: Result<(), Box<dyn std::error::Error>> = if flags.json {
             Err(CliError::invalid_args(
@@ -3750,6 +3777,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             Command::Completion { .. } => unreachable!("completions are handled before runtime setup"),
             Command::Schema { .. } | Command::Capabilities { .. } | Command::Cli { .. } => {
                 unreachable!("offline discovery commands are handled before runtime setup")
+            }
+            Command::ComputerUse { .. } => {
+                unreachable!("computer use is served before runtime setup")
             }
             Command::Bots { command } => match command {
                 BotsCommand::List(args) => {
