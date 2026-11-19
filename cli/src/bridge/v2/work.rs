@@ -3980,8 +3980,7 @@ fn plain_fallback(doc: &Doc) -> Doc {
     }
     Doc {
         text,
-        blocks: Vec::new(),
-        markdown: false,
+        ..Doc::default()
     }
 }
 

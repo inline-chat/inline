@@ -1040,13 +1040,14 @@ impl Renderer {
                 _ => row.delta.clone(),
             };
             // A widget streams as its title; its HTML belongs to the answer.
-            builder.paragraph(&inline_agent_bridge::widget::preview(&text));
+            // Prose is Markdown, styled here as Inline styles an answer.
+            blocks::markdown::write(builder, &inline_agent_bridge::widget::preview(&text));
             return;
         }
         // Claude's thinking that has text is an update, so it reads as prose.
         if row.kind == ItemKind::Reasoning {
             if let Some(text) = reasoning_text(row) {
-                builder.paragraph(&tail(&text));
+                blocks::markdown::write(builder, &tail(&text));
             }
             return;
         }
@@ -1112,10 +1113,18 @@ fn activity(body: &ItemBody) -> ActivityKind {
         _ if is_exploration(body) => ActivityKind::Explore,
         ItemBody::Command { .. } => ActivityKind::Command,
         ItemBody::FileChange { .. } => ActivityKind::Edit,
+        ItemBody::Tool {
+            name, server: None, ..
+        } if is_agent_tool(name) => ActivityKind::Agent,
         ItemBody::Tool { name, .. } => tool_activity(name),
         ItemBody::Child { .. } => ActivityKind::Agent,
         _ => ActivityKind::Unspecified,
     }
+}
+
+/// Claude Code's sub-agent tool (`Task` before it was renamed `Agent`).
+fn is_agent_tool(name: &str) -> bool {
+    matches!(name, "Agent" | "Task")
 }
 
 fn tool_activity(name: &str) -> ActivityKind {
@@ -1201,6 +1210,7 @@ impl Tally {
                 Some((_, count)) => *count += 1,
                 None => self.servers.push((server.clone(), 1)),
             },
+            ItemBody::Tool { name, .. } if is_agent_tool(name) => self.agents += 1,
             ItemBody::Tool { name, .. } => match name.as_str() {
                 "Grep" | "Glob" => self.searches += 1,
                 "Read" => self.reads += 1,
@@ -1712,6 +1722,24 @@ fn row_title(
                 .filter(|title| !title.is_empty())
                 .unwrap_or_else(|| "Thinking".to_owned());
             (title, None, ActivityKind::Reasoning)
+        }
+        ItemBody::Tool {
+            name,
+            server: None,
+            input,
+            ..
+        } if is_agent_tool(name) => {
+            // Claude's sub-agent: named by the description it was given.
+            let about = ["description", "prompt"]
+                .iter()
+                .find_map(|key| input.get(*key).and_then(Value::as_str))
+                .map(|about| first_line(&scrub(about), 70))
+                .filter(|about| !about.is_empty());
+            let title = match about {
+                Some(about) => format!("{name}: {about}"),
+                None => name.clone(),
+            };
+            (title, None, ActivityKind::Agent)
         }
         ItemBody::Tool {
             name,
@@ -2783,6 +2811,99 @@ mod tests {
         }
         assert!(!text.contains("Fixed."), "the answer is its own message");
         assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Fixed."));
+    }
+
+    #[test]
+    fn claude_sub_agents_count_as_agents_and_prose_keeps_its_styles() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        renderer.set_folder("/work".into());
+        let agent = |id: &str, description: &str| {
+            completed(
+                id,
+                ItemBody::Tool {
+                    name: "Agent".to_owned(),
+                    server: None,
+                    input: serde_json::json!({
+                        "description": description,
+                        "prompt": "Read the server for small fixes.",
+                        "subagent_type": "general-purpose",
+                    }),
+                    output: Some("launched".to_owned()),
+                    error: None,
+                },
+                None,
+            )
+        };
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, agent("t1", "Server sweep")),
+                (2, agent("t2", "Apple sweep")),
+                (
+                    3,
+                    completed(
+                        "m1:0",
+                        message("The `app_error` issue is **not** new."),
+                        None,
+                    ),
+                ),
+                (4, agent("t3", "Sentry check")),
+                (5, completed("m2:0", message("Done."), None)),
+                (
+                    6,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: Some(3_000),
+                    }),
+                ),
+            ],
+        );
+        let doc = ops
+            .iter()
+            .find_map(|op| match op {
+                RenderOp::EndProgress { doc, .. } => Some(doc),
+                _ => None,
+            })
+            .expect("end");
+        for line in [
+            "Ran 2 agents",
+            "Agent: Server sweep",
+            "Agent: Apple sweep",
+            "The app_error issue is not new.",
+            "Agent: Sentry check",
+        ] {
+            assert!(
+                doc.text.contains(line),
+                "missing {line:?} in:\n{}",
+                doc.text
+            );
+        }
+        assert!(!doc.text.contains("Called"), "{}", doc.text);
+        let styled: Vec<(i32, String)> = doc
+            .entities
+            .iter()
+            .map(|entity| {
+                let text: String = doc
+                    .text
+                    .encode_utf16()
+                    .skip(entity.offset as usize)
+                    .take(entity.length as usize)
+                    .map(|unit| char::from_u32(unit.into()).unwrap_or('?'))
+                    .collect();
+                (entity.r#type, text)
+            })
+            .collect();
+        use inline_protocol::proto::message_entity::Type;
+        assert_eq!(
+            styled,
+            [
+                (Type::Code as i32, "app_error".to_owned()),
+                (Type::Bold as i32, "not".to_owned()),
+            ]
+        );
     }
 
     #[test]

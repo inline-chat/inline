@@ -188,6 +188,26 @@ fn project(message: &Message) -> Value {
         "markdown": message.doc.markdown,
         "blocks": readable(&blocks, &message.doc.text, None),
     });
+    if !message.doc.entities.is_empty() {
+        // Each style as its kind and the text it covers.
+        value["styles"] = message
+            .doc
+            .entities
+            .iter()
+            .map(|entity| {
+                let kind = inline_protocol::proto::message_entity::Type::try_from(entity.r#type)
+                    .map_or_else(|_| entity.r#type.to_string(), |kind| {
+                        format!("{kind:?}").to_lowercase()
+                    });
+                let span = inline_protocol::proto::BlockText {
+                    offset: entity.offset,
+                    length: entity.length,
+                    ..Default::default()
+                };
+                json!({ kind: slice(&message.doc.text, &span).unwrap_or_else(|| "<out of range>".into()) })
+            })
+            .collect();
+    }
     if !message.buttons.is_empty() {
         value["buttons"] = message
             .buttons
@@ -331,6 +351,16 @@ fn check(message: &Message, case: &str) {
     let blocks = serde_json::to_value(&doc.blocks).expect("blocks");
     let mut spans = Vec::new();
     collect_spans(&blocks, &mut spans);
+    assert!(doc.entities.len() <= 1_024, "{case}: too many styles");
+    for entity in &doc.entities {
+        assert!(
+            entity.offset >= 0 && entity.length > 0 && entity.offset + entity.length <= utf16,
+            "{case}/{}: style {}+{} outside {utf16} units",
+            message.label,
+            entity.offset,
+            entity.length
+        );
+    }
     for (offset, length) in &spans {
         assert!(
             *offset >= 0 && *length > 0 && offset + length <= utf16,

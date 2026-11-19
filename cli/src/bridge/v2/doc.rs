@@ -16,6 +16,10 @@ pub(crate) struct Doc {
     /// `blocks` is then empty.
     #[serde(default)]
     pub markdown: bool,
+    /// Inline styles (code, bold, italic, links) over `text`, for the agent's
+    /// prose inside blocks; empty for Markdown, which Inline styles itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<proto::MessageEntity>,
 }
 
 impl Doc {
@@ -26,6 +30,7 @@ impl Doc {
             text: text.trim().to_owned(),
             blocks: Vec::new(),
             markdown: true,
+            entities: Vec::new(),
         }
     }
 
@@ -33,6 +38,13 @@ impl Doc {
         proto::BlockContent {
             blocks: self.blocks.clone(),
         }
+    }
+
+    /// The styles to send with `text`, when it has any.
+    pub(crate) fn message_entities(&self) -> Option<proto::MessageEntities> {
+        (!self.markdown && !self.entities.is_empty()).then(|| proto::MessageEntities {
+            entities: self.entities.clone(),
+        })
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -117,12 +129,17 @@ pub(crate) use proto::block_disclosure::ActivityKind;
 /// Line breaks a range never ends in.
 const LINE_END: [char; 2] = ['\n', '\r'];
 
+/// Styles one message carries; Inline refuses more than 1,024, and past this
+/// the rest of the prose reads plain.
+const MAX_ENTITIES: usize = 1_000;
+
 /// Appends text and blocks. Nested builders share the same text.
 #[derive(Debug, Default)]
 pub(crate) struct DocBuilder {
     text: String,
     utf16: i64,
     blocks: Vec<proto::Block>,
+    entities: Vec<proto::MessageEntity>,
 }
 
 impl DocBuilder {
@@ -142,6 +159,7 @@ impl DocBuilder {
             text: self.text,
             blocks: self.blocks,
             markdown: false,
+            entities: self.entities,
         }
     }
 
@@ -161,6 +179,40 @@ impl DocBuilder {
             length,
             ..Default::default()
         }
+    }
+
+    /// Appends the agent's Markdown as its own line, styled: inline code,
+    /// bold, italic and links become entities over the plain text, the way
+    /// Inline styles a Markdown message. Returns its range like [`span`](Self::span).
+    pub(crate) fn markdown_span(&mut self, markdown: &str) -> proto::BlockText {
+        let styled = crate::bridge::v2::blocks::markdown::inline(markdown);
+        let text = styled.text.trim_end_matches(LINE_END);
+        let end = text.encode_utf16().count() as i64;
+        let offset = self.utf16;
+        let room = MAX_ENTITIES.saturating_sub(self.entities.len());
+        self.entities.extend(
+            styled
+                .entities
+                .into_iter()
+                .filter_map(|mut entity| {
+                    entity.length = entity.length.min(end - entity.offset);
+                    (entity.length > 0).then(|| {
+                        entity.offset += offset;
+                        entity
+                    })
+                })
+                .take(room),
+        );
+        self.span(text)
+    }
+
+    /// A paragraph of the agent's Markdown, styled as [`markdown_span`](Self::markdown_span).
+    pub(crate) fn markdown_paragraph(&mut self, markdown: &str) {
+        if markdown.trim().is_empty() {
+            return;
+        }
+        let span = self.markdown_span(markdown.trim_end());
+        self.push_block(proto::block::Kind::Paragraph(span));
     }
 
     /// Appends text no block covers, such as a "Command: " label.
@@ -198,10 +250,12 @@ impl DocBuilder {
             text: std::mem::take(&mut self.text),
             utf16: self.utf16,
             blocks: Vec::new(),
+            entities: std::mem::take(&mut self.entities),
         };
         build(&mut children);
         self.text = children.text;
         self.utf16 = children.utf16;
+        self.entities = children.entities;
         children.blocks
     }
 
@@ -406,18 +460,11 @@ impl DocBuilder {
 
     pub(crate) fn callout(&mut self, kind: CalloutKind, title: &str, body: &str) {
         let title = (!title.is_empty()).then(|| self.span(title));
-        let mut children = DocBuilder {
-            text: std::mem::take(&mut self.text),
-            utf16: self.utf16,
-            blocks: Vec::new(),
-        };
-        children.paragraph(body);
-        self.text = children.text;
-        self.utf16 = children.utf16;
+        let children = self.nested(|children| children.paragraph(body));
         self.push_block(proto::block::Kind::Callout(proto::BlockCallout {
             kind: kind as i32,
             title,
-            children: children.blocks,
+            children,
             ..Default::default()
         }));
     }
@@ -476,21 +523,14 @@ impl DocBuilder {
                 }
             });
         self.push_raw("\n");
-        let mut children = DocBuilder {
-            text: std::mem::take(&mut self.text),
-            utf16: self.utf16,
-            blocks: Vec::new(),
-        };
-        build(&mut children);
-        self.text = children.text;
-        self.utf16 = children.utf16;
+        let children = self.nested(build);
         self.push_block(proto::block::Kind::Disclosure(proto::BlockDisclosure {
             summary: Some(proto::BlockText {
                 offset: summary_offset,
                 length: summary_len,
                 ..Default::default()
             }),
-            children: children.blocks,
+            children,
             activity_kind: activity as i32,
             status: status.proto(),
             meta,
@@ -525,14 +565,7 @@ impl DocBuilder {
             }
         });
         self.push_raw("\n");
-        let mut children = DocBuilder {
-            text: std::mem::take(&mut self.text),
-            utf16: self.utf16,
-            blocks: Vec::new(),
-        };
-        build(&mut children);
-        self.text = children.text;
-        self.utf16 = children.utf16;
+        let children = self.nested(build);
         let kind = if working {
             proto::block_disclosure::Kind::Progress
         } else {
@@ -546,7 +579,7 @@ impl DocBuilder {
             }),
             kind: kind as i32,
             initially_open: Some(working),
-            children: children.blocks,
+            children,
             meta,
             started_at: elapsed.map(|elapsed| elapsed.started_at),
             ..Default::default()

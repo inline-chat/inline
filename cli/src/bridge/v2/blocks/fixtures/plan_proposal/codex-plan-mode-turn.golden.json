@@ -27,7 +27,7 @@
   },
   {
     "label": "plan proposal",
-    "text": "Codex's plan\nPin the plan\n• Keep the latest `update_plan` steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex",
+    "text": "Codex's plan\nPin the plan\n• Keep the latest update_plan steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex",
     "markdown": false,
     "blocks": [
       {
@@ -47,7 +47,7 @@
                   {
                     "children": [
                       {
-                        "paragraph": "Keep the latest `update_plan` steps on the renderer"
+                        "paragraph": "Keep the latest update_plan steps on the renderer"
                       }
                     ]
                   },
@@ -75,6 +75,11 @@
             "plan-keep"
           ]
         }
+      }
+    ],
+    "styles": [
+      {
+        "code": "update_plan"
       }
     ],
     "buttons": [

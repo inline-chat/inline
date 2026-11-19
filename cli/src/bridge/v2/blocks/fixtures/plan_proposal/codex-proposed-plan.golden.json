@@ -1,7 +1,7 @@
 [
   {
     "label": "open",
-    "text": "Codex's plan\nPin the plan\n• Keep the latest `update_plan` steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex",
+    "text": "Codex's plan\nPin the plan\n• Keep the latest update_plan steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex",
     "markdown": false,
     "blocks": [
       {
@@ -21,7 +21,7 @@
                   {
                     "children": [
                       {
-                        "paragraph": "Keep the latest `update_plan` steps on the renderer"
+                        "paragraph": "Keep the latest update_plan steps on the renderer"
                       }
                     ]
                   },
@@ -51,6 +51,11 @@
         }
       }
     ],
+    "styles": [
+      {
+        "code": "update_plan"
+      }
+    ],
     "buttons": [
       {
         "id": "plan-approve",
@@ -66,7 +71,7 @@
   },
   {
     "label": "kept planning",
-    "text": "Codex's plan\nPin the plan\n• Keep the latest `update_plan` steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex\nKept planning (Dena)",
+    "text": "Codex's plan\nPin the plan\n• Keep the latest update_plan steps on the renderer\n• Write them under the progress disclosure\n[ ] Golden test for Claude and Codex\nKept planning (Dena)",
     "markdown": false,
     "blocks": [
       {
@@ -86,7 +91,7 @@
                   {
                     "children": [
                       {
-                        "paragraph": "Keep the latest `update_plan` steps on the renderer"
+                        "paragraph": "Keep the latest update_plan steps on the renderer"
                       }
                     ]
                   },
@@ -114,6 +119,11 @@
       },
       {
         "footer": "Kept planning (Dena)"
+      }
+    ],
+    "styles": [
+      {
+        "code": "update_plan"
       }
     ]
   }
