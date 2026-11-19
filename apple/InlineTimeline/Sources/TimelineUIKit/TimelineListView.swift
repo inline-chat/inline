@@ -146,11 +146,14 @@ public struct TimelineTransaction<ID: Hashable & Sendable> {
   /// Such a jump slides the screen out and the destination in next to it, on one track. When the rows
   /// on screen are still in the list, their order decides and this is not read; nil means newer.
   public var towards: TimelineEdge?
+  /// Rows new to the data arrive as new messages do: rising from below and fading in. Off for rows that
+  /// were history all along (a jump loading them), which come in with the scroll.
+  public var arrives: Bool
 
   public init(
     rows: [ID]? = nil, coverage: TimelineCoverage? = nil, scroll: TimelineScroll<ID> = .preserve,
     topInset: CGFloat? = nil, bottomInset: CGFloat? = nil, changed: Set<ID> = [], timing: TimelineTiming = .none,
-    towards: TimelineEdge? = nil
+    towards: TimelineEdge? = nil, arrives: Bool = true
   ) {
     self.rows = rows
     self.coverage = coverage
@@ -160,6 +163,7 @@ public struct TimelineTransaction<ID: Hashable & Sendable> {
     self.changed = changed
     self.timing = timing
     self.towards = towards
+    self.arrives = arrives
   }
 }
 
@@ -425,7 +429,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       case .latest, .to: jump = .some(transaction.towards)
       case .preserve, .by: jump = nil
     }
-    perform(update, timing: transaction.timing, changed: transaction.changed, jump: jump)
+    perform(update, timing: transaction.timing, changed: transaction.changed, jump: jump, arrives: transaction.arrives)
     // The fling's scroll ends here; the change that took over moves the content on.
     if takesOverFlight { onScrollEnded?() }
   }
@@ -511,11 +515,12 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
 
   /// `jump` is set for a change that scrolls to a target, with the side its destination lies on.
   private func perform(
-    _ update: TimelineUpdate<ID>, timing: TimelineTiming, changed: Set<ID>, jump: TimelineEdge?? = nil
+    _ update: TimelineUpdate<ID>, timing: TimelineTiming, changed: Set<ID>, jump: TimelineEdge?? = nil,
+    arrives: Bool = true
   ) {
     guard !isApplying else {
       // A change made while another is being applied (a row callback) runs right after it.
-      queued.append { [weak self] in self?.perform(update, timing: timing, changed: changed, jump: jump) }
+      queued.append { [weak self] in self?.perform(update, timing: timing, changed: changed, jump: jump, arrives: arrives) }
       return
     }
     isApplying = true
@@ -526,7 +531,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     var scrolled: CGFloat = 0
     if case let .by(delta) = update.scroll { scrolled = delta }
     commit(
-      change, timing: timing, changed: changed, scrolled: scrolled, jump: jump,
+      change, timing: timing, changed: changed, scrolled: scrolled, jump: jump, arrives: arrives,
       indicatorMoves: update.scroll != .preserve ? extentBefore : nil
     )
     isApplying = false
@@ -539,7 +544,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// `indicatorMoves` is set for a change that scrolls, with the indicator's extent before it.
   private func commit(
     _ change: TimelineChange<ID>, timing: TimelineTiming, changed: Set<ID>, scrolled: CGFloat, jump: TimelineEdge??,
-    indicatorMoves: TimelineIndicator.Extent? = nil
+    arrives: Bool = true, indicatorMoves: TimelineIndicator.Extent? = nil
   ) {
     let layout = change.layout
     let width = layout.viewport.width
@@ -567,6 +572,19 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     }
     let originDelta = oldOrigin - origin
     let now = CACurrentMediaTime()
+
+    // New messages at the newest end arrive together: the block rises 1.6 of its height from below, as
+    // Telegram brings in a new message, and keeps its spacing. Rows new to the data elsewhere (between
+    // kept rows) fade in and travel with their neighbours, so nothing crosses.
+    var rising: Set<ID> = []
+    var rise: CGFloat = 0
+    if arrives, animates, carousel == nil {
+      for placement in layout.placements.reversed() {
+        guard change.inserted.contains(placement.id) else { break }
+        rising.insert(placement.id)
+        rise += placement.height * Self.insertionRise
+      }
+    }
 
     CATransaction.begin()
     CATransaction.setDisableActions(true)
@@ -598,12 +616,12 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         // caller (or a system transition running a layout pass) happens to be in.
         UIView.performWithoutAnimation { slot.row.layoutIfNeeded() }
         if animates, carousel == nil {
-          // A row placed for the first time travels with its neighbours. One new to the data also rises
-          // from 1.6 of its height below, as Telegram brings in a new message, and fades in, unless it takes
-          // over a pin shown on screen: then the pin travels from where it was and the row stays opaque.
+          // A row placed for the first time travels with its neighbours. One new to the data also arrives
+          // (`rising` above) and fades in, unless it takes over a pin shown on screen: then the pin travels
+          // from where it was and the row stays opaque.
           var offset = change.offsets[placement.id] ?? 0
-          if change.inserted.contains(placement.id) {
-            offset += placement.height * Self.insertionRise
+          if arrives, change.inserted.contains(placement.id) {
+            if rising.contains(placement.id) { offset += rise }
             if let arriving = rows.pin(placement.id, slot.row).flatMap({ pinsShown[$0.spanStart] }) {
               avatarArrivals[placement.id] = (from: arriving, offset: offset)
             } else {
@@ -702,8 +720,10 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
   /// what the scale takes off keeps `focus` still for the whole removal.
   private func removeAnimated(_ id: ID, _ slot: Slot) {
     let layer = slot.view.layer
+    // From where it is: a row deleted while it still fades in doesn't flash to full first.
+    let shown = layer.presentation()?.opacity ?? layer.opacity
     layer.opacity = 0
-    Self.fade(layer, from: 1, to: 0, duration: Self.removalDuration)
+    Self.fade(layer, from: shown, to: 0, duration: Self.removalDuration)
     guard let focus = rows.removalFocus?(id, slot.row), focus.x.isFinite, focus.y.isFinite else { return }
     let shrink = 1 - Self.removalScale
     let timing = CAMediaTimingFunction(name: .easeInEaseOut)
