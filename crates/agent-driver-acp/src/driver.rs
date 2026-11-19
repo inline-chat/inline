@@ -381,6 +381,8 @@ pub struct AcpDriver {
     elicitations: PendingElicitations,
     sessions: Sessions,
     host_tools: HostTools,
+    /// Stdio MCP servers every session gets (Inline's computer use).
+    stdio_mcp_servers: Vec<acp::McpServer>,
     pub(crate) lifecycle: ConnectionLifecycle,
     sequence: Arc<AtomicU64>,
     epoch: Arc<str>,
@@ -414,6 +416,28 @@ impl AcpDriver {
     pub(crate) fn disable_durable_session_resume(&mut self) {
         self.resume_mode = ResumeMode::Unsupported;
         self.capabilities.resume_session = false;
+    }
+
+    pub(crate) fn set_stdio_mcp_servers(
+        &mut self,
+        servers: &[inline_agent_bridge::StdioMcpServer],
+    ) {
+        self.stdio_mcp_servers = servers
+            .iter()
+            .map(|server| {
+                acp::McpServer::Stdio(
+                    acp::McpServerStdio::new(server.name.clone(), server.command.clone())
+                        .args(server.args.clone()),
+                )
+            })
+            .collect();
+    }
+
+    /// The servers a session opens with: Inline's tools, then the stdio ones.
+    fn session_servers(&self, attachment: Option<&SessionMcpAttachment>) -> Vec<acp::McpServer> {
+        let mut servers = attachment.map_or_else(Vec::new, SessionMcpAttachment::servers);
+        servers.extend(self.stdio_mcp_servers.iter().cloned());
+        servers
     }
 
     pub(crate) fn set_default_permission_mode(&mut self, mode: impl Into<Arc<str>>) {
@@ -592,6 +616,7 @@ impl AcpDriver {
             elicitations,
             sessions,
             host_tools,
+            stdio_mcp_servers: Vec::new(),
             lifecycle: ConnectionLifecycle {
                 shutdown: Arc::new(StdMutex::new(Some(shutdown_tx))),
                 completion: completion_rx,
@@ -632,11 +657,8 @@ impl AcpDriver {
 
     async fn create_session(&self, cwd: PathBuf) -> DriverResult<String> {
         let attachment = self.session_mcp_attachment()?;
-        let request = acp::NewSessionRequest::new(cwd.clone()).mcp_servers(
-            attachment
-                .as_ref()
-                .map_or_else(Vec::new, SessionMcpAttachment::servers),
-        );
+        let request = acp::NewSessionRequest::new(cwd.clone())
+            .mcp_servers(self.session_servers(attachment.as_ref()));
         let response = mutating_request_with_timeout(
             &self.lifecycle,
             REQUEST_TIMEOUT,
@@ -1032,11 +1054,7 @@ impl AgentDriver for AcpDriver {
                 ResumeMode::Resume => {
                     let attachment = self.session_mcp_attachment()?;
                     let request = acp::ResumeSessionRequest::new(session_id, spec.cwd.clone())
-                        .mcp_servers(
-                            attachment
-                                .as_ref()
-                                .map_or_else(Vec::new, SessionMcpAttachment::servers),
-                        );
+                        .mcp_servers(self.session_servers(attachment.as_ref()));
                     self.record_session(
                         spec.session_id.to_string(),
                         spec.cwd.clone(),
@@ -1078,11 +1096,7 @@ impl AgentDriver for AcpDriver {
                 ResumeMode::Load => {
                     let attachment = self.session_mcp_attachment()?;
                     let request = acp::LoadSessionRequest::new(session_id, spec.cwd.clone())
-                        .mcp_servers(
-                            attachment
-                                .as_ref()
-                                .map_or_else(Vec::new, SessionMcpAttachment::servers),
-                        );
+                        .mcp_servers(self.session_servers(attachment.as_ref()));
                     self.record_session(
                         spec.session_id.to_string(),
                         spec.cwd.clone(),

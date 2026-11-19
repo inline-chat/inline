@@ -139,6 +139,19 @@ impl std::fmt::Debug for HostToolConfiguration {
     }
 }
 
+/// A stdio MCP server the bridge adds to every session of a provider that
+/// takes one, such as Inline's computer use. The provider starts it as a
+/// child process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StdioMcpServer {
+    /// The name the agent sees its tools under (`mcp__<name>__<tool>`).
+    pub name: String,
+    /// The executable the provider starts.
+    pub command: std::path::PathBuf,
+    /// Its arguments.
+    pub args: Vec<String>,
+}
+
 impl HostToolConfiguration {
     /// Stable fingerprint for the tool names, schemas, and mutation classes
     /// attached when a provider session is created. Descriptions are excluded

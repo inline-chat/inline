@@ -11,6 +11,7 @@ use crate::{AcpHarness, AcpLaunchDescriptor, require_opencode_v2, spawn_acp_driv
 use inline_agent_bridge::harness::*;
 use inline_agent_bridge::{
     AgentDriver, DriverError, DriverFuture, HostToolConfiguration, ProviderSessionId,
+    StdioMcpServer,
 };
 
 const MAX_CATALOG_FOLDERS: usize = 64;
@@ -25,6 +26,7 @@ pub struct IsolatedAcpHarness {
     catalog_epoch: tokio::sync::Mutex<Option<(PathBuf, Arc<AcpHarness>)>>,
     catalog_sessions: Mutex<HashMap<PathBuf, ProviderSessionId>>,
     stopped: AtomicBool,
+    stdio_mcp_servers: Vec<StdioMcpServer>,
 }
 
 struct LiveEpoch {
@@ -43,7 +45,7 @@ impl IsolatedAcpHarness {
         }
         reap_session_hosts(&descriptor).await?;
         let bridge_version = bridge_version.into();
-        let epoch = launch(&descriptor, &bridge_version, None).await?;
+        let epoch = launch(&descriptor, &bridge_version, None, &[]).await?;
         let info = epoch.describe();
         epoch.shutdown().await?;
         Ok(Self {
@@ -56,7 +58,14 @@ impl IsolatedAcpHarness {
             catalog_epoch: tokio::sync::Mutex::new(None),
             catalog_sessions: Mutex::new(HashMap::new()),
             stopped: AtomicBool::new(false),
+            stdio_mcp_servers: Vec::new(),
         })
+    }
+
+    /// Stdio MCP servers every session gets, such as Inline's computer use.
+    pub fn with_stdio_mcp_servers(mut self, servers: Vec<StdioMcpServer>) -> Self {
+        self.stdio_mcp_servers = servers;
+        self
     }
 
     pub async fn shutdown(&self) -> Result<(), DriverError> {
@@ -85,7 +94,7 @@ impl IsolatedAcpHarness {
     // Only tool-free probe identities enter this map. Native chat sessions
     // must never be resumed in a process shared by folder catalog requests.
     async fn open_catalog_epoch(&self, folder: &PathBuf) -> Result<Arc<AcpHarness>, DriverError> {
-        let epoch = launch(&self.descriptor, &self.bridge_version, None).await?;
+        let epoch = launch(&self.descriptor, &self.bridge_version, None, &[]).await?;
         let cached = self.catalog_sessions.lock().unwrap().get(folder).cloned();
         let mode = cached.map_or(OpenMode::Start, |session| OpenMode::Resume { session });
         let mut spec = OpenSpec {
@@ -188,6 +197,7 @@ async fn launch(
     descriptor: &AcpLaunchDescriptor,
     bridge_version: &str,
     tools: Option<HostToolConfiguration>,
+    stdio_mcp_servers: &[StdioMcpServer],
 ) -> Result<Arc<AcpHarness>, DriverError> {
     let mut descriptor = descriptor.clone();
     // Process hosts must not reap another chat's live child under a shared lock.
@@ -204,9 +214,10 @@ async fn launch(
         .map(|host| host.lock_file.clone());
     let provider = descriptor.provider_id.clone();
     let path = descriptor.program.clone();
-    let spawned = spawn_acp_driver(descriptor, bridge_version)
+    let mut spawned = spawn_acp_driver(descriptor, bridge_version)
         .await
         .map_err(|error| DriverError::Unavailable(error.to_string()))?;
+    spawned.driver.set_stdio_mcp_servers(stdio_mcp_servers);
     if let Some(lock_file) = lock_file {
         let status = spawned.process_status.clone();
         tokio::spawn(async move {
@@ -365,9 +376,14 @@ impl HarnessDriver for IsolatedAcpHarness {
                     )));
                 }
             }
-            let epoch = launch(&self.descriptor, &self.bridge_version, self.tools.clone())
-                .await
-                .map_err(OpenError::Driver)?;
+            let epoch = launch(
+                &self.descriptor,
+                &self.bridge_version,
+                self.tools.clone(),
+                &self.stdio_mcp_servers,
+            )
+            .await
+            .map_err(OpenError::Driver)?;
             let folder = spec.folder.clone();
             let session = match epoch.open(spec).await {
                 Ok(session) => session,
