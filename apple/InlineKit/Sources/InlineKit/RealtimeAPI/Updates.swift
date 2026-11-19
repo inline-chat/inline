@@ -2206,7 +2206,8 @@ enum DurableUpdateApplyError: Error, PrivacySafeErrorCategoryProviding {
 enum DeferredUpdateEffect: Sendable {
   case composeAction(InlineProtocol.UpdateComposeAction)
   case composeSuggestion(InlineProtocol.UpdateComposeSuggestion)
-  /// A new message ends any composer suggestion it makes stale.
+  /// A new message ends any composer suggestion it makes stale, and its author's
+  /// typing or sending status.
   case messageArrived(peer: Peer, fromUserID: Int64, messageID: Int64)
   case messageActionAnswered(InlineProtocol.UpdateMessageActionAnswered)
   case botPresence(InlineProtocol.UpdateBotPresence)
@@ -2223,7 +2224,10 @@ enum DeferredUpdateEffect: Sendable {
       case let .composeSuggestion(update):
         Task { @MainActor in ComposeSuggestions.shared.apply(update) }
       case let .messageArrived(peer, fromUserID, messageID):
-        Task { @MainActor in ComposeSuggestions.shared.noteMessage(peer: peer, fromUserID: fromUserID, messageID: messageID) }
+        Task { @MainActor in
+          ComposeSuggestions.shared.noteMessage(peer: peer, fromUserID: fromUserID, messageID: messageID)
+          ComposeActions.shared.noteMessageArrived(in: peer, fromUserId: fromUserID)
+        }
       case let .messageActionAnswered(update):
         update.apply()
       case let .botPresence(update):

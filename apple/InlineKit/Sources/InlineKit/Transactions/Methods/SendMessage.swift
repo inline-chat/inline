@@ -446,9 +446,11 @@ public struct TransactionSendMessage: Transaction {
 
   public func execute() async throws -> [InlineProtocol.Update] {
     try Task.checkCancellation()
-    // clear typing...
-    Task {
-      await ComposeActions.shared.stoppedTyping(for: peerId)
+    // Clear typing. An attachment's sending status replaces it and sends its own stop.
+    if attachments.isEmpty {
+      Task {
+        await ComposeActions.shared.stoppedTyping(for: peerId)
+      }
     }
 
     let date = Date()
@@ -505,42 +507,28 @@ public struct TransactionSendMessage: Transaction {
     if let attachment = attachments.first {
       switch attachment.media {
         case let .photo(photoInfo):
-//          let clearUploadState = await ComposeActions.shared.startPhotoUpload(for: peerId)
-//          defer {
-//            Task { @MainActor in
-//              clearUploadState()
-//            }
-//          }
-
           guard let localPhotoId = photoInfo.photo.id else {
             throw FileUploadError.invalidPhotoId
           }
 
-          _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
-            try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
-          }
-
-          if let photoServerId = try await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
-            inputMedia = .fromPhotoId(photoServerId)
+          // The status ends on every exit: success, failure, retry or cancel.
+          inputMedia = try await ComposeActions.withActivity(.uploadingPhoto, in: peerId) {
+            _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+              try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
+            }
+            return try await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId
+              .map(InputMedia.fromPhotoId)
           }
 
         case let .video(videoInfo):
-          // Start video upload status
-//          let clearUploadState = await ComposeActions.shared.startVideoUpload(for: peerId)
-//          defer {
-//            Task { @MainActor in
-//              clearUploadState()
-//            }
-//          }
-
           let localVideoId = try await FileUploader.shared.resolveLocalVideoId(for: videoInfo.video)
 
-          _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
-            try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
-          }
-
-          if let videoServerId = try await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
-            inputMedia = .fromVideoId(videoServerId)
+          inputMedia = try await ComposeActions.withActivity(.uploadingVideo, in: peerId) {
+            _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+              try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
+            }
+            return try await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId
+              .map(InputMedia.fromVideoId)
           }
 
         case let .document(documentInfo):
@@ -561,14 +549,12 @@ public struct TransactionSendMessage: Transaction {
           }
 
           do {
-            _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
-              try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
-            }
-
-            if let documentServerId = try await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
-              .documentId
-            {
-              inputMedia = .fromDocumentId(documentServerId)
+            inputMedia = try await ComposeActions.withActivity(.uploadingDocument, in: peerId) {
+              _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+                try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
+              }
+              return try await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?.documentId
+                .map(InputMedia.fromDocumentId)
             }
 
             Task { @MainActor in

@@ -46,7 +46,6 @@ public class ComposeActions: ObservableObject {
 
   // New structure: [Peer: [UserId: ComposeActionInfo]]
   @Published public var actions: [Peer: [Int64: ComposeActionInfo]] = [:]
-  private var _activeUploads: Set<Peer> = []
 
   private var cancelTasks: [Peer: [Int64: Task<Void, Never>]] = [:]
   private var activityStates: [Peer: WeakComposeActionActivityState] = [:]
@@ -54,7 +53,27 @@ public class ComposeActions: ObservableObject {
   private var log = Log.scoped("ComposeActions", enableTracing: false)
   private var lastTypingSent: [Peer: Date] = [:]
 
-  public init() {}
+  // Sender side. Kept apart from the received-action timers above so another
+  // user's update can never cancel or orphan our refresh loop.
+  private let sendAction: @MainActor (Peer, ApiComposeAction?) async throws -> Void
+  private let refreshInterval: Duration
+  private var outgoingActivities: [OutgoingComposeActivity.ID: OutgoingActivityRecord] = [:]
+  private var outgoingLoops: [Peer: OutgoingLoop] = [:]
+  /// The last finished loop per peer, so a new loop's first send waits for its stop.
+  private var outgoingTails: [Peer: Task<Void, Never>] = [:]
+
+  public init() {
+    sendAction = { peer, action in try await Self.sendComposeAction(for: peer, action: action) }
+    refreshInterval = .seconds(3)
+  }
+
+  init(
+    refreshInterval: Duration,
+    sendAction: @escaping @MainActor (Peer, ApiComposeAction?) async throws -> Void
+  ) {
+    self.sendAction = sendAction
+    self.refreshInterval = refreshInterval
+  }
 
   // MARK: - New Group-Aware Methods
 
@@ -120,6 +139,14 @@ public class ComposeActions: ObservableObject {
     }
   }
 
+  /// A user's new message ends what they were doing in that chat (Telegram does the
+  /// same), so a lost stop never outlives the message it was for. Agent work is kept:
+  /// an agent posts messages while it keeps working.
+  public func noteMessageArrived(in peer: Peer, fromUserId userId: Int64) {
+    guard let info = actions[peer]?[userId], info.action != .working else { return }
+    removeComposeAction(for: peer, userId: userId)
+  }
+
   /// Remove all compose actions for a peer
   public func removeAllComposeActions(for peer: Peer) {
     log.trace("removed all actions for \(peer)")
@@ -172,7 +199,7 @@ public class ComposeActions: ObservableObject {
     if action == .typing {
       textWithEllipsis = getTypingDisplayText(for: peer, length: .short) ?? action.toHumanReadable()
     } else {
-      textWithEllipsis = action.toHumanReadable()
+      textWithEllipsis = getActivityDisplayText(for: peer) ?? action.toHumanReadable()
     }
 
     return ComposeActionPresentation(
@@ -273,6 +300,27 @@ public class ComposeActions: ObservableObject {
     }
   }
 
+  /// The status line for a non-typing activity: "sending photo" in a DM, and
+  /// "Mo is sending photo" where several people could be doing it (Telegram's copy).
+  public func getActivityDisplayText(for peer: Peer) -> String? {
+    guard let info = getComposeAction(for: peer), info.action != .typing else { return nil }
+    let text = info.action.toHumanReadable()
+    guard !peer.isPrivate,
+          Self.namesActor(info.action),
+          let name = ObjectCache.shared.getUser(id: info.userId)?.user.shortDisplayName,
+          !name.isEmpty
+    else { return text }
+    return "\(name) is \(text)"
+  }
+
+  /// Activities a person does, so a group line names them. Agent "Working" stays as is.
+  static func namesActor(_ action: ApiComposeAction) -> Bool {
+    switch action {
+      case .uploadingPhoto, .uploadingVideo, .uploadingDocument, .recordingVoice: true
+      case .typing, .working: false
+    }
+  }
+
   /// Display length options for typing text
   public enum TypingDisplayLength {
     case full // "User is typing..."
@@ -283,7 +331,7 @@ public class ComposeActions: ObservableObject {
   // MARK: - Sending Methods
 
   // Sending side
-  private func sendComposeAction(for peerId: Peer, action: ApiComposeAction?) async throws {
+  private static func sendComposeAction(for peerId: Peer, action: ApiComposeAction?) async throws {
     _ = try await Api.realtime.callRpcDirect(
       method: .sendComposeAction,
       input: .sendComposeAction(.with {
@@ -295,8 +343,8 @@ public class ComposeActions: ObservableObject {
   }
 
   public func startedTyping(for peerId: Peer) async {
-    // Don't clear an active upload with typing
-    if _activeUploads.contains(peerId) {
+    // An upload or recording already speaks for this chat.
+    if hasOutgoingActivity(in: peerId) {
       return
     }
 
@@ -309,15 +357,15 @@ public class ComposeActions: ObservableObject {
     do {
       lastTypingSent[peerId] = Date()
       log.trace("sending typing status for \(peerId)")
-      try await sendComposeAction(for: peerId, action: .typing)
+      try await sendAction(peerId, .typing)
     } catch {
       log.debug("Best-effort typing status was not sent: \(error)")
     }
   }
 
   public func stoppedTyping(for peerId: Peer) async {
-    // Don't clear an active upload with stop typing
-    if _activeUploads.contains(peerId) {
+    // Stopping typing must not clear an upload or recording status.
+    if hasOutgoingActivity(in: peerId) {
       return
     }
 
@@ -325,135 +373,175 @@ public class ComposeActions: ObservableObject {
 
     // Send stop typing action immediately
     do {
-      try await sendComposeAction(for: peerId, action: nil)
+      try await sendAction(peerId, nil)
     } catch {
       log.debug("Best-effort stop-typing status was not sent: \(error)")
     }
   }
 }
 
-// MARK: - Upload Actions Extension
+
+// MARK: - Outgoing activities (uploads and recordings)
+
+/// Handle for one upload or recording the current user is doing in a chat.
+public struct OutgoingComposeActivity: Hashable, Sendable {
+  public typealias ID = UUID
+  public let id: ID
+  public let peer: Peer
+  public let action: ApiComposeAction
+}
+
+private struct OutgoingActivityRecord {
+  let peer: Peer
+  let action: ApiComposeAction
+}
+
+private struct OutgoingLoop {
+  let id: UUID
+  let wake: AsyncStream<Void>.Continuation
+  let task: Task<Void, Never>
+}
 
 public extension ComposeActions {
-  /// Manages upload compose actions (photo, document, video) for a peer during file upload
-  /// - Parameters:
-  ///   - peerId: The peer to send the compose action to
-  ///   - action: The upload action type (.uploadingPhoto, .uploadingDocument, or .uploadingVideo)
-  /// - Returns: A function to call when upload is complete
-  func startUpload(for peerId: Peer, action: ApiComposeAction) -> @Sendable () -> Void {
-    // Validate that this is an upload action
-    guard action == .uploadingPhoto || action == .uploadingDocument || action == .uploadingVideo else {
-      log.error("Invalid upload action: \(action). Must be one of the uploading types.")
-      return {}
+  /// Starts broadcasting `action` in `peer` until the returned activity ends.
+  ///
+  /// Activities are reference counted per chat: several photos uploading at once
+  /// share one status, and it clears only when the last one ends. One loop per
+  /// chat owns every send, so a stop can't race ahead of a refresh. Like Telegram,
+  /// there is no wall-clock limit: the status lives exactly as long as the work,
+  /// and each upload step already has its own stall and processing limits.
+  @discardableResult
+  func beginActivity(_ action: ApiComposeAction, in peer: Peer) -> OutgoingComposeActivity {
+    let activity = OutgoingComposeActivity(id: UUID(), peer: peer, action: action)
+    outgoingActivities[activity.id] = OutgoingActivityRecord(peer: peer, action: action)
+
+    if let loop = outgoingLoops[peer] {
+      loop.wake.yield()
+    } else {
+      startOutgoingLoop(for: peer)
     }
+    return activity
+  }
 
-    // Mark this peer as having an active upload
-    _activeUploads.insert(peerId)
-    lastTypingSent[peerId] = Date()
+  /// Ends an activity. Safe to call more than once.
+  func endActivity(_ activity: OutgoingComposeActivity) {
+    guard outgoingActivities.removeValue(forKey: activity.id) != nil else { return }
+    outgoingLoops[activity.peer]?.wake.yield()
+    finishOutgoingLoopIfIdle(for: activity.peer)
+  }
 
-    // One owned task sends immediately and then refreshes every three seconds.
-    // Replacing an activity for this peer cancels the previous owner first.
-    let uploadTask = Task(priority: .userInitiated) {
-      do {
-        while !Task.isCancelled {
-          try await self.sendComposeAction(for: peerId, action: action)
-          self.lastTypingSent[peerId] = Date()
-          try await Task.sleep(for: .seconds(3))
-        }
-      } catch is CancellationError {
-        // Replaced or explicitly stopped.
-      } catch {
-        self.log.debug("Best-effort \(action) status refresh stopped: \(error)")
-      }
-    }
-
-    // Store the task with the peer (use current user ID for upload tasks)
-    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
-    if cancelTasks[peerId] == nil {
-      cancelTasks[peerId] = [:]
-    }
-    cancelTasks[peerId]?[currentUserId]?.cancel()
-    cancelTasks[peerId]![currentUserId] = uploadTask
-
-    // Return a completion function
-    return {
-      Task { @MainActor in
-        // Cancel the task first
-        self.cancelTasks[peerId]?[currentUserId]?.cancel()
-        self.cancelTasks[peerId]?[currentUserId] = nil
-
-        // Remove from active uploads
-        self._activeUploads.remove(peerId)
-
-        // Send the "stopped uploading" status
-        Task(priority: .userInitiated) {
-          do {
-            try await self.sendComposeAction(for: peerId, action: nil)
-          } catch {
-            self.log.debug("Best-effort stop-\(action) status was not sent: \(error)")
-          }
-        }
-        self.lastTypingSent[peerId] = nil
-      }
+  /// Runs `operation` with `action` shown in `peer`, ending it on every exit path.
+  /// Prefer this over begin/end so the status can't outlive the work.
+  nonisolated static func withActivity<T: Sendable>(
+    _ action: ApiComposeAction,
+    in peer: Peer,
+    operation: () async throws -> T
+  ) async throws -> T {
+    let activity = await ComposeActions.shared.beginActivity(action, in: peer)
+    do {
+      let result = try await operation()
+      await ComposeActions.shared.endActivity(activity)
+      return result
+    } catch {
+      await ComposeActions.shared.endActivity(activity)
+      throw error
     }
   }
 
-  // Convenience methods for specific upload types
-
-  /// Starts a photo upload compose action
-  func startPhotoUpload(for peerId: Peer) -> @Sendable () -> Void {
-    startUpload(for: peerId, action: .uploadingPhoto)
+  /// The action currently broadcast for `peer`, if any.
+  func outgoingAction(in peer: Peer) -> ApiComposeAction? {
+    outgoingActivities.values
+      .filter { $0.peer == peer }
+      .map(\.action)
+      .max { Self.outgoingPriority($0) < Self.outgoingPriority($1) }
   }
 
-  /// Starts a document upload compose action
-  func startDocumentUpload(for peerId: Peer) -> @Sendable () -> Void {
-    startUpload(for: peerId, action: .uploadingDocument)
-  }
-
-  /// Starts a video upload compose action
-  func startVideoUpload(for peerId: Peer) -> @Sendable () -> Void {
-    startUpload(for: peerId, action: .uploadingVideo)
+  func hasOutgoingActivity(in peer: Peer) -> Bool {
+    outgoingAction(in: peer) != nil
   }
 
   /// Keeps a voice-recording compose action alive until recording stops.
   func startVoiceRecording(for peerId: Peer) -> @Sendable () -> Void {
-    lastTypingSent[peerId] = Date()
-
-    let task = Task(priority: .userInitiated) {
-      do {
-        while !Task.isCancelled {
-          try await self.sendComposeAction(for: peerId, action: .recordingVoice)
-          self.lastTypingSent[peerId] = Date()
-          try await Task.sleep(for: .seconds(3))
-        }
-      } catch is CancellationError {
-        // Replaced or explicitly stopped.
-      } catch {
-        self.log.debug("Best-effort recording voice refresh stopped: \(error)")
-      }
-    }
-
-    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
-    if cancelTasks[peerId] == nil {
-      cancelTasks[peerId] = [:]
-    }
-    cancelTasks[peerId]?[currentUserId]?.cancel()
-    cancelTasks[peerId]![currentUserId] = task
-
+    let activity = beginActivity(.recordingVoice, in: peerId)
     return {
       Task { @MainActor in
-        self.cancelTasks[peerId]?[currentUserId]?.cancel()
-        self.cancelTasks[peerId]?[currentUserId] = nil
-
-        Task(priority: .userInitiated) {
-          do {
-            try await self.sendComposeAction(for: peerId, action: nil)
-          } catch {
-            self.log.debug("Best-effort stop-recording status was not sent: \(error)")
-          }
-        }
-        self.lastTypingSent[peerId] = nil
+        ComposeActions.shared.endActivity(activity)
       }
     }
+  }
+}
+
+private extension ComposeActions {
+  static func outgoingPriority(_ action: ApiComposeAction) -> Int {
+    switch action {
+      case .recordingVoice: 4
+      case .uploadingVideo: 3
+      case .uploadingPhoto: 2
+      case .uploadingDocument: 1
+      case .typing, .working: 0
+    }
+  }
+
+  func startOutgoingLoop(for peer: Peer) {
+    let (wakes, wake) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    let previous = outgoingTails[peer]
+    let interval = refreshInterval
+    let loopID = UUID()
+
+    let ticker = Task { @MainActor in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: interval)
+        wake.yield()
+      }
+    }
+
+    let task = Task { @MainActor [weak self] in
+      // Never let our first send overtake the previous loop's stop.
+      await previous?.value
+      wake.yield()
+
+      var lastSent: ApiComposeAction?
+      for await _ in wakes {
+        // A torn-down loop must not pick up a newer activity in the same chat;
+        // that one belongs to the next loop, which runs after our stop.
+        guard let self, self.outgoingLoops[peer]?.id == loopID,
+              let action = self.outgoingAction(in: peer)
+        else { break }
+        do {
+          try await self.sendAction(peer, action)
+          lastSent = action
+        } catch {
+          // Keep refreshing; one timed-out send shouldn't drop the status mid-upload.
+          self.log.debug("Best-effort \(action) status was not sent: \(error)")
+        }
+      }
+      ticker.cancel()
+
+      guard let self else { return }
+      if lastSent != nil {
+        do {
+          try await self.sendAction(peer, nil)
+        } catch {
+          self.log.debug("Best-effort stop status was not sent: \(error)")
+        }
+      }
+      self.lastTypingSent[peer] = nil
+    }
+
+    outgoingLoops[peer] = OutgoingLoop(id: loopID, wake: wake, task: task)
+    outgoingTails[peer] = task
+    Task { @MainActor [weak self] in
+      await task.value
+      if self?.outgoingTails[peer] == task {
+        self?.outgoingTails[peer] = nil
+      }
+    }
+  }
+
+  func finishOutgoingLoopIfIdle(for peer: Peer) {
+    guard outgoingActivities.values.contains(where: { $0.peer == peer }) == false,
+          let loop = outgoingLoops.removeValue(forKey: peer)
+    else { return }
+    loop.wake.finish()
   }
 }

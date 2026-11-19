@@ -941,13 +941,13 @@ public enum ApiComposeAction: String, Codable, Sendable {
         "typing..."
 
       case .uploadingPhoto:
-        "uploading photo..."
+        "sending photo..."
 
       case .uploadingDocument:
-        "uploading document..."
+        "sending file..."
 
       case .uploadingVideo:
-        "uploading video..."
+        "sending video..."
 
       case .working:
         "Working"
@@ -963,13 +963,13 @@ public enum ApiComposeAction: String, Codable, Sendable {
         "typing"
 
       case .uploadingPhoto:
-        "uploading photo"
+        "sending photo"
 
       case .uploadingDocument:
-        "uploading document"
+        "sending file"
 
       case .uploadingVideo:
-        "uploading video"
+        "sending video"
 
       case .working:
         "Working"

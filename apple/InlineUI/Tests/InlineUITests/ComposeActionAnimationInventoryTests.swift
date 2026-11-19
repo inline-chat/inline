@@ -10,9 +10,9 @@ struct ComposeActionAnimationInventoryTests {
     #expect(ComposeActionAnimationInventory.animation(for: .working) == .working)
     #expect(ComposeActionAnimationInventory.animation(for: .typing) == .typing)
     #expect(ComposeActionAnimationInventory.animation(for: .recordingVoice) == .recordingVoice)
-    #expect(ComposeActionAnimationInventory.animation(for: .uploadingPhoto) == .upload)
-    #expect(ComposeActionAnimationInventory.animation(for: .uploadingDocument) == .upload)
-    #expect(ComposeActionAnimationInventory.animation(for: .uploadingVideo) == .upload)
+    #expect(ComposeActionAnimationInventory.animation(for: .uploadingPhoto) == .sending(.photo))
+    #expect(ComposeActionAnimationInventory.animation(for: .uploadingDocument) == .sending(.file))
+    #expect(ComposeActionAnimationInventory.animation(for: .uploadingVideo) == .sending(.video))
   }
 
   #if os(macOS)
