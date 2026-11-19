@@ -71,7 +71,9 @@ export {
 } from "./realtime/v3-client.js"
 export {
   InlineProtocolV3Transport,
+  type InlineProtocolV3TransportOfflineReason,
   type InlineProtocolV3TransportOptions,
+  type InlineProtocolV3TransportState,
 } from "./realtime/v3-transport.js"
 export type { RpcInput } from "./realtime/rpc-input.js"
 export {

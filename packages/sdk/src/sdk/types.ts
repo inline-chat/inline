@@ -25,6 +25,7 @@ import type { Transport } from "../realtime/transport.js"
 import type { InlineSdkAuthenticationError } from "./errors.js"
 import type { InlineProtocolPublicKey } from "../realtime/v3-connection.js"
 import type { InlineProtocolV3Credentials } from "../realtime/v3-client.js"
+import type { InlineProtocolV3TransportState } from "../realtime/v3-transport.js"
 import type { RpcInput } from "../realtime/rpc-input.js"
 
 type InlineSdkClientCommonOptions = {
@@ -104,6 +105,12 @@ export type InlineSdkProtocolV3Options = {
    * reject a write that races after credentialOwner.beginLogout() completes.
    */
   onCredentials?: (credentials: InlineProtocolV3Credentials) => void | Promise<void>
+  /**
+   * Transport lifecycle for health checks: `recovering` retries by itself with
+   * jittered backoff; `offline` needs the host (re-authenticate, then connect a
+   * new client). The latest state is also in getDiagnostics().protocol.transport.
+   */
+  onTransportState?: (state: InlineProtocolV3TransportState) => void
 }
 
 export type InlineSdkClientOptions = InlineSdkClientCommonOptions & (

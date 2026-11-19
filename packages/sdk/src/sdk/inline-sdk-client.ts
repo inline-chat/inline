@@ -353,6 +353,7 @@ export class InlineSdkClient {
         credentials: v3.credentials,
         requestTimeoutMs: options.rpcTimeoutMs ?? undefined,
         logger: options.logger,
+        ...(v3.onTransportState ? { onStateChange: v3.onTransportState } : {}),
         onCredentials: async (credentials) => {
           if (this.logoutInProgress) {
             throw new Error("credential persistence rejected while logout is in progress")

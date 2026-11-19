@@ -3,7 +3,7 @@ import type { ClientMessage } from "@inline-chat/protocol/core"
 import type { InlineProtocolAuthorization } from "./v3-connection.js"
 import { InlineProtocolV3Connection, InlineProtocolV3Error } from "./v3-connection.js"
 import { ConnectionError_Reason } from "@inline-chat/protocol/core"
-import { InlineProtocolV3Transport } from "./v3-transport.js"
+import { InlineProtocolV3Transport, type InlineProtocolV3TransportState } from "./v3-transport.js"
 import { InlineSdkClient } from "../sdk/inline-sdk-client.js"
 
 const authorization = (temporary: boolean): InlineProtocolAuthorization => ({
@@ -23,6 +23,11 @@ const deferred = <T>() => {
   })
   return { promise, resolve, reject }
 }
+
+// Largest jitter sample: every backoff lands exactly on its cap.
+const maxJitter = () => 1 - Number.EPSILON
+const pinnedKeys = [{ modulus: "1", exponent: "3", fingerprint: "1" }]
+const backoffCapMs = (failures: number) => Math.min(60_000, 1_000 * 2 ** (failures - 1))
 
 const fakeConnection = (temporary = authorization(true)) => {
   const close = vi.fn(async () => {})
@@ -154,8 +159,8 @@ describe("InlineProtocolV3Transport", () => {
     await transport.stop()
   })
 
-  it.each(["authorization-invalidated", "session-revoked"] as const)(
-    "bounds replacement failure %s and only logs out for confirmed revocation", async (code) => {
+  it.each(["authorization-invalidated", "session-revoked", "unauthorized", "protocol"] as const)(
+    "stops on permanent replacement failure %s with a typed offline state and only logs out for revocation", async (code) => {
       vi.useFakeTimers()
       const cached = fakeConnection()
       const replacement = fakeConnection()
@@ -165,10 +170,13 @@ describe("InlineProtocolV3Transport", () => {
       const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
         .mockResolvedValueOnce(cached)
         .mockResolvedValueOnce(replacement)
+      const states: InlineProtocolV3TransportState[] = []
       const transport = new InlineProtocolV3Transport({
         url: "ws://localhost/realtime/v3",
         rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
         credentials: { permanent: authorization(false), temporary: authorization(true) },
+        random: maxJitter,
+        onStateChange: (state) => states.push(state),
       })
       const iterator = transport.events[Symbol.asyncIterator]()
       await transport.start()
@@ -184,6 +192,12 @@ describe("InlineProtocolV3Transport", () => {
       expect(replacement.bindTemporary).toHaveBeenCalledOnce()
       expect(replacement.close).toHaveBeenCalledOnce()
       expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+      const reason = code === "session-revoked" ? "session-revoked" : "authorization-rejected"
+      expect(states.map((state) => state.kind)).toEqual(["connecting", "connected", "recovering", "offline"])
+      expect(states.at(-1)).toMatchObject({ kind: "offline", reason, error: { code } })
+      expect(transport.transportState).toMatchObject({ kind: "offline", reason })
+      expect(transport.getDiagnostics()).toMatchObject({ phase: "offline", offlineReason: reason })
+      expect(vi.getTimerCount()).toBe(0)
       await transport.reconnect({ skipDelay: true })
       expect(connect).toHaveBeenCalledTimes(2)
       await transport.events.send({ type: "stopping" })
@@ -236,13 +250,17 @@ describe("InlineProtocolV3Transport", () => {
       rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
       credentials: { permanent: authorization(false), temporary: authorization(true) },
       onCredentials: persist,
+      random: maxJitter,
     })
     await transport.start()
     connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
     await vi.advanceTimersByTimeAsync(1_000)
     expect(connect).toHaveBeenCalledTimes(2)
     expect(transport.getDiagnostics()).toMatchObject({ state: "connecting", connected: false, recoveringAuthorization: true })
-    await vi.advanceTimersByTimeAsync(999)
+    expect(transport.transportState).toMatchObject({
+      kind: "recovering", attempt: 2, retryInMs: 2_000, replacingAuthorization: true,
+    })
+    await vi.advanceTimersByTimeAsync(1_999)
     expect(connect).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
     expect(connect).toHaveBeenCalledTimes(3)
@@ -253,32 +271,101 @@ describe("InlineProtocolV3Transport", () => {
     await transport.stop()
   })
 
-  it("bounds exhausted network recovery to three bootstrap attempts without logging out", async () => {
+  it("keeps replacing a rejected key through ten transient failures and ends connected", async () => {
     vi.useFakeTimers()
     const cached = fakeConnection()
+    const replacement = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValueOnce(cached)
+    for (let failure = 0; failure < 10; failure += 1) {
+      connect.mockRejectedValueOnce(new InlineProtocolV3Error("closed", "server restarting"))
+    }
+    connect.mockResolvedValueOnce(replacement)
+    const states: InlineProtocolV3TransportState[] = []
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: pinnedKeys,
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random: maxJitter,
+      onStateChange: (state) => states.push(state),
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    // Close jitter, then one wait per failed replacement: 1 s doubling to the 60 s cap.
+    let elapsed = 0
+    for (let failures = 1; failures <= 11; failures += 1) {
+      await vi.advanceTimersByTimeAsync(backoffCapMs(failures) - 1)
+      expect(connect).toHaveBeenCalledTimes(failures)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(connect).toHaveBeenCalledTimes(failures + 1)
+      elapsed += backoffCapMs(failures)
+    }
+    expect(elapsed).toBe(1_000 + 2_000 + 4_000 + 8_000 + 16_000 + 32_000 + 60_000 * 5)
+    expect(replacement.bindTemporary).toHaveBeenCalledOnce()
+    expect(transport.getDiagnostics()).toMatchObject({
+      state: "connected", connected: true, recoveringAuthorization: false, phase: "connected", consecutiveFailures: 0,
+    })
+    const recovering = states.filter((state) => state.kind === "recovering")
+    expect(recovering.map((state) => state.attempt)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    expect(recovering.every((state) => state.replacingAuthorization)).toBe(true)
+    expect(states.at(-1)).toEqual({ kind: "connected" })
+    await transport.stop()
+    expect(transport.transportState).toEqual({ kind: "stopped" })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("keeps start() fail-fast after three transient replacement attempts", async () => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    cached.probeTemporaryAuthorization = vi.fn(async () => {
+      throw new InlineProtocolV3Error("authorization-invalidated", "forgotten")
+    })
     const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
       .mockResolvedValueOnce(cached)
       .mockRejectedValue(new InlineProtocolV3Error("timeout", "restart continues"))
+    const states: InlineProtocolV3TransportState[] = []
     const transport = new InlineProtocolV3Transport({
       url: "ws://localhost/realtime/v3",
-      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      rsaPublicKeys: pinnedKeys,
       credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random: maxJitter,
+      onStateChange: (state) => states.push(state),
     })
-    const iterator = transport.events[Symbol.asyncIterator]()
+    const started = expect(transport.start()).rejects.toThrow("restart continues")
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000)
+    await started
+    expect(connect).toHaveBeenCalledTimes(4)
+    expect(states.at(-1)).toMatchObject({ kind: "offline", reason: "connect-failed", error: { code: "timeout" } })
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("lets a state callback stop the transport mid-recovery without leaking a timer", async () => {
+    vi.useFakeTimers()
+    const first = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(first)
+      .mockRejectedValue(new InlineProtocolV3Error("closed", "server down"))
+    let transport!: InlineProtocolV3Transport
+    const states: InlineProtocolV3TransportState[] = []
+    transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: pinnedKeys,
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random: maxJitter,
+      onStateChange: (state) => {
+        states.push(state)
+        if (state.kind === "recovering" && state.attempt === 2) void transport.stop()
+      },
+    })
     await transport.start()
-    await iterator.next()
-    await iterator.next()
     connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
-    expect((await iterator.next()).value).toEqual({ type: "connecting" })
-    await vi.advanceTimersByTimeAsync(3_999)
-    expect(connect).toHaveBeenCalledTimes(3)
-    await vi.advanceTimersByTimeAsync(1)
-    expect(connect).toHaveBeenCalledTimes(4)
-    expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false, recoveringAuthorization: false })
-    await vi.advanceTimersByTimeAsync(60_000)
-    expect(connect).toHaveBeenCalledTimes(4)
-    await transport.events.send({ type: "stopping" })
-    expect((await iterator.next()).value).toEqual({ type: "stopping" })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(connect).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(states.at(-1)).toEqual({ kind: "stopped" })
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle" })
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("does not retry a persistence failure even when its code resembles a network timeout", async () => {
@@ -302,6 +389,9 @@ describe("InlineProtocolV3Transport", () => {
     expect(persist).toHaveBeenCalledTimes(2)
     expect(replacement.close).toHaveBeenCalledOnce()
     expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+    expect(transport.transportState).toMatchObject({
+      kind: "offline", reason: "credential-persistence-failed", error: { message: "store timeout" },
+    })
   })
 
   it.each(["backoff", "handshake", "persistence"])("manual stop fences recovery during %s", async (phase) => {
@@ -402,6 +492,7 @@ describe("InlineProtocolV3Transport", () => {
 
   it("honors SDK connect cancellation during cached-key recovery backoff", async () => {
     vi.useFakeTimers()
+    vi.spyOn(Math, "random").mockReturnValue(0.5)
     const cached = fakeConnection()
     cached.probeTemporaryAuthorization = vi.fn(async () => {
       throw new InlineProtocolV3Error("authorization-invalidated", "forgotten")
@@ -557,7 +648,8 @@ describe("InlineProtocolV3Transport", () => {
     expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
   })
 
-  it("reconnects immediately when the active connection closes", async () => {
+  it("reconnects after a jittered sub-second delay when the active connection closes", async () => {
+    vi.useFakeTimers()
     const first = fakeConnection()
     const second = fakeConnection()
     const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
@@ -567,20 +659,135 @@ describe("InlineProtocolV3Transport", () => {
       url: "ws://localhost/realtime/v3",
       rsaPublicKeys: [],
       credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random: () => 0.25,
     })
 
     await transport.start()
-    const firstOptions = connect.mock.calls[0]?.[0]
-    expect(firstOptions).toBeDefined()
-    firstOptions?.onClose?.(new Error("socket closed"))
-
-    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2))
-    await vi.waitFor(() => expect(transport.getDiagnostics()).toMatchObject({
-      state: "connected",
-      connected: true,
-    }))
+    connect.mock.calls[0]![0].onClose!(new Error("socket closed"))
+    await vi.advanceTimersByTimeAsync(0)
     expect(first.close).toHaveBeenCalledOnce()
+    expect(transport.transportState).toMatchObject({ kind: "recovering", attempt: 1, retryInMs: 250 })
+    await vi.advanceTimersByTimeAsync(249)
+    expect(connect).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected", connected: true })
     await transport.stop()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("uses full-jitter exponential backoff, bounded at 60 s, and resets it after a connection", async () => {
+    vi.useFakeTimers()
+    const samples = [0, 0.5, 0.999, 0.1, 0.75, 0.3, 0.6, 0.9, 0.2, 0.4]
+    let sample = 0
+    const random = () => samples[sample++ % samples.length]!
+    const first = fakeConnection()
+    const recovered = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValueOnce(first)
+    for (let failure = 0; failure < 9; failure += 1) {
+      connect.mockRejectedValueOnce(new InlineProtocolV3Error("closed", "server down"))
+    }
+    connect.mockResolvedValueOnce(recovered)
+    const states: InlineProtocolV3TransportState[] = []
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random,
+      onStateChange: (state) => states.push(state),
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("closed", "deploy"))
+    for (let failures = 1; failures <= 10; failures += 1) {
+      const state = transport.transportState
+      expect(state).toMatchObject({ kind: "recovering", attempt: failures, replacingAuthorization: false })
+      const retryInMs = (state as { retryInMs: number }).retryInMs
+      const capMs = backoffCapMs(failures)
+      expect(retryInMs).toBe(Math.floor(samples[failures - 1]! * (capMs + 1)))
+      expect(retryInMs).toBeGreaterThanOrEqual(0)
+      expect(retryInMs).toBeLessThanOrEqual(capMs)
+      expect(capMs).toBeLessThanOrEqual(60_000)
+      if (retryInMs > 0) {
+        await vi.advanceTimersByTimeAsync(retryInMs - 1)
+        expect(connect).toHaveBeenCalledTimes(failures)
+      }
+      await vi.advanceTimersByTimeAsync(retryInMs > 0 ? 1 : 0)
+      expect(connect).toHaveBeenCalledTimes(failures + 1)
+    }
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected", consecutiveFailures: 0 })
+
+    const second = fakeConnection()
+    connect.mockResolvedValueOnce(second)
+    connect.mock.calls[10]![0].onClose!(new InlineProtocolV3Error("closed", "next deploy"))
+    expect(transport.transportState).toMatchObject({ kind: "recovering", attempt: 1 })
+    expect((transport.transportState as { retryInMs: number }).retryInMs).toBeLessThanOrEqual(1_000)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected" })
+    // Callbacks arrive on microtasks, in publication order.
+    expect(states.filter((state) => state.kind === "recovering").map((state) => state.attempt))
+      .toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1])
+    expect(states.at(-1)).toEqual({ kind: "connected" })
+    await transport.stop()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(["ordinary", "replacement"])("stop during %s backoff cancels its timer and never reconnects", async (kind) => {
+    vi.useFakeTimers()
+    const first = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(first)
+      .mockRejectedValue(new InlineProtocolV3Error("closed", "server down"))
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: pinnedKeys,
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random: maxJitter,
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(kind === "replacement"
+      ? new InlineProtocolV3Error("authorization-invalidated", "forgotten")
+      : new InlineProtocolV3Error("closed", "deploy"))
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 1)
+    expect(connect).toHaveBeenCalledTimes(3)
+    expect(transport.transportState).toMatchObject({ kind: "recovering", attempt: 3, retryInMs: 4_000 })
+    expect(vi.getTimerCount()).toBe(1)
+
+    await transport.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(connect).toHaveBeenCalledTimes(3)
+    expect(transport.transportState).toEqual({ kind: "stopped" })
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+  })
+
+  it("lets an explicit reconnect replace a pending backoff retry without resetting the backoff", async () => {
+    vi.useFakeTimers()
+    const first = fakeConnection()
+    const recovered = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(first)
+      .mockRejectedValueOnce(new InlineProtocolV3Error("closed", "server down"))
+      .mockRejectedValueOnce(new InlineProtocolV3Error("closed", "server down"))
+      .mockResolvedValueOnce(recovered)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      random: maxJitter,
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("closed", "deploy"))
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(connect).toHaveBeenCalledTimes(2)
+    await Promise.all([transport.reconnect(), transport.reconnect()])
+    expect(connect).toHaveBeenCalledTimes(3)
+    expect(transport.transportState).toMatchObject({ kind: "recovering", attempt: 3, retryInMs: 4_000 })
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(connect).toHaveBeenCalledTimes(4)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected" })
+    await transport.stop()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("stops reconnecting and publishes session revocation after an authenticated close", async () => {
