@@ -359,10 +359,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
+  /// The background this controller last set, to skip re-setting it on every route change.
+  private var appliedWindowBackground: (background: AppWindowBackground, color: NSColor)?
+
   private func applyWindowAppearance() {
     let appearance = nav3.currentRoute.routeWindowAppearance
-    appBridge.applyWindowBackground(appearance.windowBackground)
-    appBridge.setWindowTitlebarAppearsTransparent(appearance.titlebarAppearsTransparent)
+    // Every chat switch changes the route. A new background color object redraws the whole
+    // window even when it resolves the same, so only a different background is applied. A
+    // color someone else set since (a theme change) no longer matches and is replaced.
+    let windowBackground = appearance.windowBackground
+    if let window,
+       let applied = appliedWindowBackground,
+       applied.background == windowBackground.background,
+       window.backgroundColor === applied.color,
+       window.isOpaque == windowBackground.isOpaque
+    {
+      // Unchanged.
+    } else {
+      appBridge.applyWindowBackground(windowBackground)
+      appliedWindowBackground = window.map { (windowBackground.background, $0.backgroundColor) }
+    }
+    if window?.titlebarAppearsTransparent != appearance.titlebarAppearsTransparent {
+      appBridge.setWindowTitlebarAppearsTransparent(appearance.titlebarAppearsTransparent)
+    }
   }
 
   private func installRootEscapeHandler() {

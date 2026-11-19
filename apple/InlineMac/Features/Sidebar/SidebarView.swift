@@ -361,7 +361,9 @@ struct SidebarView: View {
       selectedPeer: selectedPeer,
       selectedReplyPeer: dependencies?.nav3?.currentReplyThreadPeer,
       allChatsSelected: nav.currentRoute == .allChats || nav.currentRoute == .archivedChats,
-      gridSelectionKey: "\(String(describing: nav.currentRoute))|\(nav.selectedSpaceId ?? 0)",
+      // What the grid row draws (selection, space and avatars). A key built from the whole route
+      // changed on every chat switch and made the collection restyle every row.
+      gridSelectionKey: "\(nativeGridIsSelected)|\(nav.selectedSpaceId ?? 0)|\(nativeGridAvatars.map(\.id))",
       titlesDimmed: sidebarTitlesDimmed,
       scopedProminentUnreadCount: unreadCounts.scopedUnopenedProminentUnreadCount,
       scopedOtherUnreadCount: unreadCounts.scopedUnopenedOtherUnreadCount,

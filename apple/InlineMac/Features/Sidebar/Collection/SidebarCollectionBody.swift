@@ -1106,6 +1106,9 @@ final class SidebarCollectionBodyController: NSViewController {
         || $0.sidebarAsInbox != input.renderState.sidebarAsInbox
         || $0.archiveVisible != input.renderState.archiveVisible
     } ?? false
+    let previousRenderState = latestRenderState
+    let clearedBatchSelection: Set<SidebarCollectionRow.ID> =
+      selectionContextChanged ? chatSelection?.selectedIDs ?? [] : []
     if selectionContextChanged { chatSelection = nil }
     chatSelection?.retainVisible(inputRows.filter { $0.projectedItem != nil }.map(\.id))
     externalRows = inputRows
@@ -1113,7 +1116,14 @@ final class SidebarCollectionBodyController: NSViewController {
     let reorderPolicyChanged = reorderPolicy != input.reorderPolicy
     reorderPolicy = input.reorderPolicy
     latestRenderState = input.renderState
-    if selectionContextChanged { refreshVisibleContent(.all) }
+    if selectionContextChanged {
+      refreshVisibleContent(selectionRefreshScope(
+        from: previousRenderState,
+        to: input.renderState,
+        rows: inputRows,
+        clearedBatchSelection: clearedBatchSelection
+      ))
+    }
     if reorderPolicyChanged || selectionContextChanged, reorderSession != nil {
       cancelReorder(animated: false, reason: "selection-context-or-policy-update")
       handleScrollRequestIfPossible()
@@ -2956,6 +2966,37 @@ final class SidebarCollectionBodyController: NSViewController {
       else { return nil }
       return rowID
     })
+  }
+
+  /// A chat switch restyles the rows that were or become selected, plus any batch selection it
+  /// clears. It used to reconfigure every visible row. Mode and archive changes still do.
+  private func selectionRefreshScope(
+    from old: SidebarCollectionRenderState?,
+    to new: SidebarCollectionRenderState,
+    rows: [SidebarCollectionRow],
+    clearedBatchSelection: Set<SidebarCollectionRow.ID>
+  ) -> VisibleRefreshScope {
+    guard let old,
+          old.sidebarAsInbox == new.sidebarAsInbox,
+          old.archiveVisible == new.archiveVisible
+    else { return .all }
+
+    var rowIDs = clearedBatchSelection
+    if old.gridSelectionKey != new.gridSelectionKey {
+      rowIDs.insert(.grid)
+    }
+    if old.allChatsSelected != new.allChatsSelected {
+      rowIDs.insert(.allChats)
+    }
+    let peers = [old.selectedPeer, old.selectedReplyPeer, new.selectedPeer, new.selectedReplyPeer]
+      .compactMap { $0 }
+    if !peers.isEmpty {
+      for row in displayRows + rows {
+        guard let item = row.projectedItem, peers.contains(item.item.peerId) else { continue }
+        rowIDs.insert(row.id)
+      }
+    }
+    return rowIDs.isEmpty ? .none : .rowIDs(rowIDs)
   }
 
   private func refreshScope(
