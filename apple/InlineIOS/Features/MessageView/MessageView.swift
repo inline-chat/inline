@@ -132,12 +132,16 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       : .immediate
     let animated = motion != .immediate
     let previousText = self.layout?.text
+    // Reactions sit on the bubble's bottom edge, so pills that come and go follow that edge while
+    // the bubble resizes instead of the top they are placed from (in the bubble's coordinates).
+    let bottomShift = isSameMessage ? layout.bubble.frame.height - (self.layout?.bubble.frame.height ?? 0) : 0
     self.content = content
     self.layout = layout
     scheduleExpiry()
 
     // Content and starting states change without animation; geometry moves below.
     var appearing: [UIView] = []
+    var appearingPills: [MessageReactionPillView] = []
     var leaving: [(String, MessageReactionPillView)] = []
     UIView.performWithoutAnimation {
       bubbleView.configure(
@@ -208,13 +212,15 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         } else {
           view = makeReactionView()
           reactionViews[id] = view
-          view.untransformedFrame = frame
+          // Starts where its final place is relative to the bottom edge of the bubble as it is now,
+          // so a growing bubble never clips it.
+          view.untransformedFrame = animated ? frame.offsetBy(dx: 0, dy: -bottomShift) : frame
           if animated {
             view.alpha = 0
-            let scale = MessageReactionPillView.Metrics.popScale
+            let scale = MessageReactionPillView.Metrics.appearScale
             view.transform = CGAffineTransform(scaleX: scale, y: scale)
+            appearingPills.append(view)
           }
-          appearing.append(view)
         }
         view.configure(model, animated: animated)
       }
@@ -307,8 +313,6 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     let appearingViews = appearing
     let leavingViews = leaving
     let leavingRichNodes = richView?.leavingNodes ?? []
-    // New pills keep their starting scale on the row's curve and settle with the pop's bounce.
-    let poppingPills = animated ? appearing.compactMap { $0 as? MessageReactionPillView } : []
     motion.animate({ [self] in
       bubbleContentView.frame = layout.bubble.frame
       bubbleView.frame = bubbleContentView.bounds
@@ -331,8 +335,9 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           view.untransformedFrame = frame
         }
         view.layoutIfNeeded()
-        view.alpha = 1
-        if !poppingPills.contains(view) { view.transform = .identity }
+        // New pills grow on the row's spring and fade in on their own curve below.
+        if !appearingPills.contains(view) { view.alpha = 1 }
+        view.transform = .identity
       }
       for (id, view) in blockViews {
         let frame = view.superview === self ? layout.frame(.block(id)) : local(layout.frame(.block(id)))
@@ -341,9 +346,9 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         }
         view.layoutIfNeeded()
       }
-      for (_, view) in leavingViews {
-        view.alpha = 0
-        view.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+      // Leaving pills keep their place above the bubble's bottom edge while it moves.
+      for view in leavingReactionViews.values {
+        view.untransformedFrame = view.untransformedFrame.offsetBy(dx: 0, dy: bottomShift)
       }
       for view in appearingViews {
         view.alpha = 1
@@ -360,25 +365,26 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       }
     }, completion: { [weak self] _ in
       guard let self else { return }
-      for (id, view) in leavingViews where leavingReactionViews[id] === view {
-        leavingReactionViews[id] = nil
-        view.removeFromSuperview()
-      }
+      if !animated { removeLeavingReactions(leavingViews) }
       richView?.removeLeavingNodes(leavingRichNodes)
       for view in reactionViews.values {
         view.removeFinishedTransitions()
       }
     })
     if animated {
-      let pills = Array(reactionViews.values)
-      MessageReactionPillView.pop {
-        for pill in poppingPills {
-          pill.transform = .identity
+      // Telegram's pill fade: in, or out while shrinking to nothing, in 0.2 s.
+      MessageReactionPillView.fade({
+        for pill in appearingPills {
+          pill.alpha = 1
         }
-        for pill in pills {
-          pill.popAppearing()
+        let scale = MessageReactionPillView.Metrics.appearScale
+        for (_, view) in leavingViews {
+          view.alpha = 0
+          view.transform = CGAffineTransform(scaleX: scale, y: scale)
         }
-      }
+      }, completion: { [weak self] _ in
+        self?.removeLeavingReactions(leavingViews)
+      })
     }
   }
 
@@ -455,6 +461,14 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     view.layer.cornerRadius = max(0, layout.bubble.cornerRadius - inset)
     view.layer.maskedCorners = corners
     view.clipsToBounds = !corners.isEmpty
+  }
+
+  /// Removes the pills that finished leaving; one that came back meanwhile stays.
+  private func removeLeavingReactions(_ views: [(String, MessageReactionPillView)]) {
+    for (id, view) in views where leavingReactionViews[id] === view {
+      leavingReactionViews[id] = nil
+      view.removeFromSuperview()
+    }
   }
 
   /// A planned row frame in `bubbleContentView`'s coordinates.
