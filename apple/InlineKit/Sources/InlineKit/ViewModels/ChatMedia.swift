@@ -96,14 +96,8 @@ public final class ChatMediaViewModel: ChatResourceWindow<MediaMessage>, @unchec
   @Published public private(set) var groupedMediaMessages: [MediaMessageGroup] = []
 
   override public func rowsDidChange() {
-    groupedMediaMessages = Dictionary(grouping: rows) { Calendar.current.startOfDay(for: $0.message.date) }
-      .map { MediaMessageGroup(date: $0.key, messages: $0.value.sorted { lhs, rhs in
-        if lhs.message.date != rhs.message.date {
-          return lhs.message.date > rhs.message.date
-        }
-        return lhs.message.messageId > rhs.message.messageId
-      }) }
-      .sorted { $0.date > $1.date }
+    groupedMediaMessages = Self.dayGroups(rows, date: \.message.date, messageID: \.message.messageId)
+      .map { MediaMessageGroup(date: $0.date, messages: $0.rows) }
   }
 }
 

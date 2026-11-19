@@ -47,13 +47,7 @@ public final class ChatVoiceMemosViewModel: ChatResourceWindow<VoiceMemoMessage>
   @Published public private(set) var groupedVoiceMemoMessages: [VoiceMemoMessageGroup] = []
 
   override public func rowsDidChange() {
-    groupedVoiceMemoMessages = Dictionary(grouping: rows) { Calendar.current.startOfDay(for: $0.message.date) }
-      .map { VoiceMemoMessageGroup(date: $0.key, messages: $0.value.sorted { lhs, rhs in
-        if lhs.message.date != rhs.message.date {
-          return lhs.message.date > rhs.message.date
-        }
-        return lhs.message.messageId > rhs.message.messageId
-      }) }
-      .sorted { $0.date > $1.date }
+    groupedVoiceMemoMessages = Self.dayGroups(rows, date: \.message.date, messageID: \.message.messageId)
+      .map { VoiceMemoMessageGroup(date: $0.date, messages: $0.rows) }
   }
 }

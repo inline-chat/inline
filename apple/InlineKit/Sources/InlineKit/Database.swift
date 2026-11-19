@@ -2177,7 +2177,7 @@ public extension AppDatabase {
     #if DEBUG
     // The iOS ChatList harness runs on an in-memory database: the app's own
     // database is never opened, and realtime never starts without persistent storage.
-    if CommandLine.arguments.contains("--chatlist-harness") {
+    if CommandLine.arguments.contains("--chatlist-harness") || CommandLine.arguments.contains("--peerinfo-harness") {
       do {
         return try AppDatabase(DatabaseQueue(configuration: makeConfiguration(passphrase: "chatlist-harness")))
       } catch {

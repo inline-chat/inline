@@ -167,8 +167,9 @@ private func saveThreadRelationshipSidecars(
   dialogs: [InlineProtocol.Dialog]
 ) async throws {
   try await AppDatabase.shared.dbWriter.write { db in
+    // Sidecars carry no messages or users; don't let a missing one fail the save.
     for chat in chats {
-      _ = try Chat(from: chat).saveFull(db)
+      try Chat.saveSidecar(chat, in: db)
     }
 
     for dialog in dialogs {

@@ -101,14 +101,8 @@ public final class ChatLinksViewModel: ChatResourceWindow<LinkMessage>, @uncheck
   @Published public private(set) var groupedLinkMessages: [LinkMessageGroup] = []
 
   override public func rowsDidChange() {
-    groupedLinkMessages = Dictionary(grouping: rows) { Calendar.current.startOfDay(for: $0.message.date) }
-      .map { LinkMessageGroup(date: $0.key, messages: $0.value.sorted { lhs, rhs in
-        if lhs.message.date != rhs.message.date {
-          return lhs.message.date > rhs.message.date
-        }
-        return lhs.message.messageId > rhs.message.messageId
-      }) }
-      .sorted { $0.date > $1.date }
+    groupedLinkMessages = Self.dayGroups(rows, date: \.message.date, messageID: \.message.messageId)
+      .map { LinkMessageGroup(date: $0.date, messages: $0.rows) }
   }
 }
 

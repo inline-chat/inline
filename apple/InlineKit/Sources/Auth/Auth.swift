@@ -5,7 +5,14 @@ import InlineNotificationFence
 import Logger
 
 public final class Auth: ObservableObject, @unchecked Sendable {
-  public static let shared = TestProcess.isRunning ? Auth(mockAuthenticated: false) : Auth()
+  public static let shared: Auth = {
+    if TestProcess.isRunning { return Auth(mockAuthenticated: false) }
+    #if DEBUG
+    // The chat info harness renders as user 1 on an in-memory database; nothing reaches the server.
+    if CommandLine.arguments.contains("--peerinfo-harness") { return Auth(mockAuthenticated: true) }
+    #endif
+    return Auth()
+  }()
 
   private let log = Log.scoped("Auth")
   private let cache: AuthSnapshotCache

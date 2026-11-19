@@ -153,18 +153,31 @@ public class ChatResourceWindow<Row: Equatable & Sendable>: ObservableObject, @u
 
   private func receive(_ snapshot: ChatResourceSnapshot<Row>) {
     guard active, snapshot.limit == wantedCount else { return }
-    rows = Array(snapshot.rows.prefix(snapshot.limit))
+    // The observation re-reads on every commit that touches its tables, mostly with an
+    // unchanged result. Publishing only real changes keeps tabs from regrouping and
+    // re-rendering for unrelated writes.
+    let visibleRows = Array(snapshot.rows.prefix(snapshot.limit))
+    if visibleRows != rows {
+      rows = visibleRows
+    }
     holes = snapshot.holes
     hasMoreCachedRows = snapshot.rows.count > snapshot.limit
     if !loading, !needsLatest {
       if !hasMore {
-        loadState = .complete
+        setLoadState(.complete)
       } else if loadState == .complete {
-        loadState = .idle
+        setLoadState(.idle)
       }
       if loadState != .failed, requiresPage {
         Task { await requestDrain() }
       }
+    }
+  }
+
+  /// `@Published` notifies on every assignment, equal or not.
+  private func setLoadState(_ state: ChatResourceLoadState) {
+    if loadState != state {
+      loadState = state
     }
   }
 
@@ -251,8 +264,49 @@ public class ChatResourceWindow<Row: Equatable & Sendable>: ObservableObject, @u
     loadedMessageIds: [Int64],
     triggerWindow: Int
   ) -> Bool {
-    guard triggerWindow > 0, !loadedMessageIds.isEmpty else { return false }
-    return Set(loadedMessageIds).sorted().prefix(triggerWindow).contains(currentMessageId)
+    guard triggerWindow > 0, loadedMessageIds.contains(currentMessageId) else { return false }
+    // Among the `triggerWindow` smallest distinct ids. Cells call this as they appear,
+    // so it counts in one pass instead of sorting every loaded id.
+    var older = Set<Int64>()
+    for id in loadedMessageIds where id < currentMessageId {
+      older.insert(id)
+      if older.count >= triggerWindow { return false }
+    }
+    return true
+  }
+
+  /// Rows grouped by local day, newest day first; inside a day newest first, with the
+  /// message id breaking ties. One calendar lookup per day boundary rather than one
+  /// `Calendar.current` fetch and `startOfDay` per row.
+  nonisolated static func dayGroups(
+    _ rows: [Row],
+    date: (Row) -> Date,
+    messageID: (Row) -> Int64
+  ) -> [(date: Date, rows: [Row])] {
+    guard !rows.isEmpty else { return [] }
+    let calendar = Calendar.current
+    var buckets: [Date: [Row]] = [:]
+    var day: DateInterval?
+    for row in rows {
+      let rowDate = date(row)
+      if let current = day, rowDate >= current.start, rowDate < current.end {
+        buckets[current.start, default: []].append(row)
+        continue
+      }
+      let interval = calendar.dateInterval(of: .day, for: rowDate)
+        ?? DateInterval(start: calendar.startOfDay(for: rowDate), duration: 0)
+      day = interval
+      buckets[interval.start, default: []].append(row)
+    }
+    return buckets
+      .map { start, rows in
+        (date: start, rows: rows.sorted { lhs, rhs in
+          let lhsDate = date(lhs), rhsDate = date(rhs)
+          if lhsDate != rhsDate { return lhsDate > rhsDate }
+          return messageID(lhs) > messageID(rhs)
+        })
+      }
+      .sorted { $0.date > $1.date }
   }
 
   nonisolated static func nextOffset(holes: [MessageHistoryHole]) -> Int64? {

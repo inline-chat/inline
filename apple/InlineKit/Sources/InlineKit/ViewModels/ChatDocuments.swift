@@ -88,14 +88,8 @@ public final class ChatDocumentsViewModel: ChatResourceWindow<DocumentMessage>, 
   @Published public private(set) var groupedDocumentMessages: [DocumentMessageGroup] = []
 
   override public func rowsDidChange() {
-    groupedDocumentMessages = Dictionary(grouping: rows) { Calendar.current.startOfDay(for: $0.message.date) }
-      .map { DocumentMessageGroup(date: $0.key, messages: $0.value.sorted { lhs, rhs in
-        if lhs.message.date != rhs.message.date {
-          return lhs.message.date > rhs.message.date
-        }
-        return lhs.message.messageId > rhs.message.messageId
-      }) }
-      .sorted { $0.date > $1.date }
+    groupedDocumentMessages = Self.dayGroups(rows, date: \.message.date, messageID: \.message.messageId)
+      .map { DocumentMessageGroup(date: $0.date, messages: $0.rows) }
   }
 
   public func documentMessage(for documentId: Int64) -> DocumentMessage? {
