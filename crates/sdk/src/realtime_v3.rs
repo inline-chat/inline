@@ -1363,7 +1363,12 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 let mut fields = match received {
                     Ok(fields) => fields,
                     Err(error) => {
-                        if error.is_authorization_invalidated() {
+                        // Any other 4401 (`authorization_unavailable`: the
+                        // server no longer holds this temporary key, e.g. after
+                        // a deploy) ends this socket like a plain close. The
+                        // reconnect then exchanges a fresh temporary key with
+                        // the permanent one instead of logging the account out.
+                        if live_close_invalidates_account(&error) {
                             authentication_invalidated = true;
                             let _ = events.send(RealtimeEvent::AuthenticationInvalidated);
                         }
@@ -1706,6 +1711,13 @@ fn authorization_close_error(reason: &str) -> InlineProtocolV3Error {
     }
 }
 
+/// Whether an error that ended a live, authenticated socket proves the account
+/// session is gone. Only the server's confirmed revocation does; a recoverable
+/// 4401 must reconnect (and regenerate the temporary key), never log out.
+fn live_close_invalidates_account(error: &InlineProtocolV3Error) -> bool {
+    error.is_session_revoked()
+}
+
 fn authentication_invalidated_realtime_error() -> crate::realtime::RealtimeError {
     crate::realtime::RealtimeError::AuthenticationInvalidated
 }
@@ -1924,6 +1936,27 @@ mod tests {
             assert!(!recoverable.is_session_revoked(), "{reason}");
             assert!(recoverable.is_authorization_invalidated(), "{reason}");
         }
+    }
+
+    #[test]
+    fn a_recoverable_4401_on_a_live_socket_reconnects_instead_of_logging_out() {
+        // A temporary key the server no longer holds (e.g. after a deploy)
+        // must not clear the stored session: the reconnect regenerates it.
+        for reason in ["authorization_unavailable", "", "session_revoked"] {
+            assert!(
+                !live_close_invalidates_account(&authorization_close_error(reason)),
+                "{reason}"
+            );
+        }
+        assert!(!live_close_invalidates_account(
+            &InlineProtocolV3Error::Closed
+        ));
+        assert!(!live_close_invalidates_account(
+            &InlineProtocolV3Error::AuthorizationInvalidated
+        ));
+        assert!(live_close_invalidates_account(&authorization_close_error(
+            "session_revoked_confirmed"
+        )));
     }
 
     #[test]
