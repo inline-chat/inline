@@ -96,6 +96,7 @@ final class ReplyThreadSummaryView: NSView {
     self.style = style
     super.init(frame: .zero)
     setupView()
+    installTrackingAreaIfNeeded()
   }
 
   @available(*, unavailable)
@@ -339,14 +340,12 @@ final class ReplyThreadSummaryView: NSView {
     }
   }
 
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let trackingAreaRef {
-      removeTrackingArea(trackingAreaRef)
-    }
-
+  /// `.inVisibleRect` follows the view's bounds, so the area is added once instead of being
+  /// rebuilt on every tracking pass.
+  private func installTrackingAreaIfNeeded() {
+    guard trackingAreaRef == nil else { return }
     let area = NSTrackingArea(
-      rect: bounds,
+      rect: .zero,
       options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
       owner: self,
       userInfo: nil

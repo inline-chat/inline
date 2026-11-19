@@ -401,7 +401,9 @@ class MinimalMessageViewAppKit: NSView {
     let view = MessageTimeAndState(
       fullMessage: fullMessage,
       overlay: isTimeOverlay,
-      contentAlignment: timeContentAlignment
+      contentAlignment: timeContentAlignment,
+      // `updateHoverChrome` registers it once the label shows.
+      showsToolTip: false
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
@@ -5056,7 +5058,10 @@ extension MinimalMessageViewAppKit {
   private func updateHoverChrome() {
     hoverBackgroundView.backgroundColor = isMouseInside ? hoverBackgroundColor : nil
     hoverBackgroundView.isHidden = !isMouseInside
-    timeAndStateView.isHidden = !(showsAvatar || shouldAlwaysShowTimeAndState)
+    let showsTimeAndState = showsAvatar || shouldAlwaysShowTimeAndState
+    timeAndStateView.isHidden = !showsTimeAndState
+    // Most rows sit mid-group with the time hidden; they register no date tooltip.
+    timeAndStateView.showsToolTip = showsTimeAndState
   }
 
   private func updateHoverState(_ isHovered: Bool) {

@@ -29,8 +29,14 @@ class MessageTimeAndState: NSView {
   private var viaDetail: String?
   private var viaPrefixWidth: CGFloat = 0
   private var currentState: MessageSendingStatus = .sent
-  private var tooltipText: String = ""
-  private var trackingArea: NSTrackingArea?
+  /// Registers the date tooltip. Each registered tooltip is a rect AppKit keeps in sync while
+  /// rows scroll, so minimal rows that hide their time turn it off.
+  var showsToolTip = true {
+    didSet {
+      guard showsToolTip != oldValue else { return }
+      updateTooltip()
+    }
+  }
 
   private var isOverlay: Bool
   private var usesOutgoingBubbleStyle: Bool
@@ -217,9 +223,11 @@ class MessageTimeAndState: NSView {
     overlay: Bool,
     usesOutgoingBubbleStyle: Bool = false,
     contentAlignment: ContentAlignment = .center,
-    via: MessageViaPresentation? = nil
+    via: MessageViaPresentation? = nil,
+    showsToolTip: Bool = true
   ) {
     self.fullMessage = fullMessage
+    self.showsToolTip = showsToolTip
     viaPrefix = via.map { Self.viaPrefix(for: $0) }
     viaDetail = via?.detail(senderName: fullMessage.senderInfo?.user.shortDisplayName)
     viaPrefixWidth = Self.viaPrefixWidth(viaPrefix)
@@ -244,52 +252,20 @@ class MessageTimeAndState: NSView {
     layer?.addSublayer(statusLayer)
     statusLayer.isHidden = !hasSymbol
     updateTooltip()
-    setupMouseTracking()
   }
 
   private func updateTooltip() {
+    guard showsToolTip else {
+      if toolTip != nil {
+        toolTip = nil
+      }
+      return
+    }
     let date = Self.tooltipFormatter.string(from: fullMessage.message.date)
     let tooltipText = viaDetail.map { "\($0)\n\(date)" } ?? date
-    self.tooltipText = tooltipText
-
-    toolTip = tooltipText
-  }
-
-  private func setupMouseTracking() {
-    updateTrackingAreas()
-  }
-
-  // MARK: - Mouse Tracking
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-
-    if let trackingArea {
-      removeTrackingArea(trackingArea)
+    if toolTip != tooltipText {
+      toolTip = tooltipText
     }
-
-    trackingArea = NSTrackingArea(
-      rect: bounds,
-      options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-      owner: self,
-      userInfo: nil
-    )
-
-    if let trackingArea {
-      addTrackingArea(trackingArea)
-    }
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-//    if !tooltipText.isEmpty {
-//      SimpleTooltip.shared.show(text: tooltipText, near: self)
-//    }
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    // SimpleTooltip.shared.hide()
   }
 
   // MARK: - Layout
@@ -336,9 +312,6 @@ class MessageTimeAndState: NSView {
         height: symbolWidth - 2
       )
     }
-
-    // Update tracking areas when layout changes
-    updateTrackingAreas()
   }
 
   // MARK: - Content Updates
