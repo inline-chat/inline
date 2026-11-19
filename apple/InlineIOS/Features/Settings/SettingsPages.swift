@@ -459,31 +459,6 @@ struct PrivacyRuleSettingsView: View {
   }
 }
 
-struct DataStorageSettingsView: View {
-  var body: some View {
-    List {
-      Section {
-        NavigationLink {
-          AutoDownloadSettingsView()
-        } label: {
-          SettingsItem(
-            icon: "arrow.down.circle.fill",
-            iconColor: .blue,
-            title: "Auto-Download"
-          )
-        }
-      }
-
-      ClearCacheSettingsSection()
-
-      ResetLocalDataSettingsSection()
-    }
-    .listStyle(.insetGrouped)
-    .navigationTitle("Data & Storage")
-    .navigationBarTitleDisplayMode(.inline)
-  }
-}
-
 struct ClearCacheSettingsSection: View {
   @State private var isClearing = false
   @State private var showClearCacheAlert = false
