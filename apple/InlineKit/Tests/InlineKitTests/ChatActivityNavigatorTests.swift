@@ -84,7 +84,18 @@ struct ChatActivityNavigatorTests {
     #expect(await recorder.requests == [.read(messageIds: [5, 10])])
   }
 
-  @Test("Scrolling past an item faster than the dwell does not read it")
+  // Quarantined on CI (timing flake): a loaded runner can stretch the 60 ms sleeps
+  // past the real-clock dwell, so the item is read and `requests.isEmpty` fails.
+  // Failed in Apple Validation runs 42809432968, 43009547149, 43108731094
+  // (attempt 1), 43615732207 and 43710715764. Runs locally and with
+  // INLINE_RUN_QUARANTINED_TESTS=1; make the dwell clock injectable to restore it.
+  @Test(
+    "Scrolling past an item faster than the dwell does not read it",
+    .disabled(
+      if: ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" && ProcessInfo.processInfo.environment["INLINE_RUN_QUARANTINED_TESTS"] == nil,
+      "Quarantined on CI: timing-flaky dwell window (see comment)"
+    )
+  )
   func quickScrollDoesNotRead() async throws {
     let (navigator, recorder) = try makeNavigator(items: [item(10, .mention)], counts: (1, 0))
     navigator.noteVisible(messageIds: [10])
