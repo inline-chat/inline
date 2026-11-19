@@ -56,6 +56,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case appearInGlobalSearch
   case shareTimeZone
   case focusStatus
+  case transcribeVoiceMessages
 
   // Data & Storage
   case storageUsage
@@ -133,7 +134,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .audioAndVideo
     case .dockBadge, .notificationSounds:
       .notifications
-    case .appearInGlobalSearch, .shareTimeZone, .focusStatus:
+    case .appearInGlobalSearch, .shareTimeZone, .focusStatus, .transcribeVoiceMessages:
       .privacy
     case .storageUsage, .clearDownloads, .chatStorage, .keepMedia, .cacheLimit,
          .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages:
@@ -204,6 +205,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: "Appear in Global Search"
     case .shareTimeZone: "Who Can See My Local Time"
     case .focusStatus: "Who Can See My Focus Status"
+    case .transcribeVoiceMessages: "Transcribe My Voice Messages"
     case .storageUsage: "Storage Usage"
     case .clearDownloads: "Clear Downloads"
     case .chatStorage: "Downloads by Chat"
@@ -278,6 +280,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: "Discovery"
     case .shareTimeZone: "Time Zone"
     case .focusStatus: "Focus Status"
+    case .transcribeVoiceMessages: "Voice Messages"
     case .storageUsage: "Storage"
     case .clearDownloads, .chatStorage: "Downloads"
     case .keepMedia, .cacheLimit: "Automatic Cleanup"
@@ -350,6 +353,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
     case .shareTimeZone: ["local time", "timezone", "share", "privacy", "exceptions"]
     case .focusStatus: ["do not disturb", "dnd", "notifications silenced", "focus"]
+    case .transcribeVoiceMessages: ["transcription", "transcript", "audio", "ai", "speech to text"]
     case .storageUsage: ["disk", "space", "size", "cache", "usage"]
     case .clearDownloads: ["clear cache", "delete", "free up space", "remove", "clean"]
     case .chatStorage: ["chats", "largest", "per chat", "clear", "media"]
