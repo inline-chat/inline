@@ -13,6 +13,7 @@ struct ChatToolbarMenuButton: View {
   @Environment(\.realtimeV2) private var realtimeV2
 
   @ObservedObject private var settings = AppSettings.shared
+  @AppStorage(DeveloperMode.key) private var developerMode = false
   @StateObject private var modelHost: PeerBoundObject<ChatToolbarMenuModel>
   @State private var showRenameSheet = false
   @State private var showMoveToSpaceSheet = false
@@ -48,6 +49,19 @@ struct ChatToolbarMenuButton: View {
 
       Button("Copy Link", systemImage: "link") {
         ChatMenuActions.copyLink(for: peer)
+      }
+
+      if developerMode {
+        switch peer {
+        case let .user(id):
+          Button("Copy User ID", systemImage: "number") {
+            DeveloperIDs.copy(id, label: "User ID")
+          }
+        case let .thread(id):
+          Button("Copy Chat ID", systemImage: "number") {
+            DeveloperIDs.copy(id, label: "Chat ID")
+          }
+        }
       }
 
       Divider()

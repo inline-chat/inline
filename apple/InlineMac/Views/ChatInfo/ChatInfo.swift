@@ -43,6 +43,7 @@ struct ChatInfo: View {
   @EnvironmentStateObject private var participantsState: ChatInfoParticipantsState
   @StateObject private var appSettings = AppSettings.shared
   @StateObject private var avatarPreview = ChatInfoAvatarQuickLookPresenter()
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   let peerId: Peer
   private let defaultTab: ChatInfoDefaultTab?
@@ -384,6 +385,23 @@ struct ChatInfo: View {
             } else {
               Text("—")
                 .foregroundStyle(.secondary)
+            }
+          }
+
+          if developerMode, case let .user(userId) = peerId {
+            Divider()
+
+            infoRow("User ID") {
+              Button {
+                DeveloperIDs.copy(userId, label: "User ID")
+              } label: {
+                Text(String(userId))
+                  .font(.system(.body, design: .monospaced))
+                  .foregroundStyle(.secondary)
+                  .textSelection(.enabled)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Copy user ID")
             }
           }
         }

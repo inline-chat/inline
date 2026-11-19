@@ -24,6 +24,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case translationControls
   case openReplyThreadsInSidePane
   case openChatsCleanup
+  case developerMode
 
   // Appearance
   case appearance
@@ -123,7 +124,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .account
     case .launchAtLogin, .automaticSpellCorrection, .checkSpellingWhileTyping, .shortenSupportedLinks,
          .sendMessages, .syncMessageGestures, .doubleClick, .hold, .swipeToReply, .translationControls,
-         .openReplyThreadsInSidePane, .openChatsCleanup:
+         .openReplyThreadsInSidePane, .openChatsCleanup, .developerMode:
       .general
     case .appearance, .theme, .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
          .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize:
@@ -179,6 +180,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .translationControls: "Translation Controls"
     case .openReplyThreadsInSidePane: "Open Reply Threads in Side Pane"
     case .openChatsCleanup: "Open Chats Cleanup"
+    case .developerMode: "Developer Mode"
     case .appearance: "Appearance"
     case .theme: "Theme"
     case .sidebarItemSize: "Item Size"
@@ -255,6 +257,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .username, .email, .phone, .technicalDetails: "Account"
     case .signOut: "Session"
     case .launchAtLogin: "Startup"
+    case .developerMode: "Developer"
     case .automaticSpellCorrection, .checkSpellingWhileTyping, .shortenSupportedLinks, .sendMessages: "Writing"
     case .syncMessageGestures, .doubleClick, .hold, .swipeToReply, .translationControls,
          .openReplyThreadsInSidePane:
@@ -323,6 +326,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .translationControls: ["translate", "language"]
     case .openReplyThreadsInSidePane: ["thread", "replies", "split"]
     case .openChatsCleanup: ["archive", "close", "tabs"]
+    case .developerMode: ["debug", "ids", "chat id", "user id", "api", "bots", "integrations"]
     case .appearance: ["dark mode", "light mode", "system"]
     case .theme: ["colors", "palette", "accent", "import", "export"]
     case .sidebarItemSize: ["density", "compact", "row height"]

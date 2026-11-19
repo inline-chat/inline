@@ -6,6 +6,7 @@ struct GeneralSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
   @ObservedObject private var gestureSettings = INUserSettings.current.messageGestures
   @ObservedObject private var composeSettings = INUserSettings.current.compose
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   var body: some View {
     Form {
@@ -157,6 +158,18 @@ struct GeneralSettingsDetailView: View {
         .settingsSearchAnchor(.openChatsCleanup)
       } header: {
         SettingsSectionHeader("Sidebar")
+      }
+
+      Section {
+        Toggle(isOn: $developerMode) {
+          SettingsRowLabel(
+            .developerMode,
+            description: "Show chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents."
+          )
+        }
+        .settingsSearchAnchor(.developerMode)
+      } header: {
+        SettingsSectionHeader("Developer")
       }
     }
     .settingsFormStyle()
