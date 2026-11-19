@@ -4,8 +4,6 @@ import UIKit
 
 /// Time and delivery status. Both pieces sit at frames derived from the planned time frame.
 final class MessageTimeView: UIView {
-  private static let statusTransitionDuration: CFTimeInterval = 0.25
-
   private let pillView = UIView()
   private let textView = MessageTextView()
   private let statusView = UIImageView()
@@ -48,13 +46,12 @@ final class MessageTimeView: UIView {
       self.status = status
       statusView.preferredSymbolConfiguration = Self.symbolConfiguration(for: status, traits: traitCollection)
       let image = Self.symbolName(for: status).flatMap { UIImage(systemName: $0) }
-      if animated, previous != nil, image != nil, !UIAccessibility.isReduceMotionEnabled {
-        let fade = CATransition()
-        fade.duration = Self.statusTransitionDuration
-        fade.type = .fade
-        statusView.layer.add(fade, forKey: "contents")
-      }
       statusView.image = image
+      // Like Telegram, the glyph swaps at once and the check pops in from 130% over 0.1 s.
+      heldPop = false
+      if animated, previous != nil, status == .sent, !UIAccessibility.isReduceMotionEnabled {
+        if holdsStatusPop { heldPop = true } else { popStatus() }
+      }
     }
     layoutPieces()
   }
@@ -62,6 +59,32 @@ final class MessageTimeView: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     layoutPieces()
+  }
+
+  /// Set while the message's bubble is out of sight (flying in from the composer): a check that
+  /// arrives meanwhile pops when it is shown again.
+  var holdsStatusPop = false {
+    didSet {
+      guard !holdsStatusPop, heldPop else { return }
+      heldPop = false
+      popStatus()
+    }
+  }
+
+  private var heldPop = false
+
+  /// Forgets a held pop, for a view about to show another message.
+  func dropHeldStatusPop() {
+    heldPop = false
+  }
+
+  private func popStatus() {
+    let pop = CABasicAnimation(keyPath: "transform.scale")
+    pop.fromValue = 1.3
+    pop.toValue = 1
+    pop.duration = 0.1
+    pop.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    statusView.layer.add(pop, forKey: "statusPop")
   }
 
   private func layoutPieces() {

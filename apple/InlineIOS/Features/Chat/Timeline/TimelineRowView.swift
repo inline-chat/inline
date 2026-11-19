@@ -67,7 +67,11 @@ final class TimelineRowView: UIView {
 
   /// A sent message's row while its bubble is still flying in from the composer.
   var isSendTargetHidden = false {
-    didSet { alpha = isSendTargetHidden ? 0 : 1 }
+    didSet {
+      alpha = isSendTargetHidden ? 0 : 1
+      // The flight shows the bubble as it was when it took off; a check that came meanwhile pops on landing.
+      messageView?.timeView.holdsStatusPop = isSendTargetHidden
+    }
   }
 
   /// The bubble the context menu lifts out of the row, hidden while the menu draws it.
@@ -526,6 +530,7 @@ final class TimelineRowView: UIView {
   func prepareForReuse() {
     accessibilityElementsHidden = false
     isMenuSourceHidden = false
+    messageView?.timeView.dropHeldStatusPop()
     isSendTargetHidden = false
     replyMessage = nil
     messageActions = nil
@@ -630,6 +635,7 @@ final class TimelineRowView: UIView {
         if replies {
           ChatState.shared.setReplyingMessageId(peer: message.message.peerId, id: message.message.messageId)
         }
+        guard !UIAccessibility.isReduceMotionEnabled else { return resetSwipe() }
         let views = swipedViews
         UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5) {
           for view in views { view.transform = .identity }

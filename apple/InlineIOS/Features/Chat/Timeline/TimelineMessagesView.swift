@@ -198,12 +198,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var probe: TimelineProbe?
   #endif
 
-  /// Rows changing in place move like `MessageMotion.standard` (a critically damped 0.27 s spring).
+  /// Rows move on Telegram's list spring, the one `MessageMotion.standard` moves their contents on.
   /// With Reduce Motion they change at once, as the collection view skipped its animated updates.
   private static var rowTiming: TimelineTiming {
-    UIAccessibility.isReduceMotionEnabled
-      ? .none
-      : .spring(mass: 1, stiffness: 541.5, damping: 46.54, duration: 0.4)
+    UIAccessibility.isReduceMotionEnabled ? .none : .standard
+  }
+
+  /// A streamed message growing by a line; at once with Reduce Motion.
+  private static var streamingLineTiming: TimelineTiming {
+    UIAccessibility.isReduceMotionEnabled ? .none : .streamingLine
   }
 
   /// Telegram's send transition: 0.3 s on its vertical curve, which the bubble's flight rises on.
@@ -792,7 +795,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     // A disclosure opened or closed, or a streamed line was revealed: the row is planned again
     // and the list moves with it.
     messageView.onContentStateChange = { [weak self] _ in self?.replanKeepingTop(id) }
-    messageView.onRevealLineChange = { [weak self] _ in self?.replan(id, timing: .streamingLine) }
+    messageView.onRevealLineChange = { [weak self] _ in self?.replan(id, timing: Self.streamingLineTiming) }
     messageView.apply(plan.content, layout: plan.layout, motion: Self.motion(for: timing))
   }
 
@@ -1037,6 +1040,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let shownMessageId = messageIdOnScreen()
     let previous = self.snapshot
     let snapshot = update.snapshot
+    if snapshot.reason == .localSend {
+      SendMessageAnimationDiagnostics.debug("timeline localSend received inserted=\(update.diff.insertions.count)")
+    }
     self.snapshot = snapshot
     rebuildDayRows()
     let diff = update.diff
@@ -1128,7 +1134,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     list.apply(TimelineTransaction(
       rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll,
       bottomInset: releasedInset.map { $0 + Self.bottomPadding }, changed: changed, timing: timing,
-      towards: towards
+      // A jump's new rows are history it loaded: they come in with the scroll, not as new messages.
+      towards: towards, arrives: { if case .jump = snapshot.reason { false } else { true } }()
     ))
     let inserted = diff.insertions.map(\.id)
     if !inserted.isEmpty { beginSendFlights(inserted) }

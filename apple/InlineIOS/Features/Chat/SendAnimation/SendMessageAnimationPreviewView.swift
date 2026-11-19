@@ -87,7 +87,7 @@ final class SendMessageAnimationPreviewView: UIView {
         Self.grow(
           backgroundView.layer,
           from: CGRect(
-            x: 0, y: field.minY - startFrame.minY, width: field.width, height: field.height
+            x: field.minX - startFrame.minX, y: field.minY - startFrame.minY, width: field.width, height: field.height
           ),
           to: bounds,
           duration: SendMessageAnimationTiming.duration
