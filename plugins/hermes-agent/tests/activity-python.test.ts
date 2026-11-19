@@ -124,8 +124,8 @@ def make_adapter(mode="detailed", log=None, block=None):
             return {"ok": True, "result": {"mode": mode}}
         return {"ok": True, "result": {}}
     adapter._activity_post = post
-    async def send_message(chat_id, content, reply_to=None, metadata=None, actions=None):
-        log.append(("chat-send", {"chatId": chat_id, "text": content, "replyTo": reply_to, "metadata": metadata}, threading.get_ident()))
+    async def send_message(chat_id, content, reply_to=None, metadata=None, actions=None, quiet=False):
+        log.append(("chat-send", {"chatId": chat_id, "text": content, "replyTo": reply_to, "metadata": metadata, "quiet": quiet}, threading.get_ident()))
         return SendResult(success=True, message_id="m1", raw_response={})
     adapter._send_message = send_message
     return adapter, log
@@ -234,6 +234,7 @@ async def detailed_turn():
     assert order.index("commentary") > order.index("tool:c9") and order.index("commentary") < len(order) - 1
     chat_sends = [entry[1]["text"] for entry in log if entry[0] == "chat-send"]
     assert chat_sends == ["Status", "Approve?", "Fixed it."], chat_sends
+    assert [entry[1]["quiet"] for entry in log if entry[0] == "chat-send"] == [False, False, False]
     # Hooks after the answer, and the processing-complete fallback, add nothing.
     before = len(log)
     hooks["pre_tool_call"](tool_name="terminal", args={"command": "late"}, session_id="s1", tool_call_id="late")
@@ -324,8 +325,9 @@ async def friendly_turn():
     beat = await adapter.send("10", "⏳ Working — 3 min", metadata={"_interim_send": True})
     assert beat.success is True
     await adapter.send("10", "All good.")
-    sends = [entry[1]["text"] for entry in log if entry[0] == "chat-send"]
-    assert sends == ["Checking the logs first.", "⏳ Working — 3 min", "All good."]
+    sends = [(entry[1]["text"], entry[1]["quiet"]) for entry in log if entry[0] == "chat-send"]
+    # Progress Detailed would fold posts quietly: no notification, no unread. The answer notifies.
+    assert sends == [("Checking the logs first.", True), ("⏳ Working — 3 min", True), ("All good.", False)], sends
     # Friendly keeps no progress: only the turn's start reached the sidecar.
     assert [e["type"] for e in events_of(log)] == ["turn.start"]
     adapter._activity_stop()
@@ -396,7 +398,7 @@ async def commands_and_failures():
         raise OSError("connection refused")
     broken._activity_post = refuse
     sent = []
-    async def send_message(chat_id, content, reply_to=None, metadata=None, actions=None):
+    async def send_message(chat_id, content, reply_to=None, metadata=None, actions=None, quiet=False):
         sent.append(content)
         return SendResult(success=True, message_id="m", raw_response={})
     broken._send_message = send_message

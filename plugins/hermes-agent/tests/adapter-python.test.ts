@@ -6542,6 +6542,11 @@ async def assert_cron_mentions():
     assert calls[0][1]["sendMode"] == "silent"
     assert await sent_text(adapter, "Muted reply", {"notify": False}) == ["Muted reply"]
     assert calls[0][1]["sendMode"] == "silent"
+    # Hermes' heartbeat is status, so it posts quietly even outside a turn; an answer never does.
+    assert await sent_text(adapter, "⏳ Working — 3 min", {"_interim_send": True}) == ["⏳ Working — 3 min"]
+    assert calls[0][1]["sendMode"] == "silent"
+    assert await sent_text(adapter, "⏳ Done in 3 min") == ["⏳ Done in 3 min"]
+    assert "sendMode" not in calls[0][1]
     assert await sent_text(adapter, f"{prefix} Already addressed", metadata) == [f"{prefix} Already addressed"]
     assert await sent_text(adapter, f"Ask {prefix} later", metadata) == [f"{prefix}\n\nAsk {prefix} later"]
     body = "    keep indentation\n\nAnd trailing whitespace  "

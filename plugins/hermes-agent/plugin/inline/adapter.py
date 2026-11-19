@@ -5682,11 +5682,18 @@ class InlineAdapter(BasePlatformAdapter):
         """Hermes' send. Within a turn, the first send not marked ``_interim_send`` is the
         answer: Detailed progress closes ("Worked for") above it first. A Detailed turn's
         interim messages (Hermes' commentary between tool calls) go into the progress message
-        instead of the chat. ``_interim_send`` and every other metadata key stay off the wire."""
+        instead of the chat; in other modes they post silently, so progress never notifies or
+        counts as unread. ``_interim_send`` and every other metadata key stay off the wire."""
+        interim = bool((metadata or {}).get("_interim_send"))
+        # The "⏳ Working — N min" heartbeat is status wherever it lands.
+        quiet = interim and _is_hermes_heartbeat(content)
         turn = None if _ACTIVITY_LOCAL_SEND.get() else self._activity_turn_for_send(chat_id, metadata)
         if turn is not None:
-            if (metadata or {}).get("_interim_send"):
-                if self._activity_foldable(content, metadata, actions) and await self._activity_is_detailed(turn):
+            if interim and self._activity_foldable(content, metadata, actions):
+                if not await self._activity_is_detailed(turn):
+                    # What Detailed folds into the progress message posts in the chat quietly.
+                    quiet = True
+                else:
                     if _is_hermes_heartbeat(content):
                         # The progress message's live timer already says this.
                         return _send_result(
@@ -5705,9 +5712,11 @@ class InlineAdapter(BasePlatformAdapter):
                         raw_response={"inlineActivity": "commentary"},
                         retryable=False,
                     )
-            elif not (reply_to and str(reply_to) in turn.later_messages):
+            elif not interim and not (reply_to and str(reply_to) in turn.later_messages):
                 await self._activity_close_before_answer(turn, content)
-        return await self._send_message(chat_id, content, reply_to=reply_to, metadata=metadata, actions=actions)
+        return await self._send_message(
+            chat_id, content, reply_to=reply_to, metadata=metadata, actions=actions, quiet=quiet,
+        )
 
     async def _send_message(
         self,
@@ -5716,12 +5725,15 @@ class InlineAdapter(BasePlatformAdapter):
         reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         actions: Optional[Dict[str, Any]] = None,
+        quiet: bool = False,
     ) -> SendResult:
         requested = content
         content = self._with_cron_mention(content, metadata)
         metadata = self._with_turn_thread(chat_id, reply_to, metadata)
         target = self._target_for(chat_id, metadata)
-        send_options = {"sendMode": "silent"} if (metadata or {}).get("notify") is False else {}
+        # Silent bot sends are quiet on Inline: no notification and no unread badge.
+        silent = quiet or (metadata or {}).get("notify") is False
+        send_options = {"sendMode": "silent"} if silent else {}
         agent_action_target = parse_inline_agent_action_reply_target(reply_to)
         if agent_action_target:
             chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
