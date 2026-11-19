@@ -1128,6 +1128,7 @@ class GlassComposeAppKit: NSView {
   }
 
   func setupObservers() {
+    observeTextLayoutWidth()
     if capabilities.supportsVoiceInput {
       setupVoiceObserver()
     }
@@ -2146,14 +2147,47 @@ class GlassComposeAppKit: NSView {
     return min(300.0, max(textEditor.minHeight, measuredHeight))
   }
 
+  /// Soft-wrap height follows the text view's width, which the glass ancestors can settle
+  /// after the chat's layout callback; its frame change carries the final width.
+  private func observeTextLayoutWidth() {
+    let textView = textEditor.textView
+    textView.postsFrameChangedNotifications = true
+    NotificationCenter.default.publisher(for: NSView.frameDidChangeNotification, object: textView)
+      .sink { [weak self] _ in
+        MainActor.assumeIsolated {
+          self?.scheduleTextLayoutWidthCheck()
+        }
+      }
+      .store(in: &cancellables)
+  }
+
+  private var textLayoutWidthCheckScheduled = false
+
+  /// The text container follows the view's new width only after the frame change is posted,
+  /// so the height is measured once that frame update has finished.
+  private func scheduleTextLayoutWidthCheck() {
+    guard !textLayoutWidthCheckScheduled else { return }
+    textLayoutWidthCheckScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      textLayoutWidthCheckScheduled = false
+      updateHeightForTextLayoutWidthChange()
+    }
+  }
+
   private func updateHeightForTextLayoutWidthChange() {
     guard !currentVoiceActive else { return }
 
-    // Glass content can finish layout after the chat's viewDidLayout callback.
-    // Resolve the whole compose subtree before reading the width: laying out
-    // only the editor leaves its glass ancestors' pending width changes behind.
-    layoutSubtreeIfNeeded()
-    let textLayoutWidth = textEditor.textView.bounds.width
+    // Glass content can finish layout after the chat's viewDidLayout callback. A width its
+    // ancestors resolve later reaches `observeTextLayoutWidth` when the text view's frame
+    // changes, so this only forces the compose subtree's layout while the width is still
+    // unresolved (laying out only the editor would leave the glass ancestors behind).
+    // Forcing it on every pass laid the composer out on every live-resize step.
+    var textLayoutWidth = textEditor.textView.bounds.width
+    if textLayoutWidth <= 1 {
+      layoutSubtreeIfNeeded()
+      textLayoutWidth = textEditor.textView.bounds.width
+    }
     guard textLayoutWidth > 1 else { return }
     guard abs(lastMeasuredTextLayoutWidth - textLayoutWidth) >= 0.5 else { return }
 
