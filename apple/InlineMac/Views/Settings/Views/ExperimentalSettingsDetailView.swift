@@ -17,8 +17,6 @@ struct ExperimentalSettingsDetailView: View {
   private var nativeFileDownloadsEnabled = false
   @AppStorage(ExperimentalFeatureFlags.quickForwardKey)
   private var quickForwardEnabled = false
-  @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
-  private var richMessageCopyEditingEnabled = false
 
   var body: some View {
     Form {
@@ -76,13 +74,6 @@ struct ExperimentalSettingsDetailView: View {
 
   private var messagesSection: some View {
     Section {
-      Toggle(isOn: $richMessageCopyEditingEnabled) {
-        SettingsRowLabel(
-          .richCopyMarkdownEditing,
-          description: "Preserve formatting when copying messages. Show Markdown syntax when pasting formatted text or editing a message."
-        )
-      }
-      .settingsSearchAnchor(.richCopyMarkdownEditing)
       Toggle(isOn: $quickForwardEnabled) {
         SettingsRowLabel(
           .quickForward,

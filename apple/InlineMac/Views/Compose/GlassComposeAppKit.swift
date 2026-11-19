@@ -2378,7 +2378,7 @@ class GlassComposeAppKit: NSView {
         addReplyEscHandler()
 
         if kind == .editing {
-          let attributedString = ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageMarkdown.editableText(
+          let attributedString = MessageMarkdown.editableText(
             text: message.message.text ?? "",
             entities: message.message.entities,
             configuration: .init(
@@ -2387,13 +2387,6 @@ class GlassComposeAppKit: NSView {
               linkColor: ComposeTextEditor.linkColor,
               convertMentionsToLink: false
             )
-          ) : MessageMarkdown.withQuoteSyntax(
-            toAttributedString(
-              text: message.message.text ?? "",
-              entities: message.message.entities
-            ),
-            entities: message.message.entities,
-            attributes: [.font: ComposeTextEditor.font, .foregroundColor: ComposeTextEditor.textColor]
           )
 
           // TODO: Extract these to a function

@@ -519,7 +519,7 @@ class ComposeNSTextView: NSTextView {
     let beforeLength = (string as NSString).length
 
     resetTypingAttributesToDefault()
-    if ExperimentalFeatureFlags.richMessageCopyEditingEnabled, let markdown = MessageTextPasteboard.markdown() {
+    if let markdown = MessageTextPasteboard.markdown() {
       let text = NSAttributedString(string: markdown, attributes: defaultTypingAttributes)
       insertText(text, replacementRange: beforeRange)
     } else {

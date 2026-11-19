@@ -3591,11 +3591,6 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   @objc private func copyMessage() {
-    guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled else {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(fullMessage.displayText ?? "", forType: .string)
-      return
-    }
     MessageTextPasteboard.copy(
       text: fullMessage.displayText ?? "",
       entities: fullMessage.translationEntities ?? message.entities

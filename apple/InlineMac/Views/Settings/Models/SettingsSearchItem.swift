@@ -100,7 +100,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case richContentRenderer
   case inlineMathAttachments
   case messageWidgets
-  case richCopyMarkdownEditing
   case quickForward
   case stableChatRoute
   case coreTextMessageText
@@ -165,7 +164,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richCopyMarkdownEditing, .quickForward, .stableChatRoute, .coreTextMessageText,
+         .messageWidgets, .quickForward, .stableChatRoute, .coreTextMessageText,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -248,7 +247,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
     case .messageWidgets: "Message Widgets"
-    case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .quickForward: "Quick Forward"
     case .stableChatRoute: "Faster Chat Switching"
     case .coreTextMessageText: "Core Text Message Text"
@@ -315,7 +313,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
          .messageWidgets:
       "Agents"
-    case .richCopyMarkdownEditing, .quickForward, .stableChatRoute, .coreTextMessageText: "Messages"
+    case .quickForward, .stableChatRoute, .coreTextMessageText: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -399,7 +397,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
     case .messageWidgets: ["html", "widget", "visualization", "chart"]
-    case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .quickForward: ["forward"]
     case .stableChatRoute: ["performance", "speed", "switch", "toolbar"]
     case .coreTextMessageText: ["performance", "renderer", "text", "scroll", "core text"]
