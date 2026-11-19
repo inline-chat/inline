@@ -573,6 +573,31 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     )
   }
 
+  /// The bubble's background and, separately, everything on it, for a send flight that grows the
+  /// background out of the composer's field as Telegram's does. Nil for a bubbleless message.
+  func sendAnimationBubbleParts() -> (background: UIImage, content: UIView)? {
+    guard let frames = sendAnimationTargetFrames(), layout?.bubble.isVisible == true else { return nil }
+    let rect = convert(frames.bubble, to: bubbleContentView)
+    guard rect.isFiniteAndVisible else { return nil }
+    let format = UIGraphicsImageRendererFormat.default()
+    format.opaque = false
+    format.scale = window?.screen.scale ?? traitCollection.displayScale
+    let backgroundRect = bubbleContentView.convert(rect, to: bubbleView)
+    let background = UIGraphicsImageRenderer(size: rect.size, format: format).image { context in
+      context.cgContext.translateBy(x: -backgroundRect.minX, y: -backgroundRect.minY)
+      bubbleView.layer.render(in: context.cgContext)
+    }
+    let wasHidden = bubbleView.isHidden
+    bubbleView.isHidden = true
+    let content = bubbleContentView.sendAnimationLayerSnapshotView(in: rect, debugName: "next-target-content")
+    bubbleView.isHidden = wasHidden
+    guard let content else { return nil }
+    // Corners stay whole and the middle stretches, from the composer's field size to the bubble's.
+    let cap = max(0, min(20, floor(min(rect.width, rect.height) / 2) - 1))
+    let insets = UIEdgeInsets(top: cap, left: cap, bottom: cap, right: cap)
+    return (background.resizableImage(withCapInsets: insets, resizingMode: .stretch), content)
+  }
+
   /// Whether a pan at `point` belongs to a code block or table that scrolls sideways.
   func scrollsHorizontally(at point: CGPoint) -> Bool {
     var view = hitTest(point, with: nil)

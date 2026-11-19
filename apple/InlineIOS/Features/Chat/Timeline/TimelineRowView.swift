@@ -204,6 +204,16 @@ final class TimelineRowView: UIView {
     }
   }
 
+  /// The bubble's centre in this view, where a deleted message shrinks to; nil for rows without one.
+  var bubbleCenter: CGPoint? {
+    let bubbleView: UIView? = shownMessageView?.bubbleContentView ?? legacyView.map { legacy in
+      legacy.fullMessage.message.isServiceMessage ? legacy.serviceContainerView : legacy.bubbleView
+    }
+    guard let bubbleView, !bubbleView.bounds.isEmpty else { return nil }
+    let bubble = bubbleView.convert(bubbleView.bounds, to: self)
+    return CGPoint(x: bubble.midX, y: bubble.midY)
+  }
+
   /// Where the bubble starts, the top of a group for its avatar.
   var bubbleTop: CGFloat {
     if let messageView, !messageView.isHidden { return messageView.bubbleContentView.frame.minY }

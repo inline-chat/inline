@@ -190,6 +190,15 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       : .spring(mass: 1, stiffness: 541.5, damping: 46.54, duration: 0.4)
   }
 
+  /// Telegram's send transition: 0.3 s on its vertical curve, which the bubble's flight rises on.
+  private static var sendTiming: TimelineTiming {
+    let c1 = SendMessageAnimationTiming.verticalControlPoint1
+    let c2 = SendMessageAnimationTiming.verticalControlPoint2
+    return .curve(
+      duration: SendMessageAnimationTiming.duration, c1x: Float(c1.x), c1y: Float(c1.y), c2x: Float(c2.x), c2y: Float(c2.y)
+    )
+  }
+
   /// A jump beyond the placed rows: Telegram's jump curve, UIKit's critically damped scroll-to-top
   /// spring played over 1.15 s (response 0.43). With Reduce Motion the list goes there at once.
   private static var jumpTiming: TimelineTiming {
@@ -251,7 +260,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       // collection view's overlay drew the avatar for any visible row of a group.
       spanEnd: { [unowned self] id in avatarGroupEnd(of: id) },
       // The bubble gradient spans the screen, as the collection view's per-frame sync lays it.
-      screen: { _, view, screen in (view as? TimelineRowView)?.followScreen(screen) }
+      screen: { _, view, screen in (view as? TimelineRowView)?.followScreen(screen) },
+      // A deleted message shrinks into its bubble's centre, as Telegram's does.
+      removalFocus: { _, view in (view as? TimelineRowView)?.bubbleCenter }
     )
     list.onDemand = { [weak self] edges in edges.forEach { self?.loadHistory($0) } }
     list.onLayout = { [weak self] _ in self?.layoutChanged() }
@@ -1049,7 +1060,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
           scroll = .latest
         }
       case .localSend:
-        timing = Self.rowTiming
+        // A send with a flight scrolls on the flight's vertical curve, as Telegram's list moves with the
+        // bubble; one without moves like any new row.
+        timing = sendAnimationCoordinator?.hasPreparedSource == true && !UIAccessibility.isReduceMotionEnabled
+          ? Self.sendTiming : Self.rowTiming
         scroll = .latest
         holdsOpeningPlace = false
         ChatReadingPlaceStore.shared.clear(for: peer)
@@ -1091,6 +1105,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     }
     // The sent row and the composer's shrink move as one.
     let releasedInset = snapshot.reason == .localSend ? releaseComposeInsetHold(applying: false) : nil
+    // One commit for the list and the flights: on its own the list's transaction reaches the screen at
+    // once, and the sent row would rise into view while its bubble is snapshotted, before it is hidden.
+    CATransaction.begin()
     list.apply(TimelineTransaction(
       rows: snapshot.ids, coverage: coverage(snapshot), scroll: scroll,
       bottomInset: releasedInset.map { $0 + Self.bottomPadding }, changed: changed, timing: timing,
@@ -1099,6 +1116,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let inserted = diff.insertions.map(\.id)
     if !inserted.isEmpty { beginSendFlights(inserted) }
     retargetSendFlights(excluding: Set(inserted))
+    CATransaction.commit()
     if let landed { focusResolved(landed, opening: false) }
     menu.rowsDidUpdate(changed)
     if !isPreview { viewModel.ensureThreadAnchorCached() }
@@ -1378,9 +1396,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     for id: ChatRowID, message: FullMessage, identity: SendMessageAnimationIdentity
   ) -> (SendMessageAnimationTarget, TimelineRowView)? {
     guard let window, let rowView = list.view(for: id) as? TimelineRowView, let messageView = rowView.shownMessageView,
-          let frames = messageView.sendAnimationTargetFrames(),
-          let snapshot = messageView.sendAnimationBubbleSnapshot()
+          let frames = messageView.sendAnimationTargetFrames()
     else { return nil }
+    // The background grows out of the composer's field under the content, as Telegram's does; a
+    // bubbleless message flies whole.
+    let parts = messageView.sendAnimationBubbleParts()
+    guard let snapshot = parts?.content ?? messageView.sendAnimationBubbleSnapshot() else { return nil }
     let bubbleFrame = messageView.convert(frames.bubble, to: window)
     let textFrame = messageView.convert(frames.text, to: window)
     let baseline = messageView.convert(CGPoint(x: 0, y: frames.firstBaseline), to: window).y
@@ -1391,6 +1412,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       bubbleFrameInWindow: bubbleFrame,
       textFrameInWindow: textFrame,
       bubbleSnapshotView: snapshot,
+      bubbleBackground: parts?.background,
       textFrameInBubble: frames.text.offsetBy(dx: -frames.bubble.minX, dy: -frames.bubble.minY),
       textFirstBaselineYInWindow: baseline,
       textFirstBaselineYInBubble: frames.firstBaseline - frames.bubble.minY,

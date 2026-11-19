@@ -6,6 +6,7 @@ enum SendMessageAnimationSourceCapture {
     identity: SendMessageAnimationIdentity,
     text: String,
     textView: UITextView,
+    fieldView: UIView? = nil,
     composeHeight: CGFloat
   ) -> SendMessageAnimationSource? {
     guard let window = textView.window else {
@@ -80,6 +81,9 @@ enum SendMessageAnimationSourceCapture {
       sourceVisibleTextFrameInWindow: sourceVisibleTextFrame,
       sourceTextFirstBaselineYInWindow: sourceTextFirstBaselineYInWindow,
       sourceLineHeight: sourceLineHeight,
+      sourceFieldFrameInWindow: fieldView.flatMap { field in
+        field.window == nil ? nil : field.convert(field.bounds, to: window)
+      }.flatMap { $0.isFiniteAndVisible ? $0 : nil },
       preparedAt: Date()
     )
   }

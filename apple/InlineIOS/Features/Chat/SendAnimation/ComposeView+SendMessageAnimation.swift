@@ -17,6 +17,7 @@ extension ComposeView {
       identity: identity,
       text: text,
       textView: textView,
+      fieldView: composeAndButtonContainer,
       composeHeight: composeHeightConstraint.constant
     )
   }
