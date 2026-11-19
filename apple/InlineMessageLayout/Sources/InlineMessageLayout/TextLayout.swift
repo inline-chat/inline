@@ -415,8 +415,8 @@ public enum TextLayouter {
       let endsParagraph = endsWithHardBreak(string, range: range) || NSMaxRange(range) >= length
 
       let natural = ascent + descent + leading
-      let lineHeight: CGFloat
-      let baseline: CGFloat
+      var lineHeight: CGFloat
+      var baseline: CGFloat
       if style.lineHeight == .fontDefault, let metrics = fontDefaultMetrics(of: attributed, range: range) {
         // The platform's line box, unrounded: its height is whole points already, and its
         // baseline is where the platform draws glyphs.
@@ -425,6 +425,14 @@ public enum TextLayouter {
       } else {
         lineHeight = grid.ceil(max(natural, style.minimumLineHeight))
         baseline = grid.round(y + (lineHeight - natural) + ascent)
+      }
+      if let paragraph, paragraph.minimumLineHeight > 0 || paragraph.maximumLineHeight > 0 {
+        // Like TextKit: the line box takes the paragraph's bounds and glyphs keep their
+        // place against its bottom.
+        let upper = paragraph.maximumLineHeight > 0 ? paragraph.maximumLineHeight : .greatestFiniteMagnitude
+        let bounded = min(max(lineHeight, paragraph.minimumLineHeight), upper)
+        baseline += bounded - lineHeight
+        lineHeight = bounded
       }
       lines.append(TextLayout.Line(
         range: range,

@@ -127,6 +127,29 @@ struct ParagraphMetricsTests {
     #expect(layout.size.height == 76)
   }
 
+  @Test("A blank line with a fixed height takes that height, as in TextKit")
+  func fixedBlankLine() {
+    FontLineMetricsProvider.install { font in
+      // TextKit's 17 pt line box for 14 pt system text.
+      FontLineMetrics(height: 17, baseline: 13)
+    }
+    defer { FontLineMetricsProvider.install { FontLineMetrics.coreTextDefault(for: $0) } }
+    let layout = TextLayouter.layout(
+      text([
+        ("First\n", 14, false, TextParagraphMetrics(lineSpacing: 1)),
+        ("\n", 14, false, TextParagraphMetrics(minimumLineHeight: 12, maximumLineHeight: 12)),
+        ("Second", 14, false, TextParagraphMetrics(lineSpacing: 1)),
+      ]),
+      style: TextLayoutStyle(lineHeight: .fontDefault),
+      maximumWidth: 300,
+      grid: grid
+    )
+    // TextKit 2 measured: the second paragraph's baseline is 18 + 12 below the first.
+    #expect(layout.lines.map(\.frame.minY) == [0, 17, 30])
+    #expect(layout.lines.map(\.frame.height) == [17, 12, 17])
+    #expect(layout.lines[2].baseline - layout.lines[0].baseline == 30)
+  }
+
   @Test("Indents narrow the lines and move them in")
   func indents() {
     let metrics = TextParagraphMetrics(firstLineHeadIndent: 20, headIndent: 10, tailIndent: -30)
