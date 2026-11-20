@@ -499,6 +499,21 @@ public class ChatContainerView: UIView {
   func debugSetStatusNotice(_ text: String?) {
     (messageList as? TimelineMessagesView)?.viewModel.rowFeed.setStatusNotice(text)
   }
+
+  /// The harness's stand-in for picking a photo: a generated image in the composer's attachment strip.
+  func debugAddComposeImage() {
+    let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { context in
+      UIColor.systemTeal.setFill()
+      context.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+    }
+    composeView.addImage(image)
+  }
+
+  /// One attachment removed, as its thumbnail's close button does.
+  func debugRemoveComposeImage() {
+    guard let id = composeView.attachmentItems.keys.first else { return }
+    composeView.removeAttachment(id)
+  }
   #endif
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {

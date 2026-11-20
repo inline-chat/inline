@@ -213,6 +213,9 @@ private struct TimelineHarnessScreen: View {
             ChatState.shared.clearReplyingMessageId(peer: peer)
             ChatState.shared.clearEditingMessageId(peer: peer)
           }
+          // The attachment strip coming and going (a picked photo, then its thumbnail's close button).
+          Button("Compose photo") { model.box.container?.debugAddComposeImage() }
+          Button("Compose remove photo") { model.box.container?.debugRemoveComposeImage() }
           Button("Stream") { model.runAsync { try await $0.stream(steps: 120, every: .milliseconds(50)) } }
           Button("Delete newest") { model.run { try $0.deleteNewest() } }
           Button("Collapse history") { model.box.container?.setCollapsedMaxId(380) }

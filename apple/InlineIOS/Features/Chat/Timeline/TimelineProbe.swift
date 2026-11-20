@@ -27,7 +27,7 @@ final class TimelineProbe: NSObject {
       .appendingPathComponent("timeline-probe.csv")
     super.init()
     try? FileManager.default.removeItem(at: url)
-    lines.append("t,target,presented,settled,tracking,decelerating,fingerY,listMaxY,keyboardTop,composerTop,newestMaxY")
+    lines.append("t,target,presented,settled,tracking,decelerating,fingerY,listMaxY,keyboardTop,composerTop,newestMaxY,wall")
     let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
     let maximum = Float(UIScreen.main.maximumFramesPerSecond)
     link.preferredFrameRateRange = CAFrameRateRange(minimum: maximum, maximum: maximum, preferred: maximum)
@@ -64,9 +64,11 @@ final class TimelineProbe: NSObject {
       newestMaxY = layer.convert(layer.bounds, to: windowLayer).maxY
     }
     lines.append(String(
-      format: "%.5f,%.5f,%.2f,%.2f,%d,%d,%.1f,%.1f,%.1f,%.1f,%.1f", link.timestamp, link.targetTimestamp,
+      format: "%.5f,%.5f,%.2f,%.2f,%d,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.3f", link.timestamp, link.targetTimestamp,
       d.presentedScrollPosition, d.scrollPosition, list.isTracking ? 1 : 0, list.isDecelerating ? 1 : 0, finger,
-      frame.maxY, keyboardTop, composerTop, newestMaxY
+      frame.maxY, keyboardTop, composerTop, newestMaxY,
+      // Wall time, to line frames up with the runner's printed steps.
+      Date().timeIntervalSince1970
     ))
     if link.timestamp - lastFlush > 1 { flush() }
   }
