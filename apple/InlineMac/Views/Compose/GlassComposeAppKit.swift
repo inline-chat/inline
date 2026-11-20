@@ -2497,17 +2497,11 @@ class GlassComposeAppKit: NSView {
 
     let pendingId: String = switch usage {
       case .chat:
-        drafts2.addImage(
-          peer: peerId,
-          image: image,
-          preferredFormat: preferredImageFormat,
-          fallbackURL: url
-        )
+        drafts2.addImage(peer: peerId, image: image, sourceURL: url)
       case let .newThread(context):
         context.attachmentStore.addImage(
           image,
-          preferredFormat: preferredImageFormat,
-          fallbackURL: url,
+          sourceURL: url,
           completion: { [weak self] result in self?.handleDraftAttachmentResult(result) }
         )
     }
@@ -2727,18 +2721,29 @@ class GlassComposeAppKit: NSView {
     }
     let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
+    let sendsOriginals = attachments.sendsMediaAsOriginal
     func enqueueAttachments(replyToMessageId: Int64?) {
-      // Neighbouring photos and videos go out as albums; the text is the first one's caption.
-      for send in TransactionSendMessage.sends(
-        text: text,
-        peerId: destinationPeerId,
-        chatId: destinationChatId, // FIXME: chatId fallback
-        mediaItems: attachmentItemsSnapshot,
-        replyToMsgId: replyToMessageId,
-        entities: entities,
-        sendMode: effectiveSendMode
-      ) {
-        Transactions.shared.mutate(transaction: .sendMessage(send))
+      func enqueue(_ mediaItems: [FileMediaItem]) {
+        // Neighbouring photos and videos go out as albums; the text is the first one's caption.
+        for send in TransactionSendMessage.sends(
+          text: text,
+          peerId: destinationPeerId,
+          chatId: destinationChatId, // FIXME: chatId fallback
+          mediaItems: mediaItems,
+          replyToMsgId: replyToMessageId,
+          entities: entities,
+          sendMode: effectiveSendMode
+        ) {
+          Transactions.shared.mutate(transaction: .sendMessage(send))
+        }
+      }
+      guard sendsOriginals else {
+        enqueue(attachmentItemsSnapshot)
+        return
+      }
+      // Original: each photo and video goes as its untouched file, in the same order.
+      Task { @MainActor in
+        enqueue(await FileMediaItem.withOriginals(attachmentItemsSnapshot))
       }
     }
 
@@ -2912,12 +2917,14 @@ class GlassComposeAppKit: NSView {
       agentContext: context.agentContext()
     )
     guard !draft.isEmpty else { return }
+    let sendsOriginals = attachments.sendsMediaAsOriginal
 
     isSubmittingNewThread = true
     setNewThreadAuthoringEnabled(false)
     updateSendButtonIfNeeded()
 
     Task { @MainActor [weak self] in
+      let draft = sendsOriginals ? await draft.withOriginalMedia() : draft
       let result = await context.submit(draft, intent)
       // Submission feedback belongs to the host, not this view's lifetime.
       // An early navigation may tear Compose down while the send is still
@@ -3119,7 +3126,7 @@ class GlassComposeAppKit: NSView {
     Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       do {
-        let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+        let photoInfo = try FileCache.savePhoto(image: image)
         let mediaItem = FileMediaItem.photo(photoInfo)
 
         Transactions.shared.mutate(

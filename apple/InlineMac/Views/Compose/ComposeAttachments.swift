@@ -84,6 +84,30 @@ final class ComposeAttachments: NSView {
   private var documentCollectionHeightConstraint: NSLayoutConstraint!
   private var mediaTopConstraint: NSLayoutConstraint!
   private var documentsLeadingConstraint: NSLayoutConstraint!
+  private var mediaTrailingConstraint: NSLayoutConstraint!
+  private var mediaTrailingToToggleConstraint: NSLayoutConstraint!
+
+  /// Off: photos and videos go compressed, with no location or camera details. On: they go as
+  /// their untouched files. Resets when the attachments are cleared, after a send.
+  private(set) var sendsMediaAsOriginal = false {
+    didSet { originalToggle.state = sendsMediaAsOriginal ? .on : .off }
+  }
+
+  private lazy var originalToggle: NSButton = {
+    let button = NSButton(checkboxWithTitle: "Original", target: self, action: #selector(toggleOriginal))
+    button.controlSize = .small
+    button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+    button.contentTintColor = .secondaryLabelColor
+    button.toolTip = "Send photos and videos as files, unchanged, including their location and camera details."
+    button.setAccessibilityLabel("Send originals")
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.isHidden = true
+    return button
+  }()
+
+  @objc private func toggleOriginal() {
+    sendsMediaAsOriginal = originalToggle.state == .on
+  }
   private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
   private var isExternallyCollapsed = false
 
@@ -176,6 +200,10 @@ final class ComposeAttachments: NSView {
       self.documentScrollHeightConstraint.constant = documentViewportHeight
       self.documentCollectionHeightConstraint.constant = documentContentHeight
       self.mediaScrollView.isHidden = mediaHeight == 0
+      let showsOriginalToggle = mediaHeight > 0
+      self.originalToggle.isHidden = !showsOriginalToggle
+      self.mediaTrailingConstraint.isActive = !showsOriginalToggle
+      self.mediaTrailingToToggleConstraint.isActive = showsOriginalToggle
       self.documentScrollView.isHidden = self.isExternallyCollapsed || self.documentModels.isEmpty
       self.documentLayout.sectionInset = (!self.isExternallyCollapsed && mediaHeight == 0 && !self.documentModels.isEmpty)
         ? NSEdgeInsets(top: self.verticalPadding, left: 0, bottom: self.verticalPadding, right: 0)
@@ -258,6 +286,17 @@ final class ComposeAttachments: NSView {
 
     addSubview(mediaScrollView)
     addSubview(documentScrollView)
+    addSubview(originalToggle)
+
+    mediaTrailingConstraint = mediaScrollView.trailingAnchor.constraint(equalTo: trailingAnchor)
+    mediaTrailingToToggleConstraint = mediaScrollView.trailingAnchor.constraint(
+      equalTo: originalToggle.leadingAnchor,
+      constant: -8
+    )
+    NSLayoutConstraint.activate([
+      originalToggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalContentInset),
+      originalToggle.centerYAnchor.constraint(equalTo: mediaScrollView.centerYAnchor),
+    ])
 
     documentsLeadingConstraint = documentCollectionView.leadingAnchor.constraint(
       equalTo: documentClipView.leadingAnchor,
@@ -271,7 +310,7 @@ final class ComposeAttachments: NSView {
       documentCollectionHeightConstraint,
 
       mediaScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      mediaScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      mediaTrailingConstraint,
       mediaScrollView.topAnchor.constraint(equalTo: topAnchor),
 
       documentsLeadingConstraint,
@@ -443,6 +482,7 @@ final class ComposeAttachments: NSView {
 
   public func clearViews(animated: Bool = false) {
     attachments.removeAll()
+    sendsMediaAsOriginal = false
 
     videoAttachments.removeAll()
     orderedMediaIds.removeAll()
