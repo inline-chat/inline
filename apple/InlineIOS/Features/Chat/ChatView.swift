@@ -466,7 +466,9 @@ struct ChatView: View {
       }
 
       guard let targetPeer, targetPeer != peerId else { return }
-      router.push(.chat(peer: targetPeer))
+      // On iPad a thread opens as the primary chat with history, as thread links do. Pushed onto the
+      // detail stack, the sidebar selection followed it and the split view popped it before it showed.
+      router.openPrimaryDestination(.chat(peer: targetPeer))
     }
     .onReceive(NotificationCenter.default.publisher(for: .mediaSendFailed)) { notification in
       handleMediaSendFailure(notification)
