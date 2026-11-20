@@ -2245,7 +2245,9 @@ async def assert_mentioned_agent_projection():
         },
     })
     assert len(events) == 2
-    assert 'You are a specialized agent named "Summarizer". Proceed with the user\'s request.' in events[1].channel_prompt
+    summarizer = 'You are a specialized agent named "Summarizer". Proceed with the user\'s request.'
+    assert f"[Inline agent instructions]\n{summarizer}" in events[1].channel_context
+    assert summarizer not in events[1].channel_prompt
 
 asyncio.run(assert_mentioned_agent_projection())
 
@@ -2353,7 +2355,8 @@ async def assert_activated_agent_avoids_lookup():
     })
 
     assert len(events) == 1
-    assert "Inspect the supplied data carefully." in events[0].channel_prompt
+    assert "[Inline agent instructions]\nInspect the supplied data carefully." in events[0].channel_context
+    assert "Inspect the supplied data carefully." not in events[0].channel_prompt
 
 asyncio.run(assert_activated_agent_avoids_lookup())
 
@@ -2640,7 +2643,7 @@ async def assert_inline_entity_context():
 
     assert len(events) == 1
     summary = 'mention "Alice" -> user:99 | text link "docs" -> https://example.com/docs | thread link "thread" -> thread:77'
-    assert events[0].channel_context == f"[Inline message entities]\n{summary}"
+    assert events[0].channel_context == f"[Inline turn]\ntriggering_message: 20\n\n[Inline message entities]\n{summary}"
     assert not getattr(events[0], "metadata", None)  # Hermes native admission refuses adapter metadata
     assert "Current Inline sender is" in events[0].channel_prompt
     assert "user:u1" in events[0].channel_prompt
@@ -2650,6 +2653,38 @@ async def assert_inline_entity_context():
     assert '[this chat](inline://chat?id=10)' in events[0].channel_prompt
     assert "Inline entity metadata maps visible text to IDs" in events[0].channel_prompt
     assert "https://example.com/docs" not in events[0].channel_prompt
+
+    # Hermes keys its cached agent on the channel prompt: the sender's next message, with no
+    # entities, keeps the same prompt, and only the per-turn context names the new message.
+    await adapter._dispatch_message({
+        "seq": 16,
+        "chatId": "10",
+        "sender": {"id": "u1", "firstName": "Mo", "lastName": "Jorjani", "username": "morajabi"},
+        "message": {
+            "id": "21",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "And one more thing",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
+    assert len(events) == 2
+    assert events[1].channel_prompt == events[0].channel_prompt
+    assert "triggering_message" not in events[1].channel_prompt
+    assert events[1].channel_context == "[Inline turn]\ntriggering_message: 21"
+    # The inline tool still acts on the triggering message by default.
+    session_keys = ("HERMES_SESSION_PLATFORM", "HERMES_SESSION_CHAT_ID", "HERMES_SESSION_THREAD_ID", "HERMES_SESSION_MESSAGE_ID")
+    saved_env = {key: os.environ.get(key) for key in session_keys}
+    try:
+        os.environ.update({"HERMES_SESSION_PLATFORM": "inline", "HERMES_SESSION_CHAT_ID": "10", "HERMES_SESSION_THREAD_ID": ""})
+        os.environ["HERMES_SESSION_MESSAGE_ID"] = events[1].message_id
+        assert inline_tools._message_target({}) == ({"chatId": "10"}, "21")
+    finally:
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 asyncio.run(assert_inline_entity_context())
 

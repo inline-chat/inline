@@ -251,7 +251,6 @@ def inline_sender_guidance(
 def tool_context_prompt(
     *,
     chat_id: str,
-    message_id: str,
     thread_id: Optional[str] = None,
     parent_chat_id: Optional[str] = None,
     parent_message_id: Optional[str] = None,
@@ -276,8 +275,13 @@ def tool_context_prompt(
     else:
         lines.append(f"- Current Inline chat: `{chat_id}`.")
         lines.append(f"- Link the current chat as `[this chat](inline://chat?id={chat_id})` when asked for a chat link.")
-    if message_id:
-        lines.append(f"- Triggering Inline message: `{message_id}`. Use it as `message_id` or `parent_message_id` when creating a reply thread.")
+    # This prompt stays the same for every turn of a conversation, so Hermes can keep its
+    # agent and prompt cache. The triggering message changes each turn and arrives with
+    # the message itself, in its [Inline turn] block.
+    lines.append(
+        "- Each new message starts with an [Inline turn] block naming its triggering Inline message. "
+        "Reactions, pins and create_thread default to that message when `message_id` or `parent_message_id` is omitted."
+    )
     if parent_message_id:
         lines.append(f"- Parent Inline message for this thread: `{parent_message_id}`.")
     lines.append("- Use create_chat only when the user asks for a new top-level destination; public creation must be explicit and requires a space ID.")
