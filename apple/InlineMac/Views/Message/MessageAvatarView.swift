@@ -12,7 +12,9 @@ class UserAvatarView: NSView {
   private var currentRenderSignature: RenderSignature?
   private var isPressed = false
 
-  private var hostingView: NSHostingView<MessageViaAvatar<UserAvatar>>?
+  /// Plain layers, not a hosted `UserAvatar`: avatars move on every frame of a message list scroll, and
+  /// a hosting view that moves re-runs SwiftUI's graph and the window's drag-margin pass each time.
+  private let avatarLayerView = UserAvatarLayerView(frame: .zero)
   /// Agent badge for a message an agent sent for this user.
   private var viaMark: MessageViaPresentation.Mark?
 
@@ -95,30 +97,12 @@ class UserAvatarView: NSView {
 
   private func updateAvatar() {
     guard let userInfo else { return }
-
-    let rootView = MessageViaAvatar(
-      avatarSize: size,
-      mark: viaMark,
-      ringColor: Color(nsColor: .windowBackgroundColor)
-    ) {
-      UserAvatar(
-        userInfo: userInfo,
-        size: size,
-        ignoresSafeArea: true
-      )
-    }
-
-    if let hostingView {
-      hostingView.rootView = rootView
-    } else {
-      let newHostingView = NSHostingView(rootView: rootView)
-      newHostingView.translatesAutoresizingMaskIntoConstraints = true
-      newHostingView.wantsLayer = true
-      newHostingView.frame = bounds
-      addSubview(newHostingView)
-      hostingView = newHostingView
+    if avatarLayerView.superview == nil {
+      avatarLayerView.frame = bounds
+      addSubview(avatarLayerView)
       applyPressedTransform()
     }
+    avatarLayerView.configure(with: userInfo, size: size, viaMark: viaMark)
   }
 
   private static func renderSignature(for userInfo: UserInfo, viaMark: MessageViaPresentation.Mark?) -> RenderSignature {
@@ -148,8 +132,7 @@ class UserAvatarView: NSView {
   override func layout() {
     super.layout()
 
-    // 7. Update hosting view frame during layout
-    hostingView?.frame = bounds
+    avatarLayerView.frame = bounds
   }
 
   override func mouseDown(with event: NSEvent) {
