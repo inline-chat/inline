@@ -57,13 +57,20 @@ export type ActivityEvent =
   | { type: "waiting"; id?: string; waiting: boolean }
   /** A person's new message arrived mid-turn: the current message ends and later work starts a new one. */
   | { type: "split" }
-  | { type: "turn.end"; outcome: TurnOutcome }
+  /**
+   * The turn is over. `discard` asks to remove the open progress message instead of
+   * closing it, for a turn whose whole answer was something other than a message
+   * (an emoji reaction). Messages a split or size limit already ended stay.
+   */
+  | { type: "turn.end"; outcome: TurnOutcome; discard?: boolean }
 
 export type RenderOp =
   /** Create, or edit, progress message `slot`. `urgent` skips edit coalescing. */
   | { type: "progress"; slot: number; doc: Doc; urgent: boolean }
   /** The last edit of progress message `slot`. */
   | { type: "end"; slot: number; doc: Doc }
+  /** Remove progress message `slot`; `doc` is its closed form where it cannot be removed. */
+  | { type: "discard"; slot: number; doc: Doc }
 
 type Row = {
   id: string
@@ -136,7 +143,7 @@ export class ProgressRenderer {
         this.split(ops)
         break
       case "turn.end":
-        this.endTurn(event.outcome, ops)
+        this.endTurn(event.outcome, ops, event.discard === true)
         break
     }
     return ops
@@ -190,7 +197,7 @@ export class ProgressRenderer {
     }
   }
 
-  private endTurn(outcome: TurnOutcome, ops: RenderOp[]): void {
+  private endTurn(outcome: TurnOutcome, ops: RenderOp[], discard = false): void {
     const slot = this.slot
     if (!slot) return
     for (const row of slot.rows) {
@@ -201,7 +208,7 @@ export class ProgressRenderer {
     const verb = outcome === "cancelled" ? "Stopped after" : outcome === "failure" ? "Failed after" : "Worked for"
     const failed = unresolvedFailures(slot.rows)
     const summary = `${verb} ${elapsedText(this.now - slot.startedAt)}${failed > 0 ? ` · ${failed} failed` : ""}`
-    ops.push({ type: "end", slot: slot.id, doc: this.endedDoc(slot, summary) })
+    ops.push({ type: discard && outcome === "success" ? "discard" : "end", slot: slot.id, doc: this.endedDoc(slot, summary) })
     this.slot = undefined
   }
 

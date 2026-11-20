@@ -32,6 +32,11 @@ base = module("gateway.platforms.base")
 helpers = module("gateway.platforms.helpers")
 session_context = module("gateway.session_context")
 hermes_constants = module("hermes_constants")
+# Hermes' "needed a reply" notice, which the gateway sends in place of a bare NO_REPLY.
+agent_pkg = module("agent")
+agent_i18n = module("agent.i18n")
+SILENCE_NOTICE = "⚠️ The model returned only a silence marker for a message that needed a reply. Try again or rephrase."
+agent_i18n.t = lambda key, **kwargs: SILENCE_NOTICE if key == "gateway.errors.unexpected_silence" else key
 home = Path(tempfile.mkdtemp(prefix="inline-hermes-activity-"))
 hermes_constants.get_hermes_home = lambda: home
 os.environ["HERMES_HOME"] = str(home)
@@ -85,10 +90,11 @@ helpers.strip_markdown = lambda text: text
 # Hermes binds the turn's chat to context variables; hooks read them on their own threads.
 session_vars = contextvars.ContextVar("session_vars", default={})
 session_context.get_session_env = lambda name, default="": session_vars.get().get(name, default)
-def bind(platform="inline", chat="10", thread="", user="u1"):
+def bind(platform="inline", chat="10", thread="", user="u1", message=""):
     session_vars.set({
         "HERMES_SESSION_PLATFORM": platform, "HERMES_SESSION_CHAT_ID": chat,
         "HERMES_SESSION_THREAD_ID": thread, "HERMES_SESSION_USER_ID": user,
+        "HERMES_SESSION_MESSAGE_ID": message,
     })
 
 sys.path.insert(0, "plugin")
@@ -318,7 +324,7 @@ async def friendly_turn():
     event = processing_event()
     await adapter.on_processing_start(event)
     bind()
-    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set())
+    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set(), timeout=10)
     hooks["pre_tool_call"](tool_name="terminal", args={"command": "ls"}, session_id="s1", tool_call_id="f1")
     update = await adapter.send("10", "Checking the logs first.", metadata={"_interim_send": True})
     assert update.success is True
@@ -355,7 +361,7 @@ async def status_lines_are_never_the_answer():
     event = processing_event()
     await adapter.on_processing_start(event)
     bind()
-    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set())
+    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set(), timeout=10)
     await adapter.send_or_update_status("10", "compression", "Compressing context")
     assert adapter._activity_turn_for_send("10", None) is not None, "a status closed the turn"
     await adapter.send("10", "All good.")
@@ -377,7 +383,7 @@ async def friendly_answer_left_as_an_update():
     event = processing_event()
     await adapter.on_processing_start(event)
     bind()
-    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set())
+    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set(), timeout=10)
     await adapter.send("10", "The answer is 42.", metadata={"_interim_send": True})
     await adapter.send("10", "⏳ Working — 1 min", metadata={"_interim_send": True})
     await adapter.on_processing_complete(event, "success")
@@ -491,6 +497,98 @@ async def commands_and_failures():
     assert idle._activity_pump is None
 
 asyncio.run(commands_and_failures())
+
+def ended(log):
+    events = events_of(log)
+    return bool(events) and events[-1]["type"] == "turn.end"
+
+def react(call_id="r1", status="ok", **args):
+    payload = {"action": "add_reaction", "emoji": "👍", **args}
+    hooks["pre_tool_call"](tool_name="inline", args=payload, session_id="s1", tool_call_id=call_id)
+    result = json.dumps({"success": status == "ok", "action": "add_reaction"})
+    hooks["post_tool_call"](tool_name="inline", args=payload, result=result, session_id="s1", tool_call_id=call_id, status=status)
+
+async def reaction_answers():
+    # A reaction alone answers: Hermes' "needed a reply" notice is not posted, and the progress
+    # message (nothing but "Working") is removed instead of ending as "Worked for".
+    adapter, log = make_adapter()
+    event = processing_event(message_id="7")
+    await adapter.on_processing_start(event)
+    bind(message="7")
+    react()
+    result = await adapter.send("10", SILENCE_NOTICE, reply_to="7")
+    assert result.success is True and result.raw_response == {"inlineActivity": "answered_by_reaction"}
+    wait_for(lambda: ended(log), timeout=10)
+    assert [entry for entry in log if entry[0] == "chat-send"] == []
+    events = events_of(log)
+    assert events[-1] == {"type": "turn.end", "outcome": "success", "discard": True}, events
+    assert [e for e in events if e["type"] == "item"] == []  # the reaction shows on the message, not as a row
+    await adapter.on_processing_complete(event, types.SimpleNamespace(value="success"))
+    adapter._activity_stop()
+
+    # A turn that also worked keeps its progress ("Worked for" records the work); still no notice.
+    adapter, log = make_adapter()
+    event = processing_event(message_id="7")
+    await adapter.on_processing_start(event)
+    bind(message="7")
+    hooks["pre_tool_call"](tool_name="terminal", args={"command": "make deploy"}, session_id="s1", tool_call_id="c1")
+    hooks["post_tool_call"](tool_name="terminal", args={"command": "make deploy"}, result="{}", session_id="s1", tool_call_id="c1", status="ok")
+    react(message_id="7")
+    assert (await adapter.send("10", SILENCE_NOTICE, reply_to="7")).raw_response == {"inlineActivity": "answered_by_reaction"}
+    wait_for(lambda: ended(log), timeout=10)
+    assert events_of(log)[-1] == {"type": "turn.end", "outcome": "success"}
+    adapter._activity_stop()
+
+    # Hermes let the silence stand (no send at all): the turn still leaves no progress message.
+    adapter, log = make_adapter()
+    event = processing_event(message_id="7")
+    await adapter.on_processing_start(event)
+    bind(message="7")
+    react()
+    await adapter.on_processing_complete(event, types.SimpleNamespace(value="success"))
+    wait_for(lambda: ended(log), timeout=10)
+    assert events_of(log)[-1] == {"type": "turn.end", "outcome": "success", "discard": True}
+    adapter._activity_stop()
+
+    # Friendly output draws nothing, but a reaction still answers.
+    adapter, log = make_adapter(mode="friendly")
+    event = processing_event(message_id="7")
+    await adapter.on_processing_start(event)
+    bind(message="7")
+    wait_for(lambda: adapter._activity_turn_for_send("10", None).mode_ready.is_set(), timeout=10)
+    react()
+    assert (await adapter.send("10", SILENCE_NOTICE, reply_to="7")).raw_response == {"inlineActivity": "answered_by_reaction"}
+    assert [entry for entry in log if entry[0] == "chat-send"] == []
+    adapter._activity_stop()
+
+    # Not an answer: a reaction on another message or chat, a failed reaction, or none at all.
+    for setup in (
+        lambda: react(message_id="3"),
+        lambda: react(chat_id="99"),
+        lambda: react(status="error"),
+        lambda: None,
+    ):
+        adapter, log = make_adapter()
+        event = processing_event(message_id="7")
+        await adapter.on_processing_start(event)
+        bind(message="7")
+        setup()
+        result = await adapter.send("10", SILENCE_NOTICE, reply_to="7")
+        assert result.raw_response == {}, result.raw_response
+        assert [entry[1]["text"] for entry in log if entry[0] == "chat-send"] == [SILENCE_NOTICE]
+        adapter._activity_stop()
+
+    # A reaction next to a written answer changes nothing about the answer.
+    adapter, log = make_adapter()
+    event = processing_event(message_id="7")
+    await adapter.on_processing_start(event)
+    bind(message="7")
+    react()
+    assert (await adapter.send("10", "Done, merged.", reply_to="7")).success is True
+    assert [entry[1]["text"] for entry in log if entry[0] == "chat-send"] == ["Done, merged."]
+    adapter._activity_stop()
+
+asyncio.run(reaction_answers())
 
 print("activity python ok")
 `

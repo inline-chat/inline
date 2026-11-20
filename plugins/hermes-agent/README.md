@@ -38,6 +38,7 @@ Supported:
 - Message widgets: sandboxed HTML (charts, diagrams, mockups, small pickers) through the `inline` tool's `send_widget` action, or an `<iframe title="…" id="…" height="…">HTML</iframe>` block in a Markdown reply. Long replies are split around widgets, never inside one, with at most one widget per message; a widget longer than the 4,000-character chunk goes alone, up to Inline's 100,000-character limit. Streaming previews hide a widget until its closing tag arrives. `send_widget` returns Inline's reason when the server rejects a widget. A viewer's `inline.action(name, payload)` call becomes a turn naming the widget ID, call name, and untrusted JSON payload, and the answer replies below the widget instead of replacing it. Call names and payloads need realtime SDK 0.0.22 or later; with an older bundled SDK, the turn names only the widget.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
+- The agent reacts to some people's messages with an emoji when a person would (`agent_reactions`, on by default), and a reaction alone can answer a message that needs no written reply.
 - Opt-in reactions (`reaction_triggers`) and lifecycle/system events as synthetic Hermes messages that need no reply and keep the conversation's cached agent.
 - Cron or standalone sends through `INLINE_HOME_CHANNEL` and `hermes send --to inline:<chat-id>`.
 - Hermes-native `typing_indicator` and `gateway_restart_notification` toggles, with plugin-owned YAML bridge coverage for external-plugin compatibility.
@@ -446,6 +447,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. With it on and `INLINE_REACTION_TRIGGERS` unset, every reaction is delivered too. |
 | `INLINE_REACTION_TRIGGERS` | Which reactions start a Hermes turn, like Hermes' Slack `reaction_triggers`. Unset or `false`: none (the default). `true`: any emoji on the bot's own messages. A list such as `👍,✅`: those emoji on any message. A reaction turn needs no reply. |
+| `INLINE_AGENT_REACTIONS` | Lets the agent react to some people's messages with one emoji, as a person would: roughly one message in four to ten, such as 👍, 🫡 or ✅ for a message that needs no written reply, 👀 in a group, or the same 😂 back. A reaction alone can answer; it then leaves no Detailed progress message and no "needed a reply" warning. Defaults to `true`. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_CRON_MENTION_PREFIX` | Opt-in Inline Markdown mention prepended once to scheduled gateway text deliveries, for example `[@You](inline://user?id=42)`. Defaults to empty. See [Scheduled mentions](#scheduled-mentions). |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
@@ -492,7 +494,7 @@ Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
 `context_backfill`, `thread_context_limit`, `reply_context_limit`,
 `observed_context_limit`, `observe_unmentioned_messages`, `settings_path`,
-`system_events`, `reaction_triggers`, and `reactions` under the Inline platform config. Operational settings such
+`system_events`, `reaction_triggers`, `reactions`, and `agent_reactions` under the Inline platform config. Operational settings such
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
 `state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`,
 `cron_mention_prefix`, and `command_limit` can also be set there.

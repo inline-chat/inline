@@ -128,6 +128,10 @@ optional_env:
     description: "Reactions that start a Hermes turn: unset/false none (default), true any emoji on the bot's own messages, or a list such as 👍,✅ for those emoji on any message"
     prompt: "Reaction triggers (false, true, or emoji list)"
     password: false
+  - name: INLINE_AGENT_REACTIONS
+    description: "Let the agent react to some people's messages with an emoji, sparingly, and let a reaction alone answer a message that needs no written reply (true/false, default true)"
+    prompt: "Let the agent react with emoji? (true/false)"
+    password: false
   - name: INLINE_REACTIONS
     description: "Show processing reactions on handled inbound messages: eyes while working, then success or failure (true/false, default false)"
     prompt: "Show processing reactions? (true/false)"

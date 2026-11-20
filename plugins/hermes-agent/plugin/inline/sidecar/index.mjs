@@ -57461,7 +57461,7 @@ class ProgressRenderer {
         this.split(ops);
         break;
       case "turn.end":
-        this.endTurn(event.outcome, ops);
+        this.endTurn(event.outcome, ops, event.discard === true);
         break;
     }
     return ops;
@@ -57517,7 +57517,7 @@ class ProgressRenderer {
       this.pushProgress(ops, true);
     }
   }
-  endTurn(outcome, ops) {
+  endTurn(outcome, ops, discard = false) {
     const slot = this.slot;
     if (!slot)
       return;
@@ -57530,7 +57530,7 @@ class ProgressRenderer {
     const verb = outcome === "cancelled" ? "Stopped after" : outcome === "failure" ? "Failed after" : "Worked for";
     const failed = unresolvedFailures(slot.rows);
     const summary = `${verb} ${elapsedText(this.now - slot.startedAt)}${failed > 0 ? ` · ${failed} failed` : ""}`;
-    ops.push({ type: "end", slot: slot.id, doc: this.endedDoc(slot, summary) });
+    ops.push({ type: discard && outcome === "success" ? "discard" : "end", slot: slot.id, doc: this.endedDoc(slot, summary) });
     this.slot = undefined;
   }
   pushProgress(ops, urgent) {
@@ -57928,8 +57928,9 @@ class ProgressPresenter {
       if (slot.ended || slot.failed)
         continue;
       slot.pending = op.doc;
-      if (op.type === "end") {
+      if (op.type === "end" || op.type === "discard") {
         slot.ended = true;
+        slot.discard = op.type === "discard";
         this.writeNow(op.slot, slot);
       } else if (slot.messageId === undefined && slot.lastFingerprint === undefined && slot.timer === undefined) {
         this.writeNow(op.slot, slot);
@@ -57955,7 +57956,7 @@ class ProgressPresenter {
   slotState(id) {
     let slot = this.slots.get(id);
     if (!slot) {
-      slot = { lastWriteAt: Number.NEGATIVE_INFINITY, ended: false, failed: false };
+      slot = { lastWriteAt: Number.NEGATIVE_INFINITY, ended: false, discard: false, failed: false };
       this.slots.set(id, slot);
     }
     return slot;
@@ -57976,6 +57977,17 @@ class ProgressPresenter {
     if (!doc || slot.failed)
       return;
     slot.pending = undefined;
+    if (slot.discard && this.transport.delete) {
+      if (slot.messageId === undefined)
+        return;
+      try {
+        await this.transport.delete(slot.messageId);
+        slot.messageId = undefined;
+        return;
+      } catch (error) {
+        this.options.onError?.(error, "delete");
+      }
+    }
     const fingerprint = fingerprintOf(doc);
     if (fingerprint === slot.lastFingerprint)
       return;
@@ -58185,7 +58197,10 @@ function parseActivityEvent(value) {
       if (typeof outcome !== "string" || !OUTCOMES.has(outcome)) {
         throw new SidecarError("turn.end requires outcome success, failure or cancelled", "bad_format");
       }
-      return { type: "turn.end", outcome };
+      if (record.discard !== undefined && typeof record.discard !== "boolean") {
+        throw new SidecarError("turn.end discard must be a boolean", "bad_format");
+      }
+      return { type: "turn.end", outcome, ...record.discard === true ? { discard: true } : {} };
     }
     case "commentary":
       return { type: "commentary", text: requiredString(record, "text") };
@@ -58846,6 +58861,12 @@ function progressTransport(target) {
       await client.invokeRaw(Method.EDIT_MESSAGE, {
         oneofKind: "editMessage",
         editMessage: { messageId, peerId, text: doc.text, blockContent: doc.blockContent }
+      });
+    },
+    async delete(messageId) {
+      await client.invoke(Method.DELETE_MESSAGES, {
+        oneofKind: "deleteMessages",
+        deleteMessages: { peerId, messageIds: [messageId] }
       });
     }
   };
