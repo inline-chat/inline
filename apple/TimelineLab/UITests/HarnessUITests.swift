@@ -1394,4 +1394,42 @@ final class HarnessUITests: XCTestCase {
     }
     shot("incoming-avatar-end")
   }
+
+  /// Rotation on any screen size (an iPad): at the newest message, scrolled up into history and with the keyboard up,
+  /// each turned to landscape and back. Run with `--timeline-harness-probe`; each `[UITEST] step` line names the
+  /// frames after it. Drags use fractions of the window, so no point depends on the screen.
+  func testRotationSweep() {
+    func step(_ name: String) {
+      print("[UITEST] step \(name) t=\(String(format: "%.3f", Date().timeIntervalSince1970))")
+    }
+    func turn(_ orientation: UIDeviceOrientation, _ name: String) {
+      step(name)
+      XCUIDevice.shared.orientation = orientation
+      Thread.sleep(forTimeInterval: 2)
+      shot("rotation-\(name)")
+    }
+    launch()
+    turn(.landscapeLeft, "landscape")
+    turn(.portrait, "portrait")
+    step("scroll-up")
+    let window = app.windows.firstMatch
+    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).press(
+      forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)),
+      withVelocity: 600, thenHoldForDuration: 0.4
+    )
+    Thread.sleep(forTimeInterval: 1.3)
+    turn(.landscapeLeft, "scrolled-landscape")
+    turn(.portrait, "scrolled-portrait")
+    step("back-to-newest")
+    if scrollButton.exists, scrollButton.isHittable { scrollButton.tap() }
+    Thread.sleep(forTimeInterval: 1.3)
+    step("keyboard-open")
+    openKeyboard()
+    turn(.landscapeLeft, "keyboard-landscape")
+    turn(.portrait, "keyboard-portrait")
+    // Both sizes seen with the keyboard up: the composer moves with the turn to where the keyboard will be.
+    turn(.landscapeLeft, "keyboard-landscape-again")
+    turn(.portrait, "keyboard-portrait-again")
+    step("end")
+  }
 }
