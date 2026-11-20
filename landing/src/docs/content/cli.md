@@ -58,6 +58,19 @@ session files or print tokens to move authentication between hosts.
 
 When a coding agent like Claude Code or Codex sends a message through the CLI, people see "Sent via Claude Code" under it. Add `--as-me` to send without it. Messages you send yourself from a plain terminal aren't signed.
 
+## Listen for messages
+
+`inline listen` streams new messages and reactions as they arrive, so an agent can wake when something happens instead of polling. With `--json`, each event is one line of JSON.
+
+```bash
+inline listen --sender-id 42 --json                    # anything user 42 posts
+inline listen --chat-id 123 --with-threads --json      # a chat and its threads
+inline listen --user-id 42 --once --timeout 2h --json  # the next DM from user 42, then exit
+inline listen --mentions-me --contains deploy --json
+```
+
+Add `--name` to resume after the last delivered event when you run it again. Run `inline listen --help` for every filter and the event format.
+
 ## Update
 
 ```bash
