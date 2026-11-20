@@ -181,7 +181,10 @@ impl DocBuilder {
     /// bold, italic and links become entities over the plain text, the way
     /// Inline styles a Markdown message. Returns its range like [`span`](Self::span).
     pub(crate) fn markdown_span(&mut self, markdown: &str) -> proto::BlockText {
-        let styled = crate::bridge::v2::blocks::markdown::inline(markdown);
+        // Sanitize before styling: the entities below are measured on this
+        // text, so removing characters later would shift every one of them.
+        let markdown = sanitize_visible_text(markdown);
+        let styled = crate::bridge::v2::blocks::markdown::inline(&markdown);
         let text = styled.text.trim_end_matches(LINE_END);
         let end = text.encode_utf16().count() as i64;
         let offset = self.utf16;
@@ -752,4 +755,26 @@ mod tests {
         assert!(!Doc::markdown("before\0after").text.contains('\0'));
     }
 
+    #[test]
+    fn styled_prose_ranges_survive_control_characters() {
+        let mut builder = DocBuilder::new();
+        builder.markdown_paragraph("ru\0n `cargo\u{1b}[31m test` 🚀 **now**");
+        let doc = builder.finish();
+        assert!(!doc.text.contains('\0'));
+        let styled: Vec<String> = doc
+            .entities
+            .iter()
+            .map(|entity| {
+                slice(
+                    &doc,
+                    &proto::BlockText {
+                        offset: entity.offset,
+                        length: entity.length,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(styled, ["cargo test", "now"]);
+    }
 }
