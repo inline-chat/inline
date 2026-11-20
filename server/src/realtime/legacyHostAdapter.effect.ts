@@ -64,26 +64,24 @@ const loadCurrentRealtimeRuntime: LoadLegacyRealtimeRuntime =
   }
 
 /**
- * The only structural Elysia compatibility leaf in the replacement realtime
- * host. The current protocol handlers require `ws.raw.sendBinary`, `ws.id`,
- * and synchronous close; those exact calls delegate to the injected peer.
+ * The current protocol handlers require `ws.raw.sendBinary`, `ws.id`, and
+ * synchronous close; those exact calls delegate to the injected peer.
  *
  * TODO(effect-cutover): remove this shim after `handleMessage` and
  * `ConnectionManager` accept `RealtimeTransportPeer` directly.
  */
 const makeLegacySocket = (
   peer: RealtimeTransportPeer,
-): LegacyRealtimeSocket =>
-  ({
-    id: peer.id,
-    close: peer.close,
-    raw: {
-      sendBinary: (
-        bytes: Uint8Array,
-        compress = false,
-      ) => peer.sendBinary(bytes, compress),
-    },
-  } as LegacyRealtimeSocket)
+): LegacyRealtimeSocket => ({
+  id: peer.id,
+  close: peer.close,
+  raw: {
+    sendBinary: (
+      bytes: Uint8Array,
+      compress = false,
+    ) => peer.sendBinary(bytes, compress),
+  },
+})
 
 export const makeLegacyRealtimeSessions = (
   loadRuntime: LoadLegacyRealtimeRuntime =

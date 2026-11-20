@@ -12,7 +12,7 @@ import { connectedUserRepair } from "@in/server/modules/internalMessaging/repair
 import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
 import { connectionBackgroundWork } from "./backgroundWork"
 import type { Server } from "bun"
-import type { ElysiaWS } from "elysia/ws"
+import type { Ws } from "@in/server/realtime/types"
 import invariant from "tiny-invariant"
 
 const log = new Log("ws-connections")
@@ -78,7 +78,7 @@ export enum ConnVersion {
   REALTIME_V3 = 3,
 }
 
-type WS = ElysiaWS<any, any>
+type WS = Ws
 
 interface Connection {
   connectionId: string

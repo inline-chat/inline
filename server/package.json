@@ -49,7 +49,6 @@
     "lint:tests": "oxlint --config ../.oxlintrc.json --ignore-path ../.oxlintignore --ignore-pattern 'scripts/lint/fixtures/**' --allow all --deny inline-tests/no-focused-tests src scripts bench packages/url-preview/src"
   },
   "overrides": {
-    "elysia": "=1.4.29",
     "@sinclair/typebox": "=0.34.49"
   },
   "dependencies": {
@@ -105,7 +104,6 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "elysia": "=1.4.29",
     "oxlint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

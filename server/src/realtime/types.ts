@@ -1,8 +1,16 @@
 import type { RpcResult, ServerProtocolMessage } from "@inline-chat/protocol/core"
-import type { ServerWebSocket } from "bun"
-import type { ElysiaWS } from "elysia/ws"
 
-export type Ws = ElysiaWS<ServerWebSocket<any>>
+/**
+ * The socket surface the v2 protocol handlers and the connection registry use.
+ * `legacyHostAdapter.effect.ts` adapts the production transport peer to it.
+ */
+export interface Ws {
+  readonly id: string
+  readonly close: (code?: number, reason?: string) => void
+  readonly raw: {
+    readonly sendBinary: (bytes: Uint8Array, compress?: boolean) => number
+  }
+}
 
 export type RealtimeRequestMetadata = {
   ip?: string
