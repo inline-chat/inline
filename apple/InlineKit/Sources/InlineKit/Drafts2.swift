@@ -395,36 +395,32 @@ public final class Drafts2: @unchecked Sendable {
     return attachment
   }
 
+  /// Adds a decoded image. Pass `sourceURL` when the image came from a file: the photo is then
+  /// prepared from the file itself, which keeps it available for sending as the original.
   @discardableResult
   public func addImage(
     peer: Peer,
     image: PlatformImage,
-    preferredFormat: ImageFormat? = nil,
-    onComplete: Drafts2AttachmentCompletion? = nil
-  ) -> String {
-    addImage(
-      peer: peer,
-      image: image,
-      preferredFormat: preferredFormat,
-      fallbackURL: nil,
-      onComplete: onComplete
-    )
-  }
-
-  @discardableResult
-  public func addImage(
-    peer: Peer,
-    image: PlatformImage,
-    preferredFormat: ImageFormat? = nil,
-    fallbackURL: URL?,
+    sourceURL: URL? = nil,
     onComplete: Drafts2AttachmentCompletion? = nil
   ) -> String {
     startMaterialization(peer: peer, prefix: "pending_photo") {
-      try await AttachmentMediaMaterializer.image(
-        image,
-        preferredFormat: preferredFormat,
-        sourceURL: fallbackURL
-      )
+      try await AttachmentMediaMaterializer.image(image, sourceURL: sourceURL)
+    } onComplete: { result in
+      onComplete?(result)
+    }
+  }
+
+  /// Adds a photo from its encoded source without decoding it on the caller's side.
+  @discardableResult
+  public func addPhoto(
+    peer: Peer,
+    source: MediaSendPreparation.PhotoSource,
+    originalFileName: String? = nil,
+    onComplete: Drafts2AttachmentCompletion? = nil
+  ) -> String {
+    startMaterialization(peer: peer, prefix: "pending_photo") {
+      try await AttachmentMediaMaterializer.photo(source, originalFileName: originalFileName)
     } onComplete: { result in
       onComplete?(result)
     }

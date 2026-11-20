@@ -21,27 +21,45 @@ struct VideoCompressionTests {
     #expect(result.fileSize > 0)
   }
 
-  @Test("returns compressionNotNeeded when thresholds are high")
-  func testCompressionNotNeededForSmallVideo() async throws {
+  @Test("an H.264 video within limits is remuxed, not re-encoded, and loses its location")
+  func remuxesWithinLimits() async throws {
+    let videoURL = try await makeTestVideoURL(fileType: .mov, metadata: cameraMetadata())
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+    #expect(await VideoCompressor.content(of: videoURL) == .camera)
+
+    let result = try await VideoCompressor.shared.compressVideo(at: videoURL, options: .upload(for: .camera))
+    defer { try? FileManager.default.removeItem(at: result.url) }
+
+    #expect(result.url != videoURL)
+    #expect(result.url.pathExtension == "mp4")
+    #expect(result.width == 64)
+    #expect(try await identifyingMetadata(at: result.url).isEmpty)
+  }
+
+  @Test("a video over the size limit is re-encoded smaller and loses its location")
+  func reencodesOversize() async throws {
+    let videoURL = try await makeTestVideoURL(
+      size: CGSize(width: 1600, height: 896),
+      fileType: .mov,
+      metadata: cameraMetadata()
+    )
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+
+    let result = try await VideoCompressor.shared.compressVideo(at: videoURL, options: .upload(for: .camera))
+    defer { try? FileManager.default.removeItem(at: result.url) }
+
+    #expect(max(result.width, result.height) <= 1_280)
+    #expect(try await identifyingMetadata(at: result.url).isEmpty)
+  }
+
+  @Test("a video with no camera recorded is treated as a screen recording")
+  func screenRecordingContent() async throws {
     let videoURL = try await makeTestVideoURL()
     defer { try? FileManager.default.removeItem(at: videoURL) }
 
-    let options = VideoCompressionOptions(
-      maxDimension: 4096,
-      minFileSizeBytes: Int64.max,
-      maxBitrateMbps: 1000,
-      minimumCompressionRatio: 0.99,
-      forceTranscode: false
-    )
-
-    do {
-      _ = try await VideoCompressor.shared.compressVideo(at: videoURL, options: options)
-      #expect(Bool(false))
-    } catch VideoCompressionError.compressionNotNeeded {
-      // Expected
-    } catch {
-      #expect(Bool(false))
-    }
+    #expect(await VideoCompressor.content(of: videoURL) == .screenRecording)
+    #expect(VideoCompressionOptions.upload(for: .screenRecording).maxDimension == 1_920)
+    #expect(VideoCompressionOptions.upload(for: .camera).maxDimension == 1_280)
   }
 
   @Test("throws for empty file")
@@ -51,17 +69,36 @@ struct VideoCompressionTests {
     try Data().write(to: tempURL, options: .atomic)
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
-    do {
-      _ = try await VideoCompressor.shared.compressVideo(
-        at: tempURL,
-        options: VideoCompressionOptions.uploadDefault(forceTranscode: true)
-      )
-      #expect(Bool(false))
-    } catch VideoCompressionError.compressionNotNeeded {
-      #expect(Bool(false))
-    } catch {
-      // Expected: invalid input should fail compression.
+    await #expect(throws: (any Error).self) {
+      _ = try await VideoCompressor.shared.compressVideo(at: tempURL, options: .upload(for: .camera))
     }
+  }
+}
+
+private func cameraMetadata() -> [AVMetadataItem] {
+  func item(_ identifier: AVMetadataIdentifier, _ value: String) -> AVMetadataItem {
+    let item = AVMutableMetadataItem()
+    item.identifier = identifier
+    item.value = value as NSString
+    item.dataType = kCMMetadataBaseDataType_UTF8 as String
+    return item
+  }
+  return [
+    item(.quickTimeMetadataLocationISO6709, "+35.7000+051.4000/"),
+    item(.quickTimeMetadataMake, "Apple"),
+    item(.quickTimeMetadataModel, "iPhone 17 Pro"),
+  ]
+}
+
+private func identifyingMetadata(at url: URL) async throws -> [AVMetadataItem] {
+  let items = try await AVURLAsset(url: url).load(.metadata)
+  return items.filter {
+    $0.identifier == .quickTimeMetadataLocationISO6709
+      || $0.identifier == .quickTimeMetadataMake
+      || $0.identifier == .quickTimeMetadataModel
+      || $0.commonKey == .commonKeyLocation
+      || $0.commonKey == .commonKeyMake
+      || $0.commonKey == .commonKeyModel
   }
 }
 
@@ -85,7 +122,8 @@ private func makeTestVideoURL(
   size: CGSize = CGSize(width: 64, height: 64),
   frameCount: Int = 2,
   fps: Int32 = 10,
-  fileType: AVFileType = .mp4
+  fileType: AVFileType = .mp4,
+  metadata: [AVMetadataItem] = []
 ) async throws -> URL {
   let pathExtension = fileType == .mov ? "mov" : "mp4"
   let outputURL = FileManager.default.temporaryDirectory
@@ -95,6 +133,7 @@ private func makeTestVideoURL(
   }
 
   let writer = try AVAssetWriter(outputURL: outputURL, fileType: fileType)
+  writer.metadata = metadata
   let videoSettings: [String: Any] = [
     AVVideoCodecKey: AVVideoCodecType.h264,
     AVVideoWidthKey: Int(size.width),

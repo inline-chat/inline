@@ -687,17 +687,20 @@ public actor FileUploader {
         uploadUrl = staged
         break
       }
-      do {
-        let options = mimeType.lowercased().contains("png")
-          ? ImageCompressionOptions.defaultPNG
-          : ImageCompressionOptions.defaultPhoto
-        uploadUrl = try await ImageCompressor.shared.compressImage(at: localUrl, options: options)
-        if uploadUrl != localUrl {
-          temporaryArtifacts.append(uploadUrl)
-        }
-      } catch {
-        // Fallback to original URL if compression fails
-        uploadUrl = localUrl
+      // Photos are prepared when attached, so this is normally a header read. Anything still too
+      // large or carrying camera, place or time details (a draft from an older build) is prepared
+      // here, before staging and hashing; it is never uploaded as it is.
+      if MediaSendPreparation.photoNeedsPreparation(at: localUrl) {
+        let prepared = try await Task.detached(priority: .userInitiated) {
+          try MediaSendPreparation.preparePhoto(.file(localUrl))
+        }.value
+        let preparedURL = FileHelpers.getTrueTemporaryDirectory()
+          .appendingPathComponent("inline-upload-photo-\(UUID().uuidString)\(prepared.format.toExt())")
+        try prepared.data.write(to: preparedURL, options: .atomic)
+        temporaryArtifacts.append(preparedURL)
+        uploadUrl = preparedURL
+        uploadMimeType = prepared.format.toMimeType()
+        uploadFileName = (fileName as NSString).deletingPathExtension + prepared.format.toExt()
       }
     case .video:
       let prepared = try await prepareVideoForUpload(
@@ -1189,17 +1192,18 @@ public actor FileUploader {
   private func prepareVideoForUploadUnstaged(
     uploadId: String, localUrl: URL, inputMimeType: String, metadata: ApiClient.VideoUploadMetadata?
   ) async throws -> PreparedVideoUploadPayload {
-    let requiresMp4Output = inputMimeType.lowercased() != "video/mp4"
-
     let resolvedMetadata = try await resolveVideoUploadMetadata(
       localUrl: localUrl,
       fallback: metadata
     )
 
+    // Every video is re-encoded or remuxed into a new file without location or device details;
+    // if that fails the upload fails rather than send the original.
+    let content = await VideoCompressor.content(of: localUrl)
     do {
       let result = try await VideoCompressor.shared.compressVideo(
         at: localUrl,
-        options: VideoCompressionOptions.uploadDefault(forceTranscode: requiresMp4Output)
+        options: .upload(for: content)
       )
       let compressedMetadata = ApiClient.VideoUploadMetadata(
         width: result.width,
@@ -1210,43 +1214,18 @@ public actor FileUploader {
         isAnimated: resolvedMetadata.isAnimated,
         hasAudio: resolvedMetadata.hasAudio
       )
-      let preparedFileName = "\(uploadId).mp4"
       return PreparedVideoUploadPayload(
         url: result.url,
-        fileName: preparedFileName,
+        fileName: "\(uploadId).mp4",
         mimeType: "video/mp4",
         metadata: compressedMetadata,
         cleanupAfterUpload: true
       )
     } catch is CancellationError {
       throw FileUploadError.uploadCancelled
-    } catch VideoCompressionError.compressionNotNeeded {
-      return PreparedVideoUploadPayload(
-        url: localUrl,
-        fileName: localUrl.lastPathComponent,
-        mimeType: inputMimeType,
-        metadata: resolvedMetadata,
-        cleanupAfterUpload: false
-      )
-    } catch VideoCompressionError.compressionNotEffective {
-      return PreparedVideoUploadPayload(
-        url: localUrl,
-        fileName: localUrl.lastPathComponent,
-        mimeType: inputMimeType,
-        metadata: resolvedMetadata,
-        cleanupAfterUpload: false
-      )
     } catch {
-      Log.shared.warning(
-        "[FileUploader] Video preprocessing failed for \(uploadId); uploading original (\(error.localizedDescription))"
-      )
-      return PreparedVideoUploadPayload(
-        url: localUrl,
-        fileName: localUrl.lastPathComponent,
-        mimeType: inputMimeType,
-        metadata: resolvedMetadata,
-        cleanupAfterUpload: false
-      )
+      Log.shared.error("[FileUploader] Video preparation failed for \(uploadId)", error: error)
+      throw FileUploadError.invalidVideo
     }
   }
 
