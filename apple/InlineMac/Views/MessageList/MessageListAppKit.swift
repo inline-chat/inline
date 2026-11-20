@@ -1480,6 +1480,7 @@ class MessageListAppKit: NSViewController {
     guard range.location != NSNotFound, range.length > 0 else {
       lastAvatarOverlayVisibleRange = nil
       lastAvatarOverlayVisibleRect = nil
+      lastAvatarOverlayLayoutKey = nil
       if tableView.numberOfRows == 0 {
         avatarOverlayView.clearAvatars()
       }
@@ -1500,6 +1501,20 @@ class MessageListAppKit: NSViewController {
 
     let span = PerformanceTrace.begin("AvatarOverlaySync", category: .messages)
     defer { span.end() }
+    // Most scroll frames keep the same rows and only move the viewport. Re-place the sticky avatars
+    // instead of rebuilding every group's item, which cost more per frame than the cells did.
+    let layoutKey = AvatarOverlayLayoutKey(
+      rows: range,
+      messagesRevision: chatRows.messagesRevision,
+      tableSize: tableView.bounds.size
+    )
+    if !force, !avatarOverlayNeedsRaise, avatarOverlayView.superview === tableView,
+       lastAvatarOverlayLayoutKey == layoutKey
+    {
+      avatarOverlayView.moveStickyAvatars(viewportFrame: avatarOverlayView.convert(viewportRect, from: tableView))
+      return
+    }
+    lastAvatarOverlayLayoutKey = layoutKey
     installAvatarOverlayIfNeeded(raise: avatarOverlayNeedsRaise)
     avatarOverlayNeedsRaise = false
     guard avatarOverlayView.superview != nil else { return }
@@ -1508,6 +1523,7 @@ class MessageListAppKit: NSViewController {
     let start = max(range.location, 0)
     let end = min(range.location + range.length, tableView.numberOfRows)
     guard start < end else {
+      lastAvatarOverlayLayoutKey = nil
       if tableView.numberOfRows == 0 {
         avatarOverlayView.clearAvatars()
       }
@@ -1573,6 +1589,15 @@ class MessageListAppKit: NSViewController {
     )
     #endif
   }
+
+  private struct AvatarOverlayLayoutKey: Equatable {
+    let rows: NSRange
+    let messagesRevision: Int
+    let tableSize: CGSize
+  }
+
+  /// What the last full avatar sync placed items for; nil forces the next sync to rebuild.
+  private var lastAvatarOverlayLayoutKey: AvatarOverlayLayoutKey?
 
   private func avatarOverlayGroup(forVisibleRow row: Int) -> (messageIndex: Int, range: ClosedRange<Int>)? {
     guard usesAvatarOverlay(forRow: row) else { return nil }

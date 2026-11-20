@@ -51,6 +51,8 @@ final class MessageAvatarOverlayView: NSView {
     let view: UserAvatarView
     var reuseKey: ReuseKey
     var frame: CGRect = .null
+    /// The item last applied, for re-placing a sticky avatar when only the viewport moves.
+    var item: MessageAvatarOverlayItem?
 
     init(view: UserAvatarView, reuseKey: ReuseKey) {
       self.view = view
@@ -120,6 +122,28 @@ final class MessageAvatarOverlayView: NSView {
     CATransaction.commit()
 
     return stats
+  }
+
+  /// A scroll that keeps the same rows only moves the viewport. The overlay lives in table
+  /// coordinates, so only sticky avatars move; everything else stays where the last sync put it.
+  func moveStickyAvatars(viewportFrame: CGRect) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    for entry in active.values {
+      guard var item = entry.item, let sticky = item.sticky else { continue }
+      item.sticky = MessageAvatarOverlaySticky(
+        mode: sticky.mode,
+        viewportFrame: viewportFrame,
+        limitFrame: sticky.limitFrame,
+        viewportEdgeInset: sticky.viewportEdgeInset
+      )
+      entry.item = item
+      let frame = resolvedFrame(for: item)
+      guard entry.frame != frame else { continue }
+      entry.frame = frame
+      entry.view.frame = frame
+    }
+    CATransaction.commit()
   }
 
   func grabAvatar(overlapping sourceView: NSView) -> NSView? {
@@ -216,6 +240,7 @@ final class MessageAvatarOverlayView: NSView {
 
     entry.view.acceptsMouseInteraction = true
     entry.view.onClick = item.onClick
+    entry.item = item
     let frame = resolvedFrame(for: item)
     guard entry.frame != frame else { return }
     entry.frame = frame
