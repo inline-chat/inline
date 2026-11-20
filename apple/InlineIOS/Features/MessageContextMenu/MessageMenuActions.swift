@@ -102,11 +102,13 @@ final class MessageMenuActions: NSObject {
   }
 
   /// `includesTextCopy` is false while the custom menu offers a copy of selected text instead.
-  /// `photo` is the image the row shows now; `openDocument` opens a downloaded document.
+  /// `photo` is the image the row shows now; `openDocument` opens a downloaded document;
+  /// `richCopy` is the row's rich body as copy blocks, when it shows one.
   func actionsMenu(
     for fullMessage: FullMessage,
     photo: @escaping () -> UIImage?,
     openDocument: (() -> Void)? = nil,
+    richCopy: (() -> MessageClipboardDocument?)? = nil,
     includeReactionsAction: Bool = false,
     includesTextCopy: Bool = true,
     offersSelectText: Bool = false
@@ -119,6 +121,8 @@ final class MessageMenuActions: NSObject {
 
     if message.hasText, includesTextCopy {
       let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
+        // A rich body copies its blocks, so headings, lists, code and tables keep their shape.
+        if let document = richCopy?(), MessageClipboard.write(document) { return }
         guard let text = fullMessage.displayText else {
           UIPasteboard.general.string = message.text
           return
@@ -131,8 +135,8 @@ final class MessageMenuActions: NSObject {
       actions.append(copyAction)
     }
 
-    // The menu selects text in place only for plain bodies; code, lists and tables get a
-    // sheet to select from instead.
+    // Where the menu can't select in place (text still streaming in, older rows), a sheet
+    // offers the text to select from instead.
     if offersSelectText, message.hasText, let text = fullMessage.displayText ?? message.text {
       let entities = fullMessage.translationEntities ?? message.entities
       let canQuote = !message.isServiceMessage && !isMessageSending && !isMessageFailed

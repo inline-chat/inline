@@ -35,7 +35,15 @@ struct MessageSelectableText {
   /// code, table cells and agent cards' text are selectable; markers copy with their item.
   /// `scrollOffsets` are the code blocks' and tables' sideways offsets by path. Nil when no
   /// text shows.
-  static func rich(_ rich: RichLayout, origin: CGPoint, scrollOffsets: [RichPath: CGFloat]) -> MessageSelectableText? {
+  ///
+  /// `wholeMessage` also takes what shows but doesn't select, for copying the whole message:
+  /// disclosure summaries, written out in full, and diffs.
+  static func rich(
+    _ rich: RichLayout,
+    origin: CGPoint,
+    scrollOffsets: [RichPath: CGFloat],
+    wholeMessage: Bool = false
+  ) -> MessageSelectableText? {
     var builder = Builder()
     let nodes = rich.nodes
     let quotePaths = nodes.compactMap { placed -> RichPath? in
@@ -106,6 +114,14 @@ struct MessageSelectableText {
             role: .body,
             separatorAfter: "\n"
           )
+        }
+      case let .disclosure(disclosure) where wholeMessage:
+        // A closed row shows only its summary; an open one's children follow as their own nodes.
+        builder.block(disclosure.fullSummary.attributedString)
+      case let .diff(diff) where wholeMessage:
+        builder.block(diff.path.attributedString)
+        if let body = diff.body {
+          builder.surface(body, at: frame.origin, role: .code(language: "diff"), separatorAfter: "\n")
         }
       case .quote, .separator, .image, .album, .disclosure, .diff:
         // Disclosure summaries are cut to one line and diffs scroll in two directions; neither
@@ -191,6 +207,14 @@ struct MessageSelectableText {
       ))
       literals.append(NSAttributedString(string: text))
       literalRoles.append(.listMarker(.init(rendered: text)))
+    }
+
+    /// Text that copies as a paragraph of its own but has no surface.
+    mutating func block(_ text: NSAttributedString) {
+      guard !text.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+      document.append(.init(content: .literal(literals.count, leadingForSurface: nil), separatorAfter: "\n"))
+      literals.append(text)
+      literalRoles.append(.block)
     }
   }
 }

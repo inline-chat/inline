@@ -12,6 +12,7 @@ import struct InlineProtocol.BlockTable
 import struct InlineProtocol.BlockTableRow
 import struct InlineProtocol.BlockText
 import SwiftUI
+import TextProcessing
 import UIKit
 
 /// The custom context menu on real next-view bubbles, with the chat's menu shape and knobs for
@@ -452,6 +453,11 @@ final class MessageContextMenuLabController: UIViewController, UIContextMenuInte
     guard rows.indices.contains(index) else { return }
     scrollView.layoutIfNeeded()
     scrollView.scrollRectToVisible(rows[index].view.frame, animated: false)
+  }
+
+  /// What the menu's Copy writes for row `index` when its body is rich.
+  func wholeMessageCopyForTesting(_ index: Int) -> MessageClipboardDocument? {
+    rows.indices.contains(index) ? rows[index].view.wholeMessageClipboardDocument() : nil
   }
 
   func focusKeyboardForTesting() -> Bool {

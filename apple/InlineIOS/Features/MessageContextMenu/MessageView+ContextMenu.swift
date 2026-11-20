@@ -1,4 +1,5 @@
 import InlineMessageLayout
+import TextProcessing
 import UIKit
 
 extension MessageView {
@@ -84,6 +85,28 @@ extension MessageView {
     guard layout.text != nil, textView.layout.length > 0, !textView.isHidden else { return nil }
     let frame = textView.textFrame.offsetBy(dx: -extent.minX, dy: -extent.minY)
     return MessageContextMenuController.SelectableText(text: .plain(textView.layout, origin: frame.origin), colors: colors)
+  }
+
+  /// The whole message for the menu's Copy when its body has structure: headings, list
+  /// markers, quotes, code, tables, card text, disclosure summaries and diffs, as they show.
+  /// Nil for paragraphs alone, which copy best from the message's own text and formatting, and
+  /// while text streams in.
+  func wholeMessageClipboardDocument() -> MessageClipboardDocument? {
+    guard let content, let layout, layout.revealedLength == nil, let rich = layout.rich,
+          !MessageStreamPacer.shared.isStreaming(content.message.id),
+          rich.nodes.allSatisfy({ $0.revealedLength == nil }),
+          rich.nodes.contains(where: { Self.hasStructure($0.node) }),
+          let text = MessageSelectableText.rich(rich, origin: .zero, scrollOffsets: [:], wholeMessage: true)
+    else { return nil }
+    let document = text.clipboardDocument(for: NSRange(location: 0, length: text.length))
+    return document.isEmpty ? nil : document
+  }
+
+  private static func hasStructure(_ node: RichLayout.Node) -> Bool {
+    switch node {
+    case .text(_, role: .paragraph), .image, .album, .separator: false
+    default: true
+    }
   }
 }
 

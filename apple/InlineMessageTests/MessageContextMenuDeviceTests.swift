@@ -196,6 +196,9 @@ struct MessageContextMenuDeviceTests {
     #expect(all.markdown.hasPrefix("## Selection in rich messages"))
     #expect(all.markdown.hasSuffix("pick Select All from the menu."))
     #expect(menu.actionsViewForTesting.rowsForTesting.contains { $0.accessibilityLabel == "Quote" || $0.accessibilityLabel == "Copy" })
+    // The menu's Copy writes what Select All copies; a plain row keeps its text and formatting.
+    #expect(lab.wholeMessageCopyForTesting(row) == all)
+    #expect(lab.wholeMessageCopyForTesting(5) == nil)
 
     Attachment.record(Array(try #require(Self.sheet(frames).pngData())), named: "rich-selection.png")
     for (index, frame) in frames.enumerated() {

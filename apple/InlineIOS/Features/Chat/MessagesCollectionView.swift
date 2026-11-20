@@ -5143,6 +5143,10 @@ private extension MessagesCollectionView {
           guard let cell, cell.message?.id == fullMessage.id else { return }
           cell.messageView?.documentView.openFile()
         },
+        richCopy: { [weak cell] in
+          guard let cell, cell.message?.id == fullMessage.id, cell.showsNextMessageView else { return nil }
+          return cell.nextMessageView?.wholeMessageClipboardDocument()
+        },
         includeReactionsAction: includeReactionsAction,
         includesTextCopy: includesTextCopy,
         offersSelectText: offersSelectText

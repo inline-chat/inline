@@ -324,6 +324,7 @@ final class TimelineMessageMenu: NSObject {
       for: message,
       photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView, for: message) },
       openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) },
+      richCopy: { [weak self] in Self.richCopy(in: self?.list?.view(for: id) as? TimelineRowView, for: message) },
       includeReactionsAction: true
     )
   }
@@ -442,6 +443,7 @@ final class TimelineMessageMenu: NSObject {
             for: fullMessage,
             photo: { [weak rowView] in Self.photo(in: rowView, for: fullMessage) },
             openDocument: { [weak rowView] in Self.openDocument(in: rowView) },
+            richCopy: { [weak rowView] in Self.richCopy(in: rowView, for: fullMessage) },
             includesTextCopy: !hasTextSelection,
             offersSelectText: selectableText == nil
           )
@@ -585,6 +587,12 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     row(id).flatMap { TimelineMessagesView.actionMessage(of: $0.content) }
   }
 
+  /// The row's rich body as copy blocks, while the row still shows `message`.
+  private static func richCopy(in rowView: TimelineRowView?, for message: FullMessage) -> MessageClipboardDocument? {
+    guard let messageView = rowView?.shownMessageView, messageView.content?.message.id == message.id else { return nil }
+    return messageView.wholeMessageClipboardDocument()
+  }
+
   private static func openDocument(in rowView: TimelineRowView?) {
     if let messageView = rowView?.shownMessageView {
       messageView.openContextMenuDocument()
@@ -626,7 +634,8 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
       menu = actions.actionsMenu(
         for: fullMessage,
         photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView, for: fullMessage) },
-        openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) }
+        openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) },
+        richCopy: { [weak self] in Self.richCopy(in: self?.list?.view(for: id) as? TimelineRowView, for: fullMessage) }
       )
       // The reaction bar under the preview, as the collection view's system menu shows it.
       let view = ContextMenuIdentifierUIView(
