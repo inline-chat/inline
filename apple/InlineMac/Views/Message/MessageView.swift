@@ -3706,6 +3706,13 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func copyMessage() {
+    // A rich body copies its blocks, so headings, lists, code and tables keep their shape.
+    if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden,
+       let document = richBlockContentView.textSelectionProjection()?.structuredWholeMessageDocument(),
+       MessageClipboard.write(document)
+    {
+      return
+    }
     MessageTextPasteboard.copy(
       text: fullMessage.displayText ?? "",
       entities: fullMessage.translationEntities ?? message.entities

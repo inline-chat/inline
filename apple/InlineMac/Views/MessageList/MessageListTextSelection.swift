@@ -39,6 +39,30 @@ struct MessageTextSelectionProjection {
       literalRoles: literalRoles
     )
   }
+
+  /// The whole message as copy blocks.
+  @MainActor
+  func wholeMessageBlocks() -> [MessageClipboardDocument.Block] {
+    let lengths = lengths
+    guard let last = lengths.indices.last,
+          let ranges = RichTextMultiSurfaceSelection.ranges(
+            surfaceLengths: lengths,
+            anchor: .init(surfaceIndex: 0, utf16Offset: 0),
+            head: .init(surfaceIndex: last, utf16Offset: lengths[last])
+          )
+    else { return [] }
+    return blocks(ranges: ranges, wholeMessage: true)
+  }
+
+  /// The whole message for a menu's Copy when it has structure: headings, list items, code,
+  /// tables or quotes. Nil for paragraphs alone, which copy best from the message's own text
+  /// and formatting.
+  @MainActor
+  func structuredWholeMessageDocument() -> MessageClipboardDocument? {
+    let blocks = wholeMessageBlocks()
+    guard blocks.contains(where: { if case .paragraph = $0 { false } else { true } }) else { return nil }
+    return MessageClipboardDocument(blocks: blocks)
+  }
 }
 
 /// A rendered message whose text can join a selection that spans blocks and messages.
@@ -752,19 +776,9 @@ final class MessageListTextSelection {
   /// structure survives, otherwise from its text and formatting.
   func wholeMessageBlocks(_ message: FullMessage) -> [MessageClipboardDocument.Block] {
     if let host, let row = host.textSelectionRow(forStableId: message.id),
-       let projection = projection(atRow: row)
+       let blocks = projection(atRow: row)?.wholeMessageBlocks(), !blocks.isEmpty
     {
-      let lengths = projection.lengths
-      if let last = lengths.indices.last,
-         let ranges = RichTextMultiSurfaceSelection.ranges(
-           surfaceLengths: lengths,
-           anchor: .init(surfaceIndex: 0, utf16Offset: 0),
-           head: .init(surfaceIndex: last, utf16Offset: lengths[last])
-         )
-      {
-        let blocks = projection.blocks(ranges: ranges, wholeMessage: true)
-        if !blocks.isEmpty { return blocks }
-      }
+      return blocks
     }
     return Self.messageBlocks(message)
   }
