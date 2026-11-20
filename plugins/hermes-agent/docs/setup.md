@@ -148,7 +148,7 @@ Supported:
 - Local photo, video, voice, and document uploads; URL-backed inbound media caching when available.
 - User/group allowlists, group sender allowlists, mention controls, allowed chats, free-response chats, default reply-thread routing with `/threads` controls, thread prompts, and skill bindings.
 - Inline entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
-- Reactions on bot messages and opt-in lifecycle/system events.
+- Opt-in reactions and lifecycle/system events.
 - Hermes-native `typing_indicator` and `gateway_restart_notification` toggles.
 - Detailed and Friendly output from the bot's Output setting in Inline: a live progress message with commands, reads, edits, plans and sub-agents, collapsing to "Worked for" above the answer, or short updates instead.
 

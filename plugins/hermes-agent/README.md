@@ -38,7 +38,7 @@ Supported:
 - Message widgets: sandboxed HTML (charts, diagrams, mockups, small pickers) through the `inline` tool's `send_widget` action, or an `<iframe title="…" id="…" height="…">HTML</iframe>` block in a Markdown reply. Long replies are split around widgets, never inside one, with at most one widget per message; a widget longer than the 4,000-character chunk goes alone, up to Inline's 100,000-character limit. Streaming previews hide a widget until its closing tag arrives. `send_widget` returns Inline's reason when the server rejects a widget. A viewer's `inline.action(name, payload)` call becomes a turn naming the widget ID, call name, and untrusted JSON payload, and the answer replies below the widget instead of replacing it. Call names and payloads need realtime SDK 0.0.22 or later; with an older bundled SDK, the turn names only the widget.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
-- Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
+- Opt-in reactions and lifecycle/system events as synthetic Hermes messages.
 - Cron or standalone sends through `INLINE_HOME_CHANNEL` and `hermes send --to inline:<chat-id>`.
 - Hermes-native `typing_indicator` and `gateway_restart_notification` toggles, with plugin-owned YAML bridge coverage for external-plugin compatibility.
 - Detailed and Friendly output (the bot's Output setting in Inline; see Output below): a live, collapsible progress message for each turn, or short updates instead.
@@ -430,7 +430,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
-| `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
+| `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as reactions, edits, deletes, and participant changes as synthetic messages. Defaults to `false`; when off, these updates never start a Hermes turn. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_CRON_MENTION_PREFIX` | Opt-in Inline Markdown mention prepended once to scheduled gateway text deliveries, for example `[@You](inline://user?id=42)`. Defaults to empty. See [Scheduled mentions](#scheduled-mentions). |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |

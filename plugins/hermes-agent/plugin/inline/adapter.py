@@ -3833,6 +3833,10 @@ class InlineAdapter(BasePlatformAdapter):
         return True
 
     async def _dispatch_reaction(self, event: Dict[str, Any], *, added: bool) -> None:
+        # Reactions are lifecycle input like edits and joins: opt-in, never a turn by default.
+        if not self._system_events:
+            logger.debug("[inline] dropped %s: system_events is off", event.get("kind") or "reaction")
+            return
         reaction = event.get("reaction") if isinstance(event.get("reaction"), dict) else {}
         chat_id = str(event.get("chatId") or reaction.get("chatId") or "")
         message_id = str(event.get("messageId") or reaction.get("messageId") or "")
@@ -3859,8 +3863,6 @@ class InlineAdapter(BasePlatformAdapter):
         target_text = str((target or {}).get("message") or "") or None
         target_author = str((target or {}).get("fromId") or "") or None
         target_is_own = bool(self._me_id and target_author == self._me_id)
-        if not target_is_own and not self._system_events:
-            return
 
         source = self.build_source(
             chat_id=chat_id,
@@ -3888,6 +3890,7 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def _dispatch_system_event(self, event: Dict[str, Any]) -> None:
         if not self._system_events:
+            logger.debug("[inline] dropped %s: system_events is off", event.get("kind") or "system event")
             return
         kind = str(event.get("kind") or "")
         chat_id = str(event.get("chatId") or "")

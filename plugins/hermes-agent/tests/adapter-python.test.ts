@@ -6214,25 +6214,6 @@ async def assert_inline_lifecycle_events():
             "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}},
         }
 
-    adapter.handle_message = capture
-    adapter._fetch_message = own_message
-
-    await adapter._on_inbound(json.dumps({
-        "kind": "reaction.add",
-        "chatId": "10",
-        "seq": 21,
-        "date": "100",
-        "reaction": {"chatId": "10", "messageId": "20", "userId": "u1", "emoji": "ok", "date": "100"},
-    }))
-
-    assert len(events) == 1
-    assert events[0].text == "reaction:added:ok"
-    assert events[0].reply_to_message_id == "20"
-    assert events[0].reply_to_text == "Bot answer"
-    assert events[0].reply_to_is_own_message is True
-    assert events[0].source.chat_id == "10"
-    assert events[0].source.user_id == "u1"
-
     async def human_message(chat_id, message_id, **kwargs):
         return {
             "id": message_id,
@@ -6241,15 +6222,28 @@ async def assert_inline_lifecycle_events():
             "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}},
         }
 
-    adapter._fetch_message = human_message
-    await adapter._on_inbound(json.dumps({
-        "kind": "reaction.add",
-        "chatId": "10",
-        "seq": 22,
-        "date": "101",
-        "reaction": {"chatId": "10", "messageId": "21", "userId": "u1", "emoji": "ok", "date": "101"},
-    }))
-    assert len(events) == 1
+    async def no_fetch(*args, **kwargs):
+        raise AssertionError("dropped lifecycle update fetched its target")
+
+    adapter.handle_message = capture
+    adapter._fetch_message = no_fetch
+
+    # With system_events off (the default), reactions never start a turn, even on
+    # the bot's own messages, and neither do joins, leaves, deletes or edits.
+    for seq, kind, extra in (
+        (21, "reaction.add", {"reaction": {"chatId": "10", "messageId": "20", "userId": "u1", "emoji": "ok"}}),
+        (22, "reaction.delete", {"reaction": {"chatId": "10", "messageId": "20", "userId": "u1", "emoji": "ok"}}),
+        (23, "chat.participant.add", {"participant": {"userId": "u3"}}),
+        (24, "chat.participant.delete", {"userId": "u3"}),
+        (25, "message.delete", {"messageIds": ["20"]}),
+        (26, "message.history.clear", {}),
+        (27, "message.edit", {"message": {
+            "id": "20", "fromId": "u1", "chatId": "10", "message": "edited",
+            "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": "10"}}},
+        }}),
+    ):
+        await adapter._on_inbound(json.dumps({"kind": kind, "chatId": "10", "seq": seq, "date": "100", **extra}))
+    assert events == []
 
     system_adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "system_events": True}))
     system_adapter._get_chat_info = root_chat_info
@@ -6260,6 +6254,24 @@ async def assert_inline_lifecycle_events():
         system_events.append(event)
 
     system_adapter.handle_message = capture_system
+    system_adapter._fetch_message = own_message
+
+    await system_adapter._on_inbound(json.dumps({
+        "kind": "reaction.add",
+        "chatId": "10",
+        "seq": 21,
+        "date": "100",
+        "reaction": {"chatId": "10", "messageId": "20", "userId": "u1", "emoji": "ok", "date": "100"},
+    }))
+
+    assert len(system_events) == 1
+    assert system_events[0].text == "reaction:added:ok"
+    assert system_events[0].reply_to_message_id == "20"
+    assert system_events[0].reply_to_text == "Bot answer"
+    assert system_events[0].reply_to_is_own_message is True
+    assert system_events[0].source.chat_id == "10"
+    assert system_events[0].source.user_id == "u1"
+
     system_adapter._fetch_message = human_message
 
     await system_adapter._on_inbound(json.dumps({
