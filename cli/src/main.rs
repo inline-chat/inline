@@ -19,6 +19,7 @@ mod errors;
 mod forward_output;
 mod identity;
 mod intro;
+mod listen;
 mod mac_app_auth;
 mod media;
 mod message_export;
@@ -576,6 +577,12 @@ enum Command {
     #[command(about = "Search messages (shortcut for messages search)", after_help = SEARCH_HELP)]
     Search(MessagesSearchArgs),
     #[command(
+        about = "Stream matching messages and reactions as they arrive, for agents to wake on",
+        visible_alias = "watch",
+        after_help = listen::LISTEN_HELP
+    )]
+    Listen(listen::ListenArgs),
+    #[command(
         about = "Export a clean markdown transcript (shortcut for messages transcript)",
         after_help = r#"Examples:
   inline transcript --chat-id 123 --limit 500 --download-media --media-dir ./feedback-media --output feedback.md
@@ -714,6 +721,7 @@ impl Command {
             Self::Sidebar { .. } => "sidebar",
             Self::Me => "me",
             Self::Search(_) => "search",
+            Self::Listen(_) => "listen",
             Self::Transcript(_) => "transcript",
             Self::Completion { .. } => "completion",
             Self::Schema { .. } => "schema",
@@ -3805,6 +3813,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             }
             Command::Search(args) => {
                 handle_messages_search(args, &config, &auth_store, &local_db, cli.json, json_format).await?;
+            }
+            Command::Listen(args) => {
+                listen::run(args, &config, &auth_store, &local_db, cli.json).await?;
             }
             Command::Transcript(args) => {
                 handle_messages_export(

@@ -159,6 +159,7 @@ const KEYWORDS: &[(&str, &[&str])] = &[
     ("bots access open", &["public", "everyone", "anyone", "shared", "sharing", "bot"]),
     ("bots access close", &["private", "only", "me", "shared", "sharing", "restrict", "bulk", "bot"]),
     ("typing start", &["compose", "indicator", "typing"]),
+    ("listen", &["subscribe", "stream", "watch", "events", "ping", "wake", "monitor", "follow", "tail", "incoming", "realtime", "jsonl"]),
     ("completion", &["shell", "bash", "zsh", "fish", "autocomplete", "tab"]),
     ("capabilities", &["flags", "options", "schema", "json", "metadata"]),
 ];
