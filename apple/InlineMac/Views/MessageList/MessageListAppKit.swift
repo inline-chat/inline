@@ -4890,6 +4890,8 @@ extension MessageListAppKit: NSTableViewDelegate {
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }
         let props = messageProps(for: row)
         guard let width = measurementWidth(using: tableView, renderStyle: props.renderStyle) else {
+          // A placeholder height: finalizing must measure this row again.
+          if !didFinalizeInitialMeasurementWidth { initialMeasurementWidths.insert(-1) }
           return getCachedSize(forRow: row)?.height ?? defaultRowHeight
         }
         if !didFinalizeInitialMeasurementWidth { initialMeasurementWidths.insert(width) }
