@@ -43,6 +43,7 @@ import {
   Cause,
   Data,
   Effect,
+  Layer,
   Schema,
 } from "effect"
 import {
@@ -52,7 +53,9 @@ import {
 import {
   HttpApiBuilder,
   HttpApiEndpoint,
+  HttpApiError,
   HttpApiGroup,
+  HttpApiMiddleware,
   OpenApi,
 } from "effect/unstable/httpapi"
 import { parseLegacyElysiaBody } from "../../core/http/legacyElysiaBody"
@@ -1068,6 +1071,17 @@ const PathFallbackEndpoints = {
   ).annotateMerge(hiddenFallback),
 } as const
 
+/**
+ * HttpApi decodes the declared path, headers and query before a bot handler
+ * runs, and its own rejection is a 400 with an empty body. Bot clients read the
+ * documented `{ ok: false, error_code, ... }` envelope, so a malformed request
+ * (for example `getChat?user_id=12703abc`) gets the same `INVALID_ARGS` reply
+ * as a malformed body.
+ */
+export class BotRequestDecodeErrors extends HttpApiMiddleware.Service<
+  BotRequestDecodeErrors
+>()("@inline/server/bot/BotRequestDecodeErrors") {}
+
 export const BotApiGroup = HttpApiGroup.make("bot")
   .add(
     HeaderBotEndpoints.getMe,
@@ -1175,6 +1189,7 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathFallbackEndpoints.options,
     PathFallbackEndpoints.trace,
   )
+  .middleware(BotRequestDecodeErrors)
   .annotateMerge(
     OpenApi.annotations({
       title: "Bot",
@@ -1218,6 +1233,23 @@ const invalidArgsResponse = () =>
     error_code: 400,
     description: "Validation error",
   })
+
+const isRequestDecodeError = (error: unknown) =>
+  HttpApiError.HttpApiSchemaError.is(error) && error.kind !== "Body"
+
+export const BotRequestDecodeErrorsLive = Layer.succeed(
+  BotRequestDecodeErrors,
+  (effect) =>
+    effect.pipe(
+      Effect.catchIf(
+        isRequestDecodeError,
+        () =>
+          noteApiError.pipe(
+            Effect.as(invalidArgsResponse()),
+          ),
+      ),
+    ),
+)
 
 const internalOperationResponse = () =>
   json(500, {
@@ -2433,7 +2465,9 @@ export const makeBotRouteGroup = () => {
     apiId: BOT_API_ID,
     document: "bot",
     group: BotApiGroup,
-    handlers,
+    handlers: handlers.pipe(
+      Layer.provide(BotRequestDecodeErrorsLive),
+    ),
   })
 }
 

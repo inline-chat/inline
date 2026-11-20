@@ -338,11 +338,30 @@ describe("Bot HTTP API", () => {
       }),
     )
 
-    // The Effect bot routes reject a malformed query id in the HttpApi query
-    // schema, before the bot envelope: a bare 400 with no body. The legacy graph
-    // returned { ok: false, error: "BAD_REQUEST", error_code: 400 } here.
     expect(res.status).toBe(400)
-    expect(await res.text()).toBe("")
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "INVALID_ARGS",
+      error_code: 400,
+      description: "Validation error",
+    })
+  })
+
+  it("returns the Bot API error for a malformed query id on path-token routes", async () => {
+    const { token } = await createBotSession("strictpathidbot")
+
+    const res = await app.handle(
+      new Request(`http://localhost/bot${token}/getChatHistory?chat_id=12x&limit=5`),
+    )
+
+    expect(res.status).toBe(400)
+    expect(res.headers.get("content-type")).toContain("application/json")
+    expect(res.headers.get("cache-control")).toBe("no-store")
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: "INVALID_ARGS",
+      error_code: 400,
+    })
   })
 
   it("supports minimal message actions", async () => {
