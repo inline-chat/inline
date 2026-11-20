@@ -5,27 +5,48 @@ import Logger
 
 public enum VideoCompressionError: Error {
   case invalidAsset
-  case compressionNotNeeded
-  case compressionNotEffective
   case exportFailed
   case unsupportedOutputType
 }
 
-public struct VideoCompressionOptions: Sendable {
+/// What a video shows, which decides how it is encoded. Screen recordings carry code and UI text
+/// and cost little at high resolution, because the encoder only spends bits where pixels change.
+/// Camera footage changes everywhere, so resolution costs real bytes and send time.
+public enum VideoContent: String, Sendable, Equatable {
+  /// The file names the camera that recorded it.
+  case camera
+  /// Screen recordings, and anything else with no camera recorded in the file.
+  case screenRecording
+}
+
+public struct VideoCompressionOptions: Sendable, Equatable {
+  /// Longest edge of the output.
   public let maxDimension: Int
-  public let minFileSizeBytes: Int64
-  public let maxBitrateMbps: Double
-  public let minimumCompressionRatio: Double
+  /// Average video bitrate when re-encoding.
+  public let videoBitrateKbps: Int
+  public let audioBitrateKbps: Int
+  /// Re-encode even a source within limits (one whose codec can't go in an MP4 as is).
   public let forceTranscode: Bool
 
-  public static func uploadDefault(forceTranscode: Bool = false) -> VideoCompressionOptions {
-    VideoCompressionOptions(
-      maxDimension: 1_280,
-      minFileSizeBytes: 8_000_000,
-      maxBitrateMbps: 3.0,
-      minimumCompressionRatio: 0.94,
-      forceTranscode: forceTranscode
-    )
+  public init(maxDimension: Int, videoBitrateKbps: Int, audioBitrateKbps: Int = 128, forceTranscode: Bool = false) {
+    self.maxDimension = maxDimension
+    self.videoBitrateKbps = videoBitrateKbps
+    self.audioBitrateKbps = audioBitrateKbps
+    self.forceTranscode = forceTranscode
+  }
+
+  public static func upload(for content: VideoContent, forceTranscode: Bool = false) -> VideoCompressionOptions {
+    switch content {
+    case .camera:
+      VideoCompressionOptions(maxDimension: 1_280, videoBitrateKbps: 3_000, forceTranscode: forceTranscode)
+    case .screenRecording:
+      VideoCompressionOptions(maxDimension: 1_920, videoBitrateKbps: 5_000, forceTranscode: forceTranscode)
+    }
+  }
+
+  /// A source at or under this total bitrate is sent without re-encoding.
+  var passthroughBitrateMbps: Double {
+    Double(videoBitrateKbps + audioBitrateKbps) * 1.15 / 1_000
   }
 }
 
@@ -151,32 +172,29 @@ public actor VideoCompressor {
     }
   }
 
+  /// Always returns a new file with no location, device or date metadata: the source is either
+  /// remuxed as is (already H.264 within size and bitrate, so nothing to wait for) or re-encoded.
+  /// It never hands back the source itself.
   private func compressVideoUnbounded(at sourceURL: URL, asset: AVURLAsset, options: VideoCompressionOptions) async throws -> VideoCompressionResult {
     let metadata = try await loadMetadata(for: asset)
     let sourceFileSize = fileSize(for: sourceURL)
     let maxDimension = max(metadata.width, metadata.height)
     let bitrateMbps = estimatedBitrateMbps(fileSize: sourceFileSize, duration: metadata.duration)
+    let isH264 = await Self.isH264(asset)
+    let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
 
-    let shouldCompress = options.forceTranscode
-      || maxDimension > options.maxDimension
-      || sourceFileSize >= options.minFileSizeBytes
-      || bitrateMbps > options.maxBitrateMbps
+    let canPassThrough = !options.forceTranscode
+      && isH264
+      && maxDimension <= options.maxDimension
+      && bitrateMbps <= options.passthroughBitrateMbps
+      && compatiblePresets.contains(AVAssetExportPresetPassthrough)
 
     log.debug(
-      "Video compression check for \(sourceURL.lastPathComponent): size=\(sourceFileSize) bytes, max=\(maxDimension), bitrate=\(String(format: "%.2f", bitrateMbps)) Mbps, shouldCompress=\(shouldCompress)"
+      "Video check for \(sourceURL.lastPathComponent): size=\(sourceFileSize) bytes, max=\(maxDimension), bitrate=\(String(format: "%.2f", bitrateMbps)) Mbps, h264=\(isH264), passthrough=\(canPassThrough)"
     )
-
-    guard shouldCompress else {
-      throw VideoCompressionError.compressionNotNeeded
-    }
-
-    let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
 
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("compressed_\(UUID().uuidString).mp4")
-    if FileManager.default.fileExists(atPath: tempURL.path) {
-      try FileManager.default.removeItem(at: tempURL)
-    }
     var shouldCleanupTemp = true
     defer {
       if shouldCleanupTemp, FileManager.default.fileExists(atPath: tempURL.path) {
@@ -184,64 +202,39 @@ public actor VideoCompressor {
       }
     }
 
-    if shouldAttemptPassthroughTranscode(
-      options: options,
-      maxDimension: maxDimension,
-      sourceFileSize: sourceFileSize,
-      bitrateMbps: bitrateMbps,
-      compatiblePresets: compatiblePresets
-    ) {
+    var wrote = false
+    if canPassThrough {
       do {
         try await export(asset: asset, presetName: AVAssetExportPresetPassthrough, destinationURL: tempURL)
-        let outputSize = fileSize(for: tempURL)
-        let outputMetadata = try await loadMetadata(for: AVURLAsset(url: tempURL))
-        shouldCleanupTemp = false
-
-        log.debug(
-          "Video fast MP4 conversion result: original=\(sourceFileSize) bytes, converted=\(outputSize) bytes"
-        )
-
-        return VideoCompressionResult(
-          url: tempURL,
-          width: outputMetadata.width,
-          height: outputMetadata.height,
-          duration: outputMetadata.duration,
-          fileSize: outputSize
-        )
+        wrote = true
       } catch is CancellationError {
         throw CancellationError()
       } catch {
-        log.debug("Passthrough MP4 conversion failed, falling back to encoded export")
+        log.debug("Passthrough MP4 remux failed, re-encoding instead")
       }
     }
 
-    do {
-      try await transcodeTelegramStyle(asset: asset, options: options, destinationURL: tempURL)
-    } catch is CancellationError {
-      throw CancellationError()
-    } catch {
-      log.warning("Telegram-style transcode failed, falling back to export preset: \(error.localizedDescription)")
-      PerformanceTrace.healthEvent("app.fallback", data: ["fallback_kind": "video_transcode_export_preset"])
-      guard let presetName = selectPreset(
-        maxDimension: maxDimension,
-        targetMaxDimension: options.maxDimension,
-        compatiblePresets: compatiblePresets
-      ) else {
-        throw VideoCompressionError.exportFailed
+    if !wrote {
+      do {
+        try await transcodeTelegramStyle(asset: asset, options: options, destinationURL: tempURL)
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        log.warning("Video transcode failed, falling back to export preset: \(error.localizedDescription)")
+        PerformanceTrace.healthEvent("app.fallback", data: ["fallback_kind": "video_transcode_export_preset"])
+        guard let presetName = selectPreset(
+          maxDimension: maxDimension,
+          targetMaxDimension: options.maxDimension,
+          compatiblePresets: compatiblePresets
+        ) else {
+          throw VideoCompressionError.exportFailed
+        }
+        try await export(asset: asset, presetName: presetName, destinationURL: tempURL)
       }
-      try await export(asset: asset, presetName: presetName, destinationURL: tempURL)
     }
 
     let outputSize = fileSize(for: tempURL)
-    let compressionRatio = Double(outputSize) / Double(max(sourceFileSize, 1))
-
-    log.debug(
-      "Video compression result: original=\(sourceFileSize) bytes, compressed=\(outputSize) bytes, ratio=\(String(format: "%.2f", compressionRatio))"
-    )
-
-    if !options.forceTranscode && compressionRatio > options.minimumCompressionRatio {
-      throw VideoCompressionError.compressionNotEffective
-    }
+    log.debug("Video prepared: original=\(sourceFileSize) bytes, sent=\(outputSize) bytes, remuxed=\(wrote)")
 
     let outputMetadata = try await loadMetadata(for: AVURLAsset(url: tempURL))
     shouldCleanupTemp = false
@@ -255,18 +248,34 @@ public actor VideoCompressor {
     )
   }
 
-  private func shouldAttemptPassthroughTranscode(
-    options: VideoCompressionOptions,
-    maxDimension: Int,
-    sourceFileSize: Int64,
-    bitrateMbps: Double,
-    compatiblePresets: [String]
-  ) -> Bool {
-    guard options.forceTranscode else { return false }
-    guard compatiblePresets.contains(AVAssetExportPresetPassthrough) else { return false }
-    return maxDimension <= options.maxDimension
-      && sourceFileSize < options.minFileSizeBytes
-      && bitrateMbps <= options.maxBitrateMbps
+  /// Whether the file records the camera that made it, which marks camera footage.
+  public static func content(of url: URL) async -> VideoContent {
+    let asset = AVURLAsset(url: url)
+    guard let items = try? await asset.load(.metadata) else { return .screenRecording }
+    for item in items {
+      let isCameraKey = item.identifier == .quickTimeMetadataMake
+        || item.identifier == .quickTimeMetadataModel
+        || item.identifier == .quickTimeUserDataMake
+        || item.identifier == .quickTimeUserDataModel
+        || item.commonKey == .commonKeyMake
+        || item.commonKey == .commonKeyModel
+      guard isCameraKey else { continue }
+      if let value = try? await item.load(.stringValue),
+         !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      {
+        return .camera
+      }
+    }
+    return .screenRecording
+  }
+
+  static func isH264(_ asset: AVAsset) async -> Bool {
+    guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+          let format = try? await track.load(.formatDescriptions).first
+    else {
+      return false
+    }
+    return CMFormatDescriptionGetMediaSubType(format) == kCMVideoCodecType_H264
   }
 
   private func export(asset: AVAsset, presetName: String, destinationURL: URL) async throws {
@@ -285,6 +294,8 @@ public actor VideoCompressor {
     exportSession.outputURL = destinationURL
     exportSession.outputFileType = .mp4
     exportSession.shouldOptimizeForNetworkUse = true
+    // Drops where and on what device it was recorded, and other personal details.
+    exportSession.metadataItemFilter = AVMetadataItemFilter.forSharing()
 
     let sessionBox = ExportSessionBox(exportSession)
     try await withTaskCancellationHandler {
@@ -329,9 +340,8 @@ public actor VideoCompressor {
       throw VideoCompressionError.invalidAsset
     }
 
-    let telegramPreset = telegramPreset(for: options)
-    let outputSize = targetRenderSize(for: sourceDisplaySize, maxDimension: telegramPreset.maxDimension)
-    let frameRate = targetFrameRate(for: sourceVideoTrack, capTo30FPS: telegramPreset.capsFrameRateTo30FPS)
+    let outputSize = targetRenderSize(for: sourceDisplaySize, maxDimension: options.maxDimension)
+    let frameRate = targetFrameRate(for: sourceVideoTrack, capTo30FPS: true)
     let duration = try await asset.load(.duration)
     guard duration.isValid, duration.seconds > 0 else {
       throw VideoCompressionError.invalidAsset
@@ -400,7 +410,7 @@ public actor VideoCompressor {
       outputSettings: makeTelegramVideoSettings(
         dimensions: outputSize,
         frameRate: frameRate,
-        targetVideoBitrate: telegramPreset.videoBitrateKbps * 1_000
+        targetVideoBitrate: options.videoBitrateKbps * 1_000
       )
     )
     videoInput.expectsMediaDataInRealTime = false
@@ -411,7 +421,7 @@ public actor VideoCompressor {
 
     var audioOutput: AVAssetReaderTrackOutput?
     var audioInput: AVAssetWriterInput?
-    if let compositionAudioTrack, let telegramAudioSettings = makeTelegramAudioSettings(preset: telegramPreset) {
+    if let compositionAudioTrack, let telegramAudioSettings = makeAudioSettings(bitrateKbps: options.audioBitrateKbps) {
       let output = AVAssetReaderTrackOutput(
         track: compositionAudioTrack,
         outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM]
@@ -597,20 +607,16 @@ public actor VideoCompressor {
     ]
   }
 
-  private func makeTelegramAudioSettings(preset: TelegramVideoCompressionPreset) -> [String: Any]? {
-    guard preset.audioBitrateKbps > 0, preset.audioChannels > 0 else {
-      return nil
-    }
-
+  private func makeAudioSettings(bitrateKbps: Int) -> [String: Any]? {
+    guard bitrateKbps > 0 else { return nil }
     var layout = AudioChannelLayout()
-    layout.mChannelLayoutTag = preset.audioChannels > 1 ? kAudioChannelLayoutTag_Stereo : kAudioChannelLayoutTag_Mono
-
+    layout.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo
     return [
       AVFormatIDKey: kAudioFormatMPEG4AAC,
       AVSampleRateKey: 44_100,
-      AVEncoderBitRateKey: preset.audioBitrateKbps * 1_000,
-      AVNumberOfChannelsKey: preset.audioChannels,
-      AVChannelLayoutKey: Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size)
+      AVEncoderBitRateKey: bitrateKbps * 1_000,
+      AVNumberOfChannelsKey: 2,
+      AVChannelLayoutKey: Data(bytes: &layout, count: MemoryLayout<AudioChannelLayout>.size),
     ]
   }
 
@@ -645,10 +651,6 @@ public actor VideoCompressor {
     }
 
     return capTo30FPS ? max(1, min(frameRate, 30)) : max(1, frameRate)
-  }
-
-  private func telegramPreset(for options: VideoCompressionOptions) -> TelegramVideoCompressionPreset {
-    TelegramVideoCompressionPreset.from(maxDimension: options.maxDimension, maxBitrateMbps: options.maxBitrateMbps)
   }
 
   private func waitForGroup(_ group: DispatchGroup) async {
@@ -881,80 +883,6 @@ private final class StreamCompletionState: @unchecked Sendable {
     lock.unlock()
     if shouldRun {
       block()
-    }
-  }
-}
-
-private enum TelegramVideoCompressionPreset: Sendable {
-  case compressedVeryLow
-  case compressedLow
-  case compressedMedium
-  case compressedHigh
-  case compressedVeryHigh
-
-  var maxDimension: Int {
-    switch self {
-    case .compressedVeryLow:
-      return 480
-    case .compressedLow:
-      return 640
-    case .compressedMedium:
-      return 848
-    case .compressedHigh:
-      return 1_280
-    case .compressedVeryHigh:
-      return 1_920
-    }
-  }
-
-  var videoBitrateKbps: Int {
-    switch self {
-    case .compressedVeryLow:
-      return 400
-    case .compressedLow:
-      return 700
-    case .compressedMedium:
-      return 1_600
-    case .compressedHigh:
-      return 2_800
-    case .compressedVeryHigh:
-      return 6_600
-    }
-  }
-
-  var audioBitrateKbps: Int {
-    switch self {
-    case .compressedVeryLow, .compressedLow:
-      return 32
-    case .compressedMedium, .compressedHigh, .compressedVeryHigh:
-      return 64
-    }
-  }
-
-  var audioChannels: Int {
-    switch self {
-    case .compressedVeryLow, .compressedLow:
-      return 1
-    case .compressedMedium, .compressedHigh, .compressedVeryHigh:
-      return 2
-    }
-  }
-
-  var capsFrameRateTo30FPS: Bool {
-    self != .compressedVeryHigh
-  }
-
-  static func from(maxDimension: Int, maxBitrateMbps: Double) -> TelegramVideoCompressionPreset {
-    if maxDimension >= 1_920 || maxBitrateMbps >= 6.6 {
-      return .compressedVeryHigh
-    } else if maxDimension >= 1_280 || maxBitrateMbps >= 3.0 {
-      return .compressedHigh
-    } else if maxDimension >= 848 || maxBitrateMbps >= 1.6 {
-      return .compressedMedium
-    } else if maxDimension >= 640 || maxBitrateMbps >= 0.7 {
-      return .compressedLow
-    } else {
-      return .compressedVeryLow
     }
   }
 }

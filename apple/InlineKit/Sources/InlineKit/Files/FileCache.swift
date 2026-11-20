@@ -715,55 +715,44 @@ public actor FileCache: Sendable {
 
   // MARK: - Local Saves
 
+  /// Prepares a photo the way it is sent (resized for its content, upright, no metadata; see
+  /// `MediaSendPreparation`) and stores the result as a local photo. The stored file is the exact
+  /// body that is later staged, hashed and uploaded. Does decode and disk work: call off the main thread.
+  public static func savePreparedPhoto(
+    _ source: MediaSendPreparation.PhotoSource,
+    content: MediaSendPreparation.PhotoContent? = nil,
+    target: MediaSendPreparation.PhotoTarget? = nil
+  ) throws -> InlineKit.PhotoInfo {
+    let prepared = try MediaSendPreparation.preparePhoto(source, content: content, target: target)
+    let localPath = UUID().uuidString + prepared.format.toExt()
+    let fileURL = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
+    try prepared.data.write(to: fileURL, options: .atomic)
+    do {
+      return try AppDatabase.shared.dbWriter.write { db in
+        try Photo.createLocalPhoto(
+          db,
+          format: prepared.format,
+          localPath: localPath,
+          fileSize: prepared.data.count,
+          width: prepared.width,
+          height: prepared.height
+        )
+      }
+    } catch {
+      try? removeLocalCacheFile(fileURL)
+      throw error
+    }
+  }
+
+  /// Stores a decoded image as a local photo, prepared like any sent photo. Prefer
+  /// `savePreparedPhoto(.file(_:))` when the encoded source exists: it reads the camera
+  /// details that pick the size and never decodes more pixels than it sends.
   public static func savePhoto(
     image: PlatformImage,
-    preferredFormat: ImageFormat? = nil,
-    optimize: Bool = false
+    content: MediaSendPreparation.PhotoContent? = nil,
+    target: MediaSendPreparation.PhotoTarget? = nil
   ) throws -> InlineKit.PhotoInfo {
-    // Info - get actual pixel dimensions, not just logical size
-    let actualSize: CGSize
-    #if os(macOS)
-    actualSize = getActualPixelSize(from: image)
-    #else
-    // On iOS, image.size already gives pixel dimensions
-    actualSize = image.size
-    #endif
-
-    let w = Int(actualSize.width)
-    let h = Int(actualSize.height)
-    let format: ImageFormat = preferredFormat ?? (hasAlphaChannel(image: image) ? .png : .jpeg)
-    let protoFormat = format.toProtocol()
-    let ext = protoFormat.toExtension()
-    let mimeType = protoFormat.toMimeType()
-    let fileName = UUID().uuidString + ext
-
-    Log.shared
-      .debug(
-        "Saving photo \(fileName) with format \(format) and mimeType \(mimeType), w: \(w), h: \(h), optimize: \(optimize)"
-      )
-
-    // Save in files
-    let directory = FileHelpers.getLocalCacheDirectory(for: .photos)
-    guard let (localPath, _) = try? image.save(to: directory, withName: fileName, format: format, optimize: optimize)
-    else { throw FileCacheError.failedToSave }
-    let fileURL = directory.appendingPathComponent(
-      localPath
-    )
-    let fileSize = FileHelpers.getFileSize(at: fileURL)
-
-    // Save in DB
-    let photoInfo = try AppDatabase.shared.dbWriter.write { db in
-      try Photo.createLocalPhoto(
-        db,
-        format: format,
-        localPath: localPath,
-        fileSize: fileSize,
-        width: w,
-        height: h
-      )
-    }
-
-    return photoInfo
+    try savePreparedPhoto(.platformImage(image), content: content, target: target)
   }
 
   // Note: this does synchronous disk/thumbnail/DB work; avoid calling on MainActor for large assets.
@@ -827,7 +816,7 @@ public actor FileCache: Sendable {
     try Task.checkCancellation()
 
     let thumbnailInfo: PhotoInfo? = if let image = thumbImage {
-      try? savePhoto(image: image, preferredFormat: .jpeg)
+      try? savePhoto(image: image, target: MediaSendPreparation.videoThumbnailTarget)
     } else { nil }
 
     let video = try MediaHelpers.shared.createLocalVideo(
@@ -863,7 +852,7 @@ public actor FileCache: Sendable {
     try FileManager.default.moveItem(at: conversion.url, to: localUrl)
 
     let thumbnailInfo: PhotoInfo? = if let thumbnail = conversion.thumbnail {
-      try? savePhoto(image: thumbnail, preferredFormat: .jpeg)
+      try? savePhoto(image: thumbnail, target: MediaSendPreparation.videoThumbnailTarget)
     } else {
       nil
     }
@@ -1096,6 +1085,41 @@ public actor FileCache: Sendable {
     } catch {
       try? removeLocalCacheFile(url)
       throw error
+    }
+  }
+
+  /// Removes a photo that was prepared locally and never sent (its file and rows).
+  public static func discardLocalPhoto(_ photoInfo: PhotoInfo) async {
+    let photoDirectory = FileHelpers.getLocalCacheDirectory(for: .photos)
+    do {
+      try await Task.detached(priority: .utility) {
+        try discardLocalThumbnail(photoInfo, database: AppDatabase.shared, photoDirectory: photoDirectory)
+      }.value
+    } catch {
+      Log.shared.error("Failed to discard unsent local photo", error: error)
+    }
+  }
+
+  /// Removes a video that was copied locally and never sent (its file, thumbnail and rows).
+  public static func discardLocalVideo(_ videoInfo: VideoInfo) async {
+    let videoDirectory = FileHelpers.getLocalCacheDirectory(for: .videos)
+    let photoDirectory = FileHelpers.getLocalCacheDirectory(for: .photos)
+    do {
+      try await Task.detached(priority: .utility) {
+        guard videoInfo.video.videoId < 0 else { return }
+        try AppDatabase.shared.dbWriter.write { db in
+          _ = try Video.filter(Video.Columns.videoId == videoInfo.video.videoId).deleteAll(db)
+        }
+        if let thumbnail = videoInfo.thumbnail {
+          try discardLocalThumbnail(thumbnail, database: AppDatabase.shared, photoDirectory: photoDirectory)
+        }
+        if let localPath = videoInfo.video.localPath,
+           let fileURL = localCacheURL(localPath: localPath, directory: videoDirectory) {
+          try removeLocalCacheFile(fileURL)
+        }
+      }.value
+    } catch {
+      Log.shared.error("Failed to discard unsent local video", error: error)
     }
   }
 

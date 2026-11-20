@@ -21,7 +21,15 @@ protocol DraftAttachmentWriting: AnyObject {
   func addImage(
     peer: Peer,
     image: PlatformImage,
-    preferredFormat: ImageFormat?,
+    sourceURL: URL?,
+    onComplete: Drafts2AttachmentCompletion?
+  ) -> String
+
+  @discardableResult
+  func addPhoto(
+    peer: Peer,
+    source: MediaSendPreparation.PhotoSource,
+    originalFileName: String?,
     onComplete: Drafts2AttachmentCompletion?
   ) -> String
 
@@ -158,10 +166,6 @@ public enum DraftAttachmentImporter {
     case failed(String)
   }
 
-  private struct SendableCGImage: @unchecked Sendable {
-    let value: CGImage
-  }
-
   private static func importPreparedAttachment(
     _ attachment: PreparedPasteboardAttachment,
     into peer: Peer,
@@ -171,14 +175,12 @@ public enum DraftAttachmentImporter {
     guard !Task.isCancelled, mutationAllowed(mutationToken) else { return .ignored }
     switch attachment {
     case let .imageFile(url):
-      let decoded = await Task.detached(priority: .userInitiated) {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { return nil as SendableCGImage? }
-        return SendableCGImage(value: image)
+      // Read only the header; the photo is prepared from the file without decoding it here.
+      let readable = await Task.detached(priority: .userInitiated) {
+        MediaSendPreparation.pixelSize(of: .file(url)) != nil
       }.value
       guard !Task.isCancelled, mutationAllowed(mutationToken) else { return .ignored }
-      guard let decoded else {
+      guard readable else {
         return outcome(from: await importFile(
           url,
           peer: peer,
@@ -186,13 +188,11 @@ public enum DraftAttachmentImporter {
           mutationToken: mutationToken
         ))
       }
-      let image = NSImage(cgImage: decoded.value, size: .zero)
-      let preferredFormat: ImageFormat? = url.pathExtension.lowercased() == "png" ? .png : nil
       let result = await awaitResult(mutationToken: mutationToken) { completion in
-        _ = writer.addImage(
+        _ = writer.addPhoto(
           peer: peer,
-          image: image,
-          preferredFormat: preferredFormat,
+          source: .file(url),
+          originalFileName: url.lastPathComponent,
           onComplete: completion
         )
       }
@@ -250,12 +250,11 @@ public enum DraftAttachmentImporter {
     guard !Task.isCancelled, mutationAllowed(mutationToken) else { return .ignored }
     switch attachment {
     case let .image(image, sourceURL):
-      let preferredFormat: ImageFormat? = sourceURL?.pathExtension.lowercased() == "png" ? .png : nil
       let result = await awaitResult(mutationToken: mutationToken) { completion in
         _ = writer.addImage(
           peer: peer,
           image: image,
-          preferredFormat: preferredFormat,
+          sourceURL: sourceURL,
           onComplete: completion
         )
       }

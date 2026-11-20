@@ -149,7 +149,16 @@ private final class FakeDraftAttachmentWriter: DraftAttachmentWriting {
   func addImage(
     peer: Peer,
     image: PlatformImage,
-    preferredFormat: ImageFormat?,
+    sourceURL: URL?,
+    onComplete: Drafts2AttachmentCompletion?
+  ) -> String {
+    complete(.image, peer: peer, onComplete: onComplete)
+  }
+
+  func addPhoto(
+    peer: Peer,
+    source: MediaSendPreparation.PhotoSource,
+    originalFileName: String?,
     onComplete: Drafts2AttachmentCompletion?
   ) -> String {
     complete(.image, peer: peer, onComplete: onComplete)
