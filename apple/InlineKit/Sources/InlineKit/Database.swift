@@ -2175,6 +2175,28 @@ public extension AppDatabase {
       }
     }
     #if DEBUG
+    // The macOS perf harness runs on a throwaway file database: a pool like the app's own, so reads
+    // and storage admission behave as in production, seeded with synthetic chats before anything
+    // reads it. The profile's own database is never opened.
+    if PerfHarnessFixture.isRequested {
+      do {
+        let directory = FileManager.default.temporaryDirectory
+          .appendingPathComponent("inline-perf-harness", isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let pool = try DatabasePool(
+          path: directory.appendingPathComponent("db.sqlite").path,
+          configuration: makeConfiguration(passphrase: "perf-harness")
+        )
+        let database = try AppDatabase(pool)
+        PerfHarnessFixture.seed(database)
+        return database
+      } catch {
+        fatalError("Unable to initialize perf harness database: \(error)")
+      }
+    }
+    #endif
+    #if DEBUG
     // The iOS ChatList harness runs on an in-memory database: the app's own
     // database is never opened, and realtime never starts without persistent storage.
     if CommandLine.arguments.contains("--chatlist-harness") || CommandLine.arguments.contains("--peerinfo-harness") {

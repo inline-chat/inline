@@ -10,6 +10,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     #if DEBUG
     // The chat info harness renders as user 1 on an in-memory database; nothing reaches the server.
     if CommandLine.arguments.contains("--peerinfo-harness") { return Auth(mockAuthenticated: true) }
+    // So does the macOS perf harness, on seeded synthetic chats.
+    if CommandLine.arguments.contains("--perf-harness") { return Auth(mockAuthenticated: true) }
     #endif
     return Auth()
   }()
