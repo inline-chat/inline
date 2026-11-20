@@ -54,6 +54,20 @@ Unsupported or intentionally limited:
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 - Progress for turns Hermes starts on its own. Scheduled (cron) turns and late background sub-agent results post only their answer.
 
+## Release 1.2.6
+
+Hermes keeps its cached agent and warm prompt cache from one Inline message to
+the next. The triggering message ID, a mentioned Inline Agent and other
+per-message details now ride the message instead of the system prompt, which
+had changed on every turn. Reactions are opt-in through `reaction_triggers`
+(`INLINE_REACTION_TRIGGERS`), following Hermes' Slack convention: off by
+default, `true` for any emoji on the bot's own messages, or an emoji list for
+those emoji on any message. With `system_events` on and `reaction_triggers`
+unset, every reaction is still delivered. Reaction and system-event turns join
+the conversation they belong to, need no reply, and keep its system prompt. A
+mentioned Inline Agent's skill is named on every mention, so it can load after
+the conversation's first message too.
+
 ## Release 1.2.5
 
 Hermes status lines (context pressure, compression, provider fallback) no
@@ -285,7 +299,7 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- The 1.2.5 sidecar bundles `@inline-chat/realtime-sdk@0.0.27` and protocol
+- The 1.2.6 sidecar bundles `@inline-chat/realtime-sdk@0.0.27` and protocol
   `0.0.17`. The catalog and npm package ship the same sidecar.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
