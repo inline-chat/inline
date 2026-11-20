@@ -25,7 +25,7 @@ export type ActivityHubOptions = {
   modeCacheMs?: number
   /** A lookup slower than this falls back, so a slow server never holds up the turn. */
   modeTimeoutMs?: number
-  onError?: (error: unknown, operation: "mode" | "send" | "edit") => void
+  onError?: (error: unknown, operation: "mode" | "send" | "edit" | "delete") => void
   maxTurns?: number
 }
 
@@ -215,7 +215,10 @@ export function parseActivityEvent(value: unknown): ActivityEvent {
       if (typeof outcome !== "string" || !OUTCOMES.has(outcome as TurnOutcome)) {
         throw new SidecarError("turn.end requires outcome success, failure or cancelled", "bad_format")
       }
-      return { type: "turn.end", outcome: outcome as TurnOutcome }
+      if (record.discard !== undefined && typeof record.discard !== "boolean") {
+        throw new SidecarError("turn.end discard must be a boolean", "bad_format")
+      }
+      return { type: "turn.end", outcome: outcome as TurnOutcome, ...(record.discard === true ? { discard: true } : {}) }
     }
     case "commentary":
       return { type: "commentary", text: requiredString(record, "text") }

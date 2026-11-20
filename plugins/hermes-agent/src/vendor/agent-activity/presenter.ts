@@ -9,13 +9,15 @@ export interface ProgressTransport {
   /** Sends a new message silently; resolves to its ID. */
   send(doc: Doc): Promise<MessageId>
   edit(messageId: MessageId, doc: Doc): Promise<void>
+  /** Removes a progress message. Without it, a discarded message closes like an ended one. */
+  delete?(messageId: MessageId): Promise<void>
 }
 
 export type PresenterOptions = {
   /** Ordinary edits to one message are coalesced to one per window (the bridge uses 1.2 s). */
   editIntervalMs?: number
   /** A failed send or edit stops that message; the turn itself goes on. */
-  onError?: (error: unknown, op: "send" | "edit") => void
+  onError?: (error: unknown, op: "send" | "edit" | "delete") => void
   now?: () => number
   setTimer?: (callback: () => void, ms: number) => unknown
   clearTimer?: (timer: unknown) => void
@@ -28,6 +30,8 @@ type SlotState = {
   lastWriteAt: number
   timer?: unknown
   ended: boolean
+  /** Ended by a discard: remove the message rather than write its last form. */
+  discard: boolean
   failed: boolean
 }
 
@@ -59,8 +63,9 @@ export class ProgressPresenter {
       const slot = this.slotState(op.slot)
       if (slot.ended || slot.failed) continue
       slot.pending = op.doc
-      if (op.type === "end") {
+      if (op.type === "end" || op.type === "discard") {
         slot.ended = true
+        slot.discard = op.type === "discard"
         this.writeNow(op.slot, slot)
       } else if (slot.messageId === undefined && slot.lastFingerprint === undefined && slot.timer === undefined) {
         // The first op sends the message; anything that arrives while it is in flight waits its turn.
@@ -90,7 +95,7 @@ export class ProgressPresenter {
   private slotState(id: number): SlotState {
     let slot = this.slots.get(id)
     if (!slot) {
-      slot = { lastWriteAt: Number.NEGATIVE_INFINITY, ended: false, failed: false }
+      slot = { lastWriteAt: Number.NEGATIVE_INFINITY, ended: false, discard: false, failed: false }
       this.slots.set(id, slot)
     }
     return slot
@@ -114,6 +119,18 @@ export class ProgressPresenter {
     const doc = slot.pending
     if (!doc || slot.failed) return
     slot.pending = undefined
+    if (slot.discard && this.transport.delete) {
+      // Writes run in order, so a send queued before the discard has its ID by now.
+      if (slot.messageId === undefined) return
+      try {
+        await this.transport.delete(slot.messageId)
+        slot.messageId = undefined
+        return
+      } catch (error) {
+        // Still there: close it as an ended message instead.
+        this.options.onError?.(error, "delete")
+      }
+    }
     const fingerprint = fingerprintOf(doc)
     if (fingerprint === slot.lastFingerprint) return
     // A lost final edit would leave "Working" showing forever, so it gets one retry.

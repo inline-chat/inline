@@ -947,6 +947,7 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
         "system_events",
         "reaction_triggers",
         "reactions",
+        "agent_reactions",
         "channel_prompts",
         "channel_skill_bindings",
         "typing_indicator",
@@ -1035,7 +1036,8 @@ _ACTIVITY_HOOKS = (
 )
 # Tools whose work is visible on its own: a question card, a message the agent sent.
 _ACTIVITY_SKIPPED_TOOLS = frozenset({"clarify"})
-_ACTIVITY_VISIBLE_INLINE_ACTIONS = frozenset({"send_message", "send_widget"})
+# Actions whose result shows in the chat itself (a message, a reaction): no progress row.
+_ACTIVITY_VISIBLE_INLINE_ACTIONS = frozenset({"send_message", "send_widget", "add_reaction", "remove_reaction"})
 _ACTIVITY_COMMAND_TOOLS = frozenset({"terminal", "exec", "bash", "shell"})
 _ACTIVITY_READ_TOOLS = frozenset({"read_file", "file_read"})
 _ACTIVITY_SEARCH_TOOLS = frozenset({"search_files", "grep"})
@@ -1268,6 +1270,10 @@ class _ActivityTurn:
         # People's messages that arrived mid-turn: Hermes' busy notice replies to them, and
         # that send is not this turn's answer.
         self.later_messages: set[str] = set()
+        # The agent reacted to this turn's own message (an answer of its own), and whether the turn
+        # showed any other work. Set from the tool hooks on the agent's thread.
+        self.reacted = False
+        self.worked = False
         # The last update a non-Detailed turn posted quietly: (chat_id, text, reply_to, metadata,
         # message ids). Hermes counts delivered interim text as its final reply, so a turn can end
         # with this as its answer; it is then posted again as the answer (see on_processing_complete).
@@ -1318,12 +1324,55 @@ def _activity_turn_for_session() -> Optional[_ActivityTurn]:
     return candidates[-1] if candidates else None
 
 
+def _activity_note_tool(turn: _ActivityTurn, kind: str, payload: Dict[str, Any]) -> None:
+    """Notes what a tool call means for the turn's answer: a reaction on the turn's own message
+    can be the whole answer; anything that shows as progress is work worth keeping on screen."""
+    name = _activity_str(payload.get("tool_name"))
+    args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+    if kind == "pre_tool_call":
+        if _activity_tool_body(name, args) is not None:
+            turn.worked = True
+        return
+    if name != "inline" or _activity_str(args.get("action")) != "add_reaction":
+        return
+    if _activity_str(payload.get("status")) == "error":
+        return
+    result = _activity_json(payload.get("result"))
+    if isinstance(result, dict) and result.get("success") is False:
+        return
+    # The tool defaults to the turn's message in the current chat; an explicit other target is not an answer.
+    if _activity_str(args.get("chat_id")) or _activity_str(args.get("user_id")):
+        return
+    message_id = _activity_str(args.get("message_id"))
+    get_env = _ACTIVITY_SESSION_ENV
+    current = str(get_env("HERMES_SESSION_MESSAGE_ID", "") or "") if get_env is not None else ""
+    if message_id and message_id != current:
+        return
+    turn.reacted = True
+
+
+def _hermes_unexpected_silence_text() -> str:
+    """Hermes' "needed a reply" notice, in the gateway's language, as it sends it."""
+    try:
+        from agent.i18n import t
+        return str(t("gateway.errors.unexpected_silence") or "").strip()
+    except Exception:
+        return ""
+
+
+def _is_hermes_unexpected_silence(content: Any) -> bool:
+    notice = _hermes_unexpected_silence_text()
+    return bool(notice) and isinstance(content, str) and content.strip() == notice
+
+
 def _activity_hook(kind: str) -> Callable[..., None]:
     def callback(**kwargs: Any) -> None:
         # pre_tool_call is fail-closed and blocks the tool while it runs: find the turn,
         # copy the payload and enqueue it, nothing else. Never raise, never return a directive.
         try:
             turn = _activity_turn_for_session()
+            if turn is not None and not turn.closed and kind in {"pre_tool_call", "post_tool_call"}:
+                _activity_note_tool(turn, kind, kwargs)
             if turn is not None and not turn.closed and turn.mode not in {"friendly", "off"}:
                 payload = dict(kwargs)
                 if isinstance(payload.get("args"), dict):
@@ -1426,7 +1475,10 @@ class _ActivityPump:
             final = (payload or {}).get("final")
             if turn.held and _activity_same_text(turn.held, final):
                 turn.held = None
-            return [*self._release_held(turn), {"type": "turn.end", "outcome": (payload or {}).get("outcome") or "success"}]
+            end: Dict[str, Any] = {"type": "turn.end", "outcome": (payload or {}).get("outcome") or "success"}
+            if (payload or {}).get("discard"):
+                end["discard"] = True
+            return [*self._release_held(turn), end]
         events = self._release_held(turn)
         if kind == "split":
             events.append({"type": "split"})
@@ -1608,6 +1660,11 @@ class InlineAdapter(BasePlatformAdapter):
         self._processing_reactions = _truthy(
             extra.get("reactions") if "reactions" in extra else inline_env("INLINE_REACTIONS"),
             False,
+        )
+        # The agent's own judgment to react to people's messages (and let a reaction be the answer).
+        self._agent_reactions = _truthy(
+            extra.get("agent_reactions") if "agent_reactions" in extra else inline_env("INLINE_AGENT_REACTIONS"),
+            True,
         )
         self._sync_commands = _truthy(
             extra.get("sync_commands") if "sync_commands" in extra else inline_env("INLINE_SYNC_COMMANDS"),
@@ -4531,6 +4588,7 @@ class InlineAdapter(BasePlatformAdapter):
                 thread_id=self._chat_key(thread_id) if thread_id else None,
                 parent_chat_id=self._chat_key(parent_chat_id) if parent_chat_id else None,
                 parent_message_id=str(parent_message_id) if parent_message_id else None,
+                reactions=self._agent_reactions,
             )
         except Exception:
             tool_prompt = None
@@ -5798,6 +5856,13 @@ class InlineAdapter(BasePlatformAdapter):
         quiet = status
         update = False
         turn = None if _ACTIVITY_LOCAL_SEND.get() else self._activity_turn_for_send(chat_id, metadata)
+        if turn is not None and turn.reacted and not interim and actions is None and _is_hermes_unexpected_silence(content):
+            # The agent answered with a reaction and then NO_REPLY: that silence was the answer,
+            # so Hermes' "needed a reply" warning would be wrong. A turn that did nothing else
+            # leaves no progress message either.
+            logger.info("[inline] a reaction answered chat=%s; not posting Hermes' needed-a-reply notice", chat_id)
+            self._activity_close(turn, {"outcome": "success", "discard": not turn.worked})
+            return _send_result(success=True, raw_response={"inlineActivity": "answered_by_reaction"})
         if turn is not None:
             if interim and self._activity_foldable(content, metadata, actions):
                 if not await self._activity_is_detailed(turn):
@@ -6258,7 +6323,11 @@ class InlineAdapter(BasePlatformAdapter):
             if turn.closed:
                 return
             name = str(getattr(outcome, "value", outcome) or "").strip().lower()
-            self._activity_close(turn, {"outcome": name if name in {"success", "failure", "cancelled"} else "success"})
+            payload: Dict[str, Any] = {"outcome": name if name in {"success", "failure", "cancelled"} else "success"}
+            if turn.reacted and not turn.worked:
+                # Answered by a reaction alone (Hermes let the silence stand): no progress message left.
+                payload["discard"] = True
+            self._activity_close(turn, payload)
         except Exception as exc:
             _activity_log_failure("turn end", exc)
 

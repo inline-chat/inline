@@ -464,6 +464,13 @@ function progressTransport(target: Target) {
         editMessage: { messageId, peerId, text: doc.text, blockContent: doc.blockContent },
       })
     },
+    // A turn answered by a reaction alone leaves no progress message behind.
+    async delete(messageId: bigint): Promise<void> {
+      await client.invoke(Method.DELETE_MESSAGES, {
+        oneofKind: "deleteMessages",
+        deleteMessages: { peerId, messageIds: [messageId] },
+      })
+    },
   }
 }
 

@@ -248,12 +248,27 @@ def inline_sender_guidance(
     return "\n".join(lines)
 
 
+# Stable across turns (it lives in the cached system prompt). The adapter keeps a reaction that
+# answered the message from turning into Hermes' "needed a reply" warning.
+REACTION_GUIDANCE = (
+    "- Emoji reactions: now and then, react to the person's message with inline add_reaction "
+    "(it defaults to the message you are answering), the way a friend would: roughly one message "
+    "in four to ten, never on every message, never on your own messages, one emoji per message. "
+    "Good moments: a message that needs no written answer (thanks, ok, done, a confirmation) gets "
+    "👍, 🫡 or ✅ and then NO_REPLY, so the reaction is the whole answer; in a group, 👀 shows you "
+    "saw something you are picking up; when someone laughs or celebrates with an emoji (😂, 🎉, ❤️), "
+    "the same emoji back nods along with them. A question or a request still gets its answer: a "
+    "reaction never replaces a reply the message needs. Never mention or explain a reaction."
+)
+
+
 def tool_context_prompt(
     *,
     chat_id: str,
     thread_id: Optional[str] = None,
     parent_chat_id: Optional[str] = None,
     parent_message_id: Optional[str] = None,
+    reactions: bool = True,
 ) -> Optional[str]:
     if not check_inline_tool_requirements():
         return None
@@ -284,6 +299,8 @@ def tool_context_prompt(
     )
     if parent_message_id:
         lines.append(f"- Parent Inline message for this thread: `{parent_message_id}`.")
+    if reactions:
+        lines.append(REACTION_GUIDANCE)
     lines.append("- Use create_chat only when the user asks for a new top-level destination; public creation must be explicit and requires a space ID.")
     lines.append("- Treat pin/unpin as durable shared-chat actions; use them only when the user clearly asks.")
     return "\n".join(lines)
