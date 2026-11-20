@@ -565,6 +565,10 @@ final class AppMenu: NSObject {
 
     viewMenu.addItem(NSMenuItem.separator())
 
+    setupTextSizeMenuItems(in: viewMenu)
+
+    viewMenu.addItem(NSMenuItem.separator())
+
     setupViewPreferenceMenus(in: viewMenu)
 
     viewMenu.addItem(NSMenuItem.separator())
@@ -589,6 +593,62 @@ final class AppMenu: NSObject {
     forwardItem.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
     viewMenu.addItem(forwardItem)
 
+  }
+
+  /// Message text size, named and bound like Messages and Mail.
+  private func setupTextSizeMenuItems(in menu: NSMenu) {
+    let normalItem = NSMenuItem(
+      title: "Make Text Normal Size",
+      action: #selector(makeTextNormalSize(_:)),
+      keyEquivalent: "0"
+    )
+    normalItem.keyEquivalentModifierMask = [.command]
+    normalItem.target = self
+    menu.addItem(normalItem)
+
+    let biggerItem = NSMenuItem(
+      title: "Make Text Bigger",
+      action: #selector(makeTextBigger(_:)),
+      keyEquivalent: "+"
+    )
+    biggerItem.keyEquivalentModifierMask = [.command]
+    biggerItem.target = self
+    biggerItem.image = NSImage(systemSymbolName: "textformat.size.larger", accessibilityDescription: nil)
+    menu.addItem(biggerItem)
+
+    // ⌘= is the unshifted ⌘+ on most layouts; keep it working without showing a duplicate.
+    let biggerUnshiftedItem = NSMenuItem(
+      title: "Make Text Bigger",
+      action: #selector(makeTextBigger(_:)),
+      keyEquivalent: "="
+    )
+    biggerUnshiftedItem.keyEquivalentModifierMask = [.command]
+    biggerUnshiftedItem.target = self
+    biggerUnshiftedItem.isHidden = true
+    biggerUnshiftedItem.allowsKeyEquivalentWhenHidden = true
+    menu.addItem(biggerUnshiftedItem)
+
+    let smallerItem = NSMenuItem(
+      title: "Make Text Smaller",
+      action: #selector(makeTextSmaller(_:)),
+      keyEquivalent: "-"
+    )
+    smallerItem.keyEquivalentModifierMask = [.command]
+    smallerItem.target = self
+    smallerItem.image = NSImage(systemSymbolName: "textformat.size.smaller", accessibilityDescription: nil)
+    menu.addItem(smallerItem)
+  }
+
+  @objc private func makeTextBigger(_ sender: Any?) {
+    AppSettings.shared.increaseChatTextSize()
+  }
+
+  @objc private func makeTextSmaller(_ sender: Any?) {
+    AppSettings.shared.decreaseChatTextSize()
+  }
+
+  @objc private func makeTextNormalSize(_ sender: Any?) {
+    AppSettings.shared.resetChatTextSize()
   }
 
   private func setupViewPreferenceMenus(in menu: NSMenu) {
@@ -1529,6 +1589,15 @@ extension AppMenu: NSMenuItemValidation {
       guard AppThemePreset.allCases.indices.contains(menuItem.tag) else { return false }
       menuItem.state = settings.appTheme == AppThemePreset.allCases[menuItem.tag] ? .on : .off
       return true
+    }
+    if menuItem.action == #selector(makeTextBigger(_:)) {
+      return settings.canIncreaseChatTextSize
+    }
+    if menuItem.action == #selector(makeTextSmaller(_:)) {
+      return settings.canDecreaseChatTextSize
+    }
+    if menuItem.action == #selector(makeTextNormalSize(_:)) {
+      return !settings.isChatTextSizeDefault
     }
     if menuItem.action == #selector(selectMessageStyle(_:)) {
       guard MessageRenderStyle.allCases.indices.contains(menuItem.tag) else { return false }

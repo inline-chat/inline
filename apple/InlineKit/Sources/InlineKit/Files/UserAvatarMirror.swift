@@ -79,6 +79,13 @@ public final class UserAvatarMirror {
           directory: directory
         )
         outcome = .mirrored
+      } catch is UserAvatarCacheError {
+        // The user's photo or signed link changed, or the user went away, while
+        // this download ran. That is not a fault, but keep the backoff so views
+        // still showing the old link do not fetch it again; the current photo
+        // mirrors under its own key.
+        Log.shared.debug("Skipped caching a superseded avatar download")
+        outcome = .failed(clock.now)
       } catch {
         Log.shared.error("Failed to cache image", error: error)
         outcome = .failed(clock.now)

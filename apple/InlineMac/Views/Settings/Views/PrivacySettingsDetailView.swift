@@ -69,6 +69,18 @@ struct PrivacySettingsDetailView: View {
         SettingsSectionHeader("Focus Status")
       }
 
+      Section {
+        Toggle(isOn: $privacy.transcribeVoiceMessages) {
+          SettingsRowLabel(
+            .transcribeVoiceMessages,
+            description: "Voice messages you send are transcribed by an AI service so people can read them. Turn this off to keep your recordings from being sent for transcription."
+          )
+        }
+        .settingsSearchAnchor(.transcribeVoiceMessages)
+      } header: {
+        SettingsSectionHeader("Voice Messages")
+      }
+
       if !fileLinkSenders.isEmpty {
         Section {
           ForEach(fileLinkSenders) { sender in

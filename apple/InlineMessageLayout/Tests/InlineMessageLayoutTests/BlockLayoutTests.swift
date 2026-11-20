@@ -32,6 +32,29 @@ struct BlockLayoutTests {
     #expect(layout.edgeToEdgeBlocks == ["media"])
   }
 
+  @Test("With a media inset the bubble's colour frames a photo on every side, the time inside it")
+  func photoFramed() throws {
+    var input = Self.input("", blocks: [Self.photo])
+    input.metrics.mediaInset = 2
+    let layout = MessageLayoutPlanner.layout(input)
+    let media = try #require(layout.frame(.block("media")))
+    let body = layout.bubble.body
+    let time = try #require(layout.frame(.time))
+    #expect(media == body.insetBy(dx: 2, dy: 2))
+    #expect(media.size == CGSize(width: 240, height: 180))
+    #expect(media.contains(time))
+    #expect(abs(media.maxX - time.maxX - 6) < 0.01 && abs(media.maxY - time.maxY - 6) < 0.01)
+
+    // With a caption: inset on top and sides; the caption follows under the photo.
+    var captioned = Self.input("Caption", blocks: [Self.photo])
+    captioned.metrics.mediaInset = 2
+    let withCaption = MessageLayoutPlanner.layout(captioned)
+    let photo = try #require(withCaption.frame(.block("media")))
+    #expect(photo.minY == withCaption.bubble.body.minY + 2)
+    #expect(photo.minX == withCaption.bubble.body.minX + 2 && photo.maxX == withCaption.bubble.body.maxX - 2)
+    #expect(try #require(withCaption.frame(.text)).minY >= photo.maxY)
+  }
+
   @Test("A caption wraps to the photo's width under it")
   func photoWithCaption() throws {
     let caption = "A long caption that is wider than the photo, so it has to wrap onto more lines below it."

@@ -139,11 +139,12 @@ jobs:
     name: OpenClaw (${{ matrix.host }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: ${{ matrix.host == 'latest' }}
+    # Pinned hosts only: CI gates deploys, so it must not move with upstream.
+    # openclaw-compatibility.yml tests source and npm latest against OpenClaw latest.
     strategy:
       fail-fast: false
       matrix:
-        host: ["2026.11.1", "latest"]
+        host: ["2026.11.1", "2026.11.5"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -372,11 +373,10 @@ jobs:
     needs: candidate-packages
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: ${{ matrix.host == 'latest' }}
     strategy:
       fail-fast: false
       matrix:
-        host: ['2026.11.1', 'latest']
+        host: ['2026.11.1', '2026.11.5']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -396,10 +396,11 @@ jobs:
     needs: candidate-packages
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Pinned releases only; hermes-compatibility.yml covers Hermes latest and main.
     strategy:
       fail-fast: false
       matrix:
-        host: ['v2026.9.14', 'v2026.9.21', latest, main]
+        host: ['v2026.9.14', 'v2026.9.21', 'v0.23.2']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
@@ -480,11 +481,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install stable Hermes for local transport end-to-end test
+      - name: Install pinned stable Hermes for local transport end-to-end test
         id: hermes-host
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" latest
+        run: bash scripts/ci/install-hermes-host.sh "$RUNNER_TEMP/hermes-host" v0.23.2
       - name: Build compiled MCP app for real transport checks
         run: |
           for package in protocol oauth-core sdk mcp; do
@@ -505,10 +506,6 @@ jobs:
           HERMES_PYTHON_BIN: ${{ steps.hermes-host.outputs.python-bin }}
           INLINE_E2E_PUBLISHED_HERMES: '1'
         run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"
-      - name: Verify published OpenClaw still registers in its current host
-        run: |
-          node scripts/ci/pack-published-openclaw.mjs "$RUNNER_TEMP/published-openclaw" @inline-openclaw/inline@0.0.72
-          node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/published-openclaw" latest
       - name: Upload scenario receipts
         if: always()
         uses: actions/upload-artifact@v4

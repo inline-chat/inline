@@ -1463,280 +1463,12 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  describe.skip("legacy HTTP upload compatibility", () => {
-  it("uploadFile() sends multipart payload and returns ids", async () => {
-    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
-      expect(String(input)).toBe("https://api.inline.chat/v1/uploadFile")
-      const body = init?.body
-      if (!(body instanceof FormData)) throw new Error("missing form-data body")
-      expect(body.get("type")).toBe("photo")
-      expect(body.get("file")).toBeInstanceOf(Blob)
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_123",
-            photoId: 77,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
+  it("uploadFile() rejects invalid video metadata before uploading", async () => {
+    const transport = new MockTransport()
     const client = new InlineSdkClient({
       token: "test-token",
       baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    const result = await client.uploadFile({
-      type: "photo",
-      file: new Uint8Array([1, 2, 3]),
-      fileName: "photo.png",
-      contentType: "image/png",
-    })
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(result).toEqual({
-      fileUniqueId: "INP_123",
-      photoId: 77n,
-    })
-  })
-
-  it("uploadFile() preserves custom base path before /v1/uploadFile", async () => {
-    const fetchMock = vi.fn(async (input: unknown) => {
-      expect(String(input)).toBe("https://example.com/custom-prefix/v1/uploadFile")
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_path",
-            photoId: 44,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://example.com/custom-prefix",
-      fetch: fetchMock as any,
-    })
-
-    const result = await client.uploadFile({
-      type: "photo",
-      file: new Uint8Array([1]),
-    })
-
-    expect(result).toEqual({
-      fileUniqueId: "INP_path",
-      photoId: 44n,
-    })
-  })
-
-  it("uploadFile() accepts Blob input and preserves matching blob content type", async () => {
-    const sourceBlob = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" })
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      const body = init?.body
-      if (!(body instanceof FormData)) throw new Error("missing form-data body")
-      const file = body.get("file")
-      if (!(file instanceof Blob)) throw new Error("missing file blob")
-      expect(file.type).toBe("image/png")
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_blob",
-            photoId: 12,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    const result = await client.uploadFile({
-      type: "photo",
-      file: sourceBlob,
-      contentType: "image/png",
-    })
-
-    expect(result).toEqual({
-      fileUniqueId: "INP_blob",
-      photoId: 12n,
-    })
-  })
-
-  it("uploadFile() sanitizes path-like filenames to a leaf name", async () => {
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      const body = init?.body
-      if (!(body instanceof FormData)) throw new Error("missing form-data body")
-      const file = body.get("file")
-      if (!(file instanceof File)) throw new Error("missing file")
-      expect(file.name).toBe("latest-download.jpeg")
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_name",
-            photoId: 5,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    const result = await client.uploadFile({
-      type: "photo",
-      file: new Uint8Array([1, 2, 3]),
-      fileName: "/workspace/openclaw/tmp/latest-download.jpeg?token=abc",
-      contentType: "image/jpeg",
-    })
-
-    expect(result).toEqual({
-      fileUniqueId: "INP_name",
-      photoId: 5n,
-    })
-  })
-
-  it("uploadFile() supports thumbnail uploads for video", async () => {
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      const body = init?.body
-      if (!(body instanceof FormData)) throw new Error("missing form-data body")
-      expect(body.get("type")).toBe("video")
-      expect(body.get("thumbnail")).toBeInstanceOf(Blob)
-      expect(body.get("width")).toBe("640")
-      expect(body.get("height")).toBe("360")
-      expect(body.get("duration")).toBe("12")
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INV_thumb",
-            videoId: "9001",
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    const result = await client.uploadFile({
-      type: "video",
-      file: new Uint8Array([0, 1]),
-      thumbnail: new Uint8Array([2, 3]),
-      width: 640,
-      height: 360,
-      duration: 12,
-    })
-    expect(result).toEqual({
-      fileUniqueId: "INV_thumb",
-      videoId: 9001n,
-    })
-  })
-
-  it("uploadFile() supplies fallback metadata for video uploads", async () => {
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
-      const body = init?.body
-      if (!(body instanceof FormData)) throw new Error("missing form-data body")
-      expect(body.get("type")).toBe("video")
-      expect(body.get("width")).toBe("1280")
-      expect(body.get("height")).toBe("720")
-      expect(body.get("duration")).toBe("1")
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INV_123",
-            videoId: 88,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    const result = await client.uploadFile({
-      type: "video",
-      file: new Uint8Array([0, 1]),
-      fileName: "clip.mp4",
-      contentType: "video/mp4",
-    })
-
-    expect(result).toEqual({
-      fileUniqueId: "INV_123",
-      videoId: 88n,
-    })
-  })
-
-  it("uploadFile() surfaces API errors", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          description: "Invalid file type",
-        }),
-        {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    await expect(
-      client.uploadFile({
-        type: "document",
-        file: new Uint8Array([1]),
-        fileName: "doc.txt",
-      }),
-    ).rejects.toThrow(/Invalid file type/)
-  })
-
-  it("uploadFile() rejects invalid video metadata inputs", async () => {
-    const fetchMock = vi.fn()
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
+      transport,
     })
 
     await expect(
@@ -1746,193 +1478,36 @@ describe("InlineSdkClient", () => {
         width: 0,
       }),
     ).rejects.toThrow(/width must be a positive integer/)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(transport.sent).toHaveLength(0)
+    await client.close()
   })
 
-  it("uploadFile() handles non-json upstream failures", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response("upstream timeout", {
-        status: 504,
-        headers: { "content-type": "text/plain" },
-      })
-    })
+  it("uploadFile() sends only the leaf of a path-like file name", async () => {
+    const transport = new MockTransport()
     const client = new InlineSdkClient({
       token: "test-token",
       baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
+      transport,
     })
+    await connectAndOpen(client, transport)
 
-    await expect(
-      client.uploadFile({
-        type: "photo",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/upstream timeout/)
-  })
-
-  it("uploadFile() handles invalid json responses", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response("{ not-json", {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      })
+    const upload = client.uploadFile({
+      type: "photo",
+      file: new Uint8Array([1, 2, 3]),
+      fileName: "/workspace/openclaw/tmp/latest-download.jpeg?token=abc",
+      contentType: "image/jpeg",
     })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
+    const outcome = upload.catch((error: unknown) => error)
+    await waitFor(() => transport.sent.some((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.CREATE_UPLOAD))
+    const create = transport.sent.find((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.CREATE_UPLOAD)
+    if (!create || create.body.oneofKind !== "rpcCall" ||
+        create.body.rpcCall.input.oneofKind !== "createUpload") throw new Error("missing createUpload")
+    expect(create.body.rpcCall.input.createUpload.fileName).toBe("latest-download.jpeg")
 
-    await expect(
-      client.uploadFile({
-        type: "photo",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/status 500/)
-  })
-
-  it("uploadFile() rejects malformed success payloads", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {},
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    await expect(
-      client.uploadFile({
-        type: "document",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/missing fileUniqueId/)
-  })
-
-  it("uploadFile() rejects invalid id payload in success envelope", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_id",
-            documentId: "invalid-id",
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    await expect(
-      client.uploadFile({
-        type: "document",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/invalid documentId/)
-  })
-
-  it("uploadFile() handles API errors without description", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-        }),
-        {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    await expect(
-      client.uploadFile({
-        type: "photo",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/request failed with status 400/)
-  })
-
-  it("uploadFile() rejects non-safe numeric ids in success payload", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_big",
-            documentId: Number.MAX_SAFE_INTEGER + 1,
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    await expect(
-      client.uploadFile({
-        type: "document",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/invalid documentId/)
-  })
-
-  it("uploadFile() rejects unsupported id value types", async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          result: {
-            fileUniqueId: "INP_obj",
-            documentId: { value: 1 },
-          },
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        },
-      )
-    })
-    const client = new InlineSdkClient({
-      token: "test-token",
-      baseUrl: "https://api.inline.chat",
-      fetch: fetchMock as any,
-    })
-
-    await expect(
-      client.uploadFile({
-        type: "document",
-        file: new Uint8Array([1]),
-      }),
-    ).rejects.toThrow(/invalid documentId/)
-  })
+    await client.close()
+    await outcome
   })
 
   it("uploadFile() uses native resumable RPCs and returns typed media", async () => {

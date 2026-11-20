@@ -1,6 +1,5 @@
 import type { Transaction } from "@in/server/db/types"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
-import { isStoredChatAccessTrusted } from "@in/server/modules/authorization/chatAccessTrust"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ChatListKind, ChatListOrder, ChatListScope, type ChatListOffset, type GetChatsInput } from "@inline-chat/protocol/core"
 import { sql, type SQL } from "drizzle-orm"
@@ -194,15 +193,11 @@ function cursorSql(order: ChatListRequest["order"], after: ChatListRequest["offs
   return sql`(${activityKey}, c.id) < (${after.date!}, ${after.chatId})`
 }
 
-/**
- * One statement: scope, filter and cursor, ordered, `limit` rows. With
- * `requireStoredAccess` the statement also requires a `chat_access` row;
- * otherwise the caller must authorize the rows itself.
- */
+/** Page through candidate chats. The caller checks current membership before returning them. */
 function discoverySql(
   userId: number,
   request: ChatListRequest,
-  params: { after: ChatListRequest["offset"]; limit: number; requireStoredAccess: boolean },
+  params: { after: ChatListRequest["offset"]; limit: number },
 ): SQL {
   const conditions = filterSql(userId, request.filter)
   const cursor = cursorSql(request.order, params.after)
@@ -211,17 +206,8 @@ function discoverySql(
   let prefix = sql``
   let source: SQL
   if (request.scope === "dialogs") {
-    source = params.requireStoredAccess
-      ? sql`dialogs d
-        join chats c on c.id = d.chat_id
-        join chat_access a on a.chat_id = d.chat_id and a.user_id = d.user_id`
-      : sql`dialogs d join chats c on c.id = d.chat_id`
+    source = sql`dialogs d join chats c on c.id = d.chat_id`
     conditions.unshift(sql`d.user_id = ${userId}`, sql`d.chat_list_hidden is not true`)
-  } else if (params.requireStoredAccess) {
-    source = sql`chat_access a
-      join chats c on c.id = a.chat_id
-      left join dialogs d on d.chat_id = a.chat_id and d.user_id = a.user_id`
-    conditions.unshift(sql`a.user_id = ${userId}`)
   } else {
     prefix = sql`with recursive ${completeCatalogCte(userId)}`
     source = sql`catalog k
@@ -251,21 +237,12 @@ const toRow = (row: RawRow): ChatListRow => ({ chatId: Number(row.chatId), activ
  */
 export async function discoverChatListPage(tx: Transaction, userId: number, request: ChatListRequest): Promise<ChatListRow[]> {
   const wanted = request.limit + 1
-  if (isStoredChatAccessTrusted()) {
-    const rows = await tx.execute<RawRow>(discoverySql(userId, request, {
-      after: request.offset, limit: wanted, requireStoredAccess: true,
-    }))
-    return rows.map(toRow)
-  }
-
-  // The table is not trusted: read in batches and authorize each through the
-  // projection until the page plus one look-ahead row is full.
   const accepted: ChatListRow[] = []
   let after = request.offset
   const batchSize = Math.max(wanted, FALLBACK_BATCH_SIZE)
   for (;;) {
     const batch = (await tx.execute<RawRow>(discoverySql(userId, request, {
-      after, limit: batchSize, requireStoredAccess: false,
+      after, limit: batchSize,
     }))).map(toRow)
     if (batch.length === 0) return accepted
     const access = await getEffectiveChatAccessUserIds(tx, batch.map((row) => row.chatId), {

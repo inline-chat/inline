@@ -5,8 +5,19 @@ import SwiftUI
 public enum ComposeActionAnimationKind: Equatable, Sendable {
   case working
   case typing
-  case upload
+  case sending(SendingActivityGlyph.Kind)
   case recordingVoice
+}
+
+public extension SendingActivityGlyph.Kind {
+  init?(_ action: ApiComposeAction) {
+    switch action {
+    case .uploadingPhoto: self = .photo
+    case .uploadingVideo: self = .video
+    case .uploadingDocument: self = .file
+    default: return nil
+    }
+  }
 }
 
 public enum ComposeActionAnimationInventory {
@@ -16,8 +27,12 @@ public enum ComposeActionAnimationInventory {
       .working
     case .typing:
       .typing
-    case .uploadingPhoto, .uploadingDocument, .uploadingVideo:
-      .upload
+    case .uploadingPhoto:
+      .sending(.photo)
+    case .uploadingVideo:
+      .sending(.video)
+    case .uploadingDocument:
+      .sending(.file)
     case .recordingVoice:
       .recordingVoice
     @unknown default:
@@ -50,12 +65,8 @@ public struct ComposeActionActivityIndicator: View {
         color: color,
         lift: 1.8
       )
-    case .upload:
-      UploadActivityIndicator(
-        width: 14,
-        height: 4,
-        color: color
-      )
+    case let .sending(kind):
+      SendingActivityIndicator(kind: kind, color: color)
     case .recordingVoice:
       VoiceRecordingActivityIndicator(
         barWidth: 2.2,
@@ -316,49 +327,51 @@ public struct VoiceRecordingActivityIndicator: View {
   }
 }
 
-public struct UploadActivityIndicator: View {
-  private let width: CGFloat
-  private let height: CGFloat
+/// "Sending photo / video / file": a small drawn object that animates the send.
+/// The drawing lives in `SendingActivityGlyph`, shared with AppKit.
+public struct SendingActivityIndicator: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  private let kind: SendingActivityGlyph.Kind
   private let color: Color
-  private let cycleDuration: TimeInterval
+  private let size: CGSize
 
   public init(
-    width: CGFloat = 14,
-    height: CGFloat = 4,
+    kind: SendingActivityGlyph.Kind,
     color: Color = .accentColor,
-    cycleDuration: TimeInterval = 1.5
+    size: CGSize = SendingActivityGlyph.designSize
   ) {
-    self.width = width
-    self.height = height
+    self.kind = kind
     self.color = color
-    self.cycleDuration = cycleDuration
+    self.size = size
+  }
+
+  public init?(action: ApiComposeAction, color: Color = .accentColor, size: CGSize = SendingActivityGlyph.designSize) {
+    guard let kind = SendingActivityGlyph.Kind(action) else { return nil }
+    self.init(kind: kind, color: color, size: size)
   }
 
   public var body: some View {
-    TimelineView(.animation) { context in
-      let phase = Self.normalizedPhase(
-        context.date.timeIntervalSinceReferenceDate / max(cycleDuration, 0.01)
-      )
-      let fillProgress = phase <= 0.5 ? phase * 2 : (1 - phase) * 2
-      let fillWidth = width * fillProgress
-      let fillOffset = phase <= 0.5 ? 0 : width - fillWidth
-
-      ZStack(alignment: .leading) {
-        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
-          .fill(color.opacity(0.2))
-
-        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
-          .fill(color.opacity(0.72))
-          .frame(width: fillWidth)
-          .offset(x: fillOffset)
+    // Clock-driven like the other indicators, so every copy on screen is in phase
+    // and layout transactions around the view can't bend the animation.
+    TimelineView(.animation(paused: reduceMotion)) { context in
+      let time = reduceMotion
+        ? SendingActivityGlyph.restingTime(for: kind)
+        : context.date.timeIntervalSinceReferenceDate
+      Canvas { graphics, canvasSize in
+        let resolved = color.resolve(in: graphics.environment).cgColor
+        graphics.withCGContext { cgContext in
+          SendingActivityGlyph.draw(
+            kind,
+            in: cgContext,
+            rect: CGRect(origin: .zero, size: canvasSize),
+            time: time,
+            color: resolved
+          )
+        }
       }
+      .transaction { $0.animation = nil }
     }
-    .frame(width: width, height: height)
+    .frame(width: size.width, height: size.height)
     .accessibilityHidden(true)
-  }
-
-  private static func normalizedPhase(_ phase: Double) -> Double {
-    let wrapped = phase.truncatingRemainder(dividingBy: 1)
-    return wrapped >= 0 ? wrapped : wrapped + 1
   }
 }

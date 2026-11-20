@@ -483,6 +483,14 @@ fn install_bridge_logger(trace: bool) {
         .filter_module("inline_agent_bridge", level)
         .filter_module("inline_agent_driver_codex", level)
         .filter_module("inline_agent_driver_acp", level)
+        .filter_module("inline_agent_driver_claude", level)
+        .filter_module("inline_agent_driver_opencode", level)
+        .filter_module("inline::claude", level)
+        .filter_module("inline::opencode", level)
+        .filter_module("inline_client", level)
+        // Raw Claude stderr can echo prompts or tokens: keep it out of this
+        // file (`-v` diagnostics scrub each line instead).
+        .filter_module("inline_agent_driver_claude::stderr", log::LevelFilter::Off)
         .write_style(env_logger::WriteStyle::Never)
         .format(|buf, record| {
             use std::io::Write as _;
@@ -3556,6 +3564,9 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 env!("CARGO_PKG_VERSION"),
             );
             config.host_tools = Some(tools.configuration());
+            config.stdio_mcp_servers = computer_use_servers();
+            // Claude's desktop app gives every session Claude in Chrome.
+            config.chrome = true;
             let harness = inline_agent_driver_claude::harness::ClaudeHarness::new(config);
             (
                 Arc::new(harness),
@@ -3575,6 +3586,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 env!("CARGO_PKG_VERSION"),
             );
             config.host_tools = Some(tools.configuration());
+            config.stdio_mcp_servers = computer_use_servers();
             // A service Inline starts never inherits Inline's secrets.
             config.scrub_env = std::env::vars_os()
                 .map(|(name, _)| name)
@@ -3601,7 +3613,8 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                     env!("CARGO_PKG_VERSION"),
                     Some(tools.configuration()),
                 )
-                .await?,
+                .await?
+                .with_stdio_mcp_servers(computer_use_servers()),
             );
             owned_acp = Some(harness.clone());
             (
@@ -3731,6 +3744,22 @@ fn opencode_native_for(version: &str) -> bool {
     }
     inline_agent_driver_opencode::version::parse(version)
         .is_some_and(|version| inline_agent_driver_opencode::native_supported(&version))
+}
+
+/// Inline's computer use, for agents without their own: this executable's
+/// `computer-use mcp` (Codex brings its own computer use).
+fn computer_use_servers() -> Vec<inline_agent_bridge::StdioMcpServer> {
+    if !inline_computer_use::is_supported() {
+        return Vec::new();
+    }
+    let Ok(command) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    vec![inline_agent_bridge::StdioMcpServer {
+        name: inline_computer_use::SERVER_NAME.to_owned(),
+        command,
+        args: vec!["computer-use".to_owned(), "mcp".to_owned()],
+    }]
 }
 
 /// v2 never runs what v1 accepted, so v1's open work is closed the way a v1

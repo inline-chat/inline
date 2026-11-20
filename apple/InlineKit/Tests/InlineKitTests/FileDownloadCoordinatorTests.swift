@@ -180,13 +180,12 @@ struct FileDownloadCoordinatorTests {
     await owner.resetSession()
   }
 
-  @Test(arguments: [400, 401, 403, 404])
+  @Test(arguments: [401, 403])
   func inaccessibleNativeFailureNeverFallsBack(status: Int) async {
     let owner = FileDownloader(auth: Auth.mocked(authenticated: true).handle)
     let done = AsyncStream<Void>.makeStream()
     owner.downloadFile(id: "doc_805", url: URL(string: "unsupported-fallback://file")!,
                        localUrl: temporaryFile(), nativeFile: { _, _ in
-      // The server deliberately uses 400 for both absent and inaccessible files.
       throw RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: nil, code: status)
     }) { _, result in
       guard case let .failure(error) = result,
@@ -196,6 +195,70 @@ struct FileDownloadCoordinatorTests {
         return
       }
       #expect(code == status)
+      done.continuation.yield()
+    }
+    var iterator = done.stream.makeAsyncIterator()
+    _ = await iterator.next()
+    await owner.resetSession()
+  }
+
+  @Test(arguments: [400, 404])
+  func missingOrLegacyNativeFailureFallsBackToTheCDN(status: Int) async {
+    let owner = FileDownloader(auth: Auth.mocked(authenticated: true).handle)
+    let done = AsyncStream<Void>.makeStream()
+    owner.downloadFile(id: "doc_810", url: URL(string: "unsupported-fallback://file")!,
+                       localUrl: temporaryFile(), nativeFile: { _, _ in
+      // The server uses 400 for inaccessible files and legacy ones it has no size or path for.
+      throw RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: nil, code: status)
+    }) { _, result in
+      // Foundation's URL error proves the CDN link was tried.
+      guard case let .failure(error) = result, error is URLError else {
+        Issue.record("The native refusal did not reach the CDN: \(result)")
+        done.continuation.yield()
+        return
+      }
+      done.continuation.yield()
+    }
+    var iterator = done.stream.makeAsyncIterator()
+    _ = await iterator.next()
+    await owner.resetSession()
+  }
+
+  @Test func nativeFileIsKeptWhenItsMessageGivesAnotherSize() async throws {
+    let owner = FileDownloader(auth: Auth.mocked(authenticated: true).handle)
+    let destination = temporaryFile()
+    defer { try? FileManager.default.removeItem(at: destination) }
+    let done = AsyncStream<Void>.makeStream()
+    // Stale size metadata must neither delete the verified file nor restart it from the CDN.
+    owner.downloadFile(id: "doc_811", url: URL(string: "unsupported-fallback://file")!, localUrl: destination,
+                       expectedBytes: 10, nativeFile: { url, _ in
+      try Data([1, 2, 3]).write(to: url)
+      return url
+    }) { _, result in
+      if case let .success(url) = result { #expect(url == destination) }
+      else { Issue.record("The verified native file was discarded: \(result)") }
+      done.continuation.yield()
+    }
+    var iterator = done.stream.makeAsyncIterator()
+    _ = await iterator.next()
+    #expect(try Data(contentsOf: destination) == Data([1, 2, 3]))
+    await owner.resetSession()
+  }
+
+  @Test(arguments: [false, true])
+  func rangeFallbackRestartsTheWholeFileOnlyWhenTheObjectChanged(changed: Bool) async {
+    let owner = FileDownloader(auth: Auth.mocked(authenticated: true).handle)
+    let done = AsyncStream<Void>.makeStream()
+    let cdn: CDNRangeError = changed ? .objectChanged : .notTheFile
+    owner.downloadFile(id: "doc_812", url: URL(string: "unsupported-fallback://file")!,
+                       localUrl: temporaryFile(), nativeFile: { _, _ in
+      throw NativeRangeFallbackFailure(native: RealtimeDirectRpcError.timeout, cdn: cdn)
+    }) { _, result in
+      guard case let .failure(error) = result else { Issue.record("Unsupported CDN URL succeeded"); return }
+      // A changed object lost its partial, so the whole file is fetched again; any other range
+      // failure would only fetch the same bytes, so it ends the download.
+      if changed { #expect(error is URLError, "\(error)") }
+      else { #expect(error as? CDNRangeError == .notTheFile, "\(error)") }
       done.continuation.yield()
     }
     var iterator = done.stream.makeAsyncIterator()
@@ -325,12 +388,16 @@ struct FileDownloadCoordinatorTests {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let deleted = try partial(in: directory, fileID: "IND_deleted", accountID: 1, chatID: 42, messageID: 7)
+    let alsoDeleted = try partial(in: directory, fileID: "IND_also_deleted", accountID: 1, chatID: 42, messageID: 9)
     let survivor = try partial(in: directory, fileID: "IND_survivor", accountID: 1, chatID: 42, messageID: 8)
+    let otherChat = try partial(in: directory, fileID: "IND_other_chat", accountID: 1, chatID: 43, messageID: 7)
     let auth = Auth.mocked(authenticated: true)
     let owner = FileDownloader(auth: auth.handle, nativeManager: NativeDownloadManager(), nativeCacheDirectories: [directory])
-    await owner.discardMessageDownloads(accountToken: try auth.handle.beginAccountMutation(), chatID: 42, messageIDs: [7])
+    await owner.discardMessageDownloads(accountToken: try auth.handle.beginAccountMutation(), chatID: 42, messageIDs: [7, 9])
     #expect(!FileManager.default.fileExists(atPath: deleted.path))
+    #expect(!FileManager.default.fileExists(atPath: alsoDeleted.path))
     #expect(FileManager.default.fileExists(atPath: survivor.path))
+    #expect(FileManager.default.fileExists(atPath: otherChat.path))
     await owner.resetSession()
   }
 

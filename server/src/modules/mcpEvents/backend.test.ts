@@ -18,6 +18,16 @@ import { nextOccurrence } from "./source"
 import { runMcpEventsOnce } from "./worker"
 import type { CallbackTransport } from "./webhook"
 import type { EventOccurrence, SubscribeResult } from "./types"
+import { Cause, Effect } from "effect"
+import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import type { HttpMethod } from "effect/unstable/http/HttpMethod"
+import { executeOAuth } from "@in/server/controllers/oauth.effect"
+import { ErrorReporter } from "@in/server/core/errors/errorReporter"
+import { generateRequestId } from "@in/server/core/helpers/requestId"
+import { HttpRequestContext } from "@in/server/core/http/requestContext"
+import { OAuthHttpService } from "@in/server/modules/oauth/httpService.effect"
+import { makeOAuthHttpService } from "@in/server/modules/oauth/httpServiceAdapter.effect"
+import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 
 const secret = `whsec_${Buffer.alloc(32, 0x42).toString("base64")}`
 const destination = { mode: "webhook", url: "https://receiver.test/events", secret }
@@ -58,6 +68,41 @@ async function fixture() {
   }
   return { owner, teammate, chat, session, grant, principal, args, binding, checkpoint, subscribe, reply }
 }
+
+/**
+ * Serves one OAuth route operation through `executeOAuth`, so the declared
+ * OAuth response contract is validated. Contract drift is served but reported;
+ * any report fails the test. Only the webhook transport is substituted.
+ */
+const oauthRoute = async (operation: "introspect" | "mcpEvents", request: Request, transport?: CallbackTransport) => {
+  // The OAuth handlers read MCP_INTERNAL_SHARED_SECRET once when first loaded,
+  // so load them only after a test has set it (always to INTERNAL_SECRET).
+  const { makeOAuthHttpHandlers } = await import("@in/server/modules/oauth/httpServiceLive.effect")
+  const service = makeOAuthHttpService({
+    ...makeOAuthHttpHandlers(new InMemoryRateLimiter()),
+    mcpEvents: (input, body) => handleMcpEvents(input, body, transport),
+  })
+  const reports: string[] = []
+  const response = await Effect.runPromise(executeOAuth(operation, HttpServerRequest.fromWeb(request)).pipe(
+    Effect.provideService(OAuthHttpService, service),
+    Effect.provideService(HttpRequestContext, {
+      clientIp: "127.0.0.1", requestId: generateRequestId(), method: request.method as HttpMethod,
+      path: new URL(request.url).pathname, startedAtMillis: Date.now(),
+    }),
+    Effect.provideService(ErrorReporter, {
+      report: (report) => Effect.sync(() => { reports.push(`${report.context.operation}: ${Cause.pretty(report.cause)}`) }),
+    }),
+  ))
+  expect(reports).toEqual([])
+  return HttpServerResponse.toWeb(response)
+}
+
+const INTERNAL_SECRET = "test-events-shared-secret"
+
+const mcpEventsRequest = (body: unknown, headers: Record<string, string> = { "x-inline-mcp-secret": INTERNAL_SECRET }) =>
+  new Request("https://api.inline.chat/oauth/mcp-events", {
+    method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body),
+  })
 
 const due = async (id: string) => { await db.update(mcpEventSubscriptions).set({ nextAttemptAt: new Date(0) }).where(eq(mcpEventSubscriptions.id, id)) }
 const occurrence = (index = -1) => JSON.parse(received.at(index)!.body) as EventOccurrence
@@ -379,18 +424,17 @@ describe("durable MCP events with real PostgreSQL and committed Inline messages"
     const token = "events-test-access-token"
     await OauthModel.createAccessToken({ tokenHash: createHash("sha256").update(token).digest("hex"), grantId: f.grant.id, nowMs: Date.now(), expiresAtMs: Date.now() + 60_000 })
     const previous = process.env["MCP_INTERNAL_SHARED_SECRET"]
-    process.env["MCP_INTERNAL_SHARED_SECRET"] = "test-events-shared-secret"
+    process.env["MCP_INTERNAL_SHARED_SECRET"] = INTERNAL_SECRET
     try {
-      const request = new Request("https://api.inline.chat/oauth/mcp-events", { method: "POST", headers: { "x-inline-mcp-secret": "test-events-shared-secret" } })
-      const valid = await handleMcpEvents(request, { method: "events/cursor", params: { name: "message.created", arguments: f.args }, token })
+      const valid = await oauthRoute("mcpEvents", mcpEventsRequest({ method: "events/cursor", params: { name: "message.created", arguments: f.args }, token }))
       expect(valid.status).toBe(200)
       expect((await valid.json() as { cursor: string }).cursor).toStartWith("mcpe1_")
-      const invented = await handleMcpEvents(request, { method: "events/list", params: {}, token, grantId: "another-grant" })
+      const invented = await oauthRoute("mcpEvents", mcpEventsRequest({ method: "events/list", params: {}, token, grantId: "another-grant" }))
       expect((await invented.json() as { error: { code: number } }).error.code).toBe(-32602)
-      const unauthenticated = await handleMcpEvents(new Request(request.url), { method: "events/list", token })
+      const unauthenticated = await oauthRoute("mcpEvents", mcpEventsRequest({ method: "events/list", token }, {}))
       expect(unauthenticated.status).toBe(401)
       await OauthModel.revokeGrant(f.grant.id, Date.now())
-      const revoked = await handleMcpEvents(request, { method: "events/list", token })
+      const revoked = await oauthRoute("mcpEvents", mcpEventsRequest({ method: "events/list", token }))
       expect((await revoked.json() as { error: { code: number } }).error.code).toBe(-32012)
     } finally {
       if (previous === undefined) delete process.env["MCP_INTERNAL_SHARED_SECRET"]
@@ -453,18 +497,16 @@ describe("durable MCP events with real PostgreSQL and committed Inline messages"
     const token = "paired-events-access-token"
     await OauthModel.createAccessToken({ tokenHash: createHash("sha256").update(token).digest("hex"), grantId: f.grant.id, nowMs: Date.now(), expiresAtMs: Date.now() + 60_000 })
     const previous = process.env["MCP_INTERNAL_SHARED_SECRET"]
-    process.env["MCP_INTERNAL_SHARED_SECRET"] = "paired-test-secret"
-    const { handleIntrospect } = await import("@in/server/modules/oauth/httpHandlers")
+    process.env["MCP_INTERNAL_SHARED_SECRET"] = INTERNAL_SECRET
     const api = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: async (request) => {
       const path = new URL(request.url).pathname
-      const body: unknown = await request.json()
-      if (path === "/oauth/introspect") return handleIntrospect(request, body)
-      if (path === "/oauth/mcp-events") return handleMcpEvents(request, body, receiver())
+      if (path === "/oauth/introspect") return oauthRoute("introspect", request)
+      if (path === "/oauth/mcp-events") return oauthRoute("mcpEvents", request, receiver())
       return new Response(null, { status: 404 })
     } })
     // Import the independently built MCP boundary, avoiding a duplicate test implementation.
     const { createApp } = await import("../../../../packages/mcp/dist/server/app.js")
-    const app = createApp({ issuer: oauthConfig().resource, allowedHosts: ["127.0.0.1"], oauthInternalSharedSecret: "paired-test-secret",
+    const app = createApp({ issuer: oauthConfig().resource, allowedHosts: ["127.0.0.1"], oauthInternalSharedSecret: INTERNAL_SECRET,
       oauthProxyBaseUrl: `http://127.0.0.1:${api.port}`, oauthIntrospectionUrl: `http://127.0.0.1:${api.port}/oauth/introspect` })
     const mcp = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => app.fetch(request) })
     const call = async (method: string, params: Record<string, unknown> = {}) => {

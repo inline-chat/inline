@@ -66,16 +66,42 @@ public struct DeleteReactionTransaction: Transaction2 {
           .deleteAll(db)
       }
 
-      Task(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messageUpdatedWithId(
-          messageId: messageId,
-          chatId: chatId,
-          peer: peerId,
-          animated: true
-        )
-      }
+      publishMessageUpdate()
     } catch {
       log.error("Failed to delete reaction \(error)")
+    }
+  }
+
+  /// Puts the removed reaction back. Its original date is gone, so it returns
+  /// dated now; the next update or sync restores the server's copy.
+  public func failed(error: TransactionError2) async {
+    log.error("Failed to delete reaction", error: error)
+    guard let userId = Auth.getCurrentUserId() else { return }
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        let reaction = Reaction(
+          messageId: messageId,
+          userId: userId,
+          emoji: emoji,
+          date: Date.now,
+          chatId: chatId
+        )
+        _ = try Reaction.save(db, reaction: reaction)
+      }
+      publishMessageUpdate()
+    } catch {
+      log.error("Failed to roll back reaction removal", error: error)
+    }
+  }
+
+  private func publishMessageUpdate() {
+    Task(priority: .userInitiated) { @MainActor [messageId, chatId, peerId] in
+      MessagesPublisher.shared.messageUpdatedWithId(
+        messageId: messageId,
+        chatId: chatId,
+        peer: peerId,
+        animated: true
+      )
     }
   }
 

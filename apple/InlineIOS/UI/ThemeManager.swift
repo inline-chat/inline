@@ -181,10 +181,17 @@ struct SharedThemeConfig: ThemeConfig {
   var failedBubbleBackground: UIColor { .systemRed }
   var primaryTextColor: UIColor? { dynamicColor(\.incomingText) }
   var secondaryTextColor: UIColor? { dynamicColor(\.incomingSecondaryText) }
+  // Reactions: your own is filled (white on outgoing bubbles, the accent on incoming ones), others
+  // are tinted with that color so the pill reads on the bubble, as in Telegram.
   var reactionOutgoingPrimary: UIColor? { .white }
-  var reactionOutgoingSecoundry: UIColor? { UIColor.white.withAlphaComponent(0.12) }
+  var reactionOutgoingSecoundry: UIColor? { UIColor.white.withAlphaComponent(0.2) }
   var reactionIncomingPrimary: UIColor? { accent }
-  var reactionIncomingSecoundry: UIColor? { incomingBubbleBackground }
+  var reactionIncomingSecoundry: UIColor? {
+    let accent = accent
+    return UIColor { traits in
+      accent.resolvedColor(with: traits).withAlphaComponent(traits.userInterfaceStyle == .dark ? 0.2 : 0.12)
+    }
+  }
   var documentIconBackground: UIColor? { accent.withAlphaComponent(0.16) }
   var listRowBackground: UIColor? { nil }
   var listSeparatorColor: UIColor? { nil }

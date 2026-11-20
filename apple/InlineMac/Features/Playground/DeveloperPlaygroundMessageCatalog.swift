@@ -354,6 +354,7 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
       [
         .init(.photo, "Photo", "Local deterministic image without a caption"),
         .init(.photoCaption, "Photo with caption", "Native photo slot plus text"),
+        .init(.album, "Album", "Four photos sent together, in one grid, with a caption"),
         .init(.video, "Video", "Video dimensions, thumbnail, duration, and play treatment"),
         .init(.pdf, "PDF document", "Document name, MIME type, and file size"),
         .init(.archive, "Archive file", "Generic file presentation through the document slot"),
@@ -452,6 +453,7 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case multipleUrlPreviews
   case photo
   case photoCaption
+  case album
   case video
   case pdf
   case archive
@@ -600,6 +602,23 @@ private enum DeveloperMessageCatalogFactory {
         id: id,
         text: "The updated app artwork is ready.",
         photo: photoInfo(id: id + 1)
+      )
+    case .album:
+      // A landscape, a portrait and two squares: Telegram's "one over three" arrangement.
+      let shapes: [(CGFloat, CGFloat)] = [(384, 256), (384, 384), (288, 384), (384, 384)]
+      let items = shapes.enumerated().map { index, shape -> FullMessage in
+        let itemId = id + Int64(index) * 10
+        var item = fixture(
+          id: itemId,
+          text: index == 0 ? "Weekend photos" : nil,
+          photo: photoInfo(id: itemId + 1, width: shape.0, height: shape.1)
+        ).message
+        item.message.groupedId = 77
+        return item
+      }
+      let album = MessageAlbum(items: items)!
+      return DeveloperMessageFixture(
+        message: album.bubbleMessage, conversation: .space, groupPosition: .isolated, isRtl: false, album: album
       )
     case .video:
       return fixture(
@@ -1798,6 +1817,17 @@ private enum DeveloperMessageCatalogFactory {
         blockContent: blockContent
       )
     }
+  }
+
+  private static func photoInfo(id: Int64, width: CGFloat, height: CGFloat) -> PhotoInfo {
+    var info = photoInfo(id: id)
+    info.sizes = info.sizes.map { size in
+      var size = size
+      size.width = Int(width)
+      size.height = Int(height)
+      return size
+    }
+    return info
   }
 
   private static func photoInfo(id: Int64) -> PhotoInfo {

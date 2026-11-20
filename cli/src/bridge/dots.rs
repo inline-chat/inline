@@ -184,7 +184,7 @@ impl BotDm {
         profile: Option<ProfileSync>,
         owner: Option<Arc<super::owner_control::OwnerControl>>,
     ) -> io::Result<Self> {
-        let http = reqwest::Client::builder()
+        let http = crate::identity::http_client_builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(60))
             .build()

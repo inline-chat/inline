@@ -67,9 +67,6 @@ export const AMAZON_SECRET_ACCESS_KEY = process.env["AMAZON_SECRET_ACCESS_KEY"] 
 export const SES_ACCESS_KEY_ID = process.env["SES_ACCESS_KEY_ID"] as string
 export const SES_SECRET_ACCESS_KEY = process.env["SES_SECRET_ACCESS_KEY"] as string
 export const SES_REGION = process.env["SES_REGION"] ?? "eu-central-1"
-export const TWILIO_AUTH_TOKEN = process.env["TWILIO_AUTH_TOKEN"] as string
-export const TWILIO_SID = process.env["TWILIO_SID"] as string
-export const TWILIO_VERIFY_SERVICE_SID = process.env["TWILIO_VERIFY_SERVICE_SID"] as string
 export const SENTRY_DSN = process.env["SENTRY_DSN"] as string
 export const RESEND_API_KEY = process.env["RESEND_API_KEY"] as string
 
@@ -150,9 +147,6 @@ if (ENCRYPTION_KEY) {
 
 // Check optional variables
 const optionalVariables = [
-  "TWILIO_AUTH_TOKEN",
-  "TWILIO_SID",
-  "TWILIO_VERIFY_SERVICE_SID",
   "SENTRY_DSN",
   "IPINFO_TOKEN",
   "OPENAI_API_KEY",

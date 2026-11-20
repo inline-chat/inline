@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import InlineIOSUI
+import InlineMessageLayout
 import SwiftUI
 
 struct ExperimentalView: View {
@@ -8,14 +9,17 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
-  @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
-  private var richMessageCopyEditingEnabled = false
-
   @AppStorage(NextMessageViewFeature.preferenceKey)
   private var nextMessageViewEnabled = true
 
   @AppStorage(MessageContextMenuFeature.preferenceKey)
   private var customContextMenuEnabled = true
+
+  @AppStorage(TimelineFeature.preferenceKey)
+  private var timelineEnabled = true
+
+  @AppStorage(MessageAlbumView.layoutStyleKey)
+  private var albumLayout = AlbumLayoutStyle.telegram.rawValue
 
   var body: some View {
     List {
@@ -39,17 +43,6 @@ struct ExperimentalView: View {
       }
 
       Section {
-        SettingsItem(icon: "textformat", iconColor: .purple, title: "Rich Copy & Markdown Editing") {
-          Toggle("Rich Copy & Markdown Editing", isOn: $richMessageCopyEditingEnabled)
-            .labelsHidden()
-        }
-      } header: {
-        Text("Messages")
-      } footer: {
-        Text("Preserve formatting when copying messages. Show Markdown syntax when pasting formatted text or editing a message.")
-      }
-
-      Section {
         SettingsItem(
           icon: "contextualmenu.and.cursorarrow",
           iconColor: .indigo,
@@ -61,12 +54,22 @@ struct ExperimentalView: View {
               if enabled { MessageContextMenuFeature.resetCrashGuard() }
             }
         }
+      } header: {
+        Text("Messages")
       } footer: {
         Text("Holding a message opens Inline's menu, where you can select and quote part of the text. Turn it off to use the system menu. Reopen the chat after changing it.")
       }
 
       if SettingsBuildAudience.showsDebugTools {
         Section {
+          SettingsItem(
+            icon: "list.bullet.rectangle.fill",
+            iconColor: .purple,
+            title: "New Message List"
+          ) {
+            Toggle("New Message List", isOn: $timelineEnabled)
+              .labelsHidden()
+          }
           SettingsItem(
             icon: "text.bubble.fill",
             iconColor: .orange,
@@ -75,10 +78,23 @@ struct ExperimentalView: View {
             Toggle("Next Message View", isOn: $nextMessageViewEnabled)
               .labelsHidden()
           }
+          SettingsItem(
+            icon: "square.grid.2x2.fill",
+            iconColor: .teal,
+            title: "Album Layout"
+          ) {
+            Picker("Album Layout", selection: $albumLayout) {
+              // Islands are the Mac's minimal style.
+              ForEach(AlbumLayoutStyle.allCases.filter { $0 != .islands }, id: \.rawValue) { style in
+                Text(style.title).tag(style.rawValue)
+              }
+            }
+            .labelsHidden()
+          }
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("The next message view is on by default. Turn it off to compare with the previous view. Reopen the chat after changing it.")
+          Text("The next message view is on by default. Turn it off to compare with the previous view. Album Layout picks how photos sent together are drawn in the next message view. Reopen the chat after changing either.")
         }
       }
     }

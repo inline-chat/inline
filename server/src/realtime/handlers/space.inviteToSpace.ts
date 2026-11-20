@@ -1,4 +1,3 @@
-// TODO: Use generated protocol types when available
 import type { InviteToSpaceInput, InviteToSpaceResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"

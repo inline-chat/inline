@@ -23,8 +23,10 @@ export async function deleteChatHandler(
     )
     return {}
   } catch (err) {
-    log.error("Failed to delete chat", { error: err })
+    // Rejections (bad peer, not allowed) are the caller's outcome; deleteChat
+    // already logs its own internal failures before wrapping them.
     if (err instanceof RealtimeRpcError) throw err
+    log.error("Failed to delete chat", { error: err })
     throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to delete chat", 500)
   }
 }

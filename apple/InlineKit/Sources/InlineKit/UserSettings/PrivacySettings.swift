@@ -82,17 +82,22 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
   @Published public private(set) var timeZoneRule: PrivacyRuleValue?
   /// The server's Focus rule. Nil until a server sends one, and saves then omit it.
   @Published public private(set) var focusStatusRule: PrivacyRuleValue?
+  /// The voice transcription choice. Nil until a server sends one or the user
+  /// sets it; saves then omit it so a stale device cannot undo an opt-out.
+  @Published public private(set) var transcribeVoiceMessagesValue: Bool?
 
   public init(
     shareTimeZone: Bool = true,
     appearInGlobalSearch: Bool = true,
     timeZoneRule: PrivacyRuleValue? = nil,
-    focusStatusRule: PrivacyRuleValue? = nil
+    focusStatusRule: PrivacyRuleValue? = nil,
+    transcribeVoiceMessages: Bool? = nil
   ) {
     self.shareTimeZone = shareTimeZone
     self.appearInGlobalSearch = appearInGlobalSearch
     self.timeZoneRule = timeZoneRule
     self.focusStatusRule = focusStatusRule
+    transcribeVoiceMessagesValue = transcribeVoiceMessages
   }
 
   convenience init(from settings: InlineProtocol.PrivacySettings) {
@@ -100,8 +105,20 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
       shareTimeZone: settings.hasShareTimeZone ? settings.shareTimeZone : true,
       appearInGlobalSearch: settings.hasAppearInGlobalSearch ? settings.appearInGlobalSearch : true,
       timeZoneRule: settings.hasTimeZone ? PrivacyRuleValue(from: settings.timeZone) : nil,
-      focusStatusRule: settings.hasFocusStatus ? PrivacyRuleValue(from: settings.focusStatus) : nil
+      focusStatusRule: settings.hasFocusStatus ? PrivacyRuleValue(from: settings.focusStatus) : nil,
+      transcribeVoiceMessages: settings.hasTranscribeVoiceMessages ? settings.transcribeVoiceMessages : nil
     )
+  }
+
+  /// Voice messages the user sends are transcribed unless they turned it off.
+  public var transcribeVoiceMessages: Bool {
+    get { transcribeVoiceMessagesValue ?? true }
+    set { if transcribeVoiceMessagesValue != newValue { transcribeVoiceMessagesValue = newValue } }
+  }
+
+  /// Applies a server value without treating it as a local edit.
+  func replaceTranscribeVoiceMessages(_ value: Bool?) {
+    if transcribeVoiceMessagesValue != value { transcribeVoiceMessagesValue = value }
   }
 
   /// Focus status is opt-in: nobody sees it until the user adds an audience.
@@ -146,6 +163,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
       $0.appearInGlobalSearch = appearInGlobalSearch
       if let timeZoneRule { $0.timeZone = timeZoneRule.toProtocol() }
       if let focusStatusRule { $0.focusStatus = focusStatusRule.toProtocol() }
+      if let transcribeVoiceMessagesValue { $0.transcribeVoiceMessages = transcribeVoiceMessagesValue }
     }
   }
 
@@ -154,6 +172,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     case appearInGlobalSearch
     case timeZoneRule
     case focusStatusRule
+    case transcribeVoiceMessages
   }
 
   public required init(from decoder: Decoder) throws {
@@ -162,6 +181,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     appearInGlobalSearch = try container.decodeIfPresent(Bool.self, forKey: .appearInGlobalSearch) ?? true
     timeZoneRule = try container.decodeIfPresent(PrivacyRuleValue.self, forKey: .timeZoneRule)
     focusStatusRule = try container.decodeIfPresent(PrivacyRuleValue.self, forKey: .focusStatusRule)
+    transcribeVoiceMessagesValue = try container.decodeIfPresent(Bool.self, forKey: .transcribeVoiceMessages)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -170,5 +190,6 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     try container.encode(appearInGlobalSearch, forKey: .appearInGlobalSearch)
     try container.encodeIfPresent(timeZoneRule, forKey: .timeZoneRule)
     try container.encodeIfPresent(focusStatusRule, forKey: .focusStatusRule)
+    try container.encodeIfPresent(transcribeVoiceMessagesValue, forKey: .transcribeVoiceMessages)
   }
 }

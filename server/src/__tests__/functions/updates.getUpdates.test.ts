@@ -2372,7 +2372,7 @@ describe("getUpdates", () => {
     const settings = Encoders.userSettings({
       general: {
         notifications: { mode: UserSettingsNotificationsMode.All, silent: false, disableDmNotifications: false },
-        privacy: { shareTimeZone: false, appearInGlobalSearch: true },
+        privacy: { shareTimeZone: false, appearInGlobalSearch: true, transcribeVoiceMessages: true },
         compose: { replacePastedLinksWithTitles: true },
       },
     })

@@ -24,24 +24,45 @@ enum GettingStartedAction: String, CaseIterable, Identifiable {
   var title: String {
     switch self {
     case .setUpAgent: "Set up your agent"
-    case .inviteFriend: "Invite a friend"
+    case .inviteFriend: "Invite your team"
     case .createSpace: "Create a space"
-    case .installTools: "Install our CLI, MCP, skill, etc"
-    case .messageFounder: "Message @Mo (Inline Founder)"
-    case .joinCommunity: "Join our community"
+    case .installTools: "CLI, MCP, and skills"
+    case .messageFounder: "Message Mo"
+    case .joinCommunity: "Join the community"
     }
   }
 
   var systemImage: String {
     switch self {
-    case .setUpAgent: "teddybear"
+    case .setUpAgent: "sparkles"
     case .inviteFriend: "person.badge.plus"
-    case .createSpace: "plus.circle"
+    case .createSpace: "square.grid.2x2"
     case .installTools: "terminal"
-    case .messageFounder: "bubble.middle.bottom"
-    case .joinCommunity: "person.2"
+    case .messageFounder: "bubble.left"
+    case .joinCommunity: "globe"
     }
   }
+
+  /// Primary steps get full-strength text; the rest sit below a divider in secondary text.
+  var isPrimary: Bool {
+    switch self {
+    case .setUpAgent, .inviteFriend, .createSpace: true
+    case .installTools, .messageFounder, .joinCommunity: false
+    }
+  }
+
+  var opensInBrowser: Bool {
+    self == .installTools
+  }
+
+  static var primary: [GettingStartedAction] { allCases.filter(\.isPrimary) }
+  static var secondary: [GettingStartedAction] { allCases.filter { !$0.isPrimary } }
+}
+
+private enum GettingStartedMetrics {
+  static let width: CGFloat = 260
+  static let rowInset: CGFloat = 7
+  static let rowHeight: CGFloat = 28
 }
 
 struct GettingStartedView: View {
@@ -53,31 +74,42 @@ struct GettingStartedView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       GettingStartedLogo()
-        .padding(.bottom, 12)
+        .padding(.leading, GettingStartedMetrics.rowInset)
+        .padding(.bottom, 14)
 
-      GettingStartedHeader(dismiss: dismiss)
-        .padding(.horizontal, 6)
-        .padding(.bottom, 10)
+      GettingStartedHeader()
+        .padding(.horizontal, GettingStartedMetrics.rowInset)
+        .padding(.bottom, 14)
 
-      VStack(spacing: 2) {
-        ForEach(GettingStartedAction.allCases) { action in
-          GettingStartedActionRow(
-            title: action.title,
-            systemImage: action.systemImage,
-            isDisabled: isPerformingAction
-          ) {
-            guard !isPerformingAction else { return }
-            isPerformingAction = true
-            Task { @MainActor in
-              await perform(action)
-              isPerformingAction = false
-            }
+      actionGroup(GettingStartedAction.primary)
+
+      Divider()
+        .padding(.horizontal, GettingStartedMetrics.rowInset)
+        .padding(.vertical, 8)
+
+      actionGroup(GettingStartedAction.secondary)
+
+      GettingStartedHideButton(action: dismiss)
+        .padding(.leading, GettingStartedMetrics.rowInset)
+        .padding(.top, 12)
+    }
+    .frame(width: GettingStartedMetrics.width, alignment: .leading)
+    .offset(y: -30)
+  }
+
+  private func actionGroup(_ actions: [GettingStartedAction]) -> some View {
+    VStack(spacing: 1) {
+      ForEach(actions) { action in
+        GettingStartedActionRow(action: action, isDisabled: isPerformingAction) {
+          guard !isPerformingAction else { return }
+          isPerformingAction = true
+          Task { @MainActor in
+            await perform(action)
+            isPerformingAction = false
           }
         }
       }
     }
-    .frame(width: 300, alignment: .leading)
-    .offset(y: -34)
   }
 }
 
@@ -87,69 +119,75 @@ private struct GettingStartedLogo: View {
       .renderingMode(.template)
       .resizable()
       .scaledToFit()
-      .frame(width: 26, height: 26)
+      .frame(width: 22, height: 22)
       .foregroundStyle(.primary)
-      .frame(width: 36, height: 36)
       .allowsHitTesting(false)
       .accessibilityHidden(true)
   }
 }
 
 private struct GettingStartedHeader: View {
-  let dismiss: () -> Void
-
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var isHovered = false
-
   var body: some View {
-    HStack(spacing: 10) {
+    VStack(alignment: .leading, spacing: 3) {
       Text("Welcome to Inline")
-        .font(.system(size: 15, weight: .medium))
+        .font(.system(size: 15, weight: .semibold))
         .foregroundStyle(.primary)
 
-      Rectangle()
-        .fill(Color.primary.opacity(0.12))
-        .frame(width: 76, height: 1)
-
-      Button("dismiss", action: dismiss)
+      Text("Chat for your team and your agents.")
         .font(.system(size: 13))
         .foregroundStyle(.secondary)
-        .buttonStyle(.plain)
-        .focusEffectDisabled(true)
-        .opacity(isHovered ? 1 : 0)
-        .allowsHitTesting(isHovered)
     }
-    .frame(height: 24)
-    .contentShape(Rectangle())
-    .onHover { isHovered = $0 }
-    .animation(reduceMotion ? nil : .easeInOut(duration: 0.1), value: isHovered)
+    .accessibilityElement(children: .combine)
+    .accessibilityAddTraits(.isHeader)
   }
 }
 
-private struct GettingStartedActionRow: View {
-  let title: String
-  let systemImage: String
-  let isDisabled: Bool
+private struct GettingStartedHideButton: View {
   let action: () -> Void
 
   @State private var isHovered = false
 
   var body: some View {
-    Button(action: action) {
-      HStack(spacing: 8) {
-        Image(systemName: systemImage)
-          .font(.system(size: 13, weight: .medium))
-          .frame(width: 16, height: 16)
-          .foregroundStyle(Color.secondary)
+    Button("Hide", action: action)
+      .font(.system(size: 12))
+      .foregroundStyle(isHovered ? HierarchicalShapeStyle.secondary : .tertiary)
+      .buttonStyle(.plain)
+      .focusEffectDisabled(true)
+      .onHover { isHovered = $0 }
+      .help("Hide getting started")
+      .accessibilityLabel("Hide getting started")
+  }
+}
 
-        Text(title)
+private struct GettingStartedActionRow: View {
+  let action: GettingStartedAction
+  let isDisabled: Bool
+  let onTap: () -> Void
+
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: onTap) {
+      HStack(spacing: 9) {
+        Image(systemName: action.systemImage)
+          .font(.system(size: 13))
+          .frame(width: 18)
+
+        Text(action.title)
           .font(.system(size: 13))
           .lineLimit(1)
-          .foregroundStyle(Color.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
 
+        if action.opensInBrowser {
+          Image(systemName: "arrow.up.right")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+        }
       }
-      .padding(.horizontal, 6)
-      .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+      .foregroundStyle(action.isPrimary ? HierarchicalShapeStyle.primary : .secondary)
+      .padding(.horizontal, GettingStartedMetrics.rowInset)
+      .frame(maxWidth: .infinity, minHeight: GettingStartedMetrics.rowHeight, alignment: .leading)
       .contentShape(Rectangle())
     }
     .buttonStyle(GettingStartedButtonStyle(isHovered: isHovered && !isDisabled))
@@ -166,16 +204,15 @@ private struct GettingStartedButtonStyle: ButtonStyle {
     configuration.label
       .background(backgroundColor(isPressed: configuration.isPressed))
       .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-      .scaleEffect(configuration.isPressed ? 0.95 : 1)
-      .opacity(configuration.isPressed ? 0.8 : 1)
+      .scaleEffect(configuration.isPressed ? 0.97 : 1)
       .animation(.mediumFeedback, value: configuration.isPressed)
   }
 
   private func backgroundColor(isPressed: Bool) -> Color {
     if isPressed {
-      Color.primary.opacity(0.15)
+      Color.primary.opacity(0.1)
     } else if isHovered {
-      Color.primary.opacity(0.03)
+      Color.primary.opacity(0.05)
     } else {
       .clear
     }

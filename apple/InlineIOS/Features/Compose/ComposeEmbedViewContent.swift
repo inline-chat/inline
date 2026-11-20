@@ -54,6 +54,12 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
     setupConstraints()
     setupObservers()
     updateContent()
+    // VoiceOver read the symbol's name ("Close") without saying what closes.
+    closeButton.accessibilityLabel = switch mode {
+      case .reply: "Cancel reply"
+      case .edit: "Cancel editing"
+      case .forward: "Cancel forward"
+    }
   }
 
   @available(*, unavailable)

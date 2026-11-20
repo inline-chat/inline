@@ -223,6 +223,8 @@ public final class HomeViewModel: ObservableObject {
   @Published public private(set) var archivedChats: [HomeChatItem] = []
 
   private var chatsCancellable: AnyCancellable?
+  /// Bumped per chat snapshot so a slower background sort cannot overwrite a newer one.
+  private var chatsSortGeneration = 0
   private var spacesCancellable: AnyCancellable?
   private var db: AppDatabase
 
@@ -257,6 +259,8 @@ public final class HomeViewModel: ObservableObject {
           let isInitial = self.chats.isEmpty
 
           self.chats = chats
+          self.chatsSortGeneration += 1
+          let generation = self.chatsSortGeneration
 
           if isInitial {
             let sortedChats = Self.sortChats(Self.filterEmptyChats(chats))
@@ -267,12 +271,12 @@ public final class HomeViewModel: ObservableObject {
             myChats = filteredMyChats
           } else {
             Task.detached {
-              // FIXME: Optimize this madness
               let sortedChats = Self.sortChats(Self.filterEmptyChats(chats))
               let filteredArchived = Self.filterArchived(sortedChats, archived: true)
               let filteredMyChats = Self.filterArchived(sortedChats, archived: false)
 
               Task { @MainActor in
+                guard generation == self.chatsSortGeneration else { return }
                 withAnimation(.smooth) {
                   self.archivedChats = filteredArchived
                   self.myChats = filteredMyChats

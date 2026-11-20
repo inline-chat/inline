@@ -368,39 +368,27 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
 
-    var didSendImage = false
+    var items: [AlbumSendItem] = []
     for (index, photoItem) in photoItems.enumerated() {
       do {
         let mediaItem = try makeImageAttachment(photoItem.image, optimizePhoto: true)
-
-        // Include caption for each photo if it has one
-        let isFirst = index == 0
+        // Each photo keeps its own caption; the album shows the first one.
         let captionText = photoItem.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let messageText = captionText?.isEmpty == false ? captionText : nil
-
-        Transactions.shared.mutate(
-          transaction: .sendMessage(
-            .init(
-              text: messageText,
-              peerId: peerId,
-              chatId: chatId ?? 0,
-              mediaItems: [mediaItem],
-              replyToMsgId: isFirst ? replyToMessageId : nil,
-              isSticker: nil,
-              entities: nil
-            )
-          )
-        )
-        didSendImage = true
-
-        Log.shared
-          .debug(
-            "Sent image \(index + 1)/\(photoItems.count) with caption: '\(String(describing: captionText))'"
-          )
+        items.append(AlbumSendItem(media: mediaItem, text: captionText?.isEmpty == false ? captionText : nil))
       } catch {
         Log.shared.error("Failed to save and send photo \(index + 1)", error: error)
       }
     }
+    // Photos picked together go out as albums of up to ten.
+    for send in TransactionSendMessage.sends(
+      peerId: peerId,
+      chatId: chatId ?? 0,
+      items: items,
+      replyToMsgId: replyToMessageId
+    ) {
+      Transactions.shared.mutate(transaction: .sendMessage(send))
+    }
+    let didSendImage = !items.isEmpty
 
     if didSendImage, let chatId {
       IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)

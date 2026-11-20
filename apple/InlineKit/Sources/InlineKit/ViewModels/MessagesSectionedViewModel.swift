@@ -75,6 +75,9 @@ public class MessagesSectionedViewModel {
     progressiveViewModel.threadAnchor
   }
 
+  /// Ordered, revisioned row snapshots (`ChatRowFeed`), alongside the sections.
+  public var rowFeed: ChatRowFeed { progressiveViewModel.rowFeed }
+
   /// Frozen when the opening window was prepared. Reading while this visit is visible
   /// must not move its separator or change the initial landing.
   public let openingUnreadBoundary: Int64?
@@ -120,6 +123,7 @@ public class MessagesSectionedViewModel {
       chatId: chatId,
       reversed: reversed,
       initialState: initialState,
+      collapsedMaxId: collapsedMaxId,
       database: database,
       publisher: publisher
     )
@@ -221,6 +225,7 @@ public class MessagesSectionedViewModel {
   public func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     guard self.collapsedMaxId != collapsedMaxId else { return }
     self.collapsedMaxId = collapsedMaxId
+    progressiveViewModel.rowFeed.setCollapsedMaxId(collapsedMaxId)
     rebuildSections()
     callback?(.reload(animated: false))
   }

@@ -19157,6 +19157,17 @@ public nonisolated struct PrivacySettings: Sendable {
   /// Clears the value of `focusStatus`. Subsequent reads from it will return its default value.
   public mutating func clearFocusStatus() {self._focusStatus = nil}
 
+  /// If false, voice messages this user sends are not sent to a transcription
+  /// service. Absent means true (the default).
+  public var transcribeVoiceMessages: Bool {
+    get {_transcribeVoiceMessages ?? false}
+    set {_transcribeVoiceMessages = newValue}
+  }
+  /// Returns true if `transcribeVoiceMessages` has been explicitly set.
+  public var hasTranscribeVoiceMessages: Bool {self._transcribeVoiceMessages != nil}
+  /// Clears the value of `transcribeVoiceMessages`. Subsequent reads from it will return its default value.
+  public mutating func clearTranscribeVoiceMessages() {self._transcribeVoiceMessages = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -19165,6 +19176,7 @@ public nonisolated struct PrivacySettings: Sendable {
   fileprivate var _appearInGlobalSearch: Bool? = nil
   fileprivate var _timeZone: PrivacyRule? = nil
   fileprivate var _focusStatus: PrivacyRule? = nil
+  fileprivate var _transcribeVoiceMessages: Bool? = nil
 }
 
 /// Who can see one piece of the user's information. The user always sees their own.
@@ -21096,6 +21108,20 @@ public nonisolated struct SendMessageInput: @unchecked Sendable {
   /// Clears the value of `via`. Subsequent reads from it will return its default value.
   public mutating func clearVia() {_uniqueStorage()._via = nil}
 
+  /// Album: photos and videos sent together share one sender-chosen non-zero
+  /// id, sent as consecutive messages in order. Stored as Message.grouped_id.
+  /// Requires photo, video or document media. Clients draw consecutive messages
+  /// from one sender with the same id as one grid; older clients show them as
+  /// separate messages.
+  public var groupedID: Int64 {
+    get {_storage._groupedID ?? 0}
+    set {_uniqueStorage()._groupedID = newValue}
+  }
+  /// Returns true if `groupedID` has been explicitly set.
+  public var hasGroupedID: Bool {_storage._groupedID != nil}
+  /// Clears the value of `groupedID`. Subsequent reads from it will return its default value.
+  public mutating func clearGroupedID() {_uniqueStorage()._groupedID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -21943,9 +21969,10 @@ public nonisolated struct SearchMessagesInput: Sendable {
   public mutating func clearFilter() {self._filter = nil}
 
   /// Count every matching message instead of returning a page: the result has
-  /// total_count set and no messages. Scans the whole chat, so clients send it
-  /// alongside the first page request rather than waiting on it. Requires
-  /// queries; limit and offset_id are ignored.
+  /// total_count set and no messages. Clients send it alongside the first page
+  /// request rather than waiting on it. Requires queries (a full scan), or a
+  /// photo, video, photo_video, document or voice memo filter on its own (an
+  /// indexed count); links still need queries. limit and offset_id are ignored.
   public var countOnly: Bool {
     get {_countOnly ?? false}
     set {_countOnly = newValue}
@@ -53435,7 +53462,7 @@ nonisolated extension ComposeSettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PrivacySettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0\u{3}time_zone\0\u{3}focus_status\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0\u{3}time_zone\0\u{3}focus_status\0\u{3}transcribe_voice_messages\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -53447,6 +53474,7 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 2: try { try decoder.decodeSingularBoolField(value: &self._appearInGlobalSearch) }()
       case 3: try { try decoder.decodeSingularMessageField(value: &self._timeZone) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._focusStatus) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._transcribeVoiceMessages) }()
       default: break
       }
     }
@@ -53469,6 +53497,9 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._focusStatus {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._transcribeVoiceMessages {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -53477,6 +53508,7 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs._appearInGlobalSearch != rhs._appearInGlobalSearch {return false}
     if lhs._timeZone != rhs._timeZone {return false}
     if lhs._focusStatus != rhs._focusStatus {return false}
+    if lhs._transcribeVoiceMessages != rhs._transcribeVoiceMessages {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -55875,7 +55907,7 @@ nonisolated extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendMessageInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{3}initial_agent_context\0\u{3}source_chat_id\0\u{3}block_content\0\u{3}reply_quote\0\u{3}add_mentioned_users\0\u{1}via\0\u{4}X\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{3}initial_agent_context\0\u{3}source_chat_id\0\u{3}block_content\0\u{3}reply_quote\0\u{3}add_mentioned_users\0\u{1}via\0\u{3}grouped_id\0\u{4}W\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _peerID: InputPeer? = nil
@@ -55896,6 +55928,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _replyQuote: String? = nil
     var _addMentionedUsers: Bool? = nil
     var _via: InputMessageVia? = nil
+    var _groupedID: Int64? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -55924,6 +55957,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       _replyQuote = source._replyQuote
       _addMentionedUsers = source._addMentionedUsers
       _via = source._via
+      _groupedID = source._groupedID
     }
   }
 
@@ -55958,6 +55992,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 14: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._addMentionedUsers) }()
         case 16: try { try decoder.decodeSingularMessageField(value: &_storage._via) }()
+        case 17: try { try decoder.decodeSingularInt64Field(value: &_storage._groupedID) }()
         case 1000: try { try decoder.decodeSingularInt64Field(value: &_storage._temporarySendDate) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
@@ -56020,6 +56055,9 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       try { if let v = _storage._via {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
       } }()
+      try { if let v = _storage._groupedID {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 17)
+      } }()
       try { if let v = _storage._temporarySendDate {
         try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
       } }()
@@ -56053,6 +56091,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._replyQuote != rhs_storage._replyQuote {return false}
         if _storage._addMentionedUsers != rhs_storage._addMentionedUsers {return false}
         if _storage._via != rhs_storage._via {return false}
+        if _storage._groupedID != rhs_storage._groupedID {return false}
         return true
       }
       if !storagesAreEqual {return false}

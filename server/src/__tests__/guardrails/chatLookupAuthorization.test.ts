@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url"
 // code should use `ChatModel.getAuthorizedChatFromInputPeer`; adding a file
 // here means its author reviewed that every path authorizes the chat itself.
 const reviewedUncheckedCallers = new Set([
-  "controllers/bot/bot.ts",
   "controllers/bot/operations.ts",
   "db/models/chats.ts",
   "functions/bot.getPresence.ts",

@@ -260,6 +260,12 @@ public actor FileUploader {
 
   // MARK: - Progress Tracking
 
+  /// A send joining an upload already running must not reset its progress to processing.
+  private func publishProcessingUnlessRunning(uploadId: String) {
+    guard uploadTasks[uploadId] == nil else { return }
+    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+  }
+
   private func updateProgress(uploadId: String, token: UUID, progress: UploadProgressSnapshot) {
     guard uploadTasks[uploadId] != nil, activeUploadTokens[uploadId] == token else { return }
     publishProgress(uploadId: uploadId, progress: progress)
@@ -286,7 +292,14 @@ public actor FileUploader {
     }
 
     if progress.stage == .completed || progress.stage == .failed {
-      finishProgressPublisher(uploadId: uploadId)
+      if progress.stage == .completed {
+        finishProgressPublisher(uploadId: uploadId)
+      } else if progressPublishers[uploadId] != nil {
+        // A failed attempt is not the end: the send retries under the same upload id, and views
+        // that bound to this stream must see that attempt's progress. The message status says
+        // when the send has really failed. Kept like any idle stream, so the set stays bounded.
+        retainInactivePublisher(uploadId: uploadId)
+      }
       let evicted = terminalStateKeys.record(uploadId)
       for evictedID in evicted {
         latestProgress.removeValue(forKey: evictedID)
@@ -301,7 +314,7 @@ public actor FileUploader {
       return Just(.failed(id: uploadId, error: FileUploadError.uploadCancelled)).eraseToAnyPublisher()
     }
 
-    if let latest = latestProgress[uploadId], latest.stage == .completed || latest.stage == .failed {
+    if let latest = latestProgress[uploadId], latest.stage == .completed {
       return Just(latest).eraseToAnyPublisher()
     }
 
@@ -425,7 +438,7 @@ public actor FileUploader {
     guard let localPhotoId = photoInfo.photo.id else { throw FileUploadError.invalidPhotoId }
     let uploadId = getUploadId(photoId: localPhotoId)
 
-    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    publishProcessingUnlessRunning(uploadId: uploadId)
 
     try await startUpload(
       media: .photo(photoInfo),
@@ -470,7 +483,7 @@ public actor FileUploader {
     }
 
     let uploadId = getUploadId(videoId: localVideoId)
-    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    publishProcessingUnlessRunning(uploadId: uploadId)
 
     let thumbnailPayload = try? thumbnailData(from: resolvedVideoInfo.thumbnail)
     let videoMetadata = ApiClient.VideoUploadMetadata(
@@ -543,7 +556,7 @@ public actor FileUploader {
     )
 
     let uploadId = getUploadId(voiceId: localVoiceId)
-    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    publishProcessingUnlessRunning(uploadId: uploadId)
 
     try await startUpload(
       media: .voice(voiceContent),
@@ -665,8 +678,13 @@ public actor FileUploader {
     case .photo:
       publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
       // A retry or resume reuses the body staged by the first attempt, so compressing again
-      // would only burn CPU and battery on output that is thrown away.
-      if await FileNativeUploadStagingStore.shared.hasStagedBody(logicalID: uploadId) {
+      // would only burn CPU and battery on output that is thrown away. The staging key is
+      // owner-scoped like the coordinator's, and the upload reads the staged (compressed) body,
+      // so its size checks measure what is sent, not the original.
+      if let owner = Auth.shared.getCurrentUserId(),
+         let staged = await FileNativeUploadStagingStore.shared.stagedBody(logicalID: "\(owner):\(uploadId)")
+      {
+        uploadUrl = staged
         break
       }
       do {
@@ -960,6 +978,23 @@ public actor FileUploader {
     }
   }
 
+  /// How far a media item's upload has come, from 0 to 1; nil before its upload reports.
+  public func uploadFraction(for media: FileMediaItem) -> Double? {
+    let uploadId: String? = switch media {
+    case let .photo(photo): photo.photo.id.map { getUploadId(photoId: $0) }
+    // A send may carry a video before its local row id is known; the send resolves it the same way.
+    case let .video(video): (try? resolveLocalVideoId(for: video.video)).map { getUploadId(videoId: $0) }
+    case let .document(document): document.document.id.map { getUploadId(documentId: $0) }
+    case let .voice(voice): getUploadId(voiceId: voice.voiceID)
+    }
+    return uploadId.flatMap { currentProgress(for: $0)?.fractionCompleted }
+  }
+
+  /// `uploadFraction(for:)` for several items in one call.
+  public func uploadFractions(for media: [FileMediaItem]) -> [Double?] {
+    media.map { uploadFraction(for: $0) }
+  }
+
   public func cancelAll() async {
     if let uploadResetTask {
       await uploadResetTask.value
@@ -1006,6 +1041,10 @@ public actor FileUploader {
 
   func retainedProgressPublisherCount() -> Int {
     progressPublishers.count
+  }
+
+  func publishProgressForTesting(_ progress: UploadProgressSnapshot) {
+    publishProgress(uploadId: progress.id, progress: progress)
   }
 
   // MARK: - Status Queries
@@ -1382,10 +1421,10 @@ public actor FileUploader {
       try Task.checkCancellation()
       return result
     } else {
-      // not found
-      Log.shared.warning("[FileUploader] Upload not found for \(uploadId)")
-      throw FileUploadError.failedToUpload
-      // return UploadResult(photoId: nil, videoId: nil, documentId: nil)
+      // Not running and not finished: the attempt this send joined ended (failed or was
+      // cancelled) between joining and waiting. The send retries and starts it again.
+      Log.shared.warning("[FileUploader] Upload not running for \(uploadId)")
+      throw FileUploadError.uploadNotRunning
     }
   }
 }
@@ -1406,6 +1445,7 @@ public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProv
   case uploadAlreadyCompleted
   case uploadCancelled
   case uploadTimeout
+  case uploadNotRunning
 
   public var errorDescription: String? {
     switch self {
@@ -1433,6 +1473,8 @@ public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProv
         "The upload was cancelled."
       case .uploadTimeout:
         "The upload timed out."
+      case .uploadNotRunning:
+        "The upload stopped before it finished."
     }
   }
 
@@ -1453,6 +1495,7 @@ public enum FileUploadError: Error, LocalizedError, PrivacySafeErrorCategoryProv
     case .uploadAlreadyCompleted: "file_upload:already_completed"
     case .uploadCancelled: "file_upload:cancelled"
     case .uploadTimeout: "file_upload:timeout"
+    case .uploadNotRunning: "file_upload:not_running"
     }
   }
 }

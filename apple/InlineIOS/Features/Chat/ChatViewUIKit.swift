@@ -1,3 +1,4 @@
+import InlineIOSUI
 import InlineKit
 import InlineProtocol
 import SwiftUI
@@ -94,20 +95,133 @@ public class ChatContainerView: UIView {
     return collectionView
   }()
 
+  /// The message list: the collection view, or the timeline behind its switch.
+  private lazy var messageList: any ChatMessageListHosting = {
+    guard usesTimeline else { return messagesCollectionView }
+    let timeline = TimelineMessagesView(
+      peer: peerId, chatId: chatId, spaceId: spaceId, initialState: initialMessages,
+      collapsedMaxId: collapsedMaxId, theme: theme, isPreview: isPreview
+    )
+    timeline.sendAnimationCoordinator = sendAnimationCoordinator
+    timeline.isKeyboardVisible = { [weak self] in (self?.keyboardCoordinator?.height ?? 0) > 0 }
+    // As for the collection view: the composer gets its focus back after the menu, and a tap that
+    // puts the keyboard away waits while it is open.
+    timeline.onContextMenuWillDisplay = { [weak self] in
+      guard let self else { return }
+      restoresComposeFocusAfterContextMenu = restoresComposeFocusAfterContextMenu
+        || composeView.textView.isFirstResponder
+      keyboardDismissTapGestureRecognizer.isEnabled = false
+    }
+    timeline.onContextMenuDidEnd = { [weak self] in
+      self?.restoreComposeFocusAfterContextMenu()
+    }
+    timeline.onScrollAffordanceChanged = { [weak self] state in
+      self?.setScrollButtonShown(state.isVisible)
+      self?.scrollButton.setCount(state.unreadCount)
+    }
+    timeline.onVisibleMessagesChanged = { [weak self] ids in
+      guard let navigator = self?.activityNavigator else { return }
+      if let ids { navigator.noteVisible(messageIds: ids) } else { navigator.clearVisible() }
+    }
+    timeline.list.releaseVelocityFilter = { [weak self] velocity in
+      // A drag that moved the keyboard ends there; the list does not also fling.
+      self?.keyboardCoordinator?.isInteractive == true ? 0 : velocity
+    }
+    timeline.translatesAutoresizingMaskIntoConstraints = false
+    return timeline
+  }()
+
+  // MARK: - Timeline keyboard (one owner)
+
+  private let usesTimeline: Bool
+  private var keyboardCoordinator: KeyboardCoordinator?
+  private var isApplyingKeyboard = false
+  /// Canvas below the composer while the keyboard is up: the system can draw the keyboard a few
+  /// frames after the composer starts to rise, and this is what shows in between.
+  private lazy var composeSkirt: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.isHidden = true
+    return view
+  }()
+
+  private func installTimelineKeyboard() {
+    let coordinator = KeyboardCoordinator(view: self)
+    // As the collection view's composer followed the keyboard layout guide: on iPad it rides on an
+    // undocked or split keyboard.
+    coordinator.followsUndockedKeyboard = UIDevice.current.userInterfaceIdiom == .pad
+    coordinator.ridingHeight = { [weak self] in
+      guard let self else { return 0 }
+      return max(0, bounds.maxY - (keyboardCoordinator?.height ?? 0) - composeContainerView.frame.minY)
+    }
+    coordinator.allowsInteractiveDismissal = { [weak self] point in
+      guard let self else { return false }
+      return messageList.bounds.contains(messageList.convert(point, from: nil))
+    }
+    coordinator.onChange = { [weak self] change in self?.applyKeyboard(change) }
+    keyboardCoordinator = coordinator
+  }
+
+  /// The composer and the list's bottom inset move here, together, and nowhere else.
+  private func applyKeyboard(_ change: KeyboardChange) {
+    composeSkirt.backgroundColor = theme.chatCanvas.uiColor
+    if keyboardCoordinator?.isFloating == true {
+      // A floating keyboard leaves the rows around it in sight.
+      composeSkirt.isHidden = true
+    } else if change.height > 0 {
+      composeSkirt.isHidden = false
+    } else {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        guard let self, keyboardCoordinator?.height == 0 else { return }
+        composeSkirt.isHidden = true
+      }
+    }
+    isApplyingKeyboard = true
+    composeContainerViewBottomConstraint?.constant = -max(0, change.height - safeAreaInsets.bottom)
+    switch change.timing {
+      case let .spring(mass, stiffness, damping, _):
+        let animator = UIViewPropertyAnimator(
+          duration: 0,
+          timingParameters: UISpringTimingParameters(
+            mass: mass, stiffness: stiffness, damping: damping, initialVelocity: .zero
+          )
+        )
+        animator.addAnimations { self.layoutIfNeeded() }
+        animator.startAnimation()
+      case .none:
+        UIView.performWithoutAnimation { self.layoutIfNeeded() }
+      case .curve:
+        // Inside a rotation: the layout joins the animation it is called in.
+        layoutIfNeeded()
+    }
+    isApplyingKeyboard = false
+    reportComposeArea(change.timing, isInteractive: change.isInteractive)
+  }
+
+  private func reportComposeArea(_ timing: TimelineTiming, isInteractive: Bool = false) {
+    guard usesTimeline, bounds.height > 0 else { return }
+    // A preview has no composer: the list rests on the safe area.
+    let composeTop = isPreview ? bounds.maxY - safeAreaInsets.bottom : composeContainerView.frame.minY
+    messageList.composeAreaDidChange(
+      bottomInset: max(0, bounds.maxY - composeTop), timing: timing, isInteractive: isInteractive
+    )
+  }
+
   private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
     let view = PinnedMessageHeaderView(peerId: peerId, chatId: chatId ?? 0, showsVoicePlayback: !isPreview)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.onHeightChange = { [weak self] height in
       self?.pinnedHeaderHeightConstraint?.constant = height
-      self?.messagesCollectionView.updatePinnedHeaderHeight(height)
+      self?.messageList.updatePinnedHeaderHeight(height)
     }
     view.onOpenMessage = { [weak self] messageID in
-      self?.messagesCollectionView.scrollToMessageWhenAvailable(messageID)
+      self?.messageList.scrollToMessageWhenAvailable(messageID)
     }
     view.onOpenVoiceMessage = { [weak self] target in
       guard let self else { return }
       onOpenVoiceMessage?(target) { [weak self] messageID in
-        self?.messagesCollectionView.scrollToMessageWhenAvailable(messageID, requiresExactMessage: true)
+        self?.messageList.scrollToMessageWhenAvailable(messageID, requiresExactMessage: true)
       }
     }
     view.onPlaybackError = { [weak self] error in self?.presentVoicePlaybackError(error) }
@@ -143,7 +257,7 @@ public class ChatContainerView: UIView {
     // An agent chat grows into its card inside the setters above. The handler
     // reads this lazy var, which is unset until this closure returns, so
     // subscribing any earlier re-runs the closure until the stack overflows.
-    messagesCollectionView.setInitialComposeHeight(view.composeHeightConstraint.constant)
+    messageList.setInitialComposeHeight(view.composeHeightConstraint.constant)
     view.onHeightChange = { [weak self] newHeight, animation in
       self?.handleComposeViewHeightChange(newHeight, animation: animation)
     }
@@ -154,8 +268,8 @@ public class ChatContainerView: UIView {
         guard onRenameThread?() == true else { return nil }
         return .completed
       case .collapseHistory:
-        guard let maxID = messagesCollectionView.highestPositiveMessageId else { return nil }
-        try await messagesCollectionView.collapseHistory(maxID: maxID)
+        guard let maxID = messageList.highestPositiveMessageId else { return nil }
+        try await messageList.collapseHistory(maxID: maxID)
         return .completed
       case .createSubthread:
         guard let chatId else { return nil }
@@ -243,8 +357,10 @@ public class ChatContainerView: UIView {
     collapsedMaxId: Int64? = nil,
     initialMessages: MessagesProgressiveViewModel.InitialState? = nil,
     isPreview: Bool = false,
-    theme: IOSThemeSnapshot
+    theme: IOSThemeSnapshot,
+    usesTimeline: Bool = false
   ) {
+    self.usesTimeline = usesTimeline
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
@@ -272,26 +388,37 @@ public class ChatContainerView: UIView {
       sendAnimationCoordinator?.cancelAll()
     }
     sendAnimationCoordinator?.setHostView(window == nil ? nil : self)
-    sendAnimationCoordinator?.setSourceLayoutView(window == nil ? nil : messagesCollectionView)
+    sendAnimationCoordinator?.setSourceLayoutView(window == nil ? nil : messageList)
     if !isPreview {
       attachEdgePanHandlerIfNeeded()
       resetComposeToSafeAreaIfKeyboardClosed()
     }
+    keyboardCoordinator?.attach(to: window)
   }
 
   override public func layoutSubviews() {
     super.layoutSubviews()
+    // A new size (a rotation) can follow the keyboard's last notification: the keyboard is measured again.
+    keyboardCoordinator?.viewDidLayout()
     reportComposeBottomOffsetIfNeeded()
+    if usesTimeline, !isApplyingKeyboard {
+      // The composer grew or the size changed: the list follows inside whatever animation this
+      // layout pass belongs to. The composer's height changes (the reply and edit bars, a new line)
+      // run in `UIView.animate`, whose default curve is ease-in-out; on another curve the newest row
+      // strayed up to 20 pt from the composer while the reply bar came and went.
+      let inherited = UIView.inheritedAnimationDuration
+      reportComposeArea(inherited > 0 ? .curve(duration: inherited, c1x: 0.42, c1y: 0, c2x: 0.58, c2y: 1) : .none)
+    }
   }
 
   /// On iPad the compose's laid-out position is the only reliable keyboard signal: the
   /// hardware keyboard shortcut bar and undocked keyboards report notification frames that
   /// disagree with it. The list reserves exactly the space the compose occupies.
   private func reportComposeBottomOffsetIfNeeded() {
-    guard IPadNavigationLane.isEnabled, !isPreview, window != nil, bounds.height > 0 else { return }
+    guard !usesTimeline, IPadNavigationLane.isEnabled, !isPreview, window != nil, bounds.height > 0 else { return }
     let offset = max(0, bounds.maxY - composeContainerView.frame.maxY)
     guard offset.isFinite else { return }
-    messagesCollectionView.setComposeBottomOffset(offset)
+    messageList.setComposeBottomOffset(offset)
   }
 
   // MARK: - Bot access
@@ -358,19 +485,26 @@ public class ChatContainerView: UIView {
       // An unchanged ordinary chat route does not own the pill's pending jump.
       guard lastRequestedFocus != nil else { return }
       lastRequestedFocus = nil
-      messagesCollectionView.cancelPendingMessageFocus()
+      messageList.cancelPendingMessageFocus()
       return
     }
     guard lastRequestedFocus?.messageID != messageID || lastRequestedFocus?.revision != requestRevision
       || lastRequestedFocus?.requiresExactMessage != requiresExactMessage else { return }
     lastRequestedFocus = (messageID, requestRevision, requiresExactMessage)
-    messagesCollectionView.scrollToMessageWhenAvailable(messageID, requiresExactMessage: requiresExactMessage)
+    messageList.scrollToMessageWhenAvailable(messageID, requiresExactMessage: requiresExactMessage)
   }
+
+  #if DEBUG
+  /// The harness's stand-in for a DM peer's focus status: the line under the newest message.
+  func debugSetStatusNotice(_ text: String?) {
+    (messageList as? TimelineMessagesView)?.viewModel.rowFeed.setStatusNotice(text)
+  }
+  #endif
 
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) {
     guard self.collapsedMaxId != collapsedMaxId else { return }
     self.collapsedMaxId = collapsedMaxId
-    messagesCollectionView.setCollapsedMaxId(collapsedMaxId)
+    messageList.setCollapsedMaxId(collapsedMaxId)
   }
 
   func applyTheme(_ theme: IOSThemeSnapshot) {
@@ -381,7 +515,7 @@ public class ChatContainerView: UIView {
     composeView.tintColor = theme.primary.uiColor
     pinnedHeaderView.tintColor = theme.primary.uiColor
     scrollButton.tintColor = theme.primary.uiColor
-    messagesCollectionView.applyTheme(theme)
+    messageList.applyTheme(theme)
   }
 
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
@@ -390,16 +524,16 @@ public class ChatContainerView: UIView {
     backgroundColor = theme.chatCanvas.uiColor
     tintColor = theme.primary.uiColor
 
-    addSubview(messagesCollectionView)
-    sendAnimationCoordinator?.setSourceLayoutView(messagesCollectionView)
+    addSubview(messageList)
+    sendAnimationCoordinator?.setSourceLayoutView(messageList)
     addSubview(pinnedHeaderView)
 
     pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: pinnedHeaderView.displayedHeight)
     let commonConstraints = [
-      messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
-      messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
-      messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-      messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      messageList.topAnchor.constraint(equalTo: topAnchor),
+      messageList.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+      messageList.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+      messageList.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       pinnedHeaderView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
       pinnedHeaderView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
@@ -413,14 +547,14 @@ public class ChatContainerView: UIView {
       return
     }
 
-    messagesCollectionView.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
+    messageList.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
     addSubview(composeContainerView)
     composeContainerView.addSubview(borderView)
     addSubview(mentionCompletionViewWrapper)
     addSubview(composeView)
     addSubview(scrollButton)
     scrollButton.onTap = { [weak self] in
-      self?.messagesCollectionView.scrollToBottom()
+      self?.messageList.scrollToBottom()
     }
     addSubview(mentionButton)
     mentionButton.onTap = { [weak self] in
@@ -441,7 +575,16 @@ public class ChatContainerView: UIView {
       },
     ]))
 
-    if usesIOS27KeyboardWorkaround {
+    if usesTimeline {
+      installTimelineKeyboard()
+      insertSubview(composeSkirt, belowSubview: composeContainerView)
+      NSLayoutConstraint.activate([
+        composeSkirt.topAnchor.constraint(equalTo: composeContainerView.bottomAnchor),
+        composeSkirt.leadingAnchor.constraint(equalTo: leadingAnchor),
+        composeSkirt.trailingAnchor.constraint(equalTo: trailingAnchor),
+        composeSkirt.heightAnchor.constraint(equalToConstant: 700),
+      ])
+    } else if usesIOS27KeyboardWorkaround {
       composeView.textView.setKeyboardTrackingAccessoryView(keyboardTrackingAccessoryView)
     } else {
       keyboardLayoutGuide.followsUndockedKeyboard = true
@@ -543,7 +686,7 @@ public class ChatContainerView: UIView {
   }
 
   private func applyActivityState(_ state: ChatActivityNavigator.State) {
-    messagesCollectionView.setUnreadState(state)
+    messageList.setUnreadState(state)
     // Read-marker updates arrive often while scrolling; only @ and ♥ changes move the stack.
     guard !state.hasSameActivity(as: activityState) || isFirstActivityState else { return }
     isFirstActivityState = false
@@ -566,7 +709,7 @@ public class ChatContainerView: UIView {
     guard let navigator = activityNavigator else { return }
     Task { @MainActor [weak self] in
       guard let messageId = await navigator.nextReactionMessageId(), let self else { return }
-      self.messagesCollectionView.scrollToMessageWhenAvailable(messageId)
+      self.messageList.scrollToMessageWhenAvailable(messageId)
     }
   }
 
@@ -574,12 +717,14 @@ public class ChatContainerView: UIView {
     guard let navigator = activityNavigator else { return }
     Task { @MainActor [weak self] in
       guard let messageId = await navigator.nextMessageId(), let self else { return }
-      self.messagesCollectionView.scrollToMessageWhenAvailable(messageId)
+      self.messageList.scrollToMessageWhenAvailable(messageId)
     }
   }
 
   private func setupObservers() {
-    if usesIOS27KeyboardWorkaround {
+    if usesTimeline {
+      // The keyboard coordinator is the only keyboard observer of this screen.
+    } else if usesIOS27KeyboardWorkaround {
       NotificationCenter.default.addObserver(
         self,
         selector: #selector(keyboardFrameWillChange),
@@ -800,7 +945,7 @@ public class ChatContainerView: UIView {
   }
 
   private func resetComposeToSafeAreaIfKeyboardClosed() {
-    guard window != nil else { return }
+    guard window != nil, !usesTimeline else { return }
     guard !composeView.textView.isFirstResponder || !isComposeKeyboardVisible else { return }
     UIView.performWithoutAnimation {
       guard self.setComposeSafeAreaBottom() else { return }
@@ -951,9 +1096,9 @@ public class ChatContainerView: UIView {
       SendMessageAnimationDiagnostics.event(
         "compose height-change-deferred-to-list newHeight=\(String(format: "%.1f", newHeight))"
       )
-      messagesCollectionView.deferComposeInsetForPendingSendAnimation(composeHeight: newHeight)
+      messageList.deferComposeInsetForPendingSendAnimation(composeHeight: newHeight)
     } else {
-      messagesCollectionView.updateComposeInset(
+      messageList.updateComposeInset(
         composeHeight: newHeight,
         animation: animation
       )
@@ -975,10 +1120,26 @@ public class ChatContainerView: UIView {
   }
 
   @objc private func handleEdgePan(_ gesture: UIGestureRecognizer) {
+    if usesTimeline {
+      // The system carries the keyboard with the popping screen, posts a hide when the swipe
+      // begins and brings the keyboard back without animation on cancel. Following any of that
+      // is the glitch: keep first responder, leave the composer where it is.
+      switch gesture.state {
+        case .began:
+          keyboardCoordinator?.suspend()
+        case .ended, .cancelled, .failed:
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.keyboardCoordinator?.resume()
+          }
+        default:
+          break
+      }
+      return
+    }
     // Dismiss keyboard as soon as back-swipe begins and guard against auto-refocus after cancel.
     switch gesture.state {
     case .began:
-      messagesCollectionView.cancelContextMenuKeyboardRestoration()
+      messageList.cancelContextMenuKeyboardRestoration()
       composeView.textView.isEditable = false
       composeView.textView.resignFirstResponder()
 
@@ -996,16 +1157,16 @@ public class ChatContainerView: UIView {
   }
 
   @objc private func handleTapOutsideCompose() {
-    guard !messagesCollectionView.isContextMenuInteractionActive,
+    guard !messageList.isContextMenuInteractionActive,
           composeView.textView.isFirstResponder else { return }
-    messagesCollectionView.cancelContextMenuKeyboardRestoration()
+    messageList.cancelContextMenuKeyboardRestoration()
     composeView.textView.resignFirstResponder()
   }
 
   private func restoreComposeFocusAfterContextMenu() {
     // An emoji selection can finish the menu before its overlay sheet closes.
     // Keep the pending focus request until the picker returns the key window.
-    guard !messagesCollectionView.isReactionPickerPresented else { return }
+    guard !messageList.isReactionPickerPresented else { return }
     let shouldRestore = restoresComposeFocusAfterContextMenu
     restoresComposeFocusAfterContextMenu = false
     keyboardDismissTapGestureRecognizer.isEnabled = true
@@ -1021,16 +1182,16 @@ public class ChatContainerView: UIView {
           controller.navigationController?.presentedViewController == nil,
           controller.navigationController.map({ $0.topViewController === controller }) ?? true
     else {
-      messagesCollectionView.cancelContextMenuKeyboardRestoration()
+      messageList.cancelContextMenuKeyboardRestoration()
       return
     }
     // Keyboard notifications can arrive after the menu animator completes.
-    messagesCollectionView.preserveContextMenuViewportForKeyboardRestoration()
+    messageList.preserveContextMenuViewportForKeyboardRestoration()
     // UIKit can retain focus while temporarily hiding the keyboard for its menu.
     // Restoring the viewport is still necessary when focus itself never changed.
     guard !composeView.textView.isFirstResponder else { return }
     if !composeView.textView.becomeFirstResponder() {
-      messagesCollectionView.cancelContextMenuKeyboardRestoration()
+      messageList.cancelContextMenuKeyboardRestoration()
     }
   }
 
@@ -1141,20 +1302,23 @@ extension ChatContainerView: UIGestureRecognizerDelegate {
     shouldReceive touch: UITouch
   ) -> Bool {
     guard gestureRecognizer === keyboardDismissTapGestureRecognizer else { return true }
-    guard !messagesCollectionView.isContextMenuInteractionActive else { return false }
+    guard !messageList.isContextMenuInteractionActive else { return false }
 
     // A date tap owns navigation. Dismissing the keyboard on the same tap can
     // change the list's insets and cancel the scroll started by the button.
     var touchedView = touch.view
     while let view = touchedView {
-      if view is DateSeparatorView {
+      if view is DateSeparatorView || view is TimelineDatePill {
         return false
       }
       if let cell = view as? MessageCollectionViewCell,
          cell.isMessageActionsButton(at: touch.location(in: cell)) {
         return false
       }
-      if view === messagesCollectionView {
+      if view is TimelineMessageActionsButton {
+        return false
+      }
+      if view === messageList {
         break
       }
       touchedView = view.superview
@@ -1187,6 +1351,8 @@ struct ChatViewUIKit: UIViewRepresentable {
   /// Set for a chat with a bot the viewer can't message.
   var noAccessNotice: BotNoAccessNotice? = nil
   var onMessageBotOwner: (Int64) -> Void = { _ in }
+  /// The new message list, read when the chat is built.
+  var usesTimeline = TimelineFeature.isEnabled(allowsOverride: SettingsBuildAudience.showsDebugTools)
 
   func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(
@@ -1196,7 +1362,8 @@ struct ChatViewUIKit: UIViewRepresentable {
       collapsedMaxId: collapsedMaxId,
       initialMessages: initialMessages,
       isPreview: isPreview,
-      theme: theme
+      theme: theme,
+      usesTimeline: usesTimeline
     )
     view.onRenameThread = isPreview ? nil : onRenameThread
     configureVoicePlaybackNavigation(view)

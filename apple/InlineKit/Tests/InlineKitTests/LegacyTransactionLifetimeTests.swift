@@ -37,6 +37,20 @@ struct LegacyTransactionLifetimeTests {
     #expect(admitted == false)
   }
 
+  @Test("a rejected resume leaves the row of the run still in the cache")
+  func rejectedResumeDoesNotRollBack() async throws {
+    let transactions = Transactions(actor: TransactionsActor(), cache: RejectingTransactionsCache())
+    let id = "resume-\(UUID().uuidString)"
+    MockMessageCache.shared.add(MockMessage(id: id, text: "failed row", status: .failed))
+    defer { MockMessageCache.shared.remove(id: id) }
+    let resumed = transactions.resumeRecovered(transaction: .mockMessage(
+      MockMessageTransaction(id: id, text: "failed row")
+    ))
+    #expect(resumed == false)
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(MockMessageCache.shared.messages.contains { $0.id == id })
+  }
+
   @Test("worker pool is bounded and clear joins active work")
   func workerPoolIsBoundedAndClearJoins() async {
     let probe = LegacyTransactionProbe.shared

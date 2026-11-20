@@ -731,11 +731,11 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     clearUploadProgressBinding(resetState: false)
   }
 
+  /// One attempt failed; the send retries or waits, so keep listening for the next attempt.
   func failUpload() {
     isUploadProcessing = false
     hideProgressRing()
     if let document { documentState = determineDocumentState(document) }
-    clearUploadProgressBinding(resetState: false)
   }
 
   private func syncUploadProgressBinding() {

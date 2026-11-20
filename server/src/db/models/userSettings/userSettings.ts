@@ -8,7 +8,7 @@ import { normalizeUserSettingsGeneral } from "@in/server/modules/notifications/n
 import { decrypt, encrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
 import { userSettings, users } from "@in/server/db/schema"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import type { Transaction } from "@in/server/db/types"
 import { effectiveTimeZoneRule, isPublicRule, mergePrivacyPatch } from "@in/server/modules/privacy/privacyRules"
 
@@ -19,6 +19,7 @@ const log = new Log("UserSettingsModel")
  */
 export const UserSettingsModel = {
   getGeneral,
+  getGeneralForUsers,
   updateGeneral,
   updateGeneralWithPatch,
 }
@@ -45,6 +46,13 @@ async function getGeneral(userId: number): Promise<UserSettingsGeneral | null> {
   }
 
   return decodeGeneral({ generalEncrypted, generalIv, generalTag }, userId)
+}
+
+/** Read privacy settings in the caller's snapshot without checking out another connection. */
+async function getGeneralForUsers(tx: Transaction, userIds: number[]): Promise<Map<number, UserSettingsGeneral | null>> {
+  if (userIds.length === 0) return new Map()
+  const rows = await tx.select().from(userSettings).where(inArray(userSettings.userId, userIds))
+  return new Map(rows.map(row => [row.userId, decodeGeneral(row, row.userId)]))
 }
 
 async function updateGeneral(userId: number, general: UserSettingsGeneralInput): Promise<UserSettingsGeneral> {

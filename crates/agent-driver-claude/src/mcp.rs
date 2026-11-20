@@ -268,16 +268,52 @@ pub(crate) fn rpc_error(id: Value, code: i64, message: &str) -> Value {
 
 /// The `--mcp-config` entry that declares an in-process server to the CLI.
 pub fn sdk_server_config(names: &[&str]) -> Value {
-    let servers: serde_json::Map<String, Value> = names
+    server_config(names, &[])
+}
+
+/// The `--mcp-config` document: in-process servers by name, plus stdio
+/// servers the CLI starts itself.
+pub fn server_config(sdk: &[&str], stdio: &[inline_agent_bridge::StdioMcpServer]) -> Value {
+    let mut servers: serde_json::Map<String, Value> = sdk
         .iter()
         .map(|name| ((*name).to_string(), json!({"type": "sdk", "name": name})))
         .collect();
+    for server in stdio {
+        servers.insert(
+            server.name.clone(),
+            json!({
+                "type": "stdio",
+                "command": server.command.to_string_lossy(),
+                "args": server.args,
+            }),
+        );
+    }
     json!({"mcpServers": servers})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_config_declares_sdk_and_stdio_servers() {
+        let stdio = inline_agent_bridge::StdioMcpServer {
+            name: "computer".into(),
+            command: "/usr/local/bin/inline".into(),
+            args: vec!["computer-use".into(), "mcp".into()],
+        };
+        assert_eq!(
+            server_config(&["inline"], &[stdio]),
+            json!({"mcpServers": {
+                "inline": {"type": "sdk", "name": "inline"},
+                "computer": {
+                    "type": "stdio",
+                    "command": "/usr/local/bin/inline",
+                    "args": ["computer-use", "mcp"],
+                },
+            }})
+        );
+    }
 
     fn server() -> ToolServer {
         ToolServer::new(

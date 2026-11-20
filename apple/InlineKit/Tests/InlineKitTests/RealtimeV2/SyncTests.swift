@@ -335,8 +335,16 @@ final class SyncTests {
     #expect(reported == [true, false, false, false, false, true, false, true])
   }
 
+  // Quarantined on CI (timing flake): intermittently logs a sync_state error for
+  // the single teardown on loaded runners while passing on reruns of the same
+  // commit. Failed in Apple Validation runs 43637693545 (.stopped) and
+  // 44493924773 (.notConnected). Runs locally and with INLINE_RUN_QUARANTINED_TESTS=1.
   @Test(
     "one transport teardown before a successful state check is not an error",
+    .disabled(
+      if: ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" && ProcessInfo.processInfo.environment["INLINE_RUN_QUARANTINED_TESTS"] == nil,
+      "Quarantined on CI: timing-flaky teardown retry (see comment)"
+    ),
     arguments: [SyncRequestFailureReason.stopped, .notConnected]
   )
   func singleTeardownStateFailureIsNotReported(reason: SyncRequestFailureReason) async {
@@ -940,7 +948,17 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
-  @Test("later out-of-order arrivals do not extend the grace deadline")
+  // Quarantined on CI (timing flake): asserts wall-clock elapsed time (< 1.6 s
+  // around a 900 ms sleep and a 1 s grace), which a loaded runner exceeds.
+  // Failed in Apple Validation runs 42525605338 (attempt 1) and 42839226561.
+  // Runs locally and with INLINE_RUN_QUARANTINED_TESTS=1.
+  @Test(
+    "later out-of-order arrivals do not extend the grace deadline",
+    .disabled(
+      if: ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" && ProcessInfo.processInfo.environment["INLINE_RUN_QUARANTINED_TESTS"] == nil,
+      "Quarantined on CI: wall-clock grace deadline (see comment)"
+    )
+  )
   func liveGapGraceDeadlineIsFixed() async {
     let storage = InMemorySyncStorage()
     let peer = makeChatPeer(chatId: 1)

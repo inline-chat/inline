@@ -10,6 +10,8 @@ use inline_agent_bridge::{ProcessHostError, StoreError};
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_RUNTIME_MESSAGE: &str = "Inline CLI bridge runtime failed";
+/// The coarse failure of a forwarded log line; its wording is the `detail` tag.
+const LOG_ERROR_FAILURE: &str = "error_log";
 const COMMAND_FAILURE_MESSAGE: &str = "Inline CLI command failed";
 const PANIC_MESSAGE: &str = "Inline CLI process panicked";
 static PANIC_HOOK: Once = Once::new();
@@ -312,8 +314,10 @@ pub(crate) fn report_bridge_linger_refused() {
 }
 
 /// Forwards a bridge `error!` log line, so a failure that is only logged on
-/// the user's machine still reaches Sentry. Grouped by the log target and the
-/// message's leading words, and admitted once per day like other bridge events.
+/// the user's machine still reaches Sentry. Grouped by the log target alone
+/// (one issue per target, not one per wording); the message's leading words
+/// ride along as the `detail` tag and admit separately, so distinct lines from
+/// one target each still report.
 pub(crate) fn report_bridge_log_error(target: &str, message: &str) {
     thread_local! {
         static REPORTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -324,10 +328,11 @@ pub(crate) fn report_bridge_log_error(target: &str, message: &str) {
     if REPORTING.with(|reporting| reporting.replace(true)) {
         return;
     }
-    capture_bridge_runtime_event(
+    capture_bridge_event(
         &log_target_code(target),
         "log_error",
-        &log_message_code(message),
+        LOG_ERROR_FAILURE,
+        Some(&log_message_code(message)),
         None,
         Some(message),
         None,
@@ -414,6 +419,19 @@ fn capture_bridge_runtime_event(
     failure_text: Option<&str>,
     limit: Option<BridgeRuntimeLimit>,
 ) {
+    capture_bridge_event(target, phase, failure, None, attempt, failure_text, limit);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn capture_bridge_event(
+    target: &str,
+    phase: &str,
+    failure: &str,
+    detail: Option<&str>,
+    attempt: Option<u32>,
+    failure_text: Option<&str>,
+    limit: Option<BridgeRuntimeLimit>,
+) {
     let mut event = sentry::protocol::Event {
         message: Some(BRIDGE_RUNTIME_MESSAGE.into()),
         level: sentry::Level::Error,
@@ -426,6 +444,9 @@ fn capture_bridge_runtime_event(
     event.tags.insert("target".into(), safe_code(target));
     event.tags.insert("phase".into(), safe_code(phase));
     event.tags.insert("failure".into(), safe_code(failure));
+    if let Some(detail) = detail {
+        event.tags.insert("detail".into(), safe_code(detail));
+    }
     if let Some(attempt) = attempt {
         event.tags.insert("attempt".into(), attempt.to_string());
     }
@@ -448,8 +469,9 @@ fn capture_bridge_runtime_event(
     capture_once_per_window(key, event);
 }
 
-/// Groups by the same fields as the Sentry fingerprint, plus the release, so a
-/// restart loop yields one event per day instead of one per attempt.
+/// Groups by the same fields as the Sentry fingerprint plus the detail tag
+/// and the release, so a restart loop yields a few events per day instead of
+/// one per attempt.
 fn report_key(event: &sentry::protocol::Event<'static>) -> String {
     let mut key = format!("inline-cli@{}", env!("CARGO_PKG_VERSION"));
     for name in [
@@ -459,6 +481,7 @@ fn report_key(event: &sentry::protocol::Event<'static>) -> String {
         "target",
         "phase",
         "failure",
+        "detail",
     ] {
         key.push('|');
         if let Some(value) = event.tags.get(name) {
@@ -468,23 +491,81 @@ fn report_key(event: &sentry::protocol::Event<'static>) -> String {
     key
 }
 
-fn capture_once_per_window(key: String, event: sentry::protocol::Event<'static>) {
+fn capture_once_per_window(key: String, mut event: sentry::protocol::Event<'static>) {
     if sentry::Hub::current().client().is_none() {
         return;
     }
-    let admitted = match REPORT_LEDGER.get() {
+    let admission = match REPORT_LEDGER.get() {
         Some(path) => match admit_report(path, &key, unix_now()) {
-            Ok(admitted) => admitted,
+            Ok(admission) => admission,
             // A full disk fails the ledger in every process, so the in-process
             // fallback would report each run; the disk is the user's problem.
-            Err(error) if error.kind() == io::ErrorKind::StorageFull => false,
-            Err(_) => admit_in_process(&key),
+            Err(error) if error.kind() == io::ErrorKind::StorageFull => Admission::Suppress,
+            Err(_) if admit_in_process(&key) => Admission::Report { suppressed: 0 },
+            Err(_) => Admission::Suppress,
         },
-        None => admit_in_process(&key),
+        None if admit_in_process(&key) => Admission::Report { suppressed: 0 },
+        None => Admission::Suppress,
     };
-    if admitted {
+    if let Admission::Report { suppressed } = admission {
+        if suppressed > 0 {
+            event
+                .extra
+                .insert(SUPPRESSED_COUNT_EXTRA.into(), suppressed.into());
+        }
         sentry::capture_event(event);
     }
+}
+
+/// Repeats of one key not sent since its last report.
+const SUPPRESSED_COUNT_EXTRA: &str = "suppressed_count";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Admission {
+    /// Send it, with how many repeats were held back since the last report.
+    Report { suppressed: u64 },
+    /// Counted in the ledger; reported with the next admitted event.
+    Suppress,
+}
+
+/// One key in the shared report ledger.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+struct LedgerEntry {
+    /// When the current window began (the first report in it).
+    at: u64,
+    /// Occurrences in the current window, reported or not.
+    #[serde(default)]
+    seen: u64,
+    /// Occurrences held back since the last report.
+    #[serde(default)]
+    dropped: u64,
+}
+
+/// Ledgers written before suppressed counts stored the window start alone.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum StoredLedgerEntry {
+    Entry(LedgerEntry),
+    Legacy(u64),
+}
+
+impl From<StoredLedgerEntry> for LedgerEntry {
+    fn from(stored: StoredLedgerEntry) -> Self {
+        match stored {
+            StoredLedgerEntry::Entry(entry) => entry,
+            StoredLedgerEntry::Legacy(at) => LedgerEntry {
+                at,
+                seen: 1,
+                dropped: 0,
+            },
+        }
+    }
+}
+
+/// Repeats within a window that report anyway, carrying the count: 10, 100,
+/// 1000… so a hot loop shows its scale in a handful of events.
+fn is_repeat_report_threshold(repeats: u64) -> bool {
+    repeats >= 10 && 10u64.pow(repeats.ilog10()) == repeats
 }
 
 /// Fallback when the shared ledger is unavailable: once per process.
@@ -503,37 +584,70 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
-/// Records `key` and returns true unless it was already reported within the
-/// window. An exclusive lock serializes concurrent CLI processes.
-fn admit_report(path: &Path, key: &str, now: u64) -> io::Result<bool> {
+/// Records one occurrence of `key`. The first in a window reports, carrying
+/// any repeats held back before it; later ones are counted and report only at
+/// [`is_repeat_report_threshold`]. An exclusive lock serializes concurrent CLI
+/// processes.
+fn admit_report(path: &Path, key: &str, now: u64) -> io::Result<Admission> {
     let lock = open_private(&path.with_extension("lock"), false)?;
     lock.lock()?;
-    let mut reported: BTreeMap<String, u64> = std::fs::read(path)
+    let mut reported: BTreeMap<String, LedgerEntry> = std::fs::read(path)
         .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
+        .and_then(|bytes| {
+            serde_json::from_slice::<BTreeMap<String, StoredLedgerEntry>>(&bytes).ok()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, stored)| (key, stored.into()))
+        .collect();
     // Entries from the future mean the clock moved back; let them report again.
-    reported.retain(|_, at| *at <= now && now - *at < REPORT_WINDOW_SECONDS);
-    if reported.contains_key(key) {
-        return Ok(false);
+    let live = |entry: &LedgerEntry| entry.at <= now && now - entry.at < REPORT_WINDOW_SECONDS;
+    let admission = match reported.get_mut(key) {
+        Some(entry) if live(entry) => {
+            entry.seen = entry.seen.saturating_add(1);
+            if is_repeat_report_threshold(entry.seen - 1) {
+                let suppressed = std::mem::take(&mut entry.dropped);
+                Admission::Report { suppressed }
+            } else {
+                entry.dropped = entry.dropped.saturating_add(1);
+                Admission::Suppress
+            }
+        }
+        // A new window: report, with what the last one held back.
+        previous => {
+            let suppressed = previous.map_or(0, |entry| entry.dropped);
+            reported.remove(key);
+            Admission::Report { suppressed }
+        }
+    };
+    // Expired entries go, except those still holding back a count to report.
+    reported.retain(|_, entry| live(entry) || entry.dropped > 0);
+    if matches!(admission, Admission::Report { .. }) && !reported.contains_key(key) {
+        while reported.len() >= MAX_REPORT_LEDGER_ENTRIES {
+            let Some(oldest) = reported
+                .iter()
+                .min_by_key(|(_, entry)| entry.at)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            reported.remove(&oldest);
+        }
+        reported.insert(
+            key.to_string(),
+            LedgerEntry {
+                at: now,
+                seen: 1,
+                dropped: 0,
+            },
+        );
     }
-    while reported.len() >= MAX_REPORT_LEDGER_ENTRIES {
-        let Some(oldest) = reported
-            .iter()
-            .min_by_key(|(_, at)| **at)
-            .map(|(key, _)| key.clone())
-        else {
-            break;
-        };
-        reported.remove(&oldest);
-    }
-    reported.insert(key.to_string(), now);
     let temporary = path.with_extension("json.tmp");
     let mut file = open_private(&temporary, true)?;
     file.write_all(&serde_json::to_vec(&reported)?)?;
     file.sync_all()?;
     std::fs::rename(&temporary, path)?;
-    Ok(true)
+    Ok(admission)
 }
 
 fn open_private(path: &Path, truncate: bool) -> io::Result<std::fs::File> {
@@ -803,6 +917,17 @@ fn service_manager() -> &'static str {
     }
 }
 
+/// `Inline CLI bridge runtime failed: provider_cycle: provider_process_exited (codex)`.
+fn bridge_title(tags: &BTreeMap<String, String>) -> String {
+    let tag = |name: &str| tags.get(name).map_or("unknown", String::as_str);
+    format!(
+        "{BRIDGE_RUNTIME_MESSAGE}: {}: {} ({})",
+        tag("phase"),
+        tag("failure"),
+        tag("target")
+    )
+}
+
 fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protocol::Event<'static> {
     // Reconstruct instead of blacklisting: future integrations/scope changes
     // cannot silently add usernames, request bodies, breadcrumbs, or stacks.
@@ -840,6 +965,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         "target",
         "phase",
         "failure",
+        "detail",
         "attempt",
         "command",
         "limit_unit",
@@ -874,10 +1000,15 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
                 .insert("failure_text".into(), failure_text.into());
         }
     }
-    for name in ["limit_actual", "limit_maximum"] {
+    for name in ["limit_actual", "limit_maximum", SUPPRESSED_COUNT_EXTRA] {
         if let Some(value) = event.extra.get(name).and_then(|value| value.as_u64()) {
             safe.extra.insert(name.into(), value.into());
         }
+    }
+    // Sentry titles an issue by its message: give each bridge group its own,
+    // built only from allowlisted codes, so issues are told apart at a glance.
+    if surface == Some("bridge") {
+        safe.message = Some(bridge_title(&safe.tags));
     }
     safe.tags.insert("os".into(), std::env::consts::OS.into());
     safe.tags
@@ -1088,13 +1219,75 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join(REPORT_LEDGER_FILE);
         let day = REPORT_WINDOW_SECONDS;
-        assert!(admit_report(&path, "bridge_run|io_error", 1_000).unwrap());
-        assert!(!admit_report(&path, "bridge_run|io_error", 1_010).unwrap());
-        assert!(!admit_report(&path, "bridge_run|io_error", 1_000 + day - 1).unwrap());
-        assert!(admit_report(&path, "provider_host|exit_1", 1_010).unwrap());
-        assert!(admit_report(&path, "bridge_run|io_error", 1_000 + day).unwrap());
+        let admit = |key: &str, now: u64| admit_report(&path, key, now).unwrap();
+        let report = |suppressed| Admission::Report { suppressed };
+        assert_eq!(admit("bridge_run|io_error", 1_000), report(0));
+        assert_eq!(admit("bridge_run|io_error", 1_010), Admission::Suppress);
+        assert_eq!(
+            admit("bridge_run|io_error", 1_000 + day - 1),
+            Admission::Suppress
+        );
+        assert_eq!(admit("provider_host|exit_1", 1_010), report(0));
+        // The next window reports the repeats the last one held back.
+        assert_eq!(admit("bridge_run|io_error", 1_000 + day), report(2));
         // A clock moved backwards cannot silence a class for longer than a day.
-        assert!(admit_report(&path, "bridge_run|io_error", 500).unwrap());
+        assert_eq!(admit("bridge_run|io_error", 500), report(0));
+    }
+
+    #[test]
+    fn a_hot_failure_reports_its_scale_instead_of_dropping_silently() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(REPORT_LEDGER_FILE);
+        let mut reports = Vec::new();
+        for second in 0..1_001 {
+            if let Admission::Report { suppressed } =
+                admit_report(&path, "bridge|log_error", 1_000 + second).unwrap()
+            {
+                reports.push(suppressed);
+            }
+        }
+        // The first, then the 10th, 100th and 1000th repeat, each carrying the
+        // repeats held back since the previous report.
+        assert_eq!(reports, [0, 9, 89, 899]);
+        assert!(is_repeat_report_threshold(10_000));
+        assert!(!is_repeat_report_threshold(1));
+        assert!(!is_repeat_report_threshold(11));
+    }
+
+    #[test]
+    fn a_ledger_from_an_older_cli_keeps_its_windows() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(REPORT_LEDGER_FILE);
+        std::fs::write(&path, br#"{"old_key":1000}"#).unwrap();
+        assert_eq!(
+            admit_report(&path, "old_key", 1_010).unwrap(),
+            Admission::Suppress
+        );
+        assert_eq!(
+            admit_report(&path, "old_key", 1_000 + REPORT_WINDOW_SECONDS).unwrap(),
+            Admission::Report { suppressed: 1 }
+        );
+    }
+
+    #[test]
+    fn an_expired_window_keeps_its_held_back_count_until_it_reports() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(REPORT_LEDGER_FILE);
+        let day = REPORT_WINDOW_SECONDS;
+        assert_eq!(
+            admit_report(&path, "a", 0).unwrap(),
+            Admission::Report { suppressed: 0 }
+        );
+        assert_eq!(admit_report(&path, "a", 1).unwrap(), Admission::Suppress);
+        // Other keys' writes long after `a`'s window must not prune its count.
+        assert_eq!(
+            admit_report(&path, "b", 3 * day).unwrap(),
+            Admission::Report { suppressed: 0 }
+        );
+        assert_eq!(
+            admit_report(&path, "a", 5 * day).unwrap(),
+            Admission::Report { suppressed: 1 }
+        );
     }
 
     #[test]
@@ -1102,8 +1295,11 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join(REPORT_LEDGER_FILE);
         std::fs::write(&path, b"{not json").unwrap();
-        assert!(admit_report(&path, "key", 10).unwrap());
-        assert!(!admit_report(&path, "key", 11).unwrap());
+        assert_eq!(
+            admit_report(&path, "key", 10).unwrap(),
+            Admission::Report { suppressed: 0 }
+        );
+        assert_eq!(admit_report(&path, "key", 11).unwrap(), Admission::Suppress);
     }
 
     #[test]
@@ -1111,9 +1307,12 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join(REPORT_LEDGER_FILE);
         for index in 0..(MAX_REPORT_LEDGER_ENTRIES as u64 + 10) {
-            assert!(admit_report(&path, &format!("key-{index}"), 100 + index).unwrap());
+            assert_eq!(
+                admit_report(&path, &format!("key-{index}"), 100 + index).unwrap(),
+                Admission::Report { suppressed: 0 }
+            );
         }
-        let reported: BTreeMap<String, u64> =
+        let reported: BTreeMap<String, serde_json::Value> =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(reported.len(), MAX_REPORT_LEDGER_ENTRIES);
         assert!(!reported.contains_key("key-0"));
@@ -1263,7 +1462,13 @@ mod tests {
 
         let safe = allowlisted_event(event);
         let encoded = serde_json::to_string(&safe).unwrap();
-        assert_eq!(safe.message.as_deref(), Some(BRIDGE_RUNTIME_MESSAGE));
+        assert_eq!(
+            safe.message.as_deref(),
+            Some(
+                "Inline CLI bridge runtime failed: provider_cycle: \
+                 agent_configuration_catalog_unavailable (codex)"
+            )
+        );
         assert_eq!(
             safe.fingerprint,
             vec![
@@ -1295,6 +1500,67 @@ mod tests {
         );
         assert!(!encoded.contains("private"));
         assert!(!encoded.contains("session_id"));
+    }
+
+    #[test]
+    fn bridge_log_errors_group_by_target_with_their_wording_as_detail() {
+        let event = |detail: &str| {
+            let mut event = sentry::protocol::Event {
+                message: Some("turn failed: private prompt text".into()),
+                ..Default::default()
+            };
+            event.tags.insert("surface".into(), "bridge".into());
+            event
+                .tags
+                .insert("error_code".into(), "bridge_runtime_failure".into());
+            event
+                .tags
+                .insert("target".into(), "inline_agent_driver_claude".into());
+            event.tags.insert("phase".into(), "log_error".into());
+            event
+                .tags
+                .insert("failure".into(), LOG_ERROR_FAILURE.into());
+            event.tags.insert("detail".into(), detail.into());
+            event.extra.insert("suppressed_count".into(), 41.into());
+            event
+        };
+        let first = allowlisted_event(event("turn_failed"));
+        let second = allowlisted_event(event("cannot_retain_output"));
+        // One issue per target, titled by stable codes only.
+        assert_eq!(first.fingerprint, second.fingerprint);
+        assert_eq!(
+            first.message.as_deref(),
+            Some(
+                "Inline CLI bridge runtime failed: log_error: error_log (inline_agent_driver_claude)"
+            )
+        );
+        assert_eq!(
+            first.tags.get("detail").map(String::as_str),
+            Some("turn_failed")
+        );
+        assert_eq!(
+            first
+                .extra
+                .get("suppressed_count")
+                .and_then(|value| value.as_u64()),
+            Some(41)
+        );
+        assert!(
+            !serde_json::to_string(&first.message)
+                .unwrap()
+                .contains("private")
+        );
+        // Distinct wordings still admit separately.
+        assert_ne!(
+            report_key(&event("turn_failed")),
+            report_key(&event("cannot_retain_output"))
+        );
+        // A detail that is not a bounded code never reaches the event.
+        let unsafe_detail = allowlisted_event(event("Private Name"));
+        assert_eq!(
+            unsafe_detail.tags.get("detail").map(String::as_str),
+            Some("unknown")
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from "bun:test"
 import { eq } from "drizzle-orm"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
 import { SessionsModel } from "@in/server/db/models/sessions"
@@ -10,6 +10,8 @@ import { InlineError } from "@in/server/types/errors"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { Log } from "@in/server/utils/log"
 import { setupTestLifecycle, testUtils } from "./setup"
+
+const app = useLiveHttpApp()
 
 const MEDIA_NOT_OWNED = {
   ok: false,

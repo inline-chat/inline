@@ -173,6 +173,7 @@ pub(crate) async fn send_doc_as(
             reply_to_msg_id: reply_to,
             random_id: Some(random_id),
             parse_markdown: Some(doc.markdown),
+            entities: doc.message_entities(),
             send_mode: (notify == Notify::Silent)
                 .then_some(proto::MessageSendMode::ModeSilent as i32),
             actions,
@@ -211,9 +212,9 @@ pub(crate) async fn edit_doc(
             peer_id: Some(chat_peer(chat_id)),
             text: doc.text.clone(),
             parse_markdown: Some(doc.markdown),
+            entities: doc.message_entities(),
             actions,
             block_content: (!doc.markdown).then(|| doc.block_content()),
-            ..Default::default()
         }
     )?;
     Ok(())

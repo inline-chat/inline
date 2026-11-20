@@ -272,27 +272,24 @@ const getDurableSeqsByTarget = async (
   const durableSeqs = new Map<string, number>()
   for (let offset = 0; offset < targets.length; offset += MAX_CHAT_ACCESS_QUERY_BATCH) {
     const batch = targets.slice(offset, offset + MAX_CHAT_ACCESS_QUERY_BATCH)
-    const batchChatIds = batch.filter((target) => target.bucket === UpdateBucket.Chat).map((target) => target.entityId)
-    const batchSpaceIds = batch.filter((target) => target.bucket === UpdateBucket.Space).map((target) => target.entityId)
-    const targetWhere = batchChatIds.length > 0 && batchSpaceIds.length > 0
-      ? or(
-          and(eq(updatesTable.bucket, UpdateBucket.Chat), inArray(updatesTable.entityId, batchChatIds)),
-          and(eq(updatesTable.bucket, UpdateBucket.Space), inArray(updatesTable.entityId, batchSpaceIds)),
-        )
-      : batchChatIds.length > 0
-        ? and(eq(updatesTable.bucket, UpdateBucket.Chat), inArray(updatesTable.entityId, batchChatIds))
-        : and(eq(updatesTable.bucket, UpdateBucket.Space), inArray(updatesTable.entityId, batchSpaceIds))
-
-    const rows = await db
-      .select({
-        bucket: updatesTable.bucket,
-        entityId: updatesTable.entityId,
-        maxSeq: sql<number>`max(${updatesTable.seq})`,
-      })
-      .from(updatesTable)
-      .where(targetWhere)
-      .groupBy(updatesTable.bucket, updatesTable.entityId)
+    const targetValues = sql.join(
+      batch.map((target) => sql`(${target.bucket}::integer, ${target.entityId}::integer)`),
+      sql`, `,
+    )
+    // One backward probe of updates_bucket_idx per target. A grouped max()
+    // reads every retained row of each target (about 25k rows per call in
+    // production) because Postgres has no loose index scan.
+    const rows = await db.execute<{ bucket: number; entityId: number; maxSeq: number | null }>(sql`
+      select t.bucket, t.entity_id as "entityId", (
+        select u.seq from ${updatesTable} u
+        where u.bucket = t.bucket and u.entity_id = t.entity_id
+        order by u.seq desc
+        limit 1
+      ) as "maxSeq"
+      from (values ${targetValues}) as t(bucket, entity_id)
+    `)
     for (const row of rows) {
+      if (row.maxSeq === null) continue
       durableSeqs.set(`${row.bucket}:${row.entityId}`, Number(row.maxSeq))
     }
   }

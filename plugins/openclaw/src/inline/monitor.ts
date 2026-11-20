@@ -2989,6 +2989,8 @@ export async function monitorInlineProvider(params: {
         onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
         onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
       },
+      onFallback: (err) =>
+        runtime.error?.(`inline reply pipeline unavailable, using local typing fallback: ${String(err)}`),
     })
     const onModelSelected = replyPipeline.onModelSelected
     const rawTypingCallbacks = replyPipeline.typingCallbacks

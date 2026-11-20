@@ -38,7 +38,7 @@ Supported:
 - Message widgets: sandboxed HTML (charts, diagrams, mockups, small pickers) through the `inline` tool's `send_widget` action, or an `<iframe title="…" id="…" height="…">HTML</iframe>` block in a Markdown reply. Long replies are split around widgets, never inside one, with at most one widget per message; a widget longer than the 4,000-character chunk goes alone, up to Inline's 100,000-character limit. Streaming previews hide a widget until its closing tag arrives. `send_widget` returns Inline's reason when the server rejects a widget. A viewer's `inline.action(name, payload)` call becomes a turn naming the widget ID, call name, and untrusted JSON payload, and the answer replies below the widget instead of replacing it. Call names and payloads need realtime SDK 0.0.22 or later; with an older bundled SDK, the turn names only the widget.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
-- Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
+- Opt-in reactions (`reaction_triggers`) and lifecycle/system events as synthetic Hermes messages that need no reply and keep the conversation's cached agent.
 - Cron or standalone sends through `INLINE_HOME_CHANNEL` and `hermes send --to inline:<chat-id>`.
 - Hermes-native `typing_indicator` and `gateway_restart_notification` toggles, with plugin-owned YAML bridge coverage for external-plugin compatibility.
 - Detailed and Friendly output (the bot's Output setting in Inline; see Output below): a live, collapsible progress message for each turn, or short updates instead.
@@ -53,6 +53,51 @@ Unsupported or intentionally limited:
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 - Progress for turns Hermes starts on its own. Scheduled (cron) turns and late background sub-agent results post only their answer.
+
+## Release 1.2.5
+
+Hermes status lines (context pressure, compression, provider fallback) no
+longer count as the answer: they fold into Detailed progress instead of closing
+it early with "Worked for", and post silently in Friendly mode or outside a
+turn. In Friendly mode, an answer Hermes delivered as an update between tools
+is posted again as the answer, so it notifies, and the silent copy is removed.
+Hermes' busy notice for a message sent mid-turn posts silently, and a Friendly
+answer no longer waits on another chat's progress. Output mode changes made in
+the apps or with `inline bots settings` apply from the bot's next turn, within
+about 15 seconds. When the mode lookup fails in a new chat, the bot's last known
+default applies instead of Detailed.
+
+## Release 1.2.4
+
+Progress no longer notifies or adds unread badges. Hermes' "⏳ Working"
+heartbeat, and commentary between tool calls outside Detailed mode, post
+silently; with an Inline server from 2026-11-20 or later they also skip unread.
+Approval prompts, messages with buttons, and the answer still notify. The
+sidecar's error telemetry keeps at most 256 deduplication entries. 1.2.3 was
+tagged but never published.
+
+## Release 1.2.2
+
+The Agent Settings sheet can open while Hermes is handling a message in the same
+chat or while all ordinary message handlers are busy. The sidecar reserves four
+SDK handler slots for settings requests and changes. Requests in the same chat
+retain their order.
+
+## Release 1.2.1
+
+Messages containing Unicode line or paragraph separators now reach the gateway
+intact. A stalled inbound reader reconnects and receives its outstanding
+deliveries. The authenticated sidecar health response includes their kind, age
+in milliseconds, and write count under `result.inbound.pending`. Chat access
+updates preserve order within their chat and the user cursor while other chats
+continue receiving messages.
+
+```sh
+npm install -g @inline-chat/hermes-agent-adapter@1.2.1
+inline-hermes install --force
+```
+
+Restart the Hermes gateway to load the installed adapter.
 
 ## Release 1.2.0
 
@@ -240,10 +285,8 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,
   system Node, or an explicit `INLINE_NODE_BIN` path all work.
 - Inbound recovery retries without waiting for another message or reconnect. Independent chats are consumed concurrently; same-chat order and delivery acknowledgements are preserved. Sender provenance lookups start with a short timeout and expand up to the existing SDK ceiling after timeouts; deferred inputs stay recoverable. Stream replacement wakes pending backpressure writes.
-- Inline transport: the 1.2.0 candidate sidecar uses `@inline-chat/realtime-sdk@0.0.24` and is
-  bundled into the npm package, so Hermes startup does not run `npm install`.
-  This SDK includes widget calls, submitted forms and focus status; protocol `0.0.16` and SDK
-  `0.0.24` must be published before the adapter's registry-only release preflight.
+- The 1.2.5 sidecar bundles `@inline-chat/realtime-sdk@0.0.27` and protocol
+  `0.0.17`. The catalog and npm package ship the same sidecar.
 - Live sends require a valid Inline user or bot token in `INLINE_TOKEN`,
   `INLINE_BOT_TOKEN`, `platforms.inline.token`, or `inline.token`.
 
@@ -387,7 +430,8 @@ Access control follows Hermes' native platform model:
 | `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
-| `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
+| `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. With it on and `INLINE_REACTION_TRIGGERS` unset, every reaction is delivered too. |
+| `INLINE_REACTION_TRIGGERS` | Which reactions start a Hermes turn, like Hermes' Slack `reaction_triggers`. Unset or `false`: none (the default). `true`: any emoji on the bot's own messages. A list such as `👍,✅`: those emoji on any message. A reaction turn needs no reply. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_CRON_MENTION_PREFIX` | Opt-in Inline Markdown mention prepended once to scheduled gateway text deliveries, for example `[@You](inline://user?id=42)`. Defaults to empty. See [Scheduled mentions](#scheduled-mentions). |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
@@ -433,8 +477,8 @@ Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `group_allow_from`, `dm_policy`, `group_policy`, `require_mention`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
 `context_backfill`, `thread_context_limit`, `reply_context_limit`,
-`observed_context_limit`, `observe_unmentioned_messages`, `settings_path`, and
-`reactions` under the Inline platform config. Operational settings such
+`observed_context_limit`, `observe_unmentioned_messages`, `settings_path`,
+`system_events`, `reaction_triggers`, and `reactions` under the Inline platform config. Operational settings such
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
 `state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`,
 `cron_mention_prefix`, and `command_limit` can also be set there.

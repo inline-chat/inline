@@ -149,6 +149,68 @@ struct MessageContextMenuDeviceTests {
     Attachment.record(report.joined(separator: "\n"), named: "custom-states.txt")
   }
 
+  @Test("A rich message selects in place across its blocks and copies with their structure")
+  func richSelection() async throws {
+    let lab = MessageContextMenuLabController()
+    let stage = try Stage(root: UINavigationController(rootViewController: lab))
+    defer { stage.close() }
+    try await Task.sleep(for: .seconds(1))
+    let row = 7
+    lab.scrollToRowForTesting(row)
+    try await Task.sleep(for: .seconds(0.5))
+    let menu = try #require(lab.openMenuForTesting(row: row))
+    try await Task.sleep(for: .seconds(1.5))
+    let window = try #require(menu.presentationWindow)
+    let selection = try #require(menu.selectionViewForTesting, "rich bodies select in place")
+    let surfaces = selection.surfaces
+    let text = surfaces.string(in: NSRange(location: 0, length: surfaces.length)) as NSString
+    var report = ["surfaces \(surfaces.surfaces.count), \(surfaces.length) characters"]
+    var frames: [UIImage] = []
+
+    // One word in the heading.
+    selection.selectForTesting(text.range(of: "Selection"))
+    try await Task.sleep(for: .seconds(0.6))
+    frames.append(Self.snapshot(window))
+
+    // From the second bullet into the table's header: list items, the numbered list, the quote
+    // and the code block in between.
+    let from = text.range(of: "Near the top").location
+    let to = NSMaxRange(text.range(of: "Selectable"))
+    selection.selectForTesting(NSRange(location: from, length: to - from))
+    try await Task.sleep(for: .seconds(0.6))
+    frames.append(Self.snapshot(window))
+    let partial = try #require(menu.selectedDocumentForTesting)
+    report.append("partial, plain:\n\(partial.plainText)\n\npartial, markdown:\n\(partial.markdown)")
+    #expect(partial.plainText.hasPrefix("• Near the top or bottom"))
+    #expect(partial.plainText.contains("\n1. Select a word\n2. Drag to extend"))
+    #expect(partial.plainText.contains("Block\tSelectable"))
+    #expect(partial.markdown.contains("```swift\nlet range"))
+    #expect(partial.markdown.contains("- Copy keeps markers"))
+
+    // Everything, as Select All does.
+    selection.selectAll()
+    try await Task.sleep(for: .seconds(0.6))
+    frames.append(Self.snapshot(window))
+    let all = try #require(menu.selectedDocumentForTesting)
+    report.append("all, markdown:\n\(all.markdown)")
+    #expect(all.markdown.hasPrefix("## Selection in rich messages"))
+    #expect(all.markdown.hasSuffix("pick Select All from the menu."))
+    #expect(menu.actionsViewForTesting.rowsForTesting.contains { $0.accessibilityLabel == "Quote" || $0.accessibilityLabel == "Copy" })
+
+    Attachment.record(Array(try #require(Self.sheet(frames).pngData())), named: "rich-selection.png")
+    for (index, frame) in frames.enumerated() {
+      Attachment.record(Array(try #require(frame.pngData())), named: "rich-selection-\(index).png")
+    }
+    Attachment.record(report.joined(separator: "\n\n"), named: "rich-selection.txt")
+    // Held open for checks with real touches, when a run asks for it.
+    let hold = Double(ProcessInfo.processInfo.environment["INLINE_MENU_HOLD_SECONDS"] ?? "") ?? 0
+    if hold > 0 {
+      selection.clearSelection()
+      try await Task.sleep(for: .seconds(hold))
+    }
+    menu.dismiss(animated: false)
+  }
+
   static func describe(_ menu: MessageContextMenuController) -> String {
     let actions = menu.actionsViewForTesting
     return "menu \(actions.frame) rows \(actions.rowsForTesting.count) scroll \(menu.scrollViewForTesting.contentOffset.y)/\(menu.scrollViewForTesting.contentSize.height)"

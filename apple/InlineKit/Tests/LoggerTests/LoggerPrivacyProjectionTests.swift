@@ -199,8 +199,25 @@ struct LoggerPrivacyProjectionTests {
       detail: .scrubbed
     )
     #expect(SentryLogPolicy.fingerprint(entry: entry, errorCategory: nil, http: failure) == [
-      "app-error", "ApiClient.swift", "221", "none", "GET", "/v1/getMe", "500",
+      "app-error", "ApiClient.swift", "request()", "none", "GET", "/v1/getMe", "500",
     ])
+  }
+
+  @Test("Sentry policy keeps transient connection failures as breadcrumbs")
+  func sentryTransientPolicy() {
+    #expect(SentryLogPolicy.shouldReport(errorCategory: nil))
+    #expect(SentryLogPolicy.shouldReport(errorCategory: "transaction:timeout"))
+    #expect(SentryLogPolicy.shouldReport(errorCategory: "realtime_rpc:application:2:400"))
+    #expect(!SentryLogPolicy.shouldReport(errorCategory: "realtime_rpc:not_connected"))
+    #expect(!SentryLogPolicy.shouldReport(errorCategory: "transaction:commit_outcome_unknown"))
+    #expect(!SentryLogPolicy.shouldReport(errorCategory: "cancelled"))
+
+    let offline = NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotFindHost)
+    let wrapped = NSError(domain: "SUSparkleErrorDomain", code: 2001, userInfo: [NSUnderlyingErrorKey: offline])
+    #expect(SentryLogPolicy.isTransientNetworkError(offline))
+    #expect(SentryLogPolicy.isTransientNetworkError(wrapped))
+    #expect(!SentryLogPolicy.isTransientNetworkError(NSError(domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse)))
+    #expect(!SentryLogPolicy.isTransientNetworkError(NSError(domain: "SUSparkleErrorDomain", code: 2001)))
   }
 
   @Test("HTTP diagnostics omit unsafe request identifiers")

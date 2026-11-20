@@ -29,6 +29,36 @@ struct FileCachePhotoRetryTests {
     #expect(await loader.requested == [Self.newURL])
   }
 
+  @Test("a throttled refresh still uses a newer link that a recent fetch stored")
+  func throttledRefreshUsesStoredLink() async throws {
+    let photoID: Int64 = 7_201
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    let database = try AppDatabase(queue)
+    // The stored row already has the re-signed link; the view still holds the expired one.
+    try await queue.write { db in
+      try Photo(id: 9, photoId: photoID, format: .jpeg).insert(db)
+      try PhotoSize(photoId: 9, type: "f", width: 100, height: 100, size: 200, cdnUrl: Self.newURL).insert(db)
+    }
+    let stale = PhotoInfo(photo: Photo(id: 9, photoId: photoID, format: .jpeg), sizes: [
+      PhotoSize(photoId: 9, type: "f", width: 100, height: 100, size: 200, cdnUrl: Self.oldURL),
+    ])
+    var reload = message()
+    reload.photoId = photoID
+    let loader = Loader(responses: [Self.newURL: .data])
+    let fetches = LinkFetchCounter()
+    let refresher = MediaLinkRefresher(minimumInterval: 60) { _, _ in await fetches.increment() }
+    // That fetch ran a moment ago, so this download's refresh is throttled.
+    #expect(await refresher.refresh(peer: reload.peerId, messageId: reload.messageId))
+    let cache = FileCache(database: database, linkRefresher: refresher) { try await loader.load($0) }
+
+    let url = await cache.downloadAndWait(photo: stale, reloadMessageOnFinish: reload)
+    defer { if let url { try? FileManager.default.removeItem(at: url) } }
+
+    #expect(url != nil)
+    #expect(await loader.requested == [Self.newURL])
+    #expect(await fetches.value == 1)
+  }
+
   @Test("a rejected link with no fresher one stops after one request and cools down")
   func rejectedWithoutFresherLinkStops() async throws {
     let unexpiring = "https://cdn.example.com/p.jpg"
@@ -274,6 +304,11 @@ struct MediaLinkRefresherTests {
     private(set) var value = 0
     func increment() { value += 1 }
   }
+}
+
+private actor LinkFetchCounter {
+  private(set) var value = 0
+  func increment() { value += 1 }
 }
 
 /// Stands in for the native photo download: writes the given bytes or fails.

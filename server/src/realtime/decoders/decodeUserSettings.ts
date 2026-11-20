@@ -50,6 +50,7 @@ const decodePrivacyPatch = (settings: NonNullable<UserSettings["privacySettings"
   const patch: PrivacyPatch = {}
   if (settings.shareTimeZone !== undefined) patch.shareTimeZone = settings.shareTimeZone
   if (settings.appearInGlobalSearch !== undefined) patch.appearInGlobalSearch = settings.appearInGlobalSearch
+  if (settings.transcribeVoiceMessages !== undefined) patch.transcribeVoiceMessages = settings.transcribeVoiceMessages
   if (settings.timeZone) patch.timeZone = decodePrivacyRule(settings.timeZone)
   if (settings.focusStatus) patch.focusStatus = decodePrivacyRule(settings.focusStatus)
   return patch

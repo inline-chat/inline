@@ -14,12 +14,6 @@ public enum ExperimentalFeatureFlags {
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
   public static let nativeFileDownloadsKey = "experimental.nativeFileDownloads"
   public static let quickForwardKey = "experimental.quickForward"
-  public static let richMessageCopyEditingKey = "experimental.richMessageCopyEditing"
-
-  /// Opt-in on both Apple platforms; existing installations keep their current clipboard and editor behavior.
-  public static var richMessageCopyEditingEnabled: Bool {
-    UserDefaults.standard.bool(forKey: richMessageCopyEditingKey)
-  }
 
   /// Opt-in macOS experiment; an unset preference intentionally defaults to false.
   public static var quickForwardEnabled: Bool {

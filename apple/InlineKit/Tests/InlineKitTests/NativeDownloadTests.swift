@@ -917,6 +917,34 @@ private struct NativeDownloadManagerTests {
     #expect(await transport.snapshot().0.count == 2)
   }
 
+  @Test func cancellingOneJoinedCallerLeavesTheTransferToTheOther() async throws {
+    let manager = NativeDownloadManager()
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data((0 ..< 524_288 * 3).map { UInt8($0 % 251) })
+    let transport = HeldDownloadTransport(bytes: bytes)
+    let admitted = DownloadAdmissionProbe()
+    let first = directory.appendingPathComponent("first")
+    let second = directory.appendingPathComponent("second")
+    let leaving = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: first, transport: transport)) }
+    await transport.waitForRequest("INP_resume", offset: 1_048_576)
+    let staying = Task {
+      try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", destination: second,
+        validateAccount: { admitted.mark("staying") }, transport: transport))
+    }
+    await admitted.wait(for: "staying")
+    leaving.cancel()
+    // The cancelled caller returns while the shared ranges are still held, without stopping them.
+    await #expect(throws: CancellationError.self) { try await leaving.value }
+    #expect(await transport.snapshot().2 == 2)
+    await transport.release("INP_resume")
+    #expect(try await staying.value == second)
+    #expect(try Data(contentsOf: second) == bytes)
+    #expect(!FileManager.default.fileExists(atPath: first.path))
+    // One transfer: no part was asked for twice.
+    #expect(await transport.snapshot().0.map(\.offset).sorted() == [0, 524_288, 1_048_576])
+  }
+
   @Test func sharedWindowBoundsRangesAcrossFilesAndCanceledRequestsKeepTheirSlots() async throws {
     let manager = NativeDownloadManager(window: 6 ... 6)
     let directory = try nativeCacheDirectory()
@@ -1094,16 +1122,30 @@ private struct NativeDownloadManagerTests {
     #expect(reports.values == [[524_288, Int64(total)]])
   }
 
-  @Test func windowGrowsOnFastPartsAndHalvesOnSlowOrFailingOnes() async {
+  @Test func windowGrowsUnlessPartsAreVerySlowAndHalvesOnSlowOrFailingOnes() async {
     let manager = NativeDownloadManager(window: 2 ... 12, initialWindow: 4)
-    for _ in 0 ..< 20 { await manager.adaptWindow(after: .milliseconds(200)) }
+    // A far server's round trip is not congestion: 3 s parts still grow the window.
+    for _ in 0 ..< 20 { await manager.adaptWindow(after: .seconds(3)) }
     #expect(await manager.window == 12)
-    await manager.adaptWindow(after: .milliseconds(1_500))
+    await manager.adaptWindow(after: .seconds(10))
     #expect(await manager.window == 12)
-    await manager.adaptWindow(after: .seconds(3))
+    await manager.adaptWindow(after: .seconds(16))
     #expect(await manager.window == 6)
-    await manager.partFailedTransiently()
+    await manager.adaptWindow(after: .milliseconds(200))
+    #expect(await manager.window == 7)
+    await manager.adaptWindow(after: .seconds(15))
+    #expect(await manager.window == 7)
+    await manager.adaptWindow(after: .seconds(20))
     #expect(await manager.window == 3)
+    await manager.adaptWindow(after: .seconds(4))
+    #expect(await manager.window == 4)
+    await manager.adaptWindow(after: .seconds(5))
+    #expect(await manager.window == 4)
+    // Transient failures still halve, down to the floor.
+    for _ in 0 ..< 4 { await manager.adaptWindow(after: .seconds(1)) }
+    #expect(await manager.window == 8)
+    await manager.partFailedTransiently()
+    #expect(await manager.window == 4)
     await manager.partFailedTransiently()
     await manager.partFailedTransiently()
     #expect(await manager.window == 2)
@@ -1300,30 +1342,66 @@ private struct NativeDownloadManagerTests {
     #expect(FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_account2").path))
   }
 
-  @Test func messageDeletionDrainsDuplicateReferencesAndPurgesIdleProvenance() async throws {
+  @Test func messageDeletionStopsOnlyFilesNoOtherMessageUsesAndPurgesIdleProvenance() async throws {
     let directory = try nativeCacheDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     var original = FileMessageLocation(); original.chatID = 10; original.messageID = 20
     var other = original; other.messageID = 21
     let originalLocation = original; let otherLocation = other
-    let transport = HeldDownloadTransport(bytes: Data(repeating: 7, count: 524_288 * 3))
+    let bytes = Data(repeating: 7, count: 524_288 * 3)
+    let transport = HeldDownloadTransport(bytes: bytes)
     let manager = NativeDownloadManager()
     let first = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", message: originalLocation, destination: directory.appendingPathComponent("first"), transport: transport)) }
     await transport.waitForRequest("INP_resume", offset: 1_048_576)
     let probe = DownloadAdmissionProbe()
     let duplicate = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_resume", message: otherLocation, destination: directory.appendingPathComponent("second"), validateAccount: { probe.mark("duplicate") }, transport: transport)) }
     await probe.wait(for: "duplicate")
-    let deleting = Task { await manager.discard(message: originalLocation, accountID: 1, cacheDirectories: [directory]) }
-    await transport.waitForCancellation("INP_resume")
-    await transport.release("INP_resume")
-    await deleting.value
+    // The deleted message's caller stops first, as the coordinator does; the other message
+    // still uses the file, so deleting the first one leaves the transfer running.
+    first.cancel()
     await #expect(throws: CancellationError.self) { try await first.value }
-    await #expect(throws: CancellationError.self) { try await duplicate.value }
-    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
-    try Data([1]).write(to: nativePartial(directory))
-    try nativeRecord(directory: directory, total: 3, message: originalLocation)
-    await NativeDownloadManager().discard(message: originalLocation, accountID: 1, cacheDirectories: [directory])
-    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory).path))
+    await manager.discard(message: originalLocation, accountID: 1, cacheDirectories: [directory])
+    #expect(await transport.snapshot().2 == 2)
+    await transport.release("INP_resume")
+    #expect(try Data(contentsOf: try await duplicate.value) == bytes)
+
+    // A file only deleted messages use stops and loses its partial.
+    let single = Task { try await manager.download(.init(accountID: 1, fileUniqueID: "INP_single", message: otherLocation, destination: directory.appendingPathComponent("single"), transport: transport)) }
+    await transport.waitForRequest("INP_single", offset: 1_048_576)
+    let deleting = Task { await manager.discard(messages: [originalLocation, otherLocation], accountID: 1, cacheDirectories: [directory]) }
+    await transport.waitForCancellation("INP_single")
+    await transport.release("INP_single")
+    await deleting.value
+    await #expect(throws: CancellationError.self) { try await single.value }
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_single").path))
+
+    // Idle partials of every deleted message go in one pass; others stay.
+    var kept = original; kept.messageID = 22
+    for (file, message) in [("INP_idle20", originalLocation), ("INP_idle21", otherLocation), ("INP_idle22", kept)] {
+      try Data([1]).write(to: nativePartial(directory, file: file))
+      try nativeRecord(directory: directory, file: file, total: 3, message: message)
+    }
+    await NativeDownloadManager().discard(messages: [originalLocation, otherLocation], accountID: 1, cacheDirectories: [directory])
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_idle20").path))
+    #expect(!FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_idle21").path))
+    #expect(FileManager.default.fileExists(atPath: nativePartial(directory, file: "INP_idle22").path))
+  }
+
+  @Test func aChangedCDNObjectDiscardsThePartialWhileOtherCDNFailuresKeepIt() async throws {
+    let directory = try nativeCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bytes = Data(repeating: 5, count: 524_300)
+    for failure in [CDNRangeError.notTheFile, .objectChanged] {
+      let transport = DownloadPartMock(bytes: bytes, failureOffset: 524_288, failuresRemaining: 1, failure: failure)
+      await #expect(throws: failure) {
+        try await NativeDownloadManager().download(.init(accountID: 1, fileUniqueID: "INP_resume",
+          destination: directory.appendingPathComponent("finished"), transport: transport))
+      }
+      let kept = FileManager.default.fileExists(atPath: nativePartial(directory).path)
+      #expect(kept == (failure != .objectChanged), "\(failure)")
+      try? FileManager.default.removeItem(at: nativePartial(directory))
+      try? FileManager.default.removeItem(at: nativePartial(directory).appendingPathExtension("json"))
+    }
   }
 
   @MainActor @Test func changedAccountGenerationDrainsOldOwnerBeforeRestart() async throws {
@@ -1454,10 +1532,18 @@ private struct NativeDownloadManagerTests {
     #expect(try Data(contentsOf: body) == Data([4, 5, 6]))
   }
 
-  @Test func permissionClassifierCoversPrivacyPreservingMissingFiles() {
-    for status in [400, 401, 403, 404] {
+  @Test func permissionClassifierStopsOnlyExplicitRefusals() {
+    for status in [401, 403] {
       #expect(NativeMessageFileDownload.isPermissionFailure(RealtimeDirectRpcError.rpcError(errorCode: .internalError, message: "Unavailable", code: status)))
     }
+    // 400 is both an inaccessible file and a legacy one the server cannot size, and 404 a
+    // missing one: the client cannot tell them apart, so the CDN link gets to try.
+    for status in [400, 404] {
+      #expect(!NativeMessageFileDownload.isPermissionFailure(RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: "Unavailable", code: status)))
+    }
+    #expect(NativeMessageFileDownload.isPermissionFailure(RealtimeDirectRpcError.rpcError(errorCode: .unauthenticated, message: "Denied", code: 400)))
+    #expect(NativeMessageFileDownload.isPermissionFailure(RealtimeDirectRpcError.notAuthorized))
+    #expect(NativeMessageFileDownload.isPermissionFailure(AuthStorageError.loginUnavailable))
     #expect(NativeMessageFileDownload.isPermissionFailure(NativeFileDownloadError.inaccessible))
     #expect(!NativeMessageFileDownload.isPermissionFailure(NativeFileDownloadError.invalidResponse))
     #expect(!NativeMessageFileDownload.isPermissionFailure(NativeFileDownloadError.integrity))

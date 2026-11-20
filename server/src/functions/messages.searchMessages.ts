@@ -40,7 +40,9 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
   if (!hasQueries && !hasFilter) {
     throw RealtimeRpcError.BadRequest()
   }
-  if (input.countOnly && !hasQueries) {
+  // A count needs a query, or a media filter on its own (links can only be found by scanning).
+  const mediaCountFilter = !hasQueries && mediaFilter !== "links" ? mediaFilter : undefined
+  if (input.countOnly && !hasQueries && !mediaCountFilter) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -52,13 +54,17 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
         .from(dialogs)
         .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)))
         .limit(1)
-      const totalCount = await MessageSearchModule.countMessagesInChat({
-        chatId: chat.id,
-        keywordGroups,
-        afterMessageId: dialog?.collapsedMaxId ?? undefined,
-        mediaFilter,
-        tx,
-      })
+      const afterMessageId = dialog?.collapsedMaxId ?? undefined
+      const totalCount =
+        mediaCountFilter !== undefined
+          ? await MessageModel.countMessagesWithMediaFilter({ chatId: chat.id, filter: mediaCountFilter, afterMessageId, tx })
+          : await MessageSearchModule.countMessagesInChat({
+              chatId: chat.id,
+              keywordGroups,
+              afterMessageId,
+              mediaFilter,
+              tx,
+            })
       log.debug("searchMessages count", { chatId: chat.id, totalCount })
       return { messages: [], seq: BigInt(chat.updateSeq ?? 0), totalCount }
     })

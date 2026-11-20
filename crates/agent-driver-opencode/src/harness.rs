@@ -51,6 +51,9 @@ pub struct OpenCodeHarnessConfig {
     pub registration: Option<PathBuf>,
     /// Environment variable names removed when starting the service.
     pub scrub_env: Vec<OsString>,
+    /// Stdio MCP servers added to each folder Inline opens sessions in, such
+    /// as Inline's computer use.
+    pub stdio_mcp_servers: Vec<inline_agent_bridge::StdioMcpServer>,
 }
 
 impl OpenCodeHarnessConfig {
@@ -62,6 +65,7 @@ impl OpenCodeHarnessConfig {
             host_tools: None,
             registration: None,
             scrub_env: Vec::new(),
+            stdio_mcp_servers: Vec::new(),
         }
     }
 
@@ -106,6 +110,42 @@ struct HarnessState {
     catalogs: HashMap<PathBuf, (Instant, Catalog)>,
     models: HashMap<PathBuf, (Instant, Value)>,
     sessions: HashMap<String, Weak<SessionInner>>,
+    /// Folders that already have the stdio MCP servers.
+    mcp_folders: std::collections::HashSet<PathBuf>,
+}
+
+/// Adds the configured stdio MCP servers to `folder` once per harness, in
+/// the background: a server OpenCode cannot start never holds up a session.
+fn add_stdio_mcp_servers(shared: &Shared, link: &Arc<Link>, folder: &Path) {
+    let servers = &shared.config.stdio_mcp_servers;
+    if servers.is_empty() || !shared.state().mcp_folders.insert(folder.to_path_buf()) {
+        return;
+    }
+    let requests: Vec<(String, Value)> = servers.iter().map(local_mcp_config).collect();
+    let api = link.api();
+    let folder = folder.to_path_buf();
+    tokio::spawn(async move {
+        for (name, config) in requests {
+            let path = format!("/api/experimental/mcp/{name}");
+            let query = Query::new().location(Some(&folder));
+            if let Err(error) = api
+                .send(Method::PUT, &path, query, Some(json!({ "config": config })))
+                .await
+            {
+                log::debug!(target: "inline::opencode", "could not add MCP server {name}: {error}");
+            }
+        }
+    });
+}
+
+/// An OpenCode `local` MCP server entry for a stdio server.
+fn local_mcp_config(server: &inline_agent_bridge::StdioMcpServer) -> (String, Value) {
+    let mut command = vec![server.command.to_string_lossy().into_owned()];
+    command.extend(server.args.iter().cloned());
+    (
+        server.name.clone(),
+        json!({ "type": "local", "command": command, "enabled": true }),
+    )
 }
 
 fn provider() -> ProviderId {
@@ -125,6 +165,7 @@ impl OpenCodeHarness {
                     catalogs: HashMap::new(),
                     models: HashMap::new(),
                     sessions: HashMap::new(),
+                    mcp_folders: std::collections::HashSet::new(),
                 }),
             }),
         }
@@ -587,6 +628,7 @@ impl HarnessDriver for OpenCodeHarness {
             if let Some(tools) = &connection.tools {
                 tools.serve(folder.clone());
             }
+            add_stdio_mcp_servers(shared, &connection.link, &folder);
             // Inline's trusted guide lives in the session's instructions,
             // where it survives compaction; a changed guide is narrated.
             let guide = spec.instructions.as_deref().filter(|guide| !guide.trim().is_empty()).map(|guide| {
@@ -929,6 +971,25 @@ fn summary(info: &Value) -> Option<SessionSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stdio_servers_become_local_opencode_servers() {
+        let server = inline_agent_bridge::StdioMcpServer {
+            name: "computer".into(),
+            command: "/usr/local/bin/inline".into(),
+            args: vec!["computer-use".into(), "mcp".into()],
+        };
+        let (name, config) = local_mcp_config(&server);
+        assert_eq!(name, "computer");
+        assert_eq!(
+            config,
+            json!({
+                "type": "local",
+                "command": ["/usr/local/bin/inline", "computer-use", "mcp"],
+                "enabled": true,
+            })
+        );
+    }
 
     #[test]
     fn summaries_read_session_info() {

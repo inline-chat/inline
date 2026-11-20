@@ -11,17 +11,28 @@ public struct TextLayoutStyle: Hashable, Sendable {
   public var minimumLineHeight: CGFloat
   /// Direction for paragraphs with no letters, usually the UI direction.
   public var fallbackDirection: TextDirection
+  /// How line boxes are sized. Under `.fontDefault`, as in TextKit, every line but the first
+  /// has its paragraph's `lineSpacing` above it, and `paragraphSpacing` follows a paragraph's
+  /// last line.
+  public var lineHeight: TextLineHeight
+  /// One base direction for every paragraph, as a whole-message direction setting does. Nil
+  /// picks each paragraph's dominant direction.
+  public var baseDirection: TextDirection?
 
   public init(
     lineSpacing: CGFloat = 0,
     paragraphSpacing: CGFloat = 0,
     minimumLineHeight: CGFloat = 0,
-    fallbackDirection: TextDirection = .leftToRight
+    fallbackDirection: TextDirection = .leftToRight,
+    lineHeight: TextLineHeight = .natural,
+    baseDirection: TextDirection? = nil
   ) {
     self.lineSpacing = lineSpacing
     self.paragraphSpacing = paragraphSpacing
     self.minimumLineHeight = minimumLineHeight
     self.fallbackDirection = fallbackDirection
+    self.lineHeight = lineHeight
+    self.baseDirection = baseDirection
   }
 }
 
@@ -40,6 +51,10 @@ public struct TextLayout: Sendable {
     public let descent: CGFloat
     public let direction: TextDirection
     public let endsParagraph: Bool
+    /// Room before the line's leading edge and after its trailing edge, from its paragraph's
+    /// `TextParagraphMetrics` (a code block's padding, say).
+    public let leadingIndent: CGFloat
+    public let trailingIndent: CGFloat
     let storage: LineStorage
 
     public var ctLine: CTLine { storage.line }
@@ -90,7 +105,9 @@ public struct TextLayout: Sendable {
     copy.size.width = blockWidth
     for index in copy.lines.indices {
       let line = copy.lines[index]
-      let x = line.direction == .rightToLeft ? blockWidth - line.frame.width : 0
+      let x = line.direction == .rightToLeft
+        ? blockWidth - line.leadingIndent - line.frame.width
+        : line.leadingIndent
       copy.lines[index].frame.origin.x = x
     }
     return copy
@@ -251,6 +268,79 @@ extension TextLayout {
   }
 }
 
+/// Line breaks for very long paragraphs: pasted logs, minified JSON, base64.
+///
+/// `CTTypesetterSuggestLineBreak` gets slower the further into a paragraph it starts, so one
+/// long paragraph costs time quadratic in its length (48k characters took about a second). This
+/// finds each break with a typesetter over the next couple of thousand characters instead, and
+/// the caller still makes the line from the whole text's typesetter, so string indices stay the
+/// text's own. Breaks are the same: a window only answers for lines that end well before it does.
+struct LongParagraphBreaker {
+  /// Paragraphs longer than this (UTF-16) use windows; shorter ones are faster without.
+  static let threshold = 4096
+  /// Texts longer than this take the long path (see `TextLayouter.layout`), with room under
+  /// Core Text's 10,000 UTF-16 work limit.
+  static let longTextLength = 8000
+  static let windowLength = 2048
+  /// A break this close to a window's end may depend on text past it, so a new window starts.
+  static let margin = 64
+
+  let text: NSAttributedString
+  private var window: (typesetter: CTTypesetter, start: Int, length: Int)?
+
+  init(text: NSAttributedString) {
+    self.text = text
+  }
+
+  mutating func suggestLineBreak(at start: Int, width: CGFloat, direction: TextDirection) -> Int {
+    var length = Self.windowLength
+    while true {
+      let window = window(at: start, length: length, direction: direction)
+      let local = start - window.start
+      let count = CTTypesetterSuggestLineBreak(window.typesetter, local, Double(width))
+      let reachesTextEnd = window.start + window.length >= text.length
+      if reachesTextEnd || local + count <= window.length - Self.margin {
+        return count
+      }
+      if window.start == start {
+        // One line runs past the whole window (a long unbroken token): widen it.
+        length *= 2
+      }
+      self.window = nil
+    }
+  }
+
+  private mutating func window(at start: Int, length: Int, direction: TextDirection) -> (typesetter: CTTypesetter, start: Int, length: Int) {
+    if let window, window.start <= start, start < window.start + window.length - Self.margin {
+      return window
+    }
+    let range = NSRange(location: start, length: min(length, text.length - start))
+    let slice = NSMutableAttributedString(attributedString: text.attributedSubstring(from: range))
+    // A slice starting mid-paragraph could pick a different base direction from its own first
+    // letter; give it the paragraph's.
+    let string = slice.string as NSString
+    if TextDirection.firstStrong(in: string, range: NSRange(location: 0, length: string.length), fallback: direction) != direction {
+      var writingDirection: CTWritingDirection = direction == .rightToLeft ? .rightToLeft : .leftToRight
+      let style = withUnsafeBytes(of: &writingDirection) { bytes in
+        var setting = CTParagraphStyleSetting(
+          spec: .baseWritingDirection,
+          valueSize: MemoryLayout<CTWritingDirection>.size,
+          value: bytes.baseAddress!
+        )
+        return CTParagraphStyleCreate(&setting, 1)
+      }
+      slice.addAttribute(
+        NSAttributedString.Key(kCTParagraphStyleAttributeName as String),
+        value: style,
+        range: NSRange(location: 0, length: slice.length)
+      )
+    }
+    let made = (TextLayouter.makeTypesetter(slice), start, range.length)
+    window = made
+    return made
+  }
+}
+
 public enum TextLayouter {
   /// Breaks `text` into lines no wider than `maximumWidth`.
   public static func layout(
@@ -267,9 +357,17 @@ public enum TextLayouter {
     }
 
     let string = attributed.string as NSString
-    let typesetter = CTTypesetterCreateWithAttributedString(
-      withBaseDirections(attributed, string: string, style: style) as CFAttributedString
-    )
+    let typesetString = withBaseDirections(attributed, string: string, style: style)
+    // Past Core Text's work limit (10,000 UTF-16 on macOS 27, measured) the default typesetter
+    // stops shaping the whole text: no kerning or ligatures, Arabic-script letters don't join,
+    // and right-to-left lines break short. Long texts get an unbounded typesetter for their
+    // lines and windows for their breaks, which keeps both linear.
+    let isLong = length > LongParagraphBreaker.longTextLength
+    let typesetter = isLong
+      ? makeTypesetter(typesetString)
+      : CTTypesetterCreateWithAttributedString(typesetString as CFAttributedString)
+    var breaker = LongParagraphBreaker(text: typesetString)
+    var paragraphEnd = 0
     var lines: [TextLayout.Line] = []
     var y: CGFloat = 0
     var widest: CGFloat = 0
@@ -277,11 +375,31 @@ public enum TextLayouter {
     var paragraphStart = 0
     var paragraphDirection = direction(of: string, from: 0, style: style)
 
+    var paragraph = TextParagraphMetrics.at(start, in: attributed)
+
     while start < length {
-      if start == paragraphStart {
+      let firstInParagraph = start == paragraphStart
+      if firstInParagraph {
         paragraphDirection = direction(of: string, from: start, style: style)
+        paragraph = TextParagraphMetrics.at(start, in: attributed)
+        paragraphEnd = NSMaxRange(paragraphContent(of: string, from: start))
+        if start > 0, let paragraph { y = grid.round(y + paragraph.spacingBefore) }
       }
-      var count = CTTypesetterSuggestLineBreak(typesetter, start, Double(width))
+      if start > 0, style.lineHeight == .fontDefault {
+        // TextKit puts a line's spacing above it, from its own paragraph.
+        y = grid.round(y + (paragraph?.lineSpacing ?? style.lineSpacing))
+      }
+      let leadingIndent = max(0, firstInParagraph ? paragraph?.firstLineHeadIndent ?? 0 : paragraph?.headIndent ?? 0)
+      let trailingIndent: CGFloat = {
+        guard let tail = paragraph?.tailIndent, tail != 0 else { return 0 }
+        // Like NSParagraphStyle: negative counts in from the trailing edge, positive is the
+        // line's end measured from the leading edge.
+        return tail < 0 ? -tail : max(0, width - tail)
+      }()
+      let breakWidth = max(1, width - leadingIndent - trailingIndent)
+      var count = isLong || paragraphEnd - start > LongParagraphBreaker.threshold
+        ? breaker.suggestLineBreak(at: start, width: breakWidth, direction: paragraphDirection)
+        : CTTypesetterSuggestLineBreak(typesetter, start, Double(breakWidth))
       if count <= 0 {
         // Narrower than one cluster: take the cluster anyway rather than loop forever.
         count = string.rangeOfComposedCharacterSequence(at: start).length
@@ -297,23 +415,47 @@ public enum TextLayouter {
       let endsParagraph = endsWithHardBreak(string, range: range) || NSMaxRange(range) >= length
 
       let natural = ascent + descent + leading
-      let lineHeight = grid.ceil(max(natural, style.minimumLineHeight))
-      let baseline = grid.round(y + (lineHeight - natural) + ascent)
+      var lineHeight: CGFloat
+      var baseline: CGFloat
+      if style.lineHeight == .fontDefault, let metrics = fontDefaultMetrics(of: attributed, range: range) {
+        // The platform's line box, unrounded: its height is whole points already, and its
+        // baseline is where the platform draws glyphs.
+        lineHeight = max(metrics.height, style.minimumLineHeight)
+        baseline = y + (lineHeight - metrics.height) + metrics.baseline
+      } else {
+        lineHeight = grid.ceil(max(natural, style.minimumLineHeight))
+        baseline = grid.round(y + (lineHeight - natural) + ascent)
+      }
+      if let paragraph, paragraph.minimumLineHeight > 0 || paragraph.maximumLineHeight > 0 {
+        // Like TextKit: the line box takes the paragraph's bounds and glyphs keep their
+        // place against its bottom.
+        let upper = paragraph.maximumLineHeight > 0 ? paragraph.maximumLineHeight : .greatestFiniteMagnitude
+        let bounded = min(max(lineHeight, paragraph.minimumLineHeight), upper)
+        baseline += bounded - lineHeight
+        lineHeight = bounded
+      }
       lines.append(TextLayout.Line(
         range: range,
-        frame: CGRect(x: 0, y: y, width: lineWidth, height: lineHeight),
+        frame: CGRect(x: leadingIndent, y: y, width: lineWidth, height: lineHeight),
         baseline: baseline,
         ascent: ascent,
         descent: descent,
         direction: paragraphDirection,
         endsParagraph: endsParagraph,
+        leadingIndent: leadingIndent,
+        trailingIndent: trailingIndent,
         storage: LineStorage(line: ctLine)
       ))
-      widest = max(widest, lineWidth)
+      widest = max(widest, leadingIndent + lineWidth + trailingIndent)
       y = grid.round(y + lineHeight)
       start = NSMaxRange(range)
       if start < length {
-        y = grid.round(y + (endsParagraph ? style.paragraphSpacing : style.lineSpacing))
+        let lineSpacing = paragraph?.lineSpacing ?? style.lineSpacing
+        let paragraphSpacing = paragraph?.spacingAfter ?? style.paragraphSpacing
+        let spacing = style.lineHeight == .fontDefault
+          ? (endsParagraph ? paragraphSpacing : 0)
+          : (endsParagraph ? paragraphSpacing : lineSpacing)
+        y = grid.round(y + spacing)
       }
       if endsParagraph {
         paragraphStart = start
@@ -328,6 +470,16 @@ public enum TextLayouter {
     )
   }
 
+  /// A typesetter without Core Text's work limit. Past it, the default one stops shaping and
+  /// breaks lines short: in 12k characters of Persian, a line came out with 76 unjoined glyphs
+  /// 482 points wide instead of 81 glyphs at 409. Breaks are found through
+  /// `LongParagraphBreaker` windows, so no single call does unbounded work.
+  static func makeTypesetter(_ text: NSAttributedString) -> CTTypesetter {
+    let options = [kCTTypesetterOptionAllowUnboundedLayout: true] as CFDictionary
+    return CTTypesetterCreateWithAttributedStringAndOptions(text as CFAttributedString, options)
+      ?? CTTypesetterCreateWithAttributedString(text as CFAttributedString)
+  }
+
   /// Widths beyond any screen mean "unbounded"; clamping keeps them usable as cache keys.
   static let unboundedWidth: CGFloat = 100_000
 
@@ -336,7 +488,8 @@ public enum TextLayouter {
   }
 
   private static func direction(of string: NSString, from start: Int, style: TextLayoutStyle) -> TextDirection {
-    TextDirection.dominant(in: string, range: paragraphContent(of: string, from: start), fallback: style.fallbackDirection)
+    if let forced = style.baseDirection { return forced }
+    return TextDirection.dominant(in: string, range: paragraphContent(of: string, from: start), fallback: style.fallbackDirection)
   }
 
   /// The paragraph starting at `start`, without its line break.
@@ -358,7 +511,8 @@ public enum TextLayouter {
     var start = 0
     while start < string.length {
       let content = paragraphContent(of: string, from: start)
-      let dominant = TextDirection.dominant(in: string, range: content, fallback: style.fallbackDirection)
+      let dominant = style.baseDirection
+        ?? TextDirection.dominant(in: string, range: content, fallback: style.fallbackDirection)
       let firstStrong = TextDirection.firstStrong(in: string, range: content, fallback: style.fallbackDirection)
       let next = min(string.length, NSMaxRange(content) + 1)
       if dominant != firstStrong {

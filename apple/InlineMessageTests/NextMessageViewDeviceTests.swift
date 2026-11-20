@@ -955,6 +955,80 @@ struct NextMessageViewDeviceTests {
     #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
   }
 
+  @Test("A lone emoji draws large and the same emoji in a reply body-sized, whichever builds first or held the view")
+  func loneEmojiBesideReply() throws {
+    let stage = try Stage()
+    defer { stage.close() }
+    let width = stage.window.bounds.width
+    var failures: [String] = []
+    // Emoji no other test sends, so the styled-body cache is cold for each order.
+    for (order, emoji, replyFirst) in [("reply first", "🦄", true), ("lone first", "🪁", false)] {
+      let lone = Self.message(9_301 + (replyFirst ? 0 : 10), emoji, outgoing: true, reactions: 0)
+      var reply = Self.message(9_302 + (replyFirst ? 0 : 10), emoji, outgoing: true, reactions: 0)
+      reply.message.repliedToMessageId = 9_399
+      reply.repliedToMessage = EmbeddedMessage(
+        message: Self.message(9_399, "The message being answered", outgoing: false, reactions: 0).message,
+        senderInfo: UserInfo(user: Self.reactor)
+      )
+      // One view handed from row to row, as a list reuses it, both ways and then again.
+      let view = MessageView()
+      stage.root.addSubview(view)
+      defer { view.removeFromSuperview() }
+      var firstPlans: [Int64: MessageLayout] = [:]
+      let rows = replyFirst ? [reply, lone, reply, lone] : [lone, reply, lone, reply]
+      for (step, message) in rows.enumerated() {
+        let isLone = message.id == lone.id
+        let label = "\(order) step \(step) \(isLone ? "lone" : "reply")"
+        let layout = stage.apply(message, to: view, width: width, motion: .immediate)
+        view.frame.size.height = layout.size.height
+        view.layoutIfNeeded()
+        guard let text = layout.text else {
+          failures.append("\(label): no text planned")
+          continue
+        }
+        let font = text.text.attributedString.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        let pointSize = font?.pointSize ?? 0
+        if isLone, pointSize < 70 || layout.bubble.isVisible {
+          failures.append("\(label): \(pointSize) pt, bubble \(layout.bubble.isVisible); a lone emoji is large and bare")
+        }
+        if !isLone, pointSize > 30 || !layout.bubble.isVisible {
+          failures.append("\(label): \(pointSize) pt, bubble \(layout.bubble.isVisible); a reply's emoji is body text")
+        }
+        // A row measured from one build and drawn from a later one must agree.
+        if let first = firstPlans[message.id] {
+          if first.size != layout.size || first.frame(.text) != layout.frame(.text) {
+            failures.append("\(label): planned \(layout.size) text \(layout.frame(.text).map { "\($0)" } ?? "nil"), first planned \(first.size) text \(first.frame(.text).map { "\($0)" } ?? "nil")")
+          }
+        } else {
+          firstPlans[message.id] = layout
+        }
+        // Nothing the previous message left on the view: its text, a fade, a transform.
+        if !view.textView.layout.drawsIdentically(to: text) {
+          failures.append("\(label): text view holds another layout")
+        }
+        if view.textView.alpha != 1 || view.textView.transform != .identity || view.bubbleContentView.transform != .identity {
+          failures.append("\(label): text alpha \(view.textView.alpha), transforms \(view.textView.transform) \(view.bubbleContentView.transform)")
+        }
+        if view.textView.layer.animationKeys()?.isEmpty == false || view.timeView.layer.animationKeys()?.isEmpty == false {
+          failures.append("\(label): animations left running on an immediate apply")
+        }
+        // A crossfade's snapshot of the old text would sit here.
+        let known: [UIView] = [view.bubbleView, view.textView, view.timeView]
+        let strays = view.bubbleContentView.subviews.filter { subview in
+          !subview.isHidden && !known.contains { $0 === subview } && !(subview is MessageBlockHostView)
+            && !(subview is MessageReactionPillView) && !(subview is MessageRichView)
+            && !(subview is MessageAcknowledgementView)
+        }
+        if !strays.isEmpty {
+          failures.append("\(label): stray views over the text \(strays.map { "\(type(of: $0))" })")
+        }
+        failures += Self.placementProblems(view, layout).map { "\(label): \($0)" }
+        failures += Self.inkProblems(view.textView, expectsInk: true).map { "\(label) text: \($0)" }
+      }
+    }
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
   @Test("Catalog snapshots for review", arguments: [UIUserInterfaceStyle.light, .dark])
   func catalog(style: UIUserInterfaceStyle) async throws {
     let stage = try Stage(style: style)

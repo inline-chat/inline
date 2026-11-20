@@ -2,6 +2,7 @@ import "dotenv/config"
 import { validateDatabaseStartup } from "@in/server/db"
 import * as Sentry from "@sentry/bun"
 import { beforeSendEvent, beforeSendSpan } from "@in/server/utils/sentryPrivacy"
+import { recordErrorBurst } from "@in/server/modules/monitoring/errorBurstAlerts"
 import {
   API_BASE_URL,
   NODE_ENV,
@@ -68,7 +69,11 @@ Sentry.init({
   enabled: shouldEnableServerSentry(NODE_ENV),
   enableLogs: true,
   beforeSendLog,
-  beforeSend: beforeSendEvent,
+  beforeSend: (event) => {
+    const scrubbed = beforeSendEvent(event)
+    recordErrorBurst(scrubbed)
+    return scrubbed
+  },
   beforeSendTransaction: beforeSendEvent,
   beforeSendSpan,
 })

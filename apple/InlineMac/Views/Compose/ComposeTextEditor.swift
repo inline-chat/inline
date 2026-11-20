@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import Logger
+import MacTheme
 import TextProcessing
 
 class ComposeTextEditor: NSView {
@@ -13,8 +14,20 @@ class ComposeTextEditor: NSView {
 
   // MARK: - Theme
 
-  static let font: NSFont = .preferredFont(forTextStyle: .body)
+  /// The chat's message font, so a draft reads like the message it becomes.
+  static var font: NSFont { ChatTypography.current.font }
   private var font: NSFont { Self.font }
+
+  /// Inline code and code blocks, at the size messages draw inline code.
+  static var codeFont: NSFont {
+    let typography = ChatTypography.current
+    return typography.codeFont(sized: ChatTypography.inlineCodePointSize(at: typography.pointSize))
+  }
+
+  /// Called after a typography change restyles the editor, so its owner can
+  /// re-measure the compose height.
+  var onTypographyDidChange: (() -> Void)?
+  nonisolated(unsafe) private var typographyObserver: NSObjectProtocol?
 
   static let textColor: NSColor = .labelColor
   private var textColor: NSColor { Self.textColor }
@@ -79,9 +92,8 @@ class ComposeTextEditor: NSView {
   static func makeParagraphStyle(from existing: NSParagraphStyle? = nil) -> NSParagraphStyle {
     let paragraph = (existing?.mutableCopy() as? NSMutableParagraphStyle)
       ?? (NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle)
-    if existing == nil {
-      paragraph.lineSpacing = 0.0
-    }
+    // Lines advance like message text, so a multiline draft keeps its shape when sent.
+    paragraph.lineSpacing = ChatTypography.current.lineSpacing
     paragraph.alignment = .natural
     paragraph.baseWritingDirection = .natural
     return paragraph.copy() as! NSParagraphStyle
@@ -141,6 +153,68 @@ class ComposeTextEditor: NSView {
 
     setupViews()
     setupConstraints()
+    typographyObserver = NotificationCenter.default.addObserver(
+      forName: ChatTypography.didChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.applyCurrentTypography() }
+    }
+  }
+
+  deinit {
+    if let typographyObserver {
+      NotificationCenter.default.removeObserver(typographyObserver)
+    }
+  }
+
+  /// Restyles the draft in place for the current chat typography: body runs take
+  /// the new font (keeping bold and italic), code runs the code font, and every
+  /// paragraph the new line spacing. Text, selection and undo history are untouched.
+  func applyCurrentTypography() {
+    paragraphStyle = Self.defaultParagraphStyle
+    placeholder.font = font
+    if let storage = textView.textStorage, storage.length > 0 {
+      let fullRange = NSRange(location: 0, length: storage.length)
+      storage.beginEditing()
+      var fonts: [(NSRange, NSFont)] = []
+      storage.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+        fonts.append((range, Self.restyled(value as? NSFont, attributes: storage.attributes(at: range.location, effectiveRange: nil))))
+      }
+      for (range, font) in fonts {
+        storage.addAttribute(.font, value: font, range: range)
+      }
+      var styles: [(NSRange, NSParagraphStyle)] = []
+      storage.enumerateAttribute(.paragraphStyle, in: fullRange) { value, range, _ in
+        styles.append((range, Self.makeParagraphStyle(from: value as? NSParagraphStyle)))
+      }
+      for (range, style) in styles {
+        storage.addAttribute(.paragraphStyle, value: style, range: range)
+      }
+      storage.endEditing()
+    }
+    var typing = textView.typingAttributes
+    typing[.font] = Self.restyled(typing[.font] as? NSFont, attributes: typing)
+    typing[.paragraphStyle] = Self.makeParagraphStyle(from: typing[.paragraphStyle] as? NSParagraphStyle)
+    textView.typingAttributes = typing
+    resetTextViewInsets()
+    onTypographyDidChange?()
+  }
+
+  /// `font` from a run with `attributes`, moved to the current chat typography.
+  private static func restyled(_ font: NSFont?, attributes: [NSAttributedString.Key: Any]) -> NSFont {
+    let isCode = attributes[.inlineCode] != nil || attributes[.preCode] != nil
+      || font?.fontDescriptor.symbolicTraits.contains(.monoSpace) == true
+    if isCode { return codeFont }
+    var result = Self.font
+    let traits = font?.fontDescriptor.symbolicTraits ?? []
+    if traits.contains(.bold) {
+      result = NSFontManager.shared.convert(result, toHaveTrait: .boldFontMask)
+    }
+    if traits.contains(.italic) {
+      result = NSFontManager.shared.convert(result, toHaveTrait: .italicFontMask)
+    }
+    return result
   }
 
   @available(*, unavailable)
@@ -472,6 +546,14 @@ private final class ComposePlaceholderView: NSView {
     }
   }
 
+  var font: NSFont {
+    get { label.font ?? ComposeTextEditor.font }
+    set {
+      label.font = newValue
+      label.invalidateIntrinsicContentSize()
+    }
+  }
+
   init(text: String, symbolName: String?) {
     self.text = text
     self.symbolName = symbolName
@@ -488,7 +570,7 @@ private final class ComposePlaceholderView: NSView {
     imageView.setAccessibilityElement(false)
 
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = Theme.messageTextFont
+    label.font = ComposeTextEditor.font
     label.lineBreakMode = .byTruncatingTail
     label.textColor = .placeholderTextColor
     label.isEditable = false
@@ -714,9 +796,7 @@ extension NSTextView {
 
   /// Updates typing attributes to maintain monospace font for code blocks
   private func updateTypingAttributesForCodeBlock(attributes: [NSAttributedString.Key: Any]) {
-    let defaultFontSize = NSFont.systemFontSize
-    let currentFont = attributes[.font] as? NSFont ?? NSFont.systemFont(ofSize: defaultFontSize)
-    let monospaceFont = NSFont.monospacedSystemFont(ofSize: currentFont.pointSize, weight: .regular)
+    let monospaceFont = ComposeTextEditor.codeFont
 
     var newTypingAttributes = defaultTypingAttributes
     if let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle {

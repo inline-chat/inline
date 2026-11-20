@@ -118,6 +118,8 @@ pub(crate) struct CodexMapper {
     /// When the account's exhausted limit window resets, from the latest
     /// `account/rateLimits/updated`.
     limit_resets_at: Option<i64>,
+    /// The app-server connection ended; no turn can finish natively anymore.
+    lost: bool,
 }
 
 impl CodexMapper {
@@ -133,6 +135,7 @@ impl CodexMapper {
             answered: HashSet::new(),
             children: HashMap::new(),
             limit_resets_at: None,
+            lost: false,
         }
     }
 
@@ -197,9 +200,23 @@ impl CodexMapper {
         events
     }
 
-    /// Records the turn returned by `turn/start` before its notification arrives.
-    pub(crate) fn turn_started_by_request(&mut self, turn: TurnId) {
+    /// Records the turn returned by `turn/start` before its notification
+    /// arrives. A turn that already finished stays finished, and one whose
+    /// connection ended before the reply was handled completes as
+    /// `ConnectionLost` right away (returned for the caller to emit).
+    pub(crate) fn turn_started_by_request(&mut self, turn: TurnId) -> Vec<Event> {
+        if self.last_finished_turn.as_ref() == Some(&turn) {
+            return Vec::new();
+        }
+        if self.lost {
+            self.last_finished_turn = Some(turn.clone());
+            return vec![connection_lost_turn(
+                turn.clone(),
+                self.consumed.remove(&turn).unwrap_or_default(),
+            )];
+        }
         self.active_turn = Some(turn);
+        Vec::new()
     }
 
     /// Pending interactions, for `live_work`.
@@ -1126,6 +1143,32 @@ impl CodexMapper {
                 by: ClosedBy::Cancelled,
             })
             .collect()
+    }
+
+    /// Everything still open when the app-server connection ends: pending
+    /// interactions close and the running turn completes as `ConnectionLost`,
+    /// since Codex can no longer report its end.
+    pub(crate) fn connection_lost(&mut self) -> Vec<Event> {
+        self.lost = true;
+        let mut events = self.cancel_all();
+        if let Some(turn) = self.active_turn.take() {
+            self.last_finished_turn = Some(turn.clone());
+            let consumed = self.consumed.remove(&turn).unwrap_or_default();
+            events.push(connection_lost_turn(turn, consumed));
+        }
+        events
+    }
+}
+
+fn connection_lost_turn(turn: TurnId, inputs_consumed: Vec<InputId>) -> Event {
+    Event::Turn {
+        turn,
+        phase: TurnPhase::Completed {
+            outcome: TurnOutcome::ConnectionLost,
+            inputs_consumed,
+            error: None,
+            duration_ms: None,
+        },
     }
 }
 

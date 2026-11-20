@@ -70,7 +70,7 @@ describe("space exit updates", () => {
       .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, leaver.id)))
       .limit(1)
     if (!leaverMembership) throw new Error("Expected leaver membership")
-    const privateChat = await testUtils.createChat(space.id, "Retained leave chat", "thread", false)
+    const privateChat = await testUtils.createChat(space.id, "Private leave chat", "thread", false)
     if (!privateChat) throw new Error("Failed to create private chat")
     await db.insert(schema.chatParticipants).values({ chatId: privateChat.id, userId: leaver.id })
 
@@ -142,11 +142,13 @@ describe("space exit updates", () => {
         eq(schema.members.spaceId, space.id),
         eq(schema.members.userId, leaver.id),
       ))).toEqual([])
+      // Leaving drops private-thread participation like an admin removal, so
+      // a later rejoin cannot restore it.
       expect(await db.select().from(schema.chatParticipants).where(and(
         eq(schema.chatParticipants.chatId, privateChat.id),
         eq(schema.chatParticipants.userId, leaver.id),
-      ))).toHaveLength(1)
-      // A stale positive cache or retained participant row is not authority.
+      ))).toEqual([])
+      // A stale positive cache is not authority.
       AccessGuardsCache.setSpaceMember(space.id, leaver.id)
       await expect(AccessGuards.ensureChatAccess(privateChat, leaver.id)).rejects.toMatchObject({
         code: RealtimeRpcError.Code.SPACE_ID_INVALID,

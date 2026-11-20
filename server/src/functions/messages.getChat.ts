@@ -347,10 +347,10 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
         ? await UsersModel.getUsersWithPhotos([snapshotPeerUserId], { tx })
         : []
       const peerTimeZoneVisible = peer
-        ? (await resolveTimeZoneVisibility(currentUserId, [peer.user])).has(peer.user.id)
+        ? (await resolveTimeZoneVisibility(tx, currentUserId, [peer.user])).has(peer.user.id)
         : false
       const peerFocus = peer && peer.user.bot !== true
-        ? (await resolveFocusForViewer(currentUserId, [peer.user])).get(peer.user.id)
+        ? (await resolveFocusForViewer(tx, currentUserId, [peer.user])).get(peer.user.id)
         : undefined
 
       return {

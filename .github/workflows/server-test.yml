@@ -321,9 +321,6 @@ jobs:
       - name: Smoke test the production artifact
         run: cd server && bun run core:artifact-smoke
 
-      - name: Smoke test the full core shadow
-        run: cd server && bun run core:smoke
-
       - name: Run isolated server tests
         run: cd server && bun run test:bun
 

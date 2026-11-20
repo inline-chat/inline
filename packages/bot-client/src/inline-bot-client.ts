@@ -1,5 +1,6 @@
 import type {
   BotApiEnvelope,
+  BotApiError,
   BotMethodEnvelope,
   BotMethodName,
   BotMethodParamsByName,
@@ -114,6 +115,14 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+// A proxy or load balancer can answer with a non-envelope body (an HTML 502, say).
+// Surface the HTTP status and a short body preview instead of an undefined error.
+function nonEnvelopeError(status: number, data: unknown): BotApiError {
+  const body = typeof data === "string" ? data : (JSON.stringify(data) ?? "")
+  const preview = body.trim().slice(0, 200)
+  return { ok: false, error_code: status, description: preview || `HTTP ${status}` }
 }
 
 function serializeQueryValue(value: unknown): string {
@@ -264,7 +273,9 @@ export class InlineBotClient implements BotClientMethodSurface {
       params?: Record<string, unknown>,
       options?: InlineBotClientMethodOptions,
     ) => Promise<InlineBotClientResponse<BotApiEnvelope<T>>>)(method, params, options)
-    return res.data as BotApiEnvelope<T>
+    const data: unknown = res.data
+    if (!isRecord(data) || typeof data.ok !== "boolean") return nonEnvelopeError(res.status, data)
+    return data as BotApiEnvelope<T>
   }
 
   getMe(options?: InlineBotClientMethodOptions) {

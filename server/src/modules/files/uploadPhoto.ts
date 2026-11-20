@@ -1,4 +1,8 @@
-import { getPhotoMetadataAndValidate } from "@in/server/modules/files/metadata"
+import {
+  getPhotoMetadataAndValidate,
+  PHOTO_MAX_INPUT_PIXELS,
+  stripPhotoMetadata,
+} from "@in/server/modules/files/metadata"
 import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
 import { filePartHashes, files, photos, photoSizes } from "@in/server/db/schema"
 import { db } from "@in/server/db"
@@ -141,10 +145,17 @@ export async function normalizePhotoUpload(
   metadata: Awaited<ReturnType<typeof getPhotoMetadataAndValidate>>
 }> {
   if (metadata.mimeType !== "image/webp") {
-    return { file, metadata }
+    // Camera and location metadata never reach storage.
+    const stripped = await stripPhotoMetadata(file, metadata.mimeType)
+    if (!stripped.rewritten) return { file, metadata }
+    return { file: stripped.file, metadata: await getPhotoMetadataAndValidate(stripped.file) }
   }
 
-  const png = await sharp(await file.arrayBuffer()).png().toBuffer()
+  // Converting to PNG writes no input metadata; apply orientation first.
+  const png = await sharp(await file.arrayBuffer(), { limitInputPixels: PHOTO_MAX_INPUT_PIXELS })
+    .rotate()
+    .png()
+    .toBuffer()
   const normalizedFile = new File([toArrayBufferBackedBytes(png)], pngFileName(metadata.fileName), {
     type: "image/png",
   })

@@ -2,7 +2,7 @@ import { validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
-import type { Static } from "elysia"
+import type { Static } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { type IPInfoResponse } from "@in/server/libs/ipinfo"

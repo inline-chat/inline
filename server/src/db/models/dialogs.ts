@@ -50,7 +50,6 @@ export class DialogsModel {
     }))
   }
 
-  // AI did this, check more
   static async getUnreadCount(chatId: number, userId: number, tx?: Transaction) {
     const query = tx ?? db
     const [result] = await query

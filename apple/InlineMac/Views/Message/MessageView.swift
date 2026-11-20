@@ -329,7 +329,7 @@ class MessageViewAppKit: NSView {
   /// Media reaching the bubble's bottom corners continues into the tail.
   private var mediaBubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
     let layout = props.layout
-    guard props.renderStyle == .bubble, layout.hasBubbleColor else { return nil }
+    guard props.renderStyle == .bubble, layout.hasBubbleColor, props.album == nil else { return nil }
     let media: (plan: MessageSizeCalculator.LayoutPlan, top: CGFloat)? = if let photo = layout.photo {
       (photo, layout.photoContentViewTop)
     } else if let video = layout.video {
@@ -507,6 +507,42 @@ class MessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
+
+  /// An album's grid, in its photo's place (`props.album`). The photo view keeps the slot's
+  /// constraints and stays hidden under it.
+  private var albumGridView: MessageAlbumGridView?
+
+  private func syncAlbumGrid() {
+    guard let album = props.album, let photo = props.layout.photo, photoView.superview != nil else {
+      albumGridView?.removeFromSuperview()
+      albumGridView = nil
+      photoView.isHidden = false
+      return
+    }
+    photoView.isHidden = true
+    let grid = albumGridView ?? {
+      let grid = MessageAlbumGridView()
+      grid.translatesAutoresizingMaskIntoConstraints = false
+      contentView.addSubview(grid, positioned: .above, relativeTo: photoView)
+      NSLayoutConstraint.activate([
+        grid.topAnchor.constraint(equalTo: photoView.topAnchor),
+        grid.leadingAnchor.constraint(equalTo: photoView.leadingAnchor),
+        grid.widthAnchor.constraint(equalTo: photoView.widthAnchor),
+        grid.heightAnchor.constraint(equalTo: photoView.heightAnchor),
+      ])
+      albumGridView = grid
+      return grid
+    }()
+    let message = fullMessage.message
+    grid.configure(
+      album: album,
+      availableWidth: props.layout.albumAvailableWidth ?? photo.size.width,
+      scrollState: scrollState,
+      isRightToLeft: userInterfaceLayoutDirection == .rightToLeft,
+      roundsTop: message.repliedToMessageId == nil && !message.hasForwardHeader,
+      roundsBottom: message.text?.isEmpty != false
+    )
+  }
 
   private lazy var videoView: NewVideoView = {
     let view = NewVideoView(fullMessage, scrollState: scrollState)
@@ -941,7 +977,68 @@ class MessageViewAppKit: NSView {
 
   private var prevDelegate: NSTextViewportLayoutControllerDelegate?
 
-  private lazy var textView: NSTextView = {
+  /// Whether the NSTextView exists. Messages drawn by Core Text, and messages without text,
+  /// never create one.
+  private var isNativeTextViewLoaded = false
+
+  private var textView: NSTextView {
+    isNativeTextViewLoaded = true
+    return nativeTextView
+  }
+
+  /// Plain text drawn by Inline's Core Text renderer instead of NSTextView, behind the
+  /// "Core Text Message Text" experiment. Rich messages and code blocks stay on NSTextView.
+  private var coreTextView: CoreTextMessageView?
+  private var usesCoreText = false
+
+  /// The view that shows this message's text, created on demand.
+  private var textHostView: NSView {
+    usesCoreText ? loadCoreTextView() : textView
+  }
+
+  /// The text view when it is in the view hierarchy; never creates one.
+  private var attachedTextHost: NSView? {
+    if usesCoreText {
+      return coreTextView?.superview != nil ? coreTextView : nil
+    }
+    return isNativeTextViewLoaded && textView.superview != nil ? textView : nil
+  }
+
+  private var textSurface: (any MessageTextSurface)? {
+    if usesCoreText { return coreTextView }
+    return isNativeTextViewLoaded ? textView as? MessageTextView : nil
+  }
+
+  private func loadCoreTextView() -> CoreTextMessageView {
+    if let coreTextView { return coreTextView }
+    let view = CoreTextMessageView(frame: .zero)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    coreTextView = view
+    return view
+  }
+
+  private func wantsCoreTextRenderer() -> Bool {
+    // Rich messages use it too, as the host their blocks are placed in.
+    guard CoreTextMessageText.isEnabled, hasText else { return false }
+    return props.layout.richBlockContent != nil
+      || CoreTextMessageText.supports(entities: fullMessage.translationEntities ?? fullMessage.message.entities)
+  }
+
+  /// Moves the message's text between NSTextView and the Core Text view.
+  private func applyTextRenderer(coreText: Bool) {
+    guard coreText != usesCoreText else { return }
+    if let host = attachedTextHost {
+      textSurface?.onEntityClick = nil
+      textSurface?.onTextLongPress = nil
+      host.removeFromSuperview()
+    }
+    clearTextViewConstraints()
+    usesCoreText = coreText
+    needsUpdateConstraints = true
+    setupBoundsChangeObserver()
+  }
+
+  private lazy var nativeTextView: NSTextView = {
     if useTextKit2 {
       let textView = MessageTextView(usingTextLayoutManager: true)
       textView.translatesAutoresizingMaskIntoConstraints = false
@@ -1061,7 +1158,7 @@ class MessageViewAppKit: NSView {
 
   /// Handles link clicks by opening the URL in the default browser
   private func handleLinkClick(at characterIndex: Int) {
-    guard let url = linkURL(at: characterIndex, in: textView.attributedString()) else {
+    guard let url = linkURL(at: characterIndex, in: displayedText) else {
       MessageGestureTrace.debug(
         "MessageView.handleLinkClick messageId=\(message.messageId) char=\(characterIndex) result=noURL"
       )
@@ -1072,7 +1169,11 @@ class MessageViewAppKit: NSView {
   }
 
   private func linkURLForContextMenu(at characterIndex: Int) -> URL? {
-    linkURL(at: characterIndex, in: textView.attributedString())
+    linkURL(at: characterIndex, in: displayedText)
+  }
+
+  private var displayedText: NSAttributedString {
+    textSurface?.surfaceText ?? NSAttributedString()
   }
 
   private func linkURL(at characterIndex: Int, in attributedString: NSAttributedString) -> URL? {
@@ -1389,7 +1490,7 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupEntityClickHandling() {
-    guard let messageTextView = textView as? MessageTextView else {
+    guard let messageTextView = textSurface else {
       MessageGestureTrace.debug("MessageView.setupEntityClickHandling messageId=\(message.messageId) result=noMessageTextView")
       return
     }
@@ -1405,6 +1506,11 @@ class MessageViewAppKit: NSView {
   }
 
   private func syncTextViewForCurrentProps() {
+    applyTextRenderer(coreText: wantsCoreTextRenderer())
+    if usesCoreText {
+      syncCoreTextViewForCurrentProps()
+      return
+    }
     if hasText {
       if textView.superview == nil {
         contentView.addSubview(textView)
@@ -1420,13 +1526,42 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    guard textView.superview != nil else { return }
+    guard isNativeTextViewLoaded, textView.superview != nil else { return }
     MessageGestureTrace.debug("MessageView.syncTextView messageId=\(message.messageId) action=detachTextView")
     (textView as? MessageTextView)?.onEntityClick = nil
     (textView as? MessageTextView)?.onTextLongPress = nil
     textView.removeFromSuperview()
     clearTextViewConstraints()
     detectedLinks = []
+  }
+
+  private func syncCoreTextViewForCurrentProps() {
+    let view = loadCoreTextView()
+    guard hasText else {
+      guard view.superview != nil else { return }
+      view.onEntityClick = nil
+      view.onTextLongPress = nil
+      view.removeFromSuperview()
+      clearTextViewConstraints()
+      detectedLinks = []
+      return
+    }
+    if view.superview == nil {
+      contentView.addSubview(view)
+    }
+    if view.onEntityClick == nil {
+      setupEntityClickHandling()
+    }
+    if view.onContextMenu == nil {
+      view.onContextMenu = { [weak self, weak view] index, event in
+        guard let self, let view else { return nil }
+        return createMenu(
+          context: .textView,
+          nativeMenu: view.nativeTextMenu(at: index, event: event),
+          linkURL: index.flatMap { self.linkURLForContextMenu(at: $0) }
+        )
+      }
+    }
   }
 
   private func clearTextViewConstraints() {
@@ -1457,7 +1592,7 @@ class MessageViewAppKit: NSView {
       )
       return false
     }
-    let handled = handleTextEntityClick(hit, attributedString: textView.attributedString())
+    let handled = handleTextEntityClick(hit, attributedString: displayedText)
     if handled, let event {
       handledEntityClickEventNumber = event.eventNumber
     }
@@ -1631,7 +1766,7 @@ class MessageViewAppKit: NSView {
   }
 
   private func textEntityHit(at location: NSPoint) -> MessageTextEntityHit? {
-    guard let messageTextView = textView as? MessageTextView else { return nil }
+    guard let messageTextView = textSurface else { return nil }
     let hit = messageTextView.entityHit(
       at: location,
       extraTextRanges: detectedLinks.map(\.range)
@@ -1651,7 +1786,7 @@ class MessageViewAppKit: NSView {
       return true
     }
 
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard let textView = attachedTextHost, !textView.isHidden else { return false }
 
     let locationInSelf = convert(event.locationInWindow, from: nil)
     let locationInText = textView.convert(locationInSelf, from: self)
@@ -1671,7 +1806,7 @@ class MessageViewAppKit: NSView {
        ) as? MessageTextView {
       return hit.entityHit(at: hit.convert(locationInSelf, from: self), extraTextRanges: []) != nil
     }
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard let textView = attachedTextHost, !textView.isHidden else { return false }
 
     let locationInText = textView.convert(locationInSelf, from: self)
     guard textView.bounds.contains(locationInText) else { return false }
@@ -1680,13 +1815,13 @@ class MessageViewAppKit: NSView {
   }
 
   private func handleTextLongPress(at location: NSPoint, event: NSEvent) {
-    let locationInSelf = textView.convert(location, to: self)
+    let locationInSelf = textHostView.convert(location, to: self)
     MessageGestureTrace.debug(
       "MessageView.handleTextLongPress messageId=\(message.messageId) eventNumber=\(event.eventNumber) point=\(MessageGestureTrace.point(locationInSelf))"
     )
 
     if let result = interactiveHitTestResult(locationInSelf) {
-      guard let text = result.view as? MessageTextView, text.onTextLongPress != nil else {
+      guard let text = result.view as? any MessageTextSurface, text.onTextLongPress != nil else {
         MessageGestureTrace.debug(
           "MessageView.handleTextLongPress messageId=\(message.messageId) blocked=interactive target=\(result.name)"
         )
@@ -1812,7 +1947,7 @@ class MessageViewAppKit: NSView {
 //    view.layer?.backgroundColor = NSColor.red.cgColor
 //    reactionsView = view
 
-    if hasText, textView.superview != nil {
+    if hasText, let textView = attachedTextHost {
       if reactionsOutsideBubble {
         addSubview(reactionsView!)
       } else {
@@ -2321,6 +2456,7 @@ class MessageViewAppKit: NSView {
 
     defer {
       NSLayoutConstraint.activate(constraints)
+      syncAlbumGrid()
     }
 
     // Note:
@@ -2466,7 +2602,7 @@ class MessageViewAppKit: NSView {
 
     // Text
 
-    if let text = layout.text {
+    if let text = layout.text, let textView = attachedTextHost {
       textViewWidthConstraint = textView.widthAnchor
         .constraint(equalToConstant: text.size.width)
       textViewHeightConstraint = textView.heightAnchor
@@ -2651,6 +2787,9 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: layout.photoContentViewTop
       )
+      photoViewLeadingConstraint = photoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: photo.spacing.left
+      )
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
       photoViewWidthConstraint = photoView.widthAnchor
         .constraint(equalToConstant: photo.size.width)
@@ -2658,7 +2797,7 @@ class MessageViewAppKit: NSView {
         photoViewTopConstraint!,
         photoViewHeightConstraint!,
         photoViewWidthConstraint!,
-        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+        photoViewLeadingConstraint!,
       ])
     }
 
@@ -2669,6 +2808,9 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: layout.videoContentViewTop
       )
+      videoViewLeadingConstraint = videoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: video.spacing.left
+      )
       videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
       videoViewWidthConstraint = videoView.widthAnchor
         .constraint(equalToConstant: video.size.width)
@@ -2676,7 +2818,7 @@ class MessageViewAppKit: NSView {
         videoViewTopConstraint!,
         videoViewHeightConstraint!,
         videoViewWidthConstraint!,
-        videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
+        videoViewLeadingConstraint!,
       ])
     }
   }
@@ -2691,6 +2833,9 @@ class MessageViewAppKit: NSView {
   private var photoViewHeightConstraint: NSLayoutConstraint?
   private var photoViewWidthConstraint: NSLayoutConstraint?
   private var photoViewTopConstraint: NSLayoutConstraint?
+  /// Follows the media frame inset (`MessageSizeCalculator.mediaFrameInset`), which a reused view can change.
+  private var photoViewLeadingConstraint: NSLayoutConstraint?
+  private var videoViewLeadingConstraint: NSLayoutConstraint?
 
   private var videoViewHeightConstraint: NSLayoutConstraint?
   private var videoViewWidthConstraint: NSLayoutConstraint?
@@ -2810,7 +2955,7 @@ class MessageViewAppKit: NSView {
 
     // Text can appear/disappear when a view is reused for a different message.
     syncTextViewForCurrentProps()
-    if let text = props.layout.text, textView.superview != nil {
+    if let text = props.layout.text, let textView = attachedTextHost {
       var constraintsToActivate: [NSLayoutConstraint] = []
       if textViewWidthConstraint == nil {
         textViewWidthConstraint = textView.widthAnchor.constraint(equalToConstant: text.size.width)
@@ -2947,6 +3092,9 @@ class MessageViewAppKit: NSView {
       if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
         photoViewTopConstraint.constant = props.layout.photoContentViewTop
       }
+      if let photoViewLeadingConstraint, photoViewLeadingConstraint.constant != photo.spacing.left {
+        photoViewLeadingConstraint.constant = photo.spacing.left
+      }
     } else if let photo = props.layout.photo {
       if photoView.superview == nil {
         contentView.addSubview(photoView)
@@ -2955,13 +3103,16 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: props.layout.photoContentViewTop
       )
+      photoViewLeadingConstraint = photoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: photo.spacing.left
+      )
       photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
       photoViewWidthConstraint = photoView.widthAnchor.constraint(equalToConstant: photo.size.width)
       NSLayoutConstraint.activate([
         photoViewTopConstraint!,
         photoViewHeightConstraint!,
         photoViewWidthConstraint!,
-        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+        photoViewLeadingConstraint!,
       ])
     }
 
@@ -2982,6 +3133,9 @@ class MessageViewAppKit: NSView {
       if videoViewTopConstraint.constant != props.layout.videoContentViewTop {
         videoViewTopConstraint.constant = props.layout.videoContentViewTop
       }
+      if let videoViewLeadingConstraint, videoViewLeadingConstraint.constant != video.spacing.left {
+        videoViewLeadingConstraint.constant = video.spacing.left
+      }
     } else if let video = props.layout.video {
       // Set up constraints if they didn't exist (e.g. view reused for a different message)
       if videoView.superview == nil {
@@ -2991,13 +3145,16 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: props.layout.videoContentViewTop
       )
+      videoViewLeadingConstraint = videoView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor, constant: video.spacing.left
+      )
       videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
       videoViewWidthConstraint = videoView.widthAnchor.constraint(equalToConstant: video.size.width)
       NSLayoutConstraint.activate([
         videoViewTopConstraint!,
         videoViewHeightConstraint!,
         videoViewWidthConstraint!,
-        videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
+        videoViewLeadingConstraint!,
       ])
     }
 
@@ -3216,21 +3373,21 @@ class MessageViewAppKit: NSView {
       styleKey: renderCacheStyleKey
     ) {
       attributedString = cached
-      detectedLinks = LinkDetector.shared.detectLinks(in: cached).map { (range: $0.range, url: $0.url) }
+      // The cached text already carries `.link` on detected URLs, which the Core Text view reads;
+      // only NSTextView still re-runs detection here (up to ~2 ms for a long message).
+      detectedLinks = usesCoreText
+        ? []
+        : LinkDetector.shared.detectLinks(in: cached).map { (range: $0.range, url: $0.url) }
     } else {
       let codeBlockBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.05)
       let inlineCodeBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.06)
-      let processed = ProcessEntities.toAttributedString(
+      let processed = MessageTextTypography.attributedText(
         text: text,
         entities: entities,
-        configuration: .init(
-          font: ChatTypography.current.font(sized: props.layout.fontSize),
-          boldWeight: .semibold,
-          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
-          palette: richTextPalette,
-          codeBlockBackgroundColor: codeBlockBackgroundColor,
-          inlineCodeBackgroundColor: inlineCodeBackgroundColor
-        )
+        fontSize: props.layout.fontSize,
+        palette: richTextPalette,
+        codeBlockBackgroundColor: codeBlockBackgroundColor,
+        inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
       let linkMatches = LinkDetector.shared.applyLinkStyling(
         to: processed,
@@ -3260,7 +3417,7 @@ class MessageViewAppKit: NSView {
       }
       richView.onTextLongPress = { [weak self] event in
         guard let self else { return }
-        handleTextLongPress(at: textView.convert(event.locationInWindow, from: nil), event: event)
+        handleTextLongPress(at: textHostView.convert(event.locationInWindow, from: nil), event: event)
       }
       richView.onMessageAction = { [weak self] action in
         self?.handleMessageActionTap(action)
@@ -3276,19 +3433,30 @@ class MessageViewAppKit: NSView {
           message: self.fullMessage.message
         )
       }
-      textView.setMessageAttributedString(
-        NSAttributedString(),
-        isRtl: props.isRtl,
-        layoutSize: props.layout.text?.size ?? .zero,
-        useTextKit2: useTextKit2
-      )
-      if richView.superview !== textView {
-        richView.removeFromSuperview()
-        textView.addSubview(richView)
+      // The rich blocks draw everything; their host only places them.
+      let host = textHostView
+      if let coreTextView, usesCoreText {
+        coreTextView.setMessageAttributedString(
+          NSAttributedString(),
+          isRtl: props.isRtl,
+          layoutSize: props.layout.text?.size ?? .zero,
+          linkColor: linkColor
+        )
+      } else {
+        textView.setMessageAttributedString(
+          NSAttributedString(),
+          isRtl: props.isRtl,
+          layoutSize: props.layout.text?.size ?? .zero,
+          useTextKit2: useTextKit2
+        )
       }
-      textView.setAccessibilityElement(true)
-      textView.setAccessibilityRole(.group)
-      textView.setAccessibilityChildren([richView])
+      if richView.superview !== host {
+        richView.removeFromSuperview()
+        host.addSubview(richView)
+      }
+      host.setAccessibilityElement(true)
+      host.setAccessibilityRole(.group)
+      host.setAccessibilityChildren([richView])
       richView.frame = CGRect(origin: .zero, size: richBlockPlan.size)
       richView.update(
         plan: richBlockPlan,
@@ -3307,6 +3475,17 @@ class MessageViewAppKit: NSView {
 
     richBlockContentView?.prepareForReuse()
     richBlockContentView?.removeFromSuperview()
+    if usesCoreText {
+      coreTextView?.setAccessibilityRole(.staticText)
+      coreTextView?.setAccessibilityChildren(nil)
+      coreTextView?.setMessageAttributedString(
+        attributedString,
+        isRtl: props.isRtl,
+        layoutSize: props.layout.text?.size ?? .zero,
+        linkColor: linkColor
+      )
+      return
+    }
     textView.setAccessibilityElement(true)
     textView.setAccessibilityRole(.textArea)
     textView.setAccessibilityChildren(nil)
@@ -3376,7 +3555,8 @@ class MessageViewAppKit: NSView {
 
     // Experimental in build 66
     // Adjust viewport instead of layouting
-    if superview != nil, window != nil, let clipView = enclosingScrollView?.contentView {
+    // Only NSTextView needs it: the Core Text view has no viewport to keep laid out.
+    if superview != nil, window != nil, !usesCoreText, let clipView = enclosingScrollView?.contentView {
       // Register for both frame and bounds changes
 //      NotificationCenter.default.addObserver(
 //        self,
@@ -3425,7 +3605,7 @@ class MessageViewAppKit: NSView {
 
   private func boundsChange(scrollView: NSScrollView, clipView: NSClipView) {
     guard feature_relayoutOnBoundsChange else { return }
-    guard hasText else { return }
+    guard hasText, !usesCoreText else { return }
     // guard textView.inLiveResize else { return }
 
     let visibleRect = scrollView.documentVisibleRect
@@ -3472,11 +3652,6 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func copyMessage() {
-    guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled else {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(fullMessage.displayText ?? "", forType: .string)
-      return
-    }
     MessageTextPasteboard.copy(
       text: fullMessage.displayText ?? "",
       entities: fullMessage.translationEntities ?? message.entities
@@ -3526,7 +3701,15 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
-    if message.status == .failed {
+    if let album = props.album {
+      let sentCount = album.items.count(where: { $0.message.messageId > 0 })
+      guard sentCount > 0 else { return deleteAlbum(album) }
+      MessageDeletion.confirm(count: sentCount, in: window) { [weak self] in self?.deleteAlbum(album) }
+      return
+    }
+    // Never reached the server: cancel a send in flight, or remove a failed one locally.
+    if message.status == .failed || message.messageId <= 0 {
+      if message.status != .failed, PendingMessageCanceller.cancel(fullMessage) { return }
       let messageId = message.messageId
       let chatId = message.chatId
       let peerId = message.peerId
@@ -3541,13 +3724,40 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    // Delete message
-    Task(priority: .userInitiated) { @MainActor in
-      try await Api.realtime.send(.deleteMessages(
-        messageIds: [message.messageId],
-        peerId: message.peerId,
-        chatId: message.chatId
-      ))
+    let message = message
+    MessageDeletion.confirm(count: 1, in: window) {
+      Task(priority: .userInitiated) { @MainActor in
+        await MessageDeletion.deleteShowingErrors(
+          messageIds: [message.messageId],
+          peerId: message.peerId,
+          chatId: message.chatId
+        )
+      }
+    }
+  }
+
+  /// An album goes as a whole: sent items on the server, sends in flight cancelled, failed
+  /// ones locally.
+  private func deleteAlbum(_ album: MessageAlbum) {
+    let peerId = message.peerId
+    let chatId = message.chatId
+    let sent = album.items.map(\FullMessage.message.messageId).filter { $0 > 0 }
+    let cancelled = album.items.filter { $0.message.messageId <= 0 && PendingMessageCanceller.cancel($0) }
+    let local = album.items.filter { item in
+      item.message.messageId <= 0 && !cancelled.contains { $0.id == item.id }
+    }.map(\FullMessage.message.messageId)
+    if !local.isEmpty {
+      Task {
+        _ = try? await AppDatabase.shared.dbWriter.write { db in
+          try Message.deleteMessages(db, messageIds: local, chatId: chatId)
+        }
+        await MainActor.run { MessagesPublisher.shared.messagesDeleted(messageIds: local, peer: peerId) }
+      }
+    }
+    if !sent.isEmpty {
+      Task(priority: .userInitiated) { @MainActor in
+        await MessageDeletion.deleteShowingErrors(messageIds: sent, peerId: peerId, chatId: chatId)
+      }
     }
   }
 
@@ -3866,7 +4076,8 @@ class MessageViewAppKit: NSView {
 
   @objc private func forwardMessage() {
     if let forwardMessages = dependencies?.forwardMessages {
-      forwardMessages.present(messages: [fullMessage])
+      // An album forwards as a whole and stays one album in the destination.
+      forwardMessages.present(messages: props.album?.items ?? [fullMessage])
       return
     }
 
@@ -3880,7 +4091,7 @@ class MessageViewAppKit: NSView {
 
     weak var weakHostingController: NSViewController?
     let rootView = ForwardMessagesSheet(
-      messages: [fullMessage],
+      messages: props.album?.items ?? [fullMessage],
       onSelect: { [weak self] destination, selection in
         guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
           Log.shared.error("Forward nav failed: missing destination chat id")
@@ -4191,18 +4402,24 @@ class MessageViewAppKit: NSView {
   private func updatePropsAndUpdateLayout(
     props: MessageViewProps,
     disableTextRelayout _: Bool = false,
+    textFollows: Bool = false,
     animate: Bool = false
   ) {
     // update internal props (must update so contentView is recalced)
     self.props = props
     syncBubbleTail(animated: animate)
 
-    if textView.textContainer?.size != props.layout.text?.size ?? .zero {
+    if usesCoreText {
+      // When the next message's text follows (row reuse), a width set before the layout pass
+      // below would lay the previous message's text out again at the new width.
+      if !textFollows { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
+    } else if isNativeTextViewLoaded, textView.textContainer?.size != props.layout.text?.size ?? .zero {
       log.trace("updating size for text in msg \(message.id)")
       textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
 
     layoutSubtreeIfNeeded()
+    if textFollows, usesCoreText { coreTextView?.setLayoutWidth(props.layout.text?.size.width ?? 0) }
 
     needsUpdateConstraints = true
 
@@ -4220,9 +4437,10 @@ class MessageViewAppKit: NSView {
         DispatchQueue.main.async {
           // Avoid forcing TextKit 2 viewport layout on macOS 27; crash reports show
           // AppKit throwing from this path during NSTableView row install.
-          guard MessageTextConfiguration.useTextKit2ViewportWorkarounds else { return }
+          guard MessageTextConfiguration.useTextKit2ViewportWorkarounds,
+                let self, !self.usesCoreText, self.isNativeTextViewLoaded else { return }
           // Fixes text display issues going blank
-          self?.textView.textLayoutManager?.textViewportLayoutController
+          self.textView.textLayoutManager?.textViewportLayoutController
             .layoutViewport()
         }
       }
@@ -4288,7 +4506,7 @@ class MessageViewAppKit: NSView {
     updateReplyThreadSummaryView(for: props)
 
     // Update props and reflect changes
-    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
+    updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, textFollows: true, animate: animate)
 
     // Reactions
     // TODO: Reactions are not updating as expected
@@ -4306,9 +4524,11 @@ class MessageViewAppKit: NSView {
     syncForwardHeaderView(for: props)
 
     // Photo
-    if hasPhoto {
+    // Under an album the photo view only holds the slot: nothing to load.
+    if hasPhoto, props.album == nil {
       photoView.update(with: fullMessage)
     }
+    syncAlbumGrid()
 
     // Video
     if hasVideo {
@@ -4371,6 +4591,7 @@ class MessageViewAppKit: NSView {
       // disableTextRelayout: props.layout.singleLine // Quick hack to reduce such re-layouts
       disableTextRelayout: true
     )
+    syncAlbumGrid()
 
     if let richBlockPlan = props.layout.richBlockContent,
        let richBlockContentView
@@ -4406,8 +4627,10 @@ class MessageViewAppKit: NSView {
       if hasPhoto {
         if scrollState == .idle {
           photoView.setIsScrolling(false)
+          albumGridView?.setIsScrolling(false)
         } else {
           photoView.setIsScrolling(true)
+          albumGridView?.setIsScrolling(true)
         }
       }
       if hasVideo {
@@ -4976,12 +5199,12 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
   }
 
   private func isTextViewPoint(_ point: NSPoint) -> Bool {
-    guard textView.superview != nil, !textView.isHidden else { return false }
+    guard let textView = attachedTextHost, !textView.isHidden else { return false }
     return textView.bounds.contains(textView.convert(point, from: self))
   }
 
   private func isTextPoint(_ point: NSPoint) -> Bool {
-    guard textView.superview != nil, !textView.isHidden else {
+    guard let textView = attachedTextHost, !textView.isHidden else {
       MessageGestureTrace.trace("MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) result=false reason=noTextView")
       return false
     }
@@ -4994,7 +5217,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
       return false
     }
 
-    guard let messageTextView = textView as? MessageTextView else {
+    guard let messageTextView = textSurface else {
       MessageGestureTrace.trace(
         "MessageView.isTextPoint messageId=\(message.messageId) point=\(MessageGestureTrace.point(point)) textPoint=\(MessageGestureTrace.point(pointInText)) result=true reason=plainTextView"
       )
@@ -5138,7 +5361,7 @@ extension MessageViewAppKit: NSMenuDelegate {
         forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
         if ExperimentalFeatureFlags.quickForwardEnabled, let dependencies,
            dependencies.forwardMessages != nil {
-          forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
+          forwardItem.submenu = ForwardMessageMenu.make(messages: props.album?.items ?? [fullMessage], dependencies: dependencies)
         }
         menu.addItem(forwardItem)
         if message.messageId > 0,
@@ -5276,8 +5499,8 @@ extension MessageViewAppKit: NSMenuDelegate {
       }
     }
 
-    // Add photo actions
-    if hasPhoto {
+    // Add photo actions (an album's photos open one at a time, from their tiles)
+    if hasPhoto, props.album == nil {
       let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
       copyItem.target = photoView
       copyItem.isEnabled = true
@@ -5475,17 +5698,20 @@ extension MessageViewAppKit: MessageTextSelectionSource {
     if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
       return richBlockContentView.textSelectionProjection()
     }
-    guard let textView = textView as? MessageTextView, !textView.isHiddenOrHasHiddenAncestor,
-          (textView.textStorage?.length ?? 0) > 0
+    guard let textView = textSurface, textView.superview != nil, !textView.isHiddenOrHasHiddenAncestor,
+          textView.surfaceText.length > 0
     else { return nil }
     return .single(textView)
   }
 
   func textSelectionPressRegion() -> CGRect? {
-    let container: NSView = if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
-      richBlockContentView
+    let container: NSView
+    if let richBlockContentView, richBlockContentView.superview != nil, !richBlockContentView.isHidden {
+      container = richBlockContentView
+    } else if let host = attachedTextHost {
+      container = host
     } else {
-      textView
+      return nil
     }
     guard container.window != nil, !container.isHiddenOrHasHiddenAncestor else { return nil }
     // The text with a margin for imprecise presses, and the whole bubble around it.
@@ -5498,6 +5724,6 @@ extension MessageViewAppKit: MessageTextSelectionSource {
 
   func isInteractiveForTextSelection(at point: NSPoint) -> Bool {
     guard let result = interactiveHitTestResult(point) else { return false }
-    return !(result.view is NSTextView)
+    return !(result.view is NSTextView) && !(result.view is any MessageTextSurface)
   }
 }

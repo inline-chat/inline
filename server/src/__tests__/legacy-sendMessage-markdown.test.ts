@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
 import { db } from "@in/server/db"
 import { messages, users } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "./setup"
+
+const app = useLiveHttpApp()
 
 describe("legacy /v1/sendMessage markdown", () => {
   setupTestLifecycle()

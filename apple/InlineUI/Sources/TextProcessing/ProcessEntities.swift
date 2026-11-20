@@ -1199,19 +1199,25 @@ public class ProcessEntities {
     return title?.isEmpty == false ? title : nil
   }
 
-  private static func strippedInlineMarkdownTitle(_ value: String) -> String? {
-    var title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+  private static let inlineMarkdownTitleReplacements: [(NSRegularExpression, String)] = {
     let replacements: [(String, String)] = [
       ("`([^`\\n]+)`", "$1"),
       ("\\*\\*([^\\n]+?)\\*\\*", "$1"),
       ("__([^\\n]+?)__", "$1"),
       ("(^|\\s)_([^_\\n]+?)_(?=\\s|$)", "$1$2"),
     ]
+    return replacements.compactMap { replacement in
+      guard let regex = try? NSRegularExpression(pattern: replacement.0) else { return nil }
+      return (regex, replacement.1)
+    }
+  }()
 
-    for replacement in replacements {
-      guard let regex = try? NSRegularExpression(pattern: replacement.0) else { continue }
+  private static func strippedInlineMarkdownTitle(_ value: String) -> String? {
+    var title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    for (regex, template) in inlineMarkdownTitleReplacements {
       let range = NSRange(location: 0, length: (title as NSString).length)
-      title = regex.stringByReplacingMatches(in: title, range: range, withTemplate: replacement.1)
+      title = regex.stringByReplacingMatches(in: title, range: range, withTemplate: template)
     }
 
     return trimmedTitle(title)
@@ -1351,6 +1357,11 @@ public class ProcessEntities {
   /// Regex pattern for italic text
   /// Matches: _[content]_ only when surrounded by whitespace or string boundaries
   private static let italicTextPattern = "(^|\\s)_(.+?)_(\\s|$)"
+
+  private static let preBlockRegex = try? NSRegularExpression(pattern: preBlockPattern, options: [.dotMatchesLineSeparators])
+  private static let inlineCodeRegex = try? NSRegularExpression(pattern: inlineCodePattern, options: [])
+  private static let boldTextRegex = try? NSRegularExpression(pattern: boldTextPattern, options: [])
+  private static let italicTextRegex = try? NSRegularExpression(pattern: italicTextPattern, options: [])
 
   private static func getCachedMonospaceResult(for fontName: String) -> Bool? {
     monospaceFontCacheLock.lock()
@@ -1882,67 +1893,64 @@ public class ProcessEntities {
     var allEntities = existingEntities
     var boldEntities: [MessageEntity] = []
 
-    do {
-      let regex = try NSRegularExpression(pattern: boldTextPattern, options: [])
-      let nsText = text as NSString
-      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
+    guard let regex = boldTextRegex else {
+      return allEntities
+    }
+    let nsText = text as NSString
+    let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
-      // Process matches in reverse order to avoid offset issues when removing ** markers
-      var removals: [OffsetRemoval] = []
+    // Process matches in reverse order to avoid offset issues when removing ** markers
+    var removals: [OffsetRemoval] = []
 
-      for match in matches.reversed() {
-        // Get the full match range (including **)
-        let fullRange = match.range(at: 0)
+    for match in matches.reversed() {
+      // Get the full match range (including **)
+      let fullRange = match.range(at: 0)
 
-        // Skip if this match is within a code block
-        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
-          continue
-        }
-
-        // Get the content range (excluding **)
-        if match.numberOfRanges > 1 {
-          let contentRange = match.range(at: 1)
-
-          if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
-            // Convert NSRange to Range<String.Index> safely
-            guard let swiftFullRange = Range(fullRange, in: text),
-                  let swiftContentRange = Range(contentRange, in: text)
-            else {
-              continue // Skip this match if range conversion fails
-            }
-
-            // Extract content text
-            let contentText = String(text[swiftContentRange])
-
-            // Replace the full match with just the content
-            text.replaceSubrange(swiftFullRange, with: contentText)
-
-            let openMarkerLength = 2
-            let closeMarkerLength = 2
-            let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
-            removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
-            removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
-
-            // Store the entity position in pre-removal coordinates; map after applying removals.
-            var boldEntity = MessageEntity()
-            boldEntity.type = .bold
-            boldEntity.offset = Int64(contentRange.location)
-            boldEntity.length = Int64(contentRange.length)
-            boldEntities.append(boldEntity)
-          }
-        }
+      // Skip if this match is within a code block
+      if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+        continue
       }
 
-      applyOffsetRemovals(&allEntities, removals: removals)
-      applyOffsetRemovals(&opaqueRanges, removals: removals)
-      applyOffsetRemovals(&boldEntities, removals: removals)
+      // Get the content range (excluding **)
+      if match.numberOfRanges > 1 {
+        let contentRange = match.range(at: 1)
 
-      // Add bold entities to the list
-      allEntities.append(contentsOf: boldEntities)
+        if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+          // Convert NSRange to Range<String.Index> safely
+          guard let swiftFullRange = Range(fullRange, in: text),
+                let swiftContentRange = Range(contentRange, in: text)
+          else {
+            continue // Skip this match if range conversion fails
+          }
 
-    } catch {
-      // Handle regex error silently
+          // Extract content text
+          let contentText = String(text[swiftContentRange])
+
+          // Replace the full match with just the content
+          text.replaceSubrange(swiftFullRange, with: contentText)
+
+          let openMarkerLength = 2
+          let closeMarkerLength = 2
+          let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
+          removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
+          removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
+
+          // Store the entity position in pre-removal coordinates; map after applying removals.
+          var boldEntity = MessageEntity()
+          boldEntity.type = .bold
+          boldEntity.offset = Int64(contentRange.location)
+          boldEntity.length = Int64(contentRange.length)
+          boldEntities.append(boldEntity)
+        }
+      }
     }
+
+    applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
+    applyOffsetRemovals(&boldEntities, removals: removals)
+
+    // Add bold entities to the list
+    allEntities.append(contentsOf: boldEntities)
 
     return allEntities
   }
@@ -1955,74 +1963,71 @@ public class ProcessEntities {
     var allEntities = existingEntities
     var inlineCodeEntities: [MessageEntity] = []
 
-    do {
-      let regex = try NSRegularExpression(pattern: inlineCodePattern, options: [])
-      let nsText = text as NSString
-      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
+    guard let regex = inlineCodeRegex else {
+      return allEntities
+    }
+    let nsText = text as NSString
+    let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
-      // Process matches in reverse order to avoid offset issues when removing ` markers
-      var removals: [OffsetRemoval] = []
+    // Process matches in reverse order to avoid offset issues when removing ` markers
+    var removals: [OffsetRemoval] = []
 
-      for match in matches.reversed() {
-        // Get the full match range (including `)
-        let fullRange = match.range(at: 0)
+    for match in matches.reversed() {
+      // Get the full match range (including `)
+      let fullRange = match.range(at: 0)
 
-        // Skip if this match is within a code block (prevents nested code blocks)
-        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
-          continue
-        }
-
-        // Get the content range (excluding `)
-        if match.numberOfRanges > 2 {
-          var contentRange = match.range(at: 2)
-          let rawContent = nsText.substring(with: contentRange)
-          // Padding separates a backtick at either edge from its longer delimiter.
-          if rawContent.hasPrefix(" "), rawContent.hasSuffix(" "),
-             rawContent.contains(where: { $0 != " " }) {
-            contentRange.location += 1
-            contentRange.length -= 2
-          }
-
-          if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
-            // Convert NSRange to Range<String.Index> safely
-            guard let swiftFullRange = Range(fullRange, in: text),
-                  let swiftContentRange = Range(contentRange, in: text)
-            else {
-              continue // Skip this match if range conversion fails
-            }
-
-            // Extract content text
-            let contentText = String(text[swiftContentRange])
-
-            // Replace the full match with just the content
-            text.replaceSubrange(swiftFullRange, with: contentText)
-
-            let openMarkerLength = contentRange.location - fullRange.location
-            let closeMarkerLength = NSMaxRange(fullRange) - NSMaxRange(contentRange)
-            let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
-            removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
-            removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
-
-            // Store the entity position in pre-removal coordinates; map after applying removals.
-            var inlineCodeEntity = MessageEntity()
-            inlineCodeEntity.type = .code
-            inlineCodeEntity.offset = Int64(contentRange.location)
-            inlineCodeEntity.length = Int64(contentRange.length)
-            inlineCodeEntities.append(inlineCodeEntity)
-          }
-        }
+      // Skip if this match is within a code block (prevents nested code blocks)
+      if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+        continue
       }
 
-      applyOffsetRemovals(&allEntities, removals: removals)
-      applyOffsetRemovals(&opaqueRanges, removals: removals)
-      applyOffsetRemovals(&inlineCodeEntities, removals: removals)
+      // Get the content range (excluding `)
+      if match.numberOfRanges > 2 {
+        var contentRange = match.range(at: 2)
+        let rawContent = nsText.substring(with: contentRange)
+        // Padding separates a backtick at either edge from its longer delimiter.
+        if rawContent.hasPrefix(" "), rawContent.hasSuffix(" "),
+           rawContent.contains(where: { $0 != " " }) {
+          contentRange.location += 1
+          contentRange.length -= 2
+        }
 
-      // Add inline code entities to the list
-      allEntities.append(contentsOf: inlineCodeEntities)
+        if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+          // Convert NSRange to Range<String.Index> safely
+          guard let swiftFullRange = Range(fullRange, in: text),
+                let swiftContentRange = Range(contentRange, in: text)
+          else {
+            continue // Skip this match if range conversion fails
+          }
 
-    } catch {
-      // Handle regex error silently
+          // Extract content text
+          let contentText = String(text[swiftContentRange])
+
+          // Replace the full match with just the content
+          text.replaceSubrange(swiftFullRange, with: contentText)
+
+          let openMarkerLength = contentRange.location - fullRange.location
+          let closeMarkerLength = NSMaxRange(fullRange) - NSMaxRange(contentRange)
+          let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
+          removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
+          removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
+
+          // Store the entity position in pre-removal coordinates; map after applying removals.
+          var inlineCodeEntity = MessageEntity()
+          inlineCodeEntity.type = .code
+          inlineCodeEntity.offset = Int64(contentRange.location)
+          inlineCodeEntity.length = Int64(contentRange.length)
+          inlineCodeEntities.append(inlineCodeEntity)
+        }
+      }
     }
+
+    applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
+    applyOffsetRemovals(&inlineCodeEntities, removals: removals)
+
+    // Add inline code entities to the list
+    allEntities.append(contentsOf: inlineCodeEntities)
 
     return allEntities
   }
@@ -2412,143 +2417,140 @@ public class ProcessEntities {
     var allEntities = existingEntities
     var preEntities: [MessageEntity] = []
 
-    do {
-      let regex = try NSRegularExpression(pattern: preBlockPattern, options: [.dotMatchesLineSeparators])
-      let nsText = text as NSString
-      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
+    guard let regex = preBlockRegex else {
+      return allEntities
+    }
+    let nsText = text as NSString
+    let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
-      // Process matches in reverse order to avoid index invalidation while editing the text.
-      var adjustments: [OffsetAdjustment] = []
+    // Process matches in reverse order to avoid index invalidation while editing the text.
+    var adjustments: [OffsetAdjustment] = []
 
-      for match in matches.reversed() {
-        // Get the full match range (including ``` and language)
-        let fullRange = match.range(at: 0)
+    for match in matches.reversed() {
+      // Get the full match range (including ``` and language)
+      let fullRange = match.range(at: 0)
 
-        // Skip if this match is within a code block (prevents nested code blocks)
-        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+      // Skip if this match is within a code block (prevents nested code blocks)
+      if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+        continue
+      }
+
+      // Group 1 is the fence, group 2 is the optional language, group 3 is the content.
+      let contentRange: NSRange
+      if match.numberOfRanges >= 4, match.range(at: 3).location != NSNotFound {
+        contentRange = match.range(at: 3)
+      } else {
+        continue // Skip if no valid content group found
+      }
+
+      if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+        // Convert NSRange to Range<String.Index> safely
+        guard let swiftContentRange = Range(contentRange, in: text)
+        else {
+          continue // Skip this match if range conversion fails
+        }
+
+        // Extract content text and trim a single leading/trailing newline to avoid extra blank lines
+        let rawContentText = String(text[swiftContentRange])
+        var leadingTrimLength = 0
+        if rawContentText.hasPrefix("\r\n") {
+          leadingTrimLength = 2
+        } else if rawContentText.hasPrefix("\n") {
+          leadingTrimLength = 1
+        }
+
+        let leadingTrimmedText = leadingTrimLength > 0 ? String(rawContentText.dropFirst(leadingTrimLength)) : rawContentText
+        var trailingTrimLength = 0
+        if leadingTrimmedText.hasSuffix("\r\n") {
+          trailingTrimLength = 2
+        } else if leadingTrimmedText.hasSuffix("\n") {
+          trailingTrimLength = 1
+        }
+
+        let adjustedContentLocation = contentRange.location + leadingTrimLength
+        let adjustedContentLength = max(0, contentRange.length - leadingTrimLength - trailingTrimLength)
+        let adjustedContentRange = NSRange(location: adjustedContentLocation, length: adjustedContentLength)
+        let contentRangeEnd = adjustedContentRange.location + adjustedContentRange.length
+        let contentText = adjustedContentLength > 0 ? nsText.substring(with: adjustedContentRange) : ""
+
+        let fullRangeEnd = fullRange.location + fullRange.length
+        let needsLeadingLineBreak = fullRange.location > 0 &&
+          !isLineBreakCharacter(nsText.character(at: fullRange.location - 1))
+        let needsTrailingLineBreak = fullRangeEnd < nsText.length &&
+          !isLineBreakCharacter(nsText.character(at: fullRangeEnd))
+
+        var replacementRange = fullRange
+        if needsLeadingLineBreak, fullRange.location > 0 {
+          let previousCharacter = nsText.character(at: fullRange.location - 1)
+          if isInlineWhitespaceCharacter(previousCharacter) {
+            replacementRange.location -= 1
+            replacementRange.length += 1
+            adjustments.append(
+              OffsetAdjustment(position: fullRange.location - 1, delta: -1, includeAtPosition: false)
+            )
+          }
+        }
+
+        if needsTrailingLineBreak, fullRangeEnd < nsText.length {
+          let nextCharacter = nsText.character(at: fullRangeEnd)
+          if isInlineWhitespaceCharacter(nextCharacter) {
+            replacementRange.length += 1
+            adjustments.append(
+              OffsetAdjustment(position: fullRangeEnd, delta: -1, includeAtPosition: false)
+            )
+          }
+        }
+
+        guard let swiftReplacementRange = Range(replacementRange, in: text) else {
           continue
         }
 
-        // Group 1 is the fence, group 2 is the optional language, group 3 is the content.
-        let contentRange: NSRange
-        if match.numberOfRanges >= 4, match.range(at: 3).location != NSNotFound {
-          contentRange = match.range(at: 3)
-        } else {
-          continue // Skip if no valid content group found
+        var replacementText = contentText
+        if needsLeadingLineBreak {
+          replacementText = "\n" + replacementText
+          adjustments.append(
+            OffsetAdjustment(position: adjustedContentRange.location, delta: 1, includeAtPosition: true)
+          )
+        }
+        if needsTrailingLineBreak {
+          replacementText += "\n"
+          adjustments.append(
+            OffsetAdjustment(position: contentRangeEnd, delta: 1, includeAtPosition: true)
+          )
         }
 
-        if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
-          // Convert NSRange to Range<String.Index> safely
-          guard let swiftContentRange = Range(contentRange, in: text)
-          else {
-            continue // Skip this match if range conversion fails
-          }
+        // Replace the full match with normalized block content.
+        text.replaceSubrange(swiftReplacementRange, with: replacementText)
 
-          // Extract content text and trim a single leading/trailing newline to avoid extra blank lines
-          let rawContentText = String(text[swiftContentRange])
-          var leadingTrimLength = 0
-          if rawContentText.hasPrefix("\r\n") {
-            leadingTrimLength = 2
-          } else if rawContentText.hasPrefix("\n") {
-            leadingTrimLength = 1
-          }
+        let prefixRemovedLength = adjustedContentRange.location - fullRange.location
+        let suffixRemovedLength = fullRangeEnd - contentRangeEnd
 
-          let leadingTrimmedText = leadingTrimLength > 0 ? String(rawContentText.dropFirst(leadingTrimLength)) : rawContentText
-          var trailingTrimLength = 0
-          if leadingTrimmedText.hasSuffix("\r\n") {
-            trailingTrimLength = 2
-          } else if leadingTrimmedText.hasSuffix("\n") {
-            trailingTrimLength = 1
-          }
-
-          let adjustedContentLocation = contentRange.location + leadingTrimLength
-          let adjustedContentLength = max(0, contentRange.length - leadingTrimLength - trailingTrimLength)
-          let adjustedContentRange = NSRange(location: adjustedContentLocation, length: adjustedContentLength)
-          let contentRangeEnd = adjustedContentRange.location + adjustedContentRange.length
-          let contentText = adjustedContentLength > 0 ? nsText.substring(with: adjustedContentRange) : ""
-
-          let fullRangeEnd = fullRange.location + fullRange.length
-          let needsLeadingLineBreak = fullRange.location > 0 &&
-            !isLineBreakCharacter(nsText.character(at: fullRange.location - 1))
-          let needsTrailingLineBreak = fullRangeEnd < nsText.length &&
-            !isLineBreakCharacter(nsText.character(at: fullRangeEnd))
-
-          var replacementRange = fullRange
-          if needsLeadingLineBreak, fullRange.location > 0 {
-            let previousCharacter = nsText.character(at: fullRange.location - 1)
-            if isInlineWhitespaceCharacter(previousCharacter) {
-              replacementRange.location -= 1
-              replacementRange.length += 1
-              adjustments.append(
-                OffsetAdjustment(position: fullRange.location - 1, delta: -1, includeAtPosition: false)
-              )
-            }
-          }
-
-          if needsTrailingLineBreak, fullRangeEnd < nsText.length {
-            let nextCharacter = nsText.character(at: fullRangeEnd)
-            if isInlineWhitespaceCharacter(nextCharacter) {
-              replacementRange.length += 1
-              adjustments.append(
-                OffsetAdjustment(position: fullRangeEnd, delta: -1, includeAtPosition: false)
-              )
-            }
-          }
-
-          guard let swiftReplacementRange = Range(replacementRange, in: text) else {
-            continue
-          }
-
-          var replacementText = contentText
-          if needsLeadingLineBreak {
-            replacementText = "\n" + replacementText
-            adjustments.append(
-              OffsetAdjustment(position: adjustedContentRange.location, delta: 1, includeAtPosition: true)
-            )
-          }
-          if needsTrailingLineBreak {
-            replacementText += "\n"
-            adjustments.append(
-              OffsetAdjustment(position: contentRangeEnd, delta: 1, includeAtPosition: true)
-            )
-          }
-
-          // Replace the full match with normalized block content.
-          text.replaceSubrange(swiftReplacementRange, with: replacementText)
-
-          let prefixRemovedLength = adjustedContentRange.location - fullRange.location
-          let suffixRemovedLength = fullRangeEnd - contentRangeEnd
-
-          if prefixRemovedLength > 0 {
-            adjustments.append(
-              OffsetAdjustment(position: fullRange.location, delta: -prefixRemovedLength, includeAtPosition: false)
-            )
-          }
-          if suffixRemovedLength > 0 {
-            adjustments.append(
-              OffsetAdjustment(position: contentRangeEnd, delta: -suffixRemovedLength, includeAtPosition: false)
-            )
-          }
-
-          // Store the entity position in pre-removal coordinates; map after applying removals.
-          var preEntity = MessageEntity()
-          preEntity.type = .pre
-          preEntity.offset = Int64(adjustedContentRange.location)
-          preEntity.length = Int64(adjustedContentRange.length)
-          preEntities.append(preEntity)
+        if prefixRemovedLength > 0 {
+          adjustments.append(
+            OffsetAdjustment(position: fullRange.location, delta: -prefixRemovedLength, includeAtPosition: false)
+          )
         }
+        if suffixRemovedLength > 0 {
+          adjustments.append(
+            OffsetAdjustment(position: contentRangeEnd, delta: -suffixRemovedLength, includeAtPosition: false)
+          )
+        }
+
+        // Store the entity position in pre-removal coordinates; map after applying removals.
+        var preEntity = MessageEntity()
+        preEntity.type = .pre
+        preEntity.offset = Int64(adjustedContentRange.location)
+        preEntity.length = Int64(adjustedContentRange.length)
+        preEntities.append(preEntity)
       }
-
-      applyOffsetAdjustments(&allEntities, adjustments: adjustments)
-      applyOffsetAdjustments(&opaqueRanges, adjustments: adjustments)
-      applyOffsetAdjustments(&preEntities, adjustments: adjustments)
-
-      // Add pre entities to the list
-      allEntities.append(contentsOf: preEntities)
-
-    } catch {
-      // Handle regex error silently
     }
+
+    applyOffsetAdjustments(&allEntities, adjustments: adjustments)
+    applyOffsetAdjustments(&opaqueRanges, adjustments: adjustments)
+    applyOffsetAdjustments(&preEntities, adjustments: adjustments)
+
+    // Add pre entities to the list
+    allEntities.append(contentsOf: preEntities)
 
     return allEntities
   }
@@ -2560,80 +2562,76 @@ public class ProcessEntities {
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var italicEntities: [MessageEntity] = []
-    do {
-      let regex = try NSRegularExpression(
-        pattern: italicTextPattern,
-        options: []
-      )
-      let nsText = text as NSString
-      let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
+    guard let regex = italicTextRegex else {
+      return allEntities
+    }
+    let nsText = text as NSString
+    let matches = regex.matches(in: markdownSyntaxMask(text, entities: existingEntities, opaqueRanges: opaqueRanges), options: [], range: NSRange(location: 0, length: nsText.length))
 
-      // Process matches in reverse order to avoid offset issues when removing _ markers
-      var removals: [OffsetRemoval] = []
+    // Process matches in reverse order to avoid offset issues when removing _ markers
+    var removals: [OffsetRemoval] = []
 
-      for match in matches.reversed() {
-        // Get the full match range (including surrounding whitespace/boundaries and _)
-        let fullRange = match.range(at: 0)
+    for match in matches.reversed() {
+      // Get the full match range (including surrounding whitespace/boundaries and _)
+      let fullRange = match.range(at: 0)
 
-        // Skip if this match is within a code block
-        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
-          continue
-        }
-
-        // Get the content range (excluding _ and whitespace) - now in group 2
-        if match.numberOfRanges > 2 {
-          let contentRange = match.range(at: 2)
-          let leadingWhitespace = match.range(at: 1) // First capture group (^|\\s)
-          let trailingWhitespace = match.range(at: 3) // Third capture group (\\s|$)
-
-          if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
-            // Convert NSRange to Range<String.Index> safely
-            guard let swiftFullRange = Range(fullRange, in: text),
-                  let swiftContentRange = Range(contentRange, in: text)
-            else {
-              continue // Skip this match if range conversion fails
-            }
-
-            // Extract content text
-            let contentText = String(text[swiftContentRange])
-
-            // Calculate the leading whitespace length
-            let leadingLength = leadingWhitespace.location != NSNotFound ? leadingWhitespace.length : 0
-
-            // Calculate the trailing whitespace length
-            let trailingLength = trailingWhitespace.location != NSNotFound ? trailingWhitespace.length : 0
-
-            // Create replacement text: leading whitespace + content + trailing whitespace
-            let leadingText = leadingLength > 0 ? String(text[Range(leadingWhitespace, in: text)!]) : ""
-            let trailingText = trailingLength > 0 ? String(text[Range(trailingWhitespace, in: text)!]) : ""
-            let replacementText = leadingText + contentText + trailingText
-
-            // Replace the full match with the replacement text
-            text.replaceSubrange(swiftFullRange, with: replacementText)
-
-            let openMarkerPosition = contentRange.location - 1
-            let closeMarkerPosition = contentRange.location + contentRange.length
-            removals.append(OffsetRemoval(position: openMarkerPosition, length: 1))
-            removals.append(OffsetRemoval(position: closeMarkerPosition, length: 1))
-
-            // Store the entity position in pre-removal coordinates; map after applying removals.
-            var italicEntity = MessageEntity()
-            italicEntity.type = .italic
-            italicEntity.offset = Int64(contentRange.location)
-            italicEntity.length = Int64(contentRange.length)
-            italicEntities.append(italicEntity)
-          }
-        }
+      // Skip if this match is within a code block
+      if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+        continue
       }
 
-      applyOffsetRemovals(&allEntities, removals: removals)
-      applyOffsetRemovals(&opaqueRanges, removals: removals)
-      applyOffsetRemovals(&italicEntities, removals: removals)
+      // Get the content range (excluding _ and whitespace) - now in group 2
+      if match.numberOfRanges > 2 {
+        let contentRange = match.range(at: 2)
+        let leadingWhitespace = match.range(at: 1) // First capture group (^|\\s)
+        let trailingWhitespace = match.range(at: 3) // Third capture group (\\s|$)
 
-      // Add italic entities to the list
-      allEntities.append(contentsOf: italicEntities)
+        if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+          // Convert NSRange to Range<String.Index> safely
+          guard let swiftFullRange = Range(fullRange, in: text),
+                let swiftContentRange = Range(contentRange, in: text)
+          else {
+            continue // Skip this match if range conversion fails
+          }
 
-    } catch {}
+          // Extract content text
+          let contentText = String(text[swiftContentRange])
+
+          // Calculate the leading whitespace length
+          let leadingLength = leadingWhitespace.location != NSNotFound ? leadingWhitespace.length : 0
+
+          // Calculate the trailing whitespace length
+          let trailingLength = trailingWhitespace.location != NSNotFound ? trailingWhitespace.length : 0
+
+          // Create replacement text: leading whitespace + content + trailing whitespace
+          let leadingText = leadingLength > 0 ? String(text[Range(leadingWhitespace, in: text)!]) : ""
+          let trailingText = trailingLength > 0 ? String(text[Range(trailingWhitespace, in: text)!]) : ""
+          let replacementText = leadingText + contentText + trailingText
+
+          // Replace the full match with the replacement text
+          text.replaceSubrange(swiftFullRange, with: replacementText)
+
+          let openMarkerPosition = contentRange.location - 1
+          let closeMarkerPosition = contentRange.location + contentRange.length
+          removals.append(OffsetRemoval(position: openMarkerPosition, length: 1))
+          removals.append(OffsetRemoval(position: closeMarkerPosition, length: 1))
+
+          // Store the entity position in pre-removal coordinates; map after applying removals.
+          var italicEntity = MessageEntity()
+          italicEntity.type = .italic
+          italicEntity.offset = Int64(contentRange.location)
+          italicEntity.length = Int64(contentRange.length)
+          italicEntities.append(italicEntity)
+        }
+      }
+    }
+
+    applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
+    applyOffsetRemovals(&italicEntities, removals: removals)
+
+    // Add italic entities to the list
+    allEntities.append(contentsOf: italicEntities)
 
     return allEntities
   }

@@ -4,6 +4,9 @@ import { db } from "@in/server/db"
 import { sessions, users, type DbSession } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { hashToken } from "@in/server/utils/auth"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("auth.session")
 
 export type AuthTokenFailure =
   | "invalid_auth"
@@ -139,7 +142,9 @@ export const getUserIdFromToken = async (
       .update(sessions)
       .set({ lastActive: now })
       .where(eq(sessions.id, session.id))
-      .catch(() => {})
+      .catch((error) => {
+        log.warn("Failed to touch session lastActive", { sessionId: session.id, error })
+      })
   }
 
   return { userId: session.userId, sessionId: session.id, isBot: row.userBot === true, clientType: session.clientType ?? "unknown" }

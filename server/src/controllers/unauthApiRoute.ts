@@ -6,11 +6,9 @@ import type { TObject } from "@sinclair/typebox"
 import { measureTime } from "@in/server/utils/helpers/measure"
 import { getIp } from "@in/server/utils/ip"
 import { TMakeApiResponse } from "./apiResponse"
+import type { UnauthenticatedHandlerContext } from "./helpers"
 
-export type UnauthenticatedHandlerContext = {
-  ip: string | undefined
-  source?: string
-}
+export type { UnauthenticatedHandlerContext } from "./helpers"
 
 export const makeUnauthApiRoute = <
   Path extends string,

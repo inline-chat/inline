@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
 import { db } from "@in/server/db"
 import { authDeliveryBudgets, inviteCodes, loginCodes, members, sessions, spaces, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { hashLoginCode, hashToken } from "@in/server/utils/auth"
 import { setupTestLifecycle } from "./setup"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+
+const app = useLiveHttpApp()
 
 describe("API Endpoints", () => {
   // Setup test lifecycle

@@ -137,9 +137,18 @@ describe("raw Bun realtime transport", () => {
     await transport.websocket.open?.(socket)
     await data.connection
     const frame = Buffer.from(ClientMessage.toBinary({ id: 1n, seq: 1, body: { oneofKind: "ping", ping: { nonce: 1n } } }))
-    const requests = Array.from({ length: 40 }, () => transport.websocket.message(socket, frame))
+    // A client's full 64-call RPC window is admitted without closing.
+    const requests = Array.from({ length: 64 }, () => transport.websocket.message(socket, frame))
     await Promise.resolve()
-    expect(handled).toBeLessThanOrEqual(32)
+    expect(rejected).toBe(0)
+    // Far beyond it, the per-socket backstop closes. Reset the per-second
+    // window so this exercises the pending-frame bound, not the rate limit.
+    for (let i = 0; i < 80; i++) {
+      data.messageWindow = undefined
+      requests.push(transport.websocket.message(socket, frame))
+    }
+    await Promise.resolve()
+    expect(handled).toBeLessThanOrEqual(128)
     expect(rejected).toBeGreaterThan(0)
     release()
     await Promise.all(requests)

@@ -245,7 +245,7 @@ async function ensureDeleteAllowed(
   query: Pick<typeof db, "select"> | Pick<Transaction, "select"> = db,
 ): Promise<void> {
   if (chat.type !== "thread") {
-    log.error("Chat is not a thread", { chatId: chat.id })
+    log.warn("Chat is not a thread", { chatId: chat.id })
     throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
   }
 
@@ -267,7 +267,7 @@ async function ensureDeleteAllowed(
     const [member] = await query.select().from(members)
       .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId))).limit(1)
     if (!member) {
-      log.error("User is not a member of space", { userId: currentUserId, spaceId: chat.spaceId })
+      log.warn("User is not a member of space", { userId: currentUserId, spaceId: chat.spaceId })
       throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
     }
 
@@ -278,7 +278,7 @@ async function ensureDeleteAllowed(
           if (member.canAccessPublicChats) {
             // allow delete
           } else {
-            log.error("User cannot access public chats in space", {
+            log.warn("User cannot access public chats in space", {
               userId: currentUserId,
               spaceId: chat.spaceId,
               chatId: chat.id,
@@ -291,7 +291,7 @@ async function ensureDeleteAllowed(
             eq(chatParticipants.userId, currentUserId),
           )).limit(1)
           if (!participant) {
-            log.error("User is not a participant in private thread", {
+            log.warn("User is not a participant in private thread", {
               userId: currentUserId,
               spaceId: chat.spaceId,
               chatId: chat.id,
@@ -300,7 +300,7 @@ async function ensureDeleteAllowed(
           }
         }
       } else {
-        log.error("User is not admin/owner or creator in space", {
+        log.warn("User is not admin/owner or creator in space", {
           userId: currentUserId,
           spaceId: chat.spaceId,
           chatId: chat.id,
@@ -315,11 +315,11 @@ async function ensureDeleteAllowed(
         eq(chatParticipants.userId, currentUserId),
       )).limit(1)
       if (!participant) {
-        log.error("User is not a participant for home thread", { userId: currentUserId, chatId: chat.id })
+        log.warn("User is not a participant for home thread", { userId: currentUserId, chatId: chat.id })
         throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
       }
     } else {
-      log.error("User is not creator for home thread", { userId: currentUserId, chatId: chat.id })
+      log.warn("User is not creator for home thread", { userId: currentUserId, chatId: chat.id })
       throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
     }
   }

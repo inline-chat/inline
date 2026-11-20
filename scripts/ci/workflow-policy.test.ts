@@ -108,7 +108,7 @@ describe("public CI contracts", () => {
     expect(monitor).toContain("check-hermes-admission.mjs --latest")
     expect(monitor).not.toContain("continue-on-error: true")
     const integration = read(".github/workflows/integrations.yml")
-    expect(integration).toContain("host: ['v2026.9.14', 'v2026.9.21', latest, main]")
+    expect(integration).toContain("host: ['v2026.9.14', 'v2026.9.21', 'v0.23.2']")
     expect(integration).not.toContain('pip" install "hermes-agent==')
     expect(integration).toContain("node scripts/ci/prepare-hermes-candidate.mjs")
     expect(read(".github/workflows/umbrel-compatibility.yml")).toContain("node scripts/ci/prepare-hermes-candidate.mjs")
@@ -119,6 +119,22 @@ describe("public CI contracts", () => {
     expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
       publish.indexOf("Retain the exact checked artifact and integrity receipt"),
     )
+  })
+
+  it("keeps moving upstream hosts out of the CI that gates deploys, and on the compatibility schedules", () => {
+    const ci = workflow("integrations.yml") as unknown as { jobs: Record<string, { "continue-on-error"?: unknown; strategy?: { matrix?: { host?: string[] } } }> }
+    for (const [name, job] of Object.entries(ci.jobs)) {
+      for (const host of job.strategy?.matrix?.host ?? []) expect(host, name).toMatch(/^v?\d/)
+      expect(job["continue-on-error"], name).toBeUndefined()
+    }
+    const source = read(".github/workflows/integrations.yml")
+    expect(source).not.toMatch(/install-hermes-host\.sh "\$RUNNER_TEMP\/hermes-host" latest|check-openclaw-admission\.mjs "[^"]+" latest/)
+    for (const [file, moving] of [["hermes-compatibility.yml", "host: [latest, main]"], ["openclaw-compatibility.yml", "check-openclaw-admission.mjs \"$RUNNER_TEMP/inline-packages\" latest --candidate"]] as const) {
+      const scheduled = workflow(file) as unknown as { on: Record<string, unknown>; jobs: Record<string, unknown> }
+      expect(scheduled.on.schedule, file).toBeDefined()
+      expect(scheduled.jobs.candidate, file).toBeDefined()
+      expect(read(`.github/workflows/${file}`), file).toContain(moving)
+    }
   })
 
 })

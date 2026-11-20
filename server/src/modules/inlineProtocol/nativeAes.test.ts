@@ -27,6 +27,15 @@ describe("native AES-IGE decryption", () => {
     expect(Buffer.from(native.decrypt(ciphertext, key, iv)).equals(Buffer.from(plaintext))).toBe(true)
     // The caller's IV is never advanced.
     expect(Buffer.from(iv).equals(Buffer.from(ivBefore))).toBe(true)
+    // Views at an odd byte offset leave every pointer OpenSSL sees unaligned.
+    const unaligned = (bytes: Uint8Array) => {
+      const backing = new Uint8Array(bytes.length + 7)
+      backing.set(bytes, 7)
+      return backing.subarray(7)
+    }
+    const shifted = nodeAesBackend.igeEncrypt(plaintext.subarray(0, 4_096), key, iv)
+    expect(Buffer.from(native.decrypt(unaligned(shifted), unaligned(key), unaligned(iv)))
+      .equals(Buffer.from(plaintext.subarray(0, 4_096)))).toBe(true)
     // Inputs the record layer never sends take the reference path.
     const odd = new Uint8Array(randomBytes(20))
     expect(Buffer.from(native.decrypt(odd, key, iv)).equals(Buffer.from(nodeAesBackend.igeDecrypt(odd, key, iv))))

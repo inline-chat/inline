@@ -17,6 +17,7 @@ export const defaultNotificationSettings = {
 export const defaultPrivacySettings = {
   shareTimeZone: true,
   appearInGlobalSearch: true,
+  transcribeVoiceMessages: true,
 } as const
 
 /** Upper bound for each privacy exception list. */
@@ -68,6 +69,8 @@ export const UserSettingsGeneralSchema = z.object({
     .object({
       shareTimeZone: z.boolean().optional().default(defaultPrivacySettings.shareTimeZone),
       appearInGlobalSearch: z.boolean().optional().default(defaultPrivacySettings.appearInGlobalSearch),
+      /** If false, this user's voice messages are not sent to a transcription service. */
+      transcribeVoiceMessages: z.boolean().optional().default(defaultPrivacySettings.transcribeVoiceMessages),
       /** Authoritative once written; shareTimeZone mirrors it for older clients. */
       timeZone: PrivacyRuleSchema.optional(),
       /** Who sees Focus status. Absent means nobody. */

@@ -26,6 +26,9 @@ public enum Api {
 
     Task(priority: .background) {
       await FileNativeUploadStagingStore.shared.pruneStale()
+      if let legacy = FileNativeUploadStagingStore.legacySharedRoot {
+        await FileNativeUploadStagingStore(root: legacy).pruneStale()
+      }
     }
 
     Task(priority: .utility) {

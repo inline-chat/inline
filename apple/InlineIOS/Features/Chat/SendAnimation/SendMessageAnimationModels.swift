@@ -13,6 +13,9 @@ struct SendMessageAnimationSource {
   let sourceVisibleTextFrameInWindow: CGRect
   let sourceTextFirstBaselineYInWindow: CGFloat
   let sourceLineHeight: CGFloat
+  /// The composer's field around the text, where the bubble's background grows from; nil when the
+  /// flight moves the whole bubble instead.
+  var sourceFieldFrameInWindow: CGRect? = nil
   let preparedAt: Date
 
   var isUsable: Bool {
@@ -30,7 +33,10 @@ struct SendMessageAnimationTarget {
   let messageStableId: Int64
   let bubbleFrameInWindow: CGRect
   let textFrameInWindow: CGRect
+  /// Everything in the bubble; without its background when `bubbleBackground` is set.
   let bubbleSnapshotView: UIView
+  /// The bubble's background, stretchable, for growing it out of the composer's field.
+  var bubbleBackground: UIImage? = nil
   let textFrameInBubble: CGRect
   let textFirstBaselineYInWindow: CGFloat
   let textFirstBaselineYInBubble: CGFloat

@@ -41,6 +41,32 @@ describe("User Settings RPC", () => {
     expect(result.userSettings?.privacySettings?.shareTimeZone).toBe(true)
     expect(result.userSettings?.privacySettings?.appearInGlobalSearch).toBe(true)
     expect(result.userSettings?.composeSettings?.replacePastedLinksWithTitles).toBe(false)
+    expect(result.userSettings?.privacySettings?.transcribeVoiceMessages).toBe(true)
+  })
+
+  test("voice transcription opt-out survives a save from a client that does not know it", async () => {
+    const voiceUser = await testUtils.createUser("voice-optout@example.com")
+    const context = {
+      userId: voiceUser.id, sessionId: 201, connectionId: "voice-ios",
+      sendRaw: () => {}, sendRpcReply: () => {},
+    }
+    await updateUserSettingsHandler(
+      { userSettings: { privacySettings: { transcribeVoiceMessages: false } } }, context,
+    )
+    // An older client resends the privacy fields it knows, without field 5.
+    await updateUserSettingsHandler(
+      { userSettings: { privacySettings: { shareTimeZone: true, appearInGlobalSearch: false } } },
+      { ...context, sessionId: 202, connectionId: "voice-old-mac" },
+    )
+    const result = await getUserSettingsHandler({}, { ...context, sessionId: 203, connectionId: "voice-new-mac" })
+    expect(result.userSettings?.privacySettings?.transcribeVoiceMessages).toBe(false)
+    expect(result.userSettings?.privacySettings?.appearInGlobalSearch).toBe(false)
+
+    await updateUserSettingsHandler(
+      { userSettings: { privacySettings: { transcribeVoiceMessages: true } } }, context,
+    )
+    const restored = await getUserSettingsHandler({}, context)
+    expect(restored.userSettings?.privacySettings?.transcribeVoiceMessages).toBe(true)
   })
 
   test("gesture settings persist, merge with older clients, and reach other sessions", async () => {

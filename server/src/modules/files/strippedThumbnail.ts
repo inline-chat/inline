@@ -1,4 +1,5 @@
 import sharp from "sharp"
+import { PHOTO_MAX_INPUT_PIXELS } from "@in/server/modules/files/metadata"
 
 const STRIPPED_THUMBNAIL_VERSION = 1
 const STRIPPED_THUMBNAIL_MAX_DIMENSION = 40
@@ -18,7 +19,7 @@ export type StrippedThumbnail = {
 }
 
 export async function generateStrippedThumbnail(file: File): Promise<StrippedThumbnail> {
-  const { data, info } = await sharp(await file.arrayBuffer())
+  const { data, info } = await sharp(await file.arrayBuffer(), { limitInputPixels: PHOTO_MAX_INPUT_PIXELS })
     .rotate()
     .resize({
       width: STRIPPED_THUMBNAIL_MAX_DIMENSION,

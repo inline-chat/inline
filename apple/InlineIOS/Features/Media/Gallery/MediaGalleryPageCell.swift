@@ -19,7 +19,14 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
 
   private(set) var item: MediaGalleryItem?
   private var imageTask: ImageTask?
+  private var fullResolutionTask: ImageTask?
+  /// The page shows its final image for zoom 1: a photo decoded at page size, or a video's poster.
   private var hasFullImage = false
+  /// The photo was swapped for its full-resolution decode, for zooming.
+  private var isFullResolution = false
+  /// The link the displayed photo loaded from, which the full-resolution decode reuses.
+  private var loadedURL: URL?
+  private var displayScale: CGFloat = 3
   private var triedFallback = false
   private var readyObservation: NSKeyValueObservation?
   private var pageGap: CGFloat = 0
@@ -28,6 +35,26 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
 
   var onSingleTap: (() -> Void)?
   var onPlayTap: (() -> Void)?
+  /// The video failed; the gallery starts a fresh player.
+  var onVideoRetry: (() -> Void)?
+  /// A double tap on a long video's side. Returns true when it skipped, else the tap zooms.
+  var onSkip: ((_ seconds: Double) -> Bool)?
+  /// Press and hold on a playing video. Returns true when it sped up.
+  var onHoldSpeedUp: ((_ holding: Bool) -> Bool)?
+
+  /// What the page shows over a video.
+  struct VideoState: Equatable {
+    var isPlaying = false
+    var isBuffering = false
+    var isFailed = false
+    var isAtEnd = false
+  }
+
+  private var videoState = VideoState()
+  private let bufferingView = MediaGalleryChromeStyle.glassPanel(cornerRadius: 32)
+  private let bufferingSpinner = UIActivityIndicatorView(style: .medium)
+  private let feedbackView = MediaGalleryToastView()
+  private var feedbackHideWork: DispatchWorkItem?
   /// Called when a zoom starts or ends, so the gallery can hide its chrome.
   var onZoomChange: ((Bool) -> Void)?
   /// Called when the photo can't load. Return true if fresh links were requested.
@@ -80,6 +107,20 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     playButton.isHidden = true
     contentView.addSubview(playButton)
 
+    bufferingView.translatesAutoresizingMaskIntoConstraints = true
+    bufferingView.isUserInteractionEnabled = false
+    bufferingView.isHidden = true
+    bufferingSpinner.color = .label
+    bufferingSpinner.startAnimating()
+    bufferingView.contentView.addSubview(bufferingSpinner)
+    contentView.addSubview(bufferingView)
+    feedbackView.alpha = 0
+    contentView.addSubview(feedbackView)
+
+    let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
+    hold.minimumPressDuration = 0.3
+    scrollView.addGestureRecognizer(hold)
+
     let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
     doubleTap.numberOfTapsRequired = 2
     scrollView.addGestureRecognizer(doubleTap)
@@ -97,6 +138,10 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     super.prepareForReuse()
     imageTask?.cancel()
     imageTask = nil
+    fullResolutionTask?.cancel()
+    fullResolutionTask = nil
+    isFullResolution = false
+    loadedURL = nil
     item = nil
     hasFullImage = false
     triedFallback = false
@@ -107,6 +152,11 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     scrollView.alpha = 1
     retryButton.isHidden = true
     spinner.stopAnimating()
+    videoState = VideoState()
+    bufferingView.isHidden = true
+    playButton.alpha = 1
+    feedbackView.alpha = 0
+    setRetryTitle(forVideo: false)
   }
 
   // MARK: - Layout
@@ -130,6 +180,8 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     retryButton.center = CGPoint(x: page.midX, y: page.midY)
     playButton.bounds = CGRect(x: 0, y: 0, width: 64, height: 64)
     playButton.center = CGPoint(x: page.midX, y: page.midY)
+    bufferingView.frame = playButton.frame
+    bufferingSpinner.center = CGPoint(x: 32, y: 32)
   }
 
   /// The image's aspect: the loaded image, else the item's metadata.
@@ -169,17 +221,12 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     }
     playerView.frame = imageView.bounds
 
-    let isVideo = item?.kind == .video
-    if isVideo {
-      scrollView.maximumZoomScale = 1
-    } else if let image = imageView.image {
-      // Allow zooming to at least 3x, and further for large photos.
-      let pixelWidth = image.size.width * image.scale
-      let screenScale = window?.screen.scale ?? 3
-      scrollView.maximumZoomScale = max(3, pixelWidth / (fitted.width * screenScale) * 2)
-    } else {
-      scrollView.maximumZoomScale = 3
-    }
+    // Zoom to at least 3x, and further for large photos. The page shows a decode sized to the
+    // screen, so the original's pixel size decides how far zooming stays sharp.
+    let pixelWidth = item?.pixelSize?.width
+      ?? imageView.image.map { $0.size.width * $0.scale }
+      ?? 0
+    scrollView.maximumZoomScale = max(3, pixelWidth / (fitted.width * displayScale) * 2)
     centerContent()
   }
 
@@ -194,13 +241,25 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   // MARK: - Configuration
 
   /// Shows `item`. `placeholder` covers the page until the full image arrives.
-  func configure(item: MediaGalleryItem, placeholder: UIImage?, pageGap: CGFloat) {
+  func configure(item: MediaGalleryItem, placeholder: UIImage?, pageGap: CGFloat, displayScale: CGFloat) {
     self.pageGap = pageGap
+    self.displayScale = displayScale
+    updateAccessibility(item)
     if self.item == item, hasFullImage || imageTask != nil {
+      return
+    }
+    // The same media with new details (its download landed, a fresh link, an edited caption)
+    // keeps the image on screen instead of dropping back to the thumbnail.
+    if let current = self.item, current.id == item.id, current.kind == item.kind, hasFullImage {
+      self.item = item
       return
     }
     imageTask?.cancel()
     imageTask = nil
+    fullResolutionTask?.cancel()
+    fullResolutionTask = nil
+    isFullResolution = false
+    loadedURL = nil
     self.item = item
     hasFullImage = false
     triedFallback = false
@@ -228,9 +287,35 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     }
   }
 
+  private func updateAccessibility(_ item: MediaGalleryItem) {
+    isAccessibilityElement = true
+    accessibilityTraits = item.kind == .video ? [.image, .startsMediaSession] : .image
+    var parts = [item.kind == .video ? NSLocalizedString("Video", comment: "Gallery page") : NSLocalizedString(
+      "Photo",
+      comment: "Gallery page"
+    )]
+    if let message = item.message {
+      parts.append(MediaGalleryViewController.dateText(message.date))
+      if let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+        parts.append(text)
+      }
+    }
+    accessibilityLabel = parts.joined(separator: ", ")
+  }
+
   private static func cachedImage(_ url: URL?) -> UIImage? {
     guard let url else { return nil }
-    return ImagePipeline.shared.cache.cachedImage(for: ImageRequest(url: url))?.image
+    return cachedImage(ImageRequest(url: url))
+  }
+
+  private static func cachedImage(_ request: ImageRequest) -> UIImage? {
+    ImagePipeline.shared.cache.cachedImage(for: request, caches: .memory)?.image
+  }
+
+  /// A photo decodes at the size it fills the page; a video's poster loads as is.
+  private func request(for url: URL, item: MediaGalleryItem) -> ImageRequest {
+    guard item.kind == .photo else { return ImageRequest(url: url) }
+    return MediaGalleryImageRequests.display(url: url, item: item, pageSize: pageSize, scale: displayScale)
   }
 
   private func load(url: URL?) {
@@ -239,7 +324,9 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
       return
     }
 
-    if let cached = Self.cachedImage(url) {
+    let request = request(for: url, item: item)
+    if let cached = Self.cachedImage(request) {
+      loadedURL = url
       show(cached)
       return
     }
@@ -248,11 +335,12 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
       spinner.startAnimating()
     }
     let itemID = item.id
-    imageTask = ImagePipeline.shared.loadImage(with: ImageRequest(url: url)) { [weak self] result in
+    imageTask = ImagePipeline.shared.loadImage(with: request) { [weak self] result in
       guard let self, self.item?.id == itemID else { return }
       self.imageTask = nil
       switch result {
         case let .success(response):
+          self.loadedURL = url
           self.show(response.image)
         case .failure:
           if !self.triedFallback, let fallback = item.fallbackURL, fallback != url {
@@ -290,6 +378,27 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     load(url: item.mediaURL)
   }
 
+  /// Swaps the page-sized decode for the original once the user zooms, so detail stays sharp.
+  /// The original isn't kept in the memory cache, so it's freed with the page.
+  func loadFullResolutionIfNeeded() {
+    guard let item, item.kind == .photo, hasFullImage, !isFullResolution, fullResolutionTask == nil,
+          let url = loadedURL
+    else { return }
+    let displayed = MediaGalleryImageRequests.maxPixelSize(item: item, pageSize: pageSize, scale: displayScale)
+    guard MediaGalleryImageRequests.needsFullResolution(item: item, displayedPixelSize: displayed) else { return }
+    let itemID = item.id
+    fullResolutionTask = ImagePipeline.shared.loadImage(with: MediaGalleryImageRequests.full(url: url)) { [weak self] result in
+      guard let self, self.item?.id == itemID else { return }
+      self.fullResolutionTask = nil
+      guard case let .success(response) = result else { return }
+      self.isFullResolution = true
+      // Same aspect, so the zoomed frame stays put; only the pixels get sharper.
+      UIView.transition(with: self.imageView, duration: 0.15, options: .transitionCrossDissolve) {
+        self.imageView.image = response.image
+      }
+    }
+  }
+
   private func show(_ image: UIImage) {
     isAwaitingFreshLinks = false
     spinner.stopAnimating()
@@ -300,8 +409,20 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     layoutContent(resetZoom: !wasZoomed)
   }
 
+  private func setRetryTitle(forVideo: Bool) {
+    retryButton.configuration?.title = forVideo
+      ? NSLocalizedString("Couldn't Play · Retry", comment: "Gallery retry a video that failed to play")
+      : NSLocalizedString("Retry", comment: "Gallery retry loading a photo")
+    setNeedsLayout()
+  }
+
   @objc private func retryTapped() {
     guard let item else { return }
+    if item.kind == .video, videoState.isFailed {
+      retryButton.isHidden = true
+      onVideoRetry?()
+      return
+    }
     triedFallback = false
     retryButton.isHidden = true
     load(url: item.kind == .photo ? item.mediaURL : item.thumbnailURL)
@@ -322,21 +443,97 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     }
   }
 
+  /// What the page shows now: the video's current frame once it has played, else the image.
+  func displayedImage() -> UIImage? {
+    guard playerView.playerLayer.player != nil, playerView.playerLayer.isReadyForDisplay, playerView.alpha > 0,
+          let time = playerView.playerLayer.player?.currentTime().seconds, time.isFinite, time > 0.05,
+          imageView.bounds.width > 0, imageView.bounds.height > 0
+    else { return imageView.image }
+    let renderer = UIGraphicsImageRenderer(bounds: imageView.bounds)
+    let frame = renderer.image { _ in
+      imageView.drawHierarchy(in: imageView.bounds, afterScreenUpdates: false)
+    }
+    return frame
+  }
+
   func detachPlayer() {
     readyObservation?.invalidate()
     readyObservation = nil
     playerView.playerLayer.player = nil
+    setVideoState(VideoState())
+    playButton.alpha = 1
     playButton.isHidden = item?.kind != .video
   }
 
-  func setPlaying(_ playing: Bool) {
-    guard item?.kind == .video else { return }
-    UIView.animate(withDuration: 0.15) {
-      self.playButton.alpha = playing ? 0 : 1
-    } completion: { _ in
-      self.playButton.isHidden = playing
+  /// Play when paused, replay at the end, a spinner while buffering, Retry after a failure.
+  func setVideoState(_ state: VideoState) {
+    guard item?.kind == .video, state != videoState else { return }
+    let ended = state.isAtEnd != videoState.isAtEnd
+    videoState = state
+    let showsPlay = !state.isPlaying && !state.isFailed && !state.isBuffering
+    if ended || playButton.configuration?.image == nil {
+      playButton.configuration?.image = UIImage(
+        systemName: state.isAtEnd ? "arrow.counterclockwise" : "play.fill",
+        withConfiguration: UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold)
+      )
+      playButton.accessibilityLabel = state.isAtEnd ? "Replay" : "Play"
     }
-    if !playing { playButton.isHidden = false }
+    if showsPlay { playButton.isHidden = false }
+    UIView.animate(withDuration: 0.15) {
+      self.playButton.alpha = showsPlay ? 1 : 0
+    } completion: { _ in
+      self.playButton.isHidden = !(!self.videoState.isPlaying && !self.videoState.isFailed && !self.videoState.isBuffering)
+    }
+    bufferingView.isHidden = !state.isBuffering
+    setRetryTitle(forVideo: state.isFailed)
+    retryButton.isHidden = !state.isFailed
+  }
+
+  /// A short glass label on the side that was tapped, such as "15 s" for a skip.
+  func showFeedback(_ text: String, systemImage: String, leading: Bool?) {
+    feedbackView.update(text: text, systemImage: systemImage)
+    let size = feedbackView.systemLayoutSizeFitting(
+      CGSize(width: 200, height: 40),
+      withHorizontalFittingPriority: .fittingSizeLevel,
+      verticalFittingPriority: .required
+    )
+    let page = CGRect(origin: .zero, size: pageSize)
+    let x: CGFloat = switch leading {
+      case .some(true): page.width * 0.2
+      case .some(false): page.width * 0.8
+      case .none: page.midX
+    }
+    let y = leading == nil ? page.minY + max(safeAreaInsets.top, 20) + 70 : page.midY
+    feedbackView.frame = CGRect(x: x - size.width / 2, y: y - 20, width: size.width, height: 40)
+    feedbackHideWork?.cancel()
+    UIView.animate(withDuration: 0.15) { self.feedbackView.alpha = 1 }
+    let work = DispatchWorkItem { [weak self] in
+      UIView.animate(withDuration: 0.25) { self?.feedbackView.alpha = 0 }
+    }
+    feedbackHideWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + (leading == nil ? 60 : 0.7), execute: work)
+  }
+
+  func hideFeedback() {
+    feedbackHideWork?.cancel()
+    UIView.animate(withDuration: 0.2) { self.feedbackView.alpha = 0 }
+  }
+
+  @objc private func handleHold(_ gesture: UILongPressGestureRecognizer) {
+    guard item?.kind == .video else { return }
+    switch gesture.state {
+      case .began:
+        if onHoldSpeedUp?(true) == true {
+          UIImpactFeedbackGenerator(style: .light).impactOccurred()
+          showFeedback("2×", systemImage: "forward.fill", leading: nil)
+        }
+      case .ended, .cancelled, .failed:
+        if onHoldSpeedUp?(false) == true {
+          hideFeedback()
+        }
+      default:
+        break
+    }
   }
 
   @objc private func playTapped() {
@@ -355,7 +552,8 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   }
 
   func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-    item?.kind == .video ? nil : imageView
+    // A video zooms with its poster; the player is a subview of the image view.
+    imageView
   }
 
   func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -363,6 +561,7 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   }
 
   func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+    loadFullResolutionIfNeeded()
     onZoomChange?(true)
   }
 
@@ -371,7 +570,19 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   }
 
   @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-    guard item?.kind == .photo, imageView.image != nil else { return }
+    guard let item, imageView.image != nil else { return }
+    // A long video skips 15 s from a double tap on its sides, like Telegram: back on the leading
+    // third, forward elsewhere. Zoomed in, a double tap zooms back out instead.
+    if item.kind == .video, !isZoomed {
+      let x = gesture.location(in: self).x / max(pageSize.width, 1)
+      let back = effectiveUserInterfaceLayoutDirection == .rightToLeft ? x > 0.65 : x < 0.35
+      let seconds: Double = back ? -15 : 15
+      if onSkip?(seconds) == true {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        showFeedback("15 s", systemImage: back ? "gobackward.15" : "goforward.15", leading: back)
+        return
+      }
+    }
     if isZoomed {
       scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
       onZoomChange?(false)
@@ -385,11 +596,47 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     let point = gesture.location(in: imageView)
     let size = CGSize(width: bounds.width / scale, height: bounds.height / scale)
     let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height)
+    loadFullResolutionIfNeeded()
     onZoomChange?(true)
     scrollView.zoom(to: rect, animated: true)
   }
 
   @objc private func handleSingleTap() {
     onSingleTap?()
+  }
+}
+
+/// Image requests for gallery pages. A page decodes its photo at the size it fills the screen,
+/// not at full resolution (a 12 MP photo is about 48 MB decoded; fitted to a phone, about 5 MB),
+/// and prefetching uses the same requests so neighbors come from the cache.
+enum MediaGalleryImageRequests {
+  static func display(url: URL, item: MediaGalleryItem, pageSize: CGSize, scale: CGFloat) -> ImageRequest {
+    let pixels = maxPixelSize(item: item, pageSize: pageSize, scale: scale)
+    return ImageRequest(
+      url: url,
+      userInfo: [.thumbnailKey: ImageRequest.ThumbnailOptions(maxPixelSize: Float(pixels))]
+    )
+  }
+
+  /// The original, for zooming. Not written to the memory cache, so it doesn't outlive its page.
+  static func full(url: URL) -> ImageRequest {
+    ImageRequest(url: url, options: [.disableMemoryCacheWrites])
+  }
+
+  /// The longest side, in pixels, of the photo fitted to the page.
+  static func maxPixelSize(item: MediaGalleryItem, pageSize: CGSize, scale: CGFloat) -> CGFloat {
+    var longest = max(pageSize.width, pageSize.height)
+    if let size = item.pixelSize, size.width > 0, size.height > 0, pageSize.width > 0, pageSize.height > 0 {
+      let fit = min(pageSize.width / size.width, pageSize.height / size.height)
+      longest = max(size.width, size.height) * fit
+    }
+    // Rounded up so small layout differences share a cache entry.
+    return max(256, (longest * max(scale, 1) / 128).rounded(.up) * 128)
+  }
+
+  /// True when the original has noticeably more pixels than the page-sized decode.
+  static func needsFullResolution(item: MediaGalleryItem, displayedPixelSize: CGFloat) -> Bool {
+    guard let size = item.pixelSize else { return true }
+    return max(size.width, size.height) > displayedPixelSize * 1.2
   }
 }

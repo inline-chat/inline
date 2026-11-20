@@ -171,6 +171,113 @@ it("isolates chat handlers without early cursor acknowledgement or same-chat ove
   await consuming
 })
 
+it("chat access waits for its chat and user cursor while unrelated messages keep flowing", async () => {
+  const { c, t } = await setup({ lastUserSeq: 1, lastSeqByChatId: { "10": 1, "20": 1, "30": 1 } })
+  await result(t, updatesRpcs(t)[0]!.id, {
+    oneofKind: "getUpdates", getUpdates: { seq: 1n, date: 100n, final: true,
+      resultType: GetUpdatesResult_ResultType.EMPTY, updates: [], skippedSequences: [] },
+  })
+  await flush()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const completed: string[] = []
+  const consuming = c.consumeEvents(async (event) => {
+    if (!("chatId" in event)) return
+    if (event.kind === "message.new" && event.chatId === 10n && event.seq === 2) await held
+    completed.push(`${event.kind}:${event.chatId}`)
+  })
+  const access = (chatId: bigint, seq: number) => Update.create({
+    seq, date: 100n, update: { oneofKind: "userRemovedFromChat", userRemovedFromChat: { chatId } },
+  })
+  // The first access change is free to run. The next is behind the held chat,
+  // and the third must wait for the second's user cursor. Its chat waits too.
+  await emit(t, [message(10n, 2), access(20n, 2), access(10n, 3), access(20n, 4), message(20n, 2), message(30n, 2)])
+  await flush()
+  expect(completed).toEqual(["chat.access.removed:20", "message.new:30"])
+  expect(c.exportState()).toMatchObject({ lastUserSeq: 2, lastSeqByChatId: { "10": 1, "20": 1, "30": 2 } })
+  release()
+  await flush()
+  expect(completed.slice(2)).toEqual(["message.new:10", "chat.access.removed:10", "chat.access.removed:20", "message.new:20"])
+  expect(c.exportState()).toMatchObject({ lastUserSeq: 4, lastSeqByChatId: { "10": 2, "20": 2, "30": 2 } })
+  await c.close()
+  await consuming
+})
+
+it("delivers an independent message while a recovered chat-access grant waits on a held chat", async () => {
+  const { c, t } = await setup({ lastUserSeq: 1 })
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const completed: string[] = []
+  const consuming = c.consumeEvents(async (event) => {
+    if (!("chatId" in event)) return
+    if (event.kind === "message.new" && event.chatId === 10n) await held
+    completed.push(`${event.kind}:${event.chatId}`)
+  })
+  try {
+    await emit(t, [message(10n, 2)])
+    await flush()
+    await result(t, updatesRpcs(t)[0]!.id, {
+      oneofKind: "getUpdates",
+      getUpdates: {
+        seq: 2n, date: 100n, final: true, resultType: GetUpdatesResult_ResultType.SLICE,
+        updates: [Update.create({ seq: 2, date: 100n, update: {
+          oneofKind: "userAddedToChat", userAddedToChat: { chatId: 10n },
+        } })],
+        skippedSequences: [],
+      },
+    })
+    await flush()
+    await emit(t, [message(20n, 2)])
+    await flush()
+    expect(completed).toEqual(["message.new:20"])
+    expect(c.exportState()).toMatchObject({ lastUserSeq: 1, lastSeqByChatId: { "10": 1, "20": 2 } })
+    release()
+    await flush()
+    expect(completed).toEqual(["message.new:20", "message.new:10", "chat.access.added:10"])
+    expect(c.exportState()).toMatchObject({ lastUserSeq: 2, lastSeqByChatId: { "10": 2, "20": 2 } })
+  } finally {
+    release()
+    await c.close()
+    await consuming
+  }
+})
+
+it("answers a private settings request while all durable handler slots are busy", async () => {
+  const { c, t } = await setup()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const messages: bigint[] = []
+  const consuming = c.consumeEvents(async (event) => {
+    if (event.kind === "message.new") {
+      messages.push(event.chatId)
+      await held
+    } else if (event.kind === "bot.chatSettings.request") {
+      await c.answerBotChatSettings({ requestId: event.requestId, response: {
+        result: { oneofKind: "document", document: { version: 1, revision: "ready", sections: [] } },
+      } })
+    }
+  }, { concurrency: 2, settingsConcurrency: 2 })
+  try {
+    await emit(t, [message(10n, 2), message(20n, 2)])
+    await flush()
+    expect(messages).toEqual([10n, 20n])
+    await t.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "message", message: {
+      payload: { oneofKind: "bot", bot: { event: { oneofKind: "chatSettingsRequested",
+        chatSettingsRequested: { chatId: 10n, requestId: 123n, actorUserId: 7n, version: 1 },
+      } } },
+    } } }))
+    await flush()
+    const answer = t.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.ANSWER_BOT_CHAT_SETTINGS)
+    expect(answer?.body).toMatchObject({ rpcCall: { input: { answerBotChatSettings: { requestId: 123n } } } })
+    expect(c.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 1 })
+    await result(t, answer!.id, { oneofKind: "answerBotChatSettings", answerBotChatSettings: {} })
+  } finally {
+    release()
+    await c.close()
+    await consuming
+  }
+})
+
 it("closing during a held handler neither commits it nor revives recovery", async () => {
   const { c, t } = await setup()
   let release!: () => void

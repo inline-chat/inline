@@ -4,14 +4,12 @@ import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
 import {
-  committedChatAccessSql,
-  effectiveChatAccessSql,
   getEffectiveChatAccessUserIds,
   storedChatAccessSql,
   type ChatAccessMap,
 } from "./chatAccessProjection"
 import {
-  isStoredChatAccessTrusted,
+  canSampleStoredChatAccess,
   refreshChatAccessTrust,
   revokeChatAccessTrustIfSyncDisabled,
   setChatAccessTrustForTests,
@@ -81,45 +79,25 @@ describe("committed chat access reads", () => {
     setChatAccessTrustForTests(true)
 
     const projected = await getEffectiveChatAccessUserIds(db, seed.chatIds)
-    const stored = await getEffectiveChatAccessUserIds(db, seed.chatIds, { committed: true })
-    expect(pairs(stored)).toEqual(pairs(projected))
+    const stored = await db.execute<{ chatId: number; userId: number }>(storedChatAccessSql(seed.chatIds))
+    expect(stored.map(row => `${row.chatId}:${row.userId}`).sort()).toEqual(pairs(projected))
     expect(pairs(projected).length).toBeGreaterThan(5)
 
     for (const userId of seed.userIds) {
       const projectedForUser = await getEffectiveChatAccessUserIds(db, seed.chatIds, { userIds: [userId] })
-      const storedForUser = await getEffectiveChatAccessUserIds(db, seed.chatIds, { userIds: [userId], committed: true })
-      expect(pairs(storedForUser)).toEqual(pairs(projectedForUser))
+      const storedForUser = await db.execute<{ chatId: number; userId: number }>(storedChatAccessSql(seed.chatIds, [userId]))
+      expect(storedForUser.map(row => `${row.chatId}:${row.userId}`).sort()).toEqual(pairs(projectedForUser))
     }
   })
 
-  test("committed reads use the table only while it is trusted; mutation diffs always use the projection", async () => {
+  test("committed reads follow current membership across a backfill and later membership changes", async () => {
     const seed = await seedAccessShapes()
     await verifyChatAccess()
-    // Make the table visibly wrong so the source of each answer is observable.
-    await db.delete(schema.chatAccess).where(eq(schema.chatAccess.chatId, seed.publicThread.id))
-    const options = { userIds: [seed.member.id] }
-
-    setChatAccessTrustForTests(false)
-    const untrusted = await getEffectiveChatAccessUserIds(db, [seed.publicThread.id], { ...options, committed: true })
-    expect(untrusted.get(seed.publicThread.id)?.has(seed.member.id)).toBe(true)
-
-    setChatAccessTrustForTests(true)
-    const trusted = await getEffectiveChatAccessUserIds(db, [seed.publicThread.id], { ...options, committed: true })
-    expect(trusted.get(seed.publicThread.id)?.size).toBe(0)
-    const diff = await getEffectiveChatAccessUserIds(db, [seed.publicThread.id], options)
-    expect(diff.get(seed.publicThread.id)?.has(seed.member.id)).toBe(true)
-
-    process.env["INLINE_CHAT_ACCESS_READS"] = "off"
-    expect(isStoredChatAccessTrusted()).toBe(false)
-    const killed = await getEffectiveChatAccessUserIds(db, [seed.publicThread.id], { ...options, committed: true })
-    expect(killed.get(seed.publicThread.id)?.has(seed.member.id)).toBe(true)
-  })
-
-  test("composed queries follow the same gate", async () => {
-    setChatAccessTrustForTests(false)
-    expect(committedChatAccessSql([1], [2])).toEqual(effectiveChatAccessSql([1], [2]))
-    setChatAccessTrustForTests(true)
-    expect(committedChatAccessSql([1], [2])).toEqual(storedChatAccessSql([1], [2]))
+    expect(await refreshChatAccessTrust()).toBe(true)
+    await db.delete(schema.members).where(eq(schema.members.userId, seed.member.id))
+    const access = await getEffectiveChatAccessUserIds(db, [seed.publicThread.id], { committed: true })
+    expect(access.get(seed.publicThread.id)?.has(seed.member.id)).toBe(false)
+    expect(access.get(seed.publicThread.id)?.has(seed.owner.id)).toBe(true)
   })
 
   test("a host without sync clears the marker, and only a full repair pass restores trust", async () => {
@@ -141,8 +119,8 @@ describe("committed chat access reads", () => {
 
   test("a stalled refresh closes the gate", async () => {
     setChatAccessTrustForTests(true)
-    expect(isStoredChatAccessTrusted()).toBe(true)
+    expect(canSampleStoredChatAccess()).toBe(true)
     setChatAccessTrustForTests(false)
-    expect(isStoredChatAccessTrusted()).toBe(false)
+    expect(canSampleStoredChatAccess()).toBe(false)
   })
 })

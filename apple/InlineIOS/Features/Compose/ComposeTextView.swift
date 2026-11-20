@@ -222,6 +222,16 @@ class ComposeTextView: UITextView {
       name: UITextView.textDidChangeNotification,
       object: self
     )
+    // The keyboard runs in its own process and applies keystrokes asynchronously, so letters typed
+    // just before a send can land after the composer cleared itself, without the change callbacks
+    // that hide the placeholder. Every edit goes through the storage; the callbacks, when they do
+    // run, come after this and keep the final say.
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(textStorageDidEdit),
+      name: NSTextStorage.didProcessEditingNotification,
+      object: textStorage
+    )
 
     NotificationCenter.default.addObserver(
       self,
@@ -259,6 +269,11 @@ class ComposeTextView: UITextView {
     placeholderLabel?.alpha = show ? 1 : 0
   }
 
+  @objc private func textStorageDidEdit() {
+    guard textStorage.editedMask.contains(.editedCharacters) else { return }
+    showPlaceholder(textStorage.length == 0)
+  }
+
   override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
     if action == #selector(sendWithHardwareReturn(_:)) || action == #selector(insertHardwareNewline(_:)) {
       return canHandleHardwareReturn
@@ -266,8 +281,7 @@ class ComposeTextView: UITextView {
     if action == #selector(acceptSuggestion(_:)) {
       return canAcceptSuggestion
     }
-    if action == #selector(paste(_:)), isEditable,
-       ExperimentalFeatureFlags.richMessageCopyEditingEnabled, MessageTextPasteboard.containsFormattedText() {
+    if action == #selector(paste(_:)), isEditable, MessageTextPasteboard.containsFormattedText() {
       return true
     }
     return super.canPerformAction(action, withSender: sender)
@@ -333,7 +347,7 @@ class ComposeTextView: UITextView {
       convertMentionsToLink: false
     )) {
       replaceSelection(with: pasted, actionName: "Paste")
-    } else if let string = (ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageTextPasteboard.markdown() : nil)
+    } else if let string = MessageTextPasteboard.markdown()
       ?? UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString
     {
       let replacedRange = selectedRange
@@ -343,8 +357,7 @@ class ComposeTextView: UITextView {
         string,
         into: attributedText ?? NSAttributedString(),
         selectedRange: selectedRange,
-        typingAttributes: ExperimentalFeatureFlags.richMessageCopyEditingEnabled
-          ? [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label] : typingAttributes,
+        typingAttributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label],
         textColor: UIColor.label
       )
       registerFormattingUndo(actionName: "Paste")

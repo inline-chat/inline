@@ -25,6 +25,7 @@ struct GeneralSettingsView: View {
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
   @ObservedObject private var gestureSettings = INUserSettings.current.messageGestures
   @ObservedObject private var composeSettings = INUserSettings.current.compose
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   var body: some View {
     List {
@@ -112,6 +113,17 @@ struct GeneralSettingsView: View {
             title: "Reset Translation Alerts"
           )
         }
+      }
+
+      Section {
+        SettingsItem(icon: "hammer.fill", iconColor: .gray, title: "Developer Mode") {
+          Toggle("Developer Mode", isOn: $developerMode)
+            .labelsHidden()
+        }
+      } header: {
+        Text("Developer")
+      } footer: {
+        Text("Show the Debug page, plus chat and user IDs in the chat menu and Chat Info, for bots, integrations, and agents.")
       }
     }
     .listStyle(.insetGrouped)
@@ -294,6 +306,19 @@ struct PrivacySettingsView: View {
       } footer: {
         Text("Choose who can see your local time and when a Focus silences your notifications.")
       }
+
+      Section {
+        SettingsItem(
+          icon: "waveform",
+          iconColor: .purple,
+          title: "Transcribe Voice Messages"
+        ) {
+          Toggle("Transcribe Voice Messages", isOn: $privacy.transcribeVoiceMessages)
+            .labelsHidden()
+        }
+      } footer: {
+        Text("Voice messages you send are transcribed by an AI service so people can read them. Turn this off to keep your recordings from being sent for transcription.")
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Privacy")
@@ -456,31 +481,6 @@ struct PrivacyRuleSettingsView: View {
   private func exceptionsCount(_ rule: PrivacyRuleValue) -> String {
     let count = rule.exceptions.count
     return count == 0 ? "Add" : (count == 1 ? "1 person" : "\(count) people")
-  }
-}
-
-struct DataStorageSettingsView: View {
-  var body: some View {
-    List {
-      Section {
-        NavigationLink {
-          AutoDownloadSettingsView()
-        } label: {
-          SettingsItem(
-            icon: "arrow.down.circle.fill",
-            iconColor: .blue,
-            title: "Auto-Download"
-          )
-        }
-      }
-
-      ClearCacheSettingsSection()
-
-      ResetLocalDataSettingsSection()
-    }
-    .listStyle(.insetGrouped)
-    .navigationTitle("Data & Storage")
-    .navigationBarTitleDisplayMode(.inline)
   }
 }
 

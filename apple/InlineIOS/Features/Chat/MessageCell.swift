@@ -1276,53 +1276,19 @@ extension MessageCollectionViewCell {
   }
 
   private func isReactionOnlyUpdate(from currentMessage: FullMessage, to newMessage: FullMessage) -> Bool {
-    guard currentMessage.reactions != newMessage.reactions else { return false }
-
-    var currentWithoutReactions = currentMessage
-    currentWithoutReactions.reactions = []
-    var newWithoutReactions = newMessage
-    newWithoutReactions.reactions = []
-    return currentWithoutReactions == newWithoutReactions
+    currentMessage.isReactionOnlyUpdate(to: newMessage)
   }
 
-  private func isAcknowledgementOnlyUpdate(
-    from currentMessage: FullMessage,
-    to newMessage: FullMessage
-  ) -> Bool {
-    guard currentMessage.acknowledgements != newMessage.acknowledgements
-      || currentMessage.currentUserAcknowledgement != newMessage.currentUserAcknowledgement
-    else { return false }
-    return currentMessage.withoutAcknowledgements == newMessage.withoutAcknowledgements
+  private func isAcknowledgementOnlyUpdate(from currentMessage: FullMessage, to newMessage: FullMessage) -> Bool {
+    currentMessage.isAcknowledgementOnlyUpdate(to: newMessage)
   }
 
-  private func isDeliveryAcknowledgementUpdate(
-    from currentMessage: FullMessage,
-    to newMessage: FullMessage
-  ) -> Bool {
-    guard currentMessage.id == newMessage.id,
-          currentMessage.message.status == .sending,
-          newMessage.message.status == .sent
-    else { return false }
-
-    var acknowledgedCurrentMessage = currentMessage
-    acknowledgedCurrentMessage.message.status = newMessage.message.status
-    acknowledgedCurrentMessage.message.messageId = newMessage.message.messageId
-    acknowledgedCurrentMessage.message.randomId = newMessage.message.randomId
-    return acknowledgedCurrentMessage == newMessage
+  private func isDeliveryAcknowledgementUpdate(from currentMessage: FullMessage, to newMessage: FullMessage) -> Bool {
+    currentMessage.isDeliveryAcknowledgementUpdate(to: newMessage)
   }
 
   private func changedReactionEmoji(from currentMessage: FullMessage, to newMessage: FullMessage) -> String? {
-    let currentByEmoji = Dictionary(grouping: currentMessage.reactions) { $0.reaction.emoji }
-    let newByEmoji = Dictionary(grouping: newMessage.reactions) { $0.reaction.emoji }
-    var candidates: [String] = []
-
-    for emoji in newMessage.groupedReactions.map(\.emoji) + currentMessage.groupedReactions.map(\.emoji)
-      where !candidates.contains(emoji)
-    {
-      candidates.append(emoji)
-    }
-
-    return candidates.first { currentByEmoji[$0] != newByEmoji[$0] }
+    currentMessage.changedReactionEmoji(to: newMessage)
   }
 
   func avatarOverlayFrame(in view: UIView) -> CGRect? {

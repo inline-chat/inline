@@ -37,20 +37,22 @@ final class MessageReactionPillView: UIControl {
     static let maximumAvatars = 3
     /// How far the old and new count travel when the number rolls.
     static let rollDistance: CGFloat = 12
-    /// A new pill or avatar pops in from this scale with `pop`'s bounce.
-    static let popScale: CGFloat = 0.3
+    /// A new pill or avatar grows from this scale and a leaving one shrinks to it, as in
+    /// Telegram: from almost nothing, on the row's critically damped spring, without overshoot.
+    static let appearScale: CGFloat = 0.01
+    /// How long a new pill fades in and a leaving one fades and shrinks out.
+    static let fadeDuration: TimeInterval = 0.2
   }
 
-  /// The overshoot a new pill or avatar settles with; frames and fades keep the row's motion.
-  /// About as quick as the row's spring, with a small bounce that settles in under half a second.
-  static func pop(_ changes: @escaping () -> Void) {
+  /// Fades a pill in or out the way Telegram does: 0.2 s, ease in and out, apart from the row's
+  /// spring that moves and scales it.
+  static func fade(_ changes: @escaping () -> Void, completion: ((Bool) -> Void)? = nil) {
     UIView.animate(
-      springDuration: 0.3,
-      bounce: 0.35,
-      initialSpringVelocity: 0,
+      withDuration: Metrics.fadeDuration,
       delay: 0,
-      options: [.beginFromCurrentState, .allowUserInteraction],
-      animations: changes
+      options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut],
+      animations: changes,
+      completion: completion
     )
   }
 
@@ -74,8 +76,6 @@ final class MessageReactionPillView: UIControl {
   /// Avatars by reactor, so a reactor's avatar moves instead of another one taking its place.
   private(set) var avatarViews: [Int64: UserAvatarLayerView] = [:]
   private var leavingAvatars: [Int64: UserAvatarLayerView] = [:]
-  /// New avatars waiting for `popAppearing()`.
-  private var poppingAvatars: [UserAvatarLayerView] = []
   private var pendingBackground: UIColor?
   private(set) var model: Model?
 
@@ -103,8 +103,11 @@ final class MessageReactionPillView: UIControl {
     configurationForMenuAtLocation location: CGPoint
   ) -> UIContextMenuConfiguration? {
     guard let users = model?.users, !users.isEmpty else { return nil }
+    // Photos the pill already shows go into the menu as they are, without waiting for a load.
+    let shown = avatarViews.compactMapValues(\.displayedImage)
+    let scale = traitCollection.displayScale
     return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-      MessageReactionView.reactorsMenu(for: users)
+      MessageReactionView.reactorsMenu(for: users, shownImages: shown, scale: scale)
     }
   }
 
@@ -136,7 +139,7 @@ final class MessageReactionPillView: UIControl {
 
   /// Installs `model`. With `animated`, the caller sets starting states without animation and
   /// then runs `layoutIfNeeded()` inside the row's motion: avatars slide, the count rolls and the
-  /// color crossfades on that one curve, and new avatars settle with `popAppearing()`.
+  /// color crossfades on that one curve, and new avatars grow from `appearScale` on it.
   func configure(_ model: Model, animated: Bool = false) {
     guard model != self.model else { return }
     let previous = self.model
@@ -201,8 +204,7 @@ final class MessageReactionPillView: UIControl {
       avatar.untransformedFrame = avatarFrame(at: index, of: model)
       if animated {
         avatar.alpha = 0
-        avatar.transform = CGAffineTransform(scaleX: Metrics.popScale, y: Metrics.popScale)
-        poppingAvatars.append(avatar)
+        avatar.transform = CGAffineTransform(scaleX: Metrics.appearScale, y: Metrics.appearScale)
       }
       avatarViews[id] = avatar
     }
@@ -219,14 +221,6 @@ final class MessageReactionPillView: UIControl {
     accessibilityLabel = "\(model.emoji) \(model.count)"
     accessibilityTraits = model.byCurrentUser ? [.button, .selected] : .button
     setNeedsLayout()
-  }
-
-  /// New avatars settle at full size; call inside `MessageReactionPillView.pop`.
-  func popAppearing() {
-    for avatar in poppingAvatars {
-      avatar.transform = .identity
-    }
-    poppingAvatars.removeAll()
   }
 
   /// Drops avatars that finished leaving. Interrupted ones keep animating and stay.
@@ -259,11 +253,11 @@ final class MessageReactionPillView: UIControl {
       guard let avatar = avatarViews[info.user.id] else { continue }
       avatar.untransformedFrame = avatarFrame(at: index, of: model)
       avatar.alpha = 1
-      if !poppingAvatars.contains(avatar) { avatar.transform = .identity }
+      avatar.transform = .identity
     }
     for avatar in leavingAvatars.values {
       avatar.alpha = 0
-      avatar.transform = CGAffineTransform(scaleX: Metrics.popScale, y: Metrics.popScale)
+      avatar.transform = CGAffineTransform(scaleX: Metrics.appearScale, y: Metrics.appearScale)
     }
     if let frame = Self.countFrame(for: model) {
       countView.textFrame = frame
@@ -304,6 +298,7 @@ final class MessageReactionPillView: UIControl {
 
   @objc private func handleTap() {
     guard let model else { return }
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
     onTap?(model.emoji)
   }
 

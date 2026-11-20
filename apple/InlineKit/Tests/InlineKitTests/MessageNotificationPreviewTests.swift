@@ -32,6 +32,18 @@ struct MessageNotificationPreviewTests {
     #expect(MessageNotificationPreview.body(for: message) == "🚨 Urgent nudge")
   }
 
+  @Test func albums() {
+    var message = InlineProtocol.Message()
+    message.groupedID = 7
+    message.media.photo.photo.id = 1
+    #expect(MessageNotificationPreview.body(for: message) == "🖼️ Album")
+    message.message = "Trip"
+    #expect(MessageNotificationPreview.body(for: message) == "🖼️ Trip")
+    message.message = ""
+    message.media.document.document.fileName = "a.pdf"
+    #expect(MessageNotificationPreview.body(for: message) == "📄 Files")
+  }
+
   @Test func unicodeBoundaries() {
     let family = "👨‍👩‍👧‍👦"
     let body = MessageNotificationPreview.preview(String(repeating: family, count: 100))

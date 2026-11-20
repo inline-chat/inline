@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { getDocumentMetadataAndValidate } from "@in/server/modules/files/metadata"
 
 describe("getDocumentMetadataAndValidate", () => {
+  test.each(["folder/notes.pdf", "folder%2Fnotes.pdf", "folder%5Cnotes.pdf"])("requires a single filename after decoding %s", async (name) => {
+    await expect(getDocumentMetadataAndValidate(new File(["notes"], name))).rejects.toThrow()
+  })
+
   test("accepts blank MIME types for documents and falls back from extension", async () => {
     const file = new File([Uint8Array.from([1, 2, 3])], "script.py", {
       type: "",

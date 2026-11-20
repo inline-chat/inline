@@ -26,7 +26,7 @@ struct LinksTabView: View {
           ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
             let items = linkGroups(for: group)
             ChatInfoDateSection(
-              dateText: formatDate(group.date),
+              dateText: ChatInfoSectionDate.text(for: group.date),
               headerInsets: EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 0)
             ) {
               ForEach(items) { item in
@@ -57,25 +57,6 @@ struct LinksTabView: View {
       await linksViewModel.loadInitial()
     }
     .onDisappear { linksViewModel.deactivate() }
-  }
-
-  private func formatDate(_ date: Date) -> String {
-    let calendar = Calendar.current
-    let now = Date()
-
-    if calendar.isDateInToday(date) {
-      return "Today"
-    } else if calendar.isDateInYesterday(date) {
-      return "Yesterday"
-    } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "EEEE"
-      return formatter.string(from: date)
-    } else {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "MMMM d, yyyy"
-      return formatter.string(from: date)
-    }
   }
 
   private func linkGroups(for group: LinkMessageGroup) -> [LinkRowGroup] {

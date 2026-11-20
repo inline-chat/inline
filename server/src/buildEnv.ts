@@ -41,9 +41,6 @@ declare global {
       SES_REGION?: string
       AMAZON_ACCESS_KEY?: string
       AMAZON_SECRET_ACCESS_KEY?: string
-      TWILIO_AUTH_TOKEN?: string
-      TWILIO_SID: string
-      TWILIO_VERIFY_SERVICE_SID: string
       SENTRY_DSN: string
       RESEND_API_KEY: string
       IPINFO_TOKEN?: string

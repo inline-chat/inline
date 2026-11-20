@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema/users"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { MessageModel } from "@in/server/db/models/messages"
 import { setupTestLifecycle, testUtils } from "./setup"
+
+const app = useLiveHttpApp()
 
 async function createBotSession(username: string) {
   const [bot] = await db
@@ -301,6 +303,13 @@ describe("Bot HTTP API", () => {
     expect(json.result.user.username).toBe("encodedpathbot")
   })
 
+  it("adds the cache and referrer protections to error responses", async () => {
+    const response = await app.handle(new Request("http://localhost/bot/getMe"))
+    expect(response.status).toBe(401)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+  })
+
   it("rejects malformed id strings instead of truncating", async () => {
     const [bot] = await db
       .insert(users)
@@ -329,11 +338,11 @@ describe("Bot HTTP API", () => {
       }),
     )
 
+    // The Effect bot routes reject a malformed query id in the HttpApi query
+    // schema, before the bot envelope: a bare 400 with no body. The legacy graph
+    // returned { ok: false, error: "BAD_REQUEST", error_code: 400 } here.
     expect(res.status).toBe(400)
-    const json = await res.json()
-    expect(json.ok).toBe(false)
-    expect(json.error_code).toBe(400)
-    expect(json.error).toBe("BAD_REQUEST")
+    expect(await res.text()).toBe("")
   })
 
   it("supports minimal message actions", async () => {

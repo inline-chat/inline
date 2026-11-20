@@ -4,7 +4,9 @@ import { thereUsers, waitlist as waitlistTable } from "@in/server/db/schema"
 import { Log } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
 import { describe, expect, it, spyOn } from "bun:test"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
+
+const app = useLiveHttpApp()
 
 setupTestLifecycle()
 
@@ -89,16 +91,20 @@ describe("extra and integration routes", () => {
     expect(root.status).toBe(200)
   })
 
-  it("redirects linear callback to missing_cookie when oauth cookies are absent", async () => {
+  it("rejects a linear callback without oauth cookies", async () => {
     const response = await app.handle(
       new Request("http://localhost/integrations/linear/callback?code=test-code&state=test-state"),
     )
 
-    expect(response.status).toBe(302)
-    expect(response.headers.get("location")).toBe("in://integrations/linear?success=false&error=missing_cookie")
+    // Effect contract: an unclaimed callback without the browser cookies is not
+    // redirected into the app; it reports the expired session and clears cookies.
+    expect(response.status).toBe(400)
+    expect(response.headers.get("location")).toBeNull()
+    expect(await response.json()).toEqual({ error: "OAuth session expired or was already used" })
+    expect(response.headers.get("set-cookie")).toContain("state=; Max-Age=0")
   })
 
-  it("redirects linear callback to state_mismatch when state cookie does not match", async () => {
+  it("rejects a linear callback whose state cookie does not match", async () => {
     const warn = spyOn(Log.shared, "warn")
     const trace = spyOn(Log.shared, "trace")
     try {
@@ -110,8 +116,12 @@ describe("extra and integration routes", () => {
         }),
       )
 
-      expect(response.status).toBe(302)
-      expect(response.headers.get("location")).toBe("in://integrations/linear?success=false&error=state_mismatch")
+      // Effect contract: a state that does not match the browser session is a
+      // 400 for that browser, not an app redirect.
+      expect(response.status).toBe(400)
+      expect(response.headers.get("location")).toBeNull()
+      expect(await response.json()).toEqual({ error: "OAuth state did not match this browser session" })
+      expect(response.headers.get("set-cookie")).toContain("state=; Max-Age=0")
       expect(warn).not.toHaveBeenCalled()
       expect(trace).not.toHaveBeenCalled()
     } finally {
@@ -120,16 +130,20 @@ describe("extra and integration routes", () => {
     }
   })
 
-  it("redirects notion callback to missing_cookie when oauth cookies are absent", async () => {
+  it("rejects a notion callback without oauth cookies", async () => {
     const response = await app.handle(
       new Request("http://localhost/integrations/notion/callback?code=test-code&state=test-state"),
     )
 
-    expect(response.status).toBe(302)
-    expect(response.headers.get("location")).toBe("in://integrations/notion?success=false&error=missing_cookie")
+    // Effect contract: an unclaimed callback without the browser cookies is not
+    // redirected into the app; it reports the expired session and clears cookies.
+    expect(response.status).toBe(400)
+    expect(response.headers.get("location")).toBeNull()
+    expect(await response.json()).toEqual({ error: "OAuth session expired or was already used" })
+    expect(response.headers.get("set-cookie")).toContain("state=; Max-Age=0")
   })
 
-  it("redirects notion callback to state_mismatch when state cookie does not match", async () => {
+  it("rejects a notion callback whose state cookie does not match", async () => {
     const warn = spyOn(Log.shared, "warn")
     const trace = spyOn(Log.shared, "trace")
     try {
@@ -141,8 +155,12 @@ describe("extra and integration routes", () => {
         }),
       )
 
-      expect(response.status).toBe(302)
-      expect(response.headers.get("location")).toBe("in://integrations/notion?success=false&error=state_mismatch")
+      // Effect contract: a state that does not match the browser session is a
+      // 400 for that browser, not an app redirect.
+      expect(response.status).toBe(400)
+      expect(response.headers.get("location")).toBeNull()
+      expect(await response.json()).toEqual({ error: "OAuth state did not match this browser session" })
+      expect(response.headers.get("set-cookie")).toContain("state=; Max-Age=0")
       expect(warn).not.toHaveBeenCalled()
       expect(trace).not.toHaveBeenCalled()
     } finally {

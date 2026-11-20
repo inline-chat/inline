@@ -25,7 +25,7 @@ use inline_agent_bridge::harness::{
 use inline_agent_bridge::{
     DriverCommand, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
     DriverSettingOption, HostToolCall, HostToolConfiguration, ProviderId, ProviderSessionId,
-    SessionPageCursor, TurnId, TurnOutcome,
+    SessionPageCursor, StdioMcpServer, TurnId, TurnOutcome,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -70,6 +70,11 @@ pub struct ClaudeHarnessConfig {
     pub host_tools: Option<HostToolConfiguration>,
     /// Extra launch flags (labs: `--bare`).
     pub bare: bool,
+    /// Stdio MCP servers every session gets, such as Inline's computer use.
+    /// Their tools run without prompts, as Inline's own tools do.
+    pub stdio_mcp_servers: Vec<StdioMcpServer>,
+    /// Claude in Chrome (`--chrome`), on as in Claude's desktop app.
+    pub chrome: bool,
 }
 
 impl ClaudeHarnessConfig {
@@ -86,6 +91,8 @@ impl ClaudeHarnessConfig {
             mcp_servers: Vec::new(),
             host_tools: None,
             bare: false,
+            stdio_mcp_servers: Vec::new(),
+            chrome: false,
         }
     }
 
@@ -106,17 +113,29 @@ impl ClaudeHarnessConfig {
             .iter()
             .map(|(name, _)| name.as_str())
             .collect();
+        let mut allowed = Vec::new();
         if self.host_tools.is_some() {
             names.push(HOST_TOOLS_SERVER);
             // Inline authorizes its own tools (bindings, explicit intent), as
             // Codex dynamic tools are never prompted.
-            options.extra_args.push((
-                "allowedTools".to_owned(),
-                Some(format!("mcp__{HOST_TOOLS_SERVER}")),
-            ));
+            allowed.push(format!("mcp__{HOST_TOOLS_SERVER}"));
         }
-        if !names.is_empty() {
-            options.mcp_config = Some(crate::mcp::sdk_server_config(&names).to_string());
+        allowed.extend(
+            self.stdio_mcp_servers
+                .iter()
+                .map(|server| format!("mcp__{}", server.name)),
+        );
+        if !allowed.is_empty() {
+            options
+                .extra_args
+                .push(("allowedTools".to_owned(), Some(allowed.join(","))));
+        }
+        if self.chrome {
+            options.extra_args.push(("chrome".to_owned(), None));
+        }
+        if !names.is_empty() || !self.stdio_mcp_servers.is_empty() {
+            options.mcp_config =
+                Some(crate::mcp::server_config(&names, &self.stdio_mcp_servers).to_string());
         }
         options
     }
@@ -1584,4 +1603,41 @@ fn open_error(error: ConnectError) -> OpenError {
 #[allow(dead_code)]
 fn envelope_session(envelope: &Envelope) -> &str {
     envelope.session.session.as_str()
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    #[test]
+    fn stdio_servers_and_chrome_reach_the_launch_arguments() {
+        let mut config = ClaudeHarnessConfig::new("/usr/local/bin/claude", "0.0.0");
+        config.chrome = true;
+        config.stdio_mcp_servers = vec![StdioMcpServer {
+            name: "computer".into(),
+            command: "/usr/local/bin/inline".into(),
+            args: vec!["computer-use".into(), "mcp".into()],
+        }];
+        let args = config
+            .launch(PathBuf::from("/tmp"), SessionStart::Fresh)
+            .cli_arguments();
+        assert!(args.contains(&"--chrome".to_owned()));
+        assert!(args.contains(&"--allowedTools=mcp__computer".to_owned()));
+        let mcp = args
+            .iter()
+            .find_map(|arg| arg.strip_prefix("--mcp-config="))
+            .expect("an MCP config");
+        let mcp: Value = serde_json::from_str(mcp).unwrap();
+        assert_eq!(mcp["mcpServers"]["computer"]["type"], "stdio");
+    }
+
+    #[test]
+    fn plain_config_adds_neither() {
+        let config = ClaudeHarnessConfig::new("/usr/local/bin/claude", "0.0.0");
+        let args = config
+            .launch(PathBuf::from("/tmp"), SessionStart::Fresh)
+            .cli_arguments();
+        assert!(!args.contains(&"--chrome".to_owned()));
+        assert!(!args.iter().any(|arg| arg.starts_with("--mcp-config")));
+    }
 }

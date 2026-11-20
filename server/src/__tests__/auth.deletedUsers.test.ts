@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { db, schema } from "@in/server/db"
-import { getUserIdFromToken } from "@in/server/controllers/plugins"
+import { getUserIdFromToken } from "@in/server/modules/auth/sessionAuthentication"
 import { getOrCreateUserByEmailForSignup } from "@in/server/modules/auth/signupInvites"
 import { setupTestLifecycle, testUtils } from "./setup"
 import { eq } from "drizzle-orm"

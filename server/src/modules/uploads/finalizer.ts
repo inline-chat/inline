@@ -143,6 +143,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
       if (!r2) throw new Error("R2 is not initialized")
       await r2.file(key).delete()
     },
+    private readonly storeFileObject: typeof uploadFileObject = uploadFileObject,
   ) {}
 
   async preparePublication(input: {
@@ -355,6 +356,10 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         if (metadata.mimeType !== "image/jpeg" && metadata.mimeType !== "image/png") {
           throw new UploadInvalidMediaError()
         }
+        // Native uploads publish the bytes the client hashed and the worker
+        // stored and verified at this key; rewriting them here breaks that
+        // integrity contract. Clients strip camera and location metadata
+        // before hashing; the HTTP upload path still strips on the server.
         const stripped = await generateStrippedThumbnail(file).catch((error) => {
           log.warn("Failed to generate stripped thumbnail for native upload", {
             error,
@@ -452,7 +457,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     const identity = { fileUniqueId, path }
     const prepared = alreadyStored
       ? prepareFileObjectRecord(file.size, fileType, metadata, { userId: upload.userId }, identity)
-      : await uploadFileObject(file, fileType, metadata, { userId: upload.userId }, identity, signal)
+      : await this.storeFileObject(file, fileType, metadata, { userId: upload.userId }, identity, signal)
     return {
       record: prepared.dbFile,
       path,

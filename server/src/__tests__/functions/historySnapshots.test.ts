@@ -318,6 +318,45 @@ test("public exports, large exact lookups and Rust lookahead retain their reques
   expect(search.seq).toBe(7n)
 })
 
+test("history and search pages above the cap are clamped to 1,000 rows instead of rejected", async () => {
+  const { user, chat, peerId, context } = await fixture()
+  const text = encryptMessage("clamped page")
+  await db.insert(messages).values(
+    Array.from({ length: 1_002 }, (_, index) => ({
+      chatId: chat.id,
+      fromId: user.id,
+      messageId: index + 1,
+      textEncrypted: text.encrypted,
+      textIv: text.iv,
+      textTag: text.authTag,
+    })),
+  )
+  await db.update(chats).set({ updateSeq: 3, lastMsgId: 1_002, messageIdCounter: 1_002 }).where(eq(chats.id, chat.id))
+
+  for (const limit of [1_001, 2_147_483_647]) {
+    const latest = await getChatHistory({ peerId, limit }, context)
+    expect(latest.messages).toHaveLength(1_000)
+    expect(latest.messages[0]?.id).toBe(1_002n)
+    const newer = await getChatHistory({ peerId, mode: "newer", afterId: 1n, limit }, context)
+    expect(newer.messages.map((row) => row.id)).toEqual(Array.from({ length: 1_000 }, (_, index) => BigInt(1_001 - index)))
+    const search = await searchMessages({ peerId, queries: ["clamped page"], limit }, context)
+    expect(search.messages).toHaveLength(1_000)
+  }
+
+  // Around pages are clamped as a whole: the before side keeps its rows, the after side gives way.
+  const around = await getChatHistory(
+    { peerId, mode: "around", anchorId: 500n, beforeLimit: 2_147_483_647, afterLimit: 2_147_483_647 },
+    context,
+  )
+  expect(around.messages).toHaveLength(500)
+  const balanced = await getChatHistory(
+    { peerId, mode: "around", anchorId: 401n, beforeLimit: 400, afterLimit: 2_000 },
+    context,
+  )
+  // 400 before + the anchor + 599 of the 601 after it.
+  expect(balanced.messages.map((row) => row.id)).toEqual(Array.from({ length: 1_000 }, (_, index) => BigInt(1_000 - index)))
+})
+
 test("history RPCs reject invalid IDs, unbounded/fractional limits and contradictory cursors before creating a DM", async () => {
   const user = await testUtils.createUser("validation-owner@example.test")
   const peer = await testUtils.createUser("validation-peer@example.test")
@@ -338,7 +377,7 @@ test("history RPCs reject invalid IDs, unbounded/fractional limits and contradic
   }
   await expect(getChatHistory({ peerId, mode: "older", beforeId: 3n, offsetId: 2n }, context)).rejects.toThrow()
   await expect(
-    getChatHistory({ peerId, mode: "around", anchorId: 2n, beforeLimit: 2_147_483_647, afterLimit: 1 }, context),
+    getChatHistory({ peerId, mode: "around", anchorId: 2n, beforeLimit: 2_147_483_648, afterLimit: 1 }, context),
   ).rejects.toThrow()
   await expect(
     searchMessages({ peerId, queries: ["text"], filter: 999 as SearchMessagesFilter }, context),

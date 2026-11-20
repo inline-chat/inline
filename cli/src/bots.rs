@@ -1,4 +1,9 @@
 //! Owner management for bots: profile, photo, avatar, token, settings, and access.
+//!
+//! Settings and access commands take one bot, several (`--bot-user-id 1,2`),
+//! or every bot you own (`--all`, `--filter`), so an owner with many bots, or
+//! an agent acting for them, changes them all in one command. Those paths box
+//! their futures so `handle_bot_management`'s state machine stays small.
 
 use inline_protocol::proto;
 use serde::Serialize;
@@ -6,7 +11,7 @@ use serde::Serialize;
 use crate::attachments::prepare_photo_upload;
 use crate::auth::AuthStore;
 use crate::config::Config;
-use crate::errors::CliError;
+use crate::errors::{CliError, ReportedExit};
 use crate::output::{self, JsonFormat, terminal_text, user_display_name};
 use crate::validation::validate_positive_id_arg;
 use crate::{
@@ -15,6 +20,693 @@ use crate::{
 };
 
 type CliResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+/// Which bots a settings or access command acts on.
+#[derive(clap::Args, Clone, Debug, Default)]
+pub(crate) struct BotSelectionArgs {
+    #[arg(
+        long = "bot-user-id",
+        value_name = "ID",
+        value_delimiter = ',',
+        help = "Bot user id; comma-separate or repeat it for several bots"
+    )]
+    pub(crate) bot_user_ids: Vec<i64>,
+
+    #[arg(long, conflicts_with = "bot_user_ids", help = "Every bot you own")]
+    pub(crate) all: bool,
+
+    #[arg(
+        long,
+        short = 'f',
+        value_name = "TEXT",
+        conflicts_with = "bot_user_ids",
+        help = "Only your bots whose name or username contains this text"
+    )]
+    pub(crate) filter: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with = "bot_user_ids",
+        help = "Also include bots you manage as an admin"
+    )]
+    pub(crate) include_managed: bool,
+
+    #[arg(
+        long,
+        value_name = "ID",
+        value_delimiter = ',',
+        conflicts_with = "bot_user_ids",
+        help = "Leave out these bot user ids (comma-separated)"
+    )]
+    pub(crate) except: Vec<i64>,
+}
+
+impl BotSelectionArgs {
+    /// No bot was named, so listing commands show every bot you own.
+    fn is_empty(&self) -> bool {
+        self.bot_user_ids.is_empty()
+            && !self.all
+            && self.filter.is_none()
+            && !self.include_managed
+            && self.except.is_empty()
+    }
+
+    /// The original single-bot form, whose output stays as it was.
+    fn single(&self) -> Option<i64> {
+        match self.bot_user_ids.as_slice() {
+            [id] => Some(*id),
+            _ => None,
+        }
+    }
+
+    fn require_single(&self, purpose: &str) -> CliResult<i64> {
+        match self.single() {
+            Some(id) => Ok(validate_positive_id_arg("--bot-user-id", id)?),
+            None => Err(CliError::invalid_args(format!(
+                "{purpose} needs exactly one --bot-user-id."
+            ))
+            .into()),
+        }
+    }
+
+    fn require_some(&self) -> CliResult {
+        if self.is_empty() {
+            return Err(CliError::invalid_args(
+                "Choose bots with --bot-user-id ID[,ID...], --all, or --filter TEXT.",
+            )
+            .into());
+        }
+        Ok(())
+    }
+}
+
+/// A bot a bulk command acts on. `user` is absent for an id that isn't among
+/// the bots you own or manage; the server still decides whether you may change it.
+struct TargetBot {
+    id: i64,
+    user: Option<proto::User>,
+}
+
+impl TargetBot {
+    fn label(&self) -> String {
+        match self.user.as_ref() {
+            Some(user) => bot_label(user),
+            None => format!("bot {}", self.id),
+        }
+    }
+}
+
+/// Resolves a selection to bots, in list order for `--all`/`--filter` and in
+/// the given order for ids.
+async fn resolve_bots(
+    realtime: &mut AuthenticatedRealtime,
+    selection: &BotSelectionArgs,
+) -> CliResult<Vec<TargetBot>> {
+    if !selection.bot_user_ids.is_empty() {
+        let mut ids: Vec<i64> = Vec::with_capacity(selection.bot_user_ids.len());
+        for id in &selection.bot_user_ids {
+            let id = validate_positive_id_arg("--bot-user-id", *id)?;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        let known = realtime
+            .call(proto::ListBotsInput {
+                include_managed: Some(true),
+            })
+            .await?
+            .bots;
+        return Ok(ids
+            .into_iter()
+            .map(|id| TargetBot {
+                id,
+                user: known.iter().find(|bot| bot.id == id).cloned(),
+            })
+            .collect());
+    }
+    let mut except = Vec::with_capacity(selection.except.len());
+    for id in &selection.except {
+        except.push(validate_positive_id_arg("--except", *id)?);
+    }
+    let needle = selection
+        .filter
+        .as_deref()
+        .map(str::trim)
+        .filter(|filter| !filter.is_empty())
+        .map(str::to_lowercase);
+    let bots = realtime
+        .call(proto::ListBotsInput {
+            include_managed: selection.include_managed.then_some(true),
+        })
+        .await?
+        .bots;
+    Ok(bots
+        .into_iter()
+        .filter(|bot| !except.contains(&bot.id))
+        .filter(|bot| {
+            needle
+                .as_deref()
+                .is_none_or(|needle| crate::proto_user_matches_filter(bot, needle))
+        })
+        .map(|bot| TargetBot {
+            id: bot.id,
+            user: Some(bot),
+        })
+        .collect())
+}
+
+fn no_bots_matched(selection: &BotSelectionArgs) -> Box<dyn std::error::Error> {
+    let message = match selection.filter.as_deref() {
+        Some(filter) => format!(
+            "No bots you own match \"{}\". Run `inline bots list` to see them.",
+            terminal_text(filter)
+        ),
+        None => "No bots matched. Run `inline bots list` to see your bots.".to_string(),
+    };
+    CliError::invalid_args(message).into()
+}
+
+/// "only you", "everyone", or "1 space, 2 people", matching the apps' Shared With.
+fn shared_with_summary(grants: &[proto::AgentGrant], open_to_everyone: bool) -> String {
+    use proto::access_subject::Subject;
+    if open_to_everyone {
+        return "everyone".to_string();
+    }
+    let (mut people, mut spaces, mut groups) = (0, 0, 0);
+    for grant in grants {
+        match grant
+            .subject
+            .as_ref()
+            .and_then(|subject| subject.subject.as_ref())
+        {
+            Some(Subject::SpaceId(_)) => spaces += 1,
+            Some(Subject::GroupId(_)) => groups += 1,
+            Some(Subject::UserId(_)) | None => people += 1,
+        }
+    }
+    let count = |count: usize, one: &str, many: &str| match count {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        count => Some(format!("{count} {many}")),
+    };
+    let parts: Vec<String> = [
+        count(spaces, "space", "spaces"),
+        count(groups, "group", "groups"),
+        count(people, "person", "people"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.is_empty() {
+        "only you".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// One row of `inline bots settings` / `inline bots access list` for many bots.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BotOverviewRow {
+    pub(crate) bot_user_id: i64,
+    pub(crate) name: String,
+    pub(crate) username: Option<String>,
+    /// friendly, detailed, or unset (the agent's default, Detailed).
+    pub(crate) output_mode: Option<&'static str>,
+    pub(crate) open_to_everyone: Option<bool>,
+    /// "only you", "everyone", or counts such as "1 space, 2 people".
+    pub(crate) shared_with: Option<String>,
+    pub(crate) grant_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BotOverviewOutput {
+    bots: Vec<BotOverviewRow>,
+}
+
+async fn bot_overview_row(realtime: &mut AuthenticatedRealtime, bot: &TargetBot) -> BotOverviewRow {
+    let (name, username) = match bot.user.as_ref() {
+        Some(user) => (
+            user_display_name(user),
+            user.username
+                .clone()
+                .filter(|username| !username.is_empty()),
+        ),
+        None => (format!("bot {}", bot.id), None),
+    };
+    let mut row = BotOverviewRow {
+        bot_user_id: bot.id,
+        name,
+        username,
+        output_mode: None,
+        open_to_everyone: None,
+        shared_with: None,
+        grant_count: None,
+        error: None,
+    };
+    let settings = match read_agent_settings(realtime, bot.id).await {
+        Ok(settings) => settings.unwrap_or_default(),
+        Err(error) => {
+            row.error = Some(error.to_string());
+            return row;
+        }
+    };
+    row.output_mode = Some(output_mode_label(settings.default_output_mode));
+    row.open_to_everyone = Some(settings.open_to_everyone);
+    match realtime
+        .call(proto::ListAgentGrantsInput {
+            bot_user_id: bot.id,
+            include_all_subjects: Some(true),
+        })
+        .await
+    {
+        Ok(payload) => {
+            row.shared_with = Some(shared_with_summary(
+                &payload.grants,
+                settings.open_to_everyone,
+            ));
+            row.grant_count = Some(payload.grants.len());
+        }
+        Err(error) => row.error = Some(error.to_string()),
+    }
+    row
+}
+
+/// Output mode and who can message each selected bot (every bot you own when
+/// none is named).
+async fn print_bot_overview(
+    realtime: &mut AuthenticatedRealtime,
+    selection: &BotSelectionArgs,
+    json: bool,
+    json_format: JsonFormat,
+) -> CliResult {
+    let bots = resolve_bots(realtime, selection).await?;
+    if bots.is_empty() && !selection.is_empty() {
+        return Err(no_bots_matched(selection));
+    }
+    announce_bots(bots.len(), json);
+    let mut rows = Vec::with_capacity(bots.len());
+    for bot in &bots {
+        rows.push(bot_overview_row(realtime, bot).await);
+    }
+    if json {
+        return Ok(output::print_json(
+            &BotOverviewOutput { bots: rows },
+            json_format,
+        )?);
+    }
+    if rows.is_empty() {
+        println!("You don't own any bots yet. Create one with `inline bots create`.");
+        return Ok(());
+    }
+    output::print_bot_overview(&rows);
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum BulkStatus {
+    Changed,
+    WouldChange,
+    Unchanged,
+    Failed,
+}
+
+impl BulkStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Changed => "changed",
+            Self::WouldChange => "would change",
+            Self::Unchanged => "unchanged",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkResult {
+    bot_user_id: i64,
+    name: Option<String>,
+    username: Option<String>,
+    #[serde(skip)]
+    label: String,
+    status: BulkStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+impl BulkResult {
+    fn failed(bot: &TargetBot, error: impl ToString) -> Self {
+        Self {
+            bot_user_id: bot.id,
+            name: bot.user.as_ref().map(user_display_name),
+            username: bot.user.as_ref().and_then(|user| user.username.clone()),
+            label: bot.label(),
+            status: BulkStatus::Failed,
+            from: None,
+            to: None,
+            error: Some(error.to_string()),
+        }
+    }
+
+    fn compared(bot: &TargetBot, from: String, to: String, dry_run: bool) -> Self {
+        let status = if from == to {
+            BulkStatus::Unchanged
+        } else if dry_run {
+            BulkStatus::WouldChange
+        } else {
+            BulkStatus::Changed
+        };
+        Self {
+            bot_user_id: bot.id,
+            name: bot.user.as_ref().map(user_display_name),
+            username: bot.user.as_ref().and_then(|user| user.username.clone()),
+            label: bot.label(),
+            status,
+            from: Some(from),
+            to: Some(to),
+            error: None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkOutput {
+    /// output_mode, open, close, grant, or revoke.
+    action: &'static str,
+    title: String,
+    dry_run: bool,
+    changed: usize,
+    would_change: usize,
+    unchanged: usize,
+    failed: usize,
+    results: Vec<BulkResult>,
+}
+
+/// JSON keeps "unset" for a cleared output mode, as `bots get` does; people
+/// read it as the `default` they pass to `--output-mode`.
+fn human_value(value: &str) -> &str {
+    if value == "unset" { "default" } else { value }
+}
+
+/// "Checking 21 bots…" on a terminal, so a long sequential run doesn't look stuck.
+fn announce_bots(count: usize, json: bool) {
+    use std::io::IsTerminal;
+    if !json && count > 5 && std::io::stderr().is_terminal() {
+        eprintln!("Checking {count} bots…");
+    }
+}
+
+/// Prints a bulk change, and exits 1 after printing when any bot failed.
+fn finish_bulk(
+    action: &'static str,
+    title: String,
+    dry_run: bool,
+    results: Vec<BulkResult>,
+    json: bool,
+    json_format: JsonFormat,
+) -> CliResult {
+    let count = |status: BulkStatus| results.iter().filter(|r| r.status == status).count();
+    let output = BulkOutput {
+        changed: count(BulkStatus::Changed),
+        would_change: count(BulkStatus::WouldChange),
+        unchanged: count(BulkStatus::Unchanged),
+        failed: count(BulkStatus::Failed),
+        action,
+        title,
+        dry_run,
+        results,
+    };
+    if json {
+        output::print_json(&output, json_format)?;
+    } else {
+        let bots = if output.results.len() == 1 {
+            "bot"
+        } else {
+            "bots"
+        };
+        println!(
+            "{}{} ({} {bots}):",
+            if dry_run { "Dry run: " } else { "" },
+            output.title,
+            output.results.len()
+        );
+        for result in &output.results {
+            let detail = match (&result.error, &result.from, &result.to) {
+                (Some(error), _, _) => terminal_text(error).into_owned(),
+                (None, Some(from), Some(_)) if result.status == BulkStatus::Unchanged => {
+                    format!("already {}", human_value(from))
+                }
+                (None, Some(from), Some(to)) => {
+                    format!("{} → {}", human_value(from), human_value(to))
+                }
+                _ => String::new(),
+            };
+            println!(
+                "  {:<12}  {}: {detail}",
+                result.status.label(),
+                result.label
+            );
+        }
+        let mut summary = Vec::new();
+        if dry_run {
+            summary.push(format!("{} would change", output.would_change));
+        } else {
+            summary.push(format!("{} changed", output.changed));
+        }
+        summary.push(format!("{} unchanged", output.unchanged));
+        if output.failed > 0 {
+            summary.push(format!("{} failed", output.failed));
+        }
+        println!(
+            "{}.{}",
+            summary.join(", "),
+            if dry_run { " Nothing was changed." } else { "" }
+        );
+    }
+    if output.failed > 0 {
+        return Err(ReportedExit(1).into());
+    }
+    Ok(())
+}
+
+/// Sets the default output mode on every selected bot, skipping bots already set.
+async fn bulk_output_mode(
+    realtime: &mut AuthenticatedRealtime,
+    bots: &[TargetBot],
+    mode: BotOutputMode,
+    dry_run: bool,
+) -> Vec<BulkResult> {
+    let target = mode.protocol_value() as i32;
+    let mut results = Vec::with_capacity(bots.len());
+    for bot in bots {
+        let current = match read_agent_settings(realtime, bot.id).await {
+            Ok(settings) => settings.unwrap_or_default().default_output_mode,
+            Err(error) => {
+                results.push(BulkResult::failed(bot, error));
+                continue;
+            }
+        };
+        let result = BulkResult::compared(
+            bot,
+            output_mode_label(current).to_string(),
+            output_mode_label(target).to_string(),
+            dry_run,
+        );
+        if result.status != BulkStatus::Changed {
+            results.push(result);
+            continue;
+        }
+        let update = realtime
+            .call(proto::UpdateAgentSettingsInput {
+                bot_user_id: bot.id,
+                default_output_mode: Some(target),
+                open_to_everyone: None,
+            })
+            .await;
+        results.push(match update {
+            Ok(payload)
+                if payload
+                    .settings
+                    .as_ref()
+                    .is_none_or(|settings| settings.default_output_mode == target) =>
+            {
+                result
+            }
+            Ok(_) => BulkResult::failed(bot, "The server didn't apply the change."),
+            Err(error) => BulkResult::failed(bot, error),
+        });
+    }
+    results
+}
+
+fn open_label(open: bool) -> String {
+    if open { "open" } else { "closed" }.to_string()
+}
+
+/// Opens or closes every selected bot, skipping bots already that way.
+async fn bulk_open_to_everyone(
+    realtime: &mut AuthenticatedRealtime,
+    bots: &[TargetBot],
+    open: bool,
+    dry_run: bool,
+) -> Vec<BulkResult> {
+    let mut results = Vec::with_capacity(bots.len());
+    for bot in bots {
+        let current = match read_agent_settings(realtime, bot.id).await {
+            Ok(settings) => settings.unwrap_or_default().open_to_everyone,
+            Err(error) => {
+                results.push(BulkResult::failed(bot, error));
+                continue;
+            }
+        };
+        let result = BulkResult::compared(bot, open_label(current), open_label(open), dry_run);
+        if result.status != BulkStatus::Changed {
+            results.push(result);
+            continue;
+        }
+        let update = realtime
+            .call(proto::UpdateAgentSettingsInput {
+                bot_user_id: bot.id,
+                default_output_mode: None,
+                open_to_everyone: Some(open),
+            })
+            .await;
+        results.push(match update {
+            Ok(payload)
+                if payload
+                    .settings
+                    .as_ref()
+                    .is_some_and(|settings| settings.open_to_everyone == open) =>
+            {
+                result
+            }
+            // A server that predates the setting accepts the call and changes nothing.
+            Ok(_) => BulkResult::failed(
+                bot,
+                "This server doesn't support opening or closing a bot yet.",
+            ),
+            Err(error) => BulkResult::failed(bot, error),
+        });
+    }
+    results
+}
+
+fn grant_matches(grant: &proto::AgentGrant, subject: &proto::AccessSubject) -> bool {
+    use proto::access_subject::Subject;
+    match (
+        grant
+            .subject
+            .as_ref()
+            .and_then(|value| value.subject.as_ref()),
+        subject.subject.as_ref(),
+    ) {
+        (Some(have), Some(want)) => have == want,
+        (None, Some(Subject::UserId(id))) => grant.user_id == *id,
+        _ => false,
+    }
+}
+
+fn sorted_operations(operations: &[i32]) -> Vec<i32> {
+    let mut operations = operations.to_vec();
+    operations.sort_unstable();
+    operations.dedup();
+    operations
+}
+
+/// Grants (operations given) or revokes (None) one subject's access on every
+/// selected bot, skipping bots where it is already so.
+async fn bulk_grant(
+    realtime: &mut AuthenticatedRealtime,
+    bots: &[TargetBot],
+    subject: &proto::AccessSubject,
+    operations: Option<&[i32]>,
+    dry_run: bool,
+) -> Vec<BulkResult> {
+    let user_id = match subject.subject {
+        Some(proto::access_subject::Subject::UserId(id)) => id,
+        _ => 0,
+    };
+    let mut results = Vec::with_capacity(bots.len());
+    for bot in bots {
+        let existing = match realtime
+            .call(proto::ListAgentGrantsInput {
+                bot_user_id: bot.id,
+                include_all_subjects: Some(true),
+            })
+            .await
+        {
+            Ok(payload) => payload
+                .grants
+                .into_iter()
+                .find(|grant| grant_matches(grant, subject)),
+            Err(error) => {
+                results.push(BulkResult::failed(bot, error));
+                continue;
+            }
+        };
+        let from = existing
+            .as_ref()
+            .map(|grant| operations_label(&sorted_operations(&grant.operations)))
+            .unwrap_or_else(|| "no access".to_string());
+        let to = operations
+            .map(|operations| operations_label(&sorted_operations(operations)))
+            .unwrap_or_else(|| "no access".to_string());
+        let result = BulkResult::compared(bot, from, to, dry_run);
+        if result.status != BulkStatus::Changed {
+            results.push(result);
+            continue;
+        }
+        let call = match operations {
+            Some(operations) => realtime
+                .call(proto::SetAgentGrantInput {
+                    bot_user_id: bot.id,
+                    user_id,
+                    operations: operations.to_vec(),
+                    subject: Some(subject.clone()),
+                })
+                .await
+                .map(|_| ()),
+            None => realtime
+                .call(proto::DeleteAgentGrantInput {
+                    bot_user_id: bot.id,
+                    user_id,
+                    subject: Some(subject.clone()),
+                })
+                .await
+                .map(|_| ()),
+        };
+        results.push(match call {
+            Ok(()) => result,
+            Err(error) => BulkResult::failed(bot, error),
+        });
+    }
+    results
+}
+
+/// Resolves a bulk selection, failing when it names no bots.
+async fn resolve_bulk_targets(
+    realtime: &mut AuthenticatedRealtime,
+    selection: &BotSelectionArgs,
+    json: bool,
+) -> CliResult<Vec<TargetBot>> {
+    selection.require_some()?;
+    let bots = resolve_bots(realtime, selection).await?;
+    if bots.is_empty() {
+        return Err(no_bots_matched(selection));
+    }
+    announce_bots(bots.len(), json);
+    Ok(bots)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum BotOutputMode {
@@ -312,6 +1004,54 @@ async fn set_open_to_everyone(
     Ok(())
 }
 
+/// `access open` / `access close`: the original one-bot form, or a bulk change.
+async fn open_or_close(
+    config: &Config,
+    auth_store: &AuthStore,
+    args: crate::BotsBulkArgs,
+    open: bool,
+    json: bool,
+    json_format: JsonFormat,
+) -> CliResult {
+    if let Some(bot_user_id) = args.selection.single().filter(|_| !args.dry_run) {
+        return set_open_to_everyone(config, auth_store, bot_user_id, open, json, json_format)
+            .await;
+    }
+    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+    let bots = Box::pin(resolve_bulk_targets(&mut realtime, &args.selection, json)).await?;
+    let results = Box::pin(bulk_open_to_everyone(
+        &mut realtime,
+        &bots,
+        open,
+        args.dry_run,
+    ))
+    .await;
+    let action = if open {
+        "Open to everyone on Inline"
+    } else {
+        "Limit to you and the access list"
+    };
+    finish_bulk(
+        if open { "open" } else { "close" },
+        action.to_string(),
+        args.dry_run,
+        results,
+        json,
+        json_format,
+    )
+}
+
+fn grant_args_operations(args: &crate::BotsAccessGrantArgs) -> Vec<i32> {
+    if args.admin {
+        crate::bot_sharing::ADMIN_OPERATIONS
+            .iter()
+            .map(|operation| *operation as i32)
+            .collect()
+    } else {
+        grant_operations(&args.operations)
+    }
+}
+
 /// Handles every bots subcommand except list, create, and reveal-token.
 pub(crate) async fn handle_bot_management(
     command: BotsCommand,
@@ -503,11 +1243,52 @@ pub(crate) async fn handle_bot_management(
             }
         }
         BotsCommand::Settings(args) => {
-            let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
             let chat_id = args
                 .chat_id
                 .map(|chat_id| validate_positive_id_arg("--chat-id", chat_id))
                 .transpose()?;
+            let single = if chat_id.is_some() {
+                Some(args.selection.require_single("--chat-id")?)
+            } else {
+                args.selection
+                    .single()
+                    .filter(|_| !args.dry_run)
+                    .map(|id| validate_positive_id_arg("--bot-user-id", id))
+                    .transpose()?
+            };
+            let Some(bot_user_id) = single else {
+                let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+                let Some(mode) = args.output_mode else {
+                    if args.dry_run {
+                        return Err(CliError::invalid_args(
+                            "--dry-run needs --output-mode to preview.",
+                        )
+                        .into());
+                    }
+                    return Box::pin(print_bot_overview(
+                        &mut realtime,
+                        &args.selection,
+                        json,
+                        json_format,
+                    ))
+                    .await;
+                };
+                let bots =
+                    Box::pin(resolve_bulk_targets(&mut realtime, &args.selection, json)).await?;
+                let results =
+                    Box::pin(bulk_output_mode(&mut realtime, &bots, mode, args.dry_run)).await;
+                return finish_bulk(
+                    "output_mode",
+                    format!(
+                        "Output mode → {}",
+                        human_value(output_mode_label(mode.protocol_value() as i32))
+                    ),
+                    args.dry_run,
+                    results,
+                    json,
+                    json_format,
+                );
+            };
             let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
             if let Some(chat_id) = chat_id {
                 if let Some(mode) = args.output_mode {
@@ -607,7 +1388,17 @@ pub(crate) async fn handle_bot_management(
         }
         BotsCommand::Access { command } => match command {
             BotsAccessCommand::List(args) => {
-                let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
+                let Some(bot_user_id) = args.selection.single() else {
+                    let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+                    return Box::pin(print_bot_overview(
+                        &mut realtime,
+                        &args.selection,
+                        json,
+                        json_format,
+                    ))
+                    .await;
+                };
+                let bot_user_id = validate_positive_id_arg("--bot-user-id", bot_user_id)?;
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
                 let payload = realtime
                     .call(proto::ListAgentGrantsInput {
@@ -631,39 +1422,79 @@ pub(crate) async fn handle_bot_management(
                 }
             }
             BotsAccessCommand::Open(args) => {
-                set_open_to_everyone(
+                Box::pin(open_or_close(
                     config,
                     auth_store,
-                    args.bot_user_id,
+                    args,
                     true,
                     json,
                     json_format,
-                )
+                ))
                 .await?;
             }
             BotsAccessCommand::Close(args) => {
-                set_open_to_everyone(
+                Box::pin(open_or_close(
                     config,
                     auth_store,
-                    args.bot_user_id,
+                    args,
                     false,
                     json,
                     json_format,
-                )
+                ))
                 .await?;
             }
+            BotsAccessCommand::Grant(args) if args.selection.single().is_none() || args.dry_run => {
+                let subject = access_subject(&args.subject)?;
+                let operations = grant_args_operations(&args);
+                let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+                let bots =
+                    Box::pin(resolve_bulk_targets(&mut realtime, &args.selection, json)).await?;
+                let results = Box::pin(bulk_grant(
+                    &mut realtime,
+                    &bots,
+                    &subject,
+                    Some(&operations),
+                    args.dry_run,
+                ))
+                .await;
+                finish_bulk(
+                    "grant",
+                    format!("Grant {} access", subject_label(Some(&subject), 0)),
+                    args.dry_run,
+                    results,
+                    json,
+                    json_format,
+                )?;
+            }
+            BotsAccessCommand::Revoke(args)
+                if args.selection.single().is_none() || args.dry_run =>
+            {
+                let subject = access_subject(&args.subject)?;
+                let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
+                let bots =
+                    Box::pin(resolve_bulk_targets(&mut realtime, &args.selection, json)).await?;
+                let results = Box::pin(bulk_grant(
+                    &mut realtime,
+                    &bots,
+                    &subject,
+                    None,
+                    args.dry_run,
+                ))
+                .await;
+                finish_bulk(
+                    "revoke",
+                    format!("Revoke {}'s access", subject_label(Some(&subject), 0)),
+                    args.dry_run,
+                    results,
+                    json,
+                    json_format,
+                )?;
+            }
             BotsAccessCommand::Grant(args) => {
-                let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
+                let bot_user_id = args.selection.require_single("Granting access")?;
                 let subject = access_subject(&args.subject)?;
                 let label = subject_label(Some(&subject), 0);
-                let operations = if args.admin {
-                    crate::bot_sharing::ADMIN_OPERATIONS
-                        .iter()
-                        .map(|operation| *operation as i32)
-                        .collect()
-                } else {
-                    grant_operations(&args.operations)
-                };
+                let operations = grant_args_operations(&args);
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
                 let payload = realtime
                     .call(proto::SetAgentGrantInput {
@@ -685,7 +1516,7 @@ pub(crate) async fn handle_bot_management(
                 }
             }
             BotsAccessCommand::Revoke(args) => {
-                let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
+                let bot_user_id = args.selection.require_single("Revoking access")?;
                 let subject = access_subject(&args.subject)?;
                 let label = subject_label(Some(&subject), 0);
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
@@ -735,6 +1566,102 @@ mod tests {
                 proto::AgentGrantOperation::Invoke as i32
             ]
         );
+    }
+
+    fn grant(subject: Option<proto::access_subject::Subject>, user_id: i64) -> proto::AgentGrant {
+        proto::AgentGrant {
+            user_id,
+            subject: subject.map(|subject| proto::AccessSubject {
+                subject: Some(subject),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shared_with_matches_the_apps() {
+        use proto::access_subject::Subject;
+        assert_eq!(shared_with_summary(&[], false), "only you");
+        assert_eq!(
+            shared_with_summary(&[grant(Some(Subject::UserId(7)), 7)], true),
+            "everyone"
+        );
+        assert_eq!(
+            shared_with_summary(
+                &[
+                    grant(Some(Subject::UserId(7)), 7),
+                    grant(None, 8),
+                    grant(Some(Subject::SpaceId(3)), 0),
+                    grant(Some(Subject::GroupId(4)), 0),
+                ],
+                false
+            ),
+            "1 space, 1 group, 2 people"
+        );
+        assert_eq!(
+            shared_with_summary(&[grant(Some(Subject::UserId(7)), 7)], false),
+            "1 person"
+        );
+    }
+
+    #[test]
+    fn grants_match_by_subject_or_legacy_user_id() {
+        use proto::access_subject::Subject;
+        let person = proto::AccessSubject {
+            subject: Some(Subject::UserId(7)),
+        };
+        let space = proto::AccessSubject {
+            subject: Some(Subject::SpaceId(7)),
+        };
+        assert!(grant_matches(&grant(Some(Subject::UserId(7)), 7), &person));
+        assert!(grant_matches(&grant(None, 7), &person));
+        assert!(!grant_matches(&grant(None, 7), &space));
+        assert!(!grant_matches(
+            &grant(Some(Subject::SpaceId(7)), 0),
+            &person
+        ));
+        assert!(grant_matches(&grant(Some(Subject::SpaceId(7)), 0), &space));
+    }
+
+    #[test]
+    fn bulk_results_skip_bots_already_set() {
+        let bot = TargetBot { id: 9, user: None };
+        let same = BulkResult::compared(&bot, "friendly".into(), "friendly".into(), false);
+        assert_eq!(same.status, BulkStatus::Unchanged);
+        let change = BulkResult::compared(&bot, "unset".into(), "friendly".into(), false);
+        assert_eq!(change.status, BulkStatus::Changed);
+        let preview = BulkResult::compared(&bot, "unset".into(), "friendly".into(), true);
+        assert_eq!(preview.status, BulkStatus::WouldChange);
+        assert_eq!(bot.label(), "bot 9");
+        assert_eq!(
+            sorted_operations(&[3, 1, 3, 2]),
+            vec![1, 2, 3],
+            "grant comparisons ignore order and repeats"
+        );
+    }
+
+    #[test]
+    fn selection_keeps_the_single_bot_form() {
+        let one = BotSelectionArgs {
+            bot_user_ids: vec![9],
+            ..Default::default()
+        };
+        assert_eq!(one.single(), Some(9));
+        assert!(!one.is_empty());
+        let many = BotSelectionArgs {
+            bot_user_ids: vec![9, 10],
+            ..Default::default()
+        };
+        assert_eq!(many.single(), None);
+        assert!(many.require_single("--chat-id").is_err());
+        let none = BotSelectionArgs::default();
+        assert!(none.is_empty());
+        assert!(none.require_some().is_err());
+        let all = BotSelectionArgs {
+            all: true,
+            ..Default::default()
+        };
+        assert!(all.single().is_none() && all.require_some().is_ok());
     }
 
     #[test]

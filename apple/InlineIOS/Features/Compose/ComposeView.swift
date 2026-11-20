@@ -95,7 +95,27 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     var thumbnailImage: UIImage?
   }
 
-  var attachmentItems: [String: FileMediaItem] = [:]
+  var attachmentItems: [String: FileMediaItem] = [:] {
+    didSet { attachmentOrder = Self.updatedAttachmentOrder(attachmentOrder, items: attachmentItems) }
+  }
+  /// Keys of `attachmentItems` in the order they were added: the order they are sent in, and so
+  /// the order of an album's photos.
+  private(set) var attachmentOrder: [String] = []
+
+  /// Keeps known keys in place, drops removed ones and appends new ones.
+  static func updatedAttachmentOrder(_ order: [String], items: [String: FileMediaItem]) -> [String] {
+    var updated = order.filter { items[$0] != nil }
+    if updated.count < items.count {
+      let known = Set(updated)
+      updated.append(contentsOf: items.keys.filter { !known.contains($0) }.sorted())
+    }
+    return updated
+  }
+
+  /// Attachments in the order they were added.
+  func orderedAttachments(_ items: [String: FileMediaItem]) -> [FileMediaItem] {
+    attachmentOrder.compactMap { items[$0] }
+  }
   var pendingVideoAttachments: [PendingVideoAttachment] = []
   var canceledPendingVideoAttachmentIds: Set<String> = []
   private var pendingMediaSendState = ComposePendingMediaSendState()
@@ -1223,6 +1243,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       hasActiveAttachmentUploads: hasActiveUploads
     )
     let attachmentItemsToSend = shouldSendTextOnly ? [String: FileMediaItem]() : attachmentItemsSnapshot
+    // Ordered now: the compose clears its attachments (and their order) before the send runs.
+    let orderedAttachmentsToSend = orderedAttachments(attachmentItemsToSend)
     let hasAttachments = !attachmentItemsToSend.isEmpty
 
     // Can't send if no text, no attachments, and not forwarding
@@ -1331,29 +1353,58 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           await sendTextTransaction(transaction)
         }
       } else {
-        for (index, (_, attachment)) in attachmentItemsToSend.enumerated() {
-          log.debug("Sending attachment: \(attachment)")
-          let isFirst = index == 0
-
+        // In the order they were added; neighbouring photos and videos go out as albums.
+        let attachments = orderedAttachmentsToSend.filter { attachment in
           // Verify attachment has valid local path before sending
           guard attachment.getLocalPath() != nil else {
             log.error("Attachment has no local path, skipping: \(attachment)")
-            continue
+            return false
           }
-
-          submitAttachmentSend(.init(
-            text: isFirst ? text : nil,
-            peerId: peerId,
-            chatId: chatId,
-            mediaItems: [attachment],
-            replyToMsgId: isFirst ? replyToMessageId : nil,
-            isSticker: nil,
-            entities: isFirst ? entities : nil,
-            sendMode: sendMode
-          ))
+          return true
+        }
+        for send in TransactionSendMessage.sends(
+          text: text,
+          peerId: peerId,
+          chatId: chatId,
+          mediaItems: attachments,
+          replyToMsgId: replyToMessageId,
+          entities: entities,
+          sendMode: sendMode
+        ) {
+          submitAttachmentSend(send)
         }
       }
     }
+
+    #if DEBUG
+    // The timeline harness sends to its in-memory chat, never the network. A text send still
+    // prepares the flight from the composer, with the ids the fixture's row will carry.
+    if let debugSend = ComposeDebugOverrides.send, !hasAttachments, forwardContext == nil {
+      var ids: (randomId: Int64, temporaryMessageId: Int64)?
+      var coordinates = false
+      var prepared = false
+      if !isEditing {
+        let transaction = makeTextSendTransaction(replyToMessageId: state.replyingMessageId)
+        ids = (transaction.context.randomId, transaction.context.temporaryMessageId)
+        coordinates = shouldCoordinateTextSendAnimationReset(replyToMessageId: state.replyingMessageId)
+        prepared = prepareTextSendAnimationIfNeeded(
+          transaction: transaction,
+          replyToMessageId: state.replyingMessageId,
+          shouldCoordinateSendAnimationReset: coordinates
+        )
+      }
+      debugSend(.init(
+        text: text ?? "", replyToMessageId: state.replyingMessageId, editingMessageId: state.editingMessageId,
+        randomId: ids?.randomId, temporaryMessageId: ids?.temporaryMessageId
+      ))
+      if isEditing { ChatState.shared.clearEditingMessageId(peer: peerId) }
+      else { ChatState.shared.clearReplyingMessageId(peer: peerId) }
+      clearTextOnlyComposeAfterSend(
+        shouldCoordinateSendAnimationReset: coordinates, didPrepareSendAnimationPreview: prepared
+      )
+      return
+    }
+    #endif
 
     var didPrepareSendAnimationPreview = false
     var shouldCoordinateSendAnimationReset = false
@@ -1677,7 +1728,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if let messageId = ChatState.shared.getState(peer: peerId).editingMessageId,
          let message = try? FullMessage.get(messageId: messageId, chatId: chatId)
       {
-        // The experiment exposes Markdown syntax; otherwise keep rendered formatting.
+        // Edit as Markdown source; sending parses the markers back into entities.
         if let text = message.message.text {
           let configuration = ProcessEntities.Configuration(
             font: .systemFont(ofSize: 17),
@@ -1687,18 +1738,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             renderPhoneNumbers: false
           )
 
-          let attributedText = ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageMarkdown.editableText(
+          let attributedText = MessageMarkdown.editableText(
             text: text,
             entities: message.message.entities,
             configuration: configuration
-          ) : MessageMarkdown.withQuoteSyntax(
-            ProcessEntities.toAttributedString(
-              text: text,
-              entities: message.message.entities,
-              configuration: configuration
-            ),
-            entities: message.message.entities,
-            attributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
           )
 
           textView.attributedText = attributedText
@@ -2867,3 +2910,20 @@ extension ComposeView: UIGestureRecognizerDelegate {
     return voiceButton.point(inside: touch.location(in: voiceButton), with: nil)
   }
 }
+
+#if DEBUG
+/// Debug builds only: lets the timeline harness drive the production composer against its
+/// in-memory chat. Nil in every normal run.
+@MainActor
+enum ComposeDebugOverrides {
+  struct Send {
+    let text: String
+    let replyToMessageId: Int64?
+    let editingMessageId: Int64?
+    let randomId: Int64?
+    let temporaryMessageId: Int64?
+  }
+
+  static var send: ((Send) -> Void)?
+}
+#endif

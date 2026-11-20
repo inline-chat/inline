@@ -229,6 +229,11 @@ pub(crate) fn message_doc(message: &proto::Message) -> Doc {
             .map(|content| content.blocks.clone())
             .unwrap_or_default(),
         markdown: false,
+        entities: message
+            .entities
+            .as_ref()
+            .map(|entities| entities.entities.clone())
+            .unwrap_or_default(),
     }
 }
 

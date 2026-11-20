@@ -49,10 +49,7 @@ final class SendMessageAnimationCoordinator {
   }
 
   func canPrepareTextSendSource() -> Bool {
-    guard let collectionView = sourceLayoutView as? MessagesCollectionView else {
-      return true
-    }
-    return collectionView.itemsEmpty || collectionView.shouldScrollToBottom
+    (sourceLayoutView as? SendMessageAnimationListGate)?.acceptsSendAnimation ?? true
   }
 
   @discardableResult
@@ -117,6 +114,13 @@ final class SendMessageAnimationCoordinator {
 
   func hasPendingAnimation(for message: FullMessage) -> Bool {
     pendingIdentity(for: message) != nil
+  }
+
+  /// A send prepared its flight and its row hasn't arrived yet.
+  var hasPreparedSource: Bool {
+    pendingByIdentity.values.contains { state in
+      if case .prepared = state { true } else { false }
+    }
   }
 
   func isAnimating(identity: SendMessageAnimationIdentity) -> Bool {

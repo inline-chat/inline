@@ -136,10 +136,10 @@ const clientOptions: InlineSdkClientOptions = {
     connecting = false
     connectError = redactError(error)
     nextConnectRetryAt = null
-    process.exitCode = 3
     console.error(
       `inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`,
     )
+    void shutdown(78)
   },
   ...(rpcTimeoutMs != null ? { rpcTimeoutMs } : {}),
   logger: {
@@ -191,10 +191,9 @@ async function connectClientLoop() {
       connected = false
       connecting = false
       connectError = redactError(error)
-      process.exitCode = 3
       if (stopping) return
       if (error instanceof InlineSdkAuthenticationError) {
-        await client.close().catch(() => {})
+        await shutdown(78)
         return
       }
       nextConnectRetryAt = new Date(Date.now() + delayMs).toISOString()
@@ -212,7 +211,7 @@ async function consumeEvents() {
         meId, meUsername, signal: inboundAbort.signal,
         resolveSender: resolveInboundSender, deliver,
       })
-    })
+    }, { settingsConcurrency: 4 })
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false })
@@ -249,6 +248,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         connectRetryMaxMs,
         nextConnectRetryAt,
         diagnostics: safeJson(client.getDiagnostics()),
+        inbound: inboundStream.diagnostics(),
         ...(connectError ? { connectError } : {}),
       },
     })
@@ -467,13 +467,14 @@ function progressTransport(target: Target) {
   }
 }
 
-const AGENT_SETTINGS_CACHE_MS = 30_000
+// Short, so an owner's change applies from the next turn; stacked with the hub's per-chat cache.
+const AGENT_SETTINGS_CACHE_MS = 10_000
 let agentDefaultOutputMode: { value: number | undefined; at: number } | undefined
 
 /** This bot's default output mode (cached) and its participation override in the target chat. */
 async function readOutputModeSettings(target: Target): Promise<OutputModeSettings> {
   const peerId = inputPeerFromTarget(target)
-  const [defaultMode, participations] = await Promise.all([
+  const [defaultResult, participationsResult] = await Promise.allSettled([
     (async () => {
       if (agentDefaultOutputMode && Date.now() - agentDefaultOutputMode.at < AGENT_SETTINGS_CACHE_MS) {
         return agentDefaultOutputMode.value
@@ -492,6 +493,11 @@ async function readOutputModeSettings(target: Target): Promise<OutputModeSetting
       getAgentParticipations: { peerId },
     }),
   ])
+  if (participationsResult.status === "rejected") throw participationsResult.reason
+  // A failed settings read keeps the last default it saw, however old.
+  if (defaultResult.status === "rejected" && !agentDefaultOutputMode) throw defaultResult.reason
+  const defaultMode = defaultResult.status === "fulfilled" ? defaultResult.value : agentDefaultOutputMode?.value
+  const participations = participationsResult.value
   const list = asOptionalRecord(asOptionalRecord(participations)?.getAgentParticipations)?.participations
   const mine = Array.isArray(list) && meId != null
     ? list.map(asOptionalRecord).find((entry) => entry != null && String(entry.botUserId) === meId)
@@ -1245,7 +1251,7 @@ type SidecarClient = {
   close(): Promise<void>
   getDiagnostics(): unknown
   events(): AsyncIterable<GenericInboundEvent>
-  consumeEvents(handler: (event: GenericInboundEvent) => Promise<void>): Promise<void>
+  consumeEvents(handler: (event: GenericInboundEvent) => Promise<void>, options?: { settingsConcurrency?: number }): Promise<void>
   getChat(params: { chatId: bigint }): Promise<{
     chatId: bigint
     title: string
@@ -1745,6 +1751,12 @@ function attachConsumer(res: ServerResponse) {
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
+  res.flushHeaders()
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded && !res.writableNeedDrain) res.write("\n")
+  }, 20_000)
+  heartbeat.unref()
+  res.once("close", () => clearInterval(heartbeat))
   inboundStream.attach(res)
 }
 

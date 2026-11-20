@@ -1,5 +1,5 @@
 import { OauthModel, type OauthAuthRequest } from "@in/server/db/models/oauth"
-import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
+import type { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import { oauthConfig } from "@in/server/modules/oauth/config"
 import {
   MCP_SUPPORTED_SCOPES,
@@ -38,6 +38,12 @@ import { Value } from "@sinclair/typebox/value"
 import { authPageDocument, authPageHeaders, escapeHtml, type AuthPageContext } from "@in/server/modules/auth/authPage"
 import { describeOAuthScopes, oauthClientTrust, oauthClientViaApp } from "@in/server/modules/oauth/clientTrust"
 import { GENERIC_VIA_AGENT } from "@in/server/modules/message/viaAgents"
+import type {
+  OAuthIntrospectionResult,
+  OAuthMetadata,
+  OAuthRegisterResult,
+  OAuthTokenResult,
+} from "@in/server/controllers/oauth.effect"
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -87,10 +93,6 @@ import { captureSignupReferral } from "@in/server/modules/auth/signupAttribution
 import { handler as updateProfile } from "@in/server/methods/updateProfile"
 
 const config = oauthConfig()
-// TODO(effect-cutover): remove this oracle-only limiter with legacyServer.ts
-// after the post-cutover differential window. Production injects a separately
-// scoped limiter through its Effect Layer.
-const legacyRateLimiter = new InMemoryRateLimiter()
 const PROVIDER_CLEANUP_INTERVAL_MS = 60_000
 const PROVIDER_CLEANUP_BATCH_SIZE = 250
 const PROVIDER_EMAIL_ATTEMPT_COOLDOWN = { max: 1, windowMs: 45_000 } as const
@@ -266,6 +268,11 @@ async function providerBrowserError(input: {
     description: input.description,
   })
 }
+
+// Success bodies are checked against the controller's response contract at
+// compile time. The contract decodes with onExcessProperty "error", so a field
+// added here but not declared there would otherwise only fail in production.
+type WireBody<S extends { readonly Encoded: unknown }> = S["Encoded"]
 
 function json(status: number, body: unknown, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(body), {
@@ -578,8 +585,8 @@ export async function handleAuthorizeContinue(req: Request): Promise<Response> {
 export async function handleRegister(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -628,11 +635,11 @@ export async function handleRegister(
       client_id: client.clientId,
       client_id_issued_at: Math.floor(nowMs / 1000),
       redirect_uris: client.redirectUris,
-      client_name: client.clientName ?? undefined,
+      ...(client.clientName != null ? { client_name: client.clientName } : {}),
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
-    },
+    } satisfies WireBody<typeof OAuthRegisterResult>,
     {
       "cache-control": "no-store",
     },
@@ -700,8 +707,8 @@ export async function handleAuthorizeGet(url: URL, referrer?: string | null): Pr
 export async function handleAuthorizeSendEmailCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -817,8 +824,8 @@ export async function handleAuthorizeSendEmailCode(
 export async function handleAuthorizeVerifyEmailCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -907,8 +914,8 @@ export async function handleAuthorizeVerifyEmailCode(
 export async function handleAuthorizeSendSmsCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
   sendCode: typeof sendSmsCodeHandler = sendSmsCodeHandler,
 ): Promise<Response> {
   const nowMs = Date.now()
@@ -1013,8 +1020,8 @@ export async function handleAuthorizeSendSmsCode(
 export async function handleAuthorizeVerifySmsCode(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1257,8 +1264,8 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
 export async function handleToken(
   req: Request,
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1329,7 +1336,7 @@ export async function handleToken(
         token_type: "bearer",
         expires_in: Math.floor(config.accessTokenTtlMs / 1000),
         scope: grant.scope,
-      },
+      } satisfies WireBody<typeof OAuthTokenResult>,
       { "cache-control": "no-store", pragma: "no-cache" },
     )
   }
@@ -1382,7 +1389,7 @@ export async function handleToken(
         token_type: "bearer",
         expires_in: Math.floor(config.accessTokenTtlMs / 1000),
         scope: result.grant.scope,
-      },
+      } satisfies WireBody<typeof OAuthTokenResult>,
       { "cache-control": "no-store", pragma: "no-cache" },
     )
   }
@@ -1463,13 +1470,13 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
     via_app: client ? oauthClientViaApp(client) : GENERIC_VIA_AGENT,
     // Whether the app may leave the "Sent via" label off when the user asks.
     allow_unsigned: result.grant.allowUnsigned,
-  })
+  } satisfies WireBody<typeof OAuthIntrospectionResult>)
 }
 
 export async function handleProviderStart(
   request: Request,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1559,8 +1566,8 @@ export async function handleProviderStart(
 
 export async function handleNativeAppleStart(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const endpointRate = rateLimiter.consume({
@@ -1622,8 +1629,8 @@ export async function handleNativeAppleStart(
 
 export async function handleNativeAppleComplete(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const callbackRate = rateLimiter.consume({
     key: `oauth:endpoint:provider-native-apple-complete:${resolveClientIp(clientIpOverride)}`,
@@ -1705,8 +1712,8 @@ async function closeProviderAttemptAfterFailure(
 
 export async function handleNativeAppleContinueInvite(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1767,9 +1774,9 @@ export async function handleNativeAppleContinueInvite(
 export async function handleProviderCallback(
   provider: "google" | "apple",
   request: Request,
-  body?: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  body: unknown,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const callbackRate = rateLimiter.consume({
@@ -1851,8 +1858,8 @@ export async function handleProviderCallback(
 
 export async function handleProviderContinueInvite(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1888,8 +1895,8 @@ export async function handleProviderContinueInvite(
 
 export async function handleProviderSendEmailCode(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -1970,8 +1977,8 @@ export async function handleProviderSendEmailCode(
 
 export async function handleProviderVerifyEmailCode(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const clientIp = resolveClientIp(clientIpOverride)
@@ -2059,8 +2066,8 @@ function isRetryableProviderEmailProofFailure(cause: unknown): boolean {
 
 export async function handleProviderRedeem(
   body: unknown,
-  clientIpOverride?: string,
-  rateLimiter: InMemoryRateLimiter = legacyRateLimiter,
+  clientIpOverride: string | undefined,
+  rateLimiter: InMemoryRateLimiter,
 ): Promise<Response> {
   const nowMs = Date.now()
   const redeemRate = rateLimiter.consume({
@@ -2136,7 +2143,7 @@ export function handleAuthorizationServerMetadata(): Response {
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
-  })
+  } satisfies WireBody<typeof OAuthMetadata>)
 }
 
 export function prepareAuthorizeRequest(request: Request): Promise<Response> {

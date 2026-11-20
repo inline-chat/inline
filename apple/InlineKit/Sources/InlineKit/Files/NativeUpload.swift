@@ -2,6 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import Auth
+import InlineConfig
 import InlineProtocol
 import Logger
 import RealtimeV2
@@ -54,7 +55,8 @@ public struct NativeMediaUploadRequest: Sendable {
   ) {
     self.logicalID = logicalID
     self.fileURL = fileURL
-    self.fileName = fileName
+    // Backslash is legal on the device. Document upload names must be portable.
+    self.fileName = kind == .document ? fileName.replacingOccurrences(of: "\\", with: "_") : fileName
     self.mimeType = mimeType
     self.kind = kind
     self.thumbnailFileUniqueID = thumbnailFileUniqueID
@@ -220,10 +222,10 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
     self.copyRequiresFullAllocation = copyRequiresFullAllocation
   }
 
-  /// True when an earlier attempt already staged this upload's body, which `stage` reuses.
-  public func hasStagedBody(logicalID: String) -> Bool {
+  /// The body an earlier attempt already staged for this upload, which `stage` reuses.
+  public func stagedBody(logicalID: String) -> URL? {
     let body = root.appendingPathComponent("\(Self.fileName(for: logicalID)).body")
-    return FileManager.default.fileExists(atPath: body.path)
+    return FileManager.default.fileExists(atPath: body.path) ? body : nil
   }
 
   public func stage(logicalID: String, sourceURL: URL) throws -> URL {
@@ -297,6 +299,20 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
       let limit = name.hasPrefix("staging-") ? Self.abandonedCopyAge : Self.staleUploadAge
       guard age > limit else { continue }
       if (try? fileManager.removeItem(at: url)) != nil { removed += 1 }
+    }
+    return removed
+  }
+
+  /// Removes every staged body, sidecar and pending cancellation. For logout and local data
+  /// reset, after uploads are cancelled: nothing of the account may stay behind, and a send
+  /// retried later stages again from its original file.
+  @discardableResult
+  public func removeAll() -> Int {
+    let fileManager = FileManager.default
+    guard let urls = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return 0 }
+    var removed = 0
+    for url in urls where (try? fileManager.removeItem(at: url)) != nil {
+      removed += 1
     }
     return removed
   }
@@ -432,16 +448,43 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
   }
 
   private static func defaultRoot() -> URL {
-    let fileManager = FileManager.default
     #if os(iOS)
-    if let shared = fileManager.containerURL(
+    if let shared = FileManager.default.containerURL(
       forSecurityApplicationGroupIdentifier: "group.chat.inline"
     ) {
       return shared.appendingPathComponent("NativeUploads", isDirectory: true)
     }
     #endif
-    return FileHelpers.getApplicationSupportDirectory()
+    return defaultRoot(
+      applicationSupportDirectory: FileHelpers.getApplicationSupportDirectory(),
+      bundleIdentifier: Bundle.main.bundleIdentifier,
+      userProfile: ProjectConfig.userProfile
+    )
+  }
+
+  /// On macOS, Application Support is shared by every app and Inline profile outside the
+  /// sandbox, so staging is scoped like the media cache: one folder per app and profile, which
+  /// logout can empty without touching another profile's sends.
+  static func defaultRoot(applicationSupportDirectory: URL, bundleIdentifier: String?, userProfile: String?) -> URL {
+    #if os(macOS)
+    let profile = userProfile.flatMap { $0.isEmpty ? nil : $0 } ?? "default"
+    return applicationSupportDirectory
+      .appendingPathComponent(bundleIdentifier ?? "chat.inline", isDirectory: true)
       .appendingPathComponent("NativeUploads", isDirectory: true)
+      .appendingPathComponent(profile, isDirectory: true)
+    #else
+    return applicationSupportDirectory.appendingPathComponent("NativeUploads", isDirectory: true)
+    #endif
+  }
+
+  /// The unscoped folder earlier macOS builds staged into. Other builds and profiles may still
+  /// use it, so it only gets the age-based prune every build applies.
+  static var legacySharedRoot: URL? {
+    #if os(macOS)
+    FileHelpers.getApplicationSupportDirectory().appendingPathComponent("NativeUploads", isDirectory: true)
+    #else
+    nil
+    #endif
   }
 }
 
@@ -559,8 +602,13 @@ public actor DurableUploadCoordinator: MediaUploading {
   private static let hashReadSize = 1_048_576
   private static let partSize = 524_288
   private static let maximumPartCount: UInt32 = 1_000
-  private static let maximumConcurrentPartsPerUpload = 2
-  private static let maximumConcurrentParts = 3
+  /// Parts in flight across every upload adapt to how long a part takes: grow by one when a part
+  /// is accepted within 5 s, halve over 15 s or after a failed attempt. A long round trip alone
+  /// is not congestion (a far server needs more parts in flight, not fewer); a part that takes
+  /// many seconds means the link is shared too thinly and later parts risk their timeouts.
+  /// Telegram runs 3 parallel parts per file, 30 with its boosted setting.
+  static let partWindowLimits = 2 ... 8
+  static let initialPartWindow = 4
   private static let maximumPartAttempts = 2
   private static let maximumFinishReconciliationAttempts = 3
   // These are individual RPC stall bounds, not a deadline for the complete upload.
@@ -585,6 +633,7 @@ public actor DurableUploadCoordinator: MediaUploading {
   private let accountFence: (any NativeUploadAccountFencing)?
   private let processingTimeout: Duration
   private var activePartTransfers = 0
+  private(set) var partWindow = DurableUploadCoordinator.initialPartWindow
   private var retryingPendingCancellations = false
   private struct PartTransferWaiter {
     let id: UUID
@@ -757,6 +806,7 @@ public actor DurableUploadCoordinator: MediaUploading {
       progress(durableAcceptedBytes, byteCount)
 
       var finishReconciliationAttempts = 0
+      var missingPartRounds = 0
       let processingClock = ContinuousClock()
       var processingDeadline: ContinuousClock.Instant?
       do {
@@ -767,7 +817,9 @@ public actor DurableUploadCoordinator: MediaUploading {
             processingDeadline = nil
             try await withThrowingTaskGroup(of: UInt32.self) { group in
               var nextPart = 0
-              for _ in 0 ..< min(Self.maximumConcurrentPartsPerUpload, missingParts.count) {
+              // Tasks only wait for a slot; the shared window decides how many parts move, and
+              // waiters are served in arrival order, so uploads take turns.
+              for _ in 0 ..< min(Self.partWindowLimits.upperBound, missingParts.count) {
                 let partIndex = missingParts[nextPart]
                 nextPart += 1
                 group.addTask { [self] in
@@ -903,6 +955,10 @@ public actor DurableUploadCoordinator: MediaUploading {
             guard !missing.partIndices.isEmpty,
                   missing.partIndices.allSatisfy({ $0 < created.partCount }) else {
               throw NativeMediaUploadError.invalidGeometry
+            }
+            missingPartRounds += 1
+            guard missingPartRounds <= Self.maximumMissingPartRounds else {
+              throw NativeMediaUploadError.unexpectedResponse
             }
             accepted.subtract(missing.partIndices)
           case let .processing(processing):
@@ -1087,7 +1143,9 @@ public actor DurableUploadCoordinator: MediaUploading {
     let slotWaitMilliseconds = Int(
       (ProcessInfo.processInfo.systemUptime - slotStartedAt) * 1_000
     )
-    defer { releasePartTransferSlot() }
+    var partLatency: Duration?
+    var attemptFailed = false
+    defer { releasePartTransferSlot(latency: partLatency, attemptFailed: attemptFailed) }
     try Task.checkCancellation()
     let readStartedAt = ProcessInfo.processInfo.systemUptime
     let data = try await Self.readPart(
@@ -1129,6 +1187,7 @@ public actor DurableUploadCoordinator: MediaUploading {
       } catch {
         let saveError = error
         try Task.checkCancellation()
+        attemptFailed = true
         let state: GetUploadStateResult
         do {
           state = try await uploadState(uploadID: uploadID, accountToken: accountToken)
@@ -1167,6 +1226,7 @@ public actor DurableUploadCoordinator: MediaUploading {
     let rpcMilliseconds = Int(
       (ProcessInfo.processInfo.systemUptime - rpcStartedAt) * 1_000
     )
+    partLatency = .milliseconds(rpcMilliseconds)
     let totalMilliseconds = Int(
       (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
     )
@@ -1214,14 +1274,14 @@ public actor DurableUploadCoordinator: MediaUploading {
 
   /// Takes a part slot only if one is free now; never waits.
   private func tryAcquirePartTransferSlot() -> Bool {
-    guard activePartTransfers < Self.maximumConcurrentParts else { return false }
+    guard activePartTransfers < partWindow, partTransferWaiters.isEmpty else { return false }
     activePartTransfers += 1
     return true
   }
 
   private func acquirePartTransferSlot() async throws {
     try Task.checkCancellation()
-    guard activePartTransfers >= Self.maximumConcurrentParts else {
+    guard activePartTransfers >= partWindow || !partTransferWaiters.isEmpty else {
       activePartTransfers += 1
       return
     }
@@ -1249,13 +1309,31 @@ public actor DurableUploadCoordinator: MediaUploading {
     }
   }
 
-  private func releasePartTransferSlot() {
-    if partTransferWaiters.isEmpty {
-      activePartTransfers -= 1
-    } else {
+  /// Returns a slot. A part that was accepted adapts the window to its latency; one that needed
+  /// another attempt halves it.
+  private func releasePartTransferSlot(latency: Duration? = nil, attemptFailed: Bool = false) {
+    activePartTransfers -= 1
+    if attemptFailed {
+      partWindow = max(partWindow / 2, Self.partWindowLimits.lowerBound)
+    } else if let latency {
+      partWindow = Self.adaptedPartWindow(partWindow, after: latency)
+    }
+    while activePartTransfers < partWindow, !partTransferWaiters.isEmpty {
+      activePartTransfers += 1
       partTransferWaiters.removeFirst().continuation.resume(returning: true)
     }
   }
+
+  static func adaptedPartWindow(_ window: Int, after latency: Duration) -> Int {
+    if latency < .seconds(5) { return min(window + 1, partWindowLimits.upperBound) }
+    if latency > .seconds(15) { return max(window / 2, partWindowLimits.lowerBound) }
+    return window
+  }
+
+  /// Rounds of re-sending parts the server reports missing at finish before the attempt fails
+  /// (and the send retries with a fresh state probe), so a server that keeps losing parts can't
+  /// hold a send forever.
+  static let maximumMissingPartRounds = 3
 
   private func cancelPartTransferWaiter(_ id: UUID) {
     guard let index = partTransferWaiters.firstIndex(where: { $0.id == id }) else {

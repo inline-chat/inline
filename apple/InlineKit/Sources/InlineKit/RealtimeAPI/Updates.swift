@@ -2206,7 +2206,8 @@ enum DurableUpdateApplyError: Error, PrivacySafeErrorCategoryProviding {
 enum DeferredUpdateEffect: Sendable {
   case composeAction(InlineProtocol.UpdateComposeAction)
   case composeSuggestion(InlineProtocol.UpdateComposeSuggestion)
-  /// A new message ends any composer suggestion it makes stale.
+  /// A new message ends any composer suggestion it makes stale, and its author's
+  /// typing or sending status.
   case messageArrived(peer: Peer, fromUserID: Int64, messageID: Int64)
   case messageActionAnswered(InlineProtocol.UpdateMessageActionAnswered)
   case botPresence(InlineProtocol.UpdateBotPresence)
@@ -2223,7 +2224,10 @@ enum DeferredUpdateEffect: Sendable {
       case let .composeSuggestion(update):
         Task { @MainActor in ComposeSuggestions.shared.apply(update) }
       case let .messageArrived(peer, fromUserID, messageID):
-        Task { @MainActor in ComposeSuggestions.shared.noteMessage(peer: peer, fromUserID: fromUserID, messageID: messageID) }
+        Task { @MainActor in
+          ComposeSuggestions.shared.noteMessage(peer: peer, fromUserID: fromUserID, messageID: messageID)
+          ComposeActions.shared.noteMessageArrived(in: peer, fromUserId: fromUserID)
+        }
       case let .messageActionAnswered(update):
         update.apply()
       case let .botPresence(update):
@@ -2673,6 +2677,18 @@ extension InlineProtocol.UpdateNewMessage {
     {
       db.afterNextTransaction { committedDB in
         do {
+          // One notification per album: its first item. Later items from the same sender with the
+          // same album id stay quiet, as the server's pushes do.
+          if message.groupedID != 0,
+             try Message
+             .filter(Column("chatId") == msg.chatId && Column("groupedId") == message.groupedID)
+             .filter(Column("fromId") == msg.fromId && Column("messageId") < msg.messageId)
+             // An album's items are sent back to back: look only a short way back.
+             .filter(Column("messageId") > max(0, msg.messageId - 40))
+             .fetchCount(committedDB) > 0
+          {
+            return
+          }
           let replyToMessageID = message.hasReplyToMsgID ? message.replyToMsgID : nil
           guard let context = try MacIncomingNotificationContext.fetch(
             committedDB,

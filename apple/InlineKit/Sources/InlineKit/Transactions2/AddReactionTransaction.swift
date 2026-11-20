@@ -39,10 +39,6 @@ public struct AddReactionTransaction: Transaction2 {
 
   // Computed
 
-  var userId: Int64 {
-    Auth.getCurrentUserId()!
-  }
-
   var emoji: String { context.emoji }
   var messageId: Int64 { context.messageId }
   var peerId: Peer { context.peerId }
@@ -55,6 +51,11 @@ public struct AddReactionTransaction: Transaction2 {
   // Methods
 
   public func optimistic() async {
+    // Signed out or switching accounts between the tap and this write.
+    guard let userId = Auth.getCurrentUserId() else {
+      log.warning("Skipped optimistic reaction without a current user")
+      return
+    }
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         let reaction = Reaction(
@@ -67,16 +68,40 @@ public struct AddReactionTransaction: Transaction2 {
         _ = try Reaction.save(db, reaction: reaction)
       }
 
-      Task(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messageUpdatedWithId(
-          messageId: messageId,
-          chatId: chatId,
-          peer: peerId,
-          animated: true
-        )
-      }
+      publishMessageUpdate()
     } catch {
       log.error("Failed to add reaction \(error)")
+    }
+  }
+
+  /// Takes the optimistic reaction back off the message. If the server did
+  /// apply it before the failure, the next update or sync adds it again.
+  public func failed(error: TransactionError2) async {
+    log.error("Failed to add reaction", error: error)
+    guard let userId = Auth.getCurrentUserId() else { return }
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        _ = try Reaction
+          .filter(Column("messageId") == messageId)
+          .filter(Column("chatId") == chatId)
+          .filter(Column("emoji") == emoji)
+          .filter(Column("userId") == userId)
+          .deleteAll(db)
+      }
+      publishMessageUpdate()
+    } catch {
+      log.error("Failed to roll back reaction", error: error)
+    }
+  }
+
+  private func publishMessageUpdate() {
+    Task(priority: .userInitiated) { @MainActor [messageId, chatId, peerId] in
+      MessagesPublisher.shared.messageUpdatedWithId(
+        messageId: messageId,
+        chatId: chatId,
+        peer: peerId,
+        animated: true
+      )
     }
   }
 

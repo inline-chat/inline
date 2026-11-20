@@ -28,12 +28,14 @@ enum MediaCacheSweep {
 
   /// Sweeps once a day, a while after launch, off the main thread.
   static func scheduleIfDue(database: AppDatabase) {
-    // Extensions do not own the cache. A profile named "default" shares the unnamed profile's
-    // media folder but not its database, so neither could tell the other's files apart.
-    guard !Bundle.main.bundlePath.hasSuffix(".appex"), ProjectConfig.userProfile != "default" else { return }
+    guard !Bundle.main.bundlePath.hasSuffix(".appex") else { return }
+    #if !os(macOS)
+    guard ProjectConfig.userProfile != "default" else { return }
+    #endif
     Task.detached(priority: .background) {
       try? await Task.sleep(for: launchDelay)
       _ = runIfDue(database: database)
+      await StorageUsageService(database: { database }).applyAutomaticCleanupIfDue()
     }
   }
 
@@ -73,7 +75,9 @@ enum MediaCacheSweep {
   }
 
   /// Every cache name the database or a draft refers to, by folder.
-  static func referencedNames(_ db: Database) throws -> [FileLocalCacheDirectory: Set<String>] {
+  static func referencedNames(
+    _ db: Database, onUnreadableDraft: (Error) throws -> Void = { throw $0 }
+  ) throws -> [FileLocalCacheDirectory: Set<String>] {
     var names = try LegacyMediaCacheMigration.referencedLocalPaths(db)
     // Never set today, and resolved elsewhere; kept in every folder to be safe.
     let files = try String.fetchAll(db, sql: "SELECT localPath FROM \(File.databaseTableName) WHERE localPath IS NOT NULL AND localPath != ''")
@@ -83,9 +87,13 @@ enum MediaCacheSweep {
       db, sql: "SELECT attachments FROM \(Drafts2Row.databaseTableName) WHERE attachments IS NOT NULL"
     )
     for blob in blobs {
-      // A draft that cannot be read might hold any file: throw, so nothing is removed.
-      for attachment in try JSONDecoder().decode(Drafts2AttachmentBlob.self, from: blob).attachments {
-        insert(attachment.media, into: &names)
+      do {
+        for attachment in try JSONDecoder().decode(Drafts2AttachmentBlob.self, from: blob).attachments {
+          insert(attachment.media, into: &names)
+        }
+      } catch {
+        // Deletion must stop. Migration can still recover every readable attachment.
+        try onUnreadableDraft(error)
       }
     }
     return names

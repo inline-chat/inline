@@ -654,8 +654,24 @@ public final class BotChatSettingsCoordinator {
     } catch {
       guard currentDiscoveryGeneration == discoveryGeneration, !Task.isCancelled else { return }
       isDiscovering = false
+      if let rejection = Self.finalDiscoveryRejection(error) {
+        // A DM that has no server chat yet, or a chat the user lost: retrying
+        // cannot succeed until the database changes and re-runs discovery.
+        log.warning("Bot settings discovery rejected: \(rejection.privacySafeErrorCategory)")
+        return
+      }
       log.error("Failed to discover bot settings", error: error)
       if scheduleRetry { scheduleDiscoveryRetry() }
+    }
+  }
+
+  private static func finalDiscoveryRejection(_ error: Error) -> RealtimeDirectRpcError? {
+    guard let rpcError = error as? RealtimeDirectRpcError,
+          case let .rpcError(errorCode, _, _) = rpcError
+    else { return nil }
+    switch errorCode {
+      case .peerIDInvalid, .chatIDInvalid, .badRequest: return rpcError
+      default: return nil
     }
   }
 
@@ -769,7 +785,12 @@ public final class BotChatSettingsCoordinator {
           "BOT_SETTINGS_TRACE trace=\(traceID) phase=request_error bot=\(botID) " +
             "elapsed_ms=\(Self.elapsedMilliseconds(since: startedAt))"
         )
-        self.log.error("Bot settings request transport failed", error: error)
+        if let rejection = Self.finalDiscoveryRejection(error) {
+          // The bot does not serve chat settings for this peer.
+          self.log.warning("Bot settings request rejected: \(rejection.privacySafeErrorCategory)")
+        } else {
+          self.log.error("Bot settings request transport failed", error: error)
+        }
         self.finishRequest(
           botID: botID,
           traceID: traceID,

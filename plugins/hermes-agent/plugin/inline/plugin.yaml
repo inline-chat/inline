@@ -10,7 +10,7 @@ provides_hooks:
   - subagent_stop
   - pre_approval_request
   - post_approval_response
-version: 1.2.0
+version: 1.2.5
 requires_hermes: ">=0.21.3"
 description: >
   Inline platform adapter for Hermes Agent. The adapter runs as a native
@@ -123,6 +123,10 @@ optional_env:
   - name: INLINE_SYSTEM_EVENTS
     description: "Deliver Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages (true/false, default false)"
     prompt: "Deliver lifecycle events? (true/false)"
+    password: false
+  - name: INLINE_REACTION_TRIGGERS
+    description: "Reactions that start a Hermes turn: unset/false none (default), true any emoji on the bot's own messages, or a list such as 👍,✅ for those emoji on any message"
+    prompt: "Reaction triggers (false, true, or emoji list)"
     password: false
   - name: INLINE_REACTIONS
     description: "Show processing reactions on handled inbound messages: eyes while working, then success or failure (true/false, default false)"

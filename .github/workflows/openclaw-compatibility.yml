@@ -32,3 +32,38 @@ jobs:
           name: published-openclaw-manifest
           path: ${{ runner.temp }}/published-inline/manifest.json
           retention-days: 7
+
+  # Moved from CI: the unreleased plugin candidate against OpenClaw latest. CI
+  # pins OpenClaw so upstream releases cannot turn the deploy gate red.
+  candidate:
+    name: source candidate / OpenClaw latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - run: bun install --frozen-lockfile
+      - name: Build OpenClaw dependencies
+        run: |
+          bun run --cwd packages/protocol build
+          bun run --cwd packages/oauth-core build
+          bun run --cwd packages/bot-api-types build
+          bun run --cwd packages/sdk build
+      - name: Check source plugin against the latest host source and packed runtime
+        run: |
+          host_dir="$RUNNER_TEMP/inline-openclaw-host"
+          mkdir -p "$host_dir"
+          bun -e 'await Bun.write(process.argv[1], JSON.stringify({private: true, dependencies: {openclaw: "latest"}}))' "$host_dir/package.json"
+          bun install --cwd "$host_dir" --ignore-scripts
+          bun run --cwd plugins/openclaw check:host "$host_dir/node_modules/openclaw"
+      - name: Build and pack exact candidate bytes
+        run: |
+          bun run build:integrations
+          node scripts/ci/pack-public-packages.mjs "$RUNNER_TEMP/inline-packages"
+      - name: Load packed candidate plugin through the latest OpenClaw CLI
+        run: node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/inline-packages" latest --candidate

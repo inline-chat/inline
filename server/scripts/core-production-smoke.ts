@@ -112,9 +112,6 @@ export const makeCoreProductionSmokeEnvironment = (
   SENTRY_DSN: useArtifact
     ? artifactSmokeValue("SENTRY_DSN")
     : "",
-  TWILIO_AUTH_TOKEN: useArtifact
-    ? "artifact-smoke"
-    : environment["TWILIO_AUTH_TOKEN"],
 })
 
 const appendBounded = (

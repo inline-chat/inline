@@ -77,7 +77,8 @@ class MessageListAppKit: NSViewController {
   }
 
   var selectedMessagesInLoadedOrder: [FullMessage] {
-    selectedStableIdsInLoadedOrder().compactMap { messageAndIndex(forStableId: $0)?.message }
+    // A selected album acts on all of its items.
+    expandedAlbums(selectedStableIdsInLoadedOrder()).compactMap { messageAndIndex(forStableId: $0)?.message }
   }
 
   // MARK: - Interleaved chat rows (messages + UI-only rows)
@@ -220,6 +221,12 @@ class MessageListAppKit: NSViewController {
       self,
       selector: #selector(richBlockLayoutStateDidChange),
       name: .richBlockLayoutStateDidChange,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(chatTypographyDidChange),
+      name: ChatTypography.didChangeNotification,
       object: nil
     )
 
@@ -436,8 +443,15 @@ class MessageListAppKit: NSViewController {
     return true
   }
 
+  /// One id per selectable row: an album selects as its oldest item, and acts on all its items
+  /// (`expandedAlbums`).
   private var selectableMessageStableIds: [Int64] {
-    messages.filter { isForwardSelectable($0) }.map(\.id)
+    messages.filter { isForwardSelectable($0) && !chatRows.isAlbumMember($0.id) }.map(\.id)
+  }
+
+  /// Selected rows' messages, with each album expanded to its items in order.
+  private func expandedAlbums(_ stableIds: [Int64]) -> [Int64] {
+    stableIds.flatMap { id in chatRows.album(forStableId: id)?.items.map(\.id) ?? [id] }
   }
 
   private func selectableStableId(forRow row: Int) -> Int64? {
@@ -1081,6 +1095,7 @@ class MessageListAppKit: NSViewController {
     if scrollView.contentInsets.top != topInset {
       log.trace("Adjusting view's insets")
 
+      parkInitialClipAtBottomIfNeeded()
       let wasAtBottom = canFollowBottom && viewport.distanceFromBottom <= Self.exactBottomTolerance
       let topAnchor = captureTopAnchor()
       suppressResizeScrollMaintenance = true
@@ -1116,6 +1131,22 @@ class MessageListAppKit: NSViewController {
         self?.suppressResizeScrollMaintenance = false
       }
     }
+  }
+
+  private var didParkInitialClip = false
+
+  /// The first insets change scrolls the clip, and the table configures the rows under it. Until
+  /// then the clip sits at the top of the loaded window, which a chat almost never opens on, so a
+  /// long chat configured a screen of rows only to replace them when it scrolled to the bottom.
+  /// The initial placement still decides the final position; this only moves the first rows the
+  /// table builds to where that placement usually lands.
+  private func parkInitialClipAtBottomIfNeeded() {
+    guard needsInitialScroll, !didParkInitialClip else { return }
+    didParkInitialClip = true
+    guard initialTargetMessageId == nil, readingHold == nil else { return }
+    beginProgrammaticScroll()
+    tableView.scrollToBottomWithInset(cancel: true)
+    endProgrammaticScroll()
   }
 
   private struct TopAnchorSnapshot {
@@ -2049,6 +2080,40 @@ class MessageListAppKit: NSViewController {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+  }
+
+  /// Coalesces bursts (a dragged size slider, a held shortcut) into one reload per run loop turn.
+  private var typographyReloadScheduled = false
+
+  @objc private func chatTypographyDidChange(_ notification: Notification) {
+    guard !typographyReloadScheduled else { return }
+    typographyReloadScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      typographyReloadScheduled = false
+      reloadForTypographyChange()
+    }
+  }
+
+  /// Every row re-measures and rebuilds its text: row props carry the typography
+  /// revision, so no cell keeps text laid out with the previous font.
+  private func reloadForTypographyChange() {
+    guard isViewLoaded, !isDisposed, tableView.numberOfRows > 0 else { return }
+    let wasAtBottom = shouldKeepBottomPinned
+    let anchors = wasAtBottom ? [] : viewport.anchors()
+
+    clearHoveredMessage()
+    tableView.reloadData()
+    tableView.layoutSubtreeIfNeeded()
+    if wasAtBottom {
+      scrollToBottom(animated: false)
+    } else if let anchor = anchors.first(where: { viewport.index(of: $0) != nil }) {
+      viewport.restore(anchor)
+    }
+    maintainReadingHoldIfNeeded()
+    syncAvatarOverlayAfterTableLayout()
+    textSelection.setNeedsRefresh()
+    scheduleMessageHoverRefresh()
   }
 
   @objc private func richBlockLayoutStateDidChange(_ notification: Notification) {
@@ -3730,6 +3795,7 @@ class MessageListAppKit: NSViewController {
             interactionMode: interactionMode(for: row),
             replyThreadTitle: inputProps.replyThreadTitle,
             usesAvatarOverlay: usesAvatarOverlay(forRow: row),
+            album: inputProps.album,
             layout: plan
           )
 
@@ -3789,7 +3855,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func canGroupRows(_ earlierRow: Int, _ laterRow: Int) -> Bool {
-    guard let earlier = message(forRow: earlierRow), let later = message(forRow: laterRow) else {
+    guard let earlier = rowMessages(forRow: earlierRow).last, let later = message(forRow: laterRow) else {
       return false
     }
     return canGroup(earlier, later)
@@ -3817,11 +3883,18 @@ class MessageListAppKit: NSViewController {
     heightPrecalcTask?.cancel()
     heightPrecalcTask = Task(priority: .userInitiated) { [weak self] in
       guard let self else { return }
+      // This runs on the main actor; give frames and input a turn every few milliseconds instead
+      // of measuring every row in one go.
+      var sliceStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
       for row in rowsToUpdate {
         guard !Task.isCancelled else { return }
         guard let message = message(forRow: row) else { continue }
         let props = messageProps(for: row)
         let _ = calculateSize(for: message, with: props, tableWidth: width_)
+        if clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - sliceStart > 4_000_000 {
+          await Task.yield()
+          sliceStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        }
       }
     }
   }
@@ -4073,7 +4146,8 @@ class MessageListAppKit: NSViewController {
       translated: message.isTranslated,
       renderStyle: messageRenderStyle,
       interactionMode: interactionMode(for: row),
-      replyThreadTitle: replyThreadTitle(for: message)
+      replyThreadTitle: replyThreadTitle(for: message),
+      album: chatRows.album(forStableId: message.id)
     )
   }
 
@@ -4082,10 +4156,12 @@ class MessageListAppKit: NSViewController {
   }
 
   private func calculateSize(
-    for message: FullMessage,
+    for rowMessage: FullMessage,
     with props: MessageViewInputProps,
     tableWidth: CGFloat
   ) -> (NSSize, NSSize, NSSize?, MessageSizeCalculator.LayoutPlans) {
+    // An album measures as its bubble message with one photo the size of its grid.
+    let message = props.album?.bubbleMessage ?? rowMessage
     if message.message.isServiceMessage {
       return sizeCalculator.calculateServiceSize(for: message, with: props, tableWidth: tableWidth)
     }
@@ -4232,19 +4308,27 @@ class MessageListAppKit: NSViewController {
   }
 
   /// All on-screen messages: mentions arrive on others' messages, reactions on yours.
+  /// Every message a visible row draws: an album's items, or its one message.
   private func visibleMessageIDs() -> [Int64] {
+    visibleRowMessageIDs().flatMap { $0 }.filter { $0 > 0 }
+  }
+
+  private func rowMessages(forRow row: Int) -> [FullMessage] {
+    guard let message = message(forRow: row) else { return [] }
+    return chatRows.album(forStableId: message.id)?.items ?? [message]
+  }
+
+  private func visibleRowMessageIDs() -> [[Int64]] {
     let visibleRect = tableView.visibleRect
     let visibleRange = tableView.rows(in: visibleRect)
     guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return [] }
 
     let upperBound = min(NSMaxRange(visibleRange), tableView.numberOfRows)
-    return (visibleRange.location ..< upperBound).compactMap { row -> Int64? in
+    return (visibleRange.location ..< upperBound).compactMap { row -> [Int64]? in
       guard case .message? = rowItem(at: row),
-            tableView.rect(ofRow: row).intersects(visibleRect),
-            let message = message(forRow: row),
-            message.message.messageId > 0
+            tableView.rect(ofRow: row).intersects(visibleRect)
       else { return nil }
-      return message.message.messageId
+      return rowMessages(forRow: row).map(\.message.messageId)
     }
   }
 
@@ -4259,7 +4343,8 @@ class MessageListAppKit: NSViewController {
             tableView.rect(ofRow: row).intersects(visibleRect),
             let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false),
             !cell.isHiddenOrHasHiddenAncestor,
-            let message = message(forRow: row),
+            // An album on screen is read through its newest item.
+            let message = rowMessages(forRow: row).last,
             !message.message.isServiceMessage,
             message.message.messageId > 0,
             message.message.out != true
@@ -4435,7 +4520,7 @@ extension MessageListAppKit: NSTableViewDelegate {
 
   func isLastInGroup(at row: Int) -> Bool {
     guard let stableId = messageStableId(forRow: row) else { return true }
-    guard let index = chatRows.messageIndex(forStableMessageId: stableId) else { return true }
+    guard let index = newestMessageIndex(forRowStableId: stableId) else { return true }
     guard index < messages.count - 1 else { return true }
 
     let current = messages[index]
@@ -4443,9 +4528,14 @@ extension MessageListAppKit: NSTableViewDelegate {
     return !canGroup(current, next)
   }
 
+  /// The index of the newest message a row draws: an album's newest item, else its message.
+  private func newestMessageIndex(forRowStableId stableId: Int64) -> Int? {
+    chatRows.messageIndex(forStableMessageId: chatRows.album(forStableId: stableId)?.newest.id ?? stableId)
+  }
+
   func isLastMessage(at row: Int) -> Bool {
     guard let stableId = messageStableId(forRow: row) else { return false }
-    guard let index = chatRows.messageIndex(forStableMessageId: stableId) else { return false }
+    guard let index = newestMessageIndex(forRowStableId: stableId) else { return false }
     return index == messages.count - 1
   }
 
@@ -4532,11 +4622,16 @@ extension MessageListAppKit: NSTableViewDelegate {
       interactionMode: interactionMode(for: row),
       replyThreadTitle: inputProps.replyThreadTitle,
       usesAvatarOverlay: usesAvatarOverlay(forRow: row),
+      album: inputProps.album,
       layout: layoutPlan
     )
 
     cell.setScrollState(scrollState)
-    cell.configure(with: message, props: props, animate: animateUpdates && NSAnimationContext.current.duration > 0)
+    // An album's bubble draws from its caption's item, its newest time and its combined status.
+    cell.configure(
+      with: inputProps.album?.bubbleMessage ?? message, props: props,
+      animate: animateUpdates && NSAnimationContext.current.duration > 0
+    )
     configureForwardSelection(cell, row: row)
     configureReplyThreadSourceHighlight(cell, row: row)
     textSelection.cellDidConfigure(cell, row: row)

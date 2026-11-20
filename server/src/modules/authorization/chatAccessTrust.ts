@@ -10,13 +10,7 @@ export const isChatAccessSyncEnabled = (): boolean => process.env["INLINE_CHAT_A
 /** How long a host may keep trusting the marker after it was cleared elsewhere. */
 export const CHAT_ACCESS_TRUST_REFRESH_MS = 30_000
 
-/**
- * Committed-state readers may answer from `chat_access` only while every
- * writer keeps it current. That holds when this host syncs, reads are not
- * switched off, and the backfill marker exists. A host started with sync off
- * deletes the marker, and the next full verifier pass on a syncing host
- * recreates it, so no reader trusts rows written across a sync gap.
- */
+/** Retained for diagnostics and write compatibility with servers that still serve table reads. */
 export const isChatAccessReadEnabled = (): boolean =>
   isChatAccessSyncEnabled() && process.env["INLINE_CHAT_ACCESS_READS"] !== "off"
 
@@ -25,12 +19,8 @@ let refreshedAtMs = 0
 let refreshing: Promise<void> | undefined
 let timer: ReturnType<typeof setInterval> | undefined
 
-/**
- * Synchronous gate for hot paths. Only a host that started the refresh loop
- * (production, through the verifier process) can open it; a cold, failed or
- * stalled refresh falls back to the projection.
- */
-export function isStoredChatAccessTrusted(): boolean {
+/** A recently completed backfill makes drift sampling useful. It cannot attest to other writers. */
+export function canSampleStoredChatAccess(): boolean {
   if (!isChatAccessReadEnabled()) return false
   if (Date.now() - refreshedAtMs > CHAT_ACCESS_TRUST_REFRESH_MS * 2) return false
   return trusted
@@ -45,12 +35,12 @@ export async function refreshChatAccessTrust(): Promise<boolean> {
     try {
       const [state] = await db.select({ id: chatAccessState.id }).from(chatAccessState).limit(1)
       const next = state !== undefined
-      if (next !== trusted) log.info(next ? "Chat access reads use the table" : "Chat access reads use the projection")
+      if (next !== trusted) log.info(next ? "Chat access drift sampling enabled" : "Chat access drift sampling paused")
       trusted = next
       refreshedAtMs = Date.now()
     } catch (error) {
       trusted = false
-      log.warn("Chat access trust refresh failed; reads use the projection", { error })
+      log.warn("Chat access marker refresh failed; drift sampling paused", { error })
     } finally {
       refreshing = undefined
     }

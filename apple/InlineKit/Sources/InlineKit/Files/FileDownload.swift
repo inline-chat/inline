@@ -17,6 +17,7 @@ enum FileDownloadValidationError: Error, LocalizedError, Equatable, Sendable {
   case invalidHTTPResponse
   case httpStatus(Int)
   case byteCountMismatch(expected: Int64, actual: Int64)
+  case unexpectedContentType(String)
 
   var errorDescription: String? {
     switch self {
@@ -26,6 +27,8 @@ enum FileDownloadValidationError: Error, LocalizedError, Equatable, Sendable {
       "The file download failed (HTTP \(status))."
     case .byteCountMismatch:
       "The downloaded file has an unexpected size. Please retry the download."
+    case .unexpectedContentType:
+      "The network returned a web page instead of the file. Check your connection and retry."
     }
   }
 }
@@ -51,6 +54,17 @@ enum DownloadedFileValidation {
     guard byteCount == expectedByteCount else {
       throw FileDownloadValidationError.byteCountMismatch(expected: expectedByteCount, actual: byteCount)
     }
+  }
+
+  /// A captive portal or an error page answers with a success status and HTML. Only a file that
+  /// is itself a web page, judged by its name, may come back as one.
+  static func validateContentType(_ response: URLResponse?, for file: URL) throws {
+    guard let mimeType = response?.mimeType?.lowercased(), mimeType == "text/html", !mayBeHTML(file) else { return }
+    throw FileDownloadValidationError.unexpectedContentType(mimeType)
+  }
+
+  static func mayBeHTML(_ file: URL) -> Bool {
+    ["html", "htm", "xhtml", "shtml"].contains(file.pathExtension.lowercased())
   }
 
   /// Legacy metadata may describe a different object size. Return its mismatch
@@ -372,7 +386,8 @@ public final class FileDownloader: NSObject, Sendable {
         nativeDownload = { destination, progress in
           try await source.download(
             media: .document(document.document.documentId), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
+            fallback: url.map { CDNLink($0, refresh: refreshLink) },
+            priority: priority, progress: progress
           )
         }
       } else {
@@ -402,7 +417,7 @@ public final class FileDownloader: NSObject, Sendable {
     let completion: (Result<URL, Error>) -> Void = { [weak self] result in
       self?.finishRequest(id: downloadId, token: requestToken, result: result)
     }
-    let localPath = "\(UUID().uuidString)_\(document.document.fileName ?? "Unknown")"
+    let localPath = document.document.newDownloadCacheName()
     let localUrl = FileCache.getUrl(for: .documents, localPath: localPath)
     log.debug("Starting document download \(document.id) transport=\(nativeDownload == nil ? "cdn" : "native")")
 
@@ -466,7 +481,8 @@ public final class FileDownloader: NSObject, Sendable {
         nativeDownload = { destination, progress in
           try await source.download(
             media: .video(video.video.videoId), message: message, to: destination,
-            fallback: url.map { CDNLink($0, refresh: refreshLink) }, priority: priority, progress: progress
+            fallback: url.map { CDNLink($0, refresh: refreshLink) },
+            priority: priority, progress: progress
           )
         }
       } else {
@@ -861,11 +877,10 @@ public final class FileDownloader: NSObject, Sendable {
     for id in affected.keys { cancelDownload(id: id, includingFinalization: true) }
     for task in transfers { await task.value }
     for task in publications { await task.value }
-    for messageID in ids {
-      let location = FileMessageLocation.with { $0.chatID = chatID; $0.messageID = messageID }
-      await nativeManager.discard(message: location, accountID: accountToken.userID,
-                                  cacheDirectories: nativeCacheDirectories)
-    }
+    // One pass over the cache folders for the whole deletion, not one per message.
+    let locations = ids.map { messageID in FileMessageLocation.with { $0.chatID = chatID; $0.messageID = messageID } }
+    await nativeManager.discard(messages: locations, accountID: accountToken.userID,
+                                cacheDirectories: nativeCacheDirectories)
   }
 
   private static func voiceFileExtension(mimeType: String) -> String? {
@@ -1018,15 +1033,20 @@ public final class FileDownloader: NSObject, Sendable {
   typealias CDNLinkRefresh = @Sendable (_ stale: URL) async -> URL?
 
   /// Builds a refresh that re-fetches the owning message, then reads the media's link again.
+  /// A fetch that did not run, because one ran within the last minute, may still have stored a
+  /// newer link than the stale one: the link is read either way, and used if it has not expired.
   nonisolated static func linkRefresh(
     peer: Peer,
     messageId: Int64,
+    refresher: MediaLinkRefresher = .shared,
+    database: AppDatabase = .shared,
     readLink: @escaping @Sendable (Database) throws -> String?
   ) -> CDNLinkRefresh {
     { stale in
-      guard await MediaLinkRefresher.shared.refresh(peer: peer, messageId: messageId),
-            let link = try? await AppDatabase.shared.dbWriter.read(readLink),
-            let url = URL(string: link), url != stale
+      let refreshed = await refresher.refresh(peer: peer, messageId: messageId)
+      guard let link = try? await database.dbWriter.read(readLink),
+            let url = URL(string: link), url != stale,
+            refreshed || !MediaLinkExpiry.isExpired(url)
       else { return nil }
       return url
     }
@@ -1193,7 +1213,11 @@ public final class FileDownloader: NSObject, Sendable {
             file = localUrl
             ownsFile = true
           }
-          try DownloadedFileValidation.validateDocumentFile(at: file, expectedByteCount: expectedBytes)
+          // Every range was checked against the size the server reported for the file, so the
+          // size stored with the message is the one to doubt; refetching would get the same bytes.
+          if let mismatch = try DownloadedFileValidation.validateCDNFile(at: file, expectedByteCount: expectedBytes) {
+            self.log.warning("Native file size differs from its metadata for \(id): \(mismatch); keeping the verified file")
+          }
         } catch {
           if ownsFile { try? FileManager.default.removeItem(at: file) }
           throw error
@@ -1208,10 +1232,18 @@ public final class FileDownloader: NSObject, Sendable {
         }
         if let failure = error as? NativeRangeFallbackFailure {
           // Both transports already worked on this file's partial; a whole-file CDN restart
-          // would only download the same bytes again.
+          // would only download the same bytes again. Unless the CDN's object changed: that
+          // partial is gone, and the whole file is a clean restart.
           self.nativeTasks[token] = nil
           let canceled = Task.isCancelled || !self.isActiveDownload(id: id, token: token) || Self.isCancellation(failure.cdn)
           recordRangeFallback(failure.native, canceled ? .canceled : .failed(DownloadTelemetry.errorClass(failure.cdn)))
+          if !canceled, failure.cdn as? CDNRangeError == .objectChanged, let url {
+            self.log.warning("CDN object changed during the range fallback for \(id); restarting the whole file")
+            self.startCDNDownload(
+              id: id, token: token, url: url, localUrl: localUrl, expectedBytes: expectedBytes, afterFallback: true
+            )
+            return
+          }
           self.finishTransfer(id: id, token: token, result: .failure(
             self.isActiveDownload(id: id, token: token) ? failure.cdn : URLError(.cancelled)
           ))
@@ -1253,6 +1285,9 @@ public final class FileDownloader: NSObject, Sendable {
       if case let .success(url) = result { try? FileManager.default.removeItem(at: url) }
       return
     }
+    #if os(macOS)
+    if case let .success(url) = result { FileQuarantine.markDownloaded(url) }
+    #endif
     let completion = downloadCompletions.removeValue(forKey: id)
     let joined = joinedCompletions.removeValue(forKey: token) ?? []
     activeTasks[id] = nil
@@ -1337,6 +1372,7 @@ public final class FileDownloader: NSObject, Sendable {
       finishTransfer(id: id, token: token, result: .success(location))
     } else if let location {
       do {
+        try DownloadedFileValidation.validateContentType(task.response, for: source.localURL)
         if let mismatch = try DownloadedFileValidation.validateCDNFile(
           at: location, expectedByteCount: source.expectedBytes
         ) {
@@ -1479,6 +1515,7 @@ extension FileDownloader: URLSessionDownloadDelegate {
       let alreadyPlaced: Bool
       if let placement = cdnPlacements.take(downloadTask) {
         // Validate and move here, off the main thread: a large file costs a rename, not a copy.
+        try DownloadedFileValidation.validateContentType(downloadTask.response, for: placement.localURL)
         if let mismatch = try DownloadedFileValidation.validateCDNFile(
           at: location, expectedByteCount: placement.expectedBytes
         ) {

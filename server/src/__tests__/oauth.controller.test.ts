@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from "bun:test"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
 import { setupTestLifecycle, testUtils } from "./setup"
 import { OauthModel } from "@in/server/db/models/oauth"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
@@ -13,6 +13,8 @@ import {
   hostedLoginChooser,
   hostedLoginVerificationForm,
 } from "@in/server/modules/auth/hostedLogin/httpHandlers"
+
+const app = useLiveHttpApp()
 
 function extractSetCookieValue(setCookie: string | null): string {
   if (!setCookie) throw new Error("missing set-cookie")

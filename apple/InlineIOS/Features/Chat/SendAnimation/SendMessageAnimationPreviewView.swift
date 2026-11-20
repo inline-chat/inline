@@ -77,6 +77,23 @@ final class SendMessageAnimationPreviewView: UIView {
     currentTargetFrame = targetFrame
 
     frame = targetFrame
+    if let background = target.bubbleBackground {
+      let backgroundView = UIImageView(image: background)
+      backgroundView.frame = bounds
+      backgroundView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+      addSubview(backgroundView)
+      if let field = source.sourceFieldFrameInWindow {
+        // The background starts as the composer's field, in the flight's frame at its start.
+        Self.grow(
+          backgroundView.layer,
+          from: CGRect(
+            x: 0, y: field.minY - startFrame.minY, width: field.width, height: field.height
+          ),
+          to: bounds,
+          duration: SendMessageAnimationTiming.duration
+        )
+      }
+    }
     addSubview(snapshotView)
     overlayContainer.addSubview(self)
     overlayContainer.bringSubviewToFront(self)
@@ -158,6 +175,34 @@ final class SendMessageAnimationPreviewView: UIView {
     currentTargetFrame = nil
     completionHandler = nil
     removeFromSuperview()
+  }
+
+  /// Telegram's background morph: the frame moves sideways on the horizontal curve and up on the
+  /// vertical one, and the background fades in over the field in 0.1 s.
+  private static func grow(_ layer: CALayer, from start: CGRect, to end: CGRect, duration: TimeInterval) {
+    let horizontal = SendMessageAnimationTiming.horizontalMediaTimingFunction
+    let vertical = SendMessageAnimationTiming.verticalMediaTimingFunction
+    for (keyPath, from, to, timing) in [
+      ("bounds.size.width", start.width, end.width, horizontal),
+      ("position.x", start.midX, end.midX, horizontal),
+      ("bounds.size.height", start.height, end.height, vertical),
+      ("position.y", start.midY, end.midY, vertical),
+    ] as [(String, CGFloat, CGFloat, CAMediaTimingFunction)] {
+      let animation = CABasicAnimation(keyPath: keyPath)
+      animation.fromValue = from
+      animation.toValue = to
+      animation.duration = duration
+      animation.timingFunction = timing
+      animation.fillMode = .backwards
+      layer.add(animation, forKey: "send.grow.\(keyPath)")
+    }
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = 0
+    fade.toValue = 1
+    fade.duration = SendMessageAnimationTiming.backgroundFadeDuration
+    fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    fade.fillMode = .backwards
+    layer.add(fade, forKey: "send.grow.opacity")
   }
 
   private func boundsForSnapshot(size: CGSize) -> CGRect {

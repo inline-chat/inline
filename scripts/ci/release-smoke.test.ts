@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { curl, readReady, smoke, type Curl } from "./release-smoke"
+import { annotate, checkIntrospection, curl, failed, probeCredentials, readReady, smoke, type Curl, type CurlOptions } from "./release-smoke"
 
 const SHA = "a".repeat(40)
 
@@ -26,6 +27,35 @@ function origin({ revision = SHA, storesMessage = true, upgrades = true, bot: us
   }
   return { curl, calls, tokens }
 }
+
+const grant = {
+  active: true, grant_id: "g1", client_id: "c1", scope: "messages:read", aud: "https://mcp.inline.chat/mcp", exp: 4_000_000_000,
+  inline_user_id: "42", space_ids: ["7"], allow_dms: true, allow_home_threads: false, inline_token: "private-inline-token",
+  via_app: "Release smoke", allow_unsigned: false,
+}
+
+// A healthy origin that also serves the route-family probes.
+function probed({ v1 = true, upload = true, introspection = grant as Record<string, unknown>, introspectionCode = 200, inactiveCode = 401 } = {}) {
+  const base = origin()
+  const calls: Array<{ args: string[]; options?: CurlOptions; body?: string }> = []
+  const curl: Curl = async (args, options) => {
+    const url = args.at(-1)!
+    const file = args[args.indexOf("--data-binary") + 1]?.slice(1)
+    calls.push({ args, options, body: args.includes("--data-binary") ? readFileSync(file!, "utf8") : undefined })
+    if (url.endsWith("/v1/getMe")) return { code: v1 ? 200 : 500, body: JSON.stringify(v1 ? { ok: true, result: { user: { id: 42 } } } : { ok: false }) }
+    if (url.endsWith("/v1/uploadFile")) {
+      return { code: 200, body: JSON.stringify(upload ? { ok: true, result: { fileUniqueId: "INP_1", documentId: 5 } } : { ok: true, result: {} }) }
+    }
+    if (url.endsWith("/oauth/introspect")) {
+      const token = JSON.parse(calls.at(-1)!.body!).token as string
+      if (token.startsWith("mcp_at_release_smoke_")) return { code: inactiveCode, body: JSON.stringify({ active: false }) }
+      return { code: introspectionCode, body: JSON.stringify(introspection) }
+    }
+    return base.curl(args, options)
+  }
+  return { curl, calls }
+}
+const credentials = { userToken: "user-token", mcpSecret: "mcp-secret", oauthToken: "mcp_at_grant" }
 const base = { origin: "nuremberg", revision: SHA, token: "t", chatId: "123", now: () => 1 }
 
 describe("release smoke", () => {
@@ -35,7 +65,13 @@ describe("release smoke", () => {
     expect(checks.map((c) => [c.name, c.ok])).toEqual([
       ["readiness", true], ["bot login", true], ["send and read back", true],
       ["websocket /realtime", true], ["websocket /realtime/v3", true],
+      ["v1 getMe", true], ["v1 upload", true], ["oauth introspection", true],
     ])
+    expect(checks.filter((c) => c.skipped).map((c) => c.detail)).toEqual([
+      "skipped: INLINE_SMOKE_USER_TOKEN is not configured", "skipped: INLINE_SMOKE_USER_TOKEN is not configured",
+      "skipped: INLINE_SMOKE_MCP_SECRET is not configured",
+    ])
+    expect(failed(checks)).toBe(false)
     for (const call of o.calls) expect(call.slice(0, 2)).toEqual(["--resolve", "api.inline.chat:443:203.0.113.7"])
     expect(o.tokens).toEqual([undefined, "t", "t", "t", undefined, undefined])
     expect(o.calls.flat()).not.toContain("Authorization: Bearer t")
@@ -112,6 +148,88 @@ describe("release smoke", () => {
     expect(checks).toEqual([{ name: "readiness", ok: false, detail: "Invalid JSON response" }])
   })
 
+  it("probes each route family on a pinned origin with its own credential", async () => {
+    const o = probed()
+    const checks = await smoke({ ...base, ip: "203.0.113.7", curl: o.curl, probes: credentials, scratch: tmpdir() })
+    expect(checks.slice(5).map(({ name, ok, skipped }) => [name, ok, skipped ?? false])).toEqual([
+      ["v1 getMe", true, false], ["v1 upload", true, false],
+      ["oauth introspection (inactive token)", true, false], ["oauth introspection (active grant)", true, false],
+    ])
+    expect(failed(checks)).toBe(false)
+    const routes = o.calls.slice(6)
+    for (const call of routes) expect(call.args.slice(0, 2)).toEqual(["--resolve", "api.inline.chat:443:203.0.113.7"])
+    expect(routes.map((call) => call.options)).toEqual([
+      { token: "user-token" }, { token: "user-token" },
+      { headers: ["x-inline-mcp-secret: mcp-secret", "Content-Type: application/json"] },
+      { headers: ["x-inline-mcp-secret: mcp-secret", "Content-Type: application/json"] },
+    ])
+    // Credentials and grant tokens never enter argv; the upload is a tiny document.
+    for (const call of routes) for (const secret of ["user-token", "mcp-secret", "mcp_at_grant"]) expect(call.args.join(" ")).not.toContain(secret)
+    expect(routes[1]!.args).toContain("type=document")
+    expect(routes[3]!.body).toBe(JSON.stringify({ token: "mcp_at_grant" }))
+    // Nothing from the introspection body (it carries the Inline token) reaches the report.
+    expect(JSON.stringify(checks)).not.toContain("private-inline-token")
+  })
+
+  it("skips only the probes whose credential is missing, and never probes canonical routing or preflight", async () => {
+    const partial = await smoke({ ...base, ip: "203.0.113.7", curl: probed().curl, probes: { mcpSecret: "mcp-secret" } })
+    expect(partial.slice(5).map(({ name, skipped }) => [name, skipped ?? false])).toEqual([
+      ["v1 getMe", true], ["v1 upload", true], ["oauth introspection (inactive token)", false], ["oauth introspection (active grant)", true],
+    ])
+    for (const options of [{ ip: undefined }, { ip: "203.0.113.7", preflight: true, revision: undefined }]) {
+      const o = probed()
+      await smoke({ ...base, ...options, curl: o.curl, probes: credentials })
+      expect(o.calls.some((call) => /\/v1\/|\/oauth\//.test(call.args.at(-1)!))).toBe(false)
+    }
+  })
+
+  it("fails on a broken route family unless probes are advisory", async () => {
+    const cases: Array<[Parameters<typeof probed>[0], string]> = [
+      [{ v1: false }, "v1 getMe"], [{ upload: false }, "v1 upload"],
+      [{ inactiveCode: 500 }, "oauth introspection (inactive token)"],
+    ]
+    for (const [options, name] of cases) {
+      const checks = await smoke({ ...base, ip: "203.0.113.7", curl: probed(options).curl, probes: credentials })
+      expect(checks.filter((c) => !c.ok).map((c) => c.name), name).toEqual([name])
+      expect(failed(checks)).toBe(true)
+      const advisory = await smoke({ ...base, ip: "203.0.113.7", curl: probed(options).curl, probes: credentials, advisoryProbes: true })
+      expect(advisory.find((c) => c.name === name)).toMatchObject({ ok: false, advisory: true })
+      expect(failed(advisory)).toBe(false)
+    }
+    // The active-grant probe only warns: its stored token expires after about two hours.
+    for (const options of [{ introspectionCode: 401 }, { introspection: { ...grant, allow_unsigned: "no" } }]) {
+      const checks = await smoke({ ...base, ip: "203.0.113.7", curl: probed(options).curl, probes: credentials })
+      expect(checks.at(-1)).toMatchObject({ name: "oauth introspection (active grant)", ok: false, advisory: true })
+      expect(failed(checks)).toBe(false)
+    }
+    // Advisory mode never relaxes the base release checks.
+    const base_ = await smoke({ ...base, ip: "203.0.113.7", curl: origin({ upgrades: false }).curl, advisoryProbes: true })
+    expect(failed(base_)).toBe(true)
+  })
+
+  it("checks every introspection contract field the MCP server consumes", () => {
+    expect(checkIntrospection(grant, 1)).toContain("matches")
+    const { via_app: _via, allow_unsigned: _unsigned, ...required } = grant
+    expect(checkIntrospection(required, 1)).toContain("matches")
+    expect(() => checkIntrospection({ ...grant, exp: 1 }, 2)).toThrow("exp")
+    expect(() => checkIntrospection({ ...grant, space_ids: [7] }, 1)).toThrow("space_ids")
+    expect(() => checkIntrospection({ active: true }, 1)).toThrow("grant_id, client_id, scope, aud, inline_token, inline_user_id")
+  })
+
+  it("reads probe credentials by name, rejects malformed ones before any request, and annotates skips", async () => {
+    expect(probeCredentials({ INLINE_SMOKE_USER_TOKEN: "u", INLINE_SMOKE_MCP_SECRET: "", INLINE_SMOKE_OAUTH_TOKEN: undefined }))
+      .toEqual({ userToken: "u", mcpSecret: undefined, oauthToken: undefined })
+    const o = origin()
+    await expect(smoke({ ...base, ip: "203.0.113.7", curl: o.curl, probes: { mcpSecret: "a\nb" } })).rejects.toThrow("mcpSecret")
+    expect(o.calls).toEqual([])
+    const lines: string[] = []
+    annotate("fly", [{ name: "v1 getMe", ok: true, skipped: true, detail: "skipped: X" }, { name: "v1 upload", ok: false, advisory: true, detail: "HTTP 500" }, { name: "readiness", ok: true, detail: "ok" }], (line) => lines.push(line))
+    expect(lines).toEqual([
+      "::notice title=Smoke probe skipped (fly)::v1 getMe: skipped: X",
+      "::warning title=Smoke probe failed, advisory (fly)::v1 upload: HTTP 500",
+    ])
+  })
+
   it("passes the bot token to the curl process through stdin, never argv", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inline-smoke-curl-"))
     const previous = { PATH: process.env.PATH, INLINE_SMOKE_TEST_ARGS: process.env.INLINE_SMOKE_TEST_ARGS, INLINE_SMOKE_TEST_HEADERS: process.env.INLINE_SMOKE_TEST_HEADERS }
@@ -127,6 +245,10 @@ describe("release smoke", () => {
       expect(args).toContain("@-")
       expect(args).not.toContain("fixture-safe-token")
       expect(await readFile(process.env.INLINE_SMOKE_TEST_HEADERS, "utf8")).toBe("Authorization: Bearer fixture-safe-token\n")
+      expect(await curl(["https://smoke.invalid/oauth/introspect"], { headers: ["x-inline-mcp-secret: fixture-secret"] })).toEqual({ code: 200, body: "{}" })
+      expect(await readFile(process.env.INLINE_SMOKE_TEST_ARGS, "utf8")).not.toContain("fixture-secret")
+      expect(await readFile(process.env.INLINE_SMOKE_TEST_HEADERS, "utf8")).toBe("x-inline-mcp-secret: fixture-secret\n")
+      await expect(curl(["https://smoke.invalid/"], { headers: ["a: b\r\nc: d"] })).rejects.toThrow("Invalid smoke header")
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key]

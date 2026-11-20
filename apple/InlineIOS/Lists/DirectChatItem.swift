@@ -201,11 +201,11 @@ struct DirectChatItem: View {
     case .typing:
       TypingActivityIndicator(color: ThemeManager.shared.accentColor)
     case .uploadingPhoto:
-      UploadActivityIndicator(color: .secondary)
+      SendingActivityIndicator(kind: .photo, color: ThemeManager.shared.accentColor, size: CGSize(width: 18, height: 13.5))
     case .uploadingDocument:
-      UploadActivityIndicator(color: .secondary)
+      SendingActivityIndicator(kind: .file, color: ThemeManager.shared.accentColor, size: CGSize(width: 18, height: 13.5))
     case .uploadingVideo:
-      UploadActivityIndicator(color: .secondary)
+      SendingActivityIndicator(kind: .video, color: ThemeManager.shared.accentColor, size: CGSize(width: 18, height: 13.5))
     case .recordingVoice:
       VoiceRecordingActivityIndicator(
         barWidth: 2.2,
@@ -221,7 +221,7 @@ struct DirectChatItem: View {
 
   private func composeActionForegroundColor(_ action: ApiComposeAction?) -> Color {
     switch action {
-    case .typing, .working, .recordingVoice:
+    case .typing, .working, .recordingVoice, .uploadingPhoto, .uploadingVideo, .uploadingDocument:
       ThemeManager.shared.accentColor
     default:
       .secondary

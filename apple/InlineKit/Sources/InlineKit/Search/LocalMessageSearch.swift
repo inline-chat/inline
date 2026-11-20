@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import GRDB
 import Logger
@@ -337,65 +336,5 @@ public enum LocalMessageSearch {
       let chatId: Int64
       let messageId: Int64
     }
-  }
-}
-
-@MainActor
-public final class LocalMessageSearchViewModel: ObservableObject {
-  @Published public private(set) var results: [LocalMessageSearchResult] = []
-  @Published public private(set) var isSearching = false
-  @Published public private(set) var error: Error?
-
-  private let db: AppDatabase
-  private var searchTask: Task<Void, Never>?
-  private var searchToken = UUID()
-
-  public init(db: AppDatabase) {
-    self.db = db
-  }
-
-  deinit {
-    searchTask?.cancel()
-  }
-
-  public func search(query: String, options: LocalMessageSearchOptions = LocalMessageSearchOptions()) {
-    searchTask?.cancel()
-    searchToken = UUID()
-    let token = searchToken
-
-    guard LocalMessageSearch.isSearchable(query) else {
-      results = []
-      isSearching = false
-      error = nil
-      return
-    }
-
-    isSearching = true
-    error = nil
-
-    searchTask = Task { [db] in
-      do {
-        let results = try await LocalMessageSearch.search(db: db, query: query, options: options)
-        guard !Task.isCancelled else { return }
-        guard searchToken == token else { return }
-        self.results = results
-        isSearching = false
-      } catch {
-        guard !Task.isCancelled else { return }
-        LocalMessageSearch.log.error("Failed local message search", error: error)
-        guard searchToken == token else { return }
-        self.error = error
-        results = []
-        isSearching = false
-      }
-    }
-  }
-
-  public func clear() {
-    searchTask?.cancel()
-    searchToken = UUID()
-    results = []
-    isSearching = false
-    error = nil
   }
 }

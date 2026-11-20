@@ -6,7 +6,7 @@ import Testing
 struct MessageLayoutPlannerTests {
   let metrics = MessageLayoutMetrics()
 
-  @Test("Gold standard: adding a reaction narrows the bubble, drops the time and puts the reaction bottom-left")
+  @Test("Gold standard: adding a reaction narrows the bubble, drops the time to the bottom corner and puts the reaction bottom-left")
   func goldStandard() throws {
     // Wide enough that the inline time costs real width.
     let string = "Sounds good, see you tomorrow"
@@ -27,7 +27,8 @@ struct MessageLayoutPlannerTests {
     #expect(time.minY >= text.maxY)
     #expect(reaction.minY >= text.maxY + metrics.reactionsTopSpacing - 0.5)
     #expect(reaction.minX == text.minX)
-    #expect(abs(reaction.midY - time.midY) <= 1)
+    #expect(abs(time.maxY - reaction.maxY) <= 0.5)
+    #expect(abs(after.bubble.body.maxY - time.maxY - metrics.bubbleInsets.bottom) <= 0.5)
     #expect(abs(time.maxX - (after.bubble.body.maxX - metrics.bubbleInsets.trailing)) <= 0.5)
 
     let transition = MessageLayoutTransition(from: before, to: after)
@@ -89,6 +90,21 @@ struct MessageLayoutPlannerTests {
     #expect(outgoing.bubble.body.maxX == rowWidth - metrics.rowTrailingInset - metrics.bodyEdgeInset)
     #expect(outgoing.bubble.frame.maxX == outgoing.bubble.body.maxX + metrics.tailWidth)
     #expect(tailed.bubble.body.minX == metrics.rowLeadingInset + metrics.bodyEdgeInset)
+  }
+
+  @Test("A footer wider than the bubble wraps inside it instead of widening it past the row")
+  func longFooterWraps() throws {
+    let rowWidth: CGFloat = 390
+    let lane = rowWidth - metrics.rowLeadingInset - metrics.rowTrailingInset
+    var input = Fixtures.message("ok", rowWidth: rowWidth, outgoing: true)
+    // "Sent via Codex · 10:04" at the largest accessibility text size.
+    input.footer.time = Fixtures.text("Sent via Codex · 10:04", font: Fixtures.font(40))
+    let layout = MessageLayoutPlanner.layout(input)
+    #expect(layout.bubble.body.width <= lane * metrics.maximumBubbleWidthFraction + 0.5)
+    #expect(layout.time.lineCount == 2)
+    let time = try #require(layout.frame(.time))
+    #expect(time.maxX <= layout.bubble.body.maxX + 0.5)
+    #expect(time.minX >= layout.bubble.body.minX - 0.5)
   }
 
   @Test("An absolute width cap bounds wide rows, and the default leaves them unbounded")

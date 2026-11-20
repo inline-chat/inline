@@ -3,6 +3,8 @@ import type { InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { FileModel } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
+import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
+import { invalidateUserSettingsCache } from "@in/server/modules/cache/userSettings"
 import { chats, files, messages, users, voices } from "@in/server/db/schema"
 import { editMessage } from "@in/server/functions/messages.editMessage"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
@@ -74,6 +76,28 @@ describe("voice transcription", () => {
     const fullMessage = await MessageModel.getMessage(scenario.message.messageId, scenario.message.chatId)
     expect(fullMessage.text).toBe("hello from voice")
     expect(fullMessage.voice?.id).toBe(scenario.voice.id)
+  })
+
+  test("never sends a voice message whose sender turned transcription off", async () => {
+    const scenario = await createVoiceMessage("voice-transcribe-optout")
+    await UserSettingsModel.updateGeneral(scenario.message.fromId, {
+      privacy: { transcribeVoiceMessages: false },
+    })
+    invalidateUserSettingsCache(scenario.message.fromId)
+    const transcribeVoice = mock().mockResolvedValue("should not be used")
+    const buildContext = mock()
+
+    const result = await transcribeAndEditVoiceMessage(scenario, {
+      transcribeVoice,
+      editText: editMessage,
+      buildContext,
+    })
+
+    expect(result.didEdit).toBe(false)
+    expect(transcribeVoice).not.toHaveBeenCalled()
+    expect(buildContext).not.toHaveBeenCalled()
+    const fullMessage = await MessageModel.getMessage(scenario.message.messageId, scenario.message.chatId)
+    expect(fullMessage.text ?? "").toBe("")
   })
 
   test("passes work chat transcription context to the transcriber", async () => {

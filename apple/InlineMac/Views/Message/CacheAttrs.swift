@@ -11,6 +11,14 @@ class CacheAttrs {
     cache = NSCache<NSString, NSAttributedString>()
     cache.countLimit = 2_000
     cache.totalCostLimit = 32 * 1_024 * 1_024
+    // Entries from the old typography can no longer be hit; free them.
+    NotificationCenter.default.addObserver(
+      forName: ChatTypography.didChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [cache] _ in
+      cache.removeAllObjects()
+    }
   }
 
   func get(key: String) -> NSAttributedString? {
@@ -26,9 +34,11 @@ class CacheAttrs {
     var entitiesHash: Int?
     var renderStyle: MessageRenderStyle
     var styleKey: String
+    /// Text built with an earlier font, size or line height is never reused.
+    var typographyRevision: Int
 
     var stringValue: String {
-      "\(isTranslated ? "T" : "")_\(textCount)_\(textHash)_\(stableId)_\(entitiesHash)_\(renderStyle.rawValue)_\(styleKey)"
+      "\(isTranslated ? "T" : "")_\(textCount)_\(textHash)_\(stableId)_\(entitiesHash)_\(renderStyle.rawValue)_\(styleKey)_t\(typographyRevision)"
     }
   }
 
@@ -47,7 +57,8 @@ class CacheAttrs {
       stableId: message.message.stableId,
       entitiesHash: displayEntities?.hashValue ?? 0,
       renderStyle: renderStyle,
-      styleKey: styleKey
+      styleKey: styleKey,
+      typographyRevision: ChatTypography.current.revision
     )
   }
 

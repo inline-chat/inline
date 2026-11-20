@@ -1,5 +1,7 @@
 import Combine
 import Foundation
+import Network
+import os
 
 public enum AutoDownloadKind: Sendable {
   case media
@@ -79,6 +81,41 @@ public final class AutoDownloadSettingsManager: ObservableObject, Codable, @unch
 public enum AutoDownloadPolicy {
   @MainActor
   public static func shouldDownload(kind: AutoDownloadKind, sizeBytes: Int64?) -> Bool {
-    INUserSettings.current.autoDownload.shouldDownload(kind: kind, sizeBytes: sizeBytes)
+    guard INUserSettings.current.autoDownload.shouldDownload(kind: kind, sizeBytes: sizeBytes) else { return false }
+    // Voice messages are small and expected to play right away; the rest waits for Wi-Fi.
+    if kind != .voice, !AutoDownloadNetwork.allowsCellular, AutoDownloadNetwork.isMetered {
+      return false
+    }
+    return true
   }
+}
+
+/// Whether auto-download may use cellular data on this device. Low Data Mode counts as cellular.
+public enum AutoDownloadNetwork {
+  static let defaultsKey = "autoDownload.allowsCellular"
+
+  public static var allowsCellular: Bool {
+    get { UserDefaults.shared.object(forKey: defaultsKey) as? Bool ?? true }
+    set { UserDefaults.shared.set(newValue, forKey: defaultsKey) }
+  }
+
+  /// True on cellular, a personal hotspot, or with Low Data Mode on.
+  public static var isMetered: Bool { NetworkCostMonitor.shared.isMetered }
+}
+
+final class NetworkCostMonitor: @unchecked Sendable {
+  static let shared = NetworkCostMonitor()
+
+  private let monitor = NWPathMonitor()
+  private let state = OSAllocatedUnfairLock(initialState: false)
+
+  private init() {
+    monitor.pathUpdateHandler = { [state] path in
+      let metered = path.isExpensive || path.isConstrained
+      state.withLock { $0 = metered }
+    }
+    monitor.start(queue: DispatchQueue(label: "chat.inline.network-cost", qos: .utility))
+  }
+
+  var isMetered: Bool { state.withLock { $0 } }
 }

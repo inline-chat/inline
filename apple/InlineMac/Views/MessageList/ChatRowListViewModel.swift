@@ -42,6 +42,24 @@ final class ChatRowListViewModel {
   private var msgIdxById: [Int64: Int] = [:]
   private var rowIdxByMsgId: [Int64: Int] = [:]
   private var rowIdxsByMsgId: [Int64: IndexSet] = [:]
+  /// Photos and videos sent together draw as one row, keyed by the album's oldest item
+  /// (`MessageAlbums`). Every item's stable id maps to that row.
+  private var albumByLead: [Int64: MessageAlbum] = [:]
+  private var leadByMember: [Int64: Int64] = [:]
+
+  /// Whether rows collapse albums (both styles draw them: a grid in bubbles, islands when
+  /// minimal). Off draws one row per message.
+  var groupsAlbums = true {
+    didSet {
+      guard groupsAlbums != oldValue else { return }
+      rebuildRows()
+    }
+  }
+
+  /// An album item drawn in another item's row.
+  func isAlbumMember(_ stableId: Int64) -> Bool {
+    leadByMember[stableId] != nil
+  }
 
   private(set) var showUnreadAfter: Int64?
   /// Text for the `.statusNotice` row. It shows only while the window reaches the newest
@@ -114,6 +132,43 @@ final class ChatRowListViewModel {
   }
 
   func apply(_ update: MessagesProgressiveViewModel.MessagesChangeSet) -> UpdateKind {
+    let albumsBefore = albumByLead
+    return reconcilingAlbums(applyWithoutAlbums(update), albumsBefore: albumsBefore)
+  }
+
+  /// The album row an item draws in: its album when it is one, else nil.
+  func album(forStableId id: Int64) -> MessageAlbum? {
+    albumByLead[leadByMember[id] ?? id]
+  }
+
+  /// Albums change without their rows changing (an item arrives, is acknowledged, is deleted),
+  /// so their rows are reloaded on top of whatever the update did. Rows that no longer match the
+  /// messages (an item turned into an album member, or out of one) rebuild everything.
+  private func reconcilingAlbums(_ kind: UpdateKind, albumsBefore: [Int64: MessageAlbum]) -> UpdateKind {
+    indexAlbums()
+    // Windows without albums (most) skip the check.
+    if albumsBefore.isEmpty, albumByLead.isEmpty { return kind }
+    let expected = makeRows(for: messages)
+    if expected != rows {
+      setRows(expected)
+      return .reloadAll
+    }
+    guard albumsBefore != albumByLead else { return kind }
+    var changed = IndexSet()
+    for lead in Set(albumsBefore.keys).union(albumByLead.keys) where albumsBefore[lead] != albumByLead[lead] {
+      if let row = rowIdxByMsgId[lead] { changed.insert(row) }
+    }
+    // Rows the update inserts already show their album.
+    if case let .insert(inserted) = kind { changed.subtract(inserted) }
+    guard !changed.isEmpty else { return kind }
+    switch kind {
+      case .none: return .reloadRows(changed)
+      case let .reloadRows(rows): return .reloadRows(rows.union(changed))
+      case .insert, .remove, .reloadAll: return .reloadAll
+    }
+  }
+
+  private func applyWithoutAlbums(_ update: MessagesProgressiveViewModel.MessagesChangeSet) -> UpdateKind {
     // Raw progressive indexes do not map through a collapse boundary. Keep the established
     // incremental path unchanged for normal chats and rebuild only the collapsed projection.
     if collapsedMaxId != nil {
@@ -138,9 +193,10 @@ final class ChatRowListViewModel {
   }
 
   func syncFromViewModelAfterManualMutation() -> UpdateKind {
+    let albumsBefore = albumByLead
     let oldMessages = messages
     messages = visibleMessages
-    return applyMutationTransition(from: oldMessages, to: messages)
+    return reconcilingAlbums(applyMutationTransition(from: oldMessages, to: messages), albumsBefore: albumsBefore)
   }
 
   @discardableResult
@@ -491,7 +547,22 @@ final class ChatRowListViewModel {
 
   private func reindex() {
     indexMsgs()
+    indexAlbums()
     indexRows()
+  }
+
+  private func indexAlbums() {
+    var albums: [Int64: MessageAlbum] = [:]
+    var leads: [Int64: Int64] = [:]
+    let window = groupsAlbums && messages.contains { $0.message.groupedId != nil } ? messages : []
+    for case let .album(album) in MessageAlbums.rows(in: window) {
+      albums[album.lead.id] = album
+      for item in album.items.dropFirst() {
+        leads[item.id] = album.lead.id
+      }
+    }
+    albumByLead = albums
+    leadByMember = leads
   }
 
   private func indexMsgs() {
@@ -524,6 +595,12 @@ final class ChatRowListViewModel {
         case .daySeparator, .unreadSeparator, .repliesSeparator, .collapsedHistory, .statusNotice:
           break
       }
+    }
+
+    // An album's items live in its oldest item's row.
+    for (member, lead) in leadByMember {
+      if let row = primaryIdxByMsgId[lead] { primaryIdxByMsgId[member] = row }
+      if let rows = allIdxsByMsgId[lead] { allIdxsByMsgId[member] = rows }
     }
 
     rowIdxByMsgId = primaryIdxByMsgId
@@ -615,7 +692,8 @@ final class ChatRowListViewModel {
       unreadLineMessageId: resolveUnreadLineMessageId(in: messages),
       showsCollapsedHistory: collapsedMaxId != nil,
       parentMessageStableId: threadAnchor?.id,
-      showsStatusNotice: statusNotice != nil && !progressiveViewModel.canLoadNewerFromLocal
+      showsStatusNotice: statusNotice != nil && !progressiveViewModel.canLoadNewerFromLocal,
+      groupsAlbums: groupsAlbums
     )
   }
 
@@ -629,7 +707,8 @@ final class ChatRowListViewModel {
     unreadLineMessageId: Int64?,
     showsCollapsedHistory: Bool,
     parentMessageStableId: Int64?,
-    showsStatusNotice: Bool
+    showsStatusNotice: Bool,
+    groupsAlbums: Bool
   ) -> [Row] {
     var out: [Row] = []
     out.reserveCapacity(messages.count + 9)
@@ -645,10 +724,13 @@ final class ChatRowListViewModel {
 
     var prevDayStart: Date?
 
-    for msg in messages {
+    // An album (photos and videos sent together) is one row, keyed by its oldest item.
+    let runs: [Range<Int>] = groupsAlbums ? MessageAlbums.runs(in: messages) : messages.indices.map { $0 ..< $0 + 1 }
+    for run in runs {
+      let msg = messages[run.lowerBound]
       // The unread line goes above the date that starts with the first unread message, so
-      // opening with the line at the top still shows that date.
-      if let unreadLineMessageId, msg.message.messageId == unreadLineMessageId {
+      // opening with the line at the top still shows that date. An album is never split by it.
+      if let unreadLineMessageId, messages[run].contains(where: { $0.message.messageId == unreadLineMessageId }) {
         out.append(.unreadSeparator)
       }
 

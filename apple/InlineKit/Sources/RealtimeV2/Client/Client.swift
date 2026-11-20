@@ -385,7 +385,9 @@ actor ProtocolSession: ProtocolSessionType {
     do {
       try await transport.send(msg)
     } catch {
-      log.error("Failed to send ping: \(error)")
+      // The transport can drop between the open check and this send; the ping
+      // timeout already handles liveness.
+      log.warning("Failed to send ping: \(error)")
     }
   }
 }

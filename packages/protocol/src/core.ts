@@ -10966,6 +10966,13 @@ export interface PrivacySettings {
      * @generated from protobuf field: optional PrivacyRule focus_status = 4;
      */
     focusStatus?: PrivacyRule;
+    /**
+     * If false, voice messages this user sends are not sent to a transcription
+     * service. Absent means true (the default).
+     *
+     * @generated from protobuf field: optional bool transcribe_voice_messages = 5;
+     */
+    transcribeVoiceMessages?: boolean;
 }
 /**
  * Who can see one piece of the user's information. The user always sees their own.
@@ -12220,6 +12227,16 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional InputMessageVia via = 16;
      */
     via?: InputMessageVia;
+    /**
+     * Album: photos and videos sent together share one sender-chosen non-zero
+     * id, sent as consecutive messages in order. Stored as Message.grouped_id.
+     * Requires photo, video or document media. Clients draw consecutive messages
+     * from one sender with the same id as one grid; older clients show them as
+     * separate messages.
+     *
+     * @generated from protobuf field: optional int64 grouped_id = 17;
+     */
+    groupedId?: bigint;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -12732,9 +12749,10 @@ export interface SearchMessagesInput {
     filter?: SearchMessagesFilter;
     /**
      * Count every matching message instead of returning a page: the result has
-     * total_count set and no messages. Scans the whole chat, so clients send it
-     * alongside the first page request rather than waiting on it. Requires
-     * queries; limit and offset_id are ignored.
+     * total_count set and no messages. Clients send it alongside the first page
+     * request rather than waiting on it. Requires queries (a full scan), or a
+     * photo, video, photo_video, document or voice memo filter on its own (an
+     * indexed count); links still need queries. limit and offset_id are ignored.
      *
      * @generated from protobuf field: optional bool count_only = 6;
      */
@@ -46219,7 +46237,8 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
             { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule },
-            { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule }
+            { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule },
+            { no: 5, name: "transcribe_voice_messages", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<PrivacySettings>): PrivacySettings {
@@ -46245,6 +46264,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
                 case /* optional PrivacyRule focus_status */ 4:
                     message.focusStatus = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.focusStatus);
                     break;
+                case /* optional bool transcribe_voice_messages */ 5:
+                    message.transcribeVoiceMessages = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -46269,6 +46291,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
         /* optional PrivacyRule focus_status = 4; */
         if (message.focusStatus)
             PrivacyRule.internalBinaryWrite(message.focusStatus, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool transcribe_voice_messages = 5; */
+        if (message.transcribeVoiceMessages !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.transcribeVoiceMessages);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -49538,7 +49563,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
             { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 16, name: "via", kind: "message", T: () => InputMessageVia }
+            { no: 16, name: "via", kind: "message", T: () => InputMessageVia },
+            { no: 17, name: "grouped_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -49606,6 +49632,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional InputMessageVia via */ 16:
                     message.via = InputMessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
                     break;
+                case /* optional int64 grouped_id */ 17:
+                    message.groupedId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -49672,6 +49701,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional InputMessageVia via = 16; */
         if (message.via)
             InputMessageVia.internalBinaryWrite(message.via, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 grouped_id = 17; */
+        if (message.groupedId !== undefined)
+            writer.tag(17, WireType.Varint).int64(message.groupedId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

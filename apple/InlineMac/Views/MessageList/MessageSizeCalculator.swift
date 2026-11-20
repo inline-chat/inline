@@ -27,12 +27,10 @@ class MessageSizeCalculator {
   private let emptyFallback = " "
 
   private let log = Log.scoped("MessageSizeCalculator", enableTracing: false)
-  private let messageTextMeasurer = TextMeasurer(
-    font: MessageTextConfiguration.font,
-    extraWidth: MessageSizeCalculator.extraSafeWidth,
-    extraHeight: 1
-  )
+  private var messageTextMeasurer = MessageSizeCalculator.makeTextMeasurer(ChatTypography.current)
   private var heightForSingleLine: CGFloat?
+  /// Typography every cached size was measured with; see `syncTypography()`.
+  private var measuredTypographyRevision = ChatTypography.current.revision
 
   static let safeAreaWidth: CGFloat = Theme.messageRowSafeAreaInset
   static let extraSafeWidth = 0.0
@@ -54,7 +52,7 @@ class MessageSizeCalculator {
   static let minimalInlineTimeSpacing: CGFloat = 6
   static let minimalFollowUpTimeTopOffset: CGFloat = 1
   static let minimalInlineTimeVerticalOffset: CGFloat = 1
-  static let minimalTextFontSize: Double = Double(ChatTypography.current.pointSize)
+  static var minimalTextFontSize: Double { Double(ChatTypography.current.pointSize) }
   static let minimalMinTextWidth: CGFloat = 36
   static let minimalTextOnlyMinHeight: CGFloat = 22
   static let minimalFollowUpMinHeight: CGFloat = 22
@@ -83,6 +81,9 @@ class MessageSizeCalculator {
   static let bubbleMessageActionRowHeight: CGFloat = 28
   static let minimalMessageActionRowHeight: CGFloat = 24
   static let replyThreadSummaryHeight: CGFloat = ReplyThreadSummaryView.height(hasTitle: false)
+  /// The band of the bubble's color around photos, videos and albums in bubbles.
+  static let mediaFrameInset: CGFloat = 1
+
   private func hasBubbleColor(
     style: RenderStyle,
     emojiMessage: Bool,
@@ -165,16 +166,25 @@ class MessageSizeCalculator {
   }
 
   static func minimalTextFontSize(for emojiInfo: (count: Int, isAllEmojis: Bool)) -> Double {
-    switch emojiInfo {
-    case let (count, true) where count == 1:
-      Double(ChatTypography.current.singleEmojiPointSize)
-    case let (count, true) where count <= 3:
-      Double(ChatTypography.current.threeEmojisPointSize)
-    case (_, true):
-      Double(ChatTypography.current.manyEmojisPointSize)
-    default:
-      Self.minimalTextFontSize
-    }
+    Double(MessageTextTypography.fontSize(emojiInfo: emojiInfo))
+  }
+
+  private static func makeTextMeasurer(_ typography: ChatTypography) -> TextMeasurer {
+    TextMeasurer(
+      font: typography.font,
+      extraWidth: MessageSizeCalculator.extraSafeWidth,
+      extraHeight: 1
+    )
+  }
+
+  /// Drops every size measured with an earlier typography. Each public entry point
+  /// calls this, so sizes stay correct even before the change notification lands.
+  private func syncTypography() {
+    let typography = ChatTypography.current
+    guard typography.revision != measuredTypographyRevision else { return }
+    measuredTypographyRevision = typography.revision
+    messageTextMeasurer = Self.makeTextMeasurer(typography)
+    invalidateCache()
   }
 
   private func horizontalBubbleInset(for style: RenderStyle) -> CGFloat {
@@ -258,6 +268,7 @@ class MessageSizeCalculator {
   }
 
   func getTextWidthIfSingleLine(_ fullMessage: FullMessage, availableWidth: CGFloat) -> CGFloat? {
+    syncTypography()
     // Bypass single line cache for media messages (unless when we have a max width and available width > maxWidth so we
     // know we don't need to recalc. since this function is used in message list to bypass unneccessary calcs.
     guard !fullMessage.hasMedia else { return nil }
@@ -311,6 +322,8 @@ class MessageSizeCalculator {
 
     /// photo is always above text
     var photo: LayoutPlan?
+    /// For an album laid out as one photo: the width its grid was laid out at.
+    var albumAvailableWidth: CGFloat?
 
     /// video is always above text, mutually exclusive with other media types
     var video: LayoutPlan?
@@ -756,6 +769,7 @@ class MessageSizeCalculator {
     with _: MessageViewInputProps,
     tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
+    syncTypography()
     let (size, textSize, plan) = ServiceMessageRowLayout.calculateSize(
       for: message,
       tableWidth: width
@@ -770,6 +784,7 @@ class MessageSizeCalculator {
     tableWidth width: CGFloat,
     richContentRendererEnabled: Bool
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
+    syncTypography()
     #if DEBUG
     let start = CFAbsoluteTimeGetCurrent()
     #endif
@@ -777,7 +792,9 @@ class MessageSizeCalculator {
     let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
-    let hasMedia = message.hasMedia
+    // An album (`props.album`) is laid out as one photo the size of its grid.
+    let hasMedia = message.hasMedia || props.album != nil
+    var albumAvailableWidth: CGFloat?
     let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
@@ -821,38 +838,25 @@ class MessageSizeCalculator {
       isPngPhotoWithoutCaption: isPngPhotoWithoutCaption
     )
     let usesOutgoingBubbleStyle = isOutgoing && hasBubbleColor
+    // Media sit inside a thin band of the bubble's color (as on iOS), when the bubble has one,
+    // so they are sized for the width less that band.
+    let mediaInset: CGFloat = hasBubbleColor ? Self.mediaFrameInset : 0
     let richTextStyleKey = richTextStyleKey(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
     let bubbleContentHorizontalInset = horizontalBubbleInset(for: .bubble)
 
     // Font size
-    let fontSize: Double = switch emojiInfo {
-      case let (count, true) where count == 1:
-        Double(ChatTypography.current.singleEmojiPointSize)
-      case let (count, true) where count <= 3:
-        Double(ChatTypography.current.threeEmojisPointSize)
-      case (_, true):
-        Double(ChatTypography.current.manyEmojisPointSize)
-      default:
-        Double(ChatTypography.current.pointSize)
-    }
-
-    // Font - use this for measuring text
-    let font = ChatTypography.current.font.withSize(fontSize)
+    let fontSize = Double(MessageTextTypography.fontSize(emojiInfo: emojiInfo))
 
     // Attributed String
     let attributedString: NSAttributedString
     if let cached = CacheAttrs.shared.get(message: message, renderStyle: .bubble, styleKey: richTextStyleKey) {
       attributedString = cached
     } else {
-      let processed = ProcessEntities.toAttributedString(
+      let processed = MessageTextTypography.attributedText(
         text: text,
         entities: entities,
-        configuration: .init(
-          font: font,
-          boldWeight: .semibold,
-          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
-          palette: richTextPalette(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
-        )
+        fontSize: fontSize,
+        palette: richTextPalette(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
       )
       // cache processed string
       CacheAttrs.shared.set(message: message, renderStyle: .bubble, styleKey: richTextStyleKey, value: processed)
@@ -894,11 +898,14 @@ class MessageSizeCalculator {
         }
       }
 
-      if message.message.isSticker == true {
+      if let album = props.album {
+        albumAvailableWidth = min(parentAvailableWidth - 2 * mediaInset, maxMediaSide)
+        photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: albumAvailableWidth!).size
+      } else if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: width,
           height: height,
-          parentAvailableWidth: parentAvailableWidth,
+          parentAvailableWidth: parentAvailableWidth - 2 * mediaInset,
           hasCaption: hasText,
           maxSide: Self.stickerMaxSide
         )
@@ -906,7 +913,7 @@ class MessageSizeCalculator {
         photoSize = calculatePhotoSize(
           width: width,
           height: height,
-          parentAvailableWidth: parentAvailableWidth,
+          parentAvailableWidth: parentAvailableWidth - 2 * mediaInset,
           hasCaption: hasText,
           maxSide: maxMediaSide
         )
@@ -914,7 +921,7 @@ class MessageSizeCalculator {
         videoSize = calculatePhotoSize(
           width: width,
           height: height,
-          parentAvailableWidth: parentAvailableWidth,
+          parentAvailableWidth: parentAvailableWidth - 2 * mediaInset,
           hasCaption: hasText,
           maxSide: maxMediaSide
         )
@@ -965,9 +972,9 @@ class MessageSizeCalculator {
     // to ensure text doesn't overflow the bubble bounds
     if hasMedia, let photoSize {
       // Photos strictly constrain text width
-      availableWidth = photoSize.width - (bubbleContentHorizontalInset * 2)
+      availableWidth = photoSize.width + 2 * mediaInset - (bubbleContentHorizontalInset * 2)
     } else if hasMedia, let videoSize {
-      availableWidth = videoSize.width - (bubbleContentHorizontalInset * 2)
+      availableWidth = videoSize.width + 2 * mediaInset - (bubbleContentHorizontalInset * 2)
     } else if hasDocument {
       // Documents don't restrict text width like photos - text can use full parent width
       availableWidth = parentAvailableWidth - (bubbleContentHorizontalInset * 2)
@@ -1057,7 +1064,7 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      let textSize_ = calculateSizeForAttributedString(attributedString, width: availableWidth, message: message)
+      let textSize_ = calculateSizeForAttributedString(attributedString, width: availableWidth, isRtl: props.isRtl, message: message)
       textSize = textSize_
 
       // Cache as single line if height is equal to single line height
@@ -1240,15 +1247,19 @@ class MessageSizeCalculator {
 
     // MARK: - Photo
 
+    func framedMediaSpacing() -> NSEdgeInsets {
+      .init(
+        top: forwardHeaderPlan == nil && replyPlan == nil ? mediaInset : 0,
+        left: mediaInset,
+        bottom: hasText ? Theme.messageTextAndPhotoSpacing : mediaInset,
+        right: mediaInset
+      )
+    }
+
     if let photoSize {
       photoPlan = LayoutPlan(size: .zero, spacing: .zero)
       photoPlan!.size = photoSize
-
-      if hasText {
-        photoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
-      } else {
-        photoPlan!.spacing = .zero
-      }
+      photoPlan!.spacing = framedMediaSpacing()
     }
 
     // MARK: - Video
@@ -1256,12 +1267,7 @@ class MessageSizeCalculator {
     if let videoSize {
       videoPlan = LayoutPlan(size: .zero, spacing: .zero)
       videoPlan!.size = videoSize
-
-      if hasText {
-        videoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
-      } else {
-        videoPlan!.spacing = .zero
-      }
+      videoPlan!.spacing = framedMediaSpacing()
     }
 
     // MARK: - Document
@@ -1445,7 +1451,7 @@ class MessageSizeCalculator {
       let timeWidth = timePlan!.size.width + timePlan!.spacing.horizontalTotal
       let totalWidth = textWidth + timeWidth
 
-      let mediaWidth = photoPlan?.size.width ?? videoPlan?.size.width ?? 0
+      let mediaWidth = (photoPlan?.size.width ?? videoPlan?.size.width ?? 0) + 2 * mediaInset
       if totalWidth > mediaWidth {
         isSingleLine = false
       }
@@ -1511,14 +1517,12 @@ class MessageSizeCalculator {
       bubbleWidth = max(bubbleWidth, replyPlan.size.width + replyPlan.spacing.horizontalTotal)
     }
     if let photoPlan {
-      bubbleHeight += photoPlan.size.height
-      bubbleHeight += photoPlan.spacing.bottom
-      bubbleWidth = photoPlan.size.width
+      bubbleHeight += photoPlan.spacing.top + photoPlan.size.height + photoPlan.spacing.bottom
+      bubbleWidth = photoPlan.size.width + photoPlan.spacing.left + photoPlan.spacing.right
     }
     if let videoPlan {
-      bubbleHeight += videoPlan.size.height
-      bubbleHeight += videoPlan.spacing.bottom
-      bubbleWidth = videoPlan.size.width
+      bubbleHeight += videoPlan.spacing.top + videoPlan.size.height + videoPlan.spacing.bottom
+      bubbleWidth = videoPlan.size.width + videoPlan.spacing.left + videoPlan.spacing.right
     }
     if let documentPlan {
       bubbleHeight += documentPlan.size.height
@@ -1701,6 +1705,7 @@ class MessageSizeCalculator {
       text: textPlan,
       richBlockContent: richBlockPlan,
       photo: photoPlan,
+      albumAvailableWidth: albumAvailableWidth,
       video: videoPlan,
       document: documentPlan,
       attachmentItems: attachmentItemsPlans,
@@ -1749,10 +1754,13 @@ class MessageSizeCalculator {
     tableWidth width: CGFloat,
     richContentRendererEnabled: Bool
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
+    syncTypography()
     let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
-    let hasMedia = message.hasMedia
+    // An album (`props.album`) is laid out as one photo the size of its grid.
+    let hasMedia = message.hasMedia || props.album != nil
+    var albumAvailableWidth: CGFloat?
     let hasVoice = message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
@@ -1783,7 +1791,6 @@ class MessageSizeCalculator {
 
     // Font size
     let fontSize = Self.minimalTextFontSize(for: emojiInfo)
-    let font = ChatTypography.current.font.withSize(fontSize)
     let usesOutgoingBubbleStyle = false
     let richTextStyleKey = richTextStyleKey(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
 
@@ -1791,15 +1798,11 @@ class MessageSizeCalculator {
     if let cached = CacheAttrs.shared.get(message: message, renderStyle: .minimal, styleKey: richTextStyleKey) {
       attributedString = cached
     } else {
-      let processed = ProcessEntities.toAttributedString(
+      let processed = MessageTextTypography.attributedText(
         text: text,
         entities: entities,
-        configuration: .init(
-          font: font,
-          boldWeight: .semibold,
-          monospaceBaseFont: MessageTextConfiguration.monospaceBaseFont,
-          palette: richTextPalette(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
-        )
+        fontSize: fontSize,
+        palette: richTextPalette(for: .minimal, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle)
       )
       CacheAttrs.shared.set(message: message, renderStyle: .minimal, styleKey: richTextStyleKey, value: processed)
       attributedString = processed
@@ -1867,7 +1870,11 @@ class MessageSizeCalculator {
         }
       }
 
-      if message.message.isSticker == true {
+      if let album = props.album {
+        // Islands may run wider than one photo: the whole line, wrapping into a second.
+        albumAvailableWidth = parentAvailableWidth
+        photoSize = MessageAlbumGridView.mosaic(for: album, availableWidth: parentAvailableWidth, style: .islands).size
+      } else if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: mediaIntrinsicWidth,
           height: mediaIntrinsicHeight,
@@ -1934,7 +1941,7 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      textSize = calculateSizeForAttributedString(attributedString, width: textAvailableWidth, message: message)
+      textSize = calculateSizeForAttributedString(attributedString, width: textAvailableWidth, isRtl: props.isRtl, message: message)
     }
 
     let measuredTextHeight = textSize?.height ?? 0
@@ -2326,6 +2333,7 @@ class MessageSizeCalculator {
       text: textPlan,
       richBlockContent: richBlockPlan,
       photo: photoPlan,
+      albumAvailableWidth: albumAvailableWidth,
       video: videoPlan,
       document: documentPlan,
       attachmentItems: attachmentItemsPlans,
@@ -2364,6 +2372,7 @@ class MessageSizeCalculator {
   }
 
   func cachedSize(messageStableId: Int64) -> CGSize? {
+    syncTypography()
     guard let size = lastHeightForRow.object(forKey: NSString(string: "\(messageStableId)")) as? NSSize
     else { return nil }
     return size
@@ -2373,9 +2382,11 @@ class MessageSizeCalculator {
     textHeightCache.removeAllObjects()
     minTextWidthForSingleLine.removeAllObjects()
     lastHeightForRow.removeAllObjects()
+    heightForSingleLine = nil
   }
 
   func heightForSingleLineText() -> CGFloat {
+    syncTypography()
     if let height = heightForSingleLine {
       return height
     } else {
@@ -2433,9 +2444,17 @@ class MessageSizeCalculator {
   private func calculateSizeForAttributedString(
     _ attributedString: NSAttributedString,
     width: CGFloat,
+    isRtl: Bool,
     message _: FullMessage? = nil
   ) -> NSSize {
-    let size = messageTextMeasurer.measure(attributedString, width: width)
+    // The Core Text renderer is measured with the layout it then draws.
+    let size = CoreTextMessageText.measuredSize(
+      attributedString,
+      isRtl: isRtl,
+      width: width,
+      extraWidth: Self.extraSafeWidth
+    )
+      ?? messageTextMeasurer.measure(attributedString, width: width)
 
     #if DEBUG
     log.trace("calculateSizeForText \(attributedString.string) width \(width) resulting in size \(size)")
@@ -2499,8 +2518,7 @@ class MessageSizeCalculator {
 }
 
 enum MessageTextConfiguration {
-  static let font = ChatTypography.current.font
-  static let monospaceBaseFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+  static var font: NSFont { ChatTypography.current.font }
   static let lineFragmentPadding = Theme.messageTextLineFragmentPadding
   static let containerInset = Theme.messageTextContainerInset
   static let useTextKit2ViewportWorkarounds: Bool = {

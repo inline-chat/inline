@@ -958,6 +958,7 @@ private struct ChatToolbarObservedVisibilityMenu: View {
 }
 
 private struct ChatToolbarMoreMenu: View {
+  @AppStorage(DeveloperMode.key) private var developerMode = false
   let peer: Peer
   let chat: Chat?
   let dialog: Dialog?
@@ -1044,6 +1045,19 @@ private struct ChatToolbarMoreMenu: View {
         copyDeepLink()
       }
       .disabled(chat?.id == nil)
+
+      if developerMode {
+        if let chatId = chat?.id {
+          Button("Copy Chat ID", systemImage: "number") {
+            DeveloperIDs.copy(chatId, label: "Chat ID")
+          }
+        }
+        if case let .user(userId) = peer {
+          Button("Copy User ID", systemImage: "number") {
+            DeveloperIDs.copy(userId, label: "User ID")
+          }
+        }
+      }
 
       if peer.isThread {
         Button("Copy as Markdown", systemImage: "doc.on.doc") {

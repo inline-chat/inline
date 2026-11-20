@@ -190,6 +190,13 @@ final class ComposePlusGlassButton: UIVisualEffectView {
   }
 }
 
+/// The 32 pt send circle, with the same enlarged touch target as `ComposeVoiceButton` that shares its slot.
+final class ComposeSendButton: UIButton {
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    bounds.insetBy(dx: -8, dy: -8).contains(point)
+  }
+}
+
 extension ComposeView {
   func makeTextView() -> ComposeTextView {
     let view = ComposeTextView(composeView: self)
@@ -199,7 +206,7 @@ extension ComposeView {
   }
 
   func makeSendButton() -> UIButton {
-    let button = UIButton()
+    let button = ComposeSendButton()
     button.translatesAutoresizingMaskIntoConstraints = false
     button.frame = CGRect(origin: .zero, size: buttonSize)
 

@@ -15,12 +15,22 @@ export type DialogFolderChange =
   | { oneofKind: undefined }
 
 export async function encodeFolderDialogs(tx: Transaction, rows: DbDialog[]): Promise<Dialog[]> {
-  const result: Dialog[] = []
+  // One unread-count query per user instead of one per dialog; folder moves and
+  // deletes pass every child dialog through here.
+  const chatIdsByUser = new Map<number, number[]>()
   for (const dialog of rows) {
-    const unreadCount = await DialogsModel.getUnreadCount(dialog.chatId, dialog.userId, tx)
-    result.push(Encoders.dialog(dialog, { unreadCount }))
+    const chatIds = chatIdsByUser.get(dialog.userId)
+    if (chatIds) chatIds.push(dialog.chatId)
+    else chatIdsByUser.set(dialog.userId, [dialog.chatId])
   }
-  return result
+  const unreadByKey = new Map<string, number>()
+  for (const [userId, chatIds] of chatIdsByUser) {
+    const counts = await DialogsModel.getBatchUnreadCounts({ userId, chatIds, tx })
+    for (const { chatId, unreadCount } of counts) unreadByKey.set(`${userId}:${chatId}`, unreadCount)
+  }
+  return rows.map((dialog) =>
+    Encoders.dialog(dialog, { unreadCount: unreadByKey.get(`${dialog.userId}:${dialog.chatId}`) ?? 0 }),
+  )
 }
 
 export async function enqueueDialogFolderUpdate(input: {

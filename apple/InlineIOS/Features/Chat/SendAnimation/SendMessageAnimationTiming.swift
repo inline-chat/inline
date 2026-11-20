@@ -1,12 +1,27 @@
 import UIKit
 
 enum SendMessageAnimationTiming {
+  /// Telegram's text send transition (`ChatMessageTransitionNode.AnimationParameters.bezier`): 0.3 s,
+  /// the bubble rising on a slow-start curve that the list scrolls on too, and settling sideways on a
+  /// fast ease-out.
   static let duration: TimeInterval = 0.3
 
-  static let verticalControlPoint1 = CGPoint(x: 0.215, y: 0.61)
-  static let verticalControlPoint2 = CGPoint(x: 0.355, y: 1.0)
-  static let horizontalControlPoint1 = CGPoint(x: 0.215, y: 0.61)
-  static let horizontalControlPoint2 = CGPoint(x: 0.355, y: 1.0)
+  static let verticalControlPoint1 = CGPoint(x: 0.19919472913616398, y: 0.010644531250000006)
+  static let verticalControlPoint2 = CGPoint(x: 0.27920937042459737, y: 0.91025390625)
+  static let horizontalControlPoint1 = CGPoint(x: 0.23, y: 1.0)
+  static let horizontalControlPoint2 = CGPoint(x: 0.32, y: 1.0)
+
+  /// The bubble's background fades in over the composer's field, as Telegram's does.
+  static let backgroundFadeDuration: TimeInterval = 0.1
+
+  static var horizontalMediaTimingFunction: CAMediaTimingFunction {
+    CAMediaTimingFunction(
+      controlPoints: Float(horizontalControlPoint1.x),
+      Float(horizontalControlPoint1.y),
+      Float(horizontalControlPoint2.x),
+      Float(horizontalControlPoint2.y)
+    )
+  }
 
   static var verticalTimingParameters: UICubicTimingParameters {
     UICubicTimingParameters(

@@ -4,10 +4,18 @@ import { getSignedUrl } from "@in/server/modules/files/path"
 import type { DbFullVoice } from "@in/server/db/models/files"
 import { Log } from "@in/server/utils/log"
 import { resolveVoiceMimeType, type VoiceMimeType } from "@in/server/modules/files/voiceMime"
+import { concurrencyLimit } from "@in/server/utils/concurrencyLimit"
 
 const log = new Log("modules/voiceTranscription/openAI")
 export const voiceTranscriptionModel = "gpt-transcribe"
 const fetchTimeoutMs = 30_000
+// Stored voice messages are detached work that the deploy drain waits for:
+// one bounded attempt plus a single retry, a few at a time.
+export const voiceMessageTranscriptionRequestOptions = { timeout: 60_000, maxRetries: 1 } as const
+export const maxConcurrentVoiceTranscriptions = 4
+// Matches the compose dictation cap; longer recordings stay untranscribed.
+export const maxVoiceTranscriptionDurationSeconds = 600
+const voiceTranscriptionSlot = concurrencyLimit(maxConcurrentVoiceTranscriptions)
 
 export type VoiceTranscriptionOptions = {
   signal?: AbortSignal
@@ -27,6 +35,19 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
     return undefined
   }
 
+  if (voice.duration !== null && voice.duration > maxVoiceTranscriptionDurationSeconds) {
+    log.info("Skipping voice transcription: voice is longer than the transcription cap", {
+      voiceId: voice.id,
+      fileId: voice.fileId,
+      duration: voice.duration,
+    })
+    return undefined
+  }
+
+  return voiceTranscriptionSlot(() => transcribeStoredVoice(voice, options))
+}
+
+async function transcribeStoredVoice(voice: DbFullVoice, options?: VoiceTranscriptionOptions) {
   const file = await fetchVoiceFile(voice)
   if (!file) {
     return undefined
@@ -46,7 +67,7 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
     languageHintCount: context.languageHintCount,
   })
 
-  const text = await transcribeAudioFileWithOpenAI(file, options)
+  const text = await requestTranscription(file, options, voiceMessageTranscriptionRequestOptions)
   if (!text) {
     log.warn("OpenAI voice transcription returned empty text", {
       voiceId: voice.id,
@@ -70,12 +91,17 @@ export const transcribeVoiceWithOpenAI: VoiceTranscriber = async (voice, options
 
 /** Shared GPT provider for stored voice messages and transient compose dictation. */
 export async function transcribeAudioFileWithOpenAI(file: File, options?: VoiceTranscriptionOptions) {
+  return requestTranscription(file, options, options?.signal ? { signal: options.signal, maxRetries: 0 } : undefined)
+}
+
+async function requestTranscription(
+  file: File,
+  options: VoiceTranscriptionOptions | undefined,
+  requestOptions: { signal?: AbortSignal; timeout?: number; maxRetries?: number } | undefined,
+) {
   if (!openaiClient) return undefined
   const { request } = buildGptTranscribeRequest(file, options)
-  const response = await openaiClient.audio.transcriptions.create(
-    request,
-    options?.signal ? { signal: options.signal, maxRetries: 0 } : undefined,
-  )
+  const response = await openaiClient.audio.transcriptions.create(request, requestOptions)
   return cleanTranscript(response.text)
 }
 

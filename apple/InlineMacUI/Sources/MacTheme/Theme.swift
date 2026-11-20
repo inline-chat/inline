@@ -397,7 +397,15 @@ public enum Theme {
   public static let messageGroupSpacing: CGFloat = 8
   public static let messageListTopInset: CGFloat = 14
   public static let messageListBottomInset: CGFloat = 10
-  public static let embeddedMessageHeight: CGFloat = 40.0
+  /// A reply preview: padding and the sender line, plus one line of message text
+  /// at the chat size (40 pt at the default 13 pt).
+  public static var embeddedMessageHeight: CGFloat {
+    embeddedMessageChromeHeight + ChatTypography.naturalLineHeight(of: ChatTypography.current.font)
+  }
+
+  public static let embeddedMessageChromeHeight: CGFloat = 24
+  /// Pinned messages sit in the chat header, which keeps a fixed height.
+  public static let pinnedMessageHeight: CGFloat = 40
   public static let documentViewHeight: CGFloat = 36.0
   public static let documentViewWidth: CGFloat = 200.0
   public static let voiceMessageViewHeight: CGFloat = 44.0

@@ -233,6 +233,8 @@ function createInlineTypingCallbacks(params: CreateInlineTypingCallbacksParams):
       clearTimers()
       await fireStart()
       if (closed) return
+      // An overlapping onReplyStart may have armed timers while this call awaited.
+      clearTimers()
       keepaliveTimer = setInterval(() => {
         void fireStart()
       }, keepaliveIntervalMs)
@@ -254,11 +256,13 @@ export async function createChannelReplyPipelineCompat(params: {
   accountId?: string
   typing?: CreateInlineTypingCallbacksParams
   typingCallbacks?: InlineTypingCallbacks
+  onFallback?: (err: unknown) => void
 }): Promise<InlineChannelReplyPipeline> {
   try {
     const sdk = await import("openclaw/plugin-sdk/channel-outbound")
     return sdk.createChannelMessageReplyPipeline(params as never) as InlineChannelReplyPipeline
-  } catch {
+  } catch (err) {
+    params.onFallback?.(err)
     return {
       onModelSelected: () => {},
       ...(params.typingCallbacks

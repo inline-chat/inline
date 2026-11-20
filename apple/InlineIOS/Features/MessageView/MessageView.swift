@@ -28,7 +28,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   private(set) var blockViews: [String: MessageBlockHostView] = [:]
   private var acknowledgementView: MessageAcknowledgementView?
   private var uploadProgressView: PhotoUploadProgressView?
-  private var avatarView: UserAvatarLayerView?
+  private(set) var avatarView: UserAvatarLayerView?
   private lazy var textTap = UITapGestureRecognizer(target: self, action: #selector(handleTextTap(_:)))
   private lazy var bubbleDoubleTap: UITapGestureRecognizer = {
     let gesture = UITapGestureRecognizer(target: self, action: #selector(handleBubbleDoubleTap))
@@ -41,6 +41,18 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   var onReactionsMenu: ((FullMessage) -> Void)?
   var onAvatarTap: (() -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
+
+  /// The album grid this view draws, if its message is an album.
+  var albumView: MessageAlbumView? {
+    blockViews.values.lazy.compactMap { $0.contentView as? MessageAlbumView }.first
+  }
+
+  /// The album item under `point` (in this view's coordinates): actions aimed at one photo
+  /// (reply, save, copy) go to it. Nil off the grid or for a message that isn't an album.
+  func albumItem(at point: CGPoint) -> FullMessage? {
+    guard let albumView else { return nil }
+    return albumView.item(at: convert(point, to: albumView))
+  }
   /// Local state that changes the layout, such as an opened disclosure, changed; the host
   /// replans the row.
   var onContentStateChange: ((FullMessage) -> Void)?
@@ -51,7 +63,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// line or node asks once.
   private var requestedRevealLine: Int?
   /// Rich bodies: lists, code, tables and the rest. Created on first use.
-  private var richView: MessageRichView?
+  private(set) var richView: MessageRichView?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -120,12 +132,16 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       : .immediate
     let animated = motion != .immediate
     let previousText = self.layout?.text
+    // Reactions sit on the bubble's bottom edge, so pills that come and go follow that edge while
+    // the bubble resizes instead of the top they are placed from (in the bubble's coordinates).
+    let bottomShift = isSameMessage ? layout.bubble.frame.height - (self.layout?.bubble.frame.height ?? 0) : 0
     self.content = content
     self.layout = layout
     scheduleExpiry()
 
     // Content and starting states change without animation; geometry moves below.
     var appearing: [UIView] = []
+    var appearingPills: [MessageReactionPillView] = []
     var leaving: [(String, MessageReactionPillView)] = []
     UIView.performWithoutAnimation {
       bubbleView.configure(
@@ -196,13 +212,15 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         } else {
           view = makeReactionView()
           reactionViews[id] = view
-          view.untransformedFrame = frame
+          // Starts where its final place is relative to the bottom edge of the bubble as it is now,
+          // so a growing bubble never clips it.
+          view.untransformedFrame = animated ? frame.offsetBy(dx: 0, dy: -bottomShift) : frame
           if animated {
             view.alpha = 0
-            let scale = MessageReactionPillView.Metrics.popScale
+            let scale = MessageReactionPillView.Metrics.appearScale
             view.transform = CGAffineTransform(scaleX: scale, y: scale)
+            appearingPills.append(view)
           }
-          appearing.append(view)
         }
         view.configure(model, animated: animated)
       }
@@ -236,10 +254,18 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           }
         }
         let isEdgeToEdge = layout.edgeToEdgeBlocks.contains(block.id)
-        let bubbleBleed = mediaBleed(frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge)
+        // An album's grid is clipped to the bubble's corners by its host; its tiles never bleed.
+        let bubbleBleed = block.kind == .album
+          ? nil
+          : mediaBleed(frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge)
         view.configure(block, message: content.message, size: frame.size, bubbleBleed: bubbleBleed)
         // Media continuing into the tail reaches past the host and masks itself.
-        roundToBubble(view, frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge && bubbleBleed == nil)
+        // Album styles whose tiles round themselves (stacks, strips, cards) are not clipped.
+        let tilesRoundThemselves = (block.mosaic?.tileCornerRadius ?? 0) > 0
+        roundToBubble(
+          view, frame: layout.frame(.block(block.id)),
+          isEdgeToEdge: isEdgeToEdge && bubbleBleed == nil && !tilesRoundThemselves
+        )
       }
 
       if content.showsAcknowledgement {
@@ -262,11 +288,20 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           view = avatarView
         } else {
           view = avatarView ?? makeAvatarView()
-          view.frame = frame
+          // The list lifts the avatar with its transform to keep it in sight (sticky avatar).
+          view.untransformedFrame = frame
           if animated { view.alpha = 0 }
           appearing.append(view)
         }
-        view.configure(with: sender, size: content.input.metrics.avatarSize)
+        // An agent's run carries its badge on the sender's avatar, as the collection view's overlay drew it.
+        view.configure(
+          with: sender, size: content.input.metrics.avatarSize, viaMark: content.message.viaPresentation?.mark
+        )
+        // VoiceOver reads the sender's name, not the initial, and can open the profile as a tap does.
+        view.isAccessibilityElement = true
+        view.accessibilityLabel = sender.user.displayName
+        view.accessibilityTraits = .button
+        view.accessibilityHint = String(localized: "Opens profile")
         view.isHidden = false
       } else {
         avatarView?.isHidden = true
@@ -278,8 +313,6 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     let appearingViews = appearing
     let leavingViews = leaving
     let leavingRichNodes = richView?.leavingNodes ?? []
-    // New pills keep their starting scale on the row's curve and settle with the pop's bounce.
-    let poppingPills = animated ? appearing.compactMap { $0 as? MessageReactionPillView } : []
     motion.animate({ [self] in
       bubbleContentView.frame = layout.bubble.frame
       bubbleView.frame = bubbleContentView.bounds
@@ -302,8 +335,9 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           view.untransformedFrame = frame
         }
         view.layoutIfNeeded()
-        view.alpha = 1
-        if !poppingPills.contains(view) { view.transform = .identity }
+        // New pills grow on the row's spring and fade in on their own curve below.
+        if !appearingPills.contains(view) { view.alpha = 1 }
+        view.transform = .identity
       }
       for (id, view) in blockViews {
         let frame = view.superview === self ? layout.frame(.block(id)) : local(layout.frame(.block(id)))
@@ -312,9 +346,9 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         }
         view.layoutIfNeeded()
       }
-      for (_, view) in leavingViews {
-        view.alpha = 0
-        view.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+      // Leaving pills keep their place above the bubble's bottom edge while it moves.
+      for view in leavingReactionViews.values {
+        view.untransformedFrame = view.untransformedFrame.offsetBy(dx: 0, dy: bottomShift)
       }
       for view in appearingViews {
         view.alpha = 1
@@ -324,39 +358,42 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         acknowledgementView.isHidden = false
       }
       if let avatarView, let frame = layout.frame(.avatar) {
-        avatarView.frame = frame
+        avatarView.untransformedFrame = frame
       }
       if let uploadProgressView {
         uploadProgressView.frame = uploadProgressFrame(layout, content: content)
       }
     }, completion: { [weak self] _ in
       guard let self else { return }
-      for (id, view) in leavingViews where leavingReactionViews[id] === view {
-        leavingReactionViews[id] = nil
-        view.removeFromSuperview()
-      }
+      if !animated { removeLeavingReactions(leavingViews) }
       richView?.removeLeavingNodes(leavingRichNodes)
       for view in reactionViews.values {
         view.removeFinishedTransitions()
       }
     })
     if animated {
-      let pills = Array(reactionViews.values)
-      MessageReactionPillView.pop {
-        for pill in poppingPills {
-          pill.transform = .identity
+      // Telegram's pill fade: in, or out while shrinking to nothing, in 0.2 s.
+      MessageReactionPillView.fade({
+        for pill in appearingPills {
+          pill.alpha = 1
         }
-        for pill in pills {
-          pill.popAppearing()
+        let scale = MessageReactionPillView.Metrics.appearScale
+        for (_, view) in leavingViews {
+          view.alpha = 0
+          view.transform = CGAffineTransform(scaleX: scale, y: scale)
         }
-      }
+      }, completion: { [weak self] _ in
+        self?.removeLeavingReactions(leavingViews)
+      })
     }
   }
 
   /// A sending photo's upload bar sits in the gap under the last bubble of its group, so it
   /// never changes the row's height and the list doesn't move when it leaves.
   private func syncUploadProgress(_ content: MessageViewContent, layout: MessageLayout, isSameMessage: Bool) {
-    let message = content.message
+    // An album shows its first photo still uploading, then the next, until all are sent.
+    let message = content.album?.items.first { $0.showsPhotoUploadProgress && $0.photoInfo != nil }
+      ?? content.message
     guard message.showsPhotoUploadProgress, content.context.isLastInGroup, layout.bubble.isVisible,
           let photoLocalId = message.photoInfo?.photo.id
     else {
@@ -415,12 +452,23 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       return
     }
     let body = layout.bubble.body
+    // Inside the media frame the corners stay concentric with the bubble's.
+    let inset = content?.input.metrics.mediaInset ?? 0
+    let reach = inset + 0.5
     var corners: CACornerMask = []
-    if abs(frame.minY - body.minY) < 0.5 { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
-    if abs(frame.maxY - body.maxY) < 0.5 { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
-    view.layer.cornerRadius = layout.bubble.cornerRadius
+    if abs(frame.minY - body.minY) < reach { corners.formUnion([.layerMinXMinYCorner, .layerMaxXMinYCorner]) }
+    if abs(frame.maxY - body.maxY) < reach { corners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner]) }
+    view.layer.cornerRadius = max(0, layout.bubble.cornerRadius - inset)
     view.layer.maskedCorners = corners
     view.clipsToBounds = !corners.isEmpty
+  }
+
+  /// Removes the pills that finished leaving; one that came back meanwhile stays.
+  private func removeLeavingReactions(_ views: [(String, MessageReactionPillView)]) {
+    for (id, view) in views where leavingReactionViews[id] === view {
+      leavingReactionViews[id] = nil
+      view.removeFromSuperview()
+    }
   }
 
   /// A planned row frame in `bubbleContentView`'s coordinates.
@@ -434,12 +482,24 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     guard content?.lighting != nil, !bubbleView.isHidden else { return }
     let frame = bubbleView.convert(bubbleView.bounds, to: viewport).standardized
     let bounds = viewport.bounds.standardized
-    guard frame.height > 0, bounds.height > 0,
+    updateContinuousBubbleGradient(bubbleMinY: frame.minY - bounds.minY, bubbleHeight: frame.height, viewportHeight: bounds.height)
+  }
+
+  /// The continuous gradient's layer and the bubble's frame in `view`, when the bubble shows one.
+  func continuousGradient(in view: UIView) -> (layer: CALayer, frame: CGRect)? {
+    guard content?.lighting != nil, !bubbleView.isHidden, let layer = bubbleView.lightingLayer else { return nil }
+    return (layer, bubbleView.convert(bubbleView.bounds, to: view).standardized)
+  }
+
+  /// Positions the continuous bubble gradient for a bubble `bubbleMinY` below the top of a viewport
+  /// `viewportHeight` tall.
+  func updateContinuousBubbleGradient(bubbleMinY: CGFloat, bubbleHeight: CGFloat, viewportHeight: CGFloat) {
+    guard content?.lighting != nil, !bubbleView.isHidden,
           let vector = ThemeCatalog.bubbleGradientVector(
-            bubbleMinY: Double(frame.minY),
-            bubbleHeight: Double(frame.height),
-            viewportMinY: Double(bounds.minY),
-            viewportHeight: Double(bounds.height)
+            bubbleMinY: Double(bubbleMinY),
+            bubbleHeight: Double(bubbleHeight),
+            viewportMinY: 0,
+            viewportHeight: Double(viewportHeight)
           )
     else { return }
     bubbleView.updateLightingVector(startY: CGFloat(vector.startY), endY: CGFloat(vector.endY))
@@ -511,6 +571,31 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       in: convert(frames.bubble, to: bubbleContentView),
       debugName: "next-target-bubble"
     )
+  }
+
+  /// The bubble's background and, separately, everything on it, for a send flight that grows the
+  /// background out of the composer's field as Telegram's does. Nil for a bubbleless message.
+  func sendAnimationBubbleParts() -> (background: UIImage, content: UIView)? {
+    guard let frames = sendAnimationTargetFrames(), layout?.bubble.isVisible == true else { return nil }
+    let rect = convert(frames.bubble, to: bubbleContentView)
+    guard rect.isFiniteAndVisible else { return nil }
+    let format = UIGraphicsImageRendererFormat.default()
+    format.opaque = false
+    format.scale = window?.screen.scale ?? traitCollection.displayScale
+    let backgroundRect = bubbleContentView.convert(rect, to: bubbleView)
+    let background = UIGraphicsImageRenderer(size: rect.size, format: format).image { context in
+      context.cgContext.translateBy(x: -backgroundRect.minX, y: -backgroundRect.minY)
+      bubbleView.layer.render(in: context.cgContext)
+    }
+    let wasHidden = bubbleView.isHidden
+    bubbleView.isHidden = true
+    let content = bubbleContentView.sendAnimationLayerSnapshotView(in: rect, debugName: "next-target-content")
+    bubbleView.isHidden = wasHidden
+    guard let content else { return nil }
+    // Corners stay whole and the middle stretches, from the composer's field size to the bubble's.
+    let cap = max(0, min(20, floor(min(rect.width, rect.height) / 2) - 1))
+    let insets = UIEdgeInsets(top: cap, left: cap, bottom: cap, right: cap)
+    return (background.resizableImage(withCapInsets: insets, resizingMode: .stretch), content)
   }
 
   /// Whether a pan at `point` belongs to a code block or table that scrolls sideways.

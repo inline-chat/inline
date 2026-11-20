@@ -87,6 +87,7 @@ enum LogoutPerformer {
     await Api.realtime.loggedOut()
     await ReservedChatIDPool.shared.drainForAccountTransition()
     await FileUploader.shared.cancelAll()
+    await FileNativeUploadStagingStore.shared.removeAll()
     await FileCache.shared.cancelAllDownloads()
     await FileDownloader.shared.resetSession(accountID: logoutAccountID)
     NotionTaskService.shared.resetSession()

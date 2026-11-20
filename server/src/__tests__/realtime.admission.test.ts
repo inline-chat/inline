@@ -1,13 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test"
+import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from "bun:test"
 import { Context, Effect } from "effect"
 import type { Server } from "bun"
-import { ClientMessage, Method, RpcError_Code } from "@inline-chat/protocol/core"
+import { ClientMessage, Method, RpcError_Code, ServerProtocolMessage } from "@inline-chat/protocol/core"
 import { setupTestLifecycle, testUtils } from "./setup"
 import { makeCoreRealtimeTransport, type RealtimeWebSocketData } from "../core/http/realtimeHost"
 import { ErrorReporter } from "../core/errors/errorReporter"
 import { RealtimeSessions } from "../realtime/host.effect"
 import { makeLegacyRealtimeSessions } from "../realtime/legacyHostAdapter.effect"
 import { wsOpen, wsClose, wsClosed, wsSendClientProtocolMessage, wsServerProtocolMessage } from "../realtime/test/utils"
+import * as rpcHandlers from "../realtime/handlers/_rpc"
+import { MAX_IN_FLIGHT_RPC_CALLS } from "../realtime/message"
 
 mock.module("@in/server/ws/presence", () => ({
   presenceManager: { handleConnectionOpen: async () => {}, handleConnectionClose: async () => {} },
@@ -63,6 +65,68 @@ describe("native Bun realtime security boundary", () => {
       const reconnected = await open()
       try { await authenticate(reconnected) } finally { await wsClosed(reconnected) }
     } finally { await wsClosed(socket) }
+  })
+
+  it("answers RPC calls beyond the in-flight window with RATE_LIMIT and keeps the socket open", async () => {
+    const socket = await open()
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const handleRpcCall = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async () => {
+      await blocked
+      return { oneofKind: "getSessions", getSessions: { sessions: [] } }
+    })
+    try {
+      const user = await testUtils.createUser("native-rpc-window@example.test")
+      const { token } = await testUtils.createSessionForUser(user.id, { clientType: "cli" })
+      const opened = wsServerProtocolMessage(socket)
+      wsSendClientProtocolMessage(socket, { id: 1n, seq: 1, body: {
+        oneofKind: "connectionInit", connectionInit: { token, layer: 2, clientVersion: "1.0.0" },
+      } })
+      expect((await opened).body.oneofKind).toBe("connectionOpen")
+
+      const received: ServerProtocolMessage[] = []
+      let notify: (() => void) | undefined
+      socket.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        received.push(ServerProtocolMessage.fromBinary(new Uint8Array(event.data)))
+        notify?.()
+      }
+      const waitFor = async (predicate: () => boolean) => {
+        while (!predicate()) await new Promise<void>((resolve) => { notify = resolve })
+      }
+      const call = (id: bigint) => wsSendClientProtocolMessage(socket, { id, seq: Number(id), body: { oneofKind: "rpcCall", rpcCall: {
+        method: Method.GET_SESSIONS, input: { oneofKind: "getSessions", getSessions: {} },
+      } } })
+      const isResult = (message: ServerProtocolMessage) => message.body.oneofKind === "rpcResult"
+
+      const firstCallId = 10n
+      const excessCallId = firstCallId + BigInt(MAX_IN_FLIGHT_RPC_CALLS)
+      for (let id = firstCallId; id <= excessCallId; id++) call(id)
+      // Pings do not count against the window and are still answered.
+      wsSendClientProtocolMessage(socket, { id: 500n, seq: 500, body: { oneofKind: "ping", ping: { nonce: 7n } } })
+
+      await waitFor(() =>
+        received.some((message) => message.body.oneofKind === "rpcError")
+        && received.some((message) => message.body.oneofKind === "pong"))
+      const errors = received.flatMap((message) => message.body.oneofKind === "rpcError" ? [message.body.rpcError] : [])
+      expect(errors).toEqual([expect.objectContaining({
+        reqMsgId: excessCallId,
+        errorCode: RpcError_Code.RATE_LIMIT,
+        code: 429,
+        retryAfterSeconds: 1,
+      })])
+      expect(socket.readyState).toBe(WebSocket.OPEN)
+
+      release()
+      await waitFor(() => received.filter(isResult).length === MAX_IN_FLIGHT_RPC_CALLS)
+      // The window frees up as calls finish.
+      call(excessCallId + 1n)
+      await waitFor(() => received.filter(isResult).length === MAX_IN_FLIGHT_RPC_CALLS + 1)
+      expect(handleRpcCall).toHaveBeenCalledTimes(MAX_IN_FLIGHT_RPC_CALLS + 1)
+    } finally {
+      release()
+      handleRpcCall.mockRestore()
+      await wsClosed(socket)
+    }
   })
 
   it("closes oversized pre-auth frames at the native listener", async () => {

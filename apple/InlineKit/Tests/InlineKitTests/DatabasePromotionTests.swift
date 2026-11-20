@@ -118,6 +118,42 @@ final class DatabasePromotionTests {
     #expect(db.isCredentialStoragePrepared(for: "stable") == false)
   }
 
+  @Test("new readers use the current passphrase after each rekey of a live pool")
+  func pooledReadersFollowPassphraseChanges() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let path = directory.appendingPathComponent("db.sqlite").path
+    let persistent = try AppDatabase(path: path, passphrase: "initial-key")
+    let pool = try #require(persistent.dbWriter as? DatabasePool)
+    let database = AppDatabase.empty()
+    #expect(await database.promoteToPersistentIfPossible { persistent })
+    try await pool.write { db in
+      try db.execute(sql: "CREATE TABLE rekey_fixture (value TEXT NOT NULL)")
+      try db.execute(sql: "INSERT INTO rekey_fixture VALUES ('retained')")
+    }
+
+    func readValue() async throws -> String? {
+      try await pool.read { try String.fetchOne($0, sql: "SELECT value FROM rekey_fixture") }
+    }
+
+    #expect(try await readValue() == "retained") // Warm a reader before the first rotation.
+    for passphrase in ["login-key", "logout-key"] {
+      try database.changePassphrase(passphrase)
+      #expect(try await readValue() == "retained")
+      // Also exercise a connection opened later, even if a previous reader was cached.
+      pool.invalidateReadOnlyConnections()
+      #expect(try await readValue() == "retained")
+    }
+
+    try pool.close()
+    let reopened = try DatabaseQueue(
+      path: path, configuration: AppDatabase.makeConfiguration(passphrase: "logout-key")
+    )
+    #expect(try await reopened.read { try String.fetchOne($0, sql: "SELECT value FROM rekey_fixture") } == "retained")
+  }
+
   @Test("promotes in-memory DB to persistent once the persistent DB becomes openable")
   func promotesToPersistentIfPossible() async throws {
     let db = AppDatabase.empty()

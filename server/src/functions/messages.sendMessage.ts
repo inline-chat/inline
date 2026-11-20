@@ -168,6 +168,8 @@ type Input = {
 
   /** The agent sending this for the sender, shown as "Sent via <name>". Forwards leave it out. */
   via?: InputMessageVia
+  /** Album: consecutive photos/videos from one sender sharing this id. Zero means none. */
+  groupedId?: bigint
 }
 
 type Output = {
@@ -199,6 +201,10 @@ const photoFiles = (photo: DbFullPhoto | null | undefined): DbFullPlainFile[] =>
  * Forwarding clones source media into the forwarder's ownership first. Missing and
  * foreign ids fail alike so ids can't be probed.
  */
+/** Media that can be part of an album: photos, videos and documents, never stickers. */
+export const isAlbumMediaType = (mediaType: string | null, isSticker: boolean | undefined): boolean =>
+  isSticker !== true && (mediaType === "photo" || mediaType === "video" || mediaType === "document")
+
 const loadOwnedMedia = async <Media>(
   pending: Promise<Media | undefined>,
   files: (media: Media) => DbFullPlainFile[],
@@ -435,6 +441,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     mediaType = "voice"
   }
 
+  const groupedId = input.groupedId ? input.groupedId : undefined
+  if (groupedId !== undefined && !isAlbumMediaType(mediaType, input.isSticker)) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
   let initialAgentContext: AgentThreadContext | undefined
   let encodedInitialAgentContext: Buffer | undefined
   if (input.initialAgentContext) {
@@ -508,6 +519,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     ? await addMentionedParticipants(chat, getMentionedUserIds(entities), context)
     : undefined
 
+  // A bot's silent send is routine status, such as agent and bridge progress:
+  // no unread, no activity and no notifications. A person's silent send still
+  // counts as unread and only skips the push.
+  const countsAsUnread = !(input.sendMode === MessageSendMode.MODE_SILENT && (await senderIsBot()))
+
   let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
   let agentContextUpdate: UpdateSeqAndDate | undefined
@@ -535,12 +551,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           randomId: input.randomId,
           date: date,
           mediaType: mediaType,
+          groupedId: groupedId ?? null,
           photoId: dbFullPhoto?.id ?? null,
           videoId: dbFullVideo?.id ?? null,
           documentId: dbFullDocument?.id ?? null,
           voiceId: dbFullVoice?.id ?? null,
           isSticker: input.isSticker ?? false,
           hasLink: hasLink,
+          countsAsUnread,
           entitiesEncrypted: encryptedEntities?.encrypted ?? null,
           entitiesIv: encryptedEntities?.iv ?? null,
           entitiesTag: encryptedEntities?.authTag ?? null,
@@ -1426,6 +1444,19 @@ async function sendNotifications(input: SendPushForMsgInput) {
   }
 
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, inputPeer, mentionedUserIds } = input
+  // One notification per album: its first message says "Album" (or its caption), the rest are silent.
+  const groupedId = messageInfo.message.groupedId
+  if (
+    groupedId &&
+    (await MessageModel.hasEarlierAlbumMessage({
+      chatId: messageInfo.message.chatId,
+      messageId: messageInfo.message.messageId,
+      fromId: messageInfo.message.fromId,
+      groupedId,
+    }))
+  ) {
+    return
+  }
   const isNudge = isNudgeMessage({ messageInfo })
   const trimmedText = unencryptedText?.trim()
   const isUrgentNudge = isNudge && trimmedText === URGENT_NUDGE_TEXT
@@ -1453,8 +1484,10 @@ async function sendNotifications(input: SendPushForMsgInput) {
   let messageText = input.unencryptedText
   let messageEntities = input.unencryptedEntities
 
-  const senderNameInfo = await getCachedUserName(messageInfo.message.fromId)
-  const senderPhoto = await getCachedUserProfilePhoto(messageInfo.message.fromId)
+  const [senderNameInfo, senderPhoto] = await Promise.all([
+    getCachedUserName(messageInfo.message.fromId),
+    getCachedUserProfilePhoto(messageInfo.message.fromId),
+  ])
 
   const recipientUserIds = updateGroup.userIds.filter((userId) => userId !== currentUserId)
   const dialogNotificationSettingsByUserId = await getInheritedDialogNotificationSettings(chat.id, recipientUserIds)
@@ -1619,6 +1652,7 @@ async function prepareNotificationForUser({
     documentFileName: messageInfo.document?.fileName,
     isAnimated: messageInfo.video?.isAnimated,
     voiceDuration: messageInfo.voice?.duration,
+    isAlbum: Boolean(messageInfo.message.groupedId),
   })
 
   let includeSenderNameInMessage = false

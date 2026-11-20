@@ -1,13 +1,14 @@
 import assert from "node:assert/strict"
 import { execFile, execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 import { assertAdmissionSource, withCandidateRegistry } from "./npm-candidate-registry.mjs"
+import { packPublished, readPackageManifest } from "./pack-published-openclaw.mjs"
 
 const args = process.argv.slice(2)
 const [artifactDir, hostVersion, mode] = args
@@ -49,8 +50,35 @@ console.log(`OpenClaw host ${installedHost.version}; plugin ${plugin.version}; s
 const install = async (registryEnv = {}) => {
   console.log(await cli(["plugins", "install", `npm-pack:${archive}`, "--force", "--accept-capabilities"], registryEnv))
 }
+const dependencyDir = mode === "--candidate" ? path.join(scratch, "dependencies") : artifactDir
+const dependencies = []
+let parent = readPackageManifest(archive)
+let useCandidates = mode === "--candidate"
+if (useCandidates) await mkdir(dependencyDir)
+for (const name of ["@inline-chat/realtime-sdk", "@inline-chat/protocol"]) {
+  const pin = parent.dependencies[name]
+  assert.match(pin, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, `expected exact ${name} pin`)
+  const candidate = manifest.packages.find((item) => item.name === name && item.version === pin)
+  let receipt = candidate
+  if (mode === "--candidate") {
+    // A released SDK carries its own published protocol, even if the workspace
+    // happens to carry a protocol candidate with the same version.
+    useCandidates = useCandidates && Boolean(candidate)
+    if (useCandidates) {
+      assert.equal(path.basename(candidate.file), candidate.file)
+      await copyFile(path.join(artifactDir, candidate.file), path.join(dependencyDir, candidate.file))
+    } else {
+      receipt = await packPublished(dependencyDir, `${name}@${pin}`)
+    }
+  }
+  assert.ok(receipt, `missing ${name}@${pin} artifact`)
+  assert.equal(receipt.name, name)
+  assert.equal(receipt.version, pin)
+  dependencies.push(receipt)
+  parent = readPackageManifest(path.join(dependencyDir, receipt.file))
+}
 if (mode === "--candidate") {
-  await withCandidateRegistry(artifactDir, manifest, ({ env }) => install(env))
+  await withCandidateRegistry(dependencyDir, { ...manifest, packages: dependencies }, ({ env }) => install(env))
 } else {
   await install()
 }
@@ -67,20 +95,16 @@ const channel = JSON.parse(execFileSync(process.execPath, ["--input-type=module"
   `const { inlineChannelPlugin } = await import(${JSON.stringify(channelEntry)}); console.log(JSON.stringify({ id: inlineChannelPlugin?.id }))`,
 ], { env, cwd: hostDir, encoding: "utf8", timeout: 60_000 }).trim().split("\n").at(-1))
 assert.equal(channel.id, "inline", "Inline channel entry must load against the installed host")
-const dependencyArtifacts = ["@inline-chat/realtime-sdk", "@inline-chat/protocol"].map((name) => {
-  const item = manifest.packages.find((entry) => entry.name === name)
-  assert.ok(item, `missing ${name} artifact`)
-  return item
-})
 const pluginRequire = createRequire(path.join(pluginRoot, "package.json"))
 const sdkEntry = pluginRequire.resolve("@inline-chat/realtime-sdk")
 const sdkRequire = createRequire(sdkEntry)
 const protocolEntry = sdkRequire.resolve("@inline-chat/protocol")
-for (const [item, installedEntry] of [[plugin, path.join(pluginRoot, "dist/index.js")],
-  [dependencyArtifacts[0], sdkEntry], [dependencyArtifacts[1], protocolEntry]]) {
-  assert.equal(createHash("sha256").update(await readFile(path.join(artifactDir, item.file))).digest("hex"), item.sha256)
-  const candidateEntry = execFileSync("tar", ["-xOzf", path.join(artifactDir, item.file), "package/dist/index.js"])
-  assert.deepEqual(await readFile(installedEntry), candidateEntry, `${item.name} runtime bytes differ from this SHA`)
+for (const [item, directory, installedEntry] of [[plugin, artifactDir, path.join(pluginRoot, "dist/index.js")],
+  [dependencies[0], dependencyDir, sdkEntry], [dependencies[1], dependencyDir, protocolEntry]]) {
+  const expectedArchive = path.join(directory, item.file)
+  assert.equal(createHash("sha256").update(await readFile(expectedArchive)).digest("hex"), item.sha256)
+  const expectedEntry = execFileSync("tar", ["-xOzf", expectedArchive, "package/dist/index.js"])
+  assert.deepEqual(await readFile(installedEntry), expectedEntry, `${item.name}@${item.version} runtime bytes differ from its archive`)
 }
 const list = JSON.parse(await cli(["plugins", "list", "--json"]))
 const entry = list.plugins?.find((item) => item.id === "inline")

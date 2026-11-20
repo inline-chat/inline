@@ -755,6 +755,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await Api.realtime.loggedOut()
       try requireLocalDataResetMayContinue()
       await FileUploader.shared.cancelAll()
+      await FileNativeUploadStagingStore.shared.removeAll()
       await FileCache.shared.cancelAllDownloads()
       await FileDownloader.shared.resetSession()
       NotionTaskService.shared.resetSession()

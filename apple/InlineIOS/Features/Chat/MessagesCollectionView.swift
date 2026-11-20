@@ -17,11 +17,7 @@ import Translation
 import UIKit
 
 final class MessagesCollectionView: UICollectionView {
-  struct ScrollAffordanceState: Equatable {
-    var isVisible = false
-    /// Unread messages below the reader; see `ChatUnreadBadgeCount`.
-    var unreadCount = 0
-  }
+  typealias ScrollAffordanceState = ChatScrollAffordanceState
 
   private enum ScrollAffordanceMetrics {
     static let showDistance: CGFloat = 44
@@ -725,6 +721,8 @@ final class MessagesCollectionView: UICollectionView {
     guard !isPreview, didPlaceInitialUnread, !isPlacingInitialUnread, !suspendsReadingPlaceCapture,
           bounds.height > 0, !itemsEmpty
     else { return }
+    // A window read ahead for this chat no longer matches where it opens.
+    defer { ChatOpenPreparation.shared.discard(peer: peerId) }
     if coordinator.showsNewestMessage(in: self) {
       ChatReadingPlaceStore.shared.clear(for: peerId)
     } else if let place = coordinator.topVisibleReadingPlace(in: self) {
@@ -1667,6 +1665,8 @@ private extension MessagesCollectionView {
     private let chatId: Int64
     private let spaceId: Int64?
     private let isPreview: Bool
+    /// The chat-open trace ends with the first non-empty snapshot this list applies, once.
+    private var didTraceOpen = false
     private var theme: IOSThemeSnapshot
     var onVisibleMessagesChanged: (([Int64]?) -> Void)?
     /// `.next` draws supported message kinds with the next message view.
@@ -1694,7 +1694,8 @@ private extension MessagesCollectionView {
     }
     /// Focus highlight that must survive cell reconfiguration until it ends.
     private var focusHighlight: (messageID: Int64, endsAt: CFTimeInterval)?
-    private var reactionPickerPresentation: ReactionEmojiPickerPresentation?
+    /// The message menu's actions and reaction picker, shared with the timeline list.
+    private lazy var menuActions: MessageMenuActions = makeMenuActions()
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
     private var olderLoadTask: Task<Void, Never>?
@@ -3438,6 +3439,7 @@ private extension MessagesCollectionView {
     func applyTheme(_ theme: IOSThemeSnapshot) {
       guard self.theme != theme else { return }
       self.theme = theme
+      menuActions.theme = theme
       guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
       for case let cell as MessageCollectionViewCell in collectionView.visibleCells {
         cell.applyTheme(theme)
@@ -3467,37 +3469,43 @@ private extension MessagesCollectionView {
     }
 
     private func setupNotionTaskManager() {
-      NotionTaskManager.shared.delegate = self
-      Task {
-        let scopedSpaceId = peerId.isThread ? spaceId.validSpaceId : nil
-        do {
-          let integrations = try await InlineRPCClient.shared.integrations(
-            userID: Auth.shared.getCurrentUserId() ?? 0,
-            spaceID: scopedSpaceId
-          )
+      menuActions.loadIntegrations()
+    }
 
-          await NotionTaskManager.shared.checkIntegrationAccess(
-            peerId: peerId,
-            spaceId: scopedSpaceId,
-            integrations: integrations
-          )
-
-          DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let hasLinearConnected = peerId.isThread
-              ? integrations.hasLinearConnected
-              : (integrations.linearSpaces?.isEmpty == false)
-            self.hasLinearConnected = hasLinearConnected
-            linearTeamId = integrations.linearTeamId
-          }
-        } catch {
-          NotionTaskManager.shared.clearIntegrationAccess()
-          DispatchQueue.main.async { [weak self] in
-            self?.hasLinearConnected = false
-            self?.linearTeamId = nil
-          }
+    private func makeMenuActions() -> MessageMenuActions {
+      let actions = MessageMenuActions(peerId: peerId, spaceId: spaceId, theme: theme)
+      actions.presenter = { [weak self] in
+        (self?.currentCollectionView as? MessagesCollectionView)?.findViewController()
+      }
+      actions.containerWidth = { [weak self] in
+        self?.currentCollectionView?.window?.bounds.width
+          ?? self?.currentCollectionView?.bounds.width
+          ?? UIScreen.main.bounds.width
+      }
+      actions.currentMessage = { [weak self] stableId, messageId, chatId, randomId in
+        self?.currentFullMessage(stableId: stableId, messageId: messageId, chatId: chatId, randomId: randomId)
+      }
+      actions.react = { [weak self] stableId, toggle in
+        guard let self else { return toggle() }
+        reactFromContextMenu(messageStableId: stableId, toggle: toggle)
+      }
+      // Over the custom menu's own window when it's open, so the sheet shows above it; a menu
+      // in the keyboard's window moves out of it first.
+      actions.emojiSheetOverWindow = { [weak self] in
+        guard let self, let collectionView = currentCollectionView as? MessagesCollectionView else { return nil }
+        return customContextMenu?.moveToOwnWindow()
+          ?? (collectionView.isContextMenuInteractionActive ? collectionView.window : nil)
+      }
+      actions.onEmojiSheetDismissed = { [weak self] in
+        // Selection can close the menu while the picker still owns the key
+        // window. Retry compose restoration after that window is returned.
+        if let collectionView = self?.currentCollectionView as? MessagesCollectionView,
+           !collectionView.isContextMenuInteractionActive
+        {
+          collectionView.onContextMenuDidEnd?()
         }
       }
+      return actions
     }
 
     private func ensureThreadAnchorCachedIfNeeded() {
@@ -3505,23 +3513,8 @@ private extension MessagesCollectionView {
       viewModel.ensureThreadAnchorCached()
     }
 
-    private var hasLinearConnected: Bool = false
-    private var linearTeamId: String?
 
-    private func isMessagePinned(_ message: Message) -> Bool {
-      message.pinned == true
-    }
 
-    private func togglePinMessage(_ message: Message, unpin: Bool) {
-      Task { @MainActor in
-        do {
-          let peer = chatPeerId(for: message)
-          _ = try await Api.realtime.send(.pinMessage(peer: peer, messageId: message.messageId, unpin: unpin))
-        } catch {
-          Log.shared.error("Failed to update pinned message", error: error)
-        }
-      }
-    }
 
     private func chatPeerId(for message: Message) -> Peer {
       message.peerId
@@ -3938,6 +3931,11 @@ private extension MessagesCollectionView {
         span.end(
           "sections=\(sectionCount) items=\(itemCount) animated=\(animatingDifferences) duration_ms=\(durationMs)"
         )
+        if itemCount > 0, !self.isPreview, !self.didTraceOpen {
+          self.didTraceOpen = true
+          ChatOpenTrace.listOpened(peer: self.peerId, list: "collection")
+          ChatOpenPreparation.shared.discard(peer: self.peerId)
+        }
         PerformanceTrace.slowBreadcrumb(
           "slow iOS messages snapshot apply",
           category: "messages.ios",
@@ -4811,6 +4809,9 @@ private extension MessagesCollectionView {
         else { return }
         presentForwardSheet(fullMessage)
       }
+      // The server's rule: anyone in a DM, in a space your own messages or any as an admin.
+      let canDeleteMessage = MessageDeletePolicy.checker(peer: peerId)
+      actions.canDelete = { item in item.message.map(canDeleteMessage) ?? false }
       actions.delete = { item in
         guard let message = item.message else { return }
         MessageViewActions.sendDeleteMessage(
@@ -4842,305 +4843,20 @@ private extension MessagesCollectionView {
     private let maxCacheSize = 1_000
 
     func createReactionPickerView(for fullMessage: FullMessage) -> UIView {
-      let preferredSkinTone = EmojiSkinTonePreferenceStore.current()
-      var seenReactions = Set<String>()
-      let usualReactions = ReactionPickerEmojiUsageStore.suggestedEmojis().compactMap { emoji -> String? in
-        let preferredEmoji = preferredSkinTone.applying(to: emoji)
-        return seenReactions.insert(preferredEmoji).inserted ? preferredEmoji : nil
-      }
-      let reactions = ReactionPickerEmojis.prioritizingMessageEmojis(
-        in: fullMessage.message.text,
-        among: usualReactions
-      )
-
-      let containerWidth = currentCollectionView?.window?.bounds.width
-        ?? currentCollectionView?.bounds.width
-        ?? UIScreen.main.bounds.width
-      let preferredWidth = ContextMenuAccessoryLayout.reactionPickerWidth(for: containerWidth)
-
-      let containerView = UIView()
-      containerView.translatesAutoresizingMaskIntoConstraints = false
-      containerView.backgroundColor = .clear
-
-      let containerHeight: CGFloat
-      let horizontalGlassInset: CGFloat
-      let verticalGlassInset: CGFloat
-      if #available(iOS 26.0, *) {
-        containerHeight = ContextMenuAccessoryLayout.accessoryHostHeight
-        horizontalGlassInset = 0
-        verticalGlassInset = (ContextMenuAccessoryLayout.accessoryHostHeight - ContextMenuAccessoryLayout
-          .reactionPickerHeight) / 2
-      } else {
-        containerHeight = ContextMenuAccessoryLayout.reactionPickerHeight
-        horizontalGlassInset = 0
-        verticalGlassInset = 0
-      }
-
-      let effectView: UIVisualEffectView
-      if #available(iOS 26.0, *) {
-        let glassEffect = UIGlassEffect(style: .regular)
-        glassEffect.isInteractive = true
-        effectView = UIVisualEffectView(effect: glassEffect)
-      } else {
-        effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
-      }
-      effectView.translatesAutoresizingMaskIntoConstraints = false
-      effectView.layer.cornerRadius = ContextMenuAccessoryLayout.reactionPickerHeight / 2
-      effectView.layer.cornerCurve = .continuous
-      effectView.clipsToBounds = true
-      containerView.addSubview(effectView)
-
-      let scrollView = ReactionPickerScrollView()
-      scrollView.translatesAutoresizingMaskIntoConstraints = false
-      scrollView.showsHorizontalScrollIndicator = false
-      scrollView.alwaysBounceHorizontal = true
-      effectView.contentView.addSubview(scrollView)
-
-      let stackView = UIStackView()
-      stackView.axis = .horizontal
-      stackView.alignment = .center
-      stackView.spacing = 4
-      stackView.translatesAutoresizingMaskIntoConstraints = false
-      scrollView.addSubview(stackView)
-
-      for reaction in reactions {
-        let button = createReactionButton(
-          reaction: reaction,
-          messageStableId: fullMessage.id,
-          messageId: fullMessage.message.messageId,
-          chatId: fullMessage.message.chatId,
-          randomId: fullMessage.message.randomId
-        )
-        stackView.addArrangedSubview(button)
-      }
-
-      // Only the plus stays fixed; learned reactions scroll with the rest, as on macOS.
-      let moreButton = UIButton(type: .system)
-      moreButton.translatesAutoresizingMaskIntoConstraints = false
-      var moreConfiguration: UIButton.Configuration
-      if #available(iOS 26.0, *) {
-        moreConfiguration = .glass()
-      } else {
-        moreConfiguration = .plain()
-        moreConfiguration.background.backgroundColor = .tertiarySystemFill
-      }
-      moreConfiguration.cornerStyle = .capsule
-      moreConfiguration.contentInsets = .zero
-      moreConfiguration.image = UIImage(systemName: "plus")
-      moreConfiguration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-        pointSize: 20, weight: .medium
-      )
-      moreConfiguration.baseForegroundColor = .secondaryLabel
-      moreButton.configuration = moreConfiguration
-      moreButton.accessibilityLabel = "More reactions"
-      moreButton.accessibilityHint = "Opens the emoji picker"
-      moreButton.accessibilityIdentifier = "moreReactions"
-      moreButton.addAction(UIAction { [weak self] _ in
-        self?.showReactionEmojiPicker(for: fullMessage)
-      }, for: .touchUpInside)
-      // A sibling overlay keeps the native glass deformation outside the capsule's clipping mask.
-      containerView.addSubview(moreButton)
-
-      NSLayoutConstraint.activate([
-        moreButton.widthAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-        moreButton.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-        moreButton.trailingAnchor.constraint(
-          equalTo: effectView.trailingAnchor, constant: -ContextMenuAccessoryLayout.reactionPickerContentInset
-        ),
-        moreButton.centerYAnchor.constraint(equalTo: effectView.centerYAnchor),
-        containerView.widthAnchor.constraint(equalToConstant: preferredWidth),
-        containerView.heightAnchor.constraint(equalToConstant: containerHeight),
-
-        effectView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: verticalGlassInset),
-        effectView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: horizontalGlassInset),
-        effectView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -horizontalGlassInset),
-        effectView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -verticalGlassInset),
-
-        scrollView.topAnchor.constraint(equalTo: effectView.contentView.topAnchor),
-        scrollView.leadingAnchor.constraint(equalTo: effectView.contentView.leadingAnchor),
-        // Run the row's trailing fade under the plus so the two blend; the stack inset
-        // below keeps the last reaction clear of the plus at the end of the scroll.
-        scrollView.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: 12),
-        scrollView.bottomAnchor.constraint(equalTo: effectView.contentView.bottomAnchor),
-
-        stackView.topAnchor.constraint(
-          equalTo: scrollView.contentLayoutGuide.topAnchor,
-          constant: ContextMenuAccessoryLayout.reactionPickerContentInset
-        ),
-        stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 4),
-        stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -16),
-        stackView.bottomAnchor.constraint(
-          equalTo: scrollView.contentLayoutGuide.bottomAnchor,
-          constant: -ContextMenuAccessoryLayout.reactionPickerContentInset
-        ),
-        stackView.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-      ])
-
-      containerView.clipsToBounds = false
-
-      return containerView
+      menuActions.reactionPicker(for: fullMessage)
     }
 
     private func showReactionEmojiPicker(for fullMessage: FullMessage) {
-      guard reactionPickerPresentation == nil,
-            let collectionView = currentCollectionView as? MessagesCollectionView,
-            let sourceWindow = collectionView.window,
-            let presenter = collectionView.findViewController(),
-            let currentMessage = currentFullMessage(
-              stableId: fullMessage.id,
-              messageId: fullMessage.message.messageId,
-              chatId: fullMessage.message.chatId,
-              randomId: fullMessage.message.randomId
-            )
-      else { return }
-
-      let selectedEmojis = Set(currentMessage.reactions
-        .filter { $0.reaction.userId == Auth.shared.getCurrentUserId() }
-        .map(\.reaction.emoji))
-      let picker = ReactionEmojiPickerSheet(selectedEmojis: selectedEmojis) { [weak self] emoji in
-        self?.reactFromContextMenu(messageStableId: fullMessage.id) { [weak self] in
-          self?.toggleReaction(
-            emoji,
-            messageStableId: fullMessage.id,
-            messageId: fullMessage.message.messageId,
-            chatId: fullMessage.message.chatId,
-            randomId: fullMessage.message.randomId
-          )
-        }
-      }
-      // Keep UIKit's live menu and preview in place. Presenting from the chat
-      // requires dismissing that menu first and serializes two animations.
-      reactionPickerPresentation = ReactionEmojiPickerPresentation(
-        picker: picker,
-        presenter: presenter,
-        // Over the custom menu's own window when it's open, so the sheet shows above it; a menu
-        // in the keyboard's window moves out of it first.
-        over: customContextMenu?.moveToOwnWindow()
-          ?? (collectionView.isContextMenuInteractionActive ? sourceWindow : nil),
-        tintColor: theme.primary.uiColor,
-        onDismiss: { [weak self, weak collectionView] in
-          self?.reactionPickerPresentation = nil
-          // Selection can close the menu while the picker still owns the key
-          // window. Retry compose restoration after that window is returned.
-          if let collectionView, !collectionView.isContextMenuInteractionActive {
-            collectionView.onContextMenuDidEnd?()
-          }
-        }
-      )
+      menuActions.showReactionEmojiPicker(for: fullMessage)
     }
 
     var isReactionPickerPresented: Bool {
-      reactionPickerPresentation != nil
+      menuActions.isReactionPickerPresented
     }
 
-    private func createReactionButton(
-      reaction: String,
-      messageStableId: Int64,
-      messageId: Int64,
-      chatId: Int64,
-      randomId: Int64?
-    ) -> UIButton {
-      let button = UIButton(type: .system)
-      button.translatesAutoresizingMaskIntoConstraints = false
 
-      var configuration = UIButton.Configuration.plain()
-      configuration.contentInsets = NSDirectionalEdgeInsets(top: 1, leading: 1, bottom: 1, trailing: 1)
 
-      configuration.title = reaction
-      configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-        var outgoing = incoming
-        outgoing.font = .systemFont(ofSize: ContextMenuAccessoryLayout.reactionEmojiPointSize)
-        return outgoing
-      }
 
-      button.configuration = configuration
-
-      button.accessibilityLabel = reaction
-
-      button.layer.cornerRadius = ContextMenuAccessoryLayout.reactionButtonSize / 2
-      button.clipsToBounds = true
-      NSLayoutConstraint.activate([
-        button.widthAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-        button.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionButtonSize),
-      ])
-
-      button.addAction(UIAction { [weak self, weak button] _ in
-        guard let self, let button else { return }
-        handleReactionButtonTap(
-          button,
-          reaction: reaction,
-          messageStableId: messageStableId,
-          messageId: messageId,
-          chatId: chatId,
-          randomId: randomId
-        )
-      }, for: .touchUpInside)
-      button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
-      button.addTarget(
-        self,
-        action: #selector(buttonTouchUp(_:)),
-        for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit]
-      )
-
-      return button
-    }
-
-    @objc private func buttonTouchDown(_ sender: UIButton) {
-      let generator = UIImpactFeedbackGenerator(style: .light)
-      generator.prepare()
-      generator.impactOccurred()
-
-      let updates = {
-        sender.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
-        sender.backgroundColor = self.theme.primary.uiColor.withAlphaComponent(0.3)
-      }
-      guard !UIAccessibility.isReduceMotionEnabled else {
-        UIView.performWithoutAnimation(updates)
-        return
-      }
-      UIView.animate(withDuration: 0.1, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
-        updates()
-      }
-    }
-
-    @objc private func buttonTouchUp(_ sender: UIButton) {
-      let updates = {
-        sender.transform = .identity
-        sender.backgroundColor = .clear
-      }
-      guard !UIAccessibility.isReduceMotionEnabled else {
-        UIView.performWithoutAnimation(updates)
-        return
-      }
-      UIView.animate(
-        withDuration: 0.16,
-        delay: 0,
-        usingSpringWithDamping: 0.82,
-        initialSpringVelocity: 0.4,
-        options: [.allowUserInteraction, .beginFromCurrentState],
-        animations: updates
-      )
-    }
-
-    private func handleReactionButtonTap(
-      _ sender: UIButton,
-      reaction emoji: String,
-      messageStableId: Int64,
-      messageId: Int64,
-      chatId: Int64,
-      randomId: Int64?
-    ) {
-      buttonTouchUp(sender)
-      reactFromContextMenu(messageStableId: messageStableId) { [weak self] in
-        self?.toggleReaction(
-          emoji,
-          messageStableId: messageStableId,
-          messageId: messageId,
-          chatId: chatId,
-          randomId: randomId
-        )
-      }
-    }
 
     /// Picks a reaction from the open menu. The menu stays up until the row has the reaction (the
     /// optimistic write takes a few milliseconds), so the returning preview lands on the reacted
@@ -5167,31 +4883,6 @@ private extension MessagesCollectionView {
       DispatchQueue.main.asyncAfter(deadline: .now() + (contextMenuShowsOwnPreview ? 0.25 : 1.5), execute: dismiss)
     }
 
-    private func toggleReaction(
-      _ emoji: String,
-      messageStableId: Int64,
-      messageId: Int64,
-      chatId: Int64,
-      randomId: Int64?
-    ) {
-      guard let fullMessage = currentFullMessage(
-        stableId: messageStableId,
-        messageId: messageId,
-        chatId: chatId,
-        randomId: randomId
-      ) else { return }
-      let message = fullMessage.message
-
-      if fullMessage.reactions
-        .filter({ $0.reaction.emoji == emoji && $0.reaction.userId == Auth.shared.getCurrentUserId() ?? 0 })
-        .first != nil
-      {
-        MessageViewActions.sendReactionMutation(.deleteReaction(emoji: emoji, message: message))
-      } else {
-        MessageViewActions.sendReactionMutation(.addReaction(emoji: emoji, message: message))
-        ReactionPickerEmojiUsageStore.recordPick(emoji)
-      }
-    }
 
     private func currentFullMessage(
       stableId: Int64,
@@ -5431,21 +5122,7 @@ private extension MessagesCollectionView {
     }
 
     private func makeServiceMessageMenu(for message: Message) -> UIMenu {
-      let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
-        ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
-      }
-      let deleteAction = UIAction(
-        title: "Delete",
-        image: UIImage(systemName: "trash"),
-        attributes: .destructive
-      ) { [weak self] _ in
-        self?.showDeleteConfirmation(
-          messageId: message.messageId,
-          peerId: message.peerId,
-          chatId: message.chatId
-        )
-      }
-      return UIMenu(children: [replyAction, deleteAction])
+      menuActions.serviceMenu(for: message)
     }
 
     /// `includesTextCopy` is false while the custom menu offers a copy of selected text instead.
@@ -5456,448 +5133,37 @@ private extension MessagesCollectionView {
       includesTextCopy: Bool = true,
       offersSelectText: Bool = false
     ) -> UIMenu {
-      let message = fullMessage.message
-      let isMessageSending = message.status == .sending
-      let isMessageFailed = message.status == .failed
-
-      var actions: [UIAction] = []
-
-      if message.hasText, includesTextCopy {
-        let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
-          guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled, let text = fullMessage.displayText else {
-            UIPasteboard.general.string = message.text
-            return
-          }
-          MessageTextPasteboard.copy(
-            text: text,
-            entities: fullMessage.translationEntities ?? message.entities
-          )
-        }
-        actions.append(copyAction)
-      }
-
-      // The menu selects text in place only for plain bodies; code, lists and tables get a
-      // sheet to select from instead.
-      if offersSelectText, message.hasText, let text = fullMessage.displayText ?? message.text {
-        let entities = fullMessage.translationEntities ?? message.entities
-        let canQuote = !message.isServiceMessage && !isMessageSending && !isMessageFailed
-        actions.append(UIAction(
-          title: "Select Text",
-          image: UIImage(systemName: "selection.pin.in.out")
-        ) { [weak self] _ in
-          guard let presenter = (self?.currentCollectionView as? MessagesCollectionView)?.findViewController() else { return }
-          let sheet = MessageSelectTextSheet.make(
-            text: text,
-            entities: entities,
-            onQuote: canQuote ? { selected in
-              ChatState.shared.quote(
-                peer: message.peerId,
-                id: message.messageId,
-                markdown: MessageMarkdown.quoteLines(selected)
-              )
-            } : nil
-          )
-          presenter.present(sheet, animated: true)
-        })
-      }
-
-      if isMessageSending {
-        if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(
-            title: "Copy Photo",
-            image: UIImage(systemName: "doc.on.clipboard")
-          ) { [weak cell] _ in
-            guard let cell, cell.message?.id == fullMessage.id else { return }
-            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-              UIPasteboard.general.image = image
-              ToastManager.shared.showToast(
-                "Photo copied to clipboard",
-                type: .success,
-                systemImage: "doc.on.clipboard"
-              )
-            }
-          }
-          actions.append(copyPhotoAction)
-        }
-
-        let cancelAction = UIAction(
-          title: fullMessage.showsPhotoUploadProgress ? "Cancel Upload" : "Cancel",
-          image: fullMessage.showsPhotoUploadProgress ? UIImage(systemName: "xmark.circle") : nil,
-          attributes: .destructive
-        ) { _ in
-          PendingMessageCanceller.cancel(fullMessage)
-        }
-        actions.append(cancelAction)
-
-        return UIMenu(children: actions)
-      }
-
-      if isMessageFailed {
-        if fullMessage.photoInfo != nil {
-          let copyPhotoAction = UIAction(
-            title: "Copy Photo",
-            image: UIImage(systemName: "doc.on.clipboard")
-          ) { [weak cell] _ in
-            guard let cell, cell.message?.id == fullMessage.id else { return }
-            if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-              UIPasteboard.general.image = image
-              ToastManager.shared.showToast(
-                "Photo copied to clipboard",
-                type: .success,
-                systemImage: "doc.on.clipboard"
-              )
-            }
-          }
-          actions.append(copyPhotoAction)
-        }
-
-        if let document = fullMessage.documentInfo?.document, let localPath = document.localPath,
-           FileManager.default.fileExists(atPath: FileHelpers.getLocalCacheDirectory(for: .documents)
-             .appendingPathComponent(localPath).path) {
-          actions.append(UIAction(title: "Open Document", image: UIImage(systemName: "doc.text.magnifyingglass")) { [weak cell] _ in
-            guard let cell, cell.message?.id == fullMessage.id else { return }
-            cell.messageView?.documentView.openFile()
-          })
-        }
-
-        let resendAction = UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
-          self?.resendMessage(fullMessage)
-        }
-        actions.append(resendAction)
-
-        let deleteAction = UIAction(title: "Delete", attributes: .destructive) { [weak self] _ in
-          self?.showDeleteConfirmationForFailed(
-            messageId: message.messageId,
-            peerId: message.peerId,
-            chatId: message.chatId
-          )
-        }
-        actions.append(deleteAction)
-
-        return UIMenu(children: actions)
-      }
-
-      if fullMessage.photoInfo != nil {
-        let copyPhotoAction = UIAction(
-          title: "Copy Photo",
-          image: UIImage(systemName: "doc.on.clipboard")
-        ) { [weak cell] _ in
+      menuActions.actionsMenu(
+        for: fullMessage,
+        photo: { [weak cell] in
+          guard let cell, cell.message?.id == fullMessage.id else { return nil }
+          return cell.messageView?.newPhotoView.getCurrentImage()
+        },
+        openDocument: { [weak cell] in
           guard let cell, cell.message?.id == fullMessage.id else { return }
-          if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-            UIPasteboard.general.image = image
-            ToastManager.shared.showToast(
-              "Photo copied to clipboard",
-              type: .success,
-              systemImage: "doc.on.clipboard"
-            )
-          }
-        }
-        actions.append(copyPhotoAction)
-
-        let savePhotoAction = UIAction(
-          title: "Save Photo",
-          image: UIImage(systemName: "square.and.arrow.down")
-        ) { [weak cell] _ in
-          guard let cell, cell.message?.id == fullMessage.id else { return }
-          if let image = cell.messageView?.newPhotoView.getCurrentImage() {
-            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-            ToastManager.shared.showToast(
-              "Photo saved to Photos Library",
-              type: .success,
-              systemImage: "photo"
-            )
-          } else {
-            ToastManager.shared.showToast(
-              "Failed to save photo",
-              type: .error,
-              systemImage: "exclamationmark.triangle"
-            )
-          }
-        }
-        actions.append(savePhotoAction)
-      }
-
-      if includeReactionsAction {
-        actions.append(UIAction(title: "Reactions", image: UIImage(systemName: "face.smiling")) { [weak self] _ in
-          self?.showReactionEmojiPicker(for: fullMessage)
-        })
-      }
-
-      let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
-        ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
-      }
-      actions.append(replyAction)
-
-      let replyThreadAction = UIAction(
-        title: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread",
-        image: UIImage(systemName: "arrowshape.turn.up.left.circle")
-      ) { _ in
-        ReplyThreadNavigator.open(message: message, source: .menu)
-      }
-      actions.append(replyThreadAction)
-
-      if !message.isSubthreadPlacement {
-        let forwardAction = UIAction(
-          title: "Forward",
-          image: UIImage(systemName: "arrowshape.turn.up.right")
-        ) { [weak self] _ in
-          guard let self else { return }
-          presentForwardSheet(fullMessage)
-        }
-        actions.append(forwardAction)
-      }
-
-      let pinned = isMessagePinned(message)
-      let pinAction = UIAction(
-        title: pinned ? "Unpin" : "Pin",
-        image: UIImage(systemName: pinned ? "pin.slash" : "pin")
-      ) { [weak self] _ in
-        self?.togglePinMessage(message, unpin: pinned)
-      }
-
-      var editAction: UIAction?
-      if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText, !message.isGridTranscript {
-        editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
-          ChatState.shared.setEditingMessageId(peer: message.peerId, id: message.messageId)
-        }
-      }
-
-      let willDoAction = createWillDoMenu(for: message)
-      let linearIssueAction = createLinearIssueMenu(for: message)
-
-      let deleteAction = UIAction(
-        title: "Delete",
-        image: UIImage(systemName: "trash"),
-        attributes: .destructive
-      ) { _ in
-        self.showDeleteConfirmation(
-          messageId: message.messageId,
-          peerId: message.peerId,
-          chatId: message.chatId
-        )
-      }
-
-      var menuChildren: [UIMenuElement] = []
-
-      var basicActions = actions
-      if let editAction {
-        basicActions.append(editAction)
-      }
-      basicActions.append(pinAction)
-
-      if !basicActions.isEmpty {
-        let basicMenu = UIMenu(title: "", options: .displayInline, children: basicActions)
-        menuChildren.append(basicMenu)
-      }
-
-      let integrationActions = [willDoAction, linearIssueAction].compactMap(\.self)
-      if !integrationActions.isEmpty {
-        let integrationsMenu = UIMenu(
-          title: "Actions",
-          image: UIImage(systemName: "ellipsis.circle"),
-          children: integrationActions
-        )
-        menuChildren.append(integrationsMenu)
-      }
-
-      let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
-      menuChildren.append(deleteMenu)
-
-      if let via = fullMessage.viaPresentation {
-        let viaAction = UIAction(
-          title: via.detail(senderName: fullMessage.senderInfo?.user.shortDisplayName),
-          image: UIImage(systemName: "sparkles"),
-          attributes: .disabled
-        ) { _ in }
-        menuChildren.append(UIMenu(title: "", options: .displayInline, children: [viaAction]))
-      }
-
-      if let attribution = fullMessage.acknowledgementAttributionLabel {
-        let attributionAction = UIAction(
-          title: attribution,
-          image: UIImage(systemName: "person.2"),
-          attributes: .disabled
-        ) { _ in }
-        menuChildren.append(UIMenu(
-          title: "",
-          options: .displayInline,
-          children: [attributionAction]
-        ))
-      }
-
-      return UIMenu(children: menuChildren)
+          cell.messageView?.documentView.openFile()
+        },
+        includeReactionsAction: includeReactionsAction,
+        includesTextCopy: includesTextCopy,
+        offersSelectText: offersSelectText
+      )
     }
 
     func showDeleteConfirmation(messageId: Int64, peerId: Peer, chatId: Int64) {
-      // TODO: we have duplicate code here 2 findViewController func
-      func findViewController(from view: UIView?) -> UIViewController? {
-        guard let view else { return nil }
-
-        var responder: UIResponder? = view
-        while let nextResponder = responder?.next {
-          if let viewController = nextResponder as? UIViewController {
-            return viewController
-          }
-          responder = nextResponder
-        }
-        return nil
-      }
-
-      guard let viewController = findViewController(from: currentCollectionView) else { return }
-
-      let alert = UIAlertController(
-        title: "Delete Message",
-        message: "Are you sure you want to delete this message?",
-        preferredStyle: .alert
-      )
-
-      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-      alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-        guard let self else { return }
-        MessageViewActions.sendDeleteMessage(messageId: messageId, peerId: peerId, chatId: chatId)
-      })
-
-      viewController.present(alert, animated: true)
+      menuActions.showDeleteConfirmation(messageId: messageId, peerId: peerId, chatId: chatId)
     }
 
     func presentForwardSheet(_ fullMessage: FullMessage) {
-      func findViewController(from view: UIView?) -> UIViewController? {
-        guard let view else { return nil }
-
-        var responder: UIResponder? = view
-        while let nextResponder = responder?.next {
-          if let viewController = nextResponder as? UIViewController {
-            return viewController
-          }
-          responder = nextResponder
-        }
-        return nil
-      }
-
-      guard let viewController = findViewController(from: currentCollectionView) else { return }
-
-      let rootView = InlineUI.ForwardMessagesSheet(
-        messages: [fullMessage],
-        onSelect: { destination, selection in
-          let destinationPeer = destination.peerId
-          ChatState.shared.setForwardingMessages(
-            peer: destinationPeer,
-            fromPeerId: selection.fromPeerId,
-            sourceChatId: selection.sourceChatId,
-            messageIds: selection.messageIds
-          )
-
-          var userInfo: [AnyHashable: Any] = [:]
-          if let userId = destinationPeer.asUserId() {
-            userInfo["peerUserId"] = userId
-          }
-          if let threadId = destinationPeer.asThreadId() {
-            userInfo["peerThreadId"] = threadId
-          }
-          NotificationCenter.default.post(
-            name: Notification.Name("NavigateToForwardDestination"),
-            object: nil,
-            userInfo: userInfo
-          )
-        },
-        onSend: { destinations, selection in
-          await self.forwardMessages(
-            destinations: destinations,
-            selection: selection
-          )
-        }
-      )
-      .appDatabase(AppDatabase.shared)
-
-      let hostingController = UIHostingController(rootView: rootView)
-      hostingController.modalPresentationStyle = UIModalPresentationStyle.pageSheet
-
-      viewController.present(hostingController, animated: true)
+      menuActions.presentForwardSheet(fullMessage)
     }
 
-    @MainActor
-    private func forwardMessages(
-      destinations: [HomeChatItem],
-      selection: InlineUI.ForwardMessagesSheet.ForwardMessagesSelection
-    ) async {
-      guard !destinations.isEmpty else { return }
-      guard !selection.messageIds.isEmpty else {
-        Log.shared.error("Forward failed: empty message ids")
-        return
-      }
-
-      for destination in destinations {
-        let destinationPeer = destination.peerId
-        do {
-          let result = try await Api.realtime.send(.forwardMessages(
-            fromPeerId: selection.fromPeerId,
-            toPeerId: destinationPeer,
-            messageIds: selection.messageIds
-          ))
-
-          if case let .forwardMessages(response) = result, response.updates.isEmpty {
-            _ = await Api.realtime.sendQueued(.getChatHistory(peer: destinationPeer))
-          }
-        } catch {
-          Log.shared.error("Forward failed", error: error)
-        }
-      }
-
-      ToastManager.shared.showToast(
-        "Forwarded to \(destinations.count) chats",
-        type: .success,
-        systemImage: "arrowshape.turn.up.right"
-      )
-    }
 
     func showDeleteConfirmationForFailed(messageId: Int64, peerId: Peer, chatId: Int64) {
-      func findViewController(from view: UIView?) -> UIViewController? {
-        guard let view else { return nil }
-
-        var responder: UIResponder? = view
-        while let nextResponder = responder?.next {
-          if let viewController = nextResponder as? UIViewController {
-            return viewController
-          }
-          responder = nextResponder
-        }
-        return nil
-      }
-
-      guard let viewController = findViewController(from: currentCollectionView) else { return }
-
-      let alert = UIAlertController(
-        title: "Delete Failed Message",
-        message: "Are you sure you want to delete this failed message?",
-        preferredStyle: .alert
-      )
-
-      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-      alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-        guard let self else { return }
-        Task {
-          // Delete locally without server call since it failed to send
-          let _ = try? await AppDatabase.shared.dbWriter.write { db in
-            try Message.deleteMessages(db, messageIds: [messageId], chatId: chatId)
-          }
-
-          await MainActor.run {
-            MessagesPublisher.shared
-              .messagesDeleted(messageIds: [messageId], peer: peerId)
-          }
-        }
-      })
-
-      viewController.present(alert, animated: true)
+      menuActions.showDeleteConfirmationForFailed(messageId: messageId, peerId: peerId, chatId: chatId)
     }
 
     func resendMessage(_ fullMessage: FullMessage) {
-      Task { @MainActor in
-        do { try await FailedMessageResender.resend(fullMessage) }
-        catch { ToastManager.shared.showToast(error.localizedDescription, type: .error) }
-      }
+      menuActions.resendMessage(fullMessage)
     }
 
     // MARK: - UICollectionView
@@ -6356,290 +5622,19 @@ private extension MessagesCollectionView {
       return messages[startIndex ... endIndex].map(\.message.messageId)
     }
 
-    private func createWillDoMenu(for message: Message) -> UIAction? {
-      // Only show "Create Notion Task" if user has integration access
-      guard NotionTaskManager.shared.hasAccess else { return nil }
 
-      return UIAction(
-        title: "Create Notion Task",
-        image: UIImage(systemName: "circle.badge.plus")
-      ) { _ in
-        Task {
-          await NotionTaskManager.shared.handleWillDoAction(for: message, spaceId: self.spaceId.validSpaceId)
-        }
-      }
-    }
 
-    private func createLinearIssueMenu(for message: Message) -> UIAction? {
-      guard let text = message.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return nil
-      }
-
-      // Only show in spaces that have Linear connected (avoid showing action in spaces without Linear).
-      // For DMs, only show if the user has Linear connected in at least one space.
-      if message.peerId.isThread {
-        guard hasLinearConnected else { return nil }
-        guard let linearTeamId, !linearTeamId.isEmpty else { return nil }
-      } else {
-        guard hasLinearConnected else { return nil }
-      }
-
-      return UIAction(
-        title: "Create Linear Issue",
-        image: UIImage(systemName: "circle.badge.plus")
-      ) { _ in
-        Task { [weak self] in
-          guard let self else { return }
-
-          if message.peerId.isThread {
-            guard hasLinearConnected else { return }
-            guard let linearTeamId, !linearTeamId.isEmpty else {
-              ToastManager.shared.showToast(
-                "Select a default Linear team in Space Integrations first.",
-                type: .error,
-                systemImage: "exclamationmark.triangle"
-              )
-              return
-            }
-            await createLinearIssue(text: text, message: message, spaceId: spaceId.validSpaceId)
-            return
-          }
-
-          do {
-            let integrations = try await InlineRPCClient.shared.integrations(
-              userID: Auth.shared.getCurrentUserId() ?? 0,
-              spaceID: nil
-            )
-
-            guard integrations.hasLinearConnected else {
-              ToastManager.shared.showToast(
-                "No Linear integration found. Connect Linear in one of your spaces.",
-                type: .error,
-                systemImage: "exclamationmark.triangle"
-              )
-              return
-            }
-
-            guard let linearSpaces = integrations.linearSpaces, !linearSpaces.isEmpty else {
-              ToastManager.shared.showToast(
-                "No accessible Linear integrations found",
-                type: .error,
-                systemImage: "exclamationmark.triangle"
-              )
-              return
-            }
-
-            showIntegrationSpaceSelectionSheet(
-              title: "Select Space",
-              message: "Choose which space to create the Linear issue in:",
-              spaces: linearSpaces.map { (id: $0.spaceId, name: $0.spaceName) },
-              completion: { selectedSpaceId in
-                Task { [weak self] in
-                  guard let self else { return }
-                  do {
-                    let perSpace = try await InlineRPCClient.shared.integrations(
-                      userID: Auth.shared.getCurrentUserId() ?? 0,
-                      spaceID: selectedSpaceId
-                    )
-
-                    guard perSpace.hasLinearConnected else {
-                      ToastManager.shared.showToast(
-                        "Linear isn’t connected for that space.",
-                        type: .error,
-                        systemImage: "exclamationmark.triangle"
-                      )
-                      return
-                    }
-
-                    guard let teamId = perSpace.linearTeamId, !teamId.isEmpty else {
-                      ToastManager.shared.showToast(
-                        "Select a default Linear team for that space first.",
-                        type: .error,
-                        systemImage: "exclamationmark.triangle"
-                      )
-                      return
-                    }
-
-                    await createLinearIssue(text: text, message: message, spaceId: selectedSpaceId)
-                  } catch {
-                    ToastManager.shared.showToast(
-                      "Failed to fetch integrations for that space",
-                      type: .error,
-                      systemImage: "exclamationmark.triangle"
-                    )
-                  }
-                }
-              }
-            )
-          } catch {
-            ToastManager.shared.showToast(
-              "Failed to fetch integrations",
-              type: .error,
-              systemImage: "exclamationmark.triangle"
-            )
-          }
-        }
-      }
-    }
-
-    private func createLinearIssue(text: String, message: Message, spaceId: Int64?) async {
-      ToastManager.shared.showToast(
-        "Creating Linear issue…",
-        type: .info,
-        systemImage: "linear-icon",
-        shouldStayVisible: true
-      )
-
-      do {
-        guard let spaceId else { throw InlineRPCClientError.unexpectedResponse }
-        let result = try await InlineRPCClient.shared.createLinearIssue(
-          spaceID: spaceId,
-          messageID: message.messageId,
-          peerID: message.peerId
-        )
-
-        guard let link = result.link, let url = URL(string: link) else {
-          ToastManager.shared.showToast(
-            "Failed to create Linear issue",
-            type: .error,
-            systemImage: "exclamationmark.triangle"
-          )
-          return
-        }
-
-        ToastManager.shared.showToast(
-          "Linear issue created",
-          type: .success,
-          systemImage: "checkmark.circle",
-          action: {
-            InAppBrowser.shared.open(url)
-          },
-          actionTitle: "Fast Open"
-        )
-      } catch {
-        ToastManager.shared.showToast(
-          "Failed to create Linear issue",
-          type: .error,
-          systemImage: "exclamationmark.triangle"
-        )
-      }
-    }
   }
 }
 
-// MARK: - NotionTaskManagerDelegate Extension
+// MARK: - Translation
 
-extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegate {
-  func showErrorToast(_ message: String, systemImage: String) {
-    DispatchQueue.main.async {
-      ToastManager.shared.showToast(
-        message,
-        type: .error,
-        systemImage: systemImage
-      )
-    }
-  }
+extension MessagesCollectionView.Coordinator {
 
-  func showSuccessToast(_ message: String, systemImage: String, url: String) {
-    DispatchQueue.main.async {
-      ToastManager.shared.showToast(
-        message,
-        type: .success,
-        systemImage: systemImage,
-        action: {
-          if let url = URL(string: url) {
-            InAppBrowser.shared.open(url)
-          }
-        },
-        actionTitle: "Fast Open"
-      )
-    }
-  }
 
-  func showSpaceSelectionSheet(spaces: [InlineKit.NotionSpace], completion: @escaping @Sendable (Int64) -> Void) {
-    showIntegrationSpaceSelectionSheet(
-      title: "Select Space",
-      message: "Choose which space to create the Notion task in the selected database:",
-      spaces: spaces.map { (id: $0.spaceId, name: $0.spaceName) },
-      completion: completion
-    )
-  }
 
-  private func showIntegrationSpaceSelectionSheet(
-    title: String,
-    message: String,
-    spaces: [(id: Int64, name: String)],
-    completion: @escaping @Sendable (Int64) -> Void
-  ) {
-    // Ensure UI operations happen on the main thread
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
 
-      /// Find the view controller by traversing the responder chain from the collection view
-      func findViewController(from view: UIView?) -> UIViewController? {
-        guard let view else { return nil }
 
-        var responder: UIResponder? = view
-        while let nextResponder = responder?.next {
-          if let viewController = nextResponder as? UIViewController {
-            return viewController
-          }
-          responder = nextResponder
-        }
-        return nil
-      }
-
-      guard let viewController = findViewController(from: currentCollectionView) else { return }
-
-      let alert = UIAlertController(
-        title: title,
-        message: message,
-        preferredStyle: .actionSheet
-      )
-
-      for space in spaces {
-        let action = UIAlertAction(title: space.name, style: .default) { _ in
-          completion(space.id)
-        }
-        alert.addAction(action)
-      }
-
-      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-
-      // For iPad
-      if let popover = alert.popoverPresentationController {
-        popover.sourceView = viewController.view
-        popover.sourceRect = CGRect(
-          x: viewController.view.bounds.midX,
-          y: viewController.view.bounds.midY,
-          width: 0,
-          height: 0
-        )
-        popover.permittedArrowDirections = []
-      }
-
-      viewController.present(alert, animated: true)
-    }
-  }
-
-  func showProgressStep(_ step: Int, message: String, systemImage: String) {
-    DispatchQueue.main.async {
-      ToastManager.shared.showProgressStep(
-        step,
-        message: message,
-        systemImage: systemImage
-      )
-    }
-  }
-
-  func updateProgressToast(message: String, systemImage: String) {
-    DispatchQueue.main.async {
-      ToastManager.shared.updateProgressToast(
-        message: message,
-        systemImage: systemImage
-      )
-    }
-  }
 
   // MARK: - Translation Handling
 
@@ -6702,13 +5697,6 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
         // No action needed for deletes
         break
     }
-  }
-}
-
-private extension Int64? {
-  var validSpaceId: Int64? {
-    guard let self, self > 0 else { return nil }
-    return self
   }
 }
 

@@ -1,3 +1,5 @@
+import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
+import type { Transaction } from "@in/server/db/types"
 import type { FocusStatus } from "@inline-chat/protocol/core"
 import type { DbUser } from "@in/server/db/schema"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
@@ -46,20 +48,20 @@ export const focusViewersAllowed = async (ownerId: number, viewerIds: Iterable<n
  * currently focused need their rule read; everyone else reads as off.
  */
 export const resolveFocusForViewer = async (
+  tx: Transaction,
   viewerId: number,
   owners: Iterable<Pick<DbUser, "id"> & FocusState>,
 ): Promise<Map<number, FocusStatus>> => {
   const now = Date.now()
   const result = new Map<number, FocusStatus>()
-  await Promise.all(
-    Array.from(owners, async (owner) => {
-      if (!isCurrentlyFocused(owner, now)) {
-        result.set(owner.id, { focused: false })
-        return
-      }
-      const visible = (await focusViewersAllowed(owner.id, [viewerId])).has(viewerId)
-      result.set(owner.id, encodeFocusForViewer(owner, visible, now))
-    }),
-  )
+  const focused = Array.from(owners).filter(owner => {
+    result.set(owner.id, { focused: false })
+    return isCurrentlyFocused(owner, now)
+  })
+  const settings = await UserSettingsModel.getGeneralForUsers(tx, focused.map(owner => owner.id))
+  for (const owner of focused) {
+    const rule = effectiveFocusRule(settings.get(owner.id)?.privacy)
+    result.set(owner.id, encodeFocusForViewer(owner, canSeeWithRule(rule, owner.id, viewerId), now))
+  }
   return result
 }

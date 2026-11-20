@@ -72,7 +72,8 @@ public actor MediaLinkRefresher {
   }
 
   /// Returns true when the message was fetched; the caller then re-reads its link from the
-  /// database. Returns false when the fetch failed or ran too recently to repeat.
+  /// database. Returns false when the fetch failed or ran too recently to repeat; the stored
+  /// link may still be newer than the caller's, from that recent fetch.
   public func refresh(peer: Peer, messageId: Int64) async -> Bool {
     guard messageId > 0 else { return false }
     let key = Key(peer: peer, messageId: messageId)

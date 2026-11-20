@@ -1013,7 +1013,7 @@ final class NewVideoView: NSView {
         case .uploading, .completed:
           durationBadge.stringValue = uploadProgressLabel(uploadProgressSnapshot)
         case .failed:
-          durationBadge.stringValue = "Failed"
+          durationBadge.stringValue = uploadProgressSnapshot.pendingRetryDescription ?? ""
         }
       } else {
         durationBadge.stringValue = "Processing"

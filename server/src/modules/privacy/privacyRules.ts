@@ -11,6 +11,7 @@ type StoredPrivacy = UserSettingsGeneral["privacy"]
 export type PrivacyPatch = {
   shareTimeZone?: boolean
   appearInGlobalSearch?: boolean
+  transcribeVoiceMessages?: boolean
   timeZone?: PrivacyRuleInput
   focusStatus?: PrivacyRuleInput
 }
@@ -85,6 +86,7 @@ export const mergePrivacyPatch = (
 
   return {
     appearInGlobalSearch: patch?.appearInGlobalSearch ?? base.appearInGlobalSearch,
+    transcribeVoiceMessages: patch?.transcribeVoiceMessages ?? base.transcribeVoiceMessages,
     shareTimeZone: legacyShareFlag(timeZone),
     // Keep legacy rows rule-free until the rule actually changes.
     ...(base.timeZone || timeZone !== currentRule ? { timeZone } : {}),

@@ -17,12 +17,14 @@ final class ChatRouteToolbarTitleModel {
     case typing(String)
     case working(String)
     case recordingVoice(String)
+    case sending(SendingActivityGlyph.Kind, String)
 
     var text: String? {
       switch self {
       case .none:
         nil
-      case let .text(text), let .typing(text), let .working(text), let .recordingVoice(text):
+      case let .text(text), let .typing(text), let .working(text), let .recordingVoice(text),
+           let .sending(_, text):
         text
       }
     }
@@ -46,14 +48,21 @@ final class ChatRouteToolbarTitleModel {
       return false
     }
 
+    var sendingKind: SendingActivityGlyph.Kind? {
+      if case let .sending(kind, _) = self { return kind }
+      return nil
+    }
+
     var usesAccentColor: Bool {
-      isTyping || isWorking || isRecordingVoice
+      isTyping || isWorking || isRecordingVoice || sendingKind != nil
     }
   }
 
   struct ParentThread: Equatable {
     let peer: Peer
     let title: String
+    /// The parent's message this reply thread hangs off; opening the parent lands on it.
+    let anchorMessageId: Int64?
   }
 
   struct SpaceLink: Equatable {
@@ -425,8 +434,12 @@ final class ChatRouteToolbarTitleModel {
       if action == .working {
         return .working("Working")
       }
+      let activityText = ComposeActions.shared.getActivityDisplayText(for: peer) ?? action.toHumanReadable()
       if action == .recordingVoice {
-        return .recordingVoice(Self.textForAnimatedStatus(action.toHumanReadable()))
+        return .recordingVoice(Self.textForAnimatedStatus(activityText))
+      }
+      if let kind = SendingActivityGlyph.Kind(action) {
+        return .sending(kind, Self.textForAnimatedStatus(activityText))
       }
 
       return .text(action.toHumanReadable())
@@ -484,7 +497,7 @@ final class ChatRouteToolbarTitleModel {
     let parent = ObjectCache.shared.getCachedChat(id: parentChatId) ?? loadedParentChat
     let peer = parentPeer(for: parent, parentChatId: parentChatId)
     let title = parent.map(parentTitle) ?? "Thread"
-    return ParentThread(peer: peer, title: title)
+    return ParentThread(peer: peer, title: title, anchorMessageId: chat.parentMessageId)
   }
 
   private func resolvedBreadcrumb() -> Breadcrumb? {

@@ -5628,6 +5628,17 @@ class InboundStream {
   stopped = false;
   changed = new Set;
   pending = new Map;
+  diagnostics() {
+    const now = performance.now();
+    return {
+      consumerAttached: this.consumer !== null,
+      pending: [...this.pending.values()].map(({ kind, startedAt, writes }) => ({
+        kind,
+        ageMs: Math.round(now - startedAt),
+        writes
+      }))
+    };
+  }
   attach(consumer) {
     if (this.stopped) {
       consumer.end();
@@ -5667,7 +5678,9 @@ class InboundStream {
     const deliveryId = randomUUID();
     const line = JSON.stringify({ ...event, _inlineDeliveryId: deliveryId }) + `
 `;
-    const receipt = { acknowledged: false };
+    const kind = "kind" in event && typeof event.kind === "string" ? event.kind : "unknown";
+    const receipt = { acknowledged: false, kind, startedAt: performance.now(), writes: 0 };
+    let watchdog;
     this.pending.set(deliveryId, receipt);
     let writtenTo = null;
     try {
@@ -5684,6 +5697,14 @@ class InboundStream {
             }
             writtenTo = owner;
             owner.write(line);
+            receipt.writes++;
+            clearTimeout(watchdog);
+            const delay = Math.min(300000, 60000 * 2 ** Math.min(receipt.writes - 1, 3));
+            watchdog = setTimeout(() => {
+              if (this.consumer === owner && !receipt.acknowledged)
+                owner.destroy();
+            }, delay);
+            watchdog.unref();
           } catch {
             if (this.consumer === owner)
               this.consumer = null;
@@ -5694,6 +5715,7 @@ class InboundStream {
       }
       throw new Error("Inbound stream closed before delivery completed");
     } finally {
+      clearTimeout(watchdog);
       this.pending.delete(deliveryId);
     }
   }
@@ -49536,17 +49558,17 @@ class AcknowledgedAsyncChannel {
     else
       waiter.resolve({ value: undefined, done: true });
   }
-  consume(handler, key, concurrency = 8) {
+  consume(handler, key, concurrency = 8, independent) {
     if (this.iteratorClaimed)
       return Promise.reject(new ChannelConsumerError("AcknowledgedAsyncChannel supports one consumer"));
-    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    if (![concurrency, independent?.concurrency ?? 1].every((limit) => Number.isSafeInteger(limit) && limit >= 1)) {
       return Promise.reject(new ChannelConsumerError("Consumer concurrency must be a positive safe integer"));
     }
     if (this.closed)
       return this.failure ? Promise.reject(this.failure) : Promise.resolve();
     this.iteratorClaimed = true;
     return new Promise((resolve, reject) => {
-      this.consumption = { handler, key, concurrency, active: new Map, resolve, reject };
+      this.consumption = { handler, key, concurrency, independent, active: new Map, resolve, reject };
       this.pumpConsumption();
     });
   }
@@ -49555,44 +49577,66 @@ class AcknowledgedAsyncChannel {
     if (!owner || this.closed)
       return;
     try {
-      while (owner.active.size < owner.concurrency && this.queue.length > 0) {
-        if ([...owner.active.values()].includes(null))
-          return;
-        const keys = new Set(owner.active.values());
-        let index = -1;
-        let key = null;
-        for (let i = 0;i < this.queue.length; i++) {
-          const candidate = this.queue[i];
-          const candidateKey = owner.key(candidate.value);
-          if (candidateKey === null) {
-            if (i === 0 && owner.active.size === 0)
-              index = i;
-            break;
-          }
-          if (!keys.has(candidateKey)) {
-            index = i;
-            key = candidateKey;
-            break;
-          }
-        }
-        if (index < 0)
-          return;
-        const item = this.queue.splice(index, 1)[0];
-        owner.active.set(item, key);
-        Promise.resolve().then(() => owner.handler(item.value)).then(() => {
-          if (this.consumption !== owner)
-            return;
-          owner.active.delete(item);
-          this.bufferedBytes -= item.bytes;
-          item.acknowledge(true);
-          this.pumpConsumption();
-        }, (error) => {
-          if (this.consumption === owner)
-            this.fail(error instanceof Error ? error : new Error("Inbound handler failed"));
-        });
-      }
+      if (owner.independent)
+        this.pumpPool(owner, true, owner.independent.concurrency);
+      this.pumpPool(owner, false, owner.concurrency);
     } catch (error) {
       this.fail(error instanceof Error ? error : new Error("Inbound routing failed"));
+    }
+  }
+  pumpPool(owner, independent, limit) {
+    const belongs = (item) => (owner.independent?.accepts(item.value) ?? false) === independent;
+    while (this.queue.length > 0) {
+      const reserved = new Set;
+      let running = 0;
+      for (const [item, active] of owner.active) {
+        if (!belongs(item))
+          continue;
+        if (++running >= limit)
+          return;
+        if (active === null)
+          return;
+        for (const key of active)
+          reserved.add(key);
+      }
+      let index = -1;
+      let keys = null;
+      for (let i = 0;i < this.queue.length; i++) {
+        const candidate = this.queue[i];
+        if (!belongs(candidate))
+          continue;
+        const candidateKey = owner.key(candidate.value);
+        if (candidateKey === null) {
+          if (running === 0)
+            index = i;
+          break;
+        }
+        if (!belongs(candidate))
+          continue;
+        const candidateKeys = typeof candidateKey === "string" ? [candidateKey] : candidateKey;
+        if (!candidateKeys.some((key) => reserved.has(key))) {
+          index = i;
+          keys = candidateKeys;
+          break;
+        }
+        for (const key of candidateKeys)
+          reserved.add(key);
+      }
+      if (index < 0)
+        return;
+      const item = this.queue.splice(index, 1)[0];
+      owner.active.set(item, keys);
+      Promise.resolve().then(() => owner.handler(item.value)).then(() => {
+        if (this.consumption !== owner)
+          return;
+        owner.active.delete(item);
+        this.bufferedBytes -= item.bytes;
+        item.acknowledge(true);
+        this.pumpConsumption();
+      }, (error) => {
+        if (this.consumption === owner)
+          this.fail(error instanceof Error ? error : new Error("Inbound handler failed"));
+      });
     }
   }
   [Symbol.asyncIterator]() {
@@ -54218,14 +54262,19 @@ class InlineSdkClient {
     return this.eventStream;
   }
   consumeEvents(handler, options) {
+    const settings = options?.settingsConcurrency;
     return this.eventStream.consume(handler, (event) => {
       const bucket = this.bucketForEvent(event);
-      if (bucket?.kind === "user")
-        return null;
+      if (bucket?.kind === "user") {
+        return "chatId" in event && typeof event.chatId === "bigint" ? ["user", `chat:${event.chatId}`] : null;
+      }
       if (bucket)
         return this.updateBucketKey(bucket);
       return "chatId" in event && typeof event.chatId === "bigint" ? `chat:${event.chatId}` : null;
-    }, options?.concurrency).catch(async (error) => {
+    }, options?.concurrency, settings === undefined ? undefined : {
+      concurrency: settings,
+      accepts: (event) => event.kind === "bot.chatSettings.request" || event.kind === "bot.chatSettings.item.invoke"
+    }).catch(async (error) => {
       if (!(error instanceof ChannelConsumerError))
         await this.close();
       throw error;
@@ -57981,7 +58030,7 @@ function resolveOutputMode(defaultMode, threadOverride) {
   return pick(threadOverride) ?? pick(defaultMode) ?? "detailed";
 }
 // src/sidecar/activity.ts
-var MODE_CACHE_MS = 30000;
+var MODE_CACHE_MS = 5000;
 var MODE_TIMEOUT_MS = 3000;
 var MAX_TURNS = 256;
 
@@ -57989,6 +58038,7 @@ class ActivityHub {
   options;
   turns = new Map;
   modes = new Map;
+  lastDefault;
   now;
   modeCacheMs;
   modeTimeoutMs;
@@ -58014,8 +58064,11 @@ class ActivityHub {
       return { ignored: true };
     const mode = await state.ready;
     state.touchedAt = this.now();
-    if (mode !== "detailed" || !state.stream)
+    if (mode !== "detailed" || !state.stream) {
+      if (event.type === "turn.end")
+        this.end(turnId, state);
       return { mode };
+    }
     state.stream.apply(event, options.at);
     if (event.type === "turn.end")
       this.end(turnId, state);
@@ -58075,13 +58128,14 @@ class ActivityHub {
         })
       ]).finally(() => clearTimeout(timer));
       const mode = resolveOutputMode(settings.defaultMode, settings.override);
+      this.lastDefault = settings.defaultMode;
       this.modes.set(key, { mode, at: this.now() });
       if (this.modes.size > 1024)
         this.modes.delete(this.modes.keys().next().value);
       return mode;
     } catch (error) {
       this.options.onError?.(error, "mode");
-      return cached?.mode ?? "detailed";
+      return cached?.mode ?? resolveOutputMode(this.lastDefault, undefined);
     }
   }
 }
@@ -58274,6 +58328,7 @@ import { randomUUID as randomUUID2 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
 var TELEMETRY_TIMEOUT_MS = 2000;
 var TELEMETRY_DEDUP_MS = 5 * 60000;
+var MAX_DEDUP_ENTRIES = 256;
 var MAX_ERROR_MESSAGE_LENGTH = 8000;
 var MAX_STACK_FRAMES = 80;
 var SENSITIVE_ENV_NAME = /(?:token|secret|password|api[_-]?key|authorization)/i;
@@ -58437,6 +58492,12 @@ function reportHermesPluginError(operation, error, options = {}) {
     const now = Date.now();
     if (now - (lastReports.get(key) ?? 0) < TELEMETRY_DEDUP_MS)
       return;
+    if (lastReports.size >= MAX_DEDUP_ENTRIES) {
+      for (const [reportedKey, reportedAt] of lastReports) {
+        if (now - reportedAt >= TELEMETRY_DEDUP_MS)
+          lastReports.delete(reportedKey);
+      }
+    }
     lastReports.set(key, now);
     sendHermesPluginError(operation, exception, options).catch(() => {});
   } catch {}
@@ -58478,8 +58539,8 @@ var clientOptions = {
     connecting = false;
     connectError = redactError(error);
     nextConnectRetryAt = null;
-    process.exitCode = 3;
     console.error(`inline-sidecar: terminal authentication failure: ${connectError}; reconnect disabled`);
+    shutdown(78);
   },
   ...rpcTimeoutMs != null ? { rpcTimeoutMs } : {},
   logger: {
@@ -58530,11 +58591,10 @@ async function connectClientLoop() {
       connected = false;
       connecting = false;
       connectError = redactError(error);
-      process.exitCode = 3;
       if (stopping)
         return;
       if (error instanceof InlineSdkAuthenticationError) {
-        await client.close().catch(() => {});
+        await shutdown(78);
         return;
       }
       nextConnectRetryAt = new Date(Date.now() + delayMs).toISOString();
@@ -58554,7 +58614,7 @@ async function consumeEvents() {
         resolveSender: resolveInboundSender,
         deliver
       });
-    });
+    }, { settingsConcurrency: 4 });
   } catch (error) {
     if (!stopping) {
       reportHermesPluginError("inbound.loop", error, { handled: false });
@@ -58588,6 +58648,7 @@ async function handleRequest(req, res) {
         connectRetryMaxMs,
         nextConnectRetryAt,
         diagnostics: safeJson(client.getDiagnostics()),
+        inbound: inboundStream.diagnostics(),
         ...connectError ? { connectError } : {}
       }
     });
@@ -58789,11 +58850,11 @@ function progressTransport(target) {
     }
   };
 }
-var AGENT_SETTINGS_CACHE_MS = 30000;
+var AGENT_SETTINGS_CACHE_MS = 1e4;
 var agentDefaultOutputMode;
 async function readOutputModeSettings(target) {
   const peerId = inputPeerFromTarget(target);
-  const [defaultMode, participations] = await Promise.all([
+  const [defaultResult, participationsResult] = await Promise.allSettled([
     (async () => {
       if (agentDefaultOutputMode && Date.now() - agentDefaultOutputMode.at < AGENT_SETTINGS_CACHE_MS) {
         return agentDefaultOutputMode.value;
@@ -58812,6 +58873,12 @@ async function readOutputModeSettings(target) {
       getAgentParticipations: { peerId }
     })
   ]);
+  if (participationsResult.status === "rejected")
+    throw participationsResult.reason;
+  if (defaultResult.status === "rejected" && !agentDefaultOutputMode)
+    throw defaultResult.reason;
+  const defaultMode = defaultResult.status === "fulfilled" ? defaultResult.value : agentDefaultOutputMode?.value;
+  const participations = participationsResult.value;
   const list = asOptionalRecord(asOptionalRecord(participations)?.getAgentParticipations)?.participations;
   const mine = Array.isArray(list) && meId != null ? list.map(asOptionalRecord).find((entry) => entry != null && String(entry.botUserId) === meId) : undefined;
   const override = typeof mine?.outputMode === "number" ? mine.outputMode : undefined;
@@ -59891,6 +59958,14 @@ function attachConsumer(res) {
     "cache-control": "no-cache",
     connection: "keep-alive"
   });
+  res.flushHeaders();
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded && !res.writableNeedDrain)
+      res.write(`
+`);
+  }, 20000);
+  heartbeat.unref();
+  res.once("close", () => clearInterval(heartbeat));
   inboundStream.attach(res);
 }
 async function deliver(event) {

@@ -11,26 +11,57 @@ import UIKit
 /// current view's copy goes away with it.
 @MainActor
 enum MessageViewActions {
+  #if DEBUG
+  /// The chat harness stands in for the server: (adds, emoji, message id, chat id).
+  static var debugReactionMutation: ((Bool, String, Int64, Int64) -> Void)?
+  #endif
+
   /// Queues a reaction change on the durable RealtimeV2 transaction queue (same pattern as macOS).
   static func sendReactionMutation(_ transaction: AddReactionTransaction) {
+    #if DEBUG
+    if let debug = debugReactionMutation {
+      return debug(true, transaction.context.emoji, transaction.context.messageId, transaction.context.chatId)
+    }
+    #endif
     Task(priority: .userInitiated) { await Api.realtime.sendQueued(transaction) }
   }
 
   static func sendReactionMutation(_ transaction: DeleteReactionTransaction) {
+    #if DEBUG
+    if let debug = debugReactionMutation {
+      return debug(false, transaction.context.emoji, transaction.context.messageId, transaction.context.chatId)
+    }
+    #endif
     Task(priority: .userInitiated) { await Api.realtime.sendQueued(transaction) }
   }
 
-  /// Deletes a sent message through the durable RealtimeV2 queue.
-  /// Local-only ids (unsent messages) never reach the server.
+  /// Deletes a sent message on the server; it leaves the chat once the server acknowledges,
+  /// and stays with an error toast if the server rejects it. Local-only ids (unsent messages)
+  /// never reach the server.
   static func sendDeleteMessage(messageId: Int64, peerId: Peer, chatId: Int64) {
     guard messageId > 0 else { return }
-    Task(priority: .userInitiated) {
-      await Api.realtime.sendQueued(DeleteMessageTransaction(
-        messageIds: [messageId],
-        peerId: peerId,
-        chatId: chatId
-      ))
+    Task(priority: .userInitiated) { @MainActor in
+      do {
+        try await MessageDeletion.delete(messageIds: [messageId], peerId: peerId, chatId: chatId)
+      } catch is CancellationError {
+      } catch {
+        ToastManager.shared.showToast(MessageDeletion.failureMessage(for: error), type: .error)
+      }
     }
+  }
+
+  /// The shared Delete confirmation (`MessageDeletion.confirmation`) as a UIKit alert.
+  static func confirmDeleteMessage(
+    count: Int = 1,
+    from presenter: UIViewController?,
+    onConfirm: @escaping @MainActor () -> Void
+  ) {
+    guard let presenter else { return }
+    let copy = MessageDeletion.confirmation(count: count)
+    let alert = UIAlertController(title: copy.title, message: copy.message, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: copy.cancelTitle, style: .cancel))
+    alert.addAction(UIAlertAction(title: copy.confirmTitle, style: .destructive) { _ in onConfirm() })
+    presenter.present(alert, animated: true)
   }
 
   /// True when the character carries something tappable.
@@ -99,7 +130,7 @@ enum MessageViewActions {
   }
 
   static func toggleReaction(_ emoji: String, on message: FullMessage) {
-    let currentUserID = Auth.shared.getCurrentUserId() ?? 0
+    let currentUserID = MessageViewContent.currentUserId ?? 0
     let model = message.message
     if message.reactions.contains(where: { $0.reaction.emoji == emoji && $0.reaction.userId == currentUserID }) {
       sendReactionMutation(.deleteReaction(emoji: emoji, message: model))
@@ -143,7 +174,9 @@ enum MessageViewActions {
       NotificationCenter.default.post(
         name: Notification.Name("ScrollToRepliedMessage"),
         object: nil,
-        userInfo: ["repliedToMessageId": forwardedMessageId, "chatId": message.chatId]
+        userInfo: [
+          "repliedToMessageId": forwardedMessageId, "chatId": message.chatId, "sourceMessageId": message.messageId,
+        ]
       )
       return
     }
@@ -242,28 +275,20 @@ enum MessageViewActions {
     return UIMenu(children: actions)
   }
 
-  /// Same confirmation as the current view's subthread Delete.
   private static func confirmDelete(_ message: Message, from presenter: UIViewController?) {
-    guard let presenter else { return }
-    let alert = UIAlertController(
-      title: "Delete Message",
-      message: "Are you sure you want to delete this message?",
-      preferredStyle: .alert
-    )
-    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-    alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
+    confirmDeleteMessage(from: presenter) {
       sendDeleteMessage(messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
-    })
-    presenter.present(alert, animated: true)
+    }
   }
 
-  /// Scrolls to the message a reply quotes.
+  /// Scrolls to the message a reply quotes. The reply goes along (`sourceMessageId`): the timeline's scroll
+  /// button comes back to it.
   static func openRepliedMessage(of message: Message) {
     guard let repliedId = message.repliedToMessageId else { return }
     NotificationCenter.default.post(
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil,
-      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
+      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId, "sourceMessageId": message.messageId]
     )
   }
 

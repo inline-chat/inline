@@ -34,7 +34,7 @@ console.log(showFile({ file: { file_id: request.file_id } }))
 
 This local shape example prints `known-file-id`; it does not call the server. Replace the sample ID with a file the authenticated bot owns or can access. `BotMethodResult` is the method's successful result, while an HTTP call returns an envelope with `ok`, `result`, and error fields. See [Bot API responses](/docs/bot-api#responses) for envelope handling.
 
-The repository sources are [`packages/bot-api-types/src/index.ts`](https://github.com/inline-chat/inline/blob/main/packages/bot-api-types/src/index.ts), [`packages/bot-client/src/inline-bot-client.ts`](https://github.com/inline-chat/inline/blob/main/packages/bot-client/src/inline-bot-client.ts), and the [server's OpenAPI route](https://github.com/inline-chat/inline/blob/main/server/src/controllers/bot/bot.ts). Use the served OpenAPI document for the HTTP contract.
+The repository sources are [`packages/bot-api-types/src/index.ts`](https://github.com/inline-chat/inline/blob/main/packages/bot-api-types/src/index.ts), [`packages/bot-client/src/inline-bot-client.ts`](https://github.com/inline-chat/inline/blob/main/packages/bot-client/src/inline-bot-client.ts), and the [server's OpenAPI route](https://github.com/inline-chat/inline/blob/main/server/src/controllers/bot/bot.effect.ts). Use the served OpenAPI document for the HTTP contract.
 
 ## Summary
 

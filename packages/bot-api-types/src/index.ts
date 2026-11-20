@@ -817,6 +817,7 @@ export type SendMessageParams = BotTargetInput & {
     | { type: "photo" | "video" | "document" | "voice"; file_id: string }
     | { type: "nudge" }
   actions?: BotMessageAction[][]
+  /** Quiet status, such as progress: no notification and no unread badge. */
   silent?: boolean
   /** Trusted cross-thread provenance for explicit same-bot Agent handoffs. */
   source_chat_id?: BotInputId

@@ -1397,7 +1397,8 @@ const normalizeInputForSchema = (
     operation === "getAgent" ||
     operation === "getChatParticipant" ||
     operation === "getChatParticipantCount" ||
-    operation === "getContacts"
+    operation === "getContacts" ||
+    operation === "getFile"
   const normalized = usesQueryIdCodecs
     ? { ...input }
     : normalizeIntegerFields(input, [

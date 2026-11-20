@@ -219,19 +219,25 @@ final class MessageReactionsView: NSView {
   }
 
   private func timestampString(for date: Date) -> String {
-    let dateOnly = DateFormatter()
-    dateOnly.locale = .autoupdatingCurrent
-    dateOnly.dateStyle = .medium
-    dateOnly.timeStyle = .none
-    dateOnly.doesRelativeDateFormatting = true
-
-    let timeOnly = DateFormatter()
-    timeOnly.locale = .autoupdatingCurrent
-    timeOnly.dateStyle = .none
-    timeOnly.timeStyle = .short
-
-    return "\(dateOnly.string(from: date)), \(timeOnly.string(from: date))"
+    "\(Self.menuDateFormatter.string(from: date)), \(Self.menuTimeFormatter.string(from: date))"
   }
+
+  private static let menuDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    formatter.doesRelativeDateFormatting = true
+    return formatter
+  }()
+
+  private static let menuTimeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.dateStyle = .none
+    formatter.timeStyle = .short
+    return formatter
+  }()
 
   private func animateInsert(_ chip: ReactionChipButton) {
     chip.alphaValue = 0

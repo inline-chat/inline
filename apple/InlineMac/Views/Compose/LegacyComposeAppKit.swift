@@ -911,6 +911,11 @@ class LegacyComposeAppKit: NSView {
   private func setupTextEditor() {
     // Set the delegate if needed
     textEditor.delegate = self
+    textEditor.onTypographyDidChange = { [weak self] in
+      guard let self else { return }
+      updateContentHeight(for: textEditor.textView)
+      updateHeight(animate: false)
+    }
 
     // Configure text input settings
     textEditor.textView.isAutomaticSpellingCorrectionEnabled = AppSettings.shared.automaticSpellCorrection
@@ -1518,7 +1523,7 @@ class LegacyComposeAppKit: NSView {
         addReplyEscHandler()
 
         if kind == .editing {
-          let attributedString = ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageMarkdown.editableText(
+          let attributedString = MessageMarkdown.editableText(
             text: message.message.text ?? "",
             entities: message.message.entities,
             configuration: .init(
@@ -1527,13 +1532,6 @@ class LegacyComposeAppKit: NSView {
               linkColor: ComposeTextEditor.linkColor,
               convertMentionsToLink: false
             )
-          ) : MessageMarkdown.withQuoteSyntax(
-            toAttributedString(
-              text: message.message.text ?? "",
-              entities: message.message.entities
-            ),
-            entities: message.message.entities,
-            attributes: [.font: ComposeTextEditor.font, .foregroundColor: ComposeTextEditor.textColor]
           )
 
           // TODO: Extract these to a function
@@ -1722,6 +1720,8 @@ class LegacyComposeAppKit: NSView {
   // Send the message
   func send(sendMode: MessageSendMode? = nil, interpretInlineCommands: Bool = true) {
     guard messageList?.isMessageSelectionActive != true else { return }
+    // An input method is still composing; its marked text is not final.
+    guard !textEditor.textView.hasMarkedText() else { return }
     textEditor.textView.resetPastedLinks()
     if voiceViewModel.phase == .review {
       sendVoiceRecording()
@@ -1776,23 +1776,17 @@ class LegacyComposeAppKit: NSView {
     let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
     func enqueueAttachments(replyToMessageId: Int64?) {
-      for (index, attachment) in attachmentItemsSnapshot.enumerated() {
-        let isFirst = index == 0
-        Transactions.shared.mutate(
-          transaction:
-          .sendMessage(
-            TransactionSendMessage(
-              text: isFirst ? text : nil,
-              peerId: destinationPeerId,
-              chatId: destinationChatId, // FIXME: chatId fallback
-              mediaItems: [attachment],
-              replyToMsgId: isFirst ? replyToMessageId : nil,
-              isSticker: nil,
-              entities: isFirst ? entities : nil,
-              sendMode: effectiveSendMode
-            )
-          )
-        )
+      // Neighbouring photos and videos go out as albums; the text is the first one's caption.
+      for send in TransactionSendMessage.sends(
+        text: text,
+        peerId: destinationPeerId,
+        chatId: destinationChatId, // FIXME: chatId fallback
+        mediaItems: attachmentItemsSnapshot,
+        replyToMsgId: replyToMessageId,
+        entities: entities,
+        sendMode: effectiveSendMode
+      ) {
+        Transactions.shared.mutate(transaction: .sendMessage(send))
       }
     }
 

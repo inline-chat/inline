@@ -153,11 +153,15 @@ public struct GroupedReaction: Hashable, Sendable, Identifiable, Codable, Equata
   public var emoji: String
   public var reactions: [FullReaction]
   public var maxDate: Date
+  /// When the emoji was first used on the message: its chip's place among the others.
+  public var firstDate: Date
 
   public init(emoji: String, reactions: [FullReaction]) {
     self.emoji = emoji
     self.reactions = reactions
 
-    maxDate = reactions.map(\.reaction.date).max() ?? Date()
+    let dates = reactions.map(\.reaction.date)
+    maxDate = dates.max() ?? Date()
+    firstDate = dates.min() ?? Date()
   }
 }

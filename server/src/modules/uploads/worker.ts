@@ -292,17 +292,14 @@ export class NativeUploadWorker {
     this.#claimControllers.get(uploadDbId)?.abort(new UploadOwnershipLostError())
   }
 
+  /**
+   * Aborts the upload's multipart session. The object at the same key (a completed session, or a
+   * single-group PUT a crash left before publication) is removed by the finalizer's
+   * discardPublication, which both callers, cancel and expiry cleanup, run next.
+   */
   async discardStorage(upload: InlineUploadRecord, signal?: AbortSignal): Promise<void> {
-    if (!upload.resultFileUniqueId) return
-    const key = storageKeyFor(upload)
-    if (upload.storageUploadId) await this.multipartStore.abort(key, upload.storageUploadId, signal)
-    // A single-group upload is stored with one PUT before it publishes, and a crash can leave that
-    // object behind with no session to abort. Nothing references an unpublished object.
-    if (upload.resultMediaId === null) {
-      await this.multipartStore.remove(key, signal).catch((error) => {
-        log.warn("Native upload unpublished object cleanup failed", { error, uploadDbId: upload.id })
-      })
-    }
+    if (!upload.storageUploadId || !upload.resultFileUniqueId) return
+    await this.multipartStore.abort(storageKeyFor(upload), upload.storageUploadId, signal)
   }
 
   #pump(): void {
@@ -347,6 +344,8 @@ export class NativeUploadWorker {
         timer = setTimeout(resolve, this.#inlineFinishTimeoutMs)
         onAbort = resolve
         signal?.addEventListener("abort", onAbort, { once: true })
+        // The request may have gone while the claim was in flight; an aborted signal never fires.
+        if (signal?.aborted) resolve()
       }),
     ])
     if (timer !== undefined) clearTimeout(timer)
@@ -851,6 +850,8 @@ export class NativeUploadWorker {
     onlyGroups?: readonly number[],
   ): Promise<InlineUploadStorageWork> {
     throwIfAborted(signal)
+    // A single-group upload is stored by finish with one PUT; a session opened early would force multipart.
+    if (!includeTail && initialWork.upload.partCount <= STORAGE_FRAMES_PER_PART) return initialWork
     const codec = storageCodecFor(initialWork.upload.storageFormat)
     if (!codec) throw new UploadIntegrityError()
     const sourceByIndex = new Map(initialWork.parts.map((part) => [part.partIndex, part]))

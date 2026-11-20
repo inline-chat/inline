@@ -616,6 +616,20 @@ One-pass review:
         #[command(subcommand)]
         command: CliCommand,
     },
+    #[command(about = "Let agents read and operate apps on this Mac")]
+    ComputerUse {
+        #[command(subcommand)]
+        command: ComputerUseCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ComputerUseCommand {
+    #[command(
+        about = "Serve computer-use tools over stdio MCP",
+        after_help = "Inline's agent bridge gives this server to Claude, OpenCode and Amp sessions.\nTo use it in another agent:\n  claude mcp add computer -- inline computer-use mcp"
+    )]
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -666,6 +680,7 @@ impl Command {
                 SetupCommand::Hermes(_) => "setup_hermes",
                 SetupCommand::Openclaw(_) => "setup_openclaw",
             },
+            Self::ComputerUse { .. } => "computer_use_mcp",
             Self::Agents { command } => match command {
                 agents::AgentsCommand::Discover => "agents_discover",
                 agents::AgentsCommand::Setup(_) => "agents_setup",
@@ -1123,7 +1138,11 @@ enum ChatsCommand {
 
 #[derive(Subcommand)]
 enum BotsCommand {
-    #[command(about = "List bots you can access", visible_alias = "ls")]
+    #[command(
+        about = "List bots you can access",
+        visible_alias = "ls",
+        after_help = "For each bot's output mode and who it's shared with, run `inline bots settings`."
+    )]
     List(BotsListArgs),
     #[command(about = "Create a new bot")]
     Create(BotsCreateArgs),
@@ -1150,11 +1169,11 @@ enum BotsCommand {
     #[command(about = "Delete a bot (asks for confirmation)")]
     Delete(BotsConfirmArgs),
     #[command(
-        about = "Show or change a bot's agent settings, such as friendly or detailed output",
-        after_help = "Examples:\n  inline bots settings --bot-user-id 42\n  inline bots settings --bot-user-id 42 --output-mode friendly\n  inline bots settings --bot-user-id 42 --output-mode default\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode detailed\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode default\n\nWithout --output-mode, prints the current settings. Detailed shows every step; friendly shows short updates and the answer.\nThe owner and people with configure access can change them."
+        about = "Show or change bots' agent settings, such as friendly or detailed output, for one bot or all of them",
+        after_help = "Examples:\n  inline bots settings                                   # every bot you own: output mode and who it's shared with\n  inline bots settings --all --output-mode friendly      # all your bots at once\n  inline bots settings --bot-user-id 42,43 --output-mode detailed\n  inline bots settings --filter hermes --output-mode friendly --dry-run\n  inline bots settings --all --except 42 --output-mode friendly\n  inline bots settings --bot-user-id 42\n  inline bots settings --bot-user-id 42 --output-mode default\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode detailed\n\nWithout --output-mode, prints the current settings. Detailed shows every step; friendly shows no tool chatter and a plain-language answer; default clears the choice (the agent's default, detailed).\nBulk changes skip bots already set, report each bot, and exit 1 if any bot failed. --dry-run previews without changing anything.\nThe owner and people with configure access can change them."
     )]
     Settings(BotsSettingsArgs),
-    #[command(about = "List, grant, or revoke people's access to a bot")]
+    #[command(about = "List, grant, or revoke access to one bot or many, and open or close them")]
     Access {
         #[command(subcommand)]
         command: BotsAccessCommand,
@@ -1163,22 +1182,32 @@ enum BotsCommand {
 
 #[derive(Subcommand)]
 enum BotsAccessCommand {
-    #[command(about = "List who can message a bot", visible_alias = "ls")]
-    List(BotsBotArgs),
     #[command(
-        about = "Grant or replace one person's access to a bot",
-        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --space-id 3\n  inline bots access grant --bot-user-id 42 --user-id 7 --admin\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n\nReplaces the person's existing operations. Defaults to invoke,steer. An admin manages the bot with you; only you can delete it."
+        about = "List who can message a bot, or who each of your bots is shared with",
+        visible_alias = "ls",
+        after_help = "Examples:\n  inline bots access list                    # every bot you own: shared with only you, everyone, or people and spaces\n  inline bots access list --bot-user-id 42   # one bot's access list"
+    )]
+    List(BotsAccessListArgs),
+    #[command(
+        about = "Grant or replace one person's access to one bot or many",
+        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --space-id 3\n  inline bots access grant --bot-user-id 42 --user-id 7 --admin\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n  inline bots access grant --all --user-id 7          # on every bot you own\n\nReplaces the person's existing operations. Defaults to invoke,steer. An admin manages the bot with you; only you can delete it."
     )]
     Grant(BotsAccessGrantArgs),
-    #[command(about = "Revoke one person's access to a bot")]
+    #[command(
+        about = "Revoke one person's access to one bot or many",
+        after_help = "Examples:\n  inline bots access revoke --bot-user-id 42 --user-id 7\n  inline bots access revoke --all --user-id 7 --dry-run"
+    )]
     Revoke(BotsAccessUserArgs),
     #[command(
         about = "Let anyone on Inline message a bot",
-        after_help = "For bots meant for everyone, like a support or team bot. The bot's own software still decides who it answers; an Inline agent bridge keeps answering only its owner and access list."
+        after_help = "Examples:\n  inline bots access open --bot-user-id 42\n\nFor bots meant for everyone, like a support or team bot. The bot's own software still decides who it answers; an Inline agent bridge keeps answering only its owner and access list."
     )]
-    Open(BotsBotArgs),
-    #[command(about = "Limit a bot to its owner and access list again")]
-    Close(BotsBotArgs),
+    Open(BotsBulkArgs),
+    #[command(
+        about = "Limit one bot or many to their owner and access list (Shared With: only you)",
+        after_help = "Examples:\n  inline bots access close --bot-user-id 42\n  inline bots access close --all              # every bot you own\n  inline bots access close --all --dry-run\n\nPeople and spaces on a bot's access list keep their access; revoke them with `inline bots access revoke`."
+    )]
+    Close(BotsBulkArgs),
 }
 
 #[derive(Subcommand)]
@@ -1578,8 +1607,15 @@ struct BotsSetPhotoArgs {
 
 #[derive(Args)]
 struct BotsSettingsArgs {
-    #[arg(long, help = "Bot user id")]
-    bot_user_id: i64,
+    #[command(flatten)]
+    selection: bots::BotSelectionArgs,
+
+    #[arg(
+        long,
+        conflicts_with = "chat_id",
+        help = "Preview a bulk change without making it"
+    )]
+    dry_run: bool,
 
     #[arg(
         long,
@@ -1594,8 +1630,11 @@ struct BotsSettingsArgs {
 
 #[derive(Args)]
 struct BotsAccessGrantArgs {
-    #[arg(long, help = "Bot user id")]
-    bot_user_id: i64,
+    #[command(flatten)]
+    selection: bots::BotSelectionArgs,
+
+    #[arg(long, help = "Preview a bulk change without making it")]
+    dry_run: bool,
 
     #[command(flatten)]
     subject: BotsAccessSubjectArgs,
@@ -1619,11 +1658,30 @@ struct BotsAccessGrantArgs {
 
 #[derive(Args)]
 struct BotsAccessUserArgs {
-    #[arg(long, help = "Bot user id")]
-    bot_user_id: i64,
+    #[command(flatten)]
+    selection: bots::BotSelectionArgs,
+
+    #[arg(long, help = "Preview a bulk change without making it")]
+    dry_run: bool,
 
     #[command(flatten)]
     subject: BotsAccessSubjectArgs,
+}
+
+#[derive(Args)]
+struct BotsAccessListArgs {
+    #[command(flatten)]
+    selection: bots::BotSelectionArgs,
+}
+
+/// One bot (`--bot-user-id 42`), several, or all of yours, with a preview.
+#[derive(Args)]
+struct BotsBulkArgs {
+    #[command(flatten)]
+    selection: bots::BotSelectionArgs,
+
+    #[arg(long, help = "Preview a bulk change without making it")]
+    dry_run: bool,
 }
 
 /// Who an access grant is for: one person, everyone in a space, or everyone in a user group.
@@ -3029,6 +3087,18 @@ fn main() {
         }
     };
 
+    // Stdout is the MCP channel: nothing else may run or print first.
+    if let Command::ComputerUse {
+        command: ComputerUseCommand::Mcp,
+    } = &cli.command
+    {
+        if let Err(error) = inline_computer_use::serve_stdio() {
+            eprintln!("computer-use: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if let Command::Completion { shell } = &cli.command {
         let result: Result<(), Box<dyn std::error::Error>> = if flags.json {
             Err(CliError::invalid_args(
@@ -3750,6 +3820,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             Command::Completion { .. } => unreachable!("completions are handled before runtime setup"),
             Command::Schema { .. } | Command::Capabilities { .. } | Command::Cli { .. } => {
                 unreachable!("offline discovery commands are handled before runtime setup")
+            }
+            Command::ComputerUse { .. } => {
+                unreachable!("computer use is served before runtime setup")
             }
             Command::Bots { command } => match command {
                 BotsCommand::List(args) => {
@@ -7107,7 +7180,54 @@ async fn fetch_message_by_id(
         .ok_or_else(|| CliError::invalid_args("Message not found for that peer.").into())
 }
 
+/// The server caps one history page, so longer ranges are fetched in pages.
+const HISTORY_PAGE_LIMIT: i32 = 500;
+
+/// Messages older than `offset_id`, newest first, up to `limit`.
 async fn fetch_history_messages(
+    realtime: &mut AuthenticatedRealtime,
+    peer: &proto::InputPeer,
+    offset_id: Option<i64>,
+    limit: Option<i32>,
+) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
+    page_history(offset_id, limit, async |offset_id, limit| {
+        fetch_history_page(realtime, peer, offset_id, limit).await
+    })
+    .await
+}
+
+async fn page_history(
+    offset_id: Option<i64>,
+    limit: Option<i32>,
+    mut fetch_page: impl AsyncFnMut(
+        Option<i64>,
+        Option<i32>,
+    ) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>>,
+) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
+    let Some(total) = limit.and_then(|limit| usize::try_from(limit).ok()) else {
+        return fetch_page(offset_id, limit).await;
+    };
+    let mut messages: Vec<proto::Message> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut offset_id = offset_id;
+    while messages.len() < total {
+        let page_limit = (total - messages.len()).min(HISTORY_PAGE_LIMIT as usize);
+        let page = fetch_page(offset_id, Some(page_limit as i32)).await?;
+        let page_len = page.len();
+        let Some(oldest) = page.iter().map(|message| message.id).min() else {
+            break;
+        };
+        // Album completion can return a few rows past the limit, or repeat one.
+        messages.extend(page.into_iter().filter(|message| seen.insert(message.id)));
+        if page_len < page_limit || offset_id == Some(oldest) {
+            break;
+        }
+        offset_id = Some(oldest);
+    }
+    Ok(messages)
+}
+
+async fn fetch_history_page(
     realtime: &mut AuthenticatedRealtime,
     peer: &proto::InputPeer,
     offset_id: Option<i64>,
@@ -8264,6 +8384,65 @@ mod cli_parsing_tests {
         assert_eq!(value["translations"].as_array().unwrap().len(), 1);
     }
 
+    #[tokio::test]
+    async fn long_history_limits_are_fetched_in_server_sized_pages() {
+        // A chat with ids 1..=1200; the fake server returns newest first, older than the offset.
+        let mut requests = Vec::new();
+        let messages = page_history(None, Some(1100), async |offset_id, limit| {
+            requests.push((offset_id, limit));
+            let below = offset_id.unwrap_or(1201);
+            let limit = i64::from(limit.unwrap());
+            Ok((1..below)
+                .rev()
+                .take(limit as usize)
+                .map(|id| proto::Message {
+                    id,
+                    ..Default::default()
+                })
+                .collect())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            requests,
+            vec![
+                (None, Some(500)),
+                (Some(701), Some(500)),
+                (Some(201), Some(100))
+            ]
+        );
+        assert_eq!(messages.len(), 1100);
+        assert_eq!(messages.first().map(|m| m.id), Some(1200));
+        assert_eq!(messages.last().map(|m| m.id), Some(101));
+    }
+
+    #[tokio::test]
+    async fn history_paging_stops_at_the_start_of_the_chat_and_skips_repeats() {
+        let mut calls = 0;
+        let messages = page_history(Some(30), Some(1000), async |offset_id, _limit| {
+            calls += 1;
+            // Ids 1..30 exist; the first page repeats its oldest row as album completion can.
+            let below = offset_id.unwrap();
+            let mut page: Vec<proto::Message> = (1..below)
+                .rev()
+                .map(|id| proto::Message {
+                    id,
+                    ..Default::default()
+                })
+                .collect();
+            if let Some(last) = page.last().cloned() {
+                page.push(last);
+            }
+            Ok(page)
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(calls, 1);
+        assert_eq!(messages.len(), 29);
+    }
+
     #[test]
     fn translated_history_json_keeps_raw_history_fields() {
         let output = TranslatedChatHistoryOutput {
@@ -9033,9 +9212,128 @@ mod cli_parsing_tests {
                     BotsCommand::Access {
                         command: BotsAccessCommand::Revoke(args),
                     },
-            } => assert_eq!((args.bot_user_id, args.subject.user_id), (9, Some(7))),
+            } => assert_eq!(
+                (args.selection.bot_user_ids, args.subject.user_id),
+                (vec![9], Some(7))
+            ),
             _ => panic!("expected bots access revoke"),
         }
+    }
+
+    #[test]
+    fn parses_bulk_bot_settings_and_access() {
+        let settings = |argv: &[&str]| -> BotsSettingsArgs {
+            let mut full = vec!["inline", "bots", "settings"];
+            full.extend_from_slice(argv);
+            match Cli::try_parse_from(full).unwrap().command {
+                Command::Bots {
+                    command: BotsCommand::Settings(args),
+                } => args,
+                _ => panic!("expected bots settings"),
+            }
+        };
+
+        // No bot named: the overview of every bot you own.
+        let args = settings(&[]);
+        assert!(args.selection.bot_user_ids.is_empty() && !args.selection.all);
+
+        let args = settings(&["--all", "--output-mode", "friendly"]);
+        assert!(args.selection.all);
+        assert_eq!(args.output_mode, Some(bots::BotOutputMode::Friendly));
+
+        let args = settings(&[
+            "--bot-user-id",
+            "1,2",
+            "--bot-user-id",
+            "3",
+            "--output-mode",
+            "detailed",
+        ]);
+        assert_eq!(args.selection.bot_user_ids, vec![1, 2, 3]);
+
+        let args = settings(&[
+            "-f",
+            "hermes",
+            "--except",
+            "4,5",
+            "--include-managed",
+            "--output-mode",
+            "friendly",
+            "--dry-run",
+        ]);
+        assert_eq!(args.selection.filter.as_deref(), Some("hermes"));
+        assert_eq!(args.selection.except, vec![4, 5]);
+        assert!(args.selection.include_managed && args.dry_run);
+
+        for conflicting in [
+            &[
+                "--bot-user-id",
+                "1",
+                "--chat-id",
+                "7",
+                "--output-mode",
+                "friendly",
+                "--dry-run",
+            ][..],
+            &["--bot-user-id", "1", "--all"][..],
+            &["--bot-user-id", "1", "--filter", "x"][..],
+            &["--bot-user-id", "1", "--except", "2"][..],
+        ] {
+            let mut full = vec!["inline", "bots", "settings"];
+            full.extend_from_slice(conflicting);
+            assert!(Cli::try_parse_from(full).is_err(), "{conflicting:?}");
+        }
+
+        for (name, all) in [("close", true), ("open", false)] {
+            let mut argv = vec!["inline", "bots", "access", name];
+            if all {
+                argv.push("--all");
+            } else {
+                argv.extend(["--bot-user-id", "9"]);
+            }
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let args = match cli.command {
+                Command::Bots {
+                    command:
+                        BotsCommand::Access {
+                            command: BotsAccessCommand::Close(args) | BotsAccessCommand::Open(args),
+                        },
+                } => args,
+                _ => panic!("expected bots access {name}"),
+            };
+            assert_eq!(args.selection.all, all);
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "access",
+            "grant",
+            "--all",
+            "--user-id",
+            "7",
+            "--admin",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command:
+                    BotsCommand::Access {
+                        command: BotsAccessCommand::Grant(args),
+                    },
+            } => assert!(args.selection.all && args.admin && args.subject.user_id == Some(7)),
+            _ => panic!("expected bots access grant"),
+        }
+
+        let cli = Cli::try_parse_from(["inline", "bots", "access", "ls"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bots {
+                command: BotsCommand::Access {
+                    command: BotsAccessCommand::List(_)
+                }
+            }
+        ));
     }
 
     #[test]

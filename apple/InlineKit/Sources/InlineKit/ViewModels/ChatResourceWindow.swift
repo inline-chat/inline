@@ -36,6 +36,7 @@ public class ChatResourceWindow<Row: Equatable & Sendable>: ObservableObject, @u
   private let fetchRows: @Sendable (Database, Int) throws -> [Row]
   private let messageID: @Sendable (Row) -> Int64
   private let fetchPage: @Sendable (Int64?) async throws -> Void
+  private let account: AuthAccountMutationToken?
   private let pageSize: Int32 = 50
   private var observation: AnyCancellable?
   private var observationGeneration = 0
@@ -72,6 +73,7 @@ public class ChatResourceWindow<Row: Equatable & Sendable>: ObservableObject, @u
     self.fetchRows = fetchRows
     self.messageID = messageID
     let account = try? Auth.shared.handle.beginAccountMutation()
+    self.account = account
     self.fetchPage = fetchPage ?? { offset in
       guard let account else { throw ResourceWindowError.unsupportedResponse }
       let hasChat = try await db.reader.read { try Chat.getByPeerId(db: $0, peerId: peer) != nil }
@@ -88,6 +90,30 @@ public class ChatResourceWindow<Row: Equatable & Sendable>: ObservableObject, @u
   }
 
   public func rowsDidChange() {}
+
+  /// How many messages of this scope the chat holds, counted by the server, leaving out history
+  /// the viewer cleared. Unlike `rows`, it covers history that hasn't loaded. Servers before
+  /// media counts reject the request; callers treat a failure as unknown.
+  public func countRemote() async throws -> Int {
+    guard let filter = scope.filter, scope != .links, let account else {
+      throw ResourceWindowError.unsupportedResponse
+    }
+    let peer = peer
+    let result = try await Api.realtime.callRpcDirect(
+      method: .searchMessages,
+      input: .searchMessages(.with {
+        $0.peerID = peer.toInputPeer()
+        $0.filter = filter
+        $0.countOnly = true
+      }),
+      timeout: .seconds(30),
+      accountToken: account
+    )
+    guard case let .searchMessages(response) = result, response.hasTotalCount else {
+      throw ResourceWindowError.unsupportedResponse
+    }
+    return Int(response.totalCount)
+  }
 
   private func observe() {
     guard active else { return }

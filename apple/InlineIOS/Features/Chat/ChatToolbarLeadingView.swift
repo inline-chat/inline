@@ -243,7 +243,11 @@ struct ChatToolbarLeadingView: View {
 
   private func openParentThread(_ parent: ReplyThreadToolbarContext.ParentLink) {
     guard parent.peer != peerId else { return }
-    router.openPrimaryDestination(.chat(peer: parent.peer))
+    if let anchorMessageId = parent.anchorMessageId {
+      router.openPrimaryDestination(.chatMessage(peer: parent.peer, messageID: anchorMessageId))
+    } else {
+      router.openPrimaryDestination(.chat(peer: parent.peer))
+    }
   }
 
   private func openSpace(_ space: ReplyThreadToolbarContext.SpaceLink) {
@@ -596,16 +600,13 @@ private struct ChatToolbarSubtitleText: View {
 private struct ChatToolbarComposeActionSubtitle: View {
   let presentation: ComposeActionPresentation
 
-  private var usesAccentColor: Bool {
-    presentation.action == .typing || presentation.action == .working || presentation.action == .recordingVoice
-  }
-
   var body: some View {
     HStack(alignment: .center, spacing: 4) {
       ChatToolbarComposeActionIndicator(action: presentation.action)
       ChatToolbarSubtitleText(
         text: presentation.text,
-        color: usesAccentColor ? ThemeManager.shared.accentColor : .secondary
+        // Every live activity reads as one family: accent glyph, accent text.
+        color: ThemeManager.shared.accentColor
       )
     }
     .accessibilityElement(children: .ignore)
@@ -624,11 +625,11 @@ private struct ChatToolbarComposeActionIndicator: View {
     case .typing:
       TypingActivityIndicator(color: ThemeManager.shared.accentColor)
     case .uploadingPhoto:
-      AnimatedPhotoUpload()
+      SendingActivityIndicator(kind: .photo, color: ThemeManager.shared.accentColor)
     case .uploadingDocument:
-      AnimatedDocumentUpload()
+      SendingActivityIndicator(kind: .file, color: ThemeManager.shared.accentColor)
     case .uploadingVideo:
-      AnimatedVideoUpload()
+      SendingActivityIndicator(kind: .video, color: ThemeManager.shared.accentColor)
     case .recordingVoice:
       VoiceRecordingActivityIndicator(
         barWidth: 2,
@@ -708,26 +709,6 @@ private struct ChatToolbarBreadcrumbSubtitle: View {
   }
 }
 
-// MARK: - Animated Indicators
-
-private struct AnimatedPhotoUpload: View {
-  var body: some View {
-    UploadActivityIndicator(color: .secondary)
-  }
-}
-
-private struct AnimatedDocumentUpload: View {
-  var body: some View {
-    UploadActivityIndicator(color: .secondary)
-  }
-}
-
-private struct AnimatedVideoUpload: View {
-  var body: some View {
-    UploadActivityIndicator(color: .secondary)
-  }
-}
-
 // MARK: - Preview Provider
 
 struct ChatSubtitlePreview: View {
@@ -760,9 +741,9 @@ struct ChatSubtitlePreview: View {
     ChatSubtitlePreview(subtitle: .composeAction(.init(action: .typing, text: "John and Jane")))
 
     // Compose Actions
-    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingPhoto, text: "uploading photo")))
-    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingDocument, text: "uploading document")))
-    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingVideo, text: "uploading video")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingPhoto, text: "sending photo")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingDocument, text: "sending file")))
+    ChatSubtitlePreview(subtitle: .composeAction(.init(action: .uploadingVideo, text: "sending video")))
     ChatSubtitlePreview(subtitle: .composeAction(.init(action: .recordingVoice, text: "recording voice")))
 
     // Timezone

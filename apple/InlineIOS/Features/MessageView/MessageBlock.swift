@@ -14,6 +14,8 @@ struct MessageBlock {
     case reply
     case photo
     case video
+    /// Photos and videos sent together, in one grid.
+    case album
     case document
     case voice
     /// A link preview under the text.
@@ -34,6 +36,9 @@ struct MessageBlock {
   var attachment: FullAttachment?
   /// Actions the message's blocks draw themselves, left out of the action rows.
   var hiddenActionIDs: Set<String> = []
+  /// The album an `.album` block draws, and its tiles.
+  var album: MessageAlbum?
+  var mosaic: AlbumMosaic?
 
   var id: String { input.id }
 }
@@ -44,6 +49,7 @@ extension MessageBlock {
   @MainActor
   static func blocks(
     for message: FullMessage,
+    album: MessageAlbum? = nil,
     context: MessageRowContext,
     maximumContentWidth: CGFloat
   ) -> [MessageBlock] {
@@ -84,7 +90,23 @@ extension MessageBlock {
       )))
     }
 
-    if let photo = message.photoInfo {
+    if let album {
+      // Edge-to-edge media may be as wide as the bubble's body. Planned at a width the body
+      // allows, so the planner never scales the grid and the tiles keep their frames.
+      let mosaic = MessageAlbumView.mosaic(
+        for: album,
+        availableWidth: maximumContentWidth + MessageLayoutMetrics().bubbleInsets.horizontal,
+        mediaInset: MessageViewContent.mediaInset,
+        scale: context.displayScale
+      )
+      var block = MessageBlock(kind: .album, input: .init(
+        id: "media", position: .aboveText, width: .fixed(mosaic.size.width), height: mosaic.size.height,
+        isEdgeToEdge: true
+      ))
+      block.album = album
+      block.mosaic = mosaic
+      blocks.append(block)
+    } else if let photo = message.photoInfo {
       let best = photo.bestPhotoSize()
       let size = NewPhotoView.displaySize(width: best?.width, height: best?.height, hasCaption: hasCaption)
       blocks.append(MessageBlock(kind: .photo, input: .init(
@@ -198,6 +220,7 @@ extension MessageBlock {
       case .reply: "Reply to \(message.repliedToMessage?.from?.shortDisplayName ?? "message")"
       case .photo: "Photo"
       case .video: "Video"
+      case .album: "Album, \(block.album?.items.count ?? 0) items"
       case .document: message.documentInfo?.document.fileName ?? "File"
       case .voice: "Voice message"
       case .preview: block.attachment?.urlPreview?.title ?? "Link preview"
@@ -268,15 +291,29 @@ final class MessageBlockHostView: UIView {
     case .photo:
       let photo = contentView as? NewPhotoView ?? install(NewPhotoView(message), fills: false)
       photo.plannedSize = size
+      photo.masksOwnCorners = false
       photo.bubbleBleed = bubbleBleed
       photo.update(with: message)
       photo.onTap = { [weak self] message, sourceView, image, url in
         self?.onPhotoTap?(message, sourceView, image, url)
       }
 
+    case .album:
+      guard let album = block.album, let mosaic = block.mosaic else { break }
+      let grid = contentView as? MessageAlbumView ?? install(MessageAlbumView(), fills: true)
+      grid.onPhotoTap = { [weak self] message, sourceView, image, url in
+        self?.onPhotoTap?(message, sourceView, image, url)
+      }
+      grid.configure(
+        album: album,
+        mosaic: mosaic,
+        isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
+      )
+
     case .video:
       let video = contentView as? NewVideoView ?? install(NewVideoView(message), fills: false)
       video.plannedSize = size
+      video.masksOwnCorners = false
       video.bubbleBleed = bubbleBleed
       video.update(with: message)
 

@@ -59,10 +59,10 @@ async function dialogRows(userId: number) {
   return db.select().from(schema.dialogs).where(eq(schema.dialogs.userId, userId))
 }
 
-/** Access modes: the stored `chat_access` table, and the projection fallback. */
+/** Exercise catalog reads both before backfill and with drift sampling enabled. */
 const accessModes = [
-  { name: "stored chat_access", trusted: true },
-  { name: "access projection fallback", trusted: false },
+  { name: "after access backfill", trusted: true },
+  { name: "before backfill", trusted: false },
 ] as const
 
 async function useAccessMode(trusted: boolean) {
@@ -167,6 +167,18 @@ async function createTimeline() {
 describe("getChats paged", () => {
   setupTestLifecycle()
   afterEach(() => setChatAccessTrustForTests(false))
+
+  test("includes a newly created DM after the latest backfill", async () => {
+    await useAccessMode(true)
+    const viewer = await testUtils.createUser("paged-new-viewer@example.test")
+    const peer = await testUtils.createUser("paged-new-peer@example.test")
+    const dm = await testUtils.createPrivateChat(viewer, peer)
+    if (!dm) throw new Error("Missing DM fixture")
+    await db.insert(schema.dialogs).values({ chatId: dm.id, userId: viewer.id, peerUserId: peer.id })
+    for (const scope of [ChatListScope.DIALOGS, ChatListScope.ACCESSIBLE]) {
+      expect(ids((await page(viewer.id, { scope })).chats)).toEqual([dm.id])
+    }
+  })
 
   for (const mode of accessModes) {
     describe(mode.name, () => {

@@ -13,7 +13,7 @@ import {
 
 const staleSettings: UserSettingsGeneral = {
   notifications: { mode: UserSettingsNotificationsMode.All, silent: false, disableDmNotifications: false },
-  privacy: { shareTimeZone: true, appearInGlobalSearch: true },
+  privacy: { shareTimeZone: true, appearInGlobalSearch: true, transcribeVoiceMessages: true },
   compose: { replacePastedLinksWithTitles: false },
 }
 

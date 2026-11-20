@@ -43,6 +43,7 @@ struct ChatInfo: View {
   @EnvironmentStateObject private var participantsState: ChatInfoParticipantsState
   @StateObject private var appSettings = AppSettings.shared
   @StateObject private var avatarPreview = ChatInfoAvatarQuickLookPresenter()
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   let peerId: Peer
   private let defaultTab: ChatInfoDefaultTab?
@@ -384,6 +385,23 @@ struct ChatInfo: View {
             } else {
               Text("—")
                 .foregroundStyle(.secondary)
+            }
+          }
+
+          if developerMode, case let .user(userId) = peerId {
+            Divider()
+
+            infoRow("User ID") {
+              Button {
+                DeveloperIDs.copy(userId, label: "User ID")
+              } label: {
+                Text(String(userId))
+                  .font(.system(.body, design: .monospaced))
+                  .foregroundStyle(.secondary)
+                  .textSelection(.enabled)
+              }
+              .buttonStyle(.plain)
+              .accessibilityLabel("Copy user ID")
             }
           }
         }
@@ -1930,6 +1948,7 @@ private struct ChatInfoDocumentRow: NSViewRepresentable {
   }
 }
 
+@MainActor
 private func chatInfoDateLabel(_ date: Date) -> String {
   let calendar = Calendar.current
   let now = Date()
@@ -1941,14 +1960,29 @@ private func chatInfoDateLabel(_ date: Date) -> String {
     return "Yesterday"
   }
   if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "EEEE"
-    return formatter.string(from: date)
+    return ChatInfoDateLabelFormatters.weekday.string(from: date)
   }
 
-  let formatter = DateFormatter()
-  formatter.dateFormat = "MMMM d, yyyy"
-  return formatter.string(from: date)
+  return ChatInfoDateLabelFormatters.fullDate.string(from: date)
+}
+
+@MainActor
+private enum ChatInfoDateLabelFormatters {
+  static let weekday: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+    formatter.dateFormat = "EEEE"
+    return formatter
+  }()
+
+  static let fullDate: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.timeZone = .autoupdatingCurrent
+    formatter.dateFormat = "MMMM d, yyyy"
+    return formatter
+  }()
 }
 
 // TODO: Previews

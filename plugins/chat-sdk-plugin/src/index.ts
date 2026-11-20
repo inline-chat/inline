@@ -216,7 +216,7 @@ export class InlineAdapter implements Adapter<InlineThreadId, BotMessage> {
         const { file } = result(await this.client.getFile({ file_id: fileId, ...location }))
         if (!file.download_url) throw new Error("Inline did not return a file download URL")
         // Refresh the signed URL on each download; never attach the bot authorization header.
-        const response = await this.fetchImpl(file.download_url)
+        const response = await this.fetchImpl(file.download_url, { signal: AbortSignal.timeout(60_000) })
         if (!response.ok) throw new Error(`Inline file download failed (${response.status})`)
         return response.arrayBuffer()
       },

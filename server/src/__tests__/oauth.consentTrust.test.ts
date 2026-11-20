@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { eq } from "drizzle-orm"
-import { app } from "../legacyServer"
+import { useLiveHttpApp } from "./liveHttpApp"
 import { setupTestLifecycle, testUtils } from "./setup"
 import { db } from "@in/server/db"
 import { members, oauthGrants, sessions, users } from "@in/server/db/schema"
@@ -10,6 +10,8 @@ import { sha256Base64Url } from "@inline-chat/oauth-core"
 import { authRequestCookieName } from "@in/server/modules/oauth/authRequestCookie"
 import { oauthConfig } from "@in/server/modules/oauth/config"
 import { oauthClientTrust } from "@in/server/modules/oauth/clientTrust"
+
+const app = useLiveHttpApp()
 
 describe("OAuth consent client trust", () => {
   setupTestLifecycle()

@@ -32,6 +32,12 @@ import {
 } from "../../realtime/transportSchema.effect"
 
 const REALTIME_PATH = "/realtime"
+/**
+ * Abuse backstop for frames of any kind awaiting their handler on one socket.
+ * In-flight RPC calls have their own, lower limit (64, answered with
+ * RATE_LIMIT) in the protocol handler; this only closes floods well beyond it.
+ */
+const MAX_PENDING_FRAMES_PER_SOCKET = 128
 const REALTIME_BACKPRESSURE_LIMIT =
   16 * 1024 * 1024
 
@@ -268,7 +274,7 @@ export const makeCoreRealtimeTransport = <
           window = { start: now, count: 0 }
           socket.data.messageWindow = window
         }
-        if (++window.count > 120 || (socket.data.pendingMessages ?? 0) >= 32 || pendingMessages >= 2_048 ||
+        if (++window.count > 120 || (socket.data.pendingMessages ?? 0) >= MAX_PENDING_FRAMES_PER_SOCKET || pendingMessages >= 2_048 ||
           (socket.data.pendingBytes ?? 0) + length > 32 * 1024 * 1024 || pendingBytes + length > 128 * 1024 * 1024) {
           socket.close(1013, "Realtime capacity reached")
           return

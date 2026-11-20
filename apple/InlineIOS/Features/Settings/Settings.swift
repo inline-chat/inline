@@ -10,6 +10,7 @@ struct SettingsView: View {
   @Query(CurrentUser()) var currentUser: UserInfo?
   @Environment(Router.self) private var router
   @Environment(\.dismiss) private var dismiss
+  @AppStorage(DeveloperMode.key) private var developerMode = false
 
   var body: some View {
     List {
@@ -86,7 +87,7 @@ struct SettingsView: View {
           color: .orange,
           destination: ExperimentalView()
         )
-        if SettingsBuildAudience.showsDebugTools {
+        if developerMode {
           SettingsNavigationRow(
             title: "Debug",
             systemImage: "ladybug.fill",
@@ -163,74 +164,6 @@ extension EmojiSkinTone {
     case .dark:
       "👋🏿 Dark"
     }
-  }
-}
-
-struct AutoDownloadSettingsView: View {
-  @ObservedObject private var autoDownload = INUserSettings.current.autoDownload
-
-  var body: some View {
-    List {
-      Section("Auto-Download") {
-        thresholdRow(
-          icon: "photo.on.rectangle.angled",
-          iconColor: .blue,
-          title: "Media",
-          value: binding(\.mediaMaxMB)
-        )
-        thresholdRow(
-          icon: "doc.fill",
-          iconColor: .indigo,
-          title: "Files",
-          value: binding(\.fileMaxMB)
-        )
-        thresholdRow(
-          icon: "waveform",
-          iconColor: .red,
-          title: "Voice Messages",
-          value: binding(\.voiceMaxMB)
-        )
-      }
-    }
-    .listStyle(.insetGrouped)
-    .navigationTitle("Auto-Download")
-    .navigationBarTitleDisplayMode(.inline)
-  }
-
-  private func binding(_ keyPath: ReferenceWritableKeyPath<AutoDownloadSettingsManager, Int>) -> Binding<Int> {
-    Binding {
-      autoDownload[keyPath: keyPath]
-    } set: { value in
-      autoDownload[keyPath: keyPath] = AutoDownloadSettingsManager.clamped(value)
-    }
-  }
-
-  private func thresholdRow(
-    icon: String,
-    iconColor: Color,
-    title: String,
-    value: Binding<Int>
-  ) -> some View {
-    SettingsItem(
-      icon: icon,
-      iconColor: iconColor,
-      title: title
-    ) {
-      HStack(spacing: 8) {
-        Text(thresholdLabel(value.wrappedValue))
-          .foregroundStyle(.secondary)
-          .monospacedDigit()
-
-        Stepper("", value: value, in: 0 ... AutoDownloadSettingsManager.maxAllowedMB, step: 1)
-          .labelsHidden()
-          .accessibilityLabel(title)
-          .accessibilityValue(thresholdLabel(value.wrappedValue))
-      }
-    }
-  }
-
-  private func thresholdLabel(_ value: Int) -> String {
-    value <= 0 ? "Off" : "\(value) MB"
   }
 }
 

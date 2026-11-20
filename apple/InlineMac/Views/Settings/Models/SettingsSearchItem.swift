@@ -24,6 +24,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case translationControls
   case openReplyThreadsInSidePane
   case openChatsCleanup
+  case developerMode
 
   // Appearance
   case appearance
@@ -38,7 +39,10 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case compactToolbar
   case centeredChats
   case fonts
+  case fallbackFont
+  case codeFont
   case fontSize
+  case lineSpacing
 
   // Audio and Video
   case inputDevice
@@ -55,8 +59,14 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case appearInGlobalSearch
   case shareTimeZone
   case focusStatus
+  case transcribeVoiceMessages
 
   // Data & Storage
+  case storageUsage
+  case clearDownloads
+  case chatStorage
+  case keepMedia
+  case cacheLimit
   case autoDownloadMedia
   case autoDownloadFiles
   case autoDownloadVoiceMessages
@@ -90,9 +100,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case richContentRenderer
   case inlineMathAttachments
   case messageWidgets
-  case richCopyMarkdownEditing
   case quickForward
   case stableChatRoute
+  case coreTextMessageText
   case fileBrowser
   case nativeFileDownloads
 
@@ -111,24 +121,35 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 
   var id: String { rawValue }
 
+  /// The row a search result scrolls to. Font options live in the Message Text
+  /// customization sheet, so they land on the row that opens it.
+  var searchAnchor: SettingsSearchItem {
+    switch self {
+    case .fallbackFont, .codeFont, .lineSpacing: .fonts
+    default: self
+    }
+  }
+
   var category: SettingsCategory {
     switch self {
     case .profile, .username, .email, .phone, .technicalDetails, .signOut:
       .account
     case .launchAtLogin, .automaticSpellCorrection, .checkSpellingWhileTyping, .shortenSupportedLinks,
          .sendMessages, .syncMessageGestures, .doubleClick, .hold, .swipeToReply, .translationControls,
-         .openReplyThreadsInSidePane, .openChatsCleanup:
+         .openReplyThreadsInSidePane, .openChatsCleanup, .developerMode:
       .general
     case .appearance, .theme, .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
-         .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize:
+         .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize,
+         .lineSpacing, .fallbackFont, .codeFont:
       .appearance
     case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds:
       .audioAndVideo
     case .dockBadge, .notificationSounds:
       .notifications
-    case .appearInGlobalSearch, .shareTimeZone, .focusStatus:
+    case .appearInGlobalSearch, .shareTimeZone, .focusStatus, .transcribeVoiceMessages:
       .privacy
-    case .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages:
+    case .storageUsage, .clearDownloads, .chatStorage, .keepMedia, .cacheLimit,
+         .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages:
       .dataStorage
     case .connectors:
       .connectors
@@ -143,7 +164,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .messageWidgets, .richCopyMarkdownEditing, .quickForward, .stableChatRoute,
+         .messageWidgets, .quickForward, .stableChatRoute, .coreTextMessageText,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -172,6 +193,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .translationControls: "Translation Controls"
     case .openReplyThreadsInSidePane: "Open Reply Threads in Side Pane"
     case .openChatsCleanup: "Open Chats Cleanup"
+    case .developerMode: "Developer Mode"
     case .appearance: "Appearance"
     case .theme: "Theme"
     case .sidebarItemSize: "Item Size"
@@ -183,8 +205,11 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .unreadBadgeStyle: "Unread Badge Style"
     case .compactToolbar: "Compact Toolbar"
     case .centeredChats: "Centered Chats"
-    case .fonts: "Fonts"
-    case .fontSize: "Size"
+    case .fonts: "Font"
+    case .fallbackFont: "Fallback Font"
+    case .codeFont: "Code Font"
+    case .fontSize: "Text Size"
+    case .lineSpacing: "Line Spacing"
     case .inputDevice: "Input Device"
     case .outputDevice: "Output Device"
     case .autoUnmuteOnJoin: "Auto-Unmute on Join"
@@ -195,7 +220,13 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: "Appear in Global Search"
     case .shareTimeZone: "Who Can See My Local Time"
     case .focusStatus: "Who Can See My Focus Status"
-    case .autoDownloadMedia: "Media"
+    case .transcribeVoiceMessages: "Transcribe My Voice Messages"
+    case .storageUsage: "Storage Usage"
+    case .clearDownloads: "Clear Downloads"
+    case .chatStorage: "Downloads by Chat"
+    case .keepMedia: "Keep Media"
+    case .cacheLimit: "Maximum Size"
+    case .autoDownloadMedia: "Photos and Videos"
     case .autoDownloadFiles: "Files"
     case .autoDownloadVoiceMessages: "Voice Messages"
     case .connectors: "Connectors"
@@ -216,9 +247,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
     case .messageWidgets: "Message Widgets"
-    case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .quickForward: "Quick Forward"
     case .stableChatRoute: "Faster Chat Switching"
+    case .coreTextMessageText: "Core Text Message Text"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
     case .syncEngine: "Sync Engine"
@@ -242,6 +273,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .username, .email, .phone, .technicalDetails: "Account"
     case .signOut: "Session"
     case .launchAtLogin: "Startup"
+    case .developerMode: "Developer"
     case .automaticSpellCorrection, .checkSpellingWhileTyping, .shortenSupportedLinks, .sendMessages: "Writing"
     case .syncMessageGestures, .doubleClick, .hold, .swipeToReply, .translationControls,
          .openReplyThreadsInSidePane:
@@ -254,7 +286,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .unreadBadgeStyle: "Badges"
     case .compactToolbar: "Toolbar"
     case .centeredChats: "Chat Layout"
-    case .fonts, .fontSize: "Typography"
+    case .fonts, .fallbackFont, .codeFont, .fontSize, .lineSpacing: "Messages"
     case .inputDevice, .outputDevice: "Devices"
     case .autoUnmuteOnJoin, .autoMuteWhenAlone, .microphoneSounds: "Grid"
     case .dockBadge: "Dock"
@@ -262,6 +294,10 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: "Discovery"
     case .shareTimeZone: "Time Zone"
     case .focusStatus: "Focus Status"
+    case .transcribeVoiceMessages: "Voice Messages"
+    case .storageUsage: "Storage"
+    case .clearDownloads, .chatStorage: "Downloads"
+    case .keepMedia, .cacheLimit: "Automatic Cleanup"
     case .autoDownloadMedia, .autoDownloadFiles, .autoDownloadVoiceMessages: "Auto-Download"
     case .connectors: "Connectors"
     case .focusInlineHotkey, .gridMicrophoneHotkey: "Global Hotkeys"
@@ -277,7 +313,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
          .messageWidgets:
       "Agents"
-    case .richCopyMarkdownEditing, .quickForward, .stableChatRoute: "Messages"
+    case .quickForward, .stableChatRoute, .coreTextMessageText: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -307,6 +343,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .translationControls: ["translate", "language"]
     case .openReplyThreadsInSidePane: ["thread", "replies", "split"]
     case .openChatsCleanup: ["archive", "close", "tabs"]
+    case .developerMode: ["debug", "ids", "chat id", "user id", "api", "bots", "integrations"]
     case .appearance: ["dark mode", "light mode", "system"]
     case .theme: ["colors", "palette", "accent", "import", "export"]
     case .sidebarItemSize: ["density", "compact", "row height"]
@@ -318,8 +355,11 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .unreadBadgeStyle: ["count", "dot", "unread"]
     case .compactToolbar: ["titlebar", "height"]
     case .centeredChats: ["width", "column", "layout", "composer"]
-    case .fonts: ["font family", "typeface", "text"]
-    case .fontSize: ["font size", "text size", "bigger", "smaller", "zoom"]
+    case .fonts: ["font family", "typeface", "typography", "serif", "rounded", "monospace"]
+    case .fontSize: ["font size", "text size", "bigger", "smaller", "zoom", "typography"]
+    case .lineSpacing: ["line height", "leading", "spacing", "typography"]
+    case .fallbackFont: ["fallback", "script", "language", "persian", "arabic", "cjk", "typography"]
+    case .codeFont: ["monospace", "code", "programming", "mono", "typography"]
     case .inputDevice: ["microphone", "mic"]
     case .outputDevice: ["speaker", "headphones"]
     case .autoUnmuteOnJoin: ["microphone", "call", "room"]
@@ -330,6 +370,12 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
     case .shareTimeZone: ["local time", "timezone", "share", "privacy", "exceptions"]
     case .focusStatus: ["do not disturb", "dnd", "notifications silenced", "focus"]
+    case .transcribeVoiceMessages: ["transcription", "transcript", "audio", "ai", "speech to text"]
+    case .storageUsage: ["disk", "space", "size", "cache", "usage"]
+    case .clearDownloads: ["clear cache", "delete", "free up space", "remove", "clean"]
+    case .chatStorage: ["chats", "largest", "per chat", "clear", "media"]
+    case .keepMedia: ["auto delete", "remove old", "automatic", "cleanup", "expire"]
+    case .cacheLimit: ["cache size", "limit", "disk", "space", "automatic", "cleanup"]
     case .autoDownloadMedia: ["photos", "images", "videos", "download"]
     case .autoDownloadFiles: ["documents", "attachments", "download"]
     case .autoDownloadVoiceMessages: ["audio", "download"]
@@ -351,9 +397,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
     case .messageWidgets: ["html", "widget", "visualization", "chart"]
-    case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .quickForward: ["forward"]
     case .stableChatRoute: ["performance", "speed", "switch", "toolbar"]
+    case .coreTextMessageText: ["performance", "renderer", "text", "scroll", "core text"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]
     case .syncEngine: ["realtime", "sync"]

@@ -206,6 +206,12 @@ public class MessagesProgressiveViewModel {
   }
 
   private var isReplacingRowInPlace = false
+  /// The window `trimWindow` is reading coverage for; its row publications wait for that read.
+  /// A replacement window (a jump, a reload into another place) publishes as usual.
+  private var trimmingEpoch: UInt64?
+  var isTrimmingWindow: Bool { trimmingEpoch == windowEpoch }
+  /// Ordered, revisioned row snapshots of this window (`ChatRowFeed.swift`).
+  public let rowFeed = ChatRowFeed()
 
   // Used to ignore range when reloading if at bottom
   private var atBottom: Bool = true
@@ -360,6 +366,7 @@ public class MessagesProgressiveViewModel {
     chatId: Int64? = nil,
     reversed: Bool = false,
     initialState: InitialState? = nil,
+    collapsedMaxId: Int64? = nil,
     database: AppDatabase = .shared,
     publisher: MessagesPublisher = .shared,
     currentUserId: Int64? = Auth.shared.getCurrentUserId()
@@ -389,10 +396,13 @@ public class MessagesProgressiveViewModel {
         guard let self else { return }
         Log.shared.trace("Received update \(update)")
         let hadPendingReload = reloadTask != nil
-        if let changeset = applyChanges(update: update) {
+        let rowsBefore = messages
+        let changeset = applyChanges(update: update)
+        if let changeset {
           callback?(changeset)
           loadLatestIfTailUnknown()
         }
+        publishRows(after: update, previous: rowsBefore, changed: changeset != nil)
         // An incremental publication supersedes the snapshot being read, but
         // not the database changes that reload was asked to pick up.
         if hadPendingReload, reloadTask == nil {
@@ -407,6 +417,10 @@ public class MessagesProgressiveViewModel {
       scheduleReload(animated: false)
     }
     loadLatestIfTailUnknown()
+    publishInitialRows(
+      openAnchor: initialState?.openAnchor ?? .latest, unreadBoundary: initialState?.unreadBoundary,
+      collapsedMaxId: collapsedMaxId
+    )
   }
 
   /// The list shows one continuous stretch of history, so an unknown tail is
@@ -544,6 +558,7 @@ public class MessagesProgressiveViewModel {
       "Loading batch direction=\(request.direction.logLabel) limit=\(request.limit) prepend=\(request.prepend)"
     )
     loadAdditionalMessages(request: request, publish: publish)
+    publishRows(direction == .older ? .olderPage : .newerPage)
   }
 
   @discardableResult
@@ -568,7 +583,56 @@ public class MessagesProgressiveViewModel {
     log.trace(
       "Loading batch async direction=\(request.direction.logLabel) limit=\(request.limit) prepend=\(request.prepend)"
     )
-    return await loadAdditionalMessagesAsync(request: request, publish: publish)
+    let didLoad = await loadAdditionalMessagesAsync(request: request, publish: publish)
+    publishRows(direction == .older ? .olderPage : .newerPage)
+    return didLoad
+  }
+
+  /// The most messages a window keeps after paging; `trimWindow` cuts back to it.
+  public static let maximumWindowMessages = 600
+  /// Messages removed at a time: one large page.
+  public static let windowTrimStep = 200
+
+  /// Keeps a long window bounded: when it holds more than `maximum` messages,
+  /// whole steps of `step` messages leave the side away from `keeping` (the
+  /// side the reader pages into), then the window's metadata is read again so
+  /// that side can page back. Never removes the history anchor or unsent
+  /// messages. Publishes `.trim`; true when rows left.
+  @discardableResult
+  public func trimWindow(
+    keeping side: MessagesLoadDirection, maximum: Int = maximumWindowMessages, step: Int = windowTrimStep
+  ) async -> Bool {
+    let count = messages.count
+    guard count > maximum, step > 0 else { return false }
+    // Whole steps, so a long window is cut back once per few pages rather than on every page.
+    let removing = ((count - maximum + step - 1) / step) * step
+    guard removing > 0, removing < count else { return false }
+    // Chronological order; `reversed` windows keep the newest first.
+    let chronological = reversed ? Array(messages.reversed()) : messages
+    let kept: ArraySlice<FullMessage> = side == .older
+      ? chronological.dropLast(removing)
+      : chronological.dropFirst(removing)
+    let removed = side == .older ? chronological.suffix(removing) : chronological.prefix(removing)
+    if let anchor = historyAnchorID, removed.contains(where: { $0.message.messageId == anchor }) { return false }
+    if removed.contains(where: { $0.message.messageId <= 0 }) { return false }
+    let epoch = windowEpoch
+    // Row publications wait for the metadata read, so none shows the trimmed rows with the
+    // coverage of the untrimmed window (it would claim the trimmed side has nothing to load).
+    trimmingEpoch = epoch
+    defer { trimmingEpoch = nil }
+    messages = reversed ? Array(kept.reversed()) : Array(kept)
+    updateRange()
+    if side == .older {
+      // The newest rows left: the window no longer reaches the live end.
+      atBottom = false
+    }
+    await updateLoadedWindowMetadataAsync(retainingMessageIDs: Set(messages.map(\.id)))
+    trimmingEpoch = nil
+    // A replacement window meanwhile published itself.
+    guard epoch == windowEpoch else { return true }
+    publishRows(.trim)
+    log.debug("Trimmed \(removing) messages from the \(side == .older ? "newer" : "older") side")
+    return true
   }
 
   public func setAtBottom(_ atBottom: Bool) {
@@ -625,6 +689,7 @@ public class MessagesProgressiveViewModel {
       ? nil
       : ChatUnreadOpening.firstUnreadMessageId(in: messages, boundary: boundary, of: self)
     reloadAfterWindowReplacement(readAt: revision)
+    publishRows(.jump(.unreadLine(boundary: boundary)))
     return true
   }
 
@@ -657,6 +722,7 @@ public class MessagesProgressiveViewModel {
     messages = reapplyingPendingAcknowledgements(to: messages)
     historyAnchorID = nil
     reloadAfterWindowReplacement(readAt: revision)
+    publishRows(.jump(.latest))
     return true
   }
 
@@ -712,6 +778,7 @@ public class MessagesProgressiveViewModel {
           if let anchor = local.anchor {
             self?.threadAnchor = anchor.withoutAcknowledgements
             self?.callback?(.reload(animated: false))
+            self?.publishRows(.refresh)
             return
           }
           let hasRemoteBody = try await fetch(local.parentPeer, local.messageID)
@@ -724,6 +791,7 @@ public class MessagesProgressiveViewModel {
           self?.threadAnchor = refreshed?.anchor?.withoutAcknowledgements
           if previous != self?.threadAnchor {
             self?.callback?(.reload(animated: false))
+            self?.publishRows(.refresh)
           }
           // A successful exact lookup with no body is authoritative absence.
           // Retry only failures, never poll a deleted/unavailable parent.
@@ -1082,6 +1150,7 @@ public class MessagesProgressiveViewModel {
         _ = applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest, retainingMessageIDs: retained)
         reloadTask = nil
         callback?(.reload(animated: animated))
+        publishRows(.refresh)
         loadLatestIfTailUnknown()
       } catch is CancellationError {
         return
@@ -1716,6 +1785,7 @@ public class MessagesProgressiveViewModel {
       messages = reapplyingPendingAcknowledgements(to: aroundBatch)
       updateRange()
       updateLoadedWindowMetadata(retainingMessageIDs: [])
+      publishRows(.jump(.message(messageId)))
 
       return !messages.isEmpty
     } catch {

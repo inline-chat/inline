@@ -1,18 +1,31 @@
 import AppKit
 
 enum RichBlockCodeMetrics {
-  static let languageHeaderHeight: CGFloat = 21
-  static let headerControlTopInset: CGFloat = 5
+  static let languageHeaderHeight: CGFloat = 24
   static let headerControlHeight: CGFloat = 14
-  static let horizontalInset: CGFloat = 8
-  static let languageBodyTopInset: CGFloat = 3
-  static let overlayBodyTopInset: CGFloat = 8
-  static let bodyBottomInset: CGFloat = 9
+  static var headerControlTopInset: CGFloat { floor((languageHeaderHeight - headerControlHeight) / 2) }
+  static let labelFontSize: CGFloat = 11
+  static let copyIconSize: CGFloat = 11
+  /// Header and gutter chrome as alphas of the text color: the label reads first,
+  /// line numbers recede.
+  static let labelAlpha: CGFloat = 0.35
+  static let copyIconAlpha: CGFloat = 0.5
+  static let lineNumberAlpha: CGFloat = 0.28
+  static let dividerAlpha: CGFloat = 0.08
   static let gutterTextTrailingInset: CGFloat = 4
-  static let gutterContentGap: CGFloat = 15
-  static let bodyFontSize = NSFont.systemFontSize * 0.92
-  static let bodyFont = NSFont.monospacedSystemFont(ofSize: bodyFontSize, weight: .regular)
-  static let gutterFont = NSFont.monospacedDigitSystemFont(ofSize: bodyFontSize, weight: .regular)
+  static let copyButtonSide: CGFloat = 16
+
+  private static var basePointSize: CGFloat { ChatTypography.current.pointSize }
+  /// One padding on every side, and between line numbers and code.
+  static var horizontalInset: CGFloat { ChatTypography.space(.codePadding, at: basePointSize) }
+  static var languageBodyTopInset: CGFloat { ChatTypography.space(.codeHeaderToBody, at: basePointSize) }
+  static var overlayBodyTopInset: CGFloat { horizontalInset }
+  static var bodyBottomInset: CGFloat { horizontalInset }
+  static var gutterContentGap: CGFloat { horizontalInset }
+  /// Code reads slightly smaller than the message text and follows its size and code font.
+  static var bodyFontSize: CGFloat { ChatTypography.codeBlockPointSize(at: basePointSize) }
+  static var bodyFont: NSFont { ChatTypography.current.codeFont(sized: bodyFontSize) }
+  static var gutterFont: NSFont { NSFont.monospacedDigitSystemFont(ofSize: bodyFontSize, weight: .regular) }
 
   static func gutterWidth(lineCount: Int) -> CGFloat {
     let label = "\(max(1, lineCount))" as NSString
@@ -49,9 +62,12 @@ enum RichBlockCodeMetrics {
     }
   }
 
-  static func bodyWidth(containerWidth: CGFloat, gutterWidth: CGFloat) -> CGFloat {
+  /// Without a language header the copy button overlays the body's top trailing
+  /// corner, so the body keeps clear of it.
+  static func bodyWidth(containerWidth: CGFloat, gutterWidth: CGFloat, hasLanguage: Bool) -> CGFloat {
     let contentGap = gutterWidth > 0 ? gutterContentGap : 0
-    return max(1, containerWidth - horizontalInset * 2 - gutterWidth - contentGap)
+    let copyRoom = hasLanguage ? 0 : copyButtonSide
+    return max(1, containerWidth - horizontalInset * 2 - gutterWidth - contentGap - copyRoom)
   }
 
   static func headerHeight(hasLanguage: Bool) -> CGFloat {

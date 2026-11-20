@@ -37,6 +37,7 @@ export const sendMessage = async (
       sourceChatId: input.sourceChatId === undefined ? undefined : Number(input.sourceChatId),
       addMentionedUsers: input.addMentionedUsers === true,
       via: input.via,
+      groupedId: input.groupedId,
       // Legacy sockets know whether they belong to a bot; V3 leaves it to a cached lookup.
       paceBotSender: { isBot: handlerContext.isBot },
     },

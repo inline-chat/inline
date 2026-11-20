@@ -5,20 +5,24 @@ import RealtimeV2
 import Testing
 @testable import InlineKit
 
-/// Serves byte ranges of one body per host. Paths listed in `rejected` answer 403.
+/// Serves byte ranges of one body per host. Paths listed in `rejected` answer 403. With an
+/// `etag`, a range whose `If-Range` names another one gets the whole body, as the media proxy does.
 final class RangeCDN: URLProtocol, @unchecked Sendable {
   struct Host {
     var body: Data
     var rejected: Set<String> = []
     var ignoresRange = false
-    var requests: [(path: String, range: String?)] = []
+    var contentType: String?
+    var etag: String?
+    var requests: [(path: String, range: String?, ifRange: String?)] = []
   }
 
   private static let lock = NSLock()
   nonisolated(unsafe) private static var hosts: [String: Host] = [:]
 
   static func install(_ host: String, _ value: Host) { lock.withLock { hosts[host] = value } }
-  static func requests(_ host: String) -> [(path: String, range: String?)] { lock.withLock { hosts[host]?.requests ?? [] } }
+  static func update(_ host: String, _ change: (inout Host) -> Void) { lock.withLock { change(&hosts[host]!) } }
+  static func requests(_ host: String) -> [(path: String, range: String?, ifRange: String?)] { lock.withLock { hosts[host]?.requests ?? [] } }
 
   static func session() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
@@ -32,18 +36,24 @@ final class RangeCDN: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     let url = request.url!
     let range = request.value(forHTTPHeaderField: "Range")
+    let ifRange = request.value(forHTTPHeaderField: "If-Range")
     let host = Self.lock.withLock { () -> Host? in
-      Self.hosts[url.host!]?.requests.append((url.path, range))
+      Self.hosts[url.host!]?.requests.append((url.path, range, ifRange))
       return Self.hosts[url.host!]
     }
     guard let host else { fail(404); return }
     if host.rejected.contains(url.path) { fail(403); return }
     let body = host.body
-    if !host.ignoresRange, let range, let bounds = Self.bounds(range, count: body.count) {
+    var headers: [String: String] = [:]
+    if let contentType = host.contentType { headers["Content-Type"] = contentType }
+    if let etag = host.etag { headers["ETag"] = etag }
+    let honorsRange = !host.ignoresRange && (ifRange == nil || ifRange == host.etag)
+    if honorsRange, let range, let bounds = Self.bounds(range, count: body.count) {
       let slice = body.subdata(in: Int(bounds.lowerBound) ..< Int(bounds.upperBound) + 1)
-      respond(206, ["Content-Range": "bytes \(bounds.lowerBound)-\(bounds.upperBound)/\(body.count)"], slice)
+      headers["Content-Range"] = "bytes \(bounds.lowerBound)-\(bounds.upperBound)/\(body.count)"
+      respond(206, headers, slice)
     } else {
-      respond(200, [:], body)
+      respond(200, headers, body)
     }
   }
 
@@ -103,6 +113,11 @@ struct CDNRangeSourceTests {
     #expect(throws: CDNRangeError.rangeNotSupported) {
       try CDNRangeSource.part(for: rangeInput(offset: 4, limit: 4), status: 200, contentRange: nil, data: body)
     }
+    // With the file's size known, a whole body of another size is something else.
+    #expect(try CDNRangeSource.part(for: rangeInput(offset: 0, limit: 10), status: 200, contentRange: nil, data: body, expectedTotal: 10).totalSize == 10)
+    #expect(throws: CDNRangeError.notTheFile) {
+      try CDNRangeSource.part(for: rangeInput(offset: 0, limit: 10), status: 200, contentRange: nil, data: body, expectedTotal: 30)
+    }
     #expect(throws: CDNRangeError.httpStatus(503)) {
       try CDNRangeSource.part(for: rangeInput(offset: 0), status: 503, contentRange: nil, data: Data())
     }
@@ -135,6 +150,47 @@ struct CDNRangeSourceTests {
     #expect(parts.map(\.data) == [body.prefix(524_288), body.suffix(524_288)])
     #expect(await refreshes.value == 1)
     #expect(await link.current().path == "/fresh")
+  }
+
+  @Test func aWebPageInPlaceOfTheFileIsRejected() async throws {
+    let body = Data("<html>Sign in to the Wi-Fi</html>".utf8)
+    RangeCDN.install("portal.test", .init(body: body, ignoresRange: true, contentType: "text/html; charset=utf-8"))
+    let link = CDNLink(URL(string: "https://portal.test/file")!, refresh: nil)
+    await #expect(throws: CDNRangeError.notTheFile) {
+      try await CDNRangeSource(link: link, session: RangeCDN.session()).fetchFilePart(rangeInput(offset: 0), timeout: .seconds(10))
+    }
+    // A file that is itself a web page may come back as one.
+    let page = try await CDNRangeSource(link: link, session: RangeCDN.session(), acceptsHTML: true)
+      .fetchFilePart(rangeInput(offset: 0), timeout: .seconds(10))
+    #expect(page.data == body)
+  }
+
+  @Test func aWholeSmallBodyIsTheFileWhateverSizeItsMessageClaims() async throws {
+    // Legacy metadata can be wrong; a server that ignores Range sends the whole small file.
+    let body = Data(repeating: 4, count: 100)
+    RangeCDN.install("whole.test", .init(body: body, ignoresRange: true))
+    let link = CDNLink(URL(string: "https://whole.test/file")!, refresh: nil)
+    let part = try await CDNRangeSource(link: link, session: RangeCDN.session()).fetchFilePart(rangeInput(offset: 0), timeout: .seconds(10))
+    #expect(part.data == body && part.totalSize == 100)
+  }
+
+  @Test func laterRangesNameTheFirstRangesObjectAndAChangedObjectStops() async throws {
+    let body = Data((0 ..< 524_288 * 3).map { UInt8($0 % 239) })
+    RangeCDN.install("changed.test", .init(body: body, etag: "\"v1\""))
+    let source = CDNRangeSource(link: CDNLink(URL(string: "https://changed.test/file")!, refresh: nil), session: RangeCDN.session())
+    _ = try await source.fetchFilePart(rangeInput(offset: 0), timeout: .seconds(10))
+    let second = try await source.fetchFilePart(rangeInput(offset: 524_288), timeout: .seconds(10))
+    #expect(second.data == body.subdata(in: 524_288 ..< 1_048_576))
+    #expect(RangeCDN.requests("changed.test").map(\.ifRange) == [nil, "\"v1\""])
+    // The object is replaced: its server answers the stale If-Range with all of the new one.
+    RangeCDN.update("changed.test") { $0.etag = "\"v2\""; $0.body = Data(repeating: 1, count: body.count) }
+    await #expect(throws: CDNRangeError.objectChanged) {
+      try await source.fetchFilePart(rangeInput(offset: 1_048_576), timeout: .seconds(10))
+    }
+    // A weak ETag may not be used in If-Range; Last-Modified stands in.
+    let weak = HTTPURLResponse(url: URL(string: "https://changed.test/file")!, statusCode: 206, httpVersion: nil,
+      headerFields: ["ETag": "W/\"v1\"", "Last-Modified": "Wed, 18 Nov 2026 10:00:00 GMT"])!
+    #expect(CDNRangeSource.validator(weak) == "Wed, 18 Nov 2026 10:00:00 GMT")
   }
 
   @Test func linkStillRejectedAfterRefreshIsTerminal() async throws {
@@ -205,6 +261,22 @@ struct NativeRangeFallbackTests {
     #expect(outcome.fallback is RealtimeDirectRpcError)
     #expect(RangeCDN.requests("fallback.test").map(\.range) == ["bytes=524288-1048575"])
     #expect(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("INP_fallback.inline-partial").path))
+  }
+
+  @Test(arguments: [400, 404])
+  func missingOrLegacyNativeFileFallsBackToTheCDN(status: Int) async throws {
+    let folder = try directory()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let body = Data((0 ..< 524_288 * 2).map { UInt8($0 % 233) })
+    let host = "legacy\(status).test"
+    RangeCDN.install(host, .init(body: body))
+    // The server answers a legacy file it has no size or path for like an inaccessible one.
+    let refusal = RealtimeDirectRpcError.rpcError(errorCode: .badRequest, message: "Bad request", code: status)
+    let native = FlakyNative(body: body, failingOffset: 0, failure: refusal)
+    let outcome = try await run(host: host, native: native, in: folder)
+    #expect(try Data(contentsOf: outcome.file) == body)
+    #expect(outcome.fallback is RealtimeDirectRpcError)
+    #expect(Set(RangeCDN.requests(host).compactMap(\.range)) == ["bytes=0-524287", "bytes=524288-1048575"])
   }
 
   @Test func permissionFailureNeverFallsBack() async throws {

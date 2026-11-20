@@ -6,6 +6,7 @@ import {
   Message,
   MessageEntities,
   MessageEntity_Type,
+  MessageSendMode,
   SendMessageResult,
 } from "@inline-chat/protocol/core"
 import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
@@ -165,6 +166,43 @@ describe("sendMessage", () => {
     const message = extractMessage(result)
     expect(message?.message?.length).toBeGreaterThan(90_000)
     expect(message?.blockContent?.blocks).toHaveLength(1)
+  })
+
+  test("a bot's silent send is quiet: no unread, no notification", async () => {
+    const result = await sendMessage(
+      { peerId: privateChatPeerId, message: "Working…", sendMode: MessageSendMode.MODE_SILENT },
+      { ...context, isBot: true },
+    )
+    const message = extractMessage(result)
+    expect(message?.countsAsUnread).toBe(false)
+    expect(message?.sendMode).toBe(MessageSendMode.MODE_SILENT)
+
+    const [row] = await db
+      .select({ countsAsUnread: messages.countsAsUnread })
+      .from(messages)
+      .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(message!.id))))
+    expect(row?.countsAsUnread).toBe(false)
+  })
+
+  test("a person's silent send and a bot's normal send still count as unread", async () => {
+    const sends = [
+      { sendMode: MessageSendMode.MODE_SILENT, context },
+      { sendMode: undefined, context: { ...context, isBot: true } },
+    ]
+    for (const send of sends) {
+      const result = await sendMessage(
+        { peerId: privateChatPeerId, message: "counts", sendMode: send.sendMode },
+        send.context,
+      )
+      const message = extractMessage(result)
+      expect(message?.countsAsUnread).toBeUndefined()
+
+      const [row] = await db
+        .select({ countsAsUnread: messages.countsAsUnread })
+        .from(messages)
+        .where(and(eq(messages.chatId, privateChat.id), eq(messages.messageId, Number(message!.id))))
+      expect(row?.countsAsUnread).toBe(true)
+    }
   })
 
   test("records desktop chat activity from successful sends", async () => {

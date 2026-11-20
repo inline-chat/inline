@@ -18,6 +18,10 @@ export const Input = Type.Object({
 
 type Input = Static<typeof Input>
 
+// The schema has no bounds; a negative limit reached Postgres as a 500 and a
+// huge one read the whole chat.
+const MAX_HISTORY_LIMIT = 200
+
 type Context = {
   currentUserId: number
 }
@@ -56,7 +60,7 @@ export const handler = async (input: Input, context: Context): Promise<Response>
     .where(eq(messages.chatId, chatId))
     .leftJoin(files, eq(files.id, messages.fileId))
     .orderBy(desc(messages.date), desc(messages.messageId))
-    .limit(input.limit ?? 70)
+    .limit(Math.min(Math.max(input.limit ?? 70, 1), MAX_HISTORY_LIMIT))
 
   const messages_ = result.map((m) =>
     encodeMessageInfo(m.message, {

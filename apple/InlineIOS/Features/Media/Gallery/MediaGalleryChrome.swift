@@ -49,6 +49,54 @@ enum MediaGalleryChromeStyle {
   }
 }
 
+/// A glass capsule with an icon and a line of text, for save, copy and download status.
+final class MediaGalleryToastView: UIView {
+  private let panel = MediaGalleryChromeStyle.glassPanel(cornerRadius: 20)
+  private let iconView = UIImageView()
+  private let label = UILabel()
+
+  init() {
+    super.init(frame: .zero)
+    isUserInteractionEnabled = false
+    iconView.tintColor = .label
+    iconView.contentMode = .scaleAspectFit
+    iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+    iconView.setContentHuggingPriority(.required, for: .horizontal)
+    label.font = .systemFont(ofSize: 14, weight: .medium)
+    label.textColor = .label
+    label.lineBreakMode = .byTruncatingTail
+
+    let stack = UIStackView(arrangedSubviews: [iconView, label])
+    stack.spacing = 8
+    stack.alignment = .center
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(panel)
+    panel.contentView.addSubview(stack)
+    NSLayoutConstraint.activate([
+      panel.topAnchor.constraint(equalTo: topAnchor),
+      panel.bottomAnchor.constraint(equalTo: bottomAnchor),
+      panel.leadingAnchor.constraint(equalTo: leadingAnchor),
+      panel.trailingAnchor.constraint(equalTo: trailingAnchor),
+      stack.centerYAnchor.constraint(equalTo: panel.contentView.centerYAnchor),
+      stack.leadingAnchor.constraint(equalTo: panel.contentView.leadingAnchor, constant: 16),
+      stack.trailingAnchor.constraint(equalTo: panel.contentView.trailingAnchor, constant: -18),
+      heightAnchor.constraint(equalToConstant: 40),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func update(text: String, systemImage: String) {
+    iconView.image = UIImage(systemName: systemImage)
+    label.text = text
+    accessibilityLabel = text
+    UIAccessibility.post(notification: .announcement, argument: text)
+  }
+}
+
 /// Bars let taps on their empty areas reach the photo, so a tap anywhere toggles the chrome.
 class MediaGalleryPassthroughView: UIView {
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -259,16 +307,19 @@ final class MediaGalleryBottomBar: MediaGalleryPassthroughView {
 
 // MARK: - Video controls
 
-/// Play or pause, elapsed time, a seek slider, and duration, on a glass capsule.
+/// Play or pause, elapsed time, a seek slider, duration, and mute, on a glass capsule.
 final class MediaGalleryVideoControls: UIView {
   let playButton = UIButton(type: .system)
+  let muteButton = UIButton(type: .system)
   let slider = UISlider()
   private let panel = MediaGalleryChromeStyle.glassPanel(cornerRadius: 24)
   private let elapsedLabel = UILabel()
   private let durationLabel = UILabel()
   private(set) var isScrubbing = false
+  private var duration: Double = 0
 
-  var onSeek: ((Double) -> Void)?
+  /// Seeks to a fraction of the video. `exact` is false while the thumb is still moving.
+  var onSeek: ((_ fraction: Double, _ exact: Bool) -> Void)?
   var onScrubChange: ((Bool) -> Void)?
 
   init() {
@@ -282,13 +333,15 @@ final class MediaGalleryVideoControls: UIView {
     }
     playButton.tintColor = .label
     playButton.setContentHuggingPriority(.required, for: .horizontal)
+    muteButton.tintColor = .label
+    muteButton.setContentHuggingPriority(.required, for: .horizontal)
     slider.minimumTrackTintColor = .label
     slider.maximumTrackTintColor = .tertiaryLabel
     slider.addTarget(self, action: #selector(sliderBegan), for: .touchDown)
     slider.addTarget(self, action: #selector(sliderChanged), for: .valueChanged)
     slider.addTarget(self, action: #selector(sliderEnded), for: [.touchUpInside, .touchUpOutside, .touchCancel])
 
-    let stack = UIStackView(arrangedSubviews: [playButton, elapsedLabel, slider, durationLabel])
+    let stack = UIStackView(arrangedSubviews: [playButton, elapsedLabel, slider, durationLabel, muteButton])
     stack.spacing = 10
     stack.alignment = .center
     stack.translatesAutoresizingMaskIntoConstraints = false
@@ -303,8 +356,9 @@ final class MediaGalleryVideoControls: UIView {
       stack.trailingAnchor.constraint(equalTo: panel.contentView.trailingAnchor, constant: -16),
       stack.centerYAnchor.constraint(equalTo: panel.contentView.centerYAnchor),
       playButton.widthAnchor.constraint(equalToConstant: 28),
+      muteButton.widthAnchor.constraint(equalToConstant: 28),
     ])
-    update(elapsed: 0, duration: 0, isPlaying: false)
+    update(elapsed: 0, duration: 0, isPlaying: false, isMuted: MediaGalleryVideoPlayer.prefersMuted)
   }
 
   @available(*, unavailable)
@@ -312,10 +366,14 @@ final class MediaGalleryVideoControls: UIView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(elapsed: Double, duration: Double, isPlaying: Bool) {
-    elapsedLabel.text = Self.format(elapsed)
+  func update(elapsed: Double, duration: Double, isPlaying: Bool, isMuted: Bool) {
+    self.duration = duration
     durationLabel.text = Self.format(duration)
-    if !isScrubbing {
+    // While scrubbing, the label follows the thumb rather than the seek catching up.
+    if isScrubbing {
+      elapsedLabel.text = Self.format(Double(slider.value) * duration)
+    } else {
+      elapsedLabel.text = Self.format(elapsed)
       slider.value = duration > 0 ? Float(elapsed / duration) : 0
     }
     playButton.setImage(
@@ -326,6 +384,15 @@ final class MediaGalleryVideoControls: UIView {
       for: .normal
     )
     playButton.accessibilityLabel = isPlaying ? "Pause" : "Play"
+    let muteSymbol = isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+    if muteButton.accessibilityValue != muteSymbol {
+      muteButton.setImage(
+        UIImage(systemName: muteSymbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)),
+        for: .normal
+      )
+      muteButton.accessibilityValue = muteSymbol
+      muteButton.accessibilityLabel = isMuted ? "Unmute" : "Mute"
+    }
   }
 
   static func format(_ seconds: Double) -> String {
@@ -344,12 +411,13 @@ final class MediaGalleryVideoControls: UIView {
   }
 
   @objc private func sliderChanged() {
-    onSeek?(Double(slider.value))
+    elapsedLabel.text = Self.format(Double(slider.value) * duration)
+    onSeek?(Double(slider.value), false)
   }
 
   @objc private func sliderEnded() {
     isScrubbing = false
-    onSeek?(Double(slider.value))
+    onSeek?(Double(slider.value), true)
     onScrubChange?(false)
   }
 }
@@ -373,6 +441,9 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
 
   /// The user tapped or dragged to an item.
   var onSelect: ((Int) -> Void)?
+  /// The user started or stopped dragging the strip; the gallery settles on a page once it stops.
+  var onScrubChange: ((Bool) -> Void)?
+  private let selectionFeedback = UISelectionFeedbackGenerator()
 
   init() {
     super.init(frame: .zero)
@@ -489,6 +560,8 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
     isScrubbing = true
     lastScrubbedIndex = currentIndex
+    selectionFeedback.prepare()
+    onScrubChange?(true)
     UIView.animate(withDuration: 0.2) {
       self.layout.invalidateLayout()
       self.collectionView.layoutIfNeeded()
@@ -498,7 +571,7 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
     guard isScrubbing, let index = indexNearestCenter(), index != lastScrubbedIndex else { return }
     lastScrubbedIndex = index
-    UISelectionFeedbackGenerator().selectionChanged()
+    selectionFeedback.selectionChanged()
     onSelect?(index)
   }
 
@@ -514,6 +587,7 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
     guard isScrubbing else { return }
     isScrubbing = false
     if let index = lastScrubbedIndex { currentIndex = index }
+    onScrubChange?(false)
     UIView.animate(withDuration: 0.25) {
       self.layout.invalidateLayout()
       self.collectionView.layoutIfNeeded()
@@ -526,8 +600,14 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
   private final class Cell: UICollectionViewCell {
     static let reuseIdentifier = "MediaGalleryThumbnailCell"
     private let imageView = UIImageView()
+    private let videoBadge = UIImageView(image: UIImage(
+      systemName: "play.fill",
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
+    ))
     private var task: ImageTask?
     private var itemID: Int64?
+    private var thumbnailURL: URL?
+    private var hasThumbnail = false
 
     override init(frame: CGRect) {
       super.init(frame: frame)
@@ -536,6 +616,13 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
       imageView.backgroundColor = .tertiarySystemFill
       imageView.layer.cornerRadius = 3
       contentView.addSubview(imageView)
+      videoBadge.tintColor = .white
+      videoBadge.layer.shadowColor = UIColor.black.cgColor
+      videoBadge.layer.shadowOpacity = 0.5
+      videoBadge.layer.shadowRadius = 1.5
+      videoBadge.layer.shadowOffset = .zero
+      videoBadge.isHidden = true
+      contentView.addSubview(videoBadge)
     }
 
     @available(*, unavailable)
@@ -548,6 +635,8 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
       // The current item's margin is part of its cell, so the image stays inset.
       let inset = bounds.width > MediaGalleryThumbnailStrip.baseWidth + 1 ? MediaGalleryThumbnailStrip.currentMargin : 0
       imageView.frame = bounds.insetBy(dx: inset, dy: 0)
+      videoBadge.sizeToFit()
+      videoBadge.frame.origin = CGPoint(x: imageView.frame.minX + 3, y: imageView.frame.maxY - videoBadge.bounds.height - 3)
     }
 
     override func prepareForReuse() {
@@ -555,27 +644,38 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
       task?.cancel()
       task = nil
       itemID = nil
+      thumbnailURL = nil
+      hasThumbnail = false
       imageView.image = nil
     }
 
     func configure(_ item: MediaGalleryItem) {
-      guard itemID != item.id else { return }
+      let url = item.thumbnailURL ?? item.mediaURL
+      // A fresh link for the same item retries a thumbnail that failed on an expired one.
+      guard itemID != item.id || (url != thumbnailURL && !hasThumbnail) else { return }
       task?.cancel()
       itemID = item.id
+      thumbnailURL = url
+      hasThumbnail = false
+      videoBadge.isHidden = item.kind != .video
       imageView.image = item.strippedImage
-      guard let url = item.thumbnailURL ?? item.mediaURL else { return }
+      guard let url else { return }
+      // Decoded straight at thumbnail size: an item without a small size falls back to the
+      // full photo, which a resize processor would decode in full first.
       let request = ImageRequest(
         url: url,
-        processors: [ImageProcessors.Resize(size: CGSize(width: 80, height: 80), contentMode: .aspectFill)]
+        userInfo: [.thumbnailKey: ImageRequest.ThumbnailOptions(size: CGSize(width: 80, height: 80), unit: .points, contentMode: .aspectFill)]
       )
-      if let cached = ImagePipeline.shared.cache.cachedImage(for: request) {
+      if let cached = ImagePipeline.shared.cache.cachedImage(for: request, caches: .memory) {
         imageView.image = cached.image
+        hasThumbnail = true
         return
       }
       let id = item.id
       task = ImagePipeline.shared.loadImage(with: request) { [weak self] result in
         guard let self, self.itemID == id, case let .success(response) = result else { return }
         self.imageView.image = response.image
+        self.hasThumbnail = true
       }
     }
   }

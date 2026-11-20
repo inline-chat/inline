@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test"
-import { app } from "../../legacyServer"
+import { useLiveHttpApp } from "../liveHttpApp"
 import { db } from "@in/server/db"
 import { authDeliveryBudgets, loginCodes, sessions, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { generateTotpCode } from "@in/server/utils/totp"
 import { hashLoginCode } from "@in/server/utils/auth"
+
+const app = useLiveHttpApp()
 
 const ADMIN_ORIGIN = "http://localhost:5174"
 const USER_AGENT = "admin-test-agent"
@@ -272,15 +274,17 @@ describe("Admin auth", () => {
     const password = "supersecurepassword"
     await createSuperadmin(email, password)
 
-    const ipHeaders = { "x-forwarded-for": "203.0.113.42" }
+    // The Effect kernel never trusts x-forwarded-for; the client IP is the
+    // direct peer unless a single trusted proxy header is configured.
+    const peer = { remoteAddress: "203.0.113.42" }
 
     for (let attempt = 0; attempt < 30; attempt += 1) {
       await app.handle(
         buildRequest("/admin/auth/login", {
           method: "POST",
           body: { email, password: "wrong-password" },
-          headers: ipHeaders,
         }),
+        peer,
       )
     }
 
@@ -293,8 +297,8 @@ describe("Admin auth", () => {
       buildRequest("/admin/auth/login", {
         method: "POST",
         body: { email, password: "wrong-password" },
-        headers: ipHeaders,
       }),
+      peer,
     )
 
     expect(response.status).toBe(429)

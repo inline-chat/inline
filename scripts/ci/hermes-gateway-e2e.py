@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPLY = "inline-gateway-e2e-reply"
-INBOUND = "inline-gateway-e2e-inbound"
+INBOUND = "inline-gateway-e2e-inbound\u2028line\u2029paragraph\u0085end"
 DEADLINE_S = float(os.environ.get("INLINE_GATEWAY_E2E_TIMEOUT", "120"))
 
 plugin_src = Path(sys.argv[1]).resolve()
@@ -218,7 +218,7 @@ try:
                          "sender": {"id": "42", "bot": False, "firstName": "E2E"},
                          "peerId": {"peer": {"oneofKind": "user", "user": {"userId": "42"}}}}}
     with lock:
-        inbound_lines.append(json.dumps(event))
+        inbound_lines.append(json.dumps(event, ensure_ascii=False))
         lock.notify_all()
 
     def replied() -> bool:
@@ -228,8 +228,8 @@ try:
         ok = lock.wait_for(replied, timeout=max(1.0, deadline - time.monotonic()))
     if not ok:
         fail("the agent's reply never reached Inline through the gateway")
-    if not model_calls:
-        fail("reply arrived without a model call; the gateway turn did not run")
+    if not any(INBOUND in json.dumps(call, ensure_ascii=False) for call in model_calls):
+        fail("the gateway did not deliver the full Unicode message to the model")
     with lock:
         lock.wait_for(lambda: any(p == "/inbound/ack" for p, _ in sidecar_calls), timeout=15)
     if not any(p == "/inbound/ack" for p, _ in sidecar_calls):

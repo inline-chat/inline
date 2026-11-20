@@ -1,0 +1,53 @@
+name: TimelineLab
+options:
+  bundleIdPrefix: research.inline
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 2487AN8AL4
+packages:
+  InlineTimeline:
+    path: ../InlineTimeline
+targets:
+  TimelineLab:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - package: InlineTimeline
+        product: TimelineCore
+      - package: InlineTimeline
+        product: TimelineUIKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: research.inline.TimelineLab
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: TimelineLab
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        TARGETED_DEVICE_FAMILY: "1"
+  TimelineLabUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: TimelineLab
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: research.inline.TimelineLab.UITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TimelineLab
+schemes:
+  TimelineLab:
+    build:
+      targets:
+        TimelineLab: all
+        TimelineLabUITests: [test]
+    test:
+      targets: [TimelineLabUITests]

@@ -1,7 +1,7 @@
 [
   {
     "label": "open",
-    "text": "Fix empty input in the parser\nContext\nThe tokenizer indexes `tokens[0]` without checking the length.\nSteps\n1. Return early from tokenize() on blank input\n2. Add a regression test for whitespace-only input\n3. Run `pnpm test parser`\nif (input.trim() === \"\") return []",
+    "text": "Fix empty input in the parser\nContext\nThe tokenizer indexes tokens[0] without checking the length.\nSteps\n1. Return early from tokenize() on blank input\n2. Add a regression test for whitespace-only input\n3. Run pnpm test parser\nif (input.trim() === \"\") return []",
     "markdown": false,
     "blocks": [
       {
@@ -15,7 +15,7 @@
               }
             },
             {
-              "paragraph": "The tokenizer indexes `tokens[0]` without checking the length."
+              "paragraph": "The tokenizer indexes tokens[0] without checking the length."
             },
             {
               "heading": {
@@ -44,7 +44,7 @@
                   {
                     "children": [
                       {
-                        "paragraph": "Run `pnpm test parser`"
+                        "paragraph": "Run pnpm test parser"
                       }
                     ]
                   }
@@ -67,6 +67,17 @@
         }
       }
     ],
+    "styles": [
+      {
+        "code": "tokens[0]"
+      },
+      {
+        "bold": "tokenize()"
+      },
+      {
+        "code": "pnpm test parser"
+      }
+    ],
     "buttons": [
       {
         "id": "v2-0",
@@ -87,7 +98,7 @@
   },
   {
     "label": "approved",
-    "text": "Fix empty input in the parser\nContext\nThe tokenizer indexes `tokens[0]` without checking the length.\nSteps\n1. Return early from tokenize() on blank input\n2. Add a regression test for whitespace-only input\n3. Run `pnpm test parser`\nif (input.trim() === \"\") return []\nApprove (answered by Dena)",
+    "text": "Fix empty input in the parser\nContext\nThe tokenizer indexes tokens[0] without checking the length.\nSteps\n1. Return early from tokenize() on blank input\n2. Add a regression test for whitespace-only input\n3. Run pnpm test parser\nif (input.trim() === \"\") return []\nApprove (answered by Dena)",
     "markdown": false,
     "blocks": [
       {
@@ -101,7 +112,7 @@
               }
             },
             {
-              "paragraph": "The tokenizer indexes `tokens[0]` without checking the length."
+              "paragraph": "The tokenizer indexes tokens[0] without checking the length."
             },
             {
               "heading": {
@@ -130,7 +141,7 @@
                   {
                     "children": [
                       {
-                        "paragraph": "Run `pnpm test parser`"
+                        "paragraph": "Run pnpm test parser"
                       }
                     ]
                   }
@@ -150,6 +161,17 @@
       },
       {
         "footer": "Approve (answered by Dena)"
+      }
+    ],
+    "styles": [
+      {
+        "code": "tokens[0]"
+      },
+      {
+        "bold": "tokenize()"
+      },
+      {
+        "code": "pnpm test parser"
       }
     ]
   }

@@ -77,6 +77,7 @@
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
 		F1A0B1C32F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */; };
+		F1A0B1C52F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C62F10432100A1B2C3 /* InlineMessageLayout */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
 		D4B53A132F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A122F1C000100000001 /* InlineSearch */; };
@@ -356,6 +357,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F1A0B1C52F10432100A1B2C3 /* InlineMessageLayout in Frameworks */,
 				F00200042FA2000100000001 /* InlineGrid in Frameworks */,
 				A83010022F52000100000001 /* InlineAppIntents in Frameworks */,
 				A9E100042F50000100000001 /* MemojiKit in Frameworks */,
@@ -643,6 +645,7 @@
 				7BABF642C785B35DB0C34BF2 /* InlineMacWindow */,
 				D4ACD0022F1B000000000001 /* MacDevtools */,
 				CD092C4E2EDC6F4A00E867E5 /* MacTheme */,
+				F1A0B1C62F10432100A1B2C3 /* InlineMessageLayout */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline Debug.app */;
@@ -2295,7 +2298,7 @@
 			repositoryURL = "https://github.com/inline-chat/GRDB.swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 7.10.0;
+				minimumVersion = 7.12.0;
 			};
 		};
 		CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */ = {
@@ -2563,6 +2566,10 @@
 			productName = InlineIOSUI;
 		};
 		F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineMessageLayout;
+		};
+		F1A0B1C62F10432100A1B2C3 /* InlineMessageLayout */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMessageLayout;
 		};
