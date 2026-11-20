@@ -2829,6 +2829,73 @@ describe("InlineSdkClient", () => {
     await next
   })
 
+  it("delivers live-only reactions without a sequence and keeps the chat cursor live", async () => {
+    // The server publishes reactions to connected sessions only (no seq, not in
+    // GET_UPDATES), so withholding one for recovery would drop it for good.
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 5 } }),
+    })
+
+    await connectAndOpen(client, transport)
+    const iter = client.events()[Symbol.asyncIterator]()
+    await transport.emitMessage(ServerProtocolMessage.create({
+      id: 64n,
+      body: {
+        oneofKind: "message",
+        message: {
+          payload: {
+            oneofKind: "update",
+            update: {
+              updates: [
+                Update.create({
+                  update: {
+                    oneofKind: "updateReaction",
+                    updateReaction: {
+                      reaction: { emoji: "🎉", messageId: 7n, chatId: 10n, userId: 40n, date: 100n },
+                    },
+                  },
+                }),
+                Update.create({
+                  update: {
+                    oneofKind: "deleteReaction",
+                    deleteReaction: { emoji: "🎉", chatId: 10n, messageId: 7n, userId: 40n },
+                  },
+                }),
+                Update.create({
+                  seq: 6,
+                  date: 106n,
+                  update: {
+                    oneofKind: "participantAdd",
+                    participantAdd: { chatId: 10n, participant: { userId: 41n, date: 100n } },
+                  },
+                }),
+              ],
+            },
+          },
+        },
+      },
+    }))
+
+    const added = await iter.next()
+    expect(added.value.kind).toBe("reaction.add")
+    expect(added.value.reaction.emoji).toBe("🎉")
+    const deleted = await iter.next()
+    expect(deleted.value.kind).toBe("reaction.delete")
+    const participant = await iter.next()
+    expect(participant.value.kind).toBe("chat.participant.add")
+    const next = iter.next()
+    await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 6)
+    expect(transport.sent.filter((message) =>
+      message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES,
+    )).toHaveLength(0)
+    await client.close()
+    await next
+  })
+
   it("emits chat participant events and commits their cursor only after application acknowledgement", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
