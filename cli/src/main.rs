@@ -5959,56 +5959,11 @@ async fn handle_messages_export(
 
     let (users_by_id, chats_by_id, spaces_by_id) = fetch_export_indexes(&mut realtime).await?;
     let mut warnings = Vec::new();
-    let mut related_messages_by_id = messages
-        .iter()
-        .cloned()
-        .map(|message| (message.id, message))
-        .collect::<HashMap<_, _>>();
-    let missing_reply_ids = collect_missing_reply_ids(&messages, &related_messages_by_id);
-    if !missing_reply_ids.is_empty() {
-        let (reply_messages, missing_message_ids) =
-            fetch_messages_by_ids(&mut realtime, &peer, &missing_reply_ids).await?;
-        for message in reply_messages {
-            related_messages_by_id.insert(message.id, message);
-        }
-        if !missing_message_ids.is_empty() {
-            warnings.push(format!(
-                "Could not resolve {} reply target(s): {}",
-                missing_message_ids.len(),
-                missing_message_ids
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-        }
-    }
-
-    let mut forward_messages_by_key = HashMap::new();
-    for (source_peer, message_ids) in collect_forward_sources(&messages) {
-        let Some(input_peer) = input_peer_from_proto_peer(&source_peer) else {
-            warnings.push("Could not resolve a forwarded source peer.".to_string());
-            continue;
-        };
-        let (forward_messages, missing_message_ids) =
-            fetch_messages_by_ids(&mut realtime, &input_peer, &message_ids).await?;
-        for message in forward_messages {
-            if let Some(key) = forward_source_key(&source_peer, message.id) {
-                forward_messages_by_key.insert(key, message);
-            }
-        }
-        if !missing_message_ids.is_empty() {
-            warnings.push(format!(
-                "Could not resolve {} forwarded source message(s): {}",
-                missing_message_ids.len(),
-                missing_message_ids
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-        }
-    }
+    let (related_messages_by_id, forward_messages_by_key) =
+        fetch_export_related_messages(&peer, &messages, &mut warnings, async |peer, ids| {
+            fetch_messages_by_ids(&mut realtime, peer, ids).await
+        })
+        .await;
 
     let export_peer = export_peer_from_input_peer(&peer, &users_by_id, &chats_by_id);
     let message_count = messages.len();
@@ -6204,6 +6159,86 @@ async fn fetch_export_indexes(
     Ok((users, chats, spaces))
 }
 
+type RelatedMessages = (
+    HashMap<i64, proto::Message>,
+    HashMap<String, proto::Message>,
+);
+type MessageLookup = Result<(Vec<proto::Message>, Vec<i64>), Box<dyn std::error::Error>>;
+
+/// Reply targets in the exported chat and the sources forwarded messages copy.
+/// Best effort: a lookup the viewer can't make becomes a warning, so one
+/// unreadable source never fails the whole export.
+async fn fetch_export_related_messages(
+    peer: &proto::InputPeer,
+    messages: &[proto::Message],
+    warnings: &mut Vec<String>,
+    mut fetch: impl AsyncFnMut(&proto::InputPeer, &[i64]) -> MessageLookup,
+) -> RelatedMessages {
+    let mut related_messages_by_id = messages
+        .iter()
+        .cloned()
+        .map(|message| (message.id, message))
+        .collect::<HashMap<_, _>>();
+    let missing_reply_ids = collect_missing_reply_ids(messages, &related_messages_by_id);
+    if !missing_reply_ids.is_empty() {
+        match fetch(peer, &missing_reply_ids).await {
+            Ok((reply_messages, missing_message_ids)) => {
+                for message in reply_messages {
+                    related_messages_by_id.insert(message.id, message);
+                }
+                if !missing_message_ids.is_empty() {
+                    warnings.push(format!(
+                        "Could not resolve {} reply target(s): {}",
+                        missing_message_ids.len(),
+                        join_message_ids(&missing_message_ids)
+                    ));
+                }
+            }
+            Err(error) => warnings.push(format!(
+                "Could not resolve {} reply target(s): {error}",
+                missing_reply_ids.len()
+            )),
+        }
+    }
+
+    let mut forward_messages_by_key = HashMap::new();
+    for (chat_id, message_ids) in collect_forward_source_chats(messages) {
+        let (forward_messages, missing_message_ids) =
+            match fetch(&chat_input_peer(chat_id), &message_ids).await {
+                Ok(result) => result,
+                Err(error) => {
+                    warnings.push(format!(
+                        "Could not read forwarded source chat {chat_id}: {error}"
+                    ));
+                    continue;
+                }
+            };
+        let source_peer = proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id })),
+        };
+        for message in forward_messages {
+            if let Some(key) = forward_source_key(&source_peer, message.id) {
+                forward_messages_by_key.insert(key, message);
+            }
+        }
+        if !missing_message_ids.is_empty() {
+            warnings.push(format!(
+                "Could not resolve {} forwarded source message(s): {}",
+                missing_message_ids.len(),
+                join_message_ids(&missing_message_ids)
+            ));
+        }
+    }
+    (related_messages_by_id, forward_messages_by_key)
+}
+
+fn join_message_ids(ids: &[i64]) -> String {
+    ids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn collect_missing_reply_ids(
     messages: &[proto::Message],
     related_messages_by_id: &HashMap<i64, proto::Message>,
@@ -6221,56 +6256,36 @@ fn collect_missing_reply_ids(
     ids
 }
 
-fn collect_forward_sources(messages: &[proto::Message]) -> Vec<(proto::Peer, Vec<i64>)> {
-    let mut indexes = HashMap::<String, usize>::new();
-    let mut groups = Vec::<(proto::Peer, Vec<i64>)>::new();
+/// Source chats of forwarded messages, with the source message ids to look up.
+/// A forward header's user peer names the DM as the forwarder saw it, so
+/// reading it as anyone else would open a different DM (or create one).
+fn collect_forward_source_chats(messages: &[proto::Message]) -> Vec<(i64, Vec<i64>)> {
+    let mut indexes = HashMap::<i64, usize>::new();
+    let mut groups = Vec::<(i64, Vec<i64>)>::new();
     for message in messages {
         let Some(forward) = message.fwd_from.as_ref() else {
             continue;
         };
-        let Some(peer) = forward.from_peer_id.as_ref() else {
+        let Some(proto::peer::Type::Chat(chat)) = forward
+            .from_peer_id
+            .as_ref()
+            .and_then(|peer| peer.r#type.as_ref())
+        else {
             continue;
         };
-        let Some(peer_key) = forward_peer_group_key(peer) else {
+        if forward.from_message_id <= 0 {
             continue;
-        };
-        let index = if let Some(index) = indexes.get(&peer_key) {
-            *index
-        } else {
-            let index = groups.len();
-            groups.push((peer.clone(), Vec::new()));
-            indexes.insert(peer_key, index);
-            index
-        };
-        if forward.from_message_id > 0 && !groups[index].1.contains(&forward.from_message_id) {
-            groups[index].1.push(forward.from_message_id);
+        }
+        let index = *indexes.entry(chat.chat_id).or_insert_with(|| {
+            groups.push((chat.chat_id, Vec::new()));
+            groups.len() - 1
+        });
+        let message_ids = &mut groups[index].1;
+        if !message_ids.contains(&forward.from_message_id) {
+            message_ids.push(forward.from_message_id);
         }
     }
     groups
-}
-
-fn forward_peer_group_key(peer: &proto::Peer) -> Option<String> {
-    match &peer.r#type {
-        Some(proto::peer::Type::Chat(chat)) => Some(format!("chat:{}", chat.chat_id)),
-        Some(proto::peer::Type::User(user)) => Some(format!("user:{}", user.user_id)),
-        None => None,
-    }
-}
-
-fn input_peer_from_proto_peer(peer: &proto::Peer) -> Option<proto::InputPeer> {
-    match &peer.r#type {
-        Some(proto::peer::Type::Chat(chat)) => Some(proto::InputPeer {
-            r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
-                chat_id: chat.chat_id,
-            })),
-        }),
-        Some(proto::peer::Type::User(user)) => Some(proto::InputPeer {
-            r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
-                user_id: user.user_id,
-            })),
-        }),
-        None => None,
-    }
 }
 
 fn export_peer_from_input_peer(
@@ -8452,6 +8467,75 @@ mod cli_parsing_tests {
 
         assert_eq!(calls, 1);
         assert_eq!(messages.len(), 29);
+    }
+
+    #[tokio::test]
+    async fn export_related_lookups_skip_user_forwards_and_warn_on_unreadable_sources() {
+        fn forwarded(id: i64, peer: proto::peer::Type, from_message_id: i64) -> proto::Message {
+            proto::Message {
+                id,
+                fwd_from: Some(proto::MessageFwdHeader {
+                    from_peer_id: Some(proto::Peer { r#type: Some(peer) }),
+                    from_id: 239200,
+                    from_message_id,
+                }),
+                ..Default::default()
+            }
+        }
+        let user = |user_id| proto::peer::Type::User(proto::PeerUser { user_id });
+        let chat = |chat_id| proto::peer::Type::Chat(proto::PeerChat { chat_id });
+        let messages = vec![
+            // A user peer names the DM as the forwarder saw it, not the viewer's DM.
+            forwarded(155, user(239200), 176),
+            forwarded(153, user(239200), 153),
+            forwarded(150, chat(9681), 6),
+            forwarded(149, chat(7), 3),
+            proto::Message {
+                id: 148,
+                reply_to_msg_id: Some(40),
+                ..Default::default()
+            },
+        ];
+        let mut lookups = Vec::new();
+        let mut warnings = Vec::new();
+        let (related, forwards) = fetch_export_related_messages(
+            &chat_input_peer(9213),
+            &messages,
+            &mut warnings,
+            async |peer, ids| {
+                lookups.push(peer.clone());
+                match &peer.r#type {
+                    Some(proto::input_peer::Type::User(_)) => Err("User ID is invalid".into()),
+                    Some(proto::input_peer::Type::Chat(chat)) if chat.chat_id == 9681 => {
+                        Err("Peer ID is invalid".into())
+                    }
+                    _ => Ok((
+                        ids.iter()
+                            .map(|&id| proto::Message {
+                                id,
+                                ..Default::default()
+                            })
+                            .collect(),
+                        Vec::new(),
+                    )),
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(
+            lookups,
+            vec![
+                chat_input_peer(9213),
+                chat_input_peer(9681),
+                chat_input_peer(7)
+            ]
+        );
+        assert!(related.contains_key(&40));
+        assert!(forwards.contains_key("chat:7:3"));
+        assert_eq!(forwards.len(), 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("chat 9681"), "{warnings:?}");
     }
 
     #[test]
