@@ -1,13 +1,13 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import path from "node:path"
-import Elysia from "elysia"
+import { useLiveRealtimeHost } from "@in/server/__tests__/liveRealtimeHost"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 
 // The bridge v2 end-to-end runs: this side creates an owner, their bot and
-// their DM, serves realtime, and runs the Rust side
+// their DM, serves the production realtime host, and runs the Rust side
 // (`cli/src/bridge/v2/e2e.rs`), which drives the real v2 runtime and the real
 // harness (`codex app-server`, or `claude`) against a local fake model.
 // Discovered only with INLINE_E2E=1 (see scripts/test-discovery.ts); it needs
@@ -19,17 +19,7 @@ setupTestLifecycle()
 mock.module("@in/server/libs/openAI", () => ({ openaiClient: undefined }))
 
 describe("bridge v2 end to end", () => {
-  let app: any
-
-  beforeAll(async () => {
-    const { realtime } = await import("@in/server/realtime")
-    app = new Elysia().use(realtime)
-    app.listen({ port: 0, hostname: "127.0.0.1" })
-  })
-
-  afterAll(() => {
-    app?.server?.stop?.()
-  })
+  const host = useLiveRealtimeHost()
 
   async function runRustSide(testName: string) {
     const suffix = crypto.randomUUID()
@@ -52,7 +42,7 @@ describe("bridge v2 end to end", () => {
     const { token: teammateToken } = await testUtils.createSessionForUser(teammate.id, { clientType: "cli" })
     const { token: otherBotToken } = await testUtils.createSessionForUser(otherBot.id, { clientType: "api" })
 
-    const origin = `127.0.0.1:${app.server.port}`
+    const origin = `127.0.0.1:${host.server.port}`
     const repo = path.resolve(import.meta.dir, "../../../..")
     const cargo = Bun.spawn(
       ["cargo", "test", "-j", "2", "-p", "inline-cli", `bridge::v2::e2e::${testName}`,

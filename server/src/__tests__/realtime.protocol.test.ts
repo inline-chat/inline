@@ -21,8 +21,8 @@ import {
 import { db } from "@in/server/db"
 import { files, sessions, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
-import { afterAll, beforeAll, describe, expect, it, mock, spyOn } from "bun:test"
-import Elysia from "elysia"
+import { describe, expect, it, mock, spyOn } from "bun:test"
+import { useLiveRealtimeHost } from "@in/server/__tests__/liveRealtimeHost"
 import { Log } from "@in/server/utils/log"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -41,20 +41,10 @@ mock.module("@in/server/ws/presence", () => ({
 setupTestLifecycle()
 
 describe("realtime protocol safety", () => {
-  let app: any
-
-  beforeAll(async () => {
-    const { realtime } = await import("@in/server/realtime")
-    app = new Elysia().use(realtime)
-    app.listen(0)
-  })
-
-  afterAll(() => {
-    app.server?.stop?.()
-  })
+  const host = useLiveRealtimeHost()
 
   const openRealtimeSocket = async () => {
-    const ws = newWebsocket(app.server!)
+    const ws = newWebsocket(host.server)
     await wsOpen(ws)
     return ws
   }

@@ -1,24 +1,17 @@
-import { realtime } from "@in/server/realtime"
+import { useLiveRealtimeHost } from "@in/server/__tests__/liveRealtimeHost"
 import { newWebsocket, wsOpen } from "@in/server/realtime/test/utils"
 import { describe, it } from "bun:test"
-import Elysia from "elysia"
 
 describe("realtime api", () => {
-  it("should be able to connect", async () => {
-    const app = new Elysia()
-    app.use(realtime)
-    app.listen(0)
+  const host = useLiveRealtimeHost()
 
-    const ws = newWebsocket(app.server!)
+  it("should be able to connect", async () => {
+    const ws = newWebsocket(host.server)
     await wsOpen(ws)
   })
 
   // it("should not accept string messages", async () => {
-  //   const app = new Elysia()
-  //   app.use(realtime)
-  //   app.listen(0)
-
-  //   const ws = newWebsocket(app.server!)
+  //   const ws = newWebsocket(host.server)
   //   await wsOpen(ws)
 
   //   ws.send("hello")
