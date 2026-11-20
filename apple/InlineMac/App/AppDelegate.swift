@@ -136,6 +136,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       PeerInfoMacHarness.show(dependencies: dependencies)
       return
     }
+    // The perf harness database is seeded when it opens (`AppDatabase.makeShared`).
+    if PerfHarnessFixture.isRequested {
+      // The main window normally opens on first activation, which an unattended run never gets.
+      Task { @MainActor in
+        if MainWindowController.all.isEmpty { MainWindowOpenCoordinator.shared.openDefaultWindow() }
+      }
+    }
+    if PerfJourneyRunner.isRequested {
+      // The window's route closure runs `nav3.open`, the call a sidebar row makes.
+      PerfJourneyRunner.start { peer in MainWindowOpenCoordinator.shared.openWindow(.chat(peer: peer)) }
+    }
     #endif
     MessageGestureTrace.restoreSetting()
     let launchSpan = PerformanceTrace.begin("ApplicationDidFinish", category: .launch)
