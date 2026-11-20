@@ -293,13 +293,31 @@ class ComposeMenuButton: NSView {
       for url in panel.urls {
         let type = UTType(filenameExtension: url.pathExtension)
         let isVideo = type?.conforms(to: .movie) == true || type?.conforms(to: .video) == true
-        if let image = NSImage(contentsOf: url), !isVideo {
-          delegate?.composeMenuButton(self, didSelectImage: image, url: url)
+        if type?.conforms(to: .gif) == true {
+          // The drop path keeps a GIF's animation; decoding it as an image flattened it.
+          delegate?.composeMenuButton(self, didSelectFiles: [url])
+        } else if !isVideo, let preview = Self.previewImage(for: url) {
+          // A small preview for the attachment strip; the photo itself is prepared from the file.
+          delegate?.composeMenuButton(self, didSelectImage: preview, url: url)
         } else {
           delegate?.composeMenuButton(self, didSelectVideo: url)
         }
       }
     }
+  }
+
+  private static func previewImage(for url: URL) -> NSImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+    else {
+      return nil
+    }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: 600,
+    ]
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+    return NSImage(cgImage: image, size: .zero)
   }
 
   @objc private func openFilePicker() {

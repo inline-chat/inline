@@ -1605,12 +1605,7 @@ class LegacyComposeAppKit: NSView {
     }
 
     // Add a placeholder view immediately; Drafts2 owns file-cache persistence.
-    let pendingId = drafts2.addImage(
-      peer: peerId,
-      image: image,
-      preferredFormat: preferredImageFormat,
-      fallbackURL: url
-    )
+    let pendingId = drafts2.addImage(peer: peerId, image: image, sourceURL: url)
     attachments.addImageView(image, id: pendingId)
     updateHeight(animate: true)
   }
@@ -1775,18 +1770,29 @@ class LegacyComposeAppKit: NSView {
     }
     let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
+    let sendsOriginals = attachments.sendsMediaAsOriginal
     func enqueueAttachments(replyToMessageId: Int64?) {
-      // Neighbouring photos and videos go out as albums; the text is the first one's caption.
-      for send in TransactionSendMessage.sends(
-        text: text,
-        peerId: destinationPeerId,
-        chatId: destinationChatId, // FIXME: chatId fallback
-        mediaItems: attachmentItemsSnapshot,
-        replyToMsgId: replyToMessageId,
-        entities: entities,
-        sendMode: effectiveSendMode
-      ) {
-        Transactions.shared.mutate(transaction: .sendMessage(send))
+      func enqueue(_ mediaItems: [FileMediaItem]) {
+        // Neighbouring photos and videos go out as albums; the text is the first one's caption.
+        for send in TransactionSendMessage.sends(
+          text: text,
+          peerId: destinationPeerId,
+          chatId: destinationChatId, // FIXME: chatId fallback
+          mediaItems: mediaItems,
+          replyToMsgId: replyToMessageId,
+          entities: entities,
+          sendMode: effectiveSendMode
+        ) {
+          Transactions.shared.mutate(transaction: .sendMessage(send))
+        }
+      }
+      guard sendsOriginals else {
+        enqueue(attachmentItemsSnapshot)
+        return
+      }
+      // Original: each photo and video goes as its untouched file, in the same order.
+      Task { @MainActor in
+        enqueue(await FileMediaItem.withOriginals(attachmentItemsSnapshot))
       }
     }
 
@@ -2079,7 +2085,7 @@ class LegacyComposeAppKit: NSView {
     Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       do {
-        let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+        let photoInfo = try FileCache.savePhoto(image: image)
         let mediaItem = FileMediaItem.photo(photoInfo)
 
         Transactions.shared.mutate(
