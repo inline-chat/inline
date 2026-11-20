@@ -1012,6 +1012,61 @@ final class HarnessUITests: XCTestCase {
     }
   }
 
+  /// Every composer and screen change the list follows, one after another: the newest row should keep its gap to the
+  /// composer's top through each. Run with `--timeline-harness-probe`; each `[UITEST] step` line names the frames
+  /// after it (the probe's `wall` column).
+  func testTransitionSweep() {
+    func step(_ name: String) {
+      print("[UITEST] step \(name) t=\(String(format: "%.3f", Date().timeIntervalSince1970))")
+    }
+    func settle() { Thread.sleep(forTimeInterval: 1.3) }
+    launch()
+    step("keyboard-open")
+    openKeyboard()
+    step("type-lines")
+    composer.typeText("A long draft that wraps onto a second line, then a third one, and keeps going on to a fourth line")
+    settle()
+    shot("sweep-lines")
+    step("delete-lines")
+    composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 110))
+    settle()
+    step("edit-bar")
+    script("Compose edit")
+    settle()
+    shot("sweep-edit")
+    step("edit-clear")
+    script("Compose clear")
+    settle()
+    step("photo-add")
+    script("Compose photo")
+    settle()
+    shot("sweep-photo")
+    step("photo-remove")
+    script("Compose remove photo")
+    settle()
+    // The finger also scrolls the list here, so this stretch's drift is the scroll, not a gap.
+    step("keyboard-drag-dismiss")
+    drag(190, 300, 190, 650, v: 400, hold: 0.3)
+    settle()
+    step("back-to-newest")
+    if scrollButton.exists, scrollButton.isHittable { scrollButton.tap() }
+    settle()
+    step("photo-add-keyboard-down")
+    script("Compose photo")
+    settle()
+    step("photo-remove-keyboard-down")
+    script("Compose remove photo")
+    settle()
+    step("rotate-landscape")
+    XCUIDevice.shared.orientation = .landscapeLeft
+    Thread.sleep(forTimeInterval: 2)
+    shot("sweep-landscape")
+    step("rotate-portrait")
+    XCUIDevice.shared.orientation = .portrait
+    Thread.sleep(forTimeInterval: 2)
+    step("end")
+  }
+
   /// Puts the keyboard away with a tap on the list's empty leading margin (a drag would also scroll it).
   func tapToDismissKeyboard() {
     coord(6, 330).tap()
