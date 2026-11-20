@@ -2223,7 +2223,9 @@ async def assert_mentioned_agent_projection():
     })
 
     assert len(events) == 1
-    assert 'You are a specialized agent named "Data Analyst"' not in events[0].channel_prompt
+    assert "Data Analyst" not in events[0].channel_prompt
+    # Hermes auto-loads skills only at session start, so the per-turn block names the skill.
+    assert "[Inline agent]\nname: Data Analyst\nskill: analysis" in events[0].channel_context
     assert events[0].auto_skill == ["triage", "analysis"]
 
     await adapter._dispatch_message({
@@ -2245,9 +2247,8 @@ async def assert_mentioned_agent_projection():
         },
     })
     assert len(events) == 2
-    summarizer = 'You are a specialized agent named "Summarizer". Proceed with the user\'s request.'
-    assert f"[Inline agent instructions]\n{summarizer}" in events[1].channel_context
-    assert summarizer not in events[1].channel_prompt
+    assert "[Inline agent]\nname: Summarizer" in events[1].channel_context
+    assert "Summarizer" not in events[1].channel_prompt
 
 asyncio.run(assert_mentioned_agent_projection())
 
@@ -2355,7 +2356,7 @@ async def assert_activated_agent_avoids_lookup():
     })
 
     assert len(events) == 1
-    assert "[Inline agent instructions]\nInspect the supplied data carefully." in events[0].channel_context
+    assert "[Inline agent]\nname: Data Analyst\ninstructions:\nInspect the supplied data carefully." in events[0].channel_context
     assert "Inspect the supplied data carefully." not in events[0].channel_prompt
 
 asyncio.run(assert_activated_agent_avoids_lookup())
@@ -2685,6 +2686,32 @@ async def assert_inline_entity_context():
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+    # Mentioning an Inline Agent, or a group message observed in between, is per-turn too.
+    adapter._remember_observed_context("10", {"id": "21b", "fromId": "u2"}, "unrelated chatter")
+    await adapter._dispatch_message({
+        "seq": 17,
+        "chatId": "10",
+        "sender": {"id": "u1", "firstName": "Mo", "lastName": "Jorjani", "username": "morajabi"},
+        "message": {
+            "id": "22",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "Analyst look",
+            "peerId": {"peer": {"oneofKind": "chat"}},
+            "activatedAgent": {"id": "73", "name": "Analyst", "instructions": "Be terse.", "skillKey": "analysis"},
+            "entities": {"entities": [{
+                "type": 1, "offset": 0, "length": 7,
+                "entity": {"oneofKind": "mention", "mention": {"userId": adapter._me_id or "20", "agentId": "73"}},
+            }]},
+        },
+    })
+    assert len(events) == 3
+    assert events[2].channel_prompt == events[0].channel_prompt
+    assert events[2].channel_context.startswith(
+        "[Inline turn]\ntriggering_message: 22\n\n[Inline agent]\nname: Analyst\nskill: analysis\ninstructions:\nBe terse."
+    )
+    assert "[Inline observed context]" in events[2].channel_context
 
 asyncio.run(assert_inline_entity_context())
 
@@ -6214,16 +6241,35 @@ async def assert_inline_lifecycle_events():
             "peerId": {"type": {"oneofKind": "chat", "chat": {"chatId": chat_id}}},
         }
 
+    fetches = []
+
+    async def forbidden_fetch(chat_id, message_id, **kwargs):
+        fetches.append(message_id)
+        return await own_message(chat_id, message_id)
+
+    adapter.handle_message = capture
+    adapter._fetch_message = forbidden_fetch
+
+    # Off by default, like Hermes' Slack reaction_triggers: no turn and no target lookup.
+    def reaction_update(seq, message_id, emoji="ok"):
+        return json.dumps({
+            "kind": "reaction.add",
+            "chatId": "10",
+            "seq": seq,
+            "date": str(seq),
+            "reaction": {"chatId": "10", "messageId": message_id, "userId": "u1", "emoji": emoji, "date": str(seq)},
+        })
+
+    await adapter._on_inbound(reaction_update(19, "20"))
+    assert events == [] and fetches == []
+
+    # reaction_triggers: true routes any emoji, on the bot's own messages only.
+    adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "group_policy": "open", "reaction_triggers": True}))
+    adapter._get_chat_info = root_chat_info
+    adapter._me_id = "bot"
     adapter.handle_message = capture
     adapter._fetch_message = own_message
-
-    await adapter._on_inbound(json.dumps({
-        "kind": "reaction.add",
-        "chatId": "10",
-        "seq": 21,
-        "date": "100",
-        "reaction": {"chatId": "10", "messageId": "20", "userId": "u1", "emoji": "ok", "date": "100"},
-    }))
+    await adapter._on_inbound(reaction_update(21, "20"))
 
     assert len(events) == 1
     assert events[0].text == "reaction:added:ok"
@@ -6242,14 +6288,25 @@ async def assert_inline_lifecycle_events():
         }
 
     adapter._fetch_message = human_message
-    await adapter._on_inbound(json.dumps({
-        "kind": "reaction.add",
-        "chatId": "10",
-        "seq": 22,
-        "date": "101",
-        "reaction": {"chatId": "10", "messageId": "21", "userId": "u1", "emoji": "ok", "date": "101"},
-    }))
+    await adapter._on_inbound(reaction_update(22, "21"))
     assert len(events) == 1
+
+    # An emoji list routes those emoji on any message, and checks the emoji before any lookup.
+    listed = InlineAdapter(PlatformConfig(extra={**trusted_extra, "group_policy": "open", "reaction_triggers": "👍, ✅"}))
+    listed._get_chat_info = root_chat_info
+    listed._me_id = "bot"
+    listed.handle_message = capture
+    fetches.clear()
+    listed._fetch_message = forbidden_fetch
+    await listed._on_inbound(reaction_update(23, "21", "😂"))
+    assert len(events) == 1 and fetches == []
+    listed._fetch_message = human_message
+    await listed._on_inbound(reaction_update(24, "21", "👍"))
+    assert len(events) == 2 and events[-1].text == "reaction:added:👍"
+    events.pop()
+    assert inline_adapter_module._reaction_triggers("false", system_events=True) == ("off", frozenset())
+    assert inline_adapter_module._reaction_triggers(None, system_events=True) == ("any", frozenset())
+    assert inline_adapter_module._reaction_triggers("❤️", system_events=False) == ("any", frozenset({"❤"}))
 
     system_adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "system_events": True}))
     system_adapter._get_chat_info = root_chat_info
@@ -6290,6 +6347,69 @@ async def assert_inline_lifecycle_events():
     assert system_events[-1].source.chat_type == "dm"
 
 asyncio.run(assert_inline_lifecycle_events())
+
+async def assert_lifecycle_events_share_the_message_session():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **trusted_extra, "group_policy": "open", "reply_threads": "off", "context_backfill": "off",
+        "require_mention": False, "reaction_triggers": True, "system_events": True,
+    }))
+    adapter._me_id = "bot"
+    events = []
+
+    async def capture(event):
+        events.append(event)
+
+    async def chat_info(chat_id, **kwargs):
+        if chat_id == "T":
+            return {"id": "T", "title": "Launch thread", "parentChatId": "G", "peer": {"type": {"oneofKind": "chat"}}}
+        if chat_id == "D":
+            return {"id": "D", "title": "Mo", "peer": {"type": {"oneofKind": "user", "user": {"userId": "u1"}}}}
+        return {"id": chat_id, "title": "General", "peer": {"type": {"oneofKind": "chat"}}}
+
+    async def bot_message(chat_id, message_id, **kwargs):
+        message = {"id": message_id, "fromId": "bot", "message": "Bot answer", "peerId": {"peer": {"oneofKind": "chat"}}}
+        if chat_id == "G":
+            message["replies"] = {"chatId": "T"}  # the answer opened thread T
+        return message
+
+    adapter.handle_message = capture
+    adapter._get_chat_info = chat_info
+    adapter._fetch_message = bot_message
+    await adapter._dispatch_message({"seq": 1, "chatId": "T", "message": {
+        "id": "5", "chatId": "T", "fromId": "u1", "message": "follow-up", "peerId": {"peer": {"oneofKind": "chat"}},
+    }})
+    message_source = events[-1].source
+    assert (message_source.chat_id, message_source.thread_id, message_source.parent_chat_id) == ("T", "T", "G")
+
+    saved_fields = getattr(MessageEvent, "__dataclass_fields__", None)
+    MessageEvent.__dataclass_fields__ = {"reply_expected": object(), "inherit_channel_pin": object()}
+    try:
+        # A reaction inside the thread, and one on the parent-chat message that opened it,
+        # both continue the thread's session under its real title.
+        for seq, chat_id in ((2, "T"), (3, "G")):
+            await adapter._dispatch_reaction({"chatId": chat_id, "messageId": "4", "userId": "u1", "emoji": "👍", "seq": seq}, added=True)
+            source = events[-1].source
+            assert (source.chat_id, source.thread_id, source.parent_chat_id) == ("T", "T", "G"), (chat_id, vars(source))
+            assert source.chat_name == ("Launch thread" if chat_id == "T" else "General")
+            # No reply is owed, and Hermes keeps the conversation's pinned system prompt.
+            assert events[-1].reply_expected is False
+            assert events[-1].inherit_channel_pin is True
+            assert getattr(events[-1], "channel_prompt", None) is None
+        # A DM's lifecycle event is a DM turn, not a group one.
+        await adapter._dispatch_system_event({"kind": "message.delete", "chatId": "D", "messageIds": ["9"], "seq": 4})
+        assert events[-1].source.chat_type == "dm"
+        assert events[-1].source.chat_name == "Mo"
+        assert events[-1].inherit_channel_pin is True
+    finally:
+        if saved_fields is None:
+            del MessageEvent.__dataclass_fields__
+        else:
+            MessageEvent.__dataclass_fields__ = saved_fields
+    # Older hosts without these fields get the plain event.
+    await adapter._dispatch_reaction({"chatId": "T", "messageId": "4", "userId": "u1", "emoji": "👍", "seq": 5}, added=True)
+    assert not hasattr(events[-1], "inherit_channel_pin") and not hasattr(events[-1], "reply_expected")
+
+asyncio.run(assert_lifecycle_events_share_the_message_session())
 
 async def assert_join_mention_recovery():
     adapter = InlineAdapter(PlatformConfig(extra={

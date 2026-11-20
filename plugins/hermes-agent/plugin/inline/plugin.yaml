@@ -124,6 +124,10 @@ optional_env:
     description: "Deliver Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages (true/false, default false)"
     prompt: "Deliver lifecycle events? (true/false)"
     password: false
+  - name: INLINE_REACTION_TRIGGERS
+    description: "Reactions that start a Hermes turn: unset/false none (default), true any emoji on the bot's own messages, or a list such as 👍,✅ for those emoji on any message"
+    prompt: "Reaction triggers (false, true, or emoji list)"
+    password: false
   - name: INLINE_REACTIONS
     description: "Show processing reactions on handled inbound messages: eyes while working, then success or failure (true/false, default false)"
     prompt: "Show processing reactions? (true/false)"
