@@ -252,10 +252,9 @@ export async function rollback(api: Api, c: NbgConfig, receipt?: NbgReceipt, hoo
       throw new Error("An unrecorded Coolify deployment is active; cancel or finish it in Coolify, then rerun")
     }
     const recorded = receipt && same(before, c) ? await status(receipt.deployment) : undefined
-    let resumed = false
     if (receipt && recorded && !["failed", "cancelled", "cancelled-by-user", "error"].includes(recorded)) {
+      // An earlier attempt of this run queued it, so this run did roll back even when it already finished.
       deployment = receipt.deployment
-      resumed = recorded === "finished"
     } else if (!receipt && same(before, c) && before.healthy && await ready(c.sha).then(() => true, () => false)) {
       // Already pinned, healthy and serving the recorded revision: verify only.
       await hooks.verify?.()
@@ -275,7 +274,7 @@ export async function rollback(api: Api, c: NbgConfig, receipt?: NbgReceipt, hoo
     if (result !== "finished") throw new Error(`Coolify rollback deployment ${result}`)
     await verify()
     await hooks.verify?.()
-    return { outcome: resumed ? "already-current" : "published", deployment, image: c.image } as const
+    return { outcome: "published", deployment, image: c.image } as const
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Nuremberg rollback failed"
     throw new Error(`${reason}. Nuremberg rollback did not complete${deployment ? ` (deployment ${deployment})` : ""}; ` +

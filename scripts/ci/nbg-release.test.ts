@@ -328,6 +328,14 @@ describe("Nuremberg rollback_to_plan", () => {
     expect(f.queued()).toBe(0)
   })
 
+  it("reports a rollback an earlier attempt finished as rolled back, not as nothing to roll back", async () => {
+    const f = provider({ configured: desired(), revision: OLD_SHA })
+    const receipt = f.receipt("rollback-attempt-1", { status: "finished" })
+    const result = await rollback(f.api, config(env), receipt, { ready: f.ready, pause })
+    expect(result).toMatchObject({ outcome: "published", deployment: "rollback-attempt-1" })
+    expect(f.queued()).toBe(0)
+  })
+
   it("never restores the release being rolled back, and names the deployment to reconcile", async () => {
     for (const outcome of [{ status: "failed" }, { status: "finished", healthy: false }]) {
       const f = provider({ outcomes: [outcome] })

@@ -761,7 +761,11 @@ jobs:
           if jq -e --arg digest "${TARGET_IMAGE##*@}" --arg sha "$TARGET_REVISION" \
               '.digest == $digest and .revision == $sha' <<< "$current" > /dev/null; then
             if jq -e -f scripts/ci/fly-release-machines.jq "$RUNNER_TEMP/machines-before.json" > /dev/null 2>&1; then
-              echo "::warning title=Nothing to roll back on Fly::Fly already serves the recorded baseline $TARGET_REVISION and passes readiness; the selected plan may not be the release you meant (see rollback_plan_run)."
+              if [[ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]]; then
+                echo "::notice title=Fly already rolled back::Fly already serves the recorded baseline $TARGET_REVISION and passes readiness; an earlier attempt of this run likely replaced it, so this attempt only verifies."
+              else
+                echo "::warning title=Nothing to roll back on Fly::Fly already serves the recorded baseline $TARGET_REVISION and passes readiness; the selected plan may not be the release you meant (see rollback_plan_run)."
+              fi
               echo "outcome=already-current" >> "$GITHUB_OUTPUT"
               exit 0
             fi

@@ -387,7 +387,7 @@ describe("rollback_to_plan", () => {
       image_ref: { repository: "inline-chat/inline-server", tag: "", digest, labels: { "org.opencontainers.image.revision": sha } },
       config: { metadata: { fly_platform_version: "v2", fly_process_group: "app" }, services: [{ internal_port: 8000, checks: [{ path: "/readyz" }] }] },
       checks: [{ status }] })
-    for (const [status, deployed] of [["passing", false], ["critical", true]] as const) {
+    for (const [status, deployed, attempt] of [["passing", false, "1"], ["passing", false, "2"], ["critical", true, "1"]] as const) {
       const directory = mkdtempSync(path.join(tmpdir(), "inline-rollback-fly-"))
       try {
         writeFileSync(path.join(directory, "inventory.json"), JSON.stringify([machine(status)]))
@@ -398,12 +398,13 @@ describe("rollback_to_plan", () => {
         const result = Bun.spawnSync(["bash", "-e", "-c", replace], { cwd: root, env: {
           PATH: `${directory}:${process.env.PATH}`, RUNNER_TEMP: directory, GITHUB_OUTPUT: output, FLY_API_TOKEN: "t",
           INVENTORY: path.join(directory, "inventory.json"), DEPLOYED: path.join(directory, "deployed"),
-          TARGET_IMAGE: `ghcr.io/inline-chat/inline-server@${digest}`, TARGET_REVISION: sha,
+          TARGET_IMAGE: `ghcr.io/inline-chat/inline-server@${digest}`, TARGET_REVISION: sha, GITHUB_RUN_ATTEMPT: attempt,
         } })
         expect(result.exitCode, result.stderr.toString()).toBe(0)
         expect(existsSync(path.join(directory, "deployed"))).toBe(deployed)
         expect(readFileSync(output, "utf8")).toContain(deployed ? "outcome=published" : "outcome=already-current")
-        if (!deployed) expect(result.stdout.toString()).toContain("::warning title=Nothing to roll back on Fly::")
+        // A rerun finds the rollback an earlier attempt made, so it does not blame the selected plan.
+        if (!deployed) expect(result.stdout.toString()).toContain(attempt === "1" ? "::warning title=Nothing to roll back on Fly::" : "::notice title=Fly already rolled back::")
       } finally { rmSync(directory, { recursive: true, force: true }) }
     }
   })
