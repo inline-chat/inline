@@ -43,120 +43,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
   }
 
-  private func shouldSendAsFile(_ image: UIImage) -> Bool {
-    let width = max(image.size.width, 1)
-    let height = max(image.size.height, 1)
-    let ratio = max(width / height, height / width)
-    return ratio > 20 || (width < 50 && height < 50)
-  }
-
-  private func makeImageAttachment(_ image: UIImage, optimizePhoto: Bool) throws -> FileMediaItem {
-    if shouldSendAsFile(image) {
-      let tempDirectory = FileHelpers.getTrueTemporaryDirectory()
-      let fileName = "image-\(UUID().uuidString).jpg"
-      let (_, tempURL) = try image.save(to: tempDirectory, withName: fileName, format: .jpeg)
-      defer { try? FileManager.default.removeItem(at: tempURL) }
-      return .document(try FileCache.saveDocumentWithImmediateThumbnail(url: tempURL))
-    }
-
-    return .photo(try FileCache.savePhoto(image: image, optimize: optimizePhoto))
-  }
-
-  private func resetComposeStateAfterPreviewSend() {
-    autocompleteManager?.dismissCompletion()
-    if let attributed = textView.attributedText?.mutableCopy() as? NSMutableAttributedString {
-      let marker = "\u{FFFC}" as NSString
-      var range = (attributed.string as NSString).range(of: marker as String)
-      while range.location != NSNotFound {
-        attributed.replaceCharacters(in: range, with: "")
-        range = (attributed.string as NSString).range(of: marker as String)
-      }
-      textView.attributedText = attributed
-    }
-
-    textView.resetTypingAttributesToDefault()
-    textView.font = .systemFont(ofSize: 17)
-    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
-
-    let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
-    let isEmpty = normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
-    updateSendButtonVisibility()
-  }
-
-  private func presentSingleImagePreview(_ image: UIImage, presenter: UIViewController? = nil) {
-    guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
-    guard let resolvedPresenter = presenter ?? attachmentFlowPresenter() else { return }
-
-    selectedImage = image
-    previewViewModel.isPresented = true
-    currentPreviewUsesAttachmentPicker = attachmentPickerViewController != nil
-
-    let previewView = SwiftUIPhotoPreviewView(
-      image: image,
-      caption: Binding(
-        get: { [weak self] in self?.previewViewModel.caption ?? "" },
-        set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
-      ),
-      isPresented: Binding(
-        get: { [weak self] in self?.previewViewModel.isPresented ?? false },
-        set: { [weak self] newValue in
-          self?.previewViewModel.isPresented = newValue
-          if !newValue {
-            self?.dismissPreview()
-          }
-        }
-      ),
-      onSend: { [weak self] image, caption in
-        self?.sendImage(image, caption: caption)
-      },
-      onAddMorePhotos: { [weak self] in
-        self?.presentPicker()
-      }
-    )
-
-    let previewVC = UIHostingController(rootView: previewView)
-    previewVC.modalPresentationStyle = .fullScreen
-    previewVC.modalTransitionStyle = .crossDissolve
-
-    resolvedPresenter.present(previewVC, animated: true)
-  }
-
-  private func presentMultiImagePreview(_ images: [UIImage], presenter: UIViewController? = nil) {
-    guard !images.isEmpty else { return }
-    guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
-    guard let resolvedPresenter = presenter ?? attachmentFlowPresenter() else { return }
-
-    multiPhotoPreviewViewModel.setPhotos(images)
-    multiPhotoPreviewViewModel.isPresented = true
-    currentPreviewUsesAttachmentPicker = attachmentPickerViewController != nil
-
-    let multiPreviewView = SwiftUIPhotoPreviewView(
-      viewModel: multiPhotoPreviewViewModel,
-      isPresented: Binding(
-        get: { [weak self] in self?.multiPhotoPreviewViewModel.isPresented ?? false },
-        set: { [weak self] newValue in
-          self?.multiPhotoPreviewViewModel.isPresented = newValue
-          if !newValue {
-            self?.dismissMultiPreview()
-          }
-        }
-      ),
-      onSend: { [weak self] photoItems in
-        self?.sendMultipleImages(photoItems)
-      },
-      onAddMorePhotos: { [weak self] in
-        self?.presentPicker()
-      }
-    )
-
-    let previewVC = UIHostingController(rootView: multiPreviewView)
-    previewVC.modalPresentationStyle = .fullScreen
-    previewVC.modalTransitionStyle = .crossDissolve
-
-    resolvedPresenter.present(previewVC, animated: true)
-  }
-
   // MARK: - UIImagePickerControllerDelegate
 
   func presentPicker() {
@@ -233,175 +119,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     addImages(images)
   }
 
-  func dismissPreview(dismissAttachmentPicker: Bool = false) {
-    var responder: UIResponder? = self
-    var currentVC: UIViewController?
-
-    while let nextResponder = responder?.next {
-      if let viewController = nextResponder as? UIViewController {
-        currentVC = viewController
-        break
-      }
-      responder = nextResponder
-    }
-
-    guard let currentVC else { return }
-
-    var topmostVC = currentVC
-    while let presentedVC = topmostVC.presentedViewController {
-      topmostVC = presentedVC
-    }
-
-    let picker = topmostVC.presentingViewController as? PHPickerViewController
-
-    let finalizeDismissal: () -> Void = { [weak self] in
-      guard let self else { return }
-      self.selectedImage = nil
-      self.previewViewModel.caption = ""
-      self.previewViewModel.isPresented = false
-      self.currentPreviewUsesAttachmentPicker = false
-
-      if dismissAttachmentPicker {
-        self.dismissAttachmentPickerIfPresented(animated: true)
-      }
-    }
-
-    topmostVC.dismiss(animated: true) { [weak self] in
-      if let picker {
-        picker.dismiss(animated: true) { [weak self] in
-          self?.isPickerPresented = false
-          finalizeDismissal()
-        }
-      } else {
-        finalizeDismissal()
-      }
-    }
-  }
-
-  func dismissMultiPreview(dismissAttachmentPicker: Bool = false) {
-    var responder: UIResponder? = self
-    var currentVC: UIViewController?
-
-    while let nextResponder = responder?.next {
-      if let viewController = nextResponder as? UIViewController {
-        currentVC = viewController
-        break
-      }
-      responder = nextResponder
-    }
-
-    guard let currentVC else { return }
-
-    var topmostVC = currentVC
-    while let presentedVC = topmostVC.presentedViewController {
-      topmostVC = presentedVC
-    }
-
-    let picker = topmostVC.presentingViewController as? PHPickerViewController
-
-    let finalizeDismissal: () -> Void = { [weak self] in
-      guard let self else { return }
-      self.multiPhotoPreviewViewModel.photoItems.removeAll()
-      self.multiPhotoPreviewViewModel.currentIndex = 0
-      self.multiPhotoPreviewViewModel.isPresented = false
-      self.currentPreviewUsesAttachmentPicker = false
-
-      if dismissAttachmentPicker {
-        self.dismissAttachmentPickerIfPresented(animated: true)
-      }
-    }
-
-    topmostVC.dismiss(animated: true) { [weak self] in
-      if let picker {
-        picker.dismiss(animated: true) { [weak self] in
-          self?.isPickerPresented = false
-          finalizeDismissal()
-        }
-      } else {
-        finalizeDismissal()
-      }
-    }
-  }
-
-  func sendImage(_ image: UIImage, caption: String) {
-    guard let peerId else { return }
-
-    clearAttachments()
-
-    do {
-      let mediaItem = try makeImageAttachment(image, optimizePhoto: false)
-      let uniqueId = mediaItem.getItemUniqueId()
-      attachmentItems[uniqueId] = mediaItem
-    } catch {
-      Log.shared.error("Failed to save photo", error: error)
-    }
-
-    let didPrepareImage = !attachmentItems.isEmpty
-    for (_, attachment) in attachmentItems {
-      Transactions.shared.mutate(
-        transaction: .sendMessage(
-          .init(
-            text: caption,
-            peerId: peerId,
-            chatId: chatId ?? 0,
-            mediaItems: [attachment],
-            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
-            isSticker: nil,
-            entities: nil
-          )
-        )
-      )
-    }
-
-    if didPrepareImage, let chatId {
-      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
-    }
-
-    resetComposeStateAfterPreviewSend()
-    dismissPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
-    clearAttachments()
-    // sendMessageHaptic()
-  }
-
-  func sendMultipleImages(_ photoItems: [PhotoItem]) {
-    guard let peerId else { return }
-
-    let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
-
-    var items: [AlbumSendItem] = []
-    for (index, photoItem) in photoItems.enumerated() {
-      do {
-        let mediaItem = try makeImageAttachment(photoItem.image, optimizePhoto: true)
-        // Each photo keeps its own caption; the album shows the first one.
-        let captionText = photoItem.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
-        items.append(AlbumSendItem(media: mediaItem, text: captionText?.isEmpty == false ? captionText : nil))
-      } catch {
-        Log.shared.error("Failed to save and send photo \(index + 1)", error: error)
-      }
-    }
-    // Photos picked together go out as albums of up to ten.
-    for send in TransactionSendMessage.sends(
-      peerId: peerId,
-      chatId: chatId ?? 0,
-      items: items,
-      replyToMsgId: replyToMessageId
-    ) {
-      Transactions.shared.mutate(transaction: .sendMessage(send))
-    }
-    let didSendImage = !items.isEmpty
-
-    if didSendImage, let chatId {
-      IntentDonationCoordinator.donateOutgoing(peerId: peerId, chatId: chatId)
-    }
-
-    // Clear state and dismiss
-    resetComposeStateAfterPreviewSend()
-    dismissMultiPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
-    clearAttachments()
-    ChatState.shared.clearReplyingMessageId(peer: peerId)
-    // sendMessageHaptic()
-  }
-
   func handlePastedImage() {
     if let gifData = UIPasteboard.general.data(forPasteboardType: UTType.gif.identifier) ??
       UIPasteboard.general.data(forPasteboardType: "com.compuserve.gif") ??
@@ -419,7 +136,15 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       }
     }
 
-    guard let image = UIPasteboard.general.image else { return }
+    // Encoded bytes keep the camera details that pick the size, and serve as the original.
+    let pasteboard = UIPasteboard.general
+    for type in [UTType.heic, UTType.jpeg, UTType.png, UTType.webP, UTType.tiff] {
+      if let data = pasteboard.data(forPasteboardType: type.identifier) {
+        addPhotos([(.data(data), nil)])
+        return
+      }
+    }
+    guard let image = pasteboard.image else { return }
     addImages([image])
   }
 
@@ -427,24 +152,52 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     addImages([image])
   }
 
-  func addImages(_ images: [UIImage]) {
-    guard !images.isEmpty else { return }
+  func addImages(_ images: [UIImage], content: MediaSendPreparation.PhotoContent? = nil) {
+    addPhotos(images.map { (MediaSendPreparation.PhotoSource.platformImage($0), nil) }, content: content)
+  }
 
-    var didAddAny = false
-    for image in images {
-      do {
-        let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
-        let uniqueId = mediaItem.getItemUniqueId()
-        attachmentItems[uniqueId] = mediaItem
-        didAddAny = true
-        Log.shared.debug("Added image attachment with uniqueId: \(uniqueId)")
-      } catch {
-        Log.shared.error("Failed to save photo in attachments", error: error)
+  /// Prepares photos off the main thread (resized for their content, no metadata) and adds them
+  /// in the order given.
+  func addPhotos(
+    _ sources: [(source: MediaSendPreparation.PhotoSource, fileName: String?)],
+    content: MediaSendPreparation.PhotoContent? = nil
+  ) {
+    guard !sources.isEmpty else { return }
+    Task { [weak self] in
+      let items = await Self.preparePhotos(sources, content: content)
+      guard let self, !items.isEmpty else { return }
+      for item in items {
+        attachmentItems[item.getItemUniqueId()] = item
       }
-    }
-
-    if didAddAny {
       handleAttachmentItemsChanged(animated: false)
+    }
+  }
+
+  nonisolated static func preparePhotos(
+    _ sources: [(source: MediaSendPreparation.PhotoSource, fileName: String?)],
+    content: MediaSendPreparation.PhotoContent? = nil
+  ) async -> [FileMediaItem] {
+    await withTaskGroup(of: (Int, FileMediaItem?).self) { group in
+      for (index, entry) in sources.enumerated() {
+        group.addTask {
+          do {
+            let item = try await AttachmentMediaMaterializer.photo(
+              entry.source,
+              originalFileName: entry.fileName,
+              content: content
+            )
+            return (index, item)
+          } catch {
+            Log.shared.error("Failed to save photo in attachments", error: error)
+            return (index, nil)
+          }
+        }
+      }
+      var prepared: [(Int, FileMediaItem)] = []
+      for await (index, item) in group {
+        if let item { prepared.append((index, item)) }
+      }
+      return prepared.sorted { $0.0 < $1.0 }.map(\.1)
     }
   }
 
@@ -564,28 +317,25 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
           }
         }
       } catch AnimatedImageVideoConversionError.notAnimated {
+        // A still image after all: send it as a photo, prepared from the file.
+        let mediaItem = try? await AttachmentMediaMaterializer.photo(.file(url), originalFileName: url.lastPathComponent)
         await MainActor.run { [weak self] in
           guard let self else { return }
           guard !isPendingVideoAttachmentCanceled(pendingId) else {
             finishPendingVideoAttachmentProcessing(pendingId)
+            if case let .photo(photoInfo)? = mediaItem {
+              Task { await FileCache.discardLocalPhoto(photoInfo) }
+            }
             return
           }
-
-          guard let image = UIImage(contentsOfFile: url.path) else {
+          guard let mediaItem else {
+            Log.shared.error("Failed to save animated image fallback")
             cancelQueuedPendingVideoSend()
             completePendingVideoAttachments([pendingId])
             return
           }
-
-          do {
-            let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
-            attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
-            completePendingVideoAttachments([pendingId])
-          } catch {
-            Log.shared.error("Failed to save animated image fallback", error: error)
-            cancelQueuedPendingVideoSend()
-            completePendingVideoAttachments([pendingId])
-          }
+          attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
+          completePendingVideoAttachments([pendingId])
         }
       } catch {
         Log.shared.error("Failed to save animated image as video", error: error)
@@ -689,12 +439,14 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       return .failure(.message("Unsupported recent media type."))
     }
 
-    guard let image = await loadRecentImage(from: asset) else {
+    guard let data = await loadRecentImageData(from: asset) else {
       return .failure(.message("Couldn't open that recent photo."))
     }
 
     do {
-      let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+      let fileName = PHAssetResource.assetResources(for: asset)
+        .first { $0.type == .photo || $0.type == .fullSizePhoto }?.originalFilename
+      let mediaItem = try await AttachmentMediaMaterializer.photo(.data(data), originalFileName: fileName)
       return .success(mediaItem)
     } catch {
       Log.shared.error("Failed to save photo in attachments", error: error)
@@ -702,7 +454,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
   }
 
-  private func loadRecentImage(from asset: PHAsset) async -> UIImage? {
+  private func loadRecentImageData(from asset: PHAsset) async -> Data? {
     let options = PHImageRequestOptions()
     options.deliveryMode = .highQualityFormat
     options.resizeMode = .none
@@ -716,12 +468,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
           return
         }
 
-        guard let data, let image = UIImage(data: data) else {
-          continuation.resume(returning: nil)
-          return
-        }
-
-        continuation.resume(returning: image)
+        continuation.resume(returning: data)
       }
     }
   }
@@ -800,7 +547,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
   }
 
   private enum LibraryPickerItem {
-    case image(UIImage)
+    case photo(FileMediaItem)
     case video(FileMediaItem)
   }
 
@@ -856,15 +603,8 @@ extension ComposeView: PHPickerViewControllerDelegate {
         for entry in sortedEntries {
           let item = entry.item
           switch item {
-          case let .image(image):
-            do {
-              let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
-              let uniqueId = mediaItem.getItemUniqueId()
-              attachmentItems[uniqueId] = mediaItem
-            } catch {
-              Log.shared.error("Failed to save photo in attachments", error: error)
-              cancelQueuedPendingVideoSend()
-            }
+          case let .photo(mediaItem):
+            attachmentItems[mediaItem.getItemUniqueId()] = mediaItem
           case let .video(videoItem):
             if let pendingId = pendingVideoIdsByIndex[entry.index], isPendingVideoAttachmentCanceled(pendingId) {
               continue
@@ -974,8 +714,8 @@ extension ComposeView: PHPickerViewControllerDelegate {
         if let item = await loadAnimatedImageVideoItem(from: result) {
           return .video(item)
         }
-        if let image = await loadImageItem(from: result) {
-          return .image(image)
+        if let item = await loadPhotoItem(from: result) {
+          return .photo(item)
         }
       case .none, .some(.unknown):
         break
@@ -983,8 +723,8 @@ extension ComposeView: PHPickerViewControllerDelegate {
         break
     }
 
-    if let image = await loadImageItem(from: result) {
-      return .image(image)
+    if let item = await loadPhotoItem(from: result) {
+      return .photo(item)
     }
 
     if let item = await loadVideoItem(from: result) {
@@ -1057,16 +797,56 @@ extension ComposeView: PHPickerViewControllerDelegate {
     }
   }
 
-  private func loadImageItem(from result: PHPickerResult) async -> UIImage? {
-    await withCheckedContinuation { continuation in
-      result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
+  /// Loads the picked file itself (HEIC, JPEG, PNG…): its camera details pick the size it's
+  /// sent at, and it is kept as the original. Falls back to a decoded image.
+  private nonisolated func loadPhotoItem(from result: PHPickerResult) async -> FileMediaItem? {
+    let provider = result.itemProvider
+    if let typeIdentifier = provider.registeredTypeIdentifiers.first(where: {
+      UTType($0)?.conforms(to: .image) == true
+    }),
+      let file = await loadPhotoFileRepresentation(provider, typeIdentifier: typeIdentifier)
+    {
+      defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+      do {
+        return try await AttachmentMediaMaterializer.photo(.file(file), originalFileName: file.lastPathComponent)
+      } catch {
+        Log.shared.error("Failed to prepare picked photo file", error: error)
+      }
+    }
+
+    let image: UIImage? = await withCheckedContinuation { continuation in
+      provider.loadObject(ofClass: UIImage.self) { object, error in
         if let error {
           Log.shared.error("Failed to load image from picker", error: error)
+        }
+        continuation.resume(returning: object as? UIImage)
+      }
+    }
+    guard let image else { return nil }
+    return try? await AttachmentMediaMaterializer.photo(.platformImage(image))
+  }
+
+  /// Copies the provider's file before its callback returns, when the system deletes it.
+  private nonisolated func loadPhotoFileRepresentation(_ provider: NSItemProvider, typeIdentifier: String) async -> URL? {
+    await withCheckedContinuation { continuation in
+      provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+        guard let url else {
+          if let error { Log.shared.error("Failed to load picked photo file", error: error) }
           continuation.resume(returning: nil)
           return
         }
-
-        continuation.resume(returning: object as? UIImage)
+        let folder = FileHelpers.getTrueTemporaryDirectory()
+          .appendingPathComponent("picked-\(UUID().uuidString)", isDirectory: true)
+        do {
+          try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+          let copy = folder.appendingPathComponent(url.lastPathComponent)
+          try FileManager.default.copyItem(at: url, to: copy)
+          continuation.resume(returning: copy)
+        } catch {
+          Log.shared.error("Failed to copy picked photo file", error: error)
+          try? FileManager.default.removeItem(at: folder)
+          continuation.resume(returning: nil)
+        }
       }
     }
   }
@@ -1251,7 +1031,7 @@ extension ComposeView {
       }
 
       picker.dismiss(animated: true) { [weak self] in
-        self?.addImages([image])
+        self?.addImages([image], content: .camera)
         self?.dismissAttachmentPickerIfPresented(animated: true)
       }
     } else if mediaType == UTType.movie.identifier {

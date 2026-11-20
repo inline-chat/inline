@@ -355,6 +355,40 @@ extension ComposeView {
     return view
   }
 
+  /// The strip's Original chip. Off: photos and videos are sent compressed, with no location or
+  /// camera details. On: they go as their untouched files, the way Telegram's Send as File works.
+  func makeOriginalToggleButton() -> UIButton {
+    let button = UIButton(type: .custom)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.isSelected = sendsMediaAsOriginal
+    button.configurationUpdateHandler = { button in
+      var configuration: UIButton.Configuration = button.isSelected ? .filled() : .gray()
+      configuration.cornerStyle = .capsule
+      configuration.image = UIImage(systemName: button.isSelected ? "checkmark.circle.fill" : "circle")
+      configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+      configuration.imagePadding = 5
+      configuration.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 10, bottom: 7, trailing: 12)
+      var title = AttributedString("Original")
+      title.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+      configuration.attributedTitle = title
+      if !button.isSelected {
+        configuration.baseForegroundColor = .secondaryLabel
+      }
+      button.configuration = configuration
+      button.accessibilityValue = button.isSelected ? "On" : "Off"
+    }
+    button.addAction(UIAction { [weak self] _ in
+      guard let self else { return }
+      sendsMediaAsOriginal.toggle()
+      UISelectionFeedbackGenerator().selectionChanged()
+    }, for: .primaryActionTriggered)
+    button.accessibilityLabel = "Send originals"
+    button.accessibilityHint = "Sends photos and videos as files, unchanged, including their location and camera details."
+    button.setContentHuggingPriority(.required, for: .horizontal)
+    button.setContentCompressionResistancePriority(.required, for: .horizontal)
+    return button
+  }
+
   func makeAttachmentScrollView() -> UIScrollView {
     let view = UIScrollView()
     view.translatesAutoresizingMaskIntoConstraints = false

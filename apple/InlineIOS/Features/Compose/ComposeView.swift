@@ -98,6 +98,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var attachmentItems: [String: FileMediaItem] = [:] {
     didSet { attachmentOrder = Self.updatedAttachmentOrder(attachmentOrder, items: attachmentItems) }
   }
+  /// The strip's Original chip: photos and videos go as their untouched files. Resets once the
+  /// attachments are sent or cleared, so it never carries over to a later message.
+  var sendsMediaAsOriginal = false {
+    didSet { originalToggleButton?.isSelected = sendsMediaAsOriginal }
+  }
+  weak var originalToggleButton: UIButton?
   /// Keys of `attachmentItems` in the order they were added: the order they are sent in, and so
   /// the order of an album's photos.
   private(set) var attachmentOrder: [String] = []
@@ -412,7 +418,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let replyToMsgId = ChatState.shared.getState(peer: peerId).replyingMessageId
 
     Task.detached(priority: .userInitiated) { @MainActor in
-      let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+      let photoInfo = try FileCache.savePhoto(image: image)
       let mediaItem = FileMediaItem.photo(photoInfo)
 
       await Transactions.shared.mutate(
@@ -1214,6 +1220,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     )
     let hasText = !rawText.isEmpty
     let attachmentItemsSnapshot = attachmentItems
+    let sendsOriginalsSnapshot = sendsMediaAsOriginal
     let hasAttachmentItems = !attachmentItemsSnapshot.isEmpty
     let hasForward = forwardContext != nil
 
@@ -1357,13 +1364,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         }
       } else {
         // In the order they were added; neighbouring photos and videos go out as albums.
-        let attachments = orderedAttachmentsToSend.filter { attachment in
+        var attachments = orderedAttachmentsToSend.filter { attachment in
           // Verify attachment has valid local path before sending
           guard attachment.getLocalPath() != nil else {
             log.error("Attachment has no local path, skipping: \(attachment)")
             return false
           }
           return true
+        }
+        if sendsOriginalsSnapshot {
+          attachments = await FileMediaItem.withOriginals(attachments)
         }
         for send in TransactionSendMessage.sends(
           text: text,
@@ -2147,6 +2157,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
     attachmentItems.removeAll()
     pendingVideoAttachments.removeAll()
+    sendsMediaAsOriginal = false
     handleAttachmentItemsChanged(
       animated: false,
       shouldUpdateSendButtonVisibility: shouldUpdateSendButtonVisibility,
@@ -2361,6 +2372,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     attachmentScrollView.isHidden = !hasAttachments
 
     guard hasAttachments else { return }
+
+    if !pendingVideoAttachments.isEmpty || attachmentItems.values.contains(where: \.canSendAsOriginal) {
+      let toggle = makeOriginalToggleButton()
+      originalToggleButton = toggle
+      attachmentStackView.addArrangedSubview(toggle)
+    }
 
     for pending in pendingVideoAttachments {
       let preview = ComposeAttachmentPreviewItemView(

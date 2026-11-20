@@ -146,7 +146,6 @@ class ShareState: ObservableObject {
   private nonisolated static let maxUrls = 10
   private nonisolated static let imageCompressionQuality: CGFloat = 0.52
   private nonisolated static let maxPhotoUploadDimension = 1280
-  private nonisolated static let photoOptimizationThresholdBytes = 1_500_000
   private nonisolated static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024
   private nonisolated static let maxVideoFileSizeBytes: Int64 = maxFileSizeBytes
   private nonisolated static func maxFileSizeDisplay(for bytes: Int64) -> String {
@@ -270,46 +269,6 @@ class ShareState: ObservableObject {
     return MIMEType(text: "application/octet-stream")
   }
 
-  private nonisolated func shouldTranscodePhotoToJpeg(
-    suggestedName: String?,
-    typeIdentifier: String?,
-    mimeType: MIMEType?
-  ) -> Bool {
-    if let typeIdentifier,
-       let utType = UTType(typeIdentifier),
-       utType.conforms(to: .heic) || utType.conforms(to: .heif)
-    {
-      return true
-    }
-
-    if let suggestedName {
-      let ext = (suggestedName as NSString).pathExtension.lowercased()
-      if ext == "heic" || ext == "heif" {
-        return true
-      }
-    }
-
-    if let mimeType {
-      let lowercased = mimeType.text.lowercased()
-      if lowercased == "image/heic" ||
-         lowercased == "image/heif" ||
-         lowercased == "image/heic-sequence" ||
-         lowercased == "image/heif-sequence"
-      {
-        return true
-      }
-    }
-
-    return false
-  }
-
-  private nonisolated func jpegFileName(from fileName: String?) -> String {
-    let baseName = (fileName ?? "shared_image") as NSString
-    let stem = baseName.deletingPathExtension
-    let safeStem = stem.isEmpty ? "shared_image" : stem
-    return "\(safeStem).jpg"
-  }
-
   private nonisolated func imageFileName(
     from fileName: String?,
     typeIdentifier: String
@@ -338,33 +297,6 @@ class ShareState: ObservableObject {
     return identifier
   }
 
-  private nonisolated func writeThumbnailJpeg(from source: CGImageSource, to destinationURL: URL) -> Bool {
-    autoreleasepool {
-      let options: [CFString: Any] = [
-        kCGImageSourceShouldCache: false,
-        kCGImageSourceShouldCacheImmediately: true,
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceThumbnailMaxPixelSize: Self.maxPhotoUploadDimension,
-      ]
-      guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
-            let destination = CGImageDestinationCreateWithURL(
-              destinationURL as CFURL,
-              UTType.jpeg.identifier as CFString,
-              1,
-              nil
-            )
-      else {
-        return false
-      }
-      let properties: [CFString: Any] = [
-        kCGImageDestinationLossyCompressionQuality: Self.imageCompressionQuality,
-      ]
-      CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
-      return CGImageDestinationFinalize(destination)
-    }
-  }
-
   private nonisolated func jpegData(
     from cgImage: CGImage,
     compressionQuality: CGFloat = ShareState.imageCompressionQuality
@@ -388,172 +320,38 @@ class ShareState: ObservableObject {
     }
   }
 
-  private nonisolated func photoPixelSize(from url: URL) -> CGSize? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()) else {
-      return nil
-    }
-    return photoPixelSize(from: source)
-  }
-
-  private nonisolated func photoPixelSize(from source: CGImageSource) -> CGSize? {
-    guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, imageSourceReadOptions()) as? [CFString: Any] else {
-      return nil
-    }
-
-    guard let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
-          let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
-    else {
-      return nil
-    }
-    return CGSize(width: CGFloat(truncating: width), height: CGFloat(truncating: height))
-  }
-
-  private nonisolated func optimizedPhotoUploadFile(
-    from url: URL,
-    suggestedName: String?,
-    cleanupURLs: [URL]
-  ) throws -> PreparedSharedFile? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()),
-          let pixelSize = photoPixelSize(from: source)
-    else {
-      return nil
-    }
-
-    let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
-    let largestDimension = max(pixelSize.width, pixelSize.height)
-    let shouldOptimize = largestDimension > CGFloat(Self.maxPhotoUploadDimension) ||
-      (fileSize ?? 0) > Self.photoOptimizationThresholdBytes
-    guard shouldOptimize else { return nil }
-
-    return try downsampledPhotoFile(
-      from: source,
-      fileName: jpegFileName(from: suggestedName),
-      cleanupURLs: cleanupURLs,
-      originalFileSize: fileSize.map { Int64($0) }
-    )
-  }
-
-  private nonisolated func downsampledPhotoFile(
+  private nonisolated func preparedPhotoFile(
     from url: URL,
     fileName: String,
     cleanupURLs: [URL]
-  ) throws -> PreparedSharedFile? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()) else {
-      return nil
-    }
-    return try downsampledPhotoFile(
-      from: source,
-      fileName: fileName,
-      cleanupURLs: cleanupURLs,
-      originalFileSize: nil
-    )
-  }
-
-  private nonisolated func downsampledPhotoFile(
-    from source: CGImageSource,
-    fileName: String,
-    cleanupURLs: [URL],
-    originalFileSize: Int64?
-  ) throws -> PreparedSharedFile? {
-    let tempURL = temporaryURL(
-      suggestedName: fileName,
-      typeIdentifier: UTType.jpeg.identifier
-    )
-    guard writeThumbnailJpeg(from: source, to: tempURL) else {
-      try? FileManager.default.removeItem(at: tempURL)
-      return nil
-    }
-
-    let size = fileSize(for: tempURL) ?? 0
-    if let originalFileSize, size >= originalFileSize {
-      try? FileManager.default.removeItem(at: tempURL)
-      return nil
-    }
-
-    return PreparedSharedFile(
-      url: tempURL,
-      fileName: sanitizedFileName(
-        suggestedName: fileName,
-        fallbackURL: tempURL,
-        typeIdentifier: UTType.jpeg.identifier
-      ),
-      mimeType: MIMEType(text: "image/jpeg"),
-      fileType: .photo,
-      fileSize: size,
-      isAnimatedImage: false,
-      videoMetadata: nil,
-      cleanupURLs: cleanupURLs + [tempURL]
-    )
-  }
-
-  /// JPEG and PNG photos can embed EXIF GPS; GIF cannot.
-  private nonisolated func canCarryPhotoLocation(mimeType: MIMEType) -> Bool {
-    let lowercased = mimeType.text.lowercased()
-    return lowercased == "image/jpeg" || lowercased == "image/jpg" || lowercased == "image/png"
-  }
-
-  /// A photo sent at its original size must not carry where it was taken. Its metadata is
-  /// rewritten without GPS and its pixels and orientation tag are copied untouched; if ImageIO
-  /// cannot rewrite it, it is re-encoded with the orientation applied and no metadata at all.
-  private nonisolated func locationFreePhotoFile(
-    from url: URL,
-    fileName: String,
-    mimeType: MIMEType,
-    cleanupURLs: [URL]
-  ) throws -> PreparedSharedFile? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, imageSourceReadOptions()),
-          let sourceType = CGImageSourceGetType(source)
-    else {
-      return nil
-    }
-
-    let tempURL = temporaryURL(suggestedName: fileName, typeIdentifier: sourceType as String)
-    let copied: Bool = autoreleasepool {
-      guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, sourceType, 1, nil) else {
-        return false
-      }
-      let options: [CFString: Any] = [kCGImageMetadataShouldExcludeGPS: true]
-      // Writes the destination itself; it must not be finalized afterwards.
-      return CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil)
-    }
-    guard copied else {
-      try? FileManager.default.removeItem(at: tempURL)
-      return try downsampledPhotoFile(
-        from: source,
-        fileName: jpegFileName(from: fileName),
-        cleanupURLs: cleanupURLs,
-        originalFileSize: nil
+  ) -> PreparedSharedFile? {
+    do {
+      let prepared = try MediaSendPreparation.preparePhoto(.file(url))
+      let baseName = (fileName as NSString).deletingPathExtension
+      let preparedName = (baseName.isEmpty ? "photo" : baseName) + prepared.format.toExt()
+      let preparedURL = temporaryURL(suggestedName: preparedName, typeIdentifier: prepared.format == .png
+        ? UTType.png.identifier
+        : UTType.jpeg.identifier)
+      try prepared.data.write(to: preparedURL, options: .atomic)
+      return PreparedSharedFile(
+        url: preparedURL,
+        fileName: preparedName,
+        mimeType: MIMEType(text: prepared.format.toMimeType()),
+        fileType: .photo,
+        fileSize: Int64(prepared.data.count),
+        isAnimatedImage: false,
+        videoMetadata: nil,
+        cleanupURLs: cleanupURLs + [preparedURL]
       )
+    } catch {
+      log.warning(tagged("Photo preparation failed error=\(error.localizedDescription)"))
+      return nil
     }
-
-    return PreparedSharedFile(
-      url: tempURL,
-      fileName: fileName,
-      mimeType: mimeType,
-      fileType: .photo,
-      fileSize: fileSize(for: tempURL) ?? 0,
-      isAnimatedImage: false,
-      videoMetadata: nil,
-      cleanupURLs: cleanupURLs + [tempURL]
-    )
   }
 
   private nonisolated func shouldSendPhotoAsDocument(at url: URL) -> Bool {
-    guard let pixelSize = photoPixelSize(from: url) else { return false }
-    let width = max(pixelSize.width, 1)
-    let height = max(pixelSize.height, 1)
-    let ratio = max(width / height, height / width)
-    return ratio > 20 || (width < 50 && height < 50)
-  }
-
-  private nonisolated func isSupportedPhotoMimeType(_ mimeType: MIMEType) -> Bool {
-    let lowercased = mimeType.text.lowercased()
-    return lowercased == "image/jpeg" || lowercased == "image/png" || lowercased == "image/gif"
-  }
-
-  private nonisolated func shouldOptimizePhotoUpload(mimeType: MIMEType) -> Bool {
-    let lowercased = mimeType.text.lowercased()
-    return lowercased == "image/jpeg" || lowercased == "image/jpg"
+    guard let size = MediaSendPreparation.pixelSize(of: .file(url)) else { return false }
+    return MediaSendPreparation.shouldSendAsDocument(width: size.width, height: size.height)
   }
 
   private nonisolated func isGIF(
@@ -1376,56 +1174,19 @@ class ShareState: ObservableObject {
       isAnimatedImage = true
     }
 
-    if resolvedFileType == .photo &&
-        (shouldTranscodePhotoToJpeg(
-          suggestedName: fileName,
-          typeIdentifier: file.typeIdentifier,
-          mimeType: mimeType
-        ) || !isSupportedPhotoMimeType(mimeType))
-    {
-      if let photoFile = try downsampledPhotoFile(
-        from: file.url,
-        fileName: jpegFileName(from: fileName),
-        cleanupURLs: file.cleanupURLs
-      ) {
-        return photoFile
-      }
-
-      if shouldTranscodePhotoToJpeg(
-        suggestedName: fileName,
-        typeIdentifier: file.typeIdentifier,
-        mimeType: mimeType
-      ) {
-        log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
-        ExtensionHealth.record("app.fallback", ["fallback_kind": "share_photo_heic_as_document"])
-      } else {
-        log.warning(tagged("Unsupported photo MIME type; falling back to document (\(mimeType.text))"))
-        ExtensionHealth.record("app.fallback", ["fallback_kind": "share_photo_mime_as_document"])
-      }
-      resolvedFileType = .document
-    }
-
+    // Photos go out the way the app sends them: resized for their content, upright, and with no
+    // camera, place or time details (see MediaSendPreparation). Anything that can't be prepared
+    // is sent as a file rather than as an unprocessed photo.
     if resolvedFileType == .photo {
       if shouldSendPhotoAsDocument(at: file.url) {
         resolvedFileType = .document
         log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
-      } else if shouldOptimizePhotoUpload(mimeType: mimeType),
-                let optimized = try optimizedPhotoUploadFile(
-                  from: file.url,
-                  suggestedName: fileName,
-                  cleanupURLs: file.cleanupURLs
-                ) {
-        return optimized
-      } else if canCarryPhotoLocation(mimeType: mimeType) {
-        if let stripped = try locationFreePhotoFile(
-          from: file.url,
-          fileName: fileName,
-          mimeType: mimeType,
-          cleanupURLs: file.cleanupURLs
-        ) {
-          return stripped
-        }
-        log.warning(tagged("Could not remove photo location metadata; uploading the original"))
+      } else if let photoFile = preparedPhotoFile(from: file.url, fileName: fileName, cleanupURLs: file.cleanupURLs) {
+        return photoFile
+      } else {
+        log.warning(tagged("Couldn't prepare photo; sending as document (\(mimeType.text))"))
+        ExtensionHealth.record("app.fallback", ["fallback_kind": "share_photo_as_document"])
+        resolvedFileType = .document
       }
     }
 
@@ -1491,19 +1252,17 @@ class ShareState: ObservableObject {
       return try await prepareAnimatedImageVideoForUpload(file)
     }
 
-    let needsMp4Transcode = file.url.pathExtension.lowercased() != "mp4"
-    let options = VideoCompressionOptions.uploadDefault(forceTranscode: needsMp4Transcode)
-    let originalFileSize = file.fileSize
-    log.debug(tagged(
-      "Preparing video upload transcodeRequired=\(needsMp4Transcode) size=\(originalFileSize)"
-    ))
-
+    // Always a new file: remuxed when already small H.264, otherwise re-encoded for its content.
+    // Either way it carries no location or device details. A failure fails the share.
+    let content = await VideoCompressor.content(of: file.url)
+    log.debug(tagged("Preparing video upload content=\(content.rawValue) size=\(file.fileSize)"))
     do {
-      let result = try await VideoCompressor.shared.compressVideo(at: file.url, options: options)
+      let result = try await VideoCompressor.shared.compressVideo(at: file.url, options: .upload(for: content))
       let baseName = (file.fileName as NSString).deletingPathExtension
       let resolvedName = baseName.isEmpty ? "video.mp4" : "\(baseName).mp4"
       let mimeType = MIMEType(text: FileHelpers.getMimeType(for: result.url))
-      let preparedFile = PreparedSharedFile(
+      log.debug(tagged("Video preparation completed size=\(result.fileSize)"))
+      return PreparedSharedFile(
         url: result.url,
         fileName: resolvedName,
         mimeType: mimeType,
@@ -1513,45 +1272,14 @@ class ShareState: ObservableObject {
         videoMetadata: nil,
         cleanupURLs: file.cleanupURLs + [result.url]
       )
-      log.debug(tagged("Video compression completed size=\(result.fileSize)"))
-      return preparedFile
-    } catch VideoCompressionError.compressionNotNeeded, VideoCompressionError.compressionNotEffective {
-      if needsMp4Transcode {
-        throw NSError(
-          domain: "ShareError",
-          code: 11,
-          userInfo: [NSLocalizedDescriptionKey: "Failed to convert video to MP4."]
-        )
-      }
-      log.debug(tagged("Video compression skipped; using original MP4"))
-      return PreparedSharedFile(
-        url: file.url,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-        fileType: .video,
-        fileSize: originalFileSize,
-        isAnimatedImage: false,
-        videoMetadata: file.videoMetadata,
-        cleanupURLs: file.cleanupURLs
-      )
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
-      if needsMp4Transcode {
-        throw NSError(
-          domain: "ShareError",
-          code: 12,
-          userInfo: [NSLocalizedDescriptionKey: "Failed to compress video for upload."]
-        )
-      }
-      log.debug(tagged("Video compression failed; using original MP4 error=\(error.localizedDescription)"))
-      return PreparedSharedFile(
-        url: file.url,
-        fileName: file.fileName,
-        mimeType: file.mimeType,
-        fileType: .video,
-        fileSize: originalFileSize,
-        isAnimatedImage: false,
-        videoMetadata: file.videoMetadata,
-        cleanupURLs: file.cleanupURLs
+      log.warning(tagged("Video preparation failed error=\(error.localizedDescription)"))
+      throw NSError(
+        domain: "ShareError",
+        code: 12,
+        userInfo: [NSLocalizedDescriptionKey: "Failed to prepare video for upload."]
       )
     }
   }
