@@ -3,7 +3,7 @@ import type { Doc } from "./doc.js"
 import { ProgressPresenter, ProgressStream, type ProgressTransport } from "./presenter.js"
 import type { RenderOp } from "./renderer.js"
 
-type Call = { op: "send" | "edit"; id: bigint; text: string }
+type Call = { op: "send" | "edit" | "delete"; id: bigint; text: string }
 
 function fakeClock() {
   let now = 0
@@ -30,7 +30,7 @@ function fakeClock() {
   }
 }
 
-function transport(calls: Call[], options: { failEdits?: boolean } = {}): ProgressTransport {
+function transport(calls: Call[], options: { failEdits?: boolean; deletes?: "ok" | "fail" } = {}): ProgressTransport {
   let next = 100n
   return {
     async send(doc: Doc) {
@@ -42,6 +42,14 @@ function transport(calls: Call[], options: { failEdits?: boolean } = {}): Progre
       if (options.failEdits) throw new Error("MESSAGE_ID_INVALID")
       calls.push({ op: "edit", id, text: doc.text })
     },
+    ...(options.deletes
+      ? {
+          async delete(id: bigint) {
+            if (options.deletes === "fail") throw new Error("MESSAGE_ID_INVALID")
+            calls.push({ op: "delete", id, text: "" })
+          },
+        }
+      : {}),
   }
 }
 
@@ -166,5 +174,54 @@ describe("ProgressStream", () => {
     expect(calls[0]!.op).toBe("send")
     expect(calls.at(-1)!.text.startsWith("Worked for 2s")).toBe(true)
     expect(stream.isOpen).toBe(false)
+  })
+
+  test("a discarded turn removes its progress message after the send lands", async () => {
+    const calls: Call[] = []
+    const stream = new ProgressStream(transport(calls, { deletes: "ok" }), fakeClock())
+    stream.apply({ type: "turn.start" }, 0)
+    await stream.flush()
+    stream.apply({ type: "turn.end", outcome: "success", discard: true }, 2_000)
+    await stream.flush()
+    expect(calls.map((call) => call.op)).toEqual(["send", "delete"])
+    expect(calls[1]!.id).toBe(calls[0]!.id)
+  })
+
+  test("a discard closes the message as usual where it cannot be removed", async () => {
+    for (const deletes of [undefined, "fail"] as const) {
+      const calls: Call[] = []
+      const errors: string[] = []
+      const stream = new ProgressStream(transport(calls, deletes ? { deletes } : {}), {
+        ...fakeClock(),
+        onError: (_error, op) => errors.push(op),
+      })
+      stream.apply({ type: "turn.start" }, 0)
+      await stream.flush()
+      stream.apply({ type: "turn.end", outcome: "success", discard: true }, 2_000)
+      await stream.flush()
+      expect(calls.map((call) => call.op)).toEqual(["send", "edit"])
+      expect(calls[1]!.text.startsWith("Worked for 2s")).toBe(true)
+      expect(errors).toEqual(deletes === "fail" ? ["delete"] : [])
+    }
+  })
+
+  test("only a successful turn is discarded", async () => {
+    const calls: Call[] = []
+    const stream = new ProgressStream(transport(calls, { deletes: "ok" }), fakeClock())
+    stream.apply({ type: "turn.start" }, 0)
+    await stream.flush()
+    stream.apply({ type: "turn.end", outcome: "failure", discard: true }, 2_000)
+    await stream.flush()
+    expect(calls.map((call) => call.op)).toEqual(["send", "edit"])
+    expect(calls[1]!.text.startsWith("Failed after 2s")).toBe(true)
+  })
+
+  test("a turn discarded before its message went out never posts one", async () => {
+    const calls: Call[] = []
+    const stream = new ProgressStream(transport(calls, { deletes: "ok" }), fakeClock())
+    stream.apply({ type: "turn.start" }, 0)
+    stream.apply({ type: "turn.end", outcome: "success", discard: true }, 500)
+    await stream.flush()
+    expect(calls).toEqual([])
   })
 })
