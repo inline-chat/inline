@@ -10,8 +10,9 @@ import Logger
 ///
 /// It waits for the main window plus `--perf-journey-delay` seconds (default 6, room for a profiler
 /// to attach), then runs each journey through the app's real paths:
-/// - switch: the sidebar's own navigation call, 5 chats × 3 rounds, each until the main thread is
-///   free again (three quick main-queue hops in a row, like the HID driver's AX probe);
+/// - switch: a sidebar click's path (history prepared off the main thread, then the route commits),
+///   5 chats × 3 rounds, each until the main thread is free again (three quick main-queue hops in a
+///   row, like the HID driver's AX probe);
 /// - scroll: 12 flings up and 12 down with the HID driver's finger-then-momentum profile at 120 Hz,
 ///   moving the clip view and posting the live-scroll notifications as AppKit's threaded scrolling
 ///   does (synthetic scroll events can't be routed to a window on a locked screen);

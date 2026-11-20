@@ -144,8 +144,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
     if PerfJourneyRunner.isRequested {
-      // The window's route closure runs `nav3.open`, the call a sidebar row makes.
-      PerfJourneyRunner.start { peer in MainWindowOpenCoordinator.shared.openWindow(.chat(peer: peer)) }
+      // A sidebar click's path: the history is prepared off the main thread, then the route commits.
+      PerfJourneyRunner.start { peer in MainWindowController.all.first?.openChat(peer: peer, targetMessageId: nil) }
     }
     #endif
     MessageGestureTrace.restoreSetting()
