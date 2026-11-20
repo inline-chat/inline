@@ -134,6 +134,22 @@ inline messages wait --chat-id CHAT_ID --thread PARENT_ID --after SENT_MESSAGE_I
 
 Only other people's messages count unless `--include-own` is set; `--sender-id` narrows to one author; `--settle` collects a burst into one result. JSON returns `messages` (oldest first), `cursor`, and `timedOut`. Exit status is 0 with messages and 124 on timeout; pass `cursor` as `--after` to keep waiting without gaps or repeats. Dropped connections are retried until the timeout. Keep `--timeout` within your host's command time limit, or run it in the background.
 
+## Listen for new messages and reactions
+
+To wake when something happens (a person messages, a chat gets a post, someone mentions you), run one listener instead of polling. It streams one compact JSON object per line:
+
+```bash
+inline listen --sender-id USER_ID --json                       # anything this person posts
+inline listen --chat-id CHAT_ID --with-threads --json          # a chat and its threads
+inline listen --user-id USER_ID --once --timeout 2h --json     # the next DM from a person, then exit
+inline listen --mentions-me --contains deploy --json
+inline listen --event message.created,reaction.added --space-id SPACE_ID --json
+```
+
+The first line is `{"type":"ready",...}` once the subscription is live; claim to be watching only after it. Each event line has `type` (`message.created`, `message.updated`, `message.deleted`, `reaction.added`, `reaction.removed`), `id`, `at`, `chatId`, `messageId`, `chat` (title, `kind`, `peerUserId`, `spaceId`, parent ids), `from` (author or reactor), and `message` (`text`, `media`, `mentioned`, `replyToMessageId`) or `emoji`; `message.deleted` covers messages sent while listening. Values of one flag are alternatives; `--chat-id`, `--user-id`, and `--space-id` are alternatives to each other; where, `--sender-id`, `--mentions-me`, and `--contains` must all match. Your own messages are skipped unless `--include-own`.
+
+Run it in the background and treat each stdout line as a wake-up, or pass `--once` (or `--count N`) so the process exiting is the signal. `--timeout` prints `{"type":"timeout"}` and exits 124 when nothing matched. Without `--name` it starts now; with `--name NAME` it resumes after its last delivered event, so rerunning `inline listen --name NAME --once --json` waits again without missing what arrived between runs. Use that named form for repeated waits: fresh unnamed listeners restarted in a tight loop get rate limited. Deduplicate by `id`. Read surrounding context with `inline messages list` before acting on an event.
+
 ## Select and forward messages
 
 `--user-id` chooses a DM with a person; `--sender-id` selects an author inside that conversation. Message IDs belong to the source chat, so resolve source and destination separately. List/search time and sender filters apply to the fetched page after its limit, not to all history. JSON includes `page.fetchedCount`, `page.returnedCount`, `page.nextOffsetId`, and `page.filtersAppliedToPage`; continue with `--offset-id` even after an empty filtered page. Named days and date-only boundaries use UTC.
