@@ -412,6 +412,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       beforeFirstLayout.append(waiting)
       return
     }
+    followSizeChange()
     var update = TimelineUpdate<ID>(
       rows: transaction.rows, coverage: transaction.coverage, viewport: viewport(), scroll: transaction.scroll
     )
@@ -501,12 +502,22 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
       for transaction in waiting { apply(transaction) }
     }
     guard viewport != state.viewport else { return }
-    // A size change inside an animation (rotation) moves with that animation.
-    let inherited = UIView.inheritedAnimationDuration
-    let timing: TimelineTiming = inherited > 0
-      ? .curve(duration: inherited, c1x: 0.25, c1y: 0.1, c2x: 0.25, c2y: 1)
-      : .none
-    perform(TimelineUpdate(viewport: viewport), timing: timing, changed: [])
+    // A size change inside an animation (a rotation) moves with that animation.
+    perform(TimelineUpdate(viewport: viewport), timing: .inherited(by: layer), changed: [])
+  }
+
+  /// A new size (a rotation, a window resize) is applied on its own and moves with the animation it happens in,
+  /// whichever call notices it first. Every change carries the list's size, so an inset update made in the same
+  /// layout pass right after the frame changed (the chat's own layout does that) applied the rotation in one
+  /// frame: the rows jumped to their new places while the screen and the composer turned.
+  private func followSizeChange() {
+    let old = state.viewport
+    guard old.width > 0, old.height > 0,
+          abs(bounds.width - old.width) > 0.01 || abs(bounds.height - old.height) > 0.01 else { return }
+    var resized = old
+    resized.width = bounds.width
+    resized.height = bounds.height
+    perform(TimelineUpdate(viewport: resized), timing: .inherited(by: layer), changed: [])
   }
 
   private func viewport() -> TimelineViewport {

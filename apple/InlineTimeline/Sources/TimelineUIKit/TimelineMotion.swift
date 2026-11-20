@@ -54,6 +54,37 @@ extension TimelineTiming {
   }
 }
 
+extension TimelineTiming {
+  /// The animation the current layout pass runs in, as UIKit set it up for `layer`'s own frame change, so what
+  /// moves inside a view moves exactly with its edges. A rotation is 0.4 s ease-in-out (read on iPad, iOS 27.2);
+  /// a window resize can be a spring. When the layer's frame didn't change, UIKit's default curve over the
+  /// inherited duration; outside an animation, none.
+  @MainActor
+  public static func inherited(by layer: CALayer) -> TimelineTiming {
+    let duration = UIView.inheritedAnimationDuration
+    guard duration > 0 else { return .none }
+    // The newest frame animation added in this transaction (its begin time is set when it commits), not one
+    // still running from an earlier change.
+    let keys = (layer.animationKeys() ?? []).reversed().filter { $0.hasPrefix("bounds") || $0.hasPrefix("position") }
+    for key in keys {
+      guard let animation = layer.animation(forKey: key), animation.beginTime == 0 else { continue }
+      if let spring = animation as? CASpringAnimation {
+        return .spring(
+          mass: spring.mass, stiffness: spring.stiffness, damping: spring.damping, duration: spring.duration
+        )
+      }
+      if let basic = animation as? CABasicAnimation, let curve = basic.timingFunction {
+        var first: [Float] = [0, 0]
+        var second: [Float] = [0, 0]
+        curve.getControlPoint(at: 1, values: &first)
+        curve.getControlPoint(at: 2, values: &second)
+        return .curve(duration: basic.duration, c1x: first[0], c1y: first[1], c2x: second[0], c2y: second[1])
+      }
+    }
+    return .curve(duration: duration, c1x: 0.42, c1y: 0, c2x: 0.58, c2y: 1)
+  }
+}
+
 extension CALayer {
   /// Adds an additive track from `delta` to zero with this timing; nothing when the timing is
   /// `.none` or the distance is negligible. For views that move with the list (the composer).

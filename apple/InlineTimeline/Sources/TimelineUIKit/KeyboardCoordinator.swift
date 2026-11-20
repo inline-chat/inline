@@ -56,6 +56,20 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   /// The screen's bounds when that frame was posted: a frame from another orientation is not re-measured.
   private var keyboardScreen: CGRect?
   private var measuredSize: CGSize = .zero
+  /// A rotation with the keyboard up, until the keyboard posts its frame for the new orientation.
+  private var turn: Task<Void, Never>?
+  /// What the keyboard covered, per size of the view, so a turn back to a size seen before moves what rides on
+  /// it straight to where the keyboard will be.
+  private var restHeights: [Size: CGFloat] = [:]
+
+  private struct Size: Hashable {
+    var width: Int
+    var height: Int
+    init(_ size: CGSize) {
+      width = Int(size.width.rounded())
+      height = Int(size.height.rounded())
+    }
+  }
 
   /// Tracks the keyboard against the bottom of `view`.
   public init(view: UIView) {
@@ -83,7 +97,11 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   public func attach(to window: UIWindow?) {
     pan.view?.removeGestureRecognizer(pan)
     window?.addGestureRecognizer(pan)
-    if window == nil { cancelInteraction(animated: false) }
+    if window == nil {
+      cancelInteraction(animated: false)
+      turn?.cancel()
+      turn = nil
+    }
   }
 
   /// Stops following the keyboard (an interactive pop began).
@@ -106,6 +124,18 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
     keyboardScreen = view?.window?.screen.coordinateSpace.bounds
     guard !isSuspended, !isInteractive else { return }
     let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
+    if turn != nil {
+      // Mid-turn the keyboard posts the frames of its rotating snapshot, unanimated: empty, then shrunk in the
+      // middle of the screen (iPad). Followed, the composer dropped to the bottom and jumped halfway up the
+      // screen. Only its real frame, docked across the new screen, ends the turn.
+      guard let screen = keyboardScreen, end.height >= 1, end.maxY >= screen.maxY - 1,
+            abs(end.width - screen.width) < 1 else { return }
+      // Posted with animations off: the composer's spring would land in one frame while the list's
+      // tracks still moved. Settled from the next turn of the run loop, a frame after the keyboard.
+      turn?.cancel()
+      turn = Task { @MainActor [weak self] in self?.endTurn() }
+      return
+    }
     deliver(end, duration: duration)
   }
 
@@ -118,16 +148,45 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
       measuredSize = view.bounds.size
       return
     }
-    // A frame posted for another orientation (its new one not posted yet) would read as beside or
-    // floating: wait for that notification instead.
     let screen = window.screen.coordinateSpace.bounds
-    let docked = keyboardFrame.height >= 1 && keyboardFrame.maxY >= screen.maxY - 1
-    let stale = keyboardScreen.map { $0 != screen } == true && docked && abs(keyboardFrame.width - screen.width) >= 1
-    guard !stale else { return }
+    guard keyboardScreen.map({ $0 != screen }) != true else {
+      // A frame posted for the other orientation says nothing about this one: measured against it, the
+      // landscape keyboard read as one floating 804 pt up a portrait iPad. Inside a rotation the keyboard
+      // turns with the screen and posts its new frame after the turn.
+      measuredSize = view.bounds.size
+      if height > 0, UIView.inheritedAnimationDuration > 0 { beginTurn(in: view) }
+      return
+    }
     deliver(keyboardFrame, duration: 0)
   }
 
-  private func deliver(_ end: CGRect, duration: Double) {
+  /// A rotation with the keyboard up. What the keyboard covers holds, or moves with the turn to what it covered at
+  /// this size before, until the keyboard posts its frame for the new orientation (on iPad, 0.15 s after the
+  /// turn ends) or, without one (a floating keyboard), a while after the turn.
+  private func beginTurn(in view: UIView) {
+    let duration = UIView.inheritedAnimationDuration
+    turn?.cancel()
+    turn = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .seconds(duration + 0.6))
+      guard let self, !Task.isCancelled else { return }
+      endTurn()
+    }
+    let size = Size(view.bounds.size)
+    guard let known = restHeights[size], abs(known - height) > 0.01 else { return }
+    height = known
+    onChange?(KeyboardChange(height: known, timing: .inherited(by: view.layer), isInteractive: false))
+  }
+
+  /// The keyboard's frame after a turn lands without an animation of its own: what rides on it settles there
+  /// with the keyboard's motion instead of in one frame.
+  private func endTurn() {
+    turn?.cancel()
+    turn = nil
+    guard !isSuspended, !isInteractive, let keyboardFrame else { return }
+    deliver(keyboardFrame, duration: 0, timing: Self.spring(duration: 0.5))
+  }
+
+  private func deliver(_ end: CGRect, duration: Double, timing settling: TimelineTiming? = nil) {
     guard let view, let window = view.window else { return }
     measuredSize = view.bounds.size
     let frame = view.convert(end, from: window.screen.coordinateSpace)
@@ -139,16 +198,17 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
       covered = 0
     }
     covered = min(covered, view.bounds.height)
+    if covered > 0 { restHeights[Size(view.bounds.size)] = covered }
     guard abs(covered - height) > 0.01 else { return }
 
     let timing: TimelineTiming
-    if duration > 0 {
+    if let settling {
+      timing = settling
+    } else if duration > 0 {
       timing = Self.spring(duration: duration)
-    } else if UIView.inheritedAnimationDuration > 0 {
-      // A rotation posts the new keyboard height inside its own animation.
-      timing = .curve(duration: UIView.inheritedAnimationDuration, c1x: 0.25, c1y: 0.1, c2x: 0.25, c2y: 1)
     } else {
-      timing = .none
+      // A rotation can post the new keyboard height inside its own animation.
+      timing = .inherited(by: view.layer)
     }
     height = covered
     onChange?(KeyboardChange(height: covered, timing: timing, isInteractive: false))
