@@ -5,7 +5,6 @@ import {
   ErrorReporter as EffectErrorReporter,
   Layer,
 } from "effect"
-import Elysia from "elysia"
 import {
   HttpRouter,
   HttpServer,
@@ -812,10 +811,20 @@ describe("Effect OAuth routes", () => {
     }
   })
 
-  it("matches Elysia OAuth body parsing and malformed-body transport", async () => {
+  it("keeps the legacy OAuth body parsing and malformed-body transport", async () => {
+    // Expected values were captured from the retired Elysia route before it
+    // was deleted. Elysia answered malformed JSON with `text/plain`; the
+    // Effect transport sends the same status and body without a content type.
+    const revoked = (bodies: ReadonlyArray<unknown>) => ({
+      status: 200,
+      body: "{}",
+      contentType: "application/json",
+      bodies,
+    })
     const cases = [
       {
         name: "missing content type",
+        expected: revoked(["token=opaque"]),
         request: () =>
           new Request("http://inline.test/revoke", {
             method: "POST",
@@ -824,6 +833,12 @@ describe("Effect OAuth routes", () => {
       },
       {
         name: "malformed JSON",
+        expected: {
+          status: 400,
+          body: "Bad Request",
+          contentType: null,
+          bodies: [],
+        },
         request: () =>
           new Request("http://inline.test/revoke", {
             method: "POST",
@@ -835,6 +850,7 @@ describe("Effect OAuth routes", () => {
       },
       {
         name: "text",
+        expected: revoked(["token=opaque"]),
         request: () =>
           new Request("http://inline.test/revoke", {
             method: "POST",
@@ -846,6 +862,7 @@ describe("Effect OAuth routes", () => {
       },
       {
         name: "JSON",
+        expected: revoked([{ token: "opaque" }]),
         request: () =>
           new Request("http://inline.test/revoke", {
             method: "POST",
@@ -857,6 +874,7 @@ describe("Effect OAuth routes", () => {
       },
       {
         name: "form-urlencoded repeated field",
+        expected: revoked([{ token: ["first", "second"] }]),
         request: () =>
           new Request("http://inline.test/revoke", {
             method: "POST",
@@ -869,6 +887,7 @@ describe("Effect OAuth routes", () => {
       },
       {
         name: "multipart repeated field",
+        expected: revoked([{ token: ["first", "second"] }]),
         request: () => {
           const body = new FormData()
           body.append("token", "first")
@@ -884,6 +903,7 @@ describe("Effect OAuth routes", () => {
       },
       {
         name: "empty",
+        expected: revoked([undefined]),
         request: () =>
           new Request("http://inline.test/revoke", {
             method: "POST",
@@ -892,8 +912,7 @@ describe("Effect OAuth routes", () => {
     ] as const
 
     for (const testCase of cases) {
-      const legacyBodies: Array<unknown> = []
-      const replacementBodies: Array<unknown> = []
+      const bodies: Array<unknown> = []
       const response = () =>
         new Response(JSON.stringify({}), {
           headers: {
@@ -901,13 +920,6 @@ describe("Effect OAuth routes", () => {
             "content-type": "application/json",
           },
         })
-      const legacy = new Elysia().post(
-        "/revoke",
-        ({ body }) => {
-          legacyBodies.push(body)
-          return response()
-        },
-      )
       const handlers: OAuthHttpHandlers = {
         metadata: () => response(),
         register: async () => response(),
@@ -920,7 +932,7 @@ describe("Effect OAuth routes", () => {
         consent: async () => response(),
         token: async () => response(),
         revoke: async (body) => {
-          replacementBodies.push(body)
+          bodies.push(body)
           return response()
         },
         introspect: async () => response(),
@@ -946,38 +958,19 @@ describe("Effect OAuth routes", () => {
       })
 
       try {
-        const legacyResponse = await legacy.handle(
-          testCase.request(),
-        )
-        const replacementResponse = await kernel.handler(
+        const response = await kernel.handler(
           testCase.request(),
         )
 
         expect(
           {
-            status: replacementResponse.status,
-            body: await replacementResponse.text(),
-            invoked: replacementBodies.length,
+            status: response.status,
+            body: await response.text(),
+            contentType: response.headers.get("content-type"),
+            bodies,
           },
           testCase.name,
-        ).toEqual({
-          status: legacyResponse.status,
-          body: await legacyResponse.text(),
-          invoked: legacyBodies.length,
-        })
-        const replacementContentType =
-          replacementResponse.headers.get("content-type")
-        if (testCase.name === "malformed JSON") {
-          expect(replacementContentType).toBeNull()
-        } else {
-          expect(replacementContentType).toBe(
-            legacyResponse.headers.get("content-type"),
-          )
-        }
-        expect(
-          replacementBodies,
-          testCase.name,
-        ).toEqual(legacyBodies)
+        ).toEqual(testCase.expected)
       } finally {
         await kernel.dispose()
       }

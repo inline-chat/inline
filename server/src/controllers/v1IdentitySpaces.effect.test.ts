@@ -1,7 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, ErrorReporter as EffectErrorReporter, Layer, Schema } from "effect"
 import { ConnectionError_Reason } from "@inline-chat/protocol/core"
-import Elysia, { t } from "elysia"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { ErrorReporter, type ErrorReporterShape } from "../core/errors/errorReporter"
 import { defineExecutableHttpApi, makeHttpApplication } from "../core/http/application"
@@ -9,8 +8,6 @@ import { defineOpenApiDocument, makeBotApiBase, makePlatformApiBase } from "../c
 import { HttpRequestContext } from "../core/http/requestContext"
 import { RequestId } from "../core/helpers/requestId"
 import { InlineError } from "../types/errors"
-import { handleError } from "./apiErrorHandler"
-import { TMakeApiResponse } from "./apiResponse"
 import {
   SessionAuthentication,
   SessionAuthenticationFailure,
@@ -448,23 +445,11 @@ describe("Effect /v1 identity and spaces routes", () => {
     }
   })
 
-  it("preserves Elysia integer coercion and GET boolean coercion", async () => {
+  it("preserves legacy integer coercion and GET boolean coercion", async () => {
+    // The retired Elysia `t.Integer()` route decoded the JSON and form POSTs
+    // below to `{ q: "in", limit: 20 }` as well; captured before deletion.
     const searchInputs: Array<unknown> = []
-    const oracleSearchInputs: Array<unknown> = []
     let statusInput: unknown
-    const oracle = new Elysia().post(
-      "/v1/searchContacts",
-      ({ body }) => {
-        oracleSearchInputs.push(body)
-        return { ok: true }
-      },
-      {
-        body: t.Object({
-          q: t.String(),
-          limit: t.Optional(t.Integer()),
-        }),
-      },
-    )
     const operations = makeOperations({
       searchContacts: (input) => {
         searchInputs.push(input)
@@ -523,36 +508,11 @@ describe("Effect /v1 identity and spaces routes", () => {
           }),
         ),
       )
-      const oracleJson = await oracle.handle(
-        new Request("http://inline.test/v1/searchContacts", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            q: "in",
-            limit: "20",
-          }),
-        }),
-      )
-      const oracleForm = await oracle.handle(
-        new Request("http://inline.test/v1/searchContacts", {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-          },
-          body: "q=in&limit=20",
-        }),
-      )
-
       expect(searchInputs).toEqual([
         { q: "in", limit: 20 },
         { q: "in", limit: 20 },
         { q: "in", limit: 20 },
       ])
-      expect(oracleJson.status).toBe(200)
-      expect(oracleForm.status).toBe(200)
-      expect(oracleSearchInputs).toEqual(searchInputs.slice(1))
       expect(statusInput).toEqual({ online: false })
     } finally {
       await kernel.dispose()
@@ -663,33 +623,24 @@ describe("Effect /v1 identity and spaces routes", () => {
     }
   })
 
-  it("matches the current Elysia oracle for POST parsing and envelopes", async () => {
-    let legacyCalls = 0
-    let replacementCalls = 0
-    const legacyInput = t.Object({
-      username: t.String(),
-    })
-    const legacyResult = t.Object({
-      available: t.Boolean(),
-    })
-    const legacy = new Elysia().use(handleError).post(
-      "/v1/checkUsername",
-      () => {
-        legacyCalls += 1
-        return {
-          ok: true as const,
-          result: { available: true },
-        }
-      },
-      {
-        body: legacyInput,
-        response: TMakeApiResponse(legacyResult),
-      },
-    )
+  it("keeps the legacy POST parsing and envelopes", async () => {
+    // Expected values were captured from the retired Elysia route
+    // (`handleError` + `TMakeApiResponse`) before it was deleted.
+    let calls = 0
+    const available = {
+      status: 200,
+      contentType: "application/json",
+      body: '{"ok":true,"result":{"available":true}}',
+    }
+    const invalidArgs = {
+      status: 400,
+      contentType: "application/json",
+      body: '{"ok":false,"error":"INVALID_ARGS","errorCode":400,"description":"Validation error"}',
+    }
     const kernel = makeKernel({
       operations: makeOperations({
         checkUsername: () => {
-          replacementCalls += 1
+          calls += 1
           return Effect.succeed(fixtures.checkUsername)
         },
       }),
@@ -706,14 +657,17 @@ describe("Effect /v1 identity and spaces routes", () => {
     const cases = [
       {
         name: "JSON",
+        expected: available,
         make: () => request(JSON.stringify({ username: "inline" }), "application/json"),
       },
       {
         name: "form-urlencoded",
+        expected: available,
         make: () => request("username=inline", "application/x-www-form-urlencoded"),
       },
       {
         name: "multipart",
+        expected: available,
         make: () => {
           const form = new FormData()
           form.set("username", "inline")
@@ -722,41 +676,44 @@ describe("Effect /v1 identity and spaces routes", () => {
       },
       {
         name: "malformed JSON",
+        expected: {
+          status: 500,
+          contentType: "application/json",
+          body: '{"ok":false,"error":"SERVER_ERROR","errorCode":500,"description":"Server error"}',
+        },
         make: () => request("{", "application/json"),
       },
       {
         name: "text",
+        expected: invalidArgs,
         make: () => request(JSON.stringify({ username: "inline" }), "text/plain"),
       },
       {
         name: "empty",
+        expected: invalidArgs,
         make: () => request(undefined),
       },
       {
         name: "repeated field",
+        expected: invalidArgs,
         make: () => request("username=inline&username=other", "application/x-www-form-urlencoded"),
       },
     ] as const
 
     try {
       for (const testCase of cases) {
-        const legacyResponse = await legacy.handle(testCase.make())
-        const replacementResponse = await kernel.handler(testCase.make())
+        const response = await kernel.handler(testCase.make())
 
         expect(
           {
-            status: replacementResponse.status,
-            contentType: replacementResponse.headers.get("content-type")?.split(";", 1)[0],
-            body: await replacementResponse.text(),
+            status: response.status,
+            contentType: response.headers.get("content-type")?.split(";", 1)[0],
+            body: await response.text(),
           },
           testCase.name,
-        ).toEqual({
-          status: legacyResponse.status,
-          contentType: legacyResponse.headers.get("content-type")?.split(";", 1)[0],
-          body: await legacyResponse.text(),
-        })
+        ).toEqual(testCase.expected)
       }
-      expect(replacementCalls).toBe(legacyCalls)
+      expect(calls).toBe(3)
     } finally {
       await kernel.dispose()
     }

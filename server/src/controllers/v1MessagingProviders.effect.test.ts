@@ -2,7 +2,6 @@ import { describe, expect, it } from "@effect/vitest"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import { Context, Effect, ErrorReporter as EffectErrorReporter, Layer, Schema } from "effect"
-import { Elysia, t } from "elysia"
 import { HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http"
 import { ErrorReporter, type ErrorReporterShape } from "../core/errors/errorReporter"
 import { defineExecutableHttpApi, makeHttpApplication } from "../core/http/application"
@@ -732,108 +731,19 @@ describe("Effect /v1 messaging and provider routes", () => {
     }
   })
 
-  it("matches Elysia's query, JSON, and urlencoded coercion matrix", async () => {
-    const legacyInputs: Array<unknown> = []
-    const replacementInputs: Array<unknown> = []
-    const InputId = t.Union([t.String(), t.Integer()])
-    const Peer = t.Union([
-      t.Object({ userId: t.Integer() }),
-      t.Object({ threadId: t.Integer() }),
-    ])
-    const legacy = new Elysia()
-      .onError(({ code, set }) => {
-        if (code !== "VALIDATION") return
-        set.status = 400
-        return {
-          ok: false,
-          error: "INVALID_ARGS",
-          errorCode: 400,
-          description: "Validation error",
-        }
-      })
-      .get(
-        "/linear",
-        ({ query }) => {
-          legacyInputs.push(query)
-          return { ok: true }
-        },
-        {
-          query: t.Object({
-            text: t.String(),
-            messageId: t.Number(),
-            chatId: t.Number(),
-            peerId: Peer,
-            fromId: t.Number(),
-            spaceId: t.Optional(t.Number()),
-          }),
-        },
-      )
-      .post(
-        "/linear",
-        ({ body }) => {
-          legacyInputs.push(body)
-          return { ok: true }
-        },
-        {
-          body: t.Object({
-            text: t.String(),
-            messageId: t.Number(),
-            chatId: t.Number(),
-            peerId: Peer,
-            fromId: t.Number(),
-            spaceId: t.Optional(t.Number()),
-          }),
-        },
-      )
-      .get(
-        "/send",
-        ({ query }) => {
-          legacyInputs.push(query)
-          return { ok: true }
-        },
-        {
-          query: t.Object({
-            peerUserId: t.Optional(InputId),
-            parseMarkdown: t.Optional(t.Boolean()),
-          }),
-        },
-      )
-      .post(
-        "/send",
-        ({ body }) => {
-          legacyInputs.push(body)
-          return { ok: true }
-        },
-        {
-          body: t.Object({
-            peerUserId: t.Optional(InputId),
-            parseMarkdown: t.Optional(t.Boolean()),
-          }),
-        },
-      )
-      .post(
-        "/history",
-        ({ body }) => {
-          legacyInputs.push(body)
-          return { ok: true }
-        },
-        {
-          body: t.Object({
-            peerUserId: t.Optional(InputId),
-            limit: t.Optional(t.Integer()),
-          }),
-        },
-      )
-
+  it("keeps the legacy query, JSON, and urlencoded coercion matrix", async () => {
+    // Expected statuses and decoded inputs were captured from the retired
+    // Elysia `t.Number()`/`t.Integer()`/`t.Boolean()` routes before deletion.
+    const inputs: Array<unknown> = []
     const calls: Array<V1MessagingProvidersOperation> = []
     const kernel = makeKernel({
       messaging: makeMessaging(calls, {
         getChatHistory: (input) => {
-          replacementInputs.push(input)
+          inputs.push(input)
           return Effect.succeed({ messages: [message] })
         },
         sendMessage: (input) => {
-          replacementInputs.push(input)
+          inputs.push(input)
           return Effect.succeed({
             message,
             updates: [{ updateMessageId: { messageId: 7, randomId: "123" } }],
@@ -842,7 +752,7 @@ describe("Effect /v1 messaging and provider routes", () => {
       }),
       providers: makeProviders(calls, {
         createLinearIssue: (input) => {
-          replacementInputs.push(input)
+          inputs.push(input)
           return Effect.succeed({ link: "https://linear.app/issue/INLINE-1" })
         },
       }),
@@ -868,27 +778,16 @@ describe("Effect /v1 messaging and provider routes", () => {
       })
     const cases = [
       {
-        legacy: () =>
-          new Request(
-            "http://localhost/linear?text=Task&messageId=7&chatId=8&peerId=%7B%22userId%22%3A43%7D&fromId=42&spaceId=9",
-          ),
-        replacement: () =>
+        status: 200,
+        request: () =>
           new Request(
             "http://localhost/v1/createLinearIssue?text=Task&messageId=7&chatId=8&peerId=%7B%22userId%22%3A43%7D&fromId=42&spaceId=9",
             { headers: { authorization: "Bearer token" } },
           ),
       },
       {
-        legacy: () =>
-          json("/linear", {
-            text: "Task",
-            messageId: 7,
-            chatId: 8,
-            peerId: { userId: 43 },
-            fromId: 42,
-            spaceId: 9,
-          }),
-        replacement: () =>
+        status: 200,
+        request: () =>
           json("/v1/createLinearIssue", {
             text: "Task",
             messageId: 7,
@@ -899,16 +798,8 @@ describe("Effect /v1 messaging and provider routes", () => {
           }),
       },
       {
-        legacy: () =>
-          json("/linear", {
-            text: "Task",
-            messageId: "7",
-            chatId: "8",
-            peerId: { userId: 43 },
-            fromId: "42",
-            spaceId: "9",
-          }),
-        replacement: () =>
+        status: 400,
+        request: () =>
           json("/v1/createLinearIssue", {
             text: "Task",
             messageId: "7",
@@ -919,65 +810,61 @@ describe("Effect /v1 messaging and provider routes", () => {
           }),
       },
       {
-        legacy: () =>
-          form(
-            "/linear",
-            "text=Task&messageId=7&chatId=8&peerId=%7B%22userId%22%3A43%7D&fromId=42&spaceId=9",
-          ),
-        replacement: () =>
+        status: 400,
+        request: () =>
           form(
             "/v1/createLinearIssue",
             "text=Task&messageId=7&chatId=8&peerId=%7B%22userId%22%3A43%7D&fromId=42&spaceId=9",
           ),
       },
       {
-        legacy: () =>
-          new Request("http://localhost/send?peerUserId=43&parseMarkdown=false"),
-        replacement: () =>
+        status: 200,
+        request: () =>
           new Request(
             "http://localhost/v1/sendMessage?peerUserId=43&parseMarkdown=false",
             { headers: { authorization: "Bearer token" } },
           ),
       },
       {
-        legacy: () =>
-          json("/send", { peerUserId: "43", parseMarkdown: "false" }),
-        replacement: () =>
+        status: 400,
+        request: () =>
           json("/v1/sendMessage", {
             peerUserId: "43",
             parseMarkdown: "false",
           }),
       },
       {
-        legacy: () =>
-          form("/send", "peerUserId=43&parseMarkdown=false"),
-        replacement: () =>
+        status: 400,
+        request: () =>
           form("/v1/sendMessage", "peerUserId=43&parseMarkdown=false"),
       },
       {
-        legacy: () =>
-          json("/history", { peerUserId: "43", limit: "20" }),
-        replacement: () =>
+        status: 200,
+        request: () =>
           json("/v1/getChatHistory", {
             peerUserId: "43",
             limit: "20",
           }),
       },
       {
-        legacy: () =>
-          form("/history", "peerUserId=43&limit=20"),
-        replacement: () =>
+        status: 200,
+        request: () =>
           form("/v1/getChatHistory", "peerUserId=43&limit=20"),
       },
     ] as const
 
     try {
       for (const testCase of cases) {
-        const legacyResponse = await legacy.handle(testCase.legacy())
-        const replacementResponse = await kernel.handler(testCase.replacement())
-        expect(replacementResponse.status).toBe(legacyResponse.status)
+        const response = await kernel.handler(testCase.request())
+        expect(response.status).toBe(testCase.status)
       }
-      expect(replacementInputs).toEqual(legacyInputs)
+      expect(inputs).toEqual([
+        { text: "Task", messageId: 7, chatId: 8, peerId: { userId: 43 }, fromId: 42, spaceId: 9 },
+        { text: "Task", messageId: 7, chatId: 8, peerId: { userId: 43 }, fromId: 42, spaceId: 9 },
+        { peerUserId: "43", parseMarkdown: false },
+        { peerUserId: "43", limit: 20 },
+        { peerUserId: "43", limit: 20 },
+      ])
     } finally {
       await kernel.dispose()
     }

@@ -7,7 +7,6 @@ import {
   Schema,
 } from "effect"
 import { ConnectionError_Reason } from "@inline-chat/protocol/core"
-import Elysia, { t } from "elysia"
 import {
   HttpRouter,
   HttpServer,
@@ -399,30 +398,23 @@ describe("Effect identity routes", () => {
     }
   })
 
-  it("matches Elysia body parsing before stateful email work", async () => {
-    const [
-      { handleError },
-      { makeUnauthApiRoute },
-    ] = await Promise.all([
-      import("./apiErrorHandler"),
-      import("./unauthApiRoute"),
-    ])
-    const LegacySendEmailCodeInput = t.Object({
-      email: t.String(),
-      deviceId: t.Optional(t.String()),
-      clientType: t.Optional(t.String()),
-      clientVersion: t.Optional(t.String()),
-      osVersion: t.Optional(t.String()),
-      deviceName: t.Optional(t.String()),
-    })
-    const LegacySendEmailCodeResponse = t.Object({
-      existingUser: t.Boolean(),
-      needsInviteCode: t.Boolean(),
-      challengeToken: t.Optional(t.String()),
-    })
+  it("keeps the legacy sendEmailCode body parsing before stateful email work", async () => {
+    // Expected values were captured from the retired Elysia route
+    // (`makeUnauthApiRoute` + `handleError`) before it was deleted.
+    const invalidArgs = {
+      status: 400,
+      body: '{"ok":false,"error":"INVALID_ARGS","errorCode":400,"description":"Validation error"}',
+      calls: 0,
+    }
+    const sent = {
+      status: 200,
+      body: '{"ok":true,"result":{"existingUser":false,"needsInviteCode":true}}',
+      calls: 1,
+    }
     const cases = [
       {
         name: "missing content type",
+        expected: invalidArgs,
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -436,6 +428,11 @@ describe("Effect identity routes", () => {
       },
       {
         name: "malformed JSON",
+        expected: {
+          status: 500,
+          body: '{"ok":false,"error":"SERVER_ERROR","errorCode":500,"description":"Server error"}',
+          calls: 0,
+        },
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -450,6 +447,7 @@ describe("Effect identity routes", () => {
       },
       {
         name: "text",
+        expected: invalidArgs,
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -466,6 +464,7 @@ describe("Effect identity routes", () => {
       },
       {
         name: "JSON",
+        expected: sent,
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -482,6 +481,7 @@ describe("Effect identity routes", () => {
       },
       {
         name: "form-urlencoded",
+        expected: sent,
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -497,6 +497,7 @@ describe("Effect identity routes", () => {
       },
       {
         name: "multipart",
+        expected: sent,
         request: () => {
           const body = new FormData()
           body.set("email", "identity@example.com")
@@ -511,6 +512,7 @@ describe("Effect identity routes", () => {
       },
       {
         name: "empty",
+        expected: invalidArgs,
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -521,6 +523,7 @@ describe("Effect identity routes", () => {
       },
       {
         name: "repeated form field",
+        expected: invalidArgs,
         request: () =>
           new Request(
             "http://inline.test/v1/sendEmailCode",
@@ -538,30 +541,11 @@ describe("Effect identity routes", () => {
     ] as const
 
     for (const testCase of cases) {
-      let legacyCalls = 0
-      let replacementCalls = 0
-      const legacy = new Elysia()
-        .use(handleError)
-        .group("/v1", (app) =>
-          app.use(
-            makeUnauthApiRoute(
-              "/sendEmailCode",
-              LegacySendEmailCodeInput,
-              LegacySendEmailCodeResponse,
-              async () => {
-                legacyCalls += 1
-                return {
-                  existingUser: false,
-                  needsInviteCode: true,
-                }
-              },
-            ),
-          ),
-        )
+      let calls = 0
       const kernel = makeKernel({
         operations: makeOperations({
           sendEmailCode: () => {
-            replacementCalls += 1
+            calls += 1
             return Effect.succeed({
               existingUser: false,
               needsInviteCode: true,
@@ -571,25 +555,18 @@ describe("Effect identity routes", () => {
       })
 
       try {
-        const legacyResponse = await legacy.handle(
-          testCase.request(),
-        )
-        const replacementResponse = await kernel.handler(
+        const response = await kernel.handler(
           testCase.request(),
         )
 
         expect(
           {
-            status: replacementResponse.status,
-            body: await replacementResponse.text(),
-            calls: replacementCalls,
+            status: response.status,
+            body: await response.text(),
+            calls,
           },
           testCase.name,
-        ).toEqual({
-          status: legacyResponse.status,
-          body: await legacyResponse.text(),
-          calls: legacyCalls,
-        })
+        ).toEqual(testCase.expected)
       } finally {
         await kernel.dispose()
       }
