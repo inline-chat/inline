@@ -83,9 +83,10 @@ enum PerfJourneyRunner {
 
     let scenarios = scenario == "all" ? ["switch", "scroll", "resize"] : scenario.components(separatedBy: ",")
     for name in scenarios {
-      // Every journey starts from the same chat.
-      open(switchChats[0].peer)
-      await waitForTitle(switchChats[0].title, in: window)
+      // Every journey starts from the same chat, the last one the switch journey visits, so its
+      // first switch is a real one.
+      open(switchChats[switchChats.count - 1].peer)
+      await waitForChat(switchChats[switchChats.count - 1].peer)
       _ = await settle(from: now())
       await sleep(ms: 1500)
 
@@ -134,7 +135,7 @@ enum PerfJourneyRunner {
         let start = now()
         clicksAt.append(epochMs())
         open(chat.peer)
-        await waitForTitle(chat.title, in: window, from: start)
+        await waitForChat(chat.peer, from: start)
         times.append(await settle(from: start))
         settledAt.append(epochMs())
         await sleep(ms: 500)
@@ -151,7 +152,7 @@ enum PerfJourneyRunner {
     into result: inout [String: Any]
   ) async {
     open(scrollChat.peer)
-    await waitForTitle(scrollChat.title, in: window)
+    await waitForChat(scrollChat.peer)
     await sleep(ms: 1500)
     guard let scrollView = largestVisible(MessageListScrollView.self, in: window.contentView) else {
       result["error"] = "no message list"
@@ -191,7 +192,7 @@ enum PerfJourneyRunner {
     into result: inout [String: Any]
   ) async {
     open(scrollChat.peer)
-    await waitForTitle(scrollChat.title, in: window)
+    await waitForChat(scrollChat.peer)
     await sleep(ms: 1500)
     guard let scrollView = largestVisible(MessageListScrollView.self, in: window.contentView) else {
       result["error"] = "no message list"
@@ -326,9 +327,10 @@ enum PerfJourneyRunner {
     return best
   }
 
-  private static func waitForTitle(_ title: String, in window: NSWindow, from start: Double? = nil) async {
+  /// Until the window's route shows `peer`. Its title isn't the chat name for every chat (threads).
+  private static func waitForChat(_ peer: Peer, from start: Double? = nil) async {
     let start = start ?? now()
-    while window.title != title, now() - start < 4000 {
+    while MainWindowController.all.first?.scriptingPrimaryChat != peer, now() - start < 4000 {
       await sleep(ms: 2)
     }
   }
