@@ -1676,6 +1676,10 @@ export class InlineSdkClient {
       case "bot.chatSettings.item.invoke":
       case "chat.hasUpdates":
       case "space.hasUpdates":
+      // Live-only, like their updates in isEphemeralUpdate: the server never
+      // sequences or stores reactions, so recovery could not return one.
+      case "reaction.add":
+      case "reaction.delete":
         return undefined
       default:
         return this.bucketForEvent(event)
