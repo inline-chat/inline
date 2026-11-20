@@ -114,6 +114,9 @@ class MessageListAppKit: NSViewController {
   private let minimumAvailableMeasurementWidth: CGFloat = 80
   private var lastValidMeasurementWidth: CGFloat = 0
   private var didFinalizeInitialMeasurementWidth = false
+  /// Widths the first reload measured and configured rows at. When that was already the final
+  /// width, finalizing would measure, reconfigure and re-note every row again for nothing.
+  private var initialMeasurementWidths: Set<CGFloat> = []
 
   private var eventMonitorTask: Task<Void, Never>?
   private var integrationCheckTask: Task<Void, Never>?
@@ -3220,6 +3223,13 @@ class MessageListAppKit: NSViewController {
     // `recalculateHeightsOnWidthChange(maintainScroll: false)` / `fullWidthAsyncCalc` experiment in `viewDidLayout`.
     didFinalizeInitialMeasurementWidth = true
     lastKnownWidth = width
+    let measuredAtFinalWidth = initialMeasurementWidths == [width]
+    initialMeasurementWidths = []
+    if measuredAtFinalWidth {
+      syncAvatarOverlayAfterTableLayout()
+      refreshMessageHoverAfterGeometryChange()
+      return
+    }
 
     let rows = IndexSet(integersIn: 0 ..< tableView.numberOfRows)
 
@@ -4658,6 +4668,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     let inputProps = messageProps(for: row)
     let width = measurementWidth(using: tableView, renderStyle: inputProps.renderStyle)
       ?? fallbackMeasurementWidth(renderStyle: inputProps.renderStyle)
+    if !didFinalizeInitialMeasurementWidth { initialMeasurementWidths.insert(width) }
     let (_, _, _, layoutPlan) = calculateSize(
       for: message,
       with: inputProps,
@@ -4881,6 +4892,7 @@ extension MessageListAppKit: NSTableViewDelegate {
         guard let width = measurementWidth(using: tableView, renderStyle: props.renderStyle) else {
           return getCachedSize(forRow: row)?.height ?? defaultRowHeight
         }
+        if !didFinalizeInitialMeasurementWidth { initialMeasurementWidths.insert(width) }
         let (_, _, _, plan) = calculateSize(
           for: message,
           with: props,
