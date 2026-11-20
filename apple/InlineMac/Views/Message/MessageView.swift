@@ -2433,7 +2433,9 @@ class MessageViewAppKit: NSView {
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
     guard usesAvatarOverlay, showsAvatar, let avatar = props.layout.avatar else { return nil }
 
-    let sourceHeight = bounds.height > 0 ? bounds.height : props.layout.totalHeight
+    // The plan's height, which is the row's: a reused view keeps its previous message's height until
+    // its next layout pass, which runs after the overlay sync.
+    let sourceHeight = props.layout.totalHeight > 0 ? props.layout.totalHeight : bounds.height
     guard sourceHeight > 0 else { return nil }
 
     let top = props.layout.wrapper.spacing.top + avatar.spacing.top

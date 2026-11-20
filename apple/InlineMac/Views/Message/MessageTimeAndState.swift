@@ -358,6 +358,8 @@ class MessageTimeAndState: NSView {
     }
 
     if fullMessage.message.out != oldOut {
+      // A reused row can move between outgoing and incoming messages; only outgoing ones show status.
+      statusLayer.isHidden = !hasSymbol
       updateColorStyles()
     }
 

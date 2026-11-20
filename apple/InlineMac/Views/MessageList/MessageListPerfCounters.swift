@@ -29,6 +29,7 @@ enum MessageListPerfCounters {
   private static var maxBuiltLayers = 0
   private static var measures = 0
   private static var measuresByMessage: [Int64: Int] = [:]
+  private static var rebuildReasons: [String: Int] = [:]
 
   static func noteCell(_ path: CellPath) {
     switch path {
@@ -49,6 +50,12 @@ enum MessageListPerfCounters {
     maxBuiltLayers = max(maxBuiltLayers, layers)
   }
 
+  /// Why a cell built a new message view: "fresh" for a cell without one, otherwise every reuse
+  /// check that failed, joined by "_" (for example "sender_gfirst_shname").
+  static func noteRebuild(_ reasons: String) {
+    rebuildReasons[reasons, default: 0] += 1
+  }
+
   static func noteMeasure(messageId: Int64) {
     measures += 1
     measuresByMessage[messageId, default: 0] += 1
@@ -64,7 +71,7 @@ enum MessageListPerfCounters {
       .event,
       log: log,
       name: "MessageListCounters",
-      "reason=%{public}s built=%ld reconfigured=%ld resized=%ld unchanged=%ld measures=%ld measured_messages=%ld max_measures_per_message=%ld built_views=%ld built_layers=%ld max_views=%ld max_layers=%ld",
+      "reason=%{public}s built=%ld reconfigured=%ld resized=%ld unchanged=%ld measures=%ld measured_messages=%ld max_measures_per_message=%ld built_views=%ld built_layers=%ld max_views=%ld max_layers=%ld %{public}s",
       reason.description,
       built,
       reconfigured,
@@ -76,7 +83,8 @@ enum MessageListPerfCounters {
       builtViews,
       builtLayers,
       maxBuiltViews,
-      maxBuiltLayers
+      maxBuiltLayers,
+      rebuildReasons.sorted { $0.key < $1.key }.map { "rb_\($0.key)=\($0.value)" }.joined(separator: " ")
     )
 
     unchanged = 0
@@ -89,6 +97,7 @@ enum MessageListPerfCounters {
     maxBuiltLayers = 0
     measures = 0
     measuresByMessage.removeAll(keepingCapacity: true)
+    rebuildReasons.removeAll(keepingCapacity: true)
   }
 
   private static func viewCount(_ view: NSView) -> Int {

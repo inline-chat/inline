@@ -4655,7 +4655,22 @@ extension MessageListAppKit: NSTableViewDelegate {
     guard let messageAndIndex = messageAndIndex(forStableId: stableId) else { return nil }
     let message = messageAndIndex.message
 
-    let identifier = NSUserInterfaceItemIdentifier("MessageCell")
+    let inputProps = messageProps(for: row)
+    let width = measurementWidth(using: tableView, renderStyle: inputProps.renderStyle)
+      ?? fallbackMeasurementWidth(renderStyle: inputProps.renderStyle)
+    let (_, _, _, layoutPlan) = calculateSize(
+      for: message,
+      with: inputProps,
+      tableWidth: width
+    )
+
+    // One reuse pool per row shape, so a recycled cell usually has the view this row needs and
+    // reconfigures it in place instead of building a new one.
+    let identifier = Self.messageCellIdentifier(
+      renderStyle: inputProps.renderStyle,
+      message: message.message,
+      layout: layoutPlan
+    )
     let reusedView = tableView.makeView(withIdentifier: identifier, owner: nil)
     let cell = reusedView as? MessageTableCell ?? MessageTableCell()
     cell.identifier = identifier
@@ -4666,15 +4681,6 @@ extension MessageListAppKit: NSTableViewDelegate {
       }
       return self?.avatarOverlayView.grabAvatar(overlapping: sourceView)
     }
-
-    let inputProps = messageProps(for: row)
-    let width = measurementWidth(using: tableView, renderStyle: inputProps.renderStyle)
-      ?? fallbackMeasurementWidth(renderStyle: inputProps.renderStyle)
-    let (_, _, _, layoutPlan) = calculateSize(
-      for: message,
-      with: inputProps,
-      tableWidth: width
-    )
 
     let props = MessageViewProps(
       firstInGroup: inputProps.firstInGroup,
@@ -4712,6 +4718,37 @@ extension MessageListAppKit: NSTableViewDelegate {
       avatarOverlayNeedsRaise = true
     }
     return cell
+  }
+
+  private static var messageCellIdentifiers: [String: NSUserInterfaceItemIdentifier] = [:]
+
+  /// The parts that decide a message view's subviews and constraint graph, as a reuse identifier.
+  private static func messageCellIdentifier(
+    renderStyle: MessageRenderStyle,
+    message: Message,
+    layout: MessageSizeCalculator.LayoutPlans
+  ) -> NSUserInterfaceItemIdentifier {
+    var key = renderStyle == .minimal ? "MessageCell.m" : "MessageCell.b"
+    func flag(_ on: Bool, _ code: String) { if on { key += code } }
+    flag(message.isServiceMessage, "S")
+    // Bubbles align by direction; minimal rows don't.
+    flag(renderStyle == .bubble && message.out == true, "O")
+    flag(layout.hasName, "n")
+    flag(layout.hasAvatar, "a")
+    flag(layout.hasReply, "r")
+    flag(layout.hasForwardHeader, "f")
+    flag(layout.hasPhoto, "p")
+    flag(layout.hasVideo, "v")
+    flag(layout.hasDocument, "d")
+    flag(layout.hasAttachments, "t")
+    flag(layout.hasReactions, "x")
+    flag(layout.hasReplyThreadSummary, "s")
+    flag(layout.hasActionsRows, "k")
+    flag(layout.richBlockContent != nil, "B")
+    if let identifier = messageCellIdentifiers[key] { return identifier }
+    let identifier = NSUserInterfaceItemIdentifier(key)
+    messageCellIdentifiers[key] = identifier
+    return identifier
   }
 
   var animateUpdates: Bool {

@@ -245,13 +245,17 @@ class MessageTableCell: NSView {
     }
 
     // RE-USE
+    // Minimal rows keep their view across senders and group positions: the update path sets the name
+    // label, avatar and spacing. Bot action rows are excluded, since their observation captures the sender.
+    let reusesAcrossSenders = !message.message.isServiceMessage
+      && currentContent.map { Self.reusesAcrossSenders(from: $0.props, to: props) } ?? false
     if let currentContent,
        // has view
        messageView != nil,
        // same sender
-       currentContent.message.message.fromId == message.message.fromId,
+       currentContent.message.message.fromId == message.message.fromId || reusesAcrossSenders,
        // same message layout
-       currentContent.message.message.out == message.message.out,
+       currentContent.message.message.out == message.message.out || reusesAcrossSenders,
        currentContent.message.message.isServiceMessage == message.message.isServiceMessage,
        currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
        currentContent.message.message.hasForwardHeader == message.message.hasForwardHeader,
@@ -266,7 +270,9 @@ class MessageTableCell: NSView {
        currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id,
        // disable re-use for file message completely for now until we can optimize later
        // same message-level layout flags and same constraint graph
-       currentContent.props.equalExceptSize(props),
+       reusesAcrossSenders
+         ? currentContent.props.equalExceptSizeAndGroupPosition(props)
+         : currentContent.props.equalExceptSize(props),
        currentContent.props.layout.hasSameConstraintShape(as: props.layout)
     // For now, recreate if moving from single line to multi line
     // , currentContent.props.layout.isSingleLine == props.layout.isSingleLine
@@ -298,6 +304,11 @@ class MessageTableCell: NSView {
 
     let span = PerformanceTrace.begin("CellBuild", category: .messages)
     defer { span.end() }
+    #if DEBUG
+    MessageListPerfCounters.noteRebuild(
+      messageView == nil ? "fresh" : Self.rebuildReasons(from: currentContent, to: (message, props))
+    )
+    #endif
     currentContent = (message, props)
     updateContent()
     #if DEBUG
@@ -307,6 +318,61 @@ class MessageTableCell: NSView {
     }
     #endif
   }
+
+  private static func reusesAcrossSenders(from old: MessageViewProps, to new: MessageViewProps) -> Bool {
+    old.renderStyle == .minimal && new.renderStyle == .minimal
+      && !old.layout.hasActionsRows && !new.layout.hasActionsRows
+  }
+
+  #if DEBUG
+  /// Every reuse check in `configure` that failed, for the perf counters.
+  private static func rebuildReasons(
+    from previous: (message: FullMessage, props: MessageViewProps)?,
+    to next: (message: FullMessage, props: MessageViewProps)
+  ) -> String {
+    guard let previous else { return "nocontent" }
+    let a = previous.message, b = next.message
+    let ap = previous.props, bp = next.props
+    let al = ap.layout, bl = bp.layout
+    var r: [String] = []
+    func check(_ name: String, _ same: Bool) { if !same { r.append(name) } }
+    check("samemsg", a.message.id != b.message.id)
+    check("sender", a.message.fromId == b.message.fromId)
+    check("out", a.message.out == b.message.out)
+    check("service", a.message.isServiceMessage == b.message.isServiceMessage)
+    check("replyid", a.message.repliedToMessageId == b.message.repliedToMessageId)
+    check("fwd", a.message.hasForwardHeader == b.message.hasForwardHeader)
+    check("media", a.file?.id == b.file?.id && a.photoInfo?.id == b.photoInfo?.id
+      && a.videoInfo?.id == b.videoInfo?.id && a.documentInfo?.id == b.documentInfo?.id)
+    check("reactions", a.reactions == b.reactions || a.id == b.id)
+    check("replied", a.repliedToMessage?.id == b.repliedToMessage?.id)
+    check("typo", ap.typographyRevision == bp.typographyRevision)
+    check("gfirst", ap.firstInGroup == bp.firstInGroup)
+    check("glast", ap.lastInGroup == bp.lastInGroup)
+    check("gday", ap.renderStyle == .bubble || ap.startsAfterDaySeparator == bp.startsAfterDaySeparator)
+    check("gedge", ap.isLastMessage == bp.isLastMessage && ap.isFirstMessage == bp.isFirstMessage)
+    check("pother", ap.isRtl == bp.isRtl && ap.isDM == bp.isDM && ap.renderStyle == bp.renderStyle
+      && ap.interactionMode == bp.interactionMode && ap.replyThreadTitle == bp.replyThreadTitle
+      && ap.usesAvatarOverlay == bp.usesAvatarOverlay
+      && ap.richBlockCodePresentation == bp.richBlockCodePresentation && ap.translated == bp.translated
+      && ap.album == bp.album)
+    check("shname", al.hasName == bl.hasName)
+    check("shavatar", al.hasAvatar == bl.hasAvatar)
+    check("shreply", al.hasReply == bl.hasReply)
+    check("shtext", al.hasText == bl.hasText)
+    check("shmedia", al.hasPhoto == bl.hasPhoto && al.hasVideo == bl.hasVideo && al.hasDocument == bl.hasDocument)
+    check("shreactions", al.hasReactions == bl.hasReactions && al.reactionsOutsideBubble == bl.reactionsOutsideBubble)
+    check("shtime", al.hasTime == bl.hasTime && al.timeInContentFlow == bl.timeInContentFlow
+      && al.placesTimeAboveReactions == bl.placesTimeAboveReactions)
+    check("shattach", al.hasAttachments == bl.hasAttachments
+      && al.attachmentItems.map(\.size.height) == bl.attachmentItems.map(\.size.height))
+    check("shother", al.hasReplyThreadSummary == bl.hasReplyThreadSummary
+      && al.hasForwardHeader == bl.hasForwardHeader && al.hasActionsRows == bl.hasActionsRows
+      && al.hasAcknowledgement == bl.hasAcknowledgement)
+    if r.isEmpty { r.append("constraintshape") }
+    return r.joined(separator: "_")
+  }
+  #endif
 
   func updateTextAndSize(animate: Bool = true) {
     guard let content = currentContent else { return }

@@ -87,4 +87,16 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       translated == rhs.translated &&
       album == rhs.album
   }
+
+  /// `equalExceptSize` without where the row sits in its sender group or in the chat. A minimal row
+  /// reads those when it updates (a group's top spacing, the via footer, upload progress), and the
+  /// layout plan's constraint shape already covers the name and avatar that `firstInGroup` decides.
+  func equalExceptSizeAndGroupPosition(_ rhs: MessageViewProps) -> Bool {
+    var lhs = self
+    lhs.lastInGroup = rhs.lastInGroup
+    lhs.startsAfterDaySeparator = rhs.startsAfterDaySeparator
+    lhs.isLastMessage = rhs.isLastMessage
+    lhs.isFirstMessage = rhs.isFirstMessage
+    return lhs.equalExceptSize(rhs)
+  }
 }

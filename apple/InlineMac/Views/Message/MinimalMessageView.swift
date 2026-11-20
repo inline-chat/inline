@@ -1392,16 +1392,7 @@ class MinimalMessageViewAppKit: NSView {
 
     if showsName {
       addSubview(nameLabel)
-      let sender = outgoing ? (dependencies?.rootData?.currentUserInfo?.user ?? from) : from
-      let senderName = sender.shortDisplayName
-      let nameForInitials = UserAvatar.getNameForInitials(user: sender)
-      // Previous outgoing label behavior, kept as reference for quick revert.
-      // nameLabel.stringValue = outgoing ? "You" : senderName
-      nameLabel.stringValue = senderName
-      nameLabel.textColor = NSColor(
-        InitialsCircle.ColorPalette
-          .color(for: nameForInitials)
-      )
+      configureNameLabel()
     }
 
     addSubview(contentView)
@@ -1455,6 +1446,23 @@ class MinimalMessageViewAppKit: NSView {
     // Setup translation state observation
     setupTranslationStateObservation()
   }
+
+  /// The sender's name and color. A reused view can move to another sender's message.
+  private func configureNameLabel() {
+    let sender = outgoing ? (dependencies?.rootData?.currentUserInfo?.user ?? from) : from
+    let senderName = sender.shortDisplayName
+    // Previous outgoing label behavior, kept as reference for quick revert.
+    // nameLabel.stringValue = outgoing ? "You" : senderName
+    guard nameLabel.stringValue != senderName || configuredNameSenderId != sender.id else { return }
+    configuredNameSenderId = sender.id
+    nameLabel.stringValue = senderName
+    nameLabel.textColor = NSColor(
+      InitialsCircle.ColorPalette
+        .color(for: UserAvatar.getNameForInitials(user: sender))
+    )
+  }
+
+  private var configuredNameSenderId: Int64?
 
   private func setupTranslationStateObservation() {
     guard AppSettings.shared.translationUIEnabled else {
@@ -2360,7 +2368,9 @@ class MinimalMessageViewAppKit: NSView {
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
     guard usesAvatarOverlay, showsAvatar, let avatar = props.layout.avatar else { return nil }
 
-    let sourceHeight = bounds.height > 0 ? bounds.height : props.layout.totalHeight
+    // The plan's height, which is the row's: a reused view keeps its previous message's height until
+    // its next layout pass, which runs after the overlay sync.
+    let sourceHeight = props.layout.totalHeight > 0 ? props.layout.totalHeight : bounds.height
     guard sourceHeight > 0 else { return nil }
 
     let top = props.layout.wrapper.spacing.top + avatar.spacing.top
@@ -4475,6 +4485,9 @@ class MinimalMessageViewAppKit: NSView {
 
     if showsInlineAvatar {
       avatarView.update(userInfo: avatarUserInfo, viaMark: fullMessage.viaPresentation?.mark)
+    }
+    if showsName {
+      configureNameLabel()
     }
     if showsViaFooter || viaFooterLabel?.isHidden == false {
       needsLayout = true
