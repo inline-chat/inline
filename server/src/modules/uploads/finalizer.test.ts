@@ -293,7 +293,7 @@ describe("native upload finalizer integrity", () => {
     })).rejects.toBeInstanceOf(UploadIntegrityError)
   })
 
-  test("republishes a staged GPS-tagged photo without its location metadata", async () => {
+  test("publishes a staged GPS-tagged photo verbatim so the stored object matches the verified upload", async () => {
     const jpeg = Uint8Array.from(await sharp({
       create: { width: 120, height: 80, channels: 3, background: { r: 10, g: 20, b: 30 } },
     })
@@ -305,25 +305,21 @@ describe("native upload finalizer integrity", () => {
       ...upload, uploadId: Buffer.alloc(16), kind: "photo", fileName: "located.jpg", mimeType: "image/jpeg",
       byteCount: BigInt(jpeg.length), sha256: createHash("sha256").update(jpeg).digest(),
     } as InlineUploadRecord
-    const stored: { bytes: Buffer; path: string | undefined }[] = []
+    const stored: Buffer[] = []
     const finalizer = new UploadMediaFinalizer(unusedStore, async () => {}, async (file, fileType, metadata, context, identity) => {
-      stored.push({ bytes: Buffer.from(await file.arrayBuffer()), path: identity?.path })
+      stored.push(Buffer.from(await file.arrayBuffer()))
       return prepareFileObjectRecord(file.size, fileType, metadata, context, identity)
     })
 
-    // The buffered frames were already stored verbatim; the clean copy must replace them.
+    // The worker already stored and verified these exact bytes at the publication key.
     const publication = await finalizer.prepareBufferedPublication({
       upload: photo,
       frames: [jpeg],
       assertOwnership: async () => {},
     })
 
-    expect(stored).toHaveLength(1)
-    expect(stored[0]?.path).toBe(publication.file.path)
-    const header = await sharp(stored[0]!.bytes).metadata()
-    expect(header.exif).toBeUndefined()
-    expect({ width: header.width, height: header.height }).toEqual({ width: 80, height: 120 })
-    expect(publication.file.record.fileSize).toBe(stored[0]!.bytes.length)
+    expect(stored).toHaveLength(0)
+    expect(publication.file.record.fileSize).toBe(jpeg.length)
     expect(publication.media).toMatchObject({ kind: "photo", width: 80, height: 120, format: "jpeg" })
   })
 })

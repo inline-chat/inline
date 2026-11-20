@@ -19,7 +19,6 @@ import {
   getPhotoMetadataAndValidate,
   getVideoMetadataAndValidate,
   getVoiceMetadataAndValidate,
-  stripPhotoMetadata,
 } from "@in/server/modules/files/metadata"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
@@ -357,12 +356,11 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         if (metadata.mimeType !== "image/jpeg" && metadata.mimeType !== "image/png") {
           throw new UploadInvalidMediaError()
         }
-        // Camera and location metadata never reach the published object. A
-        // rewritten photo replaces any staged object at the publication key,
-        // which is the same key the staged upload used.
-        const sanitized = await stripPhotoMetadata(file, metadata.mimeType)
-        const photo = sanitized.file
-        const stripped = await generateStrippedThumbnail(photo).catch((error) => {
+        // Native uploads publish the bytes the client hashed and the worker
+        // stored and verified at this key; rewriting them here breaks that
+        // integrity contract. Clients strip camera and location metadata
+        // before hashing; the HTTP upload path still strips on the server.
+        const stripped = await generateStrippedThumbnail(file).catch((error) => {
           log.warn("Failed to generate stripped thumbnail for native upload", {
             error,
             userId: upload.userId,
@@ -371,14 +369,7 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
         })
         const encryptedStripped = stripped ? encryptBinary(stripped.bytes) : null
         return {
-          file: await this.#prepareFileObject(
-            photo,
-            FileTypes.PHOTO,
-            metadata,
-            upload,
-            signal,
-            alreadyStored && !sanitized.rewritten,
-          ),
+          file: await this.#prepareFileObject(file, FileTypes.PHOTO, metadata, upload, signal, alreadyStored),
           media: {
             kind: "photo",
             format: metadata.mimeType === "image/jpeg" ? "jpeg" : "png",
