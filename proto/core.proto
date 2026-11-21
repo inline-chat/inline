@@ -230,6 +230,9 @@ message User {
 
   // Set only for bots: who the bot acts for.
   optional BotInfo bot_info = 16;
+
+  // Personal Pro plan. Server-controlled; sent only for the viewer themselves.
+  optional bool is_pro = 17;
 }
 
 // A bot acts for its owner. Inline evaluates what a bot does as the bot plus
@@ -2686,6 +2689,10 @@ enum Method {
   GET_SPACES = 170;
   SEND_COMPOSE_SUGGESTION = 171;
   GET_COMMON_CHATS = 172;
+  // 173 is reserved for global message search.
+  GET_BILLING = 174;
+  CREATE_BILLING_CHECKOUT = 175;
+  CREATE_BILLING_PORTAL = 176;
 }
 
 message RpcCall {
@@ -2863,6 +2870,9 @@ message RpcCall {
     GetSpacesInput getSpaces = 171;
     SendComposeSuggestionInput sendComposeSuggestion = 172;
     GetCommonChatsInput getCommonChats = 173;
+    GetBillingInput getBilling = 175;
+    CreateBillingCheckoutInput createBillingCheckout = 176;
+    CreateBillingPortalInput createBillingPortal = 177;
   }
 }
 
@@ -3042,6 +3052,9 @@ message RpcResult {
     GetSpacesResult getSpaces = 171;
     SendComposeSuggestionResult sendComposeSuggestion = 172;
     GetCommonChatsResult getCommonChats = 173;
+    GetBillingResult getBilling = 175;
+    CreateBillingCheckoutResult createBillingCheckout = 176;
+    CreateBillingPortalResult createBillingPortal = 177;
   }
 }
 
@@ -4463,6 +4476,86 @@ message GetCommonChatsResult {
   repeated Space spaces = 3;
   // Pass as `offset` for the next page. Absent: end of list.
   optional ChatListOffset next_offset = 4;
+}
+
+// Billing for the signed-in user and the spaces they own or administer.
+message GetBillingInput {}
+
+message GetBillingResult {
+  // The viewer's personal plan.
+  BillingAccount me = 1;
+  // One per space the viewer owns or administers.
+  repeated BillingAccount spaces = 2;
+  // Plans the viewer can buy right now. Empty when checkout is unavailable.
+  repeated BillingPlanOffer plans = 3;
+}
+
+message BillingAccount {
+  // Absent for the viewer's personal account.
+  optional int64 space_id = 1;
+  bool is_pro = 2;
+  // The live plan, if any.
+  optional BillingSubscription subscription = 3;
+  // Admin-managed credit. Absent unless the account has wallet entries.
+  optional BillingWallet wallet = 4;
+}
+
+message BillingSubscription {
+  // pro | believer | team | enterprise
+  string plan = 1;
+  // month | year | three_years | none
+  string interval = 2;
+  // stripe | prepaid | wallet | comp
+  string funding = 3;
+  // Stripe subscription status for stripe funding, otherwise active.
+  string status = 4;
+  int32 seats = 5;
+  // Unix seconds. Absent: no end date.
+  optional int64 paid_through = 6;
+  bool cancel_at_period_end = 7;
+  // The viewer paid for it and can open Stripe's management page.
+  bool can_manage = 8;
+}
+
+message BillingWallet {
+  optional int64 usd_cents = 1;
+  optional int64 btc_sats = 2;
+}
+
+message BillingPlanOffer {
+  // Checkout code, for example pro-monthly, believer or team-yearly.
+  string code = 1;
+  // pro | believer | team
+  string plan = 2;
+  // month | year | three_years | none
+  string interval = 3;
+  // Bought for a space rather than the viewer.
+  bool for_space = 4;
+  // List price in USD cents, per seat when per_seat is set.
+  int64 usd_cents = 5;
+  bool per_seat = 6;
+}
+
+message CreateBillingCheckoutInput {
+  // A code from GetBillingResult.plans.
+  string plan = 1;
+  // Required for space plans; the viewer must own or administer the space.
+  optional int64 space_id = 2;
+}
+
+message CreateBillingCheckoutResult {
+  // Stripe-hosted checkout page to open in the browser.
+  string url = 1;
+}
+
+message CreateBillingPortalInput {
+  // Absent for the viewer's personal plan.
+  optional int64 space_id = 1;
+}
+
+message CreateBillingPortalResult {
+  // Stripe page for cancelling, changing the card and viewing invoices.
+  string url = 1;
 }
 
 message TranslateMessagesInput {

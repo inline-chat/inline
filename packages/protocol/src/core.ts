@@ -668,6 +668,12 @@ export interface User {
      * @generated from protobuf field: optional BotInfo bot_info = 16;
      */
     botInfo?: BotInfo;
+    /**
+     * Personal Pro plan. Server-controlled; sent only for the viewer themselves.
+     *
+     * @generated from protobuf field: optional bool is_pro = 17;
+     */
+    isPro?: boolean;
 }
 /**
  * A bot acts for its owner. Inline evaluates what a bot does as the bot plus
@@ -7182,6 +7188,24 @@ export interface RpcCall {
          */
         getCommonChats: GetCommonChatsInput;
     } | {
+        oneofKind: "getBilling";
+        /**
+         * @generated from protobuf field: GetBillingInput getBilling = 175;
+         */
+        getBilling: GetBillingInput;
+    } | {
+        oneofKind: "createBillingCheckout";
+        /**
+         * @generated from protobuf field: CreateBillingCheckoutInput createBillingCheckout = 176;
+         */
+        createBillingCheckout: CreateBillingCheckoutInput;
+    } | {
+        oneofKind: "createBillingPortal";
+        /**
+         * @generated from protobuf field: CreateBillingPortalInput createBillingPortal = 177;
+         */
+        createBillingPortal: CreateBillingPortalInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -8222,6 +8246,24 @@ export interface RpcResult {
          * @generated from protobuf field: GetCommonChatsResult getCommonChats = 173;
          */
         getCommonChats: GetCommonChatsResult;
+    } | {
+        oneofKind: "getBilling";
+        /**
+         * @generated from protobuf field: GetBillingResult getBilling = 175;
+         */
+        getBilling: GetBillingResult;
+    } | {
+        oneofKind: "createBillingCheckout";
+        /**
+         * @generated from protobuf field: CreateBillingCheckoutResult createBillingCheckout = 176;
+         */
+        createBillingCheckout: CreateBillingCheckoutResult;
+    } | {
+        oneofKind: "createBillingPortal";
+        /**
+         * @generated from protobuf field: CreateBillingPortalResult createBillingPortal = 177;
+         */
+        createBillingPortal: CreateBillingPortalResult;
     } | {
         oneofKind: undefined;
     };
@@ -11848,6 +11890,214 @@ export interface GetCommonChatsResult {
      * @generated from protobuf field: optional ChatListOffset next_offset = 4;
      */
     nextOffset?: ChatListOffset;
+}
+/**
+ * Billing for the signed-in user and the spaces they own or administer.
+ *
+ * @generated from protobuf message GetBillingInput
+ */
+export interface GetBillingInput {
+}
+/**
+ * @generated from protobuf message GetBillingResult
+ */
+export interface GetBillingResult {
+    /**
+     * The viewer's personal plan.
+     *
+     * @generated from protobuf field: BillingAccount me = 1;
+     */
+    me?: BillingAccount;
+    /**
+     * One per space the viewer owns or administers.
+     *
+     * @generated from protobuf field: repeated BillingAccount spaces = 2;
+     */
+    spaces: BillingAccount[];
+    /**
+     * Plans the viewer can buy right now. Empty when checkout is unavailable.
+     *
+     * @generated from protobuf field: repeated BillingPlanOffer plans = 3;
+     */
+    plans: BillingPlanOffer[];
+}
+/**
+ * @generated from protobuf message BillingAccount
+ */
+export interface BillingAccount {
+    /**
+     * Absent for the viewer's personal account.
+     *
+     * @generated from protobuf field: optional int64 space_id = 1;
+     */
+    spaceId?: bigint;
+    /**
+     * @generated from protobuf field: bool is_pro = 2;
+     */
+    isPro: boolean;
+    /**
+     * The live plan, if any.
+     *
+     * @generated from protobuf field: optional BillingSubscription subscription = 3;
+     */
+    subscription?: BillingSubscription;
+    /**
+     * Admin-managed credit. Absent unless the account has wallet entries.
+     *
+     * @generated from protobuf field: optional BillingWallet wallet = 4;
+     */
+    wallet?: BillingWallet;
+}
+/**
+ * @generated from protobuf message BillingSubscription
+ */
+export interface BillingSubscription {
+    /**
+     * pro | believer | team | enterprise
+     *
+     * @generated from protobuf field: string plan = 1;
+     */
+    plan: string;
+    /**
+     * month | year | three_years | none
+     *
+     * @generated from protobuf field: string interval = 2;
+     */
+    interval: string;
+    /**
+     * stripe | prepaid | wallet | comp
+     *
+     * @generated from protobuf field: string funding = 3;
+     */
+    funding: string;
+    /**
+     * Stripe subscription status for stripe funding, otherwise active.
+     *
+     * @generated from protobuf field: string status = 4;
+     */
+    status: string;
+    /**
+     * @generated from protobuf field: int32 seats = 5;
+     */
+    seats: number;
+    /**
+     * Unix seconds. Absent: no end date.
+     *
+     * @generated from protobuf field: optional int64 paid_through = 6;
+     */
+    paidThrough?: bigint;
+    /**
+     * @generated from protobuf field: bool cancel_at_period_end = 7;
+     */
+    cancelAtPeriodEnd: boolean;
+    /**
+     * The viewer paid for it and can open Stripe's management page.
+     *
+     * @generated from protobuf field: bool can_manage = 8;
+     */
+    canManage: boolean;
+}
+/**
+ * @generated from protobuf message BillingWallet
+ */
+export interface BillingWallet {
+    /**
+     * @generated from protobuf field: optional int64 usd_cents = 1;
+     */
+    usdCents?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 btc_sats = 2;
+     */
+    btcSats?: bigint;
+}
+/**
+ * @generated from protobuf message BillingPlanOffer
+ */
+export interface BillingPlanOffer {
+    /**
+     * Checkout code, for example pro-monthly, believer or team-yearly.
+     *
+     * @generated from protobuf field: string code = 1;
+     */
+    code: string;
+    /**
+     * pro | believer | team
+     *
+     * @generated from protobuf field: string plan = 2;
+     */
+    plan: string;
+    /**
+     * month | year | three_years | none
+     *
+     * @generated from protobuf field: string interval = 3;
+     */
+    interval: string;
+    /**
+     * Bought for a space rather than the viewer.
+     *
+     * @generated from protobuf field: bool for_space = 4;
+     */
+    forSpace: boolean;
+    /**
+     * List price in USD cents, per seat when per_seat is set.
+     *
+     * @generated from protobuf field: int64 usd_cents = 5;
+     */
+    usdCents: bigint;
+    /**
+     * @generated from protobuf field: bool per_seat = 6;
+     */
+    perSeat: boolean;
+}
+/**
+ * @generated from protobuf message CreateBillingCheckoutInput
+ */
+export interface CreateBillingCheckoutInput {
+    /**
+     * A code from GetBillingResult.plans.
+     *
+     * @generated from protobuf field: string plan = 1;
+     */
+    plan: string;
+    /**
+     * Required for space plans; the viewer must own or administer the space.
+     *
+     * @generated from protobuf field: optional int64 space_id = 2;
+     */
+    spaceId?: bigint;
+}
+/**
+ * @generated from protobuf message CreateBillingCheckoutResult
+ */
+export interface CreateBillingCheckoutResult {
+    /**
+     * Stripe-hosted checkout page to open in the browser.
+     *
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
+}
+/**
+ * @generated from protobuf message CreateBillingPortalInput
+ */
+export interface CreateBillingPortalInput {
+    /**
+     * Absent for the viewer's personal plan.
+     *
+     * @generated from protobuf field: optional int64 space_id = 1;
+     */
+    spaceId?: bigint;
+}
+/**
+ * @generated from protobuf message CreateBillingPortalResult
+ */
+export interface CreateBillingPortalResult {
+    /**
+     * Stripe page for cancelling, changing the card and viewing invoices.
+     *
+     * @generated from protobuf field: string url = 1;
+     */
+    url: string;
 }
 /**
  * @generated from protobuf message TranslateMessagesInput
@@ -18987,7 +19237,21 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_COMMON_CHATS = 172;
      */
-    GET_COMMON_CHATS = 172
+    GET_COMMON_CHATS = 172,
+    /**
+     * 173 is reserved for global message search.
+     *
+     * @generated from protobuf enum value: GET_BILLING = 174;
+     */
+    GET_BILLING = 174,
+    /**
+     * @generated from protobuf enum value: CREATE_BILLING_CHECKOUT = 175;
+     */
+    CREATE_BILLING_CHECKOUT = 175,
+    /**
+     * @generated from protobuf enum value: CREATE_BILLING_PORTAL = 176;
+     */
+    CREATE_BILLING_PORTAL = 176
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -21052,7 +21316,8 @@ class User$Type extends MessageType<User> {
             { no: 13, name: "bot", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar },
             { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 16, name: "bot_info", kind: "message", T: () => BotInfo }
+            { no: 16, name: "bot_info", kind: "message", T: () => BotInfo },
+            { no: 17, name: "is_pro", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -21112,6 +21377,9 @@ class User$Type extends MessageType<User> {
                 case /* optional BotInfo bot_info */ 16:
                     message.botInfo = BotInfo.internalBinaryRead(reader, reader.uint32(), options, message.botInfo);
                     break;
+                case /* optional bool is_pro */ 17:
+                    message.isPro = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21169,6 +21437,9 @@ class User$Type extends MessageType<User> {
         /* optional BotInfo bot_info = 16; */
         if (message.botInfo)
             BotInfo.internalBinaryWrite(message.botInfo, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool is_pro = 17; */
+        if (message.isPro !== undefined)
+            writer.tag(17, WireType.Varint).bool(message.isPro);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33665,7 +33936,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
             { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput },
             { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput },
-            { no: 173, name: "getCommonChats", kind: "message", oneof: "input", T: () => GetCommonChatsInput }
+            { no: 173, name: "getCommonChats", kind: "message", oneof: "input", T: () => GetCommonChatsInput },
+            { no: 175, name: "getBilling", kind: "message", oneof: "input", T: () => GetBillingInput },
+            { no: 176, name: "createBillingCheckout", kind: "message", oneof: "input", T: () => CreateBillingCheckoutInput },
+            { no: 177, name: "createBillingPortal", kind: "message", oneof: "input", T: () => CreateBillingPortalInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -34710,6 +34984,24 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getCommonChats: GetCommonChatsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getCommonChats)
                     };
                     break;
+                case /* GetBillingInput getBilling */ 175:
+                    message.input = {
+                        oneofKind: "getBilling",
+                        getBilling: GetBillingInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getBilling)
+                    };
+                    break;
+                case /* CreateBillingCheckoutInput createBillingCheckout */ 176:
+                    message.input = {
+                        oneofKind: "createBillingCheckout",
+                        createBillingCheckout: CreateBillingCheckoutInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createBillingCheckout)
+                    };
+                    break;
+                case /* CreateBillingPortalInput createBillingPortal */ 177:
+                    message.input = {
+                        oneofKind: "createBillingPortal",
+                        createBillingPortal: CreateBillingPortalInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).createBillingPortal)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -35238,6 +35530,15 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetCommonChatsInput getCommonChats = 173; */
         if (message.input.oneofKind === "getCommonChats")
             GetCommonChatsInput.internalBinaryWrite(message.input.getCommonChats, writer.tag(173, WireType.LengthDelimited).fork(), options).join();
+        /* GetBillingInput getBilling = 175; */
+        if (message.input.oneofKind === "getBilling")
+            GetBillingInput.internalBinaryWrite(message.input.getBilling, writer.tag(175, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBillingCheckoutInput createBillingCheckout = 176; */
+        if (message.input.oneofKind === "createBillingCheckout")
+            CreateBillingCheckoutInput.internalBinaryWrite(message.input.createBillingCheckout, writer.tag(176, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBillingPortalInput createBillingPortal = 177; */
+        if (message.input.oneofKind === "createBillingPortal")
+            CreateBillingPortalInput.internalBinaryWrite(message.input.createBillingPortal, writer.tag(177, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35423,7 +35724,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
             { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult },
             { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult },
-            { no: 173, name: "getCommonChats", kind: "message", oneof: "result", T: () => GetCommonChatsResult }
+            { no: 173, name: "getCommonChats", kind: "message", oneof: "result", T: () => GetCommonChatsResult },
+            { no: 175, name: "getBilling", kind: "message", oneof: "result", T: () => GetBillingResult },
+            { no: 176, name: "createBillingCheckout", kind: "message", oneof: "result", T: () => CreateBillingCheckoutResult },
+            { no: 177, name: "createBillingPortal", kind: "message", oneof: "result", T: () => CreateBillingPortalResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -36468,6 +36772,24 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getCommonChats: GetCommonChatsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getCommonChats)
                     };
                     break;
+                case /* GetBillingResult getBilling */ 175:
+                    message.result = {
+                        oneofKind: "getBilling",
+                        getBilling: GetBillingResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getBilling)
+                    };
+                    break;
+                case /* CreateBillingCheckoutResult createBillingCheckout */ 176:
+                    message.result = {
+                        oneofKind: "createBillingCheckout",
+                        createBillingCheckout: CreateBillingCheckoutResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createBillingCheckout)
+                    };
+                    break;
+                case /* CreateBillingPortalResult createBillingPortal */ 177:
+                    message.result = {
+                        oneofKind: "createBillingPortal",
+                        createBillingPortal: CreateBillingPortalResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).createBillingPortal)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -36996,6 +37318,15 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetCommonChatsResult getCommonChats = 173; */
         if (message.result.oneofKind === "getCommonChats")
             GetCommonChatsResult.internalBinaryWrite(message.result.getCommonChats, writer.tag(173, WireType.LengthDelimited).fork(), options).join();
+        /* GetBillingResult getBilling = 175; */
+        if (message.result.oneofKind === "getBilling")
+            GetBillingResult.internalBinaryWrite(message.result.getBilling, writer.tag(175, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBillingCheckoutResult createBillingCheckout = 176; */
+        if (message.result.oneofKind === "createBillingCheckout")
+            CreateBillingCheckoutResult.internalBinaryWrite(message.result.createBillingCheckout, writer.tag(176, WireType.LengthDelimited).fork(), options).join();
+        /* CreateBillingPortalResult createBillingPortal = 177; */
+        if (message.result.oneofKind === "createBillingPortal")
+            CreateBillingPortalResult.internalBinaryWrite(message.result.createBillingPortal, writer.tag(177, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -48716,6 +49047,597 @@ class GetCommonChatsResult$Type extends MessageType<GetCommonChatsResult> {
  * @generated MessageType for protobuf message GetCommonChatsResult
  */
 export const GetCommonChatsResult = new GetCommonChatsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBillingInput$Type extends MessageType<GetBillingInput> {
+    constructor() {
+        super("GetBillingInput", []);
+    }
+    create(value?: PartialMessage<GetBillingInput>): GetBillingInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetBillingInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBillingInput): GetBillingInput {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: GetBillingInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBillingInput
+ */
+export const GetBillingInput = new GetBillingInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetBillingResult$Type extends MessageType<GetBillingResult> {
+    constructor() {
+        super("GetBillingResult", [
+            { no: 1, name: "me", kind: "message", T: () => BillingAccount },
+            { no: 2, name: "spaces", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BillingAccount },
+            { no: 3, name: "plans", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BillingPlanOffer }
+        ]);
+    }
+    create(value?: PartialMessage<GetBillingResult>): GetBillingResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.spaces = [];
+        message.plans = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetBillingResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetBillingResult): GetBillingResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* BillingAccount me */ 1:
+                    message.me = BillingAccount.internalBinaryRead(reader, reader.uint32(), options, message.me);
+                    break;
+                case /* repeated BillingAccount spaces */ 2:
+                    message.spaces.push(BillingAccount.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated BillingPlanOffer plans */ 3:
+                    message.plans.push(BillingPlanOffer.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetBillingResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* BillingAccount me = 1; */
+        if (message.me)
+            BillingAccount.internalBinaryWrite(message.me, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated BillingAccount spaces = 2; */
+        for (let i = 0; i < message.spaces.length; i++)
+            BillingAccount.internalBinaryWrite(message.spaces[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated BillingPlanOffer plans = 3; */
+        for (let i = 0; i < message.plans.length; i++)
+            BillingPlanOffer.internalBinaryWrite(message.plans[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetBillingResult
+ */
+export const GetBillingResult = new GetBillingResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BillingAccount$Type extends MessageType<BillingAccount> {
+    constructor() {
+        super("BillingAccount", [
+            { no: 1, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "is_pro", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "subscription", kind: "message", T: () => BillingSubscription },
+            { no: 4, name: "wallet", kind: "message", T: () => BillingWallet }
+        ]);
+    }
+    create(value?: PartialMessage<BillingAccount>): BillingAccount {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.isPro = false;
+        if (value !== undefined)
+            reflectionMergePartial<BillingAccount>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BillingAccount): BillingAccount {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* bool is_pro */ 2:
+                    message.isPro = reader.bool();
+                    break;
+                case /* optional BillingSubscription subscription */ 3:
+                    message.subscription = BillingSubscription.internalBinaryRead(reader, reader.uint32(), options, message.subscription);
+                    break;
+                case /* optional BillingWallet wallet */ 4:
+                    message.wallet = BillingWallet.internalBinaryRead(reader, reader.uint32(), options, message.wallet);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BillingAccount, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int64 space_id = 1; */
+        if (message.spaceId !== undefined)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        /* bool is_pro = 2; */
+        if (message.isPro !== false)
+            writer.tag(2, WireType.Varint).bool(message.isPro);
+        /* optional BillingSubscription subscription = 3; */
+        if (message.subscription)
+            BillingSubscription.internalBinaryWrite(message.subscription, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional BillingWallet wallet = 4; */
+        if (message.wallet)
+            BillingWallet.internalBinaryWrite(message.wallet, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BillingAccount
+ */
+export const BillingAccount = new BillingAccount$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BillingSubscription$Type extends MessageType<BillingSubscription> {
+    constructor() {
+        super("BillingSubscription", [
+            { no: 1, name: "plan", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "interval", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "funding", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "status", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "seats", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 6, name: "paid_through", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "cancel_at_period_end", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 8, name: "can_manage", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BillingSubscription>): BillingSubscription {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.plan = "";
+        message.interval = "";
+        message.funding = "";
+        message.status = "";
+        message.seats = 0;
+        message.cancelAtPeriodEnd = false;
+        message.canManage = false;
+        if (value !== undefined)
+            reflectionMergePartial<BillingSubscription>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BillingSubscription): BillingSubscription {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string plan */ 1:
+                    message.plan = reader.string();
+                    break;
+                case /* string interval */ 2:
+                    message.interval = reader.string();
+                    break;
+                case /* string funding */ 3:
+                    message.funding = reader.string();
+                    break;
+                case /* string status */ 4:
+                    message.status = reader.string();
+                    break;
+                case /* int32 seats */ 5:
+                    message.seats = reader.int32();
+                    break;
+                case /* optional int64 paid_through */ 6:
+                    message.paidThrough = reader.int64().toBigInt();
+                    break;
+                case /* bool cancel_at_period_end */ 7:
+                    message.cancelAtPeriodEnd = reader.bool();
+                    break;
+                case /* bool can_manage */ 8:
+                    message.canManage = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BillingSubscription, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string plan = 1; */
+        if (message.plan !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.plan);
+        /* string interval = 2; */
+        if (message.interval !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.interval);
+        /* string funding = 3; */
+        if (message.funding !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.funding);
+        /* string status = 4; */
+        if (message.status !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.status);
+        /* int32 seats = 5; */
+        if (message.seats !== 0)
+            writer.tag(5, WireType.Varint).int32(message.seats);
+        /* optional int64 paid_through = 6; */
+        if (message.paidThrough !== undefined)
+            writer.tag(6, WireType.Varint).int64(message.paidThrough);
+        /* bool cancel_at_period_end = 7; */
+        if (message.cancelAtPeriodEnd !== false)
+            writer.tag(7, WireType.Varint).bool(message.cancelAtPeriodEnd);
+        /* bool can_manage = 8; */
+        if (message.canManage !== false)
+            writer.tag(8, WireType.Varint).bool(message.canManage);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BillingSubscription
+ */
+export const BillingSubscription = new BillingSubscription$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BillingWallet$Type extends MessageType<BillingWallet> {
+    constructor() {
+        super("BillingWallet", [
+            { no: 1, name: "usd_cents", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "btc_sats", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BillingWallet>): BillingWallet {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<BillingWallet>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BillingWallet): BillingWallet {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int64 usd_cents */ 1:
+                    message.usdCents = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 btc_sats */ 2:
+                    message.btcSats = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BillingWallet, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int64 usd_cents = 1; */
+        if (message.usdCents !== undefined)
+            writer.tag(1, WireType.Varint).int64(message.usdCents);
+        /* optional int64 btc_sats = 2; */
+        if (message.btcSats !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.btcSats);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BillingWallet
+ */
+export const BillingWallet = new BillingWallet$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BillingPlanOffer$Type extends MessageType<BillingPlanOffer> {
+    constructor() {
+        super("BillingPlanOffer", [
+            { no: 1, name: "code", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "plan", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "interval", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "for_space", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 5, name: "usd_cents", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "per_seat", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BillingPlanOffer>): BillingPlanOffer {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.code = "";
+        message.plan = "";
+        message.interval = "";
+        message.forSpace = false;
+        message.usdCents = 0n;
+        message.perSeat = false;
+        if (value !== undefined)
+            reflectionMergePartial<BillingPlanOffer>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BillingPlanOffer): BillingPlanOffer {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string code */ 1:
+                    message.code = reader.string();
+                    break;
+                case /* string plan */ 2:
+                    message.plan = reader.string();
+                    break;
+                case /* string interval */ 3:
+                    message.interval = reader.string();
+                    break;
+                case /* bool for_space */ 4:
+                    message.forSpace = reader.bool();
+                    break;
+                case /* int64 usd_cents */ 5:
+                    message.usdCents = reader.int64().toBigInt();
+                    break;
+                case /* bool per_seat */ 6:
+                    message.perSeat = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BillingPlanOffer, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string code = 1; */
+        if (message.code !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.code);
+        /* string plan = 2; */
+        if (message.plan !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.plan);
+        /* string interval = 3; */
+        if (message.interval !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.interval);
+        /* bool for_space = 4; */
+        if (message.forSpace !== false)
+            writer.tag(4, WireType.Varint).bool(message.forSpace);
+        /* int64 usd_cents = 5; */
+        if (message.usdCents !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.usdCents);
+        /* bool per_seat = 6; */
+        if (message.perSeat !== false)
+            writer.tag(6, WireType.Varint).bool(message.perSeat);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BillingPlanOffer
+ */
+export const BillingPlanOffer = new BillingPlanOffer$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBillingCheckoutInput$Type extends MessageType<CreateBillingCheckoutInput> {
+    constructor() {
+        super("CreateBillingCheckoutInput", [
+            { no: 1, name: "plan", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBillingCheckoutInput>): CreateBillingCheckoutInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.plan = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateBillingCheckoutInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBillingCheckoutInput): CreateBillingCheckoutInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string plan */ 1:
+                    message.plan = reader.string();
+                    break;
+                case /* optional int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBillingCheckoutInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string plan = 1; */
+        if (message.plan !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.plan);
+        /* optional int64 space_id = 2; */
+        if (message.spaceId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBillingCheckoutInput
+ */
+export const CreateBillingCheckoutInput = new CreateBillingCheckoutInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBillingCheckoutResult$Type extends MessageType<CreateBillingCheckoutResult> {
+    constructor() {
+        super("CreateBillingCheckoutResult", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBillingCheckoutResult>): CreateBillingCheckoutResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateBillingCheckoutResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBillingCheckoutResult): CreateBillingCheckoutResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBillingCheckoutResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBillingCheckoutResult
+ */
+export const CreateBillingCheckoutResult = new CreateBillingCheckoutResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBillingPortalInput$Type extends MessageType<CreateBillingPortalInput> {
+    constructor() {
+        super("CreateBillingPortalInput", [
+            { no: 1, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBillingPortalInput>): CreateBillingPortalInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<CreateBillingPortalInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBillingPortalInput): CreateBillingPortalInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional int64 space_id */ 1:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBillingPortalInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional int64 space_id = 1; */
+        if (message.spaceId !== undefined)
+            writer.tag(1, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBillingPortalInput
+ */
+export const CreateBillingPortalInput = new CreateBillingPortalInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CreateBillingPortalResult$Type extends MessageType<CreateBillingPortalResult> {
+    constructor() {
+        super("CreateBillingPortalResult", [
+            { no: 1, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CreateBillingPortalResult>): CreateBillingPortalResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<CreateBillingPortalResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CreateBillingPortalResult): CreateBillingPortalResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string url */ 1:
+                    message.url = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CreateBillingPortalResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string url = 1; */
+        if (message.url !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.url);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message CreateBillingPortalResult
+ */
+export const CreateBillingPortalResult = new CreateBillingPortalResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class TranslateMessagesInput$Type extends MessageType<TranslateMessagesInput> {
     constructor() {
