@@ -48,6 +48,7 @@ enum LogoutPerformer {
     let notificationCenter = UNUserNotificationCenter.current()
     notificationCenter.removeAllDeliveredNotifications()
     notificationCenter.removeAllPendingNotificationRequests()
+    AppIconBadgeService.shared.clearForLogout()
 
     // Fence playback and pending download intent before the first suspension.
     SharedAudioPlayer.shared.stop()
