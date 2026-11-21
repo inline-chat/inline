@@ -233,6 +233,22 @@ message User {
 
   // Personal Pro plan. Server-controlled; sent only for the viewer themselves.
   optional bool is_pro = 17;
+
+  // Public badge next to the user's name, sent to every viewer, min
+  // projections included. Absent: no badge.
+  optional UserBadge badge = 18;
+}
+
+// A badge shown next to a user's name.
+message UserBadge {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    // Personal Pro plan checkmark.
+    KIND_PRO = 1;
+    // Personal Believer plan checkmark.
+    KIND_BELIEVER = 2;
+  }
+  Kind kind = 1;
 }
 
 // A bot acts for its owner. Inline evaluates what a bot does as the bot plus

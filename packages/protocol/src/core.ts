@@ -674,6 +674,45 @@ export interface User {
      * @generated from protobuf field: optional bool is_pro = 17;
      */
     isPro?: boolean;
+    /**
+     * Public badge next to the user's name, sent to every viewer, min
+     * projections included. Absent: no badge.
+     *
+     * @generated from protobuf field: optional UserBadge badge = 18;
+     */
+    badge?: UserBadge;
+}
+/**
+ * A badge shown next to a user's name.
+ *
+ * @generated from protobuf message UserBadge
+ */
+export interface UserBadge {
+    /**
+     * @generated from protobuf field: UserBadge.Kind kind = 1;
+     */
+    kind: UserBadge_Kind;
+}
+/**
+ * @generated from protobuf enum UserBadge.Kind
+ */
+export enum UserBadge_Kind {
+    /**
+     * @generated from protobuf enum value: KIND_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * Personal Pro plan checkmark.
+     *
+     * @generated from protobuf enum value: KIND_PRO = 1;
+     */
+    PRO = 1,
+    /**
+     * Personal Believer plan checkmark.
+     *
+     * @generated from protobuf enum value: KIND_BELIEVER = 2;
+     */
+    BELIEVER = 2
 }
 /**
  * A bot acts for its owner. Inline evaluates what a bot does as the bot plus
@@ -21477,7 +21516,8 @@ class User$Type extends MessageType<User> {
             { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar },
             { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 16, name: "bot_info", kind: "message", T: () => BotInfo },
-            { no: 17, name: "is_pro", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 17, name: "is_pro", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 18, name: "badge", kind: "message", T: () => UserBadge }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -21540,6 +21580,9 @@ class User$Type extends MessageType<User> {
                 case /* optional bool is_pro */ 17:
                     message.isPro = reader.bool();
                     break;
+                case /* optional UserBadge badge */ 18:
+                    message.badge = UserBadge.internalBinaryRead(reader, reader.uint32(), options, message.badge);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21600,6 +21643,9 @@ class User$Type extends MessageType<User> {
         /* optional bool is_pro = 17; */
         if (message.isPro !== undefined)
             writer.tag(17, WireType.Varint).bool(message.isPro);
+        /* optional UserBadge badge = 18; */
+        if (message.badge)
+            UserBadge.internalBinaryWrite(message.badge, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21610,6 +21656,53 @@ class User$Type extends MessageType<User> {
  * @generated MessageType for protobuf message User
  */
 export const User = new User$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UserBadge$Type extends MessageType<UserBadge> {
+    constructor() {
+        super("UserBadge", [
+            { no: 1, name: "kind", kind: "enum", T: () => ["UserBadge.Kind", UserBadge_Kind, "KIND_"] }
+        ]);
+    }
+    create(value?: PartialMessage<UserBadge>): UserBadge {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.kind = 0;
+        if (value !== undefined)
+            reflectionMergePartial<UserBadge>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UserBadge): UserBadge {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* UserBadge.Kind kind */ 1:
+                    message.kind = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UserBadge, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* UserBadge.Kind kind = 1; */
+        if (message.kind !== 0)
+            writer.tag(1, WireType.Varint).int32(message.kind);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UserBadge
+ */
+export const UserBadge = new UserBadge$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class BotInfo$Type extends MessageType<BotInfo> {
     constructor() {
