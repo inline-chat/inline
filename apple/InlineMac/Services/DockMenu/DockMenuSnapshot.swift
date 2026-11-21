@@ -22,8 +22,7 @@ struct DockMenuSnapshot {
         AND "lastMessage"."messageId" = "chat"."lastMsgId"
       WHERE \(Dialog.chatListVisibilitySQL)
         AND ("dialog"."archived" IS NULL OR "dialog"."archived" = 0)
-        AND \(Dialog.unreadSQL)
-        AND \(Dialog.prominentUnreadSQL)
+        AND \(Dialog.appBadgeSQL)
       ORDER BY COALESCE("lastMessage"."date", "chat"."date") DESC, "dialog"."id" DESC
       """)
 

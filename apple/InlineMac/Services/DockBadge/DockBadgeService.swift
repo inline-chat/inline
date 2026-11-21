@@ -79,7 +79,7 @@ final class DockBadgeService {
     let observationGeneration = unreadCountsObservationGeneration
 
     withObservationTracking {
-      _ = unreadCounts.prominentUnreadChatCount
+      _ = unreadCounts.appBadgeChatCount
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
         guard let self else { return }
@@ -98,7 +98,7 @@ final class DockBadgeService {
 
   private func applyDockBadgeCount(debounceIncreases: Bool) {
     dockBadgeController.setUnreadCount(
-      unreadCounts.prominentUnreadChatCount,
+      unreadCounts.appBadgeChatCount,
       debounceIncreases: debounceIncreases
     )
   }
