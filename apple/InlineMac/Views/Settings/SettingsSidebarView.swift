@@ -214,6 +214,7 @@ private extension SettingsCategory {
     case .experimental: 0xFFC42D
     case .debug: 0xA2A2A6
     case .account: 0xAD79F7
+    case .billing: 0x34C759
     }
     return Color(
       red: Double((hex >> 16) & 0xFF) / 255,

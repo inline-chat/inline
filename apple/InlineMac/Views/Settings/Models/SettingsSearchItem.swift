@@ -11,6 +11,9 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case technicalDetails
   case signOut
 
+  // Plan & Billing
+  case plan
+
   // General
   case launchAtLogin
   case automaticSpellCorrection
@@ -134,6 +137,8 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     switch self {
     case .profile, .username, .email, .phone, .technicalDetails, .signOut:
       .account
+    case .plan:
+      .billing
     case .launchAtLogin, .automaticSpellCorrection, .checkSpellingWhileTyping, .shortenSupportedLinks,
          .sendMessages, .syncMessageGestures, .doubleClick, .hold, .swipeToReply, .translationControls,
          .openReplyThreadsInSidePane, .openChatsCleanup, .developerMode:
@@ -181,6 +186,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .phone: "Phone"
     case .technicalDetails: "Technical Details"
     case .signOut: "This Mac"
+    case .plan: "Your Plan"
     case .launchAtLogin: "Launch at Login"
     case .automaticSpellCorrection: "Automatic Spell Correction"
     case .checkSpellingWhileTyping: "Check Spelling While Typing"
@@ -272,6 +278,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .profile: "Profile"
     case .username, .email, .phone, .technicalDetails: "Account"
     case .signOut: "Session"
+    case .plan: "Plan"
     case .launchAtLogin: "Startup"
     case .developerMode: "Developer"
     case .automaticSpellCorrection, .checkSpellingWhileTyping, .shortenSupportedLinks, .sendMessages: "Writing"
@@ -331,6 +338,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .phone: ["number", "mobile"]
     case .technicalDetails: ["account id"]
     case .signOut: ["sign out", "log out", "logout"]
+    case .plan: ["billing", "subscription", "pro", "upgrade", "believer", "team", "payment", "invoice", "credit"]
     case .launchAtLogin: ["startup", "open automatically", "boot"]
     case .automaticSpellCorrection: ["autocorrect", "spelling", "typo"]
     case .checkSpellingWhileTyping: ["spellcheck", "underline", "typo"]

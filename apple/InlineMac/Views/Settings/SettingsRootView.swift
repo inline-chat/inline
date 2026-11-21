@@ -204,6 +204,8 @@ private struct SettingsDetailView: View {
         AppearanceSettingsDetailView()
       case .account:
         AccountSettingsDetailView()
+      case .billing:
+        BillingSettingsDetailView()
       case .activeSessions:
         AccountSessionsSettingsDetailView()
       case .bots:

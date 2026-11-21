@@ -2,6 +2,7 @@ import Foundation
 
 enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
+  case billing
   case activeSessions
   case audioAndVideo
   case bots
@@ -28,7 +29,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     updates.append(.updates)
 #endif
     let groups: [[SettingsCategory]] = [
-      isLoggedIn ? [.account] : [],
+      isLoggedIn ? [.account, .billing] : [],
       [.general, .appearance, .notifications, .audioAndVideo],
       isLoggedIn ? [.privacy, .dataStorage, .activeSessions] : [.dataStorage],
       isLoggedIn ? [.connectors, .bots, .hotkeys] : [.hotkeys],
@@ -57,6 +58,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Appearance"
     case .account:
       return "Account"
+    case .billing:
+      return "Plan & Billing"
     case .activeSessions:
       return "Active Sessions"
     case .bots:
@@ -93,6 +96,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "SettingsIconAppearance"
     case .account:
       return "SettingsIconAccount"
+    case .billing:
+      return "SettingsIconBilling"
     case .activeSessions:
       return "SettingsIconActiveSessions"
     case .bots:
