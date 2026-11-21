@@ -41,6 +41,7 @@ export const READ_ONLY_RPC_METHODS: ReadonlySet<Method> = new Set<Method>([
   Method.GET_CHAT,
   Method.GET_UPDATES,
   Method.SEARCH_MESSAGES,
+  Method.SEARCH_MESSAGES_GLOBAL,
   Method.LIST_BOTS,
   Method.REVEAL_BOT_TOKEN,
   Method.GET_MESSAGES,

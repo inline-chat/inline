@@ -2689,7 +2689,7 @@ enum Method {
   GET_SPACES = 170;
   SEND_COMPOSE_SUGGESTION = 171;
   GET_COMMON_CHATS = 172;
-  // 173 is reserved for global message search.
+  SEARCH_MESSAGES_GLOBAL = 173;
   GET_BILLING = 174;
   CREATE_BILLING_CHECKOUT = 175;
   CREATE_BILLING_PORTAL = 176;
@@ -2870,6 +2870,7 @@ message RpcCall {
     GetSpacesInput getSpaces = 171;
     SendComposeSuggestionInput sendComposeSuggestion = 172;
     GetCommonChatsInput getCommonChats = 173;
+    SearchMessagesGlobalInput searchMessagesGlobal = 174;
     GetBillingInput getBilling = 175;
     CreateBillingCheckoutInput createBillingCheckout = 176;
     CreateBillingPortalInput createBillingPortal = 177;
@@ -3052,6 +3053,7 @@ message RpcResult {
     GetSpacesResult getSpaces = 171;
     SendComposeSuggestionResult sendComposeSuggestion = 172;
     GetCommonChatsResult getCommonChats = 173;
+    SearchMessagesGlobalResult searchMessagesGlobal = 174;
     GetBillingResult getBilling = 175;
     CreateBillingCheckoutResult createBillingCheckout = 176;
     CreateBillingPortalResult createBillingPortal = 177;
@@ -4968,6 +4970,53 @@ enum SearchMessagesFilter {
   FILTER_DOCUMENTS = 4;
   FILTER_LINKS = 5;
   FILTER_VOICE_MEMOS = 6;
+}
+
+// Whole normalized words across the signed-in person's discoverable chats.
+// Space-separated terms may span the body and filename. Quoted phrases and the
+// parts of a punctuation-connected term must occur consecutively within one field.
+message SearchMessagesGlobalInput {
+  string query = 1;
+  optional InputPeer peer_id = 2;
+  optional int64 space_id = 3;
+  optional int32 limit = 4; // Default 20, maximum 50.
+  optional string cursor = 5; // Opaque, session-bound continuation.
+  optional SearchMessagesFilter filter = 6;
+  optional int64 from_user_id = 7;
+  optional int64 min_date = 8; // Inclusive Unix seconds.
+  optional int64 max_date = 9;
+  optional bool include_archived = 10; // Defaults to true.
+  optional bool home_only = 11;
+}
+
+message GlobalSearchExcerpt {
+  enum Field {
+    FIELD_UNSPECIFIED = 0;
+    BODY = 1;
+    DOCUMENT_FILENAME = 2;
+  }
+  message Range {
+    uint32 offset = 1; // UTF-16 code units in text.
+    uint32 length = 2;
+  }
+  Field field = 1;
+  string text = 2;
+  repeated Range highlights = 3;
+}
+
+message GlobalMessageSearchHit {
+  Peer peer = 1;
+  int64 chat_id = 2;
+  int64 message_id = 3; // Local to chat_id.
+  int64 date = 4;
+  int64 from_user_id = 5;
+  repeated GlobalSearchExcerpt excerpts = 6;
+}
+
+message SearchMessagesGlobalResult {
+  repeated GlobalMessageSearchHit hits = 1;
+  optional string next_cursor = 2; // Can be present even on an empty verified page.
+  bool index_incomplete = 3; // True while eligible history has missing or superseded indexing work.
 }
 
 message SearchMessagesInput {

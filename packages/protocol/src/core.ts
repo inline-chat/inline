@@ -7188,6 +7188,12 @@ export interface RpcCall {
          */
         getCommonChats: GetCommonChatsInput;
     } | {
+        oneofKind: "searchMessagesGlobal";
+        /**
+         * @generated from protobuf field: SearchMessagesGlobalInput searchMessagesGlobal = 174;
+         */
+        searchMessagesGlobal: SearchMessagesGlobalInput;
+    } | {
         oneofKind: "getBilling";
         /**
          * @generated from protobuf field: GetBillingInput getBilling = 175;
@@ -8246,6 +8252,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetCommonChatsResult getCommonChats = 173;
          */
         getCommonChats: GetCommonChatsResult;
+    } | {
+        oneofKind: "searchMessagesGlobal";
+        /**
+         * @generated from protobuf field: SearchMessagesGlobalResult searchMessagesGlobal = 174;
+         */
+        searchMessagesGlobal: SearchMessagesGlobalResult;
     } | {
         oneofKind: "getBilling";
         /**
@@ -13028,6 +13040,152 @@ export interface GetThreadSubthreadsResult {
      * @generated from protobuf field: repeated Dialog dialogs = 3;
      */
     dialogs: Dialog[];
+}
+/**
+ * Whole normalized words across the signed-in person's discoverable chats.
+ * Space-separated terms may span the body and filename. Quoted phrases and the
+ * parts of a punctuation-connected term must occur consecutively within one field.
+ *
+ * @generated from protobuf message SearchMessagesGlobalInput
+ */
+export interface SearchMessagesGlobalInput {
+    /**
+     * @generated from protobuf field: string query = 1;
+     */
+    query: string;
+    /**
+     * @generated from protobuf field: optional InputPeer peer_id = 2;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: optional int64 space_id = 3;
+     */
+    spaceId?: bigint;
+    /**
+     * @generated from protobuf field: optional int32 limit = 4;
+     */
+    limit?: number; // Default 20, maximum 50.
+    /**
+     * @generated from protobuf field: optional string cursor = 5;
+     */
+    cursor?: string; // Opaque, session-bound continuation.
+    /**
+     * @generated from protobuf field: optional SearchMessagesFilter filter = 6;
+     */
+    filter?: SearchMessagesFilter;
+    /**
+     * @generated from protobuf field: optional int64 from_user_id = 7;
+     */
+    fromUserId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 min_date = 8;
+     */
+    minDate?: bigint; // Inclusive Unix seconds.
+    /**
+     * @generated from protobuf field: optional int64 max_date = 9;
+     */
+    maxDate?: bigint;
+    /**
+     * @generated from protobuf field: optional bool include_archived = 10;
+     */
+    includeArchived?: boolean; // Defaults to true.
+    /**
+     * @generated from protobuf field: optional bool home_only = 11;
+     */
+    homeOnly?: boolean;
+}
+/**
+ * @generated from protobuf message GlobalSearchExcerpt
+ */
+export interface GlobalSearchExcerpt {
+    /**
+     * @generated from protobuf field: GlobalSearchExcerpt.Field field = 1;
+     */
+    field: GlobalSearchExcerpt_Field;
+    /**
+     * @generated from protobuf field: string text = 2;
+     */
+    text: string;
+    /**
+     * @generated from protobuf field: repeated GlobalSearchExcerpt.Range highlights = 3;
+     */
+    highlights: GlobalSearchExcerpt_Range[];
+}
+/**
+ * @generated from protobuf message GlobalSearchExcerpt.Range
+ */
+export interface GlobalSearchExcerpt_Range {
+    /**
+     * @generated from protobuf field: uint32 offset = 1;
+     */
+    offset: number; // UTF-16 code units in text.
+    /**
+     * @generated from protobuf field: uint32 length = 2;
+     */
+    length: number;
+}
+/**
+ * @generated from protobuf enum GlobalSearchExcerpt.Field
+ */
+export enum GlobalSearchExcerpt_Field {
+    /**
+     * @generated from protobuf enum value: FIELD_UNSPECIFIED = 0;
+     */
+    FIELD_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: BODY = 1;
+     */
+    BODY = 1,
+    /**
+     * @generated from protobuf enum value: DOCUMENT_FILENAME = 2;
+     */
+    DOCUMENT_FILENAME = 2
+}
+/**
+ * @generated from protobuf message GlobalMessageSearchHit
+ */
+export interface GlobalMessageSearchHit {
+    /**
+     * @generated from protobuf field: Peer peer = 1;
+     */
+    peer?: Peer;
+    /**
+     * @generated from protobuf field: int64 chat_id = 2;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 message_id = 3;
+     */
+    messageId: bigint; // Local to chat_id.
+    /**
+     * @generated from protobuf field: int64 date = 4;
+     */
+    date: bigint;
+    /**
+     * @generated from protobuf field: int64 from_user_id = 5;
+     */
+    fromUserId: bigint;
+    /**
+     * @generated from protobuf field: repeated GlobalSearchExcerpt excerpts = 6;
+     */
+    excerpts: GlobalSearchExcerpt[];
+}
+/**
+ * @generated from protobuf message SearchMessagesGlobalResult
+ */
+export interface SearchMessagesGlobalResult {
+    /**
+     * @generated from protobuf field: repeated GlobalMessageSearchHit hits = 1;
+     */
+    hits: GlobalMessageSearchHit[];
+    /**
+     * @generated from protobuf field: optional string next_cursor = 2;
+     */
+    nextCursor?: string; // Can be present even on an empty verified page.
+    /**
+     * @generated from protobuf field: bool index_incomplete = 3;
+     */
+    indexIncomplete: boolean; // True while eligible history has missing or superseded indexing work.
 }
 /**
  * @generated from protobuf message SearchMessagesInput
@@ -19239,8 +19397,10 @@ export enum Method {
      */
     GET_COMMON_CHATS = 172,
     /**
-     * 173 is reserved for global message search.
-     *
+     * @generated from protobuf enum value: SEARCH_MESSAGES_GLOBAL = 173;
+     */
+    SEARCH_MESSAGES_GLOBAL = 173,
+    /**
      * @generated from protobuf enum value: GET_BILLING = 174;
      */
     GET_BILLING = 174,
@@ -33937,6 +34097,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput },
             { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput },
             { no: 173, name: "getCommonChats", kind: "message", oneof: "input", T: () => GetCommonChatsInput },
+            { no: 174, name: "searchMessagesGlobal", kind: "message", oneof: "input", T: () => SearchMessagesGlobalInput },
             { no: 175, name: "getBilling", kind: "message", oneof: "input", T: () => GetBillingInput },
             { no: 176, name: "createBillingCheckout", kind: "message", oneof: "input", T: () => CreateBillingCheckoutInput },
             { no: 177, name: "createBillingPortal", kind: "message", oneof: "input", T: () => CreateBillingPortalInput }
@@ -34984,6 +35145,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getCommonChats: GetCommonChatsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getCommonChats)
                     };
                     break;
+                case /* SearchMessagesGlobalInput searchMessagesGlobal */ 174:
+                    message.input = {
+                        oneofKind: "searchMessagesGlobal",
+                        searchMessagesGlobal: SearchMessagesGlobalInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).searchMessagesGlobal)
+                    };
+                    break;
                 case /* GetBillingInput getBilling */ 175:
                     message.input = {
                         oneofKind: "getBilling",
@@ -35530,6 +35697,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetCommonChatsInput getCommonChats = 173; */
         if (message.input.oneofKind === "getCommonChats")
             GetCommonChatsInput.internalBinaryWrite(message.input.getCommonChats, writer.tag(173, WireType.LengthDelimited).fork(), options).join();
+        /* SearchMessagesGlobalInput searchMessagesGlobal = 174; */
+        if (message.input.oneofKind === "searchMessagesGlobal")
+            SearchMessagesGlobalInput.internalBinaryWrite(message.input.searchMessagesGlobal, writer.tag(174, WireType.LengthDelimited).fork(), options).join();
         /* GetBillingInput getBilling = 175; */
         if (message.input.oneofKind === "getBilling")
             GetBillingInput.internalBinaryWrite(message.input.getBilling, writer.tag(175, WireType.LengthDelimited).fork(), options).join();
@@ -35725,6 +35895,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult },
             { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult },
             { no: 173, name: "getCommonChats", kind: "message", oneof: "result", T: () => GetCommonChatsResult },
+            { no: 174, name: "searchMessagesGlobal", kind: "message", oneof: "result", T: () => SearchMessagesGlobalResult },
             { no: 175, name: "getBilling", kind: "message", oneof: "result", T: () => GetBillingResult },
             { no: 176, name: "createBillingCheckout", kind: "message", oneof: "result", T: () => CreateBillingCheckoutResult },
             { no: 177, name: "createBillingPortal", kind: "message", oneof: "result", T: () => CreateBillingPortalResult }
@@ -36772,6 +36943,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getCommonChats: GetCommonChatsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getCommonChats)
                     };
                     break;
+                case /* SearchMessagesGlobalResult searchMessagesGlobal */ 174:
+                    message.result = {
+                        oneofKind: "searchMessagesGlobal",
+                        searchMessagesGlobal: SearchMessagesGlobalResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).searchMessagesGlobal)
+                    };
+                    break;
                 case /* GetBillingResult getBilling */ 175:
                     message.result = {
                         oneofKind: "getBilling",
@@ -37318,6 +37495,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetCommonChatsResult getCommonChats = 173; */
         if (message.result.oneofKind === "getCommonChats")
             GetCommonChatsResult.internalBinaryWrite(message.result.getCommonChats, writer.tag(173, WireType.LengthDelimited).fork(), options).join();
+        /* SearchMessagesGlobalResult searchMessagesGlobal = 174; */
+        if (message.result.oneofKind === "searchMessagesGlobal")
+            SearchMessagesGlobalResult.internalBinaryWrite(message.result.searchMessagesGlobal, writer.tag(174, WireType.LengthDelimited).fork(), options).join();
         /* GetBillingResult getBilling = 175; */
         if (message.result.oneofKind === "getBilling")
             GetBillingResult.internalBinaryWrite(message.result.getBilling, writer.tag(175, WireType.LengthDelimited).fork(), options).join();
@@ -52052,6 +52232,389 @@ class GetThreadSubthreadsResult$Type extends MessageType<GetThreadSubthreadsResu
  * @generated MessageType for protobuf message GetThreadSubthreadsResult
  */
 export const GetThreadSubthreadsResult = new GetThreadSubthreadsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchMessagesGlobalInput$Type extends MessageType<SearchMessagesGlobalInput> {
+    constructor() {
+        super("SearchMessagesGlobalInput", [
+            { no: 1, name: "query", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 3, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "cursor", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "filter", kind: "enum", opt: true, T: () => ["SearchMessagesFilter", SearchMessagesFilter] },
+            { no: 7, name: "from_user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "min_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 9, name: "max_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 10, name: "include_archived", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 11, name: "home_only", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SearchMessagesGlobalInput>): SearchMessagesGlobalInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.query = "";
+        if (value !== undefined)
+            reflectionMergePartial<SearchMessagesGlobalInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchMessagesGlobalInput): SearchMessagesGlobalInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string query */ 1:
+                    message.query = reader.string();
+                    break;
+                case /* optional InputPeer peer_id */ 2:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 space_id */ 3:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional int32 limit */ 4:
+                    message.limit = reader.int32();
+                    break;
+                case /* optional string cursor */ 5:
+                    message.cursor = reader.string();
+                    break;
+                case /* optional SearchMessagesFilter filter */ 6:
+                    message.filter = reader.int32();
+                    break;
+                case /* optional int64 from_user_id */ 7:
+                    message.fromUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 min_date */ 8:
+                    message.minDate = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 max_date */ 9:
+                    message.maxDate = reader.int64().toBigInt();
+                    break;
+                case /* optional bool include_archived */ 10:
+                    message.includeArchived = reader.bool();
+                    break;
+                case /* optional bool home_only */ 11:
+                    message.homeOnly = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchMessagesGlobalInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string query = 1; */
+        if (message.query !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.query);
+        /* optional InputPeer peer_id = 2; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 space_id = 3; */
+        if (message.spaceId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.spaceId);
+        /* optional int32 limit = 4; */
+        if (message.limit !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.limit);
+        /* optional string cursor = 5; */
+        if (message.cursor !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.cursor);
+        /* optional SearchMessagesFilter filter = 6; */
+        if (message.filter !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.filter);
+        /* optional int64 from_user_id = 7; */
+        if (message.fromUserId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.fromUserId);
+        /* optional int64 min_date = 8; */
+        if (message.minDate !== undefined)
+            writer.tag(8, WireType.Varint).int64(message.minDate);
+        /* optional int64 max_date = 9; */
+        if (message.maxDate !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.maxDate);
+        /* optional bool include_archived = 10; */
+        if (message.includeArchived !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.includeArchived);
+        /* optional bool home_only = 11; */
+        if (message.homeOnly !== undefined)
+            writer.tag(11, WireType.Varint).bool(message.homeOnly);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchMessagesGlobalInput
+ */
+export const SearchMessagesGlobalInput = new SearchMessagesGlobalInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GlobalSearchExcerpt$Type extends MessageType<GlobalSearchExcerpt> {
+    constructor() {
+        super("GlobalSearchExcerpt", [
+            { no: 1, name: "field", kind: "enum", T: () => ["GlobalSearchExcerpt.Field", GlobalSearchExcerpt_Field] },
+            { no: 2, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "highlights", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GlobalSearchExcerpt_Range }
+        ]);
+    }
+    create(value?: PartialMessage<GlobalSearchExcerpt>): GlobalSearchExcerpt {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.field = 0;
+        message.text = "";
+        message.highlights = [];
+        if (value !== undefined)
+            reflectionMergePartial<GlobalSearchExcerpt>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GlobalSearchExcerpt): GlobalSearchExcerpt {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* GlobalSearchExcerpt.Field field */ 1:
+                    message.field = reader.int32();
+                    break;
+                case /* string text */ 2:
+                    message.text = reader.string();
+                    break;
+                case /* repeated GlobalSearchExcerpt.Range highlights */ 3:
+                    message.highlights.push(GlobalSearchExcerpt_Range.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GlobalSearchExcerpt, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* GlobalSearchExcerpt.Field field = 1; */
+        if (message.field !== 0)
+            writer.tag(1, WireType.Varint).int32(message.field);
+        /* string text = 2; */
+        if (message.text !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.text);
+        /* repeated GlobalSearchExcerpt.Range highlights = 3; */
+        for (let i = 0; i < message.highlights.length; i++)
+            GlobalSearchExcerpt_Range.internalBinaryWrite(message.highlights[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GlobalSearchExcerpt
+ */
+export const GlobalSearchExcerpt = new GlobalSearchExcerpt$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GlobalSearchExcerpt_Range$Type extends MessageType<GlobalSearchExcerpt_Range> {
+    constructor() {
+        super("GlobalSearchExcerpt.Range", [
+            { no: 1, name: "offset", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
+            { no: 2, name: "length", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GlobalSearchExcerpt_Range>): GlobalSearchExcerpt_Range {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.offset = 0;
+        message.length = 0;
+        if (value !== undefined)
+            reflectionMergePartial<GlobalSearchExcerpt_Range>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GlobalSearchExcerpt_Range): GlobalSearchExcerpt_Range {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* uint32 offset */ 1:
+                    message.offset = reader.uint32();
+                    break;
+                case /* uint32 length */ 2:
+                    message.length = reader.uint32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GlobalSearchExcerpt_Range, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* uint32 offset = 1; */
+        if (message.offset !== 0)
+            writer.tag(1, WireType.Varint).uint32(message.offset);
+        /* uint32 length = 2; */
+        if (message.length !== 0)
+            writer.tag(2, WireType.Varint).uint32(message.length);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GlobalSearchExcerpt.Range
+ */
+export const GlobalSearchExcerpt_Range = new GlobalSearchExcerpt_Range$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GlobalMessageSearchHit$Type extends MessageType<GlobalMessageSearchHit> {
+    constructor() {
+        super("GlobalMessageSearchHit", [
+            { no: 1, name: "peer", kind: "message", T: () => Peer },
+            { no: 2, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "from_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "excerpts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GlobalSearchExcerpt }
+        ]);
+    }
+    create(value?: PartialMessage<GlobalMessageSearchHit>): GlobalMessageSearchHit {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.messageId = 0n;
+        message.date = 0n;
+        message.fromUserId = 0n;
+        message.excerpts = [];
+        if (value !== undefined)
+            reflectionMergePartial<GlobalMessageSearchHit>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GlobalMessageSearchHit): GlobalMessageSearchHit {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer */ 1:
+                    message.peer = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peer);
+                    break;
+                case /* int64 chat_id */ 2:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 3:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 4:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                case /* int64 from_user_id */ 5:
+                    message.fromUserId = reader.int64().toBigInt();
+                    break;
+                case /* repeated GlobalSearchExcerpt excerpts */ 6:
+                    message.excerpts.push(GlobalSearchExcerpt.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GlobalMessageSearchHit, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer = 1; */
+        if (message.peer)
+            Peer.internalBinaryWrite(message.peer, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 chat_id = 2; */
+        if (message.chatId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.chatId);
+        /* int64 message_id = 3; */
+        if (message.messageId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.messageId);
+        /* int64 date = 4; */
+        if (message.date !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.date);
+        /* int64 from_user_id = 5; */
+        if (message.fromUserId !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.fromUserId);
+        /* repeated GlobalSearchExcerpt excerpts = 6; */
+        for (let i = 0; i < message.excerpts.length; i++)
+            GlobalSearchExcerpt.internalBinaryWrite(message.excerpts[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GlobalMessageSearchHit
+ */
+export const GlobalMessageSearchHit = new GlobalMessageSearchHit$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchMessagesGlobalResult$Type extends MessageType<SearchMessagesGlobalResult> {
+    constructor() {
+        super("SearchMessagesGlobalResult", [
+            { no: 1, name: "hits", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => GlobalMessageSearchHit },
+            { no: 2, name: "next_cursor", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "index_incomplete", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SearchMessagesGlobalResult>): SearchMessagesGlobalResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.hits = [];
+        message.indexIncomplete = false;
+        if (value !== undefined)
+            reflectionMergePartial<SearchMessagesGlobalResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchMessagesGlobalResult): SearchMessagesGlobalResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated GlobalMessageSearchHit hits */ 1:
+                    message.hits.push(GlobalMessageSearchHit.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* optional string next_cursor */ 2:
+                    message.nextCursor = reader.string();
+                    break;
+                case /* bool index_incomplete */ 3:
+                    message.indexIncomplete = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchMessagesGlobalResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated GlobalMessageSearchHit hits = 1; */
+        for (let i = 0; i < message.hits.length; i++)
+            GlobalMessageSearchHit.internalBinaryWrite(message.hits[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional string next_cursor = 2; */
+        if (message.nextCursor !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.nextCursor);
+        /* bool index_incomplete = 3; */
+        if (message.indexIncomplete !== false)
+            writer.tag(3, WireType.Varint).bool(message.indexIncomplete);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchMessagesGlobalResult
+ */
+export const SearchMessagesGlobalResult = new SearchMessagesGlobalResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
     constructor() {
