@@ -54,7 +54,7 @@ export class CloudSearchWorker {
       }
       // Live sends and edits get first claim. Reserve a quarter for history even under sustained traffic.
       const live = await runCloudSearchIndexBatch({ limit: 12 })
-      if (process.env["CLOUD_MESSAGE_SEARCH_BACKFILL_ENABLED"] === "true" && Date.now() >= this.nextBackfillCheck) {
+      if (process.env["CLOUD_MESSAGE_SEARCH_BACKFILL_ENABLED"] !== "false" && Date.now() >= this.nextBackfillCheck) {
         const complete = await bootstrapSearchDocuments()
         if (complete) {
           const repaired = await requeueObsoleteSearchDocuments()

@@ -24,7 +24,7 @@ export const searchSourceBytes = sql`(coalesce(octet_length(m.text_encrypted), o
   + coalesce(octet_length(doc.file_name), 0) + coalesce(octet_length(m.system_message_encrypted), 0))`
 
 export function cloudSearchEnabled(): boolean {
-  const value = process.env["CLOUD_MESSAGE_SEARCH_ENABLED"] ?? "false"
+  const value = process.env["CLOUD_MESSAGE_SEARCH_ENABLED"] ?? "true"
   if (value !== "true" && value !== "false") throw new Error("Invalid cloud search configuration")
   return value === "true"
 }

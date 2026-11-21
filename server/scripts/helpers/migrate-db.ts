@@ -8,6 +8,7 @@ import {
   migrationFolder,
   sourceMigrations,
 } from "../../src/db/migrationState"
+import { prebuildOnlineIndexes } from "./online-indexes"
 
 // One global lock for this database's Inline schema. The lock, ledger checks,
 // and DDL must share a transaction: a lost lock connection cannot leave a
@@ -16,6 +17,10 @@ const MIGRATION_LOCK_KEY = 0x496e6c696e65
 
 export const migrateDb = async () => {
   const databaseUrl = directDatabaseUrl(process.env)
+
+  // Concurrent index builds cannot run in a transaction, so they precede it.
+  const built = await prebuildOnlineIndexes(databaseUrl, migrationFolder(), MIGRATION_LOCK_KEY)
+  if (built.length > 0) console.info(`Built indexes concurrently: ${built.join(", ")}`)
 
   const migrationClient = postgres(databaseUrl, {
     max: 1,

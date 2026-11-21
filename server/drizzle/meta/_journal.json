@@ -1254,6 +1254,13 @@
       "when": 1795299052944,
       "tag": "0178_billing-payment-date",
       "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "7",
+      "when": 1795299713005,
+      "tag": "0179_enable-global-search-capture",
+      "breakpoints": true
     }
   ]
 }
