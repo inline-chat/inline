@@ -33,6 +33,17 @@ enum MediaGalleryChromeStyle {
     return button
   }
 
+  /// Cross-fades what the views draw next, so text that changes as pages turn doesn't pop.
+  static func fadeContents(of views: [UIView]) {
+    for view in views where view.window != nil {
+      let fade = CATransition()
+      fade.type = .fade
+      fade.duration = 0.16
+      fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      view.layer.add(fade, forKey: "contentsFade")
+    }
+  }
+
   /// A non-interactive glass panel for text that sits over the photo.
   static func glassPanel(cornerRadius: CGFloat) -> UIVisualEffectView {
     let panel: UIVisualEffectView
@@ -46,6 +57,67 @@ enum MediaGalleryChromeStyle {
     panel.clipsToBounds = true
     panel.translatesAutoresizingMaskIntoConstraints = false
     return panel
+  }
+}
+
+/// The download ring over a page that is still loading: a dark disc with the chat bubble's white
+/// progress ring. It fills as bytes arrive and spins a short arc while the size is unknown.
+final class MediaGalleryDownloadRing: UIView {
+  static let diameter: CGFloat = 52
+  private let ring = CircularProgressHostingView()
+  private(set) var isShowing = false
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    isUserInteractionEnabled = false
+    backgroundColor = UIColor.black.withAlphaComponent(0.45)
+    layer.cornerRadius = Self.diameter / 2
+    layer.cornerCurve = .circular
+    addSubview(ring)
+    alpha = 0
+    isHidden = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    ring.frame = bounds.insetBy(dx: 6, dy: 6)
+  }
+
+  func setProgress(_ fraction: Double) {
+    guard isShowing else { return }
+    ring.setProgress(fraction)
+  }
+
+  func show() {
+    guard !isShowing else { return }
+    isShowing = true
+    ring.setProgress(0)
+    isHidden = false
+    UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState]) { self.alpha = 1 }
+  }
+
+  /// Fades out; a finished download fills the ring first.
+  func hide(filled: Bool) {
+    guard isShowing else { return }
+    if filled { ring.setProgress(1) }
+    isShowing = false
+    UIView.animate(withDuration: 0.2, delay: filled ? 0.1 : 0, options: [.beginFromCurrentState]) {
+      self.alpha = 0
+    } completion: { _ in
+      if !self.isShowing { self.isHidden = true }
+    }
+  }
+
+  func reset() {
+    isShowing = false
+    layer.removeAllAnimations()
+    alpha = 0
+    isHidden = true
   }
 }
 
@@ -170,7 +242,10 @@ final class MediaGalleryTopBar: MediaGalleryPassthroughView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(title: String?, subtitle: String?) {
+  func update(title: String?, subtitle: String?, animated: Bool = false) {
+    if animated, title != titleLabel.text || subtitle != subtitleLabel.text {
+      MediaGalleryChromeStyle.fadeContents(of: [titleLabel, subtitleLabel])
+    }
     titleLabel.text = title
     titleLabel.isHidden = title == nil
     subtitleLabel.text = subtitle
@@ -271,16 +346,55 @@ final class MediaGalleryBottomBar: MediaGalleryPassthroughView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(caption: String?, counter: String?, isVideo: Bool) {
+  func update(caption: String?, counter: String?, isVideo: Bool, animated: Bool = false) {
     let caption = caption?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if animated {
+      var changed: [UIView] = []
+      if caption != captionLabel.text { changed.append(captionLabel) }
+      if counter != counterLabel.text { changed.append(counterLabel) }
+      MediaGalleryChromeStyle.fadeContents(of: changed)
+    }
     captionLabel.text = caption
-    captionPanel.superview?.isHidden = caption?.isEmpty ?? true
     isCaptionExpanded = false
     captionLabel.numberOfLines = 3
     counterLabel.text = counter
     counterPanel.isHidden = counter == nil
-    videoControls.isHidden = !isVideo
-    setNeedsLayout()
+    let captionHidden = caption?.isEmpty ?? true
+    let rowsChange = captionPanel.superview?.isHidden != captionHidden || videoControls.isHidden == isVideo
+    let apply = {
+      // Stack views count repeated hides inside animations; set only what changes.
+      if let row = self.captionPanel.superview, row.isHidden != captionHidden { row.isHidden = captionHidden }
+      if self.videoControls.isHidden == isVideo { self.videoControls.isHidden = !isVideo }
+      self.setNeedsLayout()
+    }
+    // Paging between a photo with a caption and one without, or to a video, grows or shrinks
+    // the bar; animate it rather than jumping the strip.
+    if animated, rowsChange, window != nil {
+      UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+        apply()
+        self.superview?.layoutIfNeeded()
+      }
+    } else {
+      apply()
+    }
+  }
+
+  /// The strip shows once the gallery has more than one item, which for a chat is usually just
+  /// after the open lands; it grows in rather than popping the bar taller.
+  func setStripVisible(_ visible: Bool, animated: Bool) {
+    guard strip.isHidden == visible else { return }
+    strip.isHidden = !visible
+    guard animated, visible, window != nil else { return }
+    // An explicit fade: the strip appears in the same pass that reloads it and resizes the bar.
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = 0
+    fade.toValue = 1
+    fade.duration = 0.25
+    fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    strip.layer.add(fade, forKey: "appear")
+    UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+      self.superview?.layoutIfNeeded()
+    }
   }
 
   override func layoutSubviews() {
@@ -595,6 +709,22 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
     }
   }
 
+  /// Decoded straight at thumbnail size: an item without a small size falls back to the
+  /// full photo, which a resize processor would decode in full first.
+  static func request(url: URL) -> ImageRequest {
+    ImageRequest(
+      url: url,
+      userInfo: [.thumbnailKey: ImageRequest.ThumbnailOptions(size: CGSize(width: 80, height: 80), unit: .points, contentMode: .aspectFill)]
+    )
+  }
+
+  /// The strip's thumbnail for `item`, if it's in memory: small but whole, a better page
+  /// placeholder than the blurred stripped thumbnail.
+  static func cachedThumbnail(for item: MediaGalleryItem) -> UIImage? {
+    guard let url = item.thumbnailURL ?? item.mediaURL else { return nil }
+    return ImagePipeline.shared.cache.cachedImage(for: request(url: url), caches: .memory)?.image
+  }
+
   // MARK: Cell
 
   private final class Cell: UICollectionViewCell {
@@ -660,12 +790,7 @@ final class MediaGalleryThumbnailStrip: UIView, UICollectionViewDataSource, UICo
       videoBadge.isHidden = item.kind != .video
       imageView.image = item.strippedImage
       guard let url else { return }
-      // Decoded straight at thumbnail size: an item without a small size falls back to the
-      // full photo, which a resize processor would decode in full first.
-      let request = ImageRequest(
-        url: url,
-        userInfo: [.thumbnailKey: ImageRequest.ThumbnailOptions(size: CGSize(width: 80, height: 80), unit: .points, contentMode: .aspectFill)]
-      )
+      let request = MediaGalleryThumbnailStrip.request(url: url)
       if let cached = ImagePipeline.shared.cache.cachedImage(for: request, caches: .memory) {
         imageView.image = cached.image
         hasThumbnail = true

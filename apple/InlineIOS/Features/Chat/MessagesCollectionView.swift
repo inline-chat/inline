@@ -1260,6 +1260,32 @@ final class MessagesCollectionView: UICollectionView {
     return Self.galleryMediaView(in: cell.contentView)
   }
 
+  /// The thumbnail a gallery item zooms from and back to. An album item uses its own tile; the
+  /// album's row holds several, and the first one would be the wrong photo.
+  func gallerySourceView(stableId: Int64, messageId: Int64) -> UIView? {
+    for case let cell as MessageCollectionViewCell in visibleCells {
+      if let tile = Self.albumTile(messageId: messageId, in: cell.contentView) {
+        return tile
+      }
+    }
+    return sourceViewForMessageStableId(stableId)
+  }
+
+  private static func albumTile(messageId: Int64, in view: UIView) -> UIView? {
+    for subview in view.subviews where !subview.isHidden {
+      if let album = subview as? MessageAlbumView {
+        guard let tile = album.tileView(messageId: messageId) else { continue }
+        if let photo = tile as? NewPhotoView { return photo.imageView }
+        if let video = tile as? NewVideoView { return video.gallerySourceView }
+        return tile
+      }
+      if let found = albumTile(messageId: messageId, in: subview) {
+        return found
+      }
+    }
+    return nil
+  }
+
   /// The photo or video thumbnail inside a message cell, for gallery transitions.
   private static func galleryMediaView(in view: UIView) -> UIView? {
     for subview in view.subviews where !subview.isHidden {
@@ -4827,7 +4853,7 @@ private extension MessagesCollectionView {
         sourceImage: sourceImage,
         actions: actions,
         sourceViewProvider: { [weak collectionView] item in
-          item.messageStableId.flatMap { collectionView?.sourceViewForMessageStableId($0) }
+          item.messageStableId.flatMap { collectionView?.gallerySourceView(stableId: $0, messageId: item.id) }
         }
       )
       viewer.onDismiss = { [weak self] in
