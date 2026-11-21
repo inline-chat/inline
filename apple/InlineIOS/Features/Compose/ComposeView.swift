@@ -98,12 +98,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var attachmentItems: [String: FileMediaItem] = [:] {
     didSet { attachmentOrder = Self.updatedAttachmentOrder(attachmentOrder, items: attachmentItems) }
   }
-  /// The strip's Original chip: photos and videos go as their untouched files. Resets once the
-  /// attachments are sent or cleared, so it never carries over to a later message.
-  var sendsMediaAsOriginal = false {
-    didSet { originalToggleButton?.isSelected = sendsMediaAsOriginal }
-  }
-  weak var originalToggleButton: UIButton?
+  /// What Send as Original would send for each photo, video or image file (size, location),
+  /// for its menu.
+  private var originalAvailability: [String: OriginalAvailability] = [:]
+  private var originalSummaryTasks: [String: Task<Void, Never>] = [:]
+  /// Attachments being switched between photo and file by Send as Original.
+  private var switchingAttachmentIds: Set<String> = []
   /// Keys of `attachmentItems` in the order they were added: the order they are sent in, and so
   /// the order of an album's photos.
   private(set) var attachmentOrder: [String] = []
@@ -1219,7 +1219,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     )
     let hasText = !rawText.isEmpty
     let attachmentItemsSnapshot = attachmentItems
-    let sendsOriginalsSnapshot = sendsMediaAsOriginal
     let hasAttachmentItems = !attachmentItemsSnapshot.isEmpty
     let hasForward = forwardContext != nil
 
@@ -1362,17 +1361,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           await sendTextTransaction(transaction)
         }
       } else {
-        // In the order they were added; neighbouring photos and videos go out as albums.
-        var attachments = orderedAttachmentsToSend.filter { attachment in
+        // In the order they were added; neighbouring items go out as albums, photos and videos
+        // before files (originals among them).
+        let attachments = orderedAttachmentsToSend.filter { attachment in
           // Verify attachment has valid local path before sending
           guard attachment.getLocalPath() != nil else {
             log.error("Attachment has no local path, skipping: \(attachment)")
             return false
           }
           return true
-        }
-        if sendsOriginalsSnapshot {
-          attachments = await FileMediaItem.withOriginals(attachments)
         }
         for send in TransactionSendMessage.sends(
           text: text,
@@ -2143,7 +2140,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
     attachmentItems.removeAll()
     pendingVideoAttachments.removeAll()
-    sendsMediaAsOriginal = false
     handleAttachmentItemsChanged(
       animated: false,
       shouldUpdateSendButtonVisibility: shouldUpdateSendButtonVisibility,
@@ -2166,6 +2162,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     cancelRemovedUploads: Bool = true
   ) {
     syncAttachmentUploadTracking(cancelRemovedUploads: cancelRemovedUploads)
+    syncOriginalMediaState()
     UIView.performWithoutAnimation {
       refreshAttachmentPreviews()
       attachmentStackView.layoutIfNeeded()
@@ -2359,12 +2356,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     guard hasAttachments else { return }
 
-    if !pendingVideoAttachments.isEmpty || attachmentItems.values.contains(where: \.canSendAsOriginal) {
-      let toggle = makeOriginalToggleButton()
-      originalToggleButton = toggle
-      attachmentStackView.addArrangedSubview(toggle)
-    }
-
     for pending in pendingVideoAttachments {
       let preview = ComposeAttachmentPreviewItemView(
         pendingVideoId: pending.id,
@@ -2375,7 +2366,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       attachmentStackView.addArrangedSubview(preview)
     }
 
-    for id in attachmentOrder {
+    // As they're sent: photos and videos first, then files (a switched original among them).
+    let addedIds = attachmentOrder.filter { attachmentItems[$0] != nil }
+    let displayedIds = TransactionSendMessage.sendOrder(addedIds.compactMap { attachmentItems[$0] }).map { addedIds[$0] }
+    for id in displayedIds {
       guard let mediaItem = attachmentItems[id] else { continue }
       let preview = ComposeAttachmentPreviewItemView(
         attachmentId: id,
@@ -2386,8 +2380,109 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       ) { [weak self] attachmentId in
         self?.removeAttachment(attachmentId)
       }
+      if mediaItem.canSwitchOriginal {
+        preview.originalMenuState = { [weak self] in
+          self?.originalMenuState(for: id) ?? .init(isOn: false, detail: nil, isAvailable: false)
+        }
+        preview.onSwitchOriginal = { [weak self] in
+          self?.switchOriginal(attachmentId: id)
+        }
+        preview.setSwitching(switchingAttachmentIds.contains(id))
+      }
       preview.setUploadProgress(attachmentUploadProgress[id])
       attachmentStackView.addArrangedSubview(preview)
+    }
+  }
+
+  // MARK: - Send as Original
+
+  private enum OriginalAvailability {
+    case loading
+    case available(OriginalMediaSummary)
+    case unavailable
+  }
+
+  /// Send as Original: switches a photo or video to a file of its untouched original, or an
+  /// image or video file back to a compressed photo or video. The tile changes in place once the
+  /// other form is ready; files move after the photos and videos, where they're sent.
+  func switchOriginal(attachmentId: String) {
+    guard let item = attachmentItems[attachmentId], item.canSwitchOriginal,
+          !switchingAttachmentIds.contains(attachmentId)
+    else { return }
+    switchingAttachmentIds.insert(attachmentId)
+    previewTile(for: attachmentId)?.setSwitching(true)
+    UISelectionFeedbackGenerator().selectionChanged()
+
+    Task { [weak self] in
+      let switched: FileMediaItem?
+      do {
+        switched = try await item.switchedForOriginal()
+      } catch {
+        Log.shared.error("Couldn't switch the attachment for Send as Original", error: error)
+        switched = nil
+      }
+      guard let self else {
+        await switched?.discardUnsent()
+        return
+      }
+      self.switchingAttachmentIds.remove(attachmentId)
+      // Sent or removed while switching: keep nothing new.
+      guard self.attachmentItems[attachmentId] != nil else {
+        await switched?.discardUnsent()
+        return
+      }
+      guard let switched else {
+        self.previewTile(for: attachmentId)?.setSwitching(false)
+        ToastManager.shared.showToast(
+          item.isSentAsFile ? "This file can only be sent as a file." : "The original is no longer available.",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        return
+      }
+      UIView.transition(with: self.attachmentStackView, duration: 0.22, options: .transitionCrossDissolve) {
+        self.replaceAttachment(attachmentId, with: switched)
+      }
+      await item.discardUnsent()
+    }
+  }
+
+  private func previewTile(for attachmentId: String) -> ComposeAttachmentPreviewItemView? {
+    attachmentStackView.arrangedSubviews
+      .compactMap { $0 as? ComposeAttachmentPreviewItemView }
+      .first { $0.attachmentIdentifier == attachmentId }
+  }
+
+  private func originalMenuState(for attachmentId: String) -> ComposeAttachmentPreviewItemView.OriginalMenuState {
+    let isOn = attachmentItems[attachmentId]?.isSentAsFile == true
+    let isSwitching = switchingAttachmentIds.contains(attachmentId)
+    switch originalAvailability[attachmentId] {
+    case let .available(summary):
+      return .init(isOn: isOn, detail: summary.detailText, isAvailable: !isSwitching)
+    case .unavailable:
+      return .init(isOn: isOn, detail: "The original is no longer available", isAvailable: false)
+    case .loading, nil:
+      return .init(isOn: isOn, detail: nil, isAvailable: !isSwitching)
+    }
+  }
+
+  /// Forgets removed items and reads what Send as Original would send for each new photo,
+  /// video or image file (size, location), for its menu. Reads file headers off the main thread.
+  private func syncOriginalMediaState() {
+    let ids = Set(attachmentItems.keys)
+    for id in Set(originalSummaryTasks.keys).subtracting(ids) {
+      originalSummaryTasks.removeValue(forKey: id)?.cancel()
+    }
+    originalAvailability = originalAvailability.filter { ids.contains($0.key) }
+
+    for (id, media) in attachmentItems where media.canSwitchOriginal && originalAvailability[id] == nil {
+      originalAvailability[id] = .loading
+      originalSummaryTasks[id] = Task { [weak self] in
+        let summary = await OriginalMediaStore.summary(for: media)
+        guard let self, !Task.isCancelled, self.attachmentItems[id] != nil else { return }
+        self.originalSummaryTasks.removeValue(forKey: id)
+        self.originalAvailability[id] = summary.map { .available($0) } ?? .unavailable
+      }
     }
   }
 
@@ -2482,14 +2577,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func applyEditedPhoto(from editedURL: URL, replacing attachmentId: String) {
+    // Named after the photo it edits, with the edit's own format.
+    let originalName: String? = attachmentItems[attachmentId]
+      .flatMap { OriginalMediaStore.original(for: $0) }
+      .flatMap { ($0.deletingPathExtension().lastPathComponent as NSString).appendingPathExtension(editedURL.pathExtension) }
     Task { [weak self] in
-      let result = await Task.detached(priority: .userInitiated) { () -> Result<FileMediaItem, Error> in
-        defer { try? FileManager.default.removeItem(at: editedURL) }
-        guard let image = UIImage(contentsOfFile: editedURL.path) else {
-          return .failure(CocoaError(.fileReadCorruptFile))
-        }
-        return Result { .photo(try FileCache.savePhoto(image: image, optimize: true)) }
-      }.value
+      // Prepared like any photo, with the edited file kept as its original for Send as Original.
+      let result: Result<FileMediaItem, Error>
+      do {
+        result = .success(try await AttachmentMediaMaterializer.photo(.file(editedURL), originalFileName: originalName))
+      } catch {
+        result = .failure(error)
+      }
+      try? FileManager.default.removeItem(at: editedURL)
 
       guard let self else { return }
       switch result {
@@ -2648,8 +2748,42 @@ private final class ComposeQuickLookItem: NSObject, QLPreviewItem {
   }
 }
 
-private final class ComposeAttachmentPreviewItemView: UIView {
+private final class ComposeAttachmentPreviewItemView: UIView, UIContextMenuInteractionDelegate {
   static let stripHeight: CGFloat = 92
+
+  /// What the long-press menu's Send as Original item shows.
+  struct OriginalMenuState {
+    var isOn: Bool
+    /// "2.8 MB · Includes location", or why it can't be sent.
+    var detail: String?
+    var isAvailable: Bool
+  }
+
+  /// Set for photos, videos and image or video files: their long-press menu offers Send as
+  /// Original, checked when the item is a file.
+  var originalMenuState: (() -> OriginalMenuState)? {
+    didSet { updateContextMenu() }
+  }
+  var onSwitchOriginal: (() -> Void)?
+  private var contextMenuInteraction: UIContextMenuInteraction?
+
+  /// Shown while Send as Original switches the item between photo and file.
+  private let switchingIndicator: UIActivityIndicatorView = {
+    let indicator = UIActivityIndicatorView(style: .medium)
+    indicator.translatesAutoresizingMaskIntoConstraints = false
+    indicator.color = .white
+    indicator.hidesWhenStopped = true
+    return indicator
+  }()
+
+  private let switchingDimView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+    view.isHidden = true
+    view.isUserInteractionEnabled = false
+    return view
+  }()
 
   private enum Metrics {
     static let tileSize: CGFloat = 84
@@ -2823,6 +2957,8 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     tileContentView.addSubview(centerIconView)
     tileContentView.addSubview(extensionBadge)
     tileContentView.addSubview(overlayIconView)
+    tileContentView.addSubview(switchingDimView)
+    tileContentView.addSubview(switchingIndicator)
     addSubview(removeButton)
     removeButton.addSubview(removeBadgeView)
     removeBadgeView.addSubview(removeIconView)
@@ -2870,6 +3006,14 @@ private final class ComposeAttachmentPreviewItemView: UIView {
       overlayIconView.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
       overlayIconView.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
 
+      switchingDimView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
+      switchingDimView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
+      switchingDimView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
+      switchingDimView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
+
+      switchingIndicator.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
+      switchingIndicator.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
+
       removeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
       removeButton.widthAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
@@ -2914,6 +3058,11 @@ private final class ComposeAttachmentPreviewItemView: UIView {
           usesInternalTinyThumbnail: true,
           showsLoadingPlaceholder: true
         )
+        // The extension marks it as a file, so a photo switched to Send as Original reads as one.
+        if let ext = fileExtension(from: documentInfo.document.fileName) {
+          extensionBadge.text = " \(ext.uppercased()) "
+          extensionBadge.isHidden = false
+        }
       } else {
         applyFallback(
           iconName: DocumentIconResolver.symbolName(
@@ -2943,6 +3092,100 @@ private final class ComposeAttachmentPreviewItemView: UIView {
 
   func setUploadProgress(_ progress: UploadProgressSnapshot?) {
     _ = progress
+  }
+
+  // MARK: Send as Original
+
+  func setSwitching(_ isSwitching: Bool) {
+    switchingDimView.isHidden = !isSwitching
+    if isSwitching {
+      switchingIndicator.startAnimating()
+    } else {
+      switchingIndicator.stopAnimating()
+    }
+  }
+
+  private func updateContextMenu() {
+    if originalMenuState == nil {
+      if let contextMenuInteraction {
+        tileContentView.removeInteraction(contextMenuInteraction)
+        self.contextMenuInteraction = nil
+      }
+    } else if contextMenuInteraction == nil {
+      let interaction = UIContextMenuInteraction(delegate: self)
+      tileContentView.addInteraction(interaction)
+      contextMenuInteraction = interaction
+    }
+    updateAccessibility()
+  }
+
+  private func updateAccessibility() {
+    guard originalMenuState != nil else {
+      tileContentView.isAccessibilityElement = false
+      tileContentView.accessibilityCustomActions = nil
+      return
+    }
+    let isFile = originalMenuState?().isOn == true
+    tileContentView.isAccessibilityElement = true
+    tileContentView.accessibilityTraits = .button
+    tileContentView.accessibilityLabel = "Attachment"
+    tileContentView.accessibilityValue = isFile ? "Original file" : "Compressed"
+    tileContentView.accessibilityCustomActions = [
+      UIAccessibilityCustomAction(name: isFile ? "Send Compressed" : "Send as Original") { [weak self] _ in
+        self?.onSwitchOriginal?()
+        return true
+      },
+      UIAccessibilityCustomAction(name: "Remove") { [weak self] _ in
+        self?.removeTapped()
+        return true
+      },
+    ]
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    guard let state = originalMenuState?() else { return nil }
+    return UIContextMenuConfiguration(identifier: attachmentId as NSString, previewProvider: nil) { [weak self] _ in
+      let original = UIAction(
+        title: "Send as Original",
+        subtitle: state.detail,
+        image: UIImage(systemName: "doc"),
+        attributes: state.isAvailable ? [] : [.disabled],
+        state: state.isOn ? .on : .off
+      ) { [weak self] _ in
+        self?.onSwitchOriginal?()
+      }
+      let remove = UIAction(title: "Remove", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+        self?.removeTapped()
+      }
+      return UIMenu(children: [UIMenu(options: .displayInline, children: [original]), remove])
+    }
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configuration: UIContextMenuConfiguration,
+    highlightPreviewForItemWithIdentifier identifier: any NSCopying
+  ) -> UITargetedPreview? {
+    roundedPreview()
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configuration: UIContextMenuConfiguration,
+    dismissalPreviewForItemWithIdentifier identifier: any NSCopying
+  ) -> UITargetedPreview? {
+    roundedPreview()
+  }
+
+  private func roundedPreview() -> UITargetedPreview? {
+    guard tileContentView.window != nil else { return nil }
+    let parameters = UIPreviewParameters()
+    parameters.visiblePath = UIBezierPath(roundedRect: tileContentView.bounds, cornerRadius: Metrics.cornerRadius)
+    parameters.backgroundColor = .clear
+    return UITargetedPreview(view: tileContentView, parameters: parameters)
   }
 
   private func applyPhotoPreview(
