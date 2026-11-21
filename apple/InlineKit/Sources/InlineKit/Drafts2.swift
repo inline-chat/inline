@@ -466,6 +466,27 @@ public final class Drafts2: @unchecked Sendable {
     }
   }
 
+  /// Puts another form of the same item in an attachment's place (Send as Original switches a
+  /// photo to its file and back). Returns the new attachment, or nil when `id` has left the
+  /// draft, for example because it was sent meanwhile.
+  @discardableResult
+  public func replaceAttachment(peer: Peer, id: String, with media: FileMediaItem) -> Drafts2Attachment? {
+    var replacement: Drafts2Attachment?
+    let snapshot = stage(peer: peer) { draft in
+      guard let index = draft.attachments.firstIndex(where: { $0.id == id }) else { return }
+      let attachment = Drafts2Attachment(
+        id: media.getItemUniqueId(),
+        media: media,
+        createdAt: draft.attachments[index].createdAt
+      )
+      draft.attachments[index] = attachment
+      replacement = attachment
+    }
+    guard replacement != nil else { return nil }
+    persist(snapshot)
+    return replacement
+  }
+
   public func removeAttachment(peer: Peer, id: String) {
     let peerKey = peer.toString()
     let taskKey = Self.pendingTaskKey(peerKey: peerKey, id: id)

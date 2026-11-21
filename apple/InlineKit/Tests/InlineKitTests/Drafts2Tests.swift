@@ -152,6 +152,28 @@ struct Drafts2Tests {
     #expect(sendSnapshot.mediaItems.count == 1)
   }
 
+  @Test("switching an attachment's form keeps its place and survives storage")
+  func replaceAttachmentKeepsPlace() async throws {
+    let db = AppDatabase.empty()
+    let drafts = Drafts2(database: db)
+    let peer: InlineKit.Peer = .thread(id: 41)
+
+    let first = drafts.appendAttachment(peer: peer, media: .document(documentInfo(id: -411)))
+    let switched = drafts.appendAttachment(peer: peer, media: .document(documentInfo(id: -412)))
+    let last = drafts.appendAttachment(peer: peer, media: .document(documentInfo(id: -413)))
+
+    let replacement = try #require(drafts.replaceAttachment(peer: peer, id: switched.id, with: .document(documentInfo(id: -414))))
+    #expect(replacement.id != switched.id)
+    #expect(replacement.createdAt == switched.createdAt)
+    await drafts.flush()
+
+    let reloaded = Drafts2(database: db).load(peer: peer)?.attachments.map(\.id) ?? []
+    #expect(reloaded == [first.id, replacement.id, last.id])
+
+    // Sent or removed meanwhile: nothing to replace.
+    #expect(drafts.replaceAttachment(peer: peer, id: switched.id, with: .document(documentInfo(id: -415))) == nil)
+  }
+
   @Test("flush stores latest staged text without blocking update calls")
   func flushStoresLatestStagedText() async throws {
     let db = AppDatabase.empty()

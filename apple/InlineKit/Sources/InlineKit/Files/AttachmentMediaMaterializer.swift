@@ -5,7 +5,7 @@ import Logger
 /// ever making that representation a requirement for retaining the source.
 public enum AttachmentMediaMaterializer {
   /// Prepares a picked photo for sending (see `MediaSendPreparation`) and keeps its untouched
-  /// source for the composer's Original toggle. Images too thin or too small to show as a photo
+  /// source for the item's Send as Original option. Images too thin or too small to show as a photo
   /// go as a file, as before.
   public static func photo(
     _ source: MediaSendPreparation.PhotoSource,
@@ -53,7 +53,7 @@ public enum AttachmentMediaMaterializer {
       case .cgImage, .platformImage:
         // A camera capture handed over as pixels has no file behind it: keep a full-resolution
         // copy so Original still sends every pixel. Other pixel-only images (pastes, stickers)
-        // send the prepared photo even with Original on.
+        // send the prepared photo even when marked Send as Original.
         guard content == .camera else { break }
         let full = try MediaSendPreparation.preparePhoto(
           source,
@@ -119,12 +119,13 @@ public enum AttachmentMediaMaterializer {
 
   public static func video(
     _ url: URL,
-    thumbnail: PlatformImage? = nil
+    thumbnail: PlatformImage? = nil,
+    originalFileName: String? = nil
   ) async throws -> FileMediaItem {
     try await withBareFileFallback {
       let video = FileMediaItem.video(try await FileCache.saveVideo(url: url, thumbnail: thumbnail))
       do {
-        try OriginalMediaStore.retain(copyOf: url, for: video)
+        try OriginalMediaStore.retain(copyOf: url, fileName: originalFileName, for: video)
       } catch {
         Log.shared.warning("Couldn't keep the original video for sending as a file: \(error.localizedDescription)")
       }

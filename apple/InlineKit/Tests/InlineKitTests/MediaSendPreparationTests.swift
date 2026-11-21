@@ -155,9 +155,53 @@ struct OriginalMediaStoreTests {
     #expect(OriginalMediaStore.safeFileName("..") == "original")
   }
 
-  @Test("only photos and videos can be sent as originals")
-  func eligibility() {
-    #expect(photoItem(localPath: "a.jpg").canSendAsOriginal)
+
+  @Test("image and video files can switch back to compressed; GIFs, vectors and other files can't")
+  func fileEligibility() {
+    #expect(documentItem("IMG_4821.HEIC", mimeType: "image/heic").canSwitchOriginal)
+    #expect(documentItem("photo.jpg", mimeType: "application/octet-stream").canSwitchOriginal)
+    #expect(documentItem("IMG_4822.MOV", mimeType: "video/quicktime").isVideoForOriginal)
+    #expect(!documentItem("loop.gif", mimeType: "image/gif").canSwitchOriginal)
+    #expect(!documentItem("logo.svg", mimeType: "image/svg+xml").canSwitchOriginal)
+    #expect(!documentItem("report.pdf", mimeType: "application/pdf").canSwitchOriginal)
+    #expect(photoItem(localPath: "a.jpg").canSwitchOriginal)
+    #expect(!photoItem(localPath: "a.jpg").isSentAsFile)
+    #expect(documentItem("IMG_4821.HEIC", mimeType: "image/heic").isSentAsFile)
+  }
+
+  @Test("a photo whose original is gone can't switch")
+  func switchWithoutOriginal() async throws {
+    let item = photoItem(localPath: "no-original-\(UUID().uuidString).jpg")
+    #expect(try await item.switchedForOriginal() == nil)
+  }
+
+  @Test("the location check reads GPS from the file header")
+  func locationCheck() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let withLocation = folder.appendingPathComponent("gps.jpg")
+    try writeJPEG(to: withLocation, properties: [
+      kCGImagePropertyGPSDictionary: [
+        kCGImagePropertyGPSLatitude: 52.37,
+        kCGImagePropertyGPSLatitudeRef: "N",
+        kCGImagePropertyGPSLongitude: 4.89,
+        kCGImagePropertyGPSLongitudeRef: "E",
+      ],
+    ])
+    let withoutLocation = folder.appendingPathComponent("plain.jpg")
+    try writeJPEG(to: withoutLocation, properties: [:])
+
+    #expect(OriginalMediaStore.imageIncludesLocation(withLocation))
+    #expect(!OriginalMediaStore.imageIncludesLocation(withoutLocation))
+  }
+
+  @Test("the menu detail names the size and the location")
+  func summaryText() {
+    let size = ByteCountFormatter.string(fromByteCount: 2_800_000, countStyle: .file)
+    #expect(OriginalMediaSummary(byteCount: 2_800_000, includesLocation: true).detailText == "\(size) · Includes location")
+    #expect(OriginalMediaSummary(byteCount: 2_800_000, includesLocation: false).detailText == size)
   }
 }
 
@@ -167,6 +211,26 @@ private func photoItem(localPath: String) -> FileMediaItem {
   .photo(PhotoInfo(photo: Photo(photoId: -7, format: .jpeg), sizes: [
     PhotoSize(photoId: -7, type: "f", width: 10, height: 10, localPath: localPath),
   ]))
+}
+
+private func documentItem(_ fileName: String, mimeType: String) -> FileMediaItem {
+  .document(DocumentInfo(document: Document(
+    id: nil, documentId: -11, date: Date(timeIntervalSince1970: 1), fileName: fileName, mimeType: mimeType,
+    size: 1, cdnUrl: nil, localPath: fileName, thumbnailPhotoId: nil
+  )))
+}
+
+private func writeJPEG(to url: URL, properties: [CFString: Any]) throws {
+  let context = try #require(CGContext(
+    data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+  ))
+  context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1))
+  context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+  let image = try #require(context.makeImage())
+  let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil))
+  CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+  #expect(CGImageDestinationFinalize(destination))
 }
 
 private func properties(of data: Data) -> [CFString: Any]? {
