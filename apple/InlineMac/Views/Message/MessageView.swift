@@ -549,8 +549,18 @@ class MessageViewAppKit: NSView {
       scrollState: scrollState,
       isRightToLeft: userInterfaceLayoutDirection == .rightToLeft,
       roundsTop: message.repliedToMessageId == nil && !message.hasForwardHeader,
-      roundsBottom: message.text?.isEmpty != false
+      roundsBottom: message.text?.isEmpty != false && !album.hasFiles
     )
+  }
+
+  /// An album's file rows, in its document's place (`props.album`).
+  private var albumFilesView: MessageAlbumFilesView?
+
+  /// The album file row under the mouse, for the menu's file actions.
+  private var albumFileRowUnderMouse: DocumentView? {
+    guard let albumFilesView, let window, albumFilesView.superview != nil else { return nil }
+    let point = albumFilesView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    return albumFilesView.row(at: point)
   }
 
   private lazy var videoView: NewVideoView = {
@@ -863,6 +873,15 @@ class MessageViewAppKit: NSView {
         mode: .embeddedBubble
       )
       desiredView = voiceMessageView
+    } else if let album = props.album, album.hasFiles {
+      let files = albumFilesView ?? {
+        let view = MessageAlbumFilesView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        albumFilesView = view
+        return view
+      }()
+      files.configure(items: album.fileItems, white: usesOutgoingBubbleStyle)
+      desiredView = files
     } else {
       if let documentInfo = fullMessage.documentInfo {
         documentView?.update(with: documentInfo, fullMessage: fullMessage)
@@ -5606,9 +5625,11 @@ extension MessageViewAppKit: NSMenuDelegate {
       }
     }
 
-    // Add document actions
+    // Add document actions: the message's file, or the album file under the mouse.
     if hasActualDocument {
       documentView?.appendContextMenuItems(to: menu)
+    } else if let row = albumFileRowUnderMouse {
+      row.appendContextMenuItems(to: menu)
     }
 
     if canSaveLoadedVoice {

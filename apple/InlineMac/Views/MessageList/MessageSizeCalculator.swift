@@ -525,6 +525,13 @@ class MessageSizeCalculator {
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
+      // An album's files sit under its grid.
+      if let video {
+        top += video.spacing.top + video.size.height + video.spacing.bottom
+      }
+      if let photo {
+        top += photo.spacing.top + photo.size.height + photo.spacing.bottom
+      }
       return top
     }
 
@@ -792,11 +799,13 @@ class MessageSizeCalculator {
     let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
-    // An album (`props.album`) is laid out as one photo the size of its grid.
-    let hasMedia = message.hasMedia || props.album != nil
+    // An album (`props.album`) is laid out as one photo the size of its grid, and its files as
+    // one document the height of their rows.
+    let hasMedia = message.hasMedia || props.album?.hasMedia == true
     var albumAvailableWidth: CGFloat?
     let hasVoice = message.message.hasVoice
-    let hasDocument = message.documentInfo != nil || hasVoice
+    let albumFiles = props.album?.fileItems ?? []
+    let hasDocument = message.documentInfo != nil || hasVoice || !albumFiles.isEmpty
     let hasReply = message.message.repliedToMessageId != nil
     let hasForwardHeader = message.message.hasForwardHeader
     let hasReactions = message.reactions.count > 0
@@ -935,14 +944,20 @@ class MessageSizeCalculator {
       // Start with the minimum document width, but don't exceed parent available width
       let baseWidth = if hasVoice {
         Theme.voiceMessageViewWidth
+      } else if !albumFiles.isEmpty {
+        MessageAlbumFilesView.preferredWidth(for: albumFiles)
       } else if let documentInfo = message.documentInfo {
         DocumentPresentationPlan.preferredWidth(for: documentInfo)
       } else {
         Theme.documentViewWidth
       }
-      let documentAvailableWidth = hasVoice
+      var documentAvailableWidth = hasVoice
         ? max(1, parentAvailableWidth - (bubbleContentHorizontalInset * 2))
         : parentAvailableWidth
+      // An album's files sit inside the bubble its grid sizes.
+      if !albumFiles.isEmpty, let photoSize {
+        documentAvailableWidth = max(1, photoSize.width + 2 * mediaInset - bubbleContentHorizontalInset * 2)
+      }
       documentWidth = min(documentAvailableWidth, baseWidth)
     }
 
@@ -1277,6 +1292,8 @@ class MessageSizeCalculator {
       // Use the shared document width calculated above
       let documentHeight = if hasVoice {
         Theme.voiceMessageViewHeight
+      } else if !albumFiles.isEmpty {
+        MessageAlbumFilesView.height(for: albumFiles)
       } else if let documentInfo = message.documentInfo {
         DocumentPresentationPlan.preferredHeight(for: documentInfo)
       } else {
@@ -1527,7 +1544,8 @@ class MessageSizeCalculator {
     if let documentPlan {
       bubbleHeight += documentPlan.size.height
       bubbleHeight += documentPlan.spacing.bottom
-      if replyPlan != nil {
+      // Under a reply or an album's grid, the gap above the files counts too.
+      if replyPlan != nil || photoPlan != nil || videoPlan != nil {
         bubbleHeight += documentPlan.spacing.top
       }
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
@@ -1758,11 +1776,13 @@ class MessageSizeCalculator {
     let hasText = message.message.hasText
     let text = message.displayText ?? emptyFallback
     let entities = message.translationEntities ?? message.message.entities
-    // An album (`props.album`) is laid out as one photo the size of its grid.
-    let hasMedia = message.hasMedia || props.album != nil
+    // An album (`props.album`) is laid out as one photo the size of its grid, and its files as
+    // one document the height of their rows.
+    let hasMedia = message.hasMedia || props.album?.hasMedia == true
     var albumAvailableWidth: CGFloat?
     let hasVoice = message.message.hasVoice
-    let hasDocument = message.documentInfo != nil || hasVoice
+    let albumFiles = props.album?.fileItems ?? []
+    let hasDocument = message.documentInfo != nil || hasVoice || !albumFiles.isEmpty
     let hasReply = message.message.repliedToMessageId != nil
     let hasForwardHeader = message.message.hasForwardHeader
     let hasReactions = message.reactions.count > 0
@@ -1909,6 +1929,11 @@ class MessageSizeCalculator {
     if hasDocument {
       if hasVoice {
         documentWidth = min(parentAvailableWidth, Theme.voiceMessageViewWidth)
+      } else if !albumFiles.isEmpty {
+        documentWidth = min(
+          parentAvailableWidth,
+          min(Self.minimalDocumentMaxWidth, MessageAlbumFilesView.preferredWidth(for: albumFiles))
+        )
       } else if let documentInfo = message.documentInfo {
         documentWidth = min(
           parentAvailableWidth,
@@ -2074,6 +2099,8 @@ class MessageSizeCalculator {
       documentPlan = LayoutPlan(size: .zero, spacing: .zero)
       let documentHeight = if hasVoice {
         Theme.voiceMessageMinimalViewHeight
+      } else if !albumFiles.isEmpty {
+        MessageAlbumFilesView.height(for: albumFiles)
       } else if let documentInfo = message.documentInfo {
         DocumentPresentationPlan.preferredHeight(for: documentInfo)
       } else {

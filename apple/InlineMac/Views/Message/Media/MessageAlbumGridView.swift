@@ -2,7 +2,8 @@ import AppKit
 import InlineKit
 import InlineMessageLayout
 
-/// An album's grid on the Mac: one photo or video tile per item, placed by `AlbumMosaic` in
+/// An album's grid on the Mac: one tile per photo or video (`MessageAlbum.mediaItems`; its files
+/// are rows under the grid, `MessageAlbumFilesView`), placed by `AlbumMosaic` in
 /// Telegram's arrangement. The message view lays the album out as one photo the size of the
 /// grid and puts this view in that photo's place; each tile is the item's own media view, so
 /// loading, Quick Look, video playback and upload progress work per item.
@@ -11,13 +12,22 @@ final class MessageAlbumGridView: NSView {
   /// islands (separate tiles flowing into lines) in the minimal style.
   static func mosaic(for album: MessageAlbum, availableWidth: CGFloat, style: AlbumLayoutStyle = .telegram) -> AlbumMosaic {
     let width = max(1, availableWidth)
-    return AlbumMosaic.layout(
+    let grid = PixelGrid(scale: NSScreen.main?.backingScaleFactor ?? 2)
+    let mosaic = AlbumMosaic.layout(
       style: style,
-      aspectRatios: album.items.map(aspectRatio),
+      aspectRatios: album.mediaItems.map(aspectRatio),
       // About Telegram's 300 × 380 box, scaled to the width.
       metrics: .init(width: width, maxHeight: width * 380 / 300, spacing: 2),
-      grid: PixelGrid(scale: NSScreen.main?.backingScaleFactor ?? 2)
+      grid: grid
     )
+    guard album.hasFiles else { return mosaic }
+    // A lone photo over files is at least as wide as the files' rows ask: in a bubble, inside
+    // its padding less the media frame; islands sit on the line with the files.
+    let padding = style == .islands
+      ? 0
+      : 2 * (Theme.messageBubbleContentHorizontalInset - MessageSizeCalculator.mediaFrameInset)
+    let filesWidth = MessageAlbumFilesView.preferredWidth(for: album.fileItems) + padding
+    return mosaic.widened(toAtLeast: min(width, filesWidth), grid: grid)
   }
 
   /// Width over height of an item's media; square when unknown.
@@ -78,7 +88,8 @@ final class MessageAlbumGridView: NSView {
     roundsBottom: Bool
   ) {
     let mosaic = Self.mosaic(for: album, availableWidth: availableWidth, style: style)
-    let ids = Set(album.items.map(\.id))
+    let items = album.mediaItems
+    let ids = Set(items.map(\.id))
     let rebuildsTiles = mosaic.tileCornerRadius != tileCornerRadius
     tileCornerRadius = mosaic.tileCornerRadius
     for (id, tile) in tiles where !ids.contains(id) || rebuildsTiles {
@@ -86,7 +97,7 @@ final class MessageAlbumGridView: NSView {
       tiles[id] = nil
       frames[id] = nil
     }
-    for (index, item) in album.items.enumerated() where index < mosaic.tiles.count {
+    for (index, item) in items.enumerated() where index < mosaic.tiles.count {
       var frame = mosaic.tiles[index].frame
       if isRightToLeft {
         frame.origin.x = mosaic.size.width - frame.maxX
