@@ -216,3 +216,33 @@ describe("billing admin", () => {
     expect(row!.badge).toBeNull()
   })
 })
+
+describe("billing admin payments", () => {
+  setupTestLifecycle()
+
+  test("a BTC payment for a space plan stays in BTC, nets to zero, and shows in the overview", async () => {
+    const { adminFinancialsOverview, adminRecordPayment } = await import("../../modules/billing/admin")
+    const space = (await testUtils.createSpace("Paying Space"))!
+    const paidAt = new Date(Date.UTC(2026, 9, 15))
+    const through = new Date(Date.UTC(2027, 1, 28))
+    await expect(adminRecordPayment({ spaceId: space.id }, { currency: "btc", amount: 0, plan: undefined }, null)).rejects.toThrow("invalid_input")
+    await expect(adminRecordPayment({ spaceId: space.id }, { currency: "btc", amount: 1, plan: { plan: "pro", paidThrough: through } }, null)).rejects.toThrow("invalid_input")
+
+    const { subscription } = await adminRecordPayment({ spaceId: space.id }, {
+      currency: "btc", amount: 2_000_000, reference: "tx test", occurredAt: paidAt,
+      plan: { plan: "business", seats: 11, paidThrough: through },
+    }, null)
+    expect(subscription).toMatchObject({ plan: "business", funding: "wallet", seats: 11 })
+    const [row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+    expect(row!.isPro).toBe(true)
+
+    const overview = await adminFinancialsOverview()
+    const live = overview.live.find((sub) => sub.spaceId === space.id)
+    expect(live).toMatchObject({ plan: "business", isPro: true, spaceName: "Paying Space" })
+    expect(overview.balances.filter((b) => b.spaceId === space.id)).toEqual([])
+    const mine = overview.entries.filter((e) => e.spaceId === space.id)
+    expect(mine.map((e) => [e.kind, e.currency, e.amount]).sort()).toEqual([["btc_topup", "btc", 2_000_000], ["plan_charge", "btc", -2_000_000]])
+    expect(mine.every((e) => e.occurredAt?.getTime() === paidAt.getTime())).toBe(true)
+    expect(overview.receivedOffStripe["btc"]).toBe(2_000_000)
+  })
+})

@@ -89,6 +89,8 @@ import {
   AdminAvatarBody,
   AdminBillingDetailResult,
   AdminBillingPlanResult,
+  AdminBillingRecordPaymentInput,
+  AdminBillingRecordPaymentResult,
   AdminBillingSetPlanInput,
   AdminBillingWalletEntryInput,
   AdminBillingWalletEntryResult,
@@ -104,6 +106,7 @@ import {
   AdminEmailProviderStatusQuery,
   AdminEmailProviderTestInput,
   AdminEmailProviderTestResult,
+  AdminFinancialsResult,
   AdminInviteCodesResult,
   AdminInviteCountInput,
   AdminInvitesQuery,
@@ -950,6 +953,54 @@ const spaceBillingPlanEndEndpoint = stepUpEndpoint(
   ),
 )
 
+const userBillingPaymentEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminUserBillingPayment",
+    "/admin/users/:id/billing/payment",
+    {
+      params: AdminUserIdParams.fields,
+      payload: AdminBillingRecordPaymentInput,
+      success: AdminBillingRecordPaymentResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
+const spaceBillingPaymentEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminSpaceBillingPayment",
+    "/admin/spaces/:id/billing/payment",
+    {
+      params: AdminSpaceIdParams.fields,
+      payload: AdminBillingRecordPaymentInput,
+      success: AdminBillingRecordPaymentResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
+const financialsEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminFinancials",
+    "/admin/financials",
+    {
+      success: AdminFinancialsResult,
+    },
+  ),
+)
+
 export const AdminApiGroup = HttpApiGroup.make(
   "admin",
 ).add(
@@ -998,6 +1049,9 @@ export const AdminApiGroup = HttpApiGroup.make(
   spaceBillingPlanEndpoint,
   userBillingPlanEndEndpoint,
   spaceBillingPlanEndEndpoint,
+  userBillingPaymentEndpoint,
+  spaceBillingPaymentEndpoint,
+  financialsEndpoint,
 )
 
 export const makeAdminRouteGroup = () => {
@@ -1149,6 +1203,36 @@ export const makeAdminRouteGroup = () => {
                       Effect.flatMap((subject) =>
                         operations.endBillingPlan(
                           subject,
+                          session,
+                          info,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+        const billingPayment = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ) =>
+          run(
+            complete(
+              `admin.${kind}s.billing.payment`,
+              AdminBillingRecordPaymentResult,
+              decodeBody(
+                request,
+                AdminBillingRecordPaymentInput,
+              ).pipe(
+                Effect.flatMap(({ input, info }) =>
+                  withSession((session) =>
+                    billingSubject(request, kind).pipe(
+                      Effect.flatMap((subject) =>
+                        operations.recordBillingPayment(
+                          subject,
+                          input,
                           session,
                           info,
                         ),
@@ -1975,6 +2059,27 @@ export const makeAdminRouteGroup = () => {
           .handleRaw(
             "adminSpaceBillingPlanEnd",
             ({ request }) => billingPlanEnd(request, "space"),
+          )
+          .handleRaw(
+            "adminUserBillingPayment",
+            ({ request }) => billingPayment(request, "user"),
+          )
+          .handleRaw(
+            "adminSpaceBillingPayment",
+            ({ request }) => billingPayment(request, "space"),
+          )
+          .handleRaw(
+            "adminFinancials",
+            () =>
+              run(
+                complete(
+                  "admin.financials",
+                  AdminFinancialsResult,
+                  withSession((session) =>
+                    operations.financials(session),
+                  ),
+                ),
+              ),
           )
       }),
   )

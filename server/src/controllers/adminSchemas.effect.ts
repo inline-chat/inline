@@ -884,6 +884,7 @@ export const AdminSpaceIdParams = Schema.Struct({
 })
 
 const AdminBillingCurrency = Schema.Literals(["usd", "btc"])
+const AdminBillingPlanCode = Schema.Literals(["pro", "believer", "team", "business", "enterprise"])
 const NullableEntityId = Schema.NullOr(WirePositiveInteger)
 
 const AdminBillingSubscription = Schema.Struct({
@@ -919,6 +920,8 @@ const AdminBillingWalletEntry = Schema.Struct({
   reference: NullableString,
   subscriptionId: NullableEntityId,
   adminId: NullableEntityId,
+  /** When the money moved, if recorded later than that; otherwise null and createdAt applies. */
+  occurredAt: NullableString,
   createdAt: Schema.String,
 }).annotate({
   identifier: "AdminBillingWalletEntry",
@@ -972,6 +975,8 @@ export const AdminBillingWalletEntryInput = Schema.Struct({
     "adjustment",
   ]),
   reference: OptionalString,
+  /** ISO 8601 timestamp of when the money moved, if not now. */
+  occurredAt: OptionalString,
 }).annotate({
   identifier: "AdminBillingWalletEntryInput",
 })
@@ -984,7 +989,7 @@ export const AdminBillingWalletEntryResult = Schema.Struct({
 })
 
 export const AdminBillingSetPlanInput = Schema.Struct({
-  plan: Schema.Literals(["pro", "believer", "team", "enterprise"]),
+  plan: AdminBillingPlanCode,
   funding: Schema.Literals(["comp", "wallet", "prepaid"]),
   /** ISO 8601 timestamp, or null for no end date. */
   paidThrough: NullableString,
@@ -1006,6 +1011,83 @@ export const AdminBillingPlanResult = Schema.Struct({
   subscription: Schema.NullOr(AdminBillingSubscription),
 }).annotate({
   identifier: "AdminBillingPlanResult",
+})
+
+export const AdminBillingRecordPaymentInput = Schema.Struct({
+  currency: AdminBillingCurrency,
+  /** Positive minor units received: USD cents or BTC sats. Never converted. */
+  amount: Schema.Number,
+  /** Transaction hash, invoice number or other note. */
+  reference: OptionalString,
+  /** ISO 8601 timestamp of when the payment was made, if not now. */
+  occurredAt: OptionalString,
+  /** The plan this payment pays for; the whole amount is charged to it. */
+  plan: Schema.optionalKey(
+    Schema.Struct({
+      plan: AdminBillingPlanCode,
+      seats: Schema.optionalKey(Schema.Number),
+      /** ISO 8601 timestamp, or null for no end date. */
+      paidThrough: NullableString,
+      note: OptionalString,
+    }),
+  ),
+}).annotate({
+  identifier: "AdminBillingRecordPaymentInput",
+})
+
+export const AdminBillingRecordPaymentResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  credit: AdminBillingWalletEntry,
+  subscription: Schema.NullOr(AdminBillingSubscription),
+}).annotate({
+  identifier: "AdminBillingRecordPaymentResult",
+})
+
+/** Display names for the billing subject; the user fields name the buyer on space checkouts. */
+const AdminBillingSubjectNames = {
+  userName: NullableString,
+  username: NullableString,
+  spaceName: NullableString,
+}
+
+export const AdminFinancialsResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  live: Schema.Array(
+    Schema.Struct({
+      ...AdminBillingSubscription.fields,
+      isPro: Schema.Boolean,
+      ...AdminBillingSubjectNames,
+    }),
+  ),
+  /** Non-zero wallet balances per subject and currency, in minor units. */
+  balances: Schema.Array(
+    Schema.Struct({
+      userId: NullableEntityId,
+      spaceId: NullableEntityId,
+      currency: Schema.String,
+      balance: WireSafeInteger,
+      ...AdminBillingSubjectNames,
+    }),
+  ),
+  entries: Schema.Array(
+    Schema.Struct({
+      ...AdminBillingWalletEntry.fields,
+      ...AdminBillingSubjectNames,
+    }),
+  ),
+  orders: Schema.Array(
+    Schema.Struct({
+      ...AdminBillingOrder.fields,
+      ...AdminBillingSubjectNames,
+    }),
+  ),
+  /** Credit received outside Stripe, per currency, in minor units. */
+  receivedOffStripe: Schema.Struct({
+    usd: Schema.optionalKey(WireSafeInteger),
+    btc: Schema.optionalKey(WireSafeInteger),
+  }),
+}).annotate({
+  identifier: "AdminFinancialsResult",
 })
 
 export const AdminAvatarBody = Schema.Uint8Array.pipe(

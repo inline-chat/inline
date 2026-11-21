@@ -1,6 +1,8 @@
 import { db } from "@in/server/db"
 import { billingOrders, billingSubscriptions, billingWalletEntries, spaces, users } from "@in/server/db/schema"
-import { and, desc, eq, isNull } from "drizzle-orm"
+import type { Transaction } from "@in/server/db/types"
+import { and, desc, eq, isNull, sql } from "drizzle-orm"
+import { plansBySubject, type BillingPlan } from "./catalog"
 import { grantsAccess, liveSubscription, refreshProFlag, type Subject } from "./entitlements"
 import { runProPushes, type ProPush } from "./notify"
 import { walletBalances } from "./service"
@@ -46,6 +48,8 @@ export interface WalletEntryInput {
   readonly amount: number
   readonly kind: "legacy_import" | "btc_topup" | "admin_topup" | "plan_charge" | "refund" | "adjustment"
   readonly reference?: string | undefined
+  /** When the money moved, if not now. */
+  readonly occurredAt?: Date | undefined
 }
 
 const validEntry = (entry: WalletEntryInput) =>
@@ -63,14 +67,78 @@ export const adminAddWalletEntry = async (subject: Subject, entry: WalletEntryIn
     amount: entry.amount,
     kind: entry.kind,
     reference: entry.reference ?? null,
+    occurredAt: entry.occurredAt ?? null,
     adminId,
   }).returning()
   return row!
 }
 
+export interface RecordPaymentInput {
+  readonly currency: "usd" | "btc"
+  /** Positive minor units received (cents or sats). Kept in the currency it was paid in; never converted. */
+  readonly amount: number
+  /** Transaction hash, invoice number or other note. */
+  readonly reference?: string | undefined
+  readonly occurredAt?: Date | undefined
+  /** The plan this payment pays for. The whole amount is charged to it, so the balance nets to zero. */
+  readonly plan?: {
+    readonly plan: BillingPlan
+    readonly seats?: number | undefined
+    readonly paidThrough: Date | null
+    readonly note?: string | undefined
+  } | undefined
+}
+
+/**
+ * Records an off-Stripe payment (BTC, bank transfer) in one transaction: the credit, and
+ * optionally the plan it buys with a matching charge. Amounts stay in their own currency.
+ */
+export const adminRecordPayment = async (subject: Subject, input: RecordPaymentInput, adminId: number | null) => {
+  if ((input.currency !== "usd" && input.currency !== "btc") || !Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    throw new BillingAdminError("invalid_input")
+  }
+  if (input.reference !== undefined && input.reference.length > 500) throw new BillingAdminError("invalid_input")
+  const plan = input.plan
+  if (plan) validatePlan(subject, { ...plan, funding: "wallet" })
+  await requireSubject(subject)
+
+  const pushes: ProPush[] = []
+  const result = await db.transaction(async (tx) => {
+    const kind = input.currency === "btc" ? "btc_topup" : "admin_topup"
+    const [credit] = await tx.insert(billingWalletEntries).values({
+      ...subjectColumns(subject),
+      currency: input.currency,
+      amount: input.amount,
+      kind,
+      reference: input.reference ?? null,
+      occurredAt: input.occurredAt ?? null,
+      adminId,
+    }).returning()
+    if (!plan) return { credit: credit!, subscription: null }
+
+    const subscription = await replaceWithManualPlan(tx, subject, {
+      plan: plan.plan, funding: "wallet", paidThrough: plan.paidThrough, seats: plan.seats, note: plan.note,
+    })
+    await tx.insert(billingWalletEntries).values({
+      ...subjectColumns(subject),
+      currency: input.currency,
+      amount: -input.amount,
+      kind: "plan_charge",
+      reference: input.reference ?? null,
+      occurredAt: input.occurredAt ?? null,
+      subscriptionId: subscription.id,
+      adminId,
+    })
+    const push = await refreshProFlag(tx, subject)
+    if (push) pushes.push(push)
+    return { credit: credit!, subscription }
+  })
+  await runProPushes(pushes)
+  return result
+}
+
 export interface ManualPlanInput {
-  /** pro | believer | team | enterprise */
-  readonly plan: "pro" | "believer" | "team" | "enterprise"
+  readonly plan: BillingPlan
   /** comp: free or arranged outside Inline. wallet: paid from wallet credit. prepaid: paid another way. */
   readonly funding: "comp" | "wallet" | "prepaid"
   /** Null keeps it open-ended. */
@@ -85,33 +153,46 @@ export interface ManualPlanInput {
  * Sets a manual plan, replacing any live comp/prepaid/wallet plan. Refuses to touch a
  * live Stripe subscription; that changes only through Stripe.
  */
-export const adminSetPlan = async (subject: Subject, input: ManualPlanInput, adminId: number | null) => {
-  const plans = ["pro", "believer", "team", "enterprise"]
-  if (!plans.includes(input.plan) || !["comp", "wallet", "prepaid"].includes(input.funding)) throw new BillingAdminError("invalid_input")
-  if ((input.plan === "team" || input.plan === "enterprise") !== (subject.spaceId !== undefined)) throw new BillingAdminError("invalid_input")
-  if (input.walletDebit && !(Number.isSafeInteger(input.walletDebit.amount) && input.walletDebit.amount > 0)) throw new BillingAdminError("invalid_input")
+const validatePlan = (subject: Subject, input: Pick<ManualPlanInput, "plan" | "funding" | "seats">) => {
+  const allowed = plansBySubject[subject.spaceId !== undefined ? "space" : "user"]
+  if (!allowed.includes(input.plan) || !["comp", "wallet", "prepaid"].includes(input.funding)) throw new BillingAdminError("invalid_input")
   if (input.seats !== undefined && !(Number.isSafeInteger(input.seats) && input.seats >= 1 && input.seats <= 100_000)) throw new BillingAdminError("invalid_input")
+}
+
+/** Ends the live manual plan (never a paid Stripe one) and starts the new one. */
+const replaceWithManualPlan = async (
+  tx: Transaction,
+  subject: Subject,
+  input: Pick<ManualPlanInput, "plan" | "funding" | "paidThrough" | "seats" | "note">,
+) => {
+  const now = new Date()
+  const live = await liveSubscription(tx, subject, true)
+  if (live?.funding === "stripe" && grantsAccess(live)) throw new BillingAdminError("stripe_managed")
+  if (live) {
+    await tx.update(billingSubscriptions).set({ endedAt: now, status: "replaced", updatedAt: now })
+      .where(eq(billingSubscriptions.id, live.id))
+  }
+  const [created] = await tx.insert(billingSubscriptions).values({
+    ...subjectColumns(subject),
+    plan: input.plan,
+    interval: "none",
+    funding: input.funding,
+    status: "active",
+    seats: input.seats ?? 1,
+    paidThrough: input.paidThrough,
+    note: input.note ?? null,
+  }).returning()
+  return created!
+}
+
+export const adminSetPlan = async (subject: Subject, input: ManualPlanInput, adminId: number | null) => {
+  validatePlan(subject, input)
+  if (input.walletDebit && !(Number.isSafeInteger(input.walletDebit.amount) && input.walletDebit.amount > 0)) throw new BillingAdminError("invalid_input")
   await requireSubject(subject)
 
   const pushes: ProPush[] = []
   const subscription = await db.transaction(async (tx) => {
-    const now = new Date()
-    const live = await liveSubscription(tx, subject, true)
-    if (live?.funding === "stripe" && grantsAccess(live)) throw new BillingAdminError("stripe_managed")
-    if (live) {
-      await tx.update(billingSubscriptions).set({ endedAt: now, status: "replaced", updatedAt: now })
-        .where(eq(billingSubscriptions.id, live.id))
-    }
-    const [created] = await tx.insert(billingSubscriptions).values({
-      ...subjectColumns(subject),
-      plan: input.plan,
-      interval: "none",
-      funding: input.funding,
-      status: "active",
-      seats: input.seats ?? 1,
-      paidThrough: input.paidThrough,
-      note: input.note ?? null,
-    }).returning()
+    const created = await replaceWithManualPlan(tx, subject, input)
     if (input.walletDebit) {
       await tx.insert(billingWalletEntries).values({
         ...subjectColumns(subject),
@@ -148,4 +229,59 @@ export const adminEndPlan = async (subject: Subject) => {
   })
   await runProPushes(pushes)
   return ended
+}
+
+/**
+ * Everything for the admin Financials page: live plans, non-zero balances, recent ledger
+ * entries and checkouts, with subject names. Admin-only; never exposed to clients.
+ */
+export const adminFinancialsOverview = async () => {
+  const subjectName = (userTable: typeof users, spaceTable: typeof spaces) => ({
+    userName: sql<string | null>`nullif(trim(concat_ws(' ', ${userTable.firstName}, ${userTable.lastName})), '')`,
+    username: userTable.username,
+    spaceName: spaceTable.name,
+  })
+  const live = await db.select({ subscription: billingSubscriptions, ...subjectName(users, spaces) })
+    .from(billingSubscriptions)
+    .leftJoin(users, eq(users.id, billingSubscriptions.userId))
+    .leftJoin(spaces, eq(spaces.id, billingSubscriptions.spaceId))
+    .where(isNull(billingSubscriptions.endedAt))
+    .orderBy(desc(billingSubscriptions.updatedAt))
+    .limit(500)
+  const balances = await db.select({
+    userId: billingWalletEntries.userId,
+    spaceId: billingWalletEntries.spaceId,
+    currency: billingWalletEntries.currency,
+    balance: sql<string>`sum(${billingWalletEntries.amount})`,
+    ...subjectName(users, spaces),
+  }).from(billingWalletEntries)
+    .leftJoin(users, eq(users.id, billingWalletEntries.userId))
+    .leftJoin(spaces, eq(spaces.id, billingWalletEntries.spaceId))
+    .groupBy(billingWalletEntries.userId, billingWalletEntries.spaceId, billingWalletEntries.currency, users.firstName, users.lastName, users.username, spaces.name)
+    .having(sql`sum(${billingWalletEntries.amount}) <> 0`)
+  const entries = await db.select({ entry: billingWalletEntries, ...subjectName(users, spaces) })
+    .from(billingWalletEntries)
+    .leftJoin(users, eq(users.id, billingWalletEntries.userId))
+    .leftJoin(spaces, eq(spaces.id, billingWalletEntries.spaceId))
+    .orderBy(desc(billingWalletEntries.createdAt))
+    .limit(200)
+  const orders = await db.select({ order: billingOrders, ...subjectName(users, spaces) })
+    .from(billingOrders)
+    .leftJoin(users, eq(users.id, sql`coalesce(${billingOrders.userId}, ${billingOrders.buyerUserId})`))
+    .leftJoin(spaces, eq(spaces.id, billingOrders.spaceId))
+    .orderBy(desc(billingOrders.createdAt))
+    .limit(100)
+  const received = await db.select({
+    currency: billingWalletEntries.currency,
+    total: sql<string>`sum(${billingWalletEntries.amount})`,
+  }).from(billingWalletEntries)
+    .where(sql`${billingWalletEntries.amount} > 0 and ${billingWalletEntries.kind} in ('btc_topup', 'admin_topup', 'legacy_import')`)
+    .groupBy(billingWalletEntries.currency)
+  return {
+    live: live.map((row) => ({ ...row.subscription, isPro: grantsAccess(row.subscription), userName: row.userName, username: row.username, spaceName: row.spaceName })),
+    balances: balances.map((row) => ({ ...row, balance: Number(row.balance) })),
+    entries: entries.map((row) => ({ ...row.entry, userName: row.userName, username: row.username, spaceName: row.spaceName })),
+    orders: orders.map((row) => ({ ...row.order, userName: row.userName, username: row.username, spaceName: row.spaceName })),
+    receivedOffStripe: Object.fromEntries(received.map((row) => [row.currency, Number(row.total)])),
+  }
 }

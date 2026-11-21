@@ -1,0 +1,1 @@
+ALTER TABLE "billing_wallet_entries" ADD COLUMN "occurred_at" timestamp (3) with time zone;

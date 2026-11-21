@@ -113,6 +113,8 @@ export const billingWalletEntries = pgTable(
     reference: text(),
     subscriptionId: integer("subscription_id").references(() => billingSubscriptions.id),
     adminId: integer("admin_id").references(() => superadminUsers.id),
+    /** When the money actually moved (for example a BTC payment last month); null means at creation. */
+    occurredAt: at("occurred_at"),
     createdAt: at("created_at").defaultNow().notNull(),
   },
   (table) => [

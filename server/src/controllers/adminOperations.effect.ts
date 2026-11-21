@@ -6,6 +6,7 @@ import {
 } from "effect"
 import type {
   AdminActiveUsersQuery,
+  AdminBillingRecordPaymentInput,
   AdminBillingSetPlanInput,
   AdminBillingWalletEntryInput,
   AdminCreateEmailCampaignInput,
@@ -277,6 +278,15 @@ export interface AdminOperationsShape {
     subject: AdminBillingSubject,
     session: AdminSessionValue,
     request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly recordBillingPayment: (
+    subject: AdminBillingSubject,
+    input: BodyOf<typeof AdminBillingRecordPaymentInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly financials: (
+    session: AdminSessionValue,
   ) => AdminOperation
 }
 

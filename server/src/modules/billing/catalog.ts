@@ -3,7 +3,13 @@
  * service's CHECKOUT_APPS entry; Inline only knows codes, subjects and list prices.
  */
 export type BillingSubject = "user" | "space"
-export type BillingPlan = "pro" | "believer" | "team" | "enterprise"
+export type BillingPlan = "pro" | "believer" | "team" | "business" | "enterprise"
+
+/** Which plans each subject can hold, for checkout and admin-entered plans alike. */
+export const plansBySubject: Readonly<Record<BillingSubject, readonly BillingPlan[]>> = {
+  user: ["pro", "believer"],
+  space: ["team", "business", "enterprise"],
+}
 export type BillingInterval = "month" | "year" | "three_years" | "none"
 
 export interface CatalogPlan {
@@ -29,6 +35,8 @@ export const catalog: readonly CatalogPlan[] = [
   { code: "believer", subject: "user", plan: "believer", interval: "three_years", mode: "subscription", usdCents: 20_000, perSeat: false },
   { code: "team-monthly", subject: "space", plan: "team", interval: "month", mode: "subscription", usdCents: 2_000, perSeat: true },
   { code: "team-yearly", subject: "space", plan: "team", interval: "year", mode: "subscription", usdCents: 20_000, perSeat: true },
+  { code: "business-monthly", subject: "space", plan: "business", interval: "month", mode: "subscription", usdCents: 3_000, perSeat: true },
+  { code: "business-yearly", subject: "space", plan: "business", interval: "year", mode: "subscription", usdCents: 30_000, perSeat: true },
   // Existing one-time sandbox price used to verify payment and fulfillment end to end.
   { code: "sandbox-test", subject: "space", plan: "team", interval: "none", mode: "payment", usdCents: 0, perSeat: false, prepaidDays: 30, testOnly: true },
 ]

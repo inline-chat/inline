@@ -22,8 +22,10 @@ import {
   db,
 } from "@in/server/db"
 import {
+  billingSubscriptions,
   superadminSessions,
   superadminUsers,
+  users,
 } from "@in/server/db/schema"
 import {
   generateToken,
@@ -548,5 +550,115 @@ describe("AdminSessionStoreLive", () => {
     expect((await call(`/admin/spaces/${space.id}/billing`)).body).toMatchObject({
       ok: true, isPro: true, live: { plan: "team" },
     })
+  })
+
+  it("records off-Stripe payments and lists them on the financials overview", async () => {
+    const admin = await testUtils.createUser("effect-admin-financials@example.com")
+    const [superadmin] = await db.insert(superadminUsers).values({
+      email: admin.email!, userId: admin.id,
+      passwordHash: "configured", passwordSetAt: new Date(), totpEnabledAt: new Date(),
+    }).returning()
+    const { token, tokenHash } = await generateToken(admin.id)
+    const now = new Date()
+    const day = 24 * 60 * 60 * 1_000
+    await db.insert(superadminSessions).values({
+      userId: admin.id, tokenHash, lastSeenAt: now, stepUpAt: now,
+      expiresAt: new Date(now.getTime() + day), idleExpiresAt: new Date(now.getTime() + day),
+      userAgentHash: hashToken("admin-financials"),
+    })
+    const customer = await testUtils.createUser("effect-admin-financials-customer@example.com")
+    await db.update(users).set({ firstName: "Fake", lastName: "Customer", username: "fakecustomer" })
+      .where(eq(users.id, customer.id))
+    const space = (await testUtils.createSpace("Fake Payments Space"))!
+    const stripeSpace = (await testUtils.createSpace("Fake Stripe Space"))!
+    await db.insert(billingSubscriptions).values({
+      spaceId: stripeSpace.id, plan: "team", interval: "month", funding: "stripe", status: "active",
+      paidThrough: new Date(now.getTime() + 30 * day), stripeSubscriptionId: "sub_fake_financials",
+    })
+    const call = async (path: string, body?: unknown) => {
+      const response = await handle(new Request(`http://inline.test${path}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          cookie: `inline_admin_session=${token}`, origin: "https://admin.inline.chat",
+          "user-agent": "admin-financials", "content-type": "application/json",
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }))
+      return { status: response.status, body: await response.json() }
+    }
+
+    expect(await call("/admin/financials")).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        live: [expect.objectContaining({ spaceId: stripeSpace.id, funding: "stripe", isPro: true, spaceName: "Fake Stripe Space" })],
+        balances: [], entries: [], orders: [], receivedOffStripe: {},
+      },
+    })
+
+    const occurredAt = "2026-10-01T12:00:00.000Z"
+    const paidThrough = new Date(now.getTime() + 365 * day).toISOString()
+    const paid = await call(`/admin/users/${customer.id}/billing/payment`, {
+      currency: "btc", amount: 120_000, reference: " fake-tx-1 ", occurredAt,
+      plan: { plan: "pro", paidThrough, note: " a year paid in BTC " },
+    })
+    expect(paid).toMatchObject({
+      status: 200,
+      body: {
+        ok: true,
+        credit: { userId: customer.id, currency: "btc", amount: 120_000, kind: "btc_topup", reference: "fake-tx-1", occurredAt, adminId: superadmin!.id },
+        subscription: { userId: customer.id, plan: "pro", funding: "wallet", status: "active", paidThrough, note: "a year paid in BTC" },
+      },
+    })
+
+    const credited = await call(`/admin/spaces/${space.id}/billing/payment`, { currency: "usd", amount: 5_000 })
+    expect(credited).toMatchObject({
+      status: 200,
+      body: { ok: true, credit: { spaceId: space.id, currency: "usd", amount: 5_000, kind: "admin_topup", occurredAt: null }, subscription: null },
+    })
+
+    for (const invalid of [
+      { currency: "usd", amount: 0 },
+      { currency: "usd", amount: 1.5 },
+      { currency: "usd", amount: 100, occurredAt: "not-a-date" },
+      { currency: "usd", amount: 100, plan: { plan: "team", paidThrough: null } },
+      { currency: "usd", amount: 100, plan: { plan: "pro", paidThrough: "not-a-date" } },
+    ]) {
+      expect(await call(`/admin/users/${customer.id}/billing/payment`, invalid)).toEqual({
+        status: 400, body: { ok: false, error: "invalid_input" },
+      })
+    }
+    expect((await call("/admin/users/999999999/billing/payment", { currency: "usd", amount: 100 })).status).toBe(404)
+    expect(await call(`/admin/spaces/${stripeSpace.id}/billing/payment`, {
+      currency: "usd", amount: 2_000, plan: { plan: "business", seats: 4, paidThrough: null },
+    })).toEqual({ status: 409, body: { ok: false, error: "stripe_managed" } })
+
+    const adjustment = await call(`/admin/spaces/${space.id}/billing/wallet`, {
+      currency: "usd", amount: -1_000, kind: "adjustment", occurredAt: "2026-09-15T12:00:00.000Z",
+    })
+    expect(adjustment).toMatchObject({ status: 200, body: { ok: true, entry: { amount: -1_000, occurredAt: "2026-09-15T12:00:00.000Z" } } })
+    expect((await call(`/admin/spaces/${space.id}/billing/wallet`, {
+      currency: "usd", amount: 100, kind: "adjustment", occurredAt: "yesterday-ish",
+    })).body).toEqual({ ok: false, error: "invalid_input" })
+
+    const overview = await call("/admin/financials")
+    expect(overview.status).toBe(200)
+    expect(overview.body.live).toHaveLength(2)
+    expect(overview.body.live).toContainEqual(expect.objectContaining({
+      userId: customer.id, plan: "pro", funding: "wallet", paidThrough, isPro: true,
+      userName: "Fake Customer", username: "fakecustomer", spaceName: null,
+    }))
+    // The BTC payment was charged in full to the plan, so only the space's USD credit is left.
+    expect(overview.body.balances).toEqual([{
+      userId: null, spaceId: space.id, currency: "usd", balance: 4_000,
+      userName: null, username: null, spaceName: "Fake Payments Space",
+    }])
+    expect(overview.body.entries).toHaveLength(4)
+    expect(overview.body.entries).toContainEqual(expect.objectContaining({
+      userId: customer.id, kind: "plan_charge", currency: "btc", amount: -120_000, occurredAt, userName: "Fake Customer",
+    }))
+    expect(overview.body.orders).toEqual([])
+    // The rejected Stripe-space payment rolled back with its plan.
+    expect(overview.body.receivedOffStripe).toEqual({ btc: 120_000, usd: 5_000 })
   })
 })

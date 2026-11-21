@@ -107,6 +107,8 @@ import {
   adminAddWalletEntry,
   adminBillingDetail,
   adminEndPlan,
+  adminFinancialsOverview,
+  adminRecordPayment,
   adminSetPlan,
   BillingAdminError,
 } from "@in/server/modules/billing/admin"
@@ -160,6 +162,8 @@ type ManagementOperationName =
   | "addBillingWalletEntry"
   | "setBillingPlan"
   | "endBillingPlan"
+  | "recordBillingPayment"
+  | "financials"
 
 export type AdminManagementOperations = Pick<
   AdminOperationsShape,
@@ -1562,6 +1566,7 @@ const serializeBillingWalletEntry = (row: BillingWalletEntryRow) => ({
   reference: row.reference,
   subscriptionId: row.subscriptionId,
   adminId: row.adminId,
+  occurredAt: isoOrNull(row.occurredAt),
   createdAt: row.createdAt.toISOString(),
 })
 
@@ -1581,6 +1586,24 @@ const serializeBillingOrder = (row: BillingOrderRow) => ({
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
 })
+
+const subjectNames = (row: {
+  readonly userName: string | null
+  readonly username: string | null
+  readonly spaceName: string | null
+}) => ({
+  userName: row.userName,
+  username: row.username,
+  spaceName: row.spaceName,
+})
+
+/** Parses an ISO timestamp from a billing body, refusing one that isn't a date. */
+const billingDate = (value: string): Effect.Effect<Date, AdminRejected> => {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? reject(400, "invalid_input")
+    : Effect.succeed(date)
+}
 
 const describeBillingSubject = (subject: AdminBillingSubject): string =>
   subject.userId !== undefined
@@ -1618,6 +1641,9 @@ const billingDetailOperation: AdminOperationsShape["billingDetail"] =
 const addBillingWalletEntryOperation: AdminOperationsShape["addBillingWalletEntry"] =
   (subject, input, session, request) =>
     Effect.gen(function* () {
+      const occurredAt = input.occurredAt === undefined
+        ? undefined
+        : yield* billingDate(input.occurredAt)
       const adminId = yield* superadminIdFor(session)
       const entry = yield* attemptBilling(
         "admin.billing.wallet.add",
@@ -1629,6 +1655,7 @@ const addBillingWalletEntryOperation: AdminOperationsShape["addBillingWalletEntr
               amount: input.amount,
               kind: input.kind,
               reference: input.reference?.trim() || undefined,
+              occurredAt,
             },
             adminId,
           ),
@@ -1720,6 +1747,88 @@ const endBillingPlanOperation: AdminOperationsShape["endBillingPlan"] =
       })
     })
 
+const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"] =
+  (subject, input, session, request) =>
+    Effect.gen(function* () {
+      const occurredAt = input.occurredAt === undefined
+        ? undefined
+        : yield* billingDate(input.occurredAt)
+      const paidThrough = input.plan !== undefined && input.plan.paidThrough !== null
+        ? yield* billingDate(input.plan.paidThrough)
+        : null
+      const adminId = yield* superadminIdFor(session)
+      const result = yield* attemptBilling(
+        "admin.billing.payment.record",
+        () =>
+          adminRecordPayment(
+            subject,
+            {
+              currency: input.currency,
+              amount: input.amount,
+              reference: input.reference?.trim() || undefined,
+              occurredAt,
+              plan: input.plan
+                ? {
+                    plan: input.plan.plan,
+                    seats: input.plan.seats,
+                    paidThrough,
+                    note: input.plan.note?.trim() || undefined,
+                  }
+                : undefined,
+            },
+            adminId,
+          ),
+      )
+      const plan = input.plan
+        ? `, paying for ${input.plan.plan} ${paidThrough ? `through ${paidThrough.toISOString()}` : "with no end date"}`
+        : ""
+      yield* attempt(
+        "admin.billing.payment.record.notify",
+        () =>
+          notifyAdminAction({
+            actionTaken: `Recorded a ${formatMinorUnits(input.currency, input.amount)} payment for ${describeBillingSubject(subject)}${plan}`,
+            actorEmail: session.email,
+            request,
+          }),
+      )
+      return jsonResult({
+        ok: true as const,
+        credit: serializeBillingWalletEntry(result.credit),
+        subscription: result.subscription ? serializeBillingSubscription(result.subscription) : null,
+      })
+    })
+
+const financialsOperation: AdminOperationsShape["financials"] =
+  () =>
+    attempt("admin.billing.financials", () => adminFinancialsOverview()).pipe(
+      Effect.map((overview) =>
+        jsonResult({
+          ok: true as const,
+          live: overview.live.map((row) => ({
+            ...serializeBillingSubscription(row),
+            isPro: row.isPro,
+            ...subjectNames(row),
+          })),
+          balances: overview.balances.map((row) => ({
+            userId: row.userId,
+            spaceId: row.spaceId,
+            currency: row.currency,
+            balance: row.balance,
+            ...subjectNames(row),
+          })),
+          entries: overview.entries.map((row) => ({
+            ...serializeBillingWalletEntry(row),
+            ...subjectNames(row),
+          })),
+          orders: overview.orders.map((row) => ({
+            ...serializeBillingOrder(row),
+            ...subjectNames(row),
+          })),
+          receivedOffStripe: overview.receivedOffStripe,
+        }),
+      ),
+    )
+
 export const makeAdminManagementOperations = (
   dependencies: {
     readonly sendProviderEmail?: Parameters<typeof makeTestEmailProviderOperation>[0] | undefined
@@ -1749,6 +1858,8 @@ export const makeAdminManagementOperations = (
     addBillingWalletEntry: addBillingWalletEntryOperation,
     setBillingPlan: setBillingPlanOperation,
     endBillingPlan: endBillingPlanOperation,
+    recordBillingPayment: recordBillingPaymentOperation,
+    financials: financialsOperation,
     invites: invitesOperation,
     generateInvites: (input, session, request) =>
       Effect.gen(function* () {

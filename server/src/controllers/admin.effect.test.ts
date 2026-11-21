@@ -256,6 +256,9 @@ const makeOperations = (
       called("addBillingWalletEntry"),
     setBillingPlan: () => called("setBillingPlan"),
     endBillingPlan: () => called("endBillingPlan"),
+    recordBillingPayment: () =>
+      called("recordBillingPayment"),
+    financials: () => called("financials"),
     ...overrides,
   }
 }
@@ -433,6 +436,7 @@ describe("AdminRouteGroup", () => {
         "GET /admin/auth/totp/setup",
         "GET /admin/email-campaigns",
         "GET /admin/email-provider-status",
+        "GET /admin/financials",
         "GET /admin/invites",
         "GET /admin/me",
         "GET /admin/metrics/active-users",
@@ -464,9 +468,11 @@ describe("AdminRouteGroup", () => {
         "POST /admin/email-provider-test",
         "POST /admin/invites/generate",
         "POST /admin/reserved-usernames",
+        "POST /admin/spaces/{id}/billing/payment",
         "POST /admin/spaces/{id}/billing/plan",
         "POST /admin/spaces/{id}/billing/plan/end",
         "POST /admin/spaces/{id}/billing/wallet",
+        "POST /admin/users/{id}/billing/payment",
         "POST /admin/users/{id}/billing/plan",
         "POST /admin/users/{id}/billing/plan/end",
         "POST /admin/users/{id}/billing/wallet",
@@ -1246,6 +1252,199 @@ describe("AdminRouteGroup", () => {
                 orders: [],
               },
             }),
+        },
+      },
+    )
+  })
+
+  it("routes payments and the financials overview behind the right guards", async () => {
+    const payments: Array<[unknown, unknown]> = []
+    const credit = {
+      id: 11,
+      userId: null,
+      spaceId: 9,
+      currency: "btc",
+      amount: 50_000,
+      kind: "btc_topup",
+      reference: "fake-tx",
+      subscriptionId: null,
+      adminId: 2,
+      occurredAt: "2026-10-01T12:00:00.000Z",
+      createdAt: "2026-11-01T00:00:00.000Z",
+    }
+    const financials = {
+      ok: true,
+      live: [],
+      balances: [
+        {
+          userId: null,
+          spaceId: 9,
+          currency: "btc",
+          balance: 50_000,
+          userName: null,
+          username: null,
+          spaceName: "Fake Space",
+        },
+      ],
+      entries: [
+        {
+          ...credit,
+          userName: null,
+          username: null,
+          spaceName: "Fake Space",
+        },
+      ],
+      orders: [],
+      receivedOffStripe: { btc: 50_000 },
+    }
+    await withKernel(
+      async ({ handler, probe }) => {
+        const payment = await handler(
+          adminRequest("/admin/spaces/9/billing/payment", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              currency: "btc",
+              amount: 50_000,
+              reference: "fake-tx",
+              occurredAt: "2026-10-01T12:00:00.000Z",
+              plan: {
+                plan: "business",
+                seats: 3,
+                paidThrough: null,
+              },
+            }),
+          }),
+        )
+        expect(payment.status).toBe(200)
+        expect(await payment.json()).toEqual({
+          ok: true,
+          credit,
+          subscription: null,
+        })
+
+        const unknownCurrency = await handler(
+          adminRequest("/admin/users/5/billing/payment", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              currency: "eur",
+              amount: 100,
+            }),
+          }),
+        )
+        expect(unknownCurrency.status).toBe(422)
+
+        const overview = await handler(
+          adminRequest("/admin/financials"),
+        )
+        expect(overview.status).toBe(200)
+        expect(await overview.json()).toEqual(financials)
+
+        expect(payments).toEqual([
+          [
+            { spaceId: 9 },
+            {
+              currency: "btc",
+              amount: 50_000,
+              reference: "fake-tx",
+              occurredAt: "2026-10-01T12:00:00.000Z",
+              plan: {
+                plan: "business",
+                seats: 3,
+                paidThrough: null,
+              },
+            },
+          ],
+        ])
+        expect(probe.calls).toEqual([])
+      },
+      {
+        operations: {
+          recordBillingPayment: (subject, input) => {
+            payments.push([subject, input])
+            return Effect.succeed({
+              kind: "json",
+              body: { ok: true, credit, subscription: null },
+            })
+          },
+          financials: () =>
+            Effect.succeed({
+              kind: "json",
+              body: financials,
+            }),
+        },
+      },
+    )
+
+    const staleStepUp: Probe = {
+      calls: [],
+      sessionTokens: [],
+      session: session({
+        stepUpAt: new Date(0),
+      }),
+    }
+    await withKernel(
+      async ({ handler }) => {
+        const read = await handler(
+          adminRequest("/admin/financials"),
+        )
+        expect(read.status).toBe(200)
+
+        const write = await handler(
+          adminRequest("/admin/users/5/billing/payment", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              currency: "usd",
+              amount: 1_000,
+            }),
+          }),
+        )
+        expect(write.status).toBe(403)
+        expect(await write.json()).toEqual({
+          ok: false,
+          error: "step_up_required",
+        })
+        expect(staleStepUp.calls).toEqual([])
+      },
+      {
+        probe: staleStepUp,
+        operations: {
+          financials: () =>
+            Effect.succeed({
+              kind: "json",
+              body: {
+                ok: true,
+                live: [],
+                balances: [],
+                entries: [],
+                orders: [],
+                receivedOffStripe: {},
+              },
+            }),
+        },
+      },
+    )
+
+    await withKernel(
+      async ({ handler }) => {
+        const signedOut = await handler(
+          adminRequest("/admin/financials"),
+        )
+        expect(signedOut.status).toBe(401)
+      },
+      {
+        probe: {
+          calls: [],
+          sessionTokens: [],
+          session: null,
         },
       },
     )

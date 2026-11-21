@@ -50,6 +50,8 @@ describe("catalog and config", () => {
     expect(findPlan("pro-yearly")).toMatchObject({ subject: "user", usdCents: 10_000 })
     expect(findPlan("team-monthly")).toMatchObject({ subject: "space", usdCents: 2_000, perSeat: true })
     expect(findPlan("team-yearly")).toMatchObject({ subject: "space", usdCents: 20_000, perSeat: true })
+    expect(findPlan("business-monthly")).toMatchObject({ subject: "space", plan: "business", usdCents: 3_000, perSeat: true })
+    expect(findPlan("business-yearly")).toMatchObject({ subject: "space", plan: "business", usdCents: 30_000, perSeat: true })
     expect(findPlan("believer")).toMatchObject({ subject: "user", plan: "believer", interval: "three_years", mode: "subscription", usdCents: 20_000 })
     expect(findPlan("sandbox-test")).toMatchObject({ mode: "payment", testOnly: true })
   })
