@@ -652,7 +652,11 @@ private enum TinyThumbnailRenderer {
     guard let scaledImage = aspectFilledCGImage(from: image, targetSize: TinyThumbnailRenderConstants.renderSize) else {
       return nil
     }
+    return filtered(scaledImage)
+  }
 
+  /// The bubble's blur and saturation.
+  static func filtered(_ scaledImage: CGImage) -> CGImage {
     let inputImage = CIImage(cgImage: scaledImage)
     let blurFilter = CIFilter(name: "CIGaussianBlur")
     blurFilter?.setValue(inputImage.clampedToExtent(), forKey: kCIInputImageKey)
@@ -706,6 +710,51 @@ private enum TinyThumbnailRenderer {
     return context.makeImage()
   }
 }
+
+#if os(iOS)
+/// The bubble's blurred stripped thumbnail at the photo's own aspect ratio, for surfaces that
+/// show the whole photo (the media gallery) rather than a crop of it.
+public enum InlineTinyThumbnailImage {
+  // NSCache synchronizes its own reads and writes.
+  nonisolated(unsafe) private static let cache: NSCache<NSData, UIImage> = {
+    let cache = NSCache<NSData, UIImage>()
+    cache.countLimit = 256
+    return cache
+  }()
+
+  /// Blurred and saturated like the bubble's background. Renders synchronously on first use
+  /// (a few milliseconds at this size) and is cached by its bytes after that.
+  public static func blurred(strippedBytes: Data?) -> UIImage? {
+    guard let strippedBytes, !strippedBytes.isEmpty else { return nil }
+    if let cached = cache.object(forKey: strippedBytes as NSData) {
+      return cached
+    }
+    guard let image = TinyThumbnailRenderer.aspectPreservingBackground(for: strippedBytes) else { return nil }
+    let result = UIImage(cgImage: image)
+    cache.setObject(result, forKey: strippedBytes as NSData)
+    return result
+  }
+}
+
+extension TinyThumbnailRenderer {
+  /// The bubble's filter on an image whose short side is the bubble's render size, so the blur
+  /// reads the same while the whole frame stays visible.
+  static func aspectPreservingBackground(for strippedBytes: Data) -> CGImage? {
+    guard let decodedJPEG = InlineTinyThumbnailDecoder.decodeJPEGData(from: strippedBytes),
+          let imageSource = CGImageSourceCreateWithData(decodedJPEG as CFData, nil),
+          let decoded = CGImageSourceCreateImageAtIndex(imageSource, 0, nil),
+          decoded.width > 0, decoded.height > 0
+    else { return nil }
+    let side = TinyThumbnailRenderConstants.renderSize.width
+    let width = CGFloat(decoded.width)
+    let height = CGFloat(decoded.height)
+    let scale = side / min(width, height)
+    let target = CGSize(width: min(width * scale, side * 4), height: min(height * scale, side * 4))
+    guard let scaled = aspectFilledCGImage(from: decoded, targetSize: target) else { return nil }
+    return filtered(scaled)
+  }
+}
+#endif
 
 public final class InlineTinyThumbnailBackgroundView: PlatformView {
   public var onVisibilityChange: ((Bool) -> Void)? {
