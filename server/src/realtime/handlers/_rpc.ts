@@ -36,6 +36,7 @@ import { handleTranslateMessages } from "./translateMessages"
 import { handleGetChats } from "./messages.getChats"
 import { handleGetSpaces } from "./space.getSpaces"
 import { getCommonChatsHandler } from "./messages.getCommonChats"
+import { createBillingCheckoutHandler, createBillingPortalHandler, getBillingHandler } from "@in/server/realtime/handlers/billing"
 import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
@@ -801,6 +802,27 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return {
         oneofKind: "getCommonChats",
         getCommonChats: await getCommonChatsHandler(call.input.getCommonChats, handlerContext),
+      }
+    }
+
+    case Method.GET_BILLING: {
+      if (call.input.oneofKind !== "getBilling") throw RealtimeRpcError.BadRequest()
+      return { oneofKind: "getBilling", getBilling: await getBillingHandler(call.input.getBilling, handlerContext) }
+    }
+
+    case Method.CREATE_BILLING_CHECKOUT: {
+      if (call.input.oneofKind !== "createBillingCheckout") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "createBillingCheckout",
+        createBillingCheckout: await createBillingCheckoutHandler(call.input.createBillingCheckout, handlerContext),
+      }
+    }
+
+    case Method.CREATE_BILLING_PORTAL: {
+      if (call.input.oneofKind !== "createBillingPortal") throw RealtimeRpcError.BadRequest()
+      return {
+        oneofKind: "createBillingPortal",
+        createBillingPortal: await createBillingPortalHandler(call.input.createBillingPortal, handlerContext),
       }
     }
 

@@ -1,6 +1,7 @@
 import { Layer } from "effect"
 import { GridTranscriptionWorkerRoutesLive } from "./gridTranscription.effect"
 import { HttpRpcRoutesLive } from "./rpc.effect"
+import { BillingRoutesLive } from "./billing.effect"
 import {
   AuthApiGroup,
 } from "../../controllers/auth.effect"
@@ -99,5 +100,6 @@ export const makeCandidateHttpApplication = ({
     }),
     GridTranscriptionWorkerRoutesLive,
     HttpRpcRoutesLive,
+    BillingRoutesLive,
   )
 }

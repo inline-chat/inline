@@ -6,6 +6,8 @@ import {
 } from "effect"
 import type {
   AdminActiveUsersQuery,
+  AdminBillingSetPlanInput,
+  AdminBillingWalletEntryInput,
   AdminCreateEmailCampaignInput,
   AdminEmailCampaignPreviewInput,
   AdminEmailProviderStatusQuery,
@@ -30,6 +32,7 @@ import type {
 } from "./adminSecurity.effect"
 import type {
   SessionId,
+  SpaceId,
   UserId,
 } from "../core/schema/identifiers"
 import type {
@@ -254,7 +257,33 @@ export interface AdminOperationsShape {
     session: AdminSessionValue,
     request: AdminRequestInfo,
   ) => AdminOperation
+  readonly billingDetail: (
+    subject: AdminBillingSubject,
+    session: AdminSessionValue,
+  ) => AdminOperation
+  readonly addBillingWalletEntry: (
+    subject: AdminBillingSubject,
+    input: BodyOf<typeof AdminBillingWalletEntryInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly setBillingPlan: (
+    subject: AdminBillingSubject,
+    input: BodyOf<typeof AdminBillingSetPlanInput>,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
+  readonly endBillingPlan: (
+    subject: AdminBillingSubject,
+    session: AdminSessionValue,
+    request: AdminRequestInfo,
+  ) => AdminOperation
 }
+
+/** The billing holder an admin billing route acts on: a user or a space. */
+export type AdminBillingSubject =
+  | { readonly userId: UserId; readonly spaceId?: undefined }
+  | { readonly spaceId: SpaceId; readonly userId?: undefined }
 
 export class AdminOperations extends Context.Service<
   AdminOperations,

@@ -54,6 +54,8 @@ export const users = pgTable(
     timeZone: varchar("time_zone", { length: 256 }),
     shareTimeZone: boolean("share_time_zone").default(true).notNull(),
     appearInGlobalSearch: boolean("appear_in_global_search").default(true).notNull(),
+    // Server-controlled entitlement derived from billing_subscriptions; never client-set.
+    isPro: boolean("is_pro").default(false).notNull(),
 
     /** Next monotonic thread number available in this user's scope. */
     nextThreadNumber: integer("next_thread_number").default(1).notNull(),
@@ -94,11 +96,13 @@ export function userNotDeleted(): SQL {
 }
 
 type DbUserRow = typeof users.$inferSelect
-export type DbUser = Omit<DbUserRow, "shareTimeZone" | "appearInGlobalSearch"> & {
+export type DbUser = Omit<DbUserRow, "shareTimeZone" | "appearInGlobalSearch" | "isPro"> & {
   /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
   shareTimeZone?: boolean
   /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
   appearInGlobalSearch?: boolean
+  /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
+  isPro?: boolean
 }
 export type DbUserWithPhoto = DbUser & { photo?: (DbFile & { thumbs?: DbFile[] | null }) | null }
 export type DbUserWithProfile = DbUser & {

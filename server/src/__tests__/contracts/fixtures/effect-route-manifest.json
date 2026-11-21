@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 324,
+  "count": 332,
   "methodCounts": {
     "DELETE": 1,
-    "GET": 155,
-    "POST": 166,
+    "GET": 157,
+    "POST": 172,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "698fa5b0b81c9dd9e39cda54cc5454cb07de62ad13d28b84fb6d3a66ffb8959b",
+  "sha256": "93cf0a615d190eee40170959313d650b8181b4b7091dd1f01844201c6780d095",
   "routes": [
     {
       "method": "DELETE",
@@ -76,6 +76,10 @@
     },
     {
       "method": "GET",
+      "path": "/admin/spaces/{id}/billing"
+    },
+    {
+      "method": "GET",
       "path": "/admin/users"
     },
     {
@@ -85,6 +89,10 @@
     {
       "method": "GET",
       "path": "/admin/users/{id}/avatar"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/users/{id}/billing"
     },
     {
       "method": "GET",
@@ -725,6 +733,30 @@
     {
       "method": "POST",
       "path": "/admin/reserved-usernames"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/spaces/{id}/billing/plan"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/spaces/{id}/billing/plan/end"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/spaces/{id}/billing/wallet"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/{id}/billing/plan"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/{id}/billing/plan/end"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/{id}/billing/wallet"
     },
     {
       "method": "POST",

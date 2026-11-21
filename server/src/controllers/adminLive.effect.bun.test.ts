@@ -468,4 +468,85 @@ describe("AdminSessionStoreLive", () => {
       usernames: [],
     })
   })
+
+  it("manages user and space billing through the live HTTP routes", async () => {
+    const admin = await testUtils.createUser("effect-admin-billing@example.com")
+    const [superadmin] = await db.insert(superadminUsers).values({
+      email: admin.email!, userId: admin.id,
+      passwordHash: "configured", passwordSetAt: new Date(), totpEnabledAt: new Date(),
+    }).returning()
+    const { token, tokenHash } = await generateToken(admin.id)
+    const now = new Date()
+    const day = 24 * 60 * 60 * 1_000
+    await db.insert(superadminSessions).values({
+      userId: admin.id, tokenHash, lastSeenAt: now, stepUpAt: now,
+      expiresAt: new Date(now.getTime() + day), idleExpiresAt: new Date(now.getTime() + day),
+      userAgentHash: hashToken("admin-billing"),
+    })
+    const customer = await testUtils.createUser("effect-admin-billing-customer@example.com")
+    const space = (await testUtils.createSpace("Billing Space"))!
+    const call = async (path: string, body?: unknown) => {
+      const response = await handle(new Request(`http://inline.test${path}`, {
+        method: body === undefined && !path.endsWith("/end") ? "GET" : "POST",
+        headers: {
+          cookie: `inline_admin_session=${token}`, origin: "https://admin.inline.chat",
+          "user-agent": "admin-billing", "content-type": "application/json",
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }))
+      return { status: response.status, body: await response.json() }
+    }
+
+    expect(await call(`/admin/users/${customer.id}/billing`)).toEqual({
+      status: 200,
+      body: { ok: true, isPro: false, live: null, subscriptions: [], wallet: {}, walletEntries: [], orders: [] },
+    })
+    expect((await call("/admin/users/999999999/billing")).status).toBe(404)
+
+    const credit = await call(`/admin/users/${customer.id}/billing/wallet`, {
+      currency: "btc", amount: 250_000, kind: "btc_topup", reference: " tx-1 ",
+    })
+    expect(credit).toMatchObject({
+      status: 200,
+      body: { ok: true, entry: { currency: "btc", amount: 250_000, kind: "btc_topup", reference: "tx-1", adminId: superadmin!.id } },
+    })
+    expect((await call(`/admin/users/${customer.id}/billing/wallet`, {
+      currency: "usd", amount: 1.5, kind: "adjustment",
+    })).body).toEqual({ ok: false, error: "invalid_input" })
+
+    const paidThrough = new Date(now.getTime() + 365 * day).toISOString()
+    const plan = await call(`/admin/users/${customer.id}/billing/plan`, {
+      plan: "pro", funding: "wallet", paidThrough, note: "a year of BTC",
+      walletDebit: { currency: "btc", amount: 100_000 },
+    })
+    expect(plan).toMatchObject({
+      status: 200,
+      body: { ok: true, subscription: { plan: "pro", funding: "wallet", status: "active", paidThrough, endedAt: null } },
+    })
+    expect((await call(`/admin/users/${customer.id}/billing/plan`, {
+      plan: "team", funding: "comp", paidThrough: null,
+    })).body).toEqual({ ok: false, error: "invalid_input" })
+
+    const detail = await call(`/admin/users/${customer.id}/billing`)
+    expect(detail.body).toMatchObject({
+      ok: true, isPro: true, live: { plan: "pro", paidThrough }, wallet: { btc: 150_000 },
+    })
+    expect(detail.body.walletEntries).toHaveLength(2)
+
+    const ended = await call(`/admin/users/${customer.id}/billing/plan/end`)
+    expect(ended).toMatchObject({ status: 200, body: { ok: true, subscription: { status: "canceled" } } })
+    expect(await call(`/admin/users/${customer.id}/billing/plan/end`)).toEqual({
+      status: 200, body: { ok: true, subscription: null },
+    })
+
+    const team = await call(`/admin/spaces/${space.id}/billing/plan`, {
+      plan: "team", funding: "comp", paidThrough: null, seats: 5,
+    })
+    expect(team).toMatchObject({
+      status: 200, body: { ok: true, subscription: { spaceId: space.id, plan: "team", seats: 5, paidThrough: null } },
+    })
+    expect((await call(`/admin/spaces/${space.id}/billing`)).body).toMatchObject({
+      ok: true, isPro: true, live: { plan: "team" },
+    })
+  })
 })

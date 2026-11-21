@@ -95,6 +95,7 @@ import { MAX_HTTP_UPLOAD_BYTES } from "../../modules/files/limits"
 import { isLegacyFileUploadRequest, limitHttpRequestBody } from "./requestBodyLimit"
 import { startAgentRuntimeSweeper, stopAgentRuntimeSweeper } from "@in/server/modules/agents/runtime"
 import { startBotOnlineSweeper, stopBotOnlineSweeper } from "@in/server/modules/bots/online"
+import { startBillingSweeper, stopBillingSweeper } from "@in/server/modules/billing/sweeper"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { Log } from "@in/server/utils/log"
 export type { CoreWebSocketData } from "./combinedWebsocket"
@@ -449,7 +450,7 @@ export const startCoreProductionServer = async <
   const producerStopFailures: unknown[] = []
   const stopBackgroundProducers = (): Promise<void> => producerStopPromise ??= (async () => {
     if (!startBackgroundProcesses) return
-    await Promise.all([stopAgentRuntimeSweeper(), stopBotOnlineSweeper()])
+    await Promise.all([stopAgentRuntimeSweeper(), stopBotOnlineSweeper(), stopBillingSweeper()])
     // Stop all producers before any application/hint drain. Disposing the
     // runtime first would also close the database those drains still require.
     const result = await bridge.runPromiseExit(Effect.all([
@@ -676,6 +677,8 @@ export const startCoreProductionServer = async <
       startAgentRuntimeSweeper()
       // Bots seen only over HTTP go offline once their activity lapses.
       startBotOnlineSweeper()
+      // Billing periods lapse by time, so they need a sweep as well as webhooks.
+      startBillingSweeper()
       // Push tokens registered before fingerprints existed get one live owner each. Idempotent.
       applicationBackgroundWork.track(
         SessionsModel.backfillPushTokenFingerprints().catch((error: unknown) => {

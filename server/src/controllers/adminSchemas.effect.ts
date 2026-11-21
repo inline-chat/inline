@@ -4,6 +4,7 @@ import {
 } from "effect/unstable/httpapi"
 import {
   SessionId,
+  SpaceId,
   UserId,
 } from "../core/schema/identifiers"
 import {
@@ -866,6 +867,145 @@ export const AdminUpdateUserInput = Schema.Struct({
   emailVerified: Schema.optionalKey(Schema.Boolean),
 }).annotate({
   identifier: "AdminUpdateUserInput",
+})
+
+export const AdminSpaceIdParam = Schema.NumberFromString.pipe(
+  Schema.decodeTo(SpaceId),
+).annotate({
+  identifier: "AdminSpaceIdParam",
+})
+
+export const AdminSpaceIdParams = Schema.Struct({
+  id: Schema.String.annotate({
+    description: "A positive safe-integer space identifier.",
+  }),
+}).annotate({
+  identifier: "AdminSpaceIdParams",
+})
+
+const AdminBillingCurrency = Schema.Literals(["usd", "btc"])
+const NullableEntityId = Schema.NullOr(WirePositiveInteger)
+
+const AdminBillingSubscription = Schema.Struct({
+  id: WirePositiveInteger,
+  userId: NullableEntityId,
+  spaceId: NullableEntityId,
+  plan: Schema.String,
+  interval: Schema.String,
+  funding: Schema.String,
+  status: Schema.String,
+  seats: WireSafeInteger,
+  paidThrough: NullableString,
+  cancelAtPeriodEnd: Schema.Boolean,
+  payerUserId: NullableEntityId,
+  stripeSubscriptionId: NullableString,
+  livemode: Schema.Boolean,
+  note: NullableString,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  endedAt: NullableString,
+}).annotate({
+  identifier: "AdminBillingSubscription",
+})
+
+const AdminBillingWalletEntry = Schema.Struct({
+  id: WirePositiveInteger,
+  userId: NullableEntityId,
+  spaceId: NullableEntityId,
+  currency: Schema.String,
+  /** Minor units: USD cents or BTC sats. */
+  amount: WireSafeInteger,
+  kind: Schema.String,
+  reference: NullableString,
+  subscriptionId: NullableEntityId,
+  adminId: NullableEntityId,
+  createdAt: Schema.String,
+}).annotate({
+  identifier: "AdminBillingWalletEntry",
+})
+
+const AdminBillingOrder = Schema.Struct({
+  id: Schema.String,
+  buyerUserId: WirePositiveInteger,
+  userId: NullableEntityId,
+  spaceId: NullableEntityId,
+  planCode: Schema.String,
+  quantity: WireSafeInteger,
+  status: Schema.String,
+  livemode: Schema.Boolean,
+  checkoutSessionId: NullableString,
+  stripeSubscriptionId: NullableString,
+  paymentIntentId: NullableString,
+  subscriptionId: NullableEntityId,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+}).annotate({
+  identifier: "AdminBillingOrder",
+})
+
+export const AdminBillingDetailResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  isPro: Schema.Boolean,
+  live: Schema.NullOr(AdminBillingSubscription),
+  subscriptions: Schema.Array(AdminBillingSubscription),
+  /** Balances in minor units; a currency is absent when it has no entries. */
+  wallet: Schema.Struct({
+    usd: Schema.optionalKey(WireSafeInteger),
+    btc: Schema.optionalKey(WireSafeInteger),
+  }),
+  walletEntries: Schema.Array(AdminBillingWalletEntry),
+  orders: Schema.Array(AdminBillingOrder),
+}).annotate({
+  identifier: "AdminBillingDetailResult",
+})
+
+export const AdminBillingWalletEntryInput = Schema.Struct({
+  currency: AdminBillingCurrency,
+  /** Signed minor units: USD cents or BTC sats. Positive credits, negative debits. */
+  amount: Schema.Number,
+  kind: Schema.Literals([
+    "legacy_import",
+    "btc_topup",
+    "admin_topup",
+    "plan_charge",
+    "refund",
+    "adjustment",
+  ]),
+  reference: OptionalString,
+}).annotate({
+  identifier: "AdminBillingWalletEntryInput",
+})
+
+export const AdminBillingWalletEntryResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  entry: AdminBillingWalletEntry,
+}).annotate({
+  identifier: "AdminBillingWalletEntryResult",
+})
+
+export const AdminBillingSetPlanInput = Schema.Struct({
+  plan: Schema.Literals(["pro", "believer", "team", "enterprise"]),
+  funding: Schema.Literals(["comp", "wallet", "prepaid"]),
+  /** ISO 8601 timestamp, or null for no end date. */
+  paidThrough: NullableString,
+  seats: Schema.optionalKey(Schema.Number),
+  note: OptionalString,
+  /** Positive minor units debited from the wallet with the plan. */
+  walletDebit: Schema.optionalKey(
+    Schema.Struct({
+      currency: AdminBillingCurrency,
+      amount: Schema.Number,
+    }),
+  ),
+}).annotate({
+  identifier: "AdminBillingSetPlanInput",
+})
+
+export const AdminBillingPlanResult = Schema.Struct({
+  ok: Schema.Literal(true),
+  subscription: Schema.NullOr(AdminBillingSubscription),
+}).annotate({
+  identifier: "AdminBillingPlanResult",
 })
 
 export const AdminAvatarBody = Schema.Uint8Array.pipe(

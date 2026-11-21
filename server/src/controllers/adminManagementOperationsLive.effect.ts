@@ -103,14 +103,28 @@ import {
 import {
   lockPublicHandleNamespace,
 } from "@in/server/modules/spaces/spaceHandle"
-import type {
-  AdminOperationsShape,
+import {
+  adminAddWalletEntry,
+  adminBillingDetail,
+  adminEndPlan,
+  adminSetPlan,
+  BillingAdminError,
+} from "@in/server/modules/billing/admin"
+import {
+  AdminOperationFailure,
+  AdminRejected,
+  type AdminBillingSubject,
+  type AdminOperationsShape,
 } from "./adminOperations.effect"
+import type {
+  AdminSessionValue,
+} from "./adminSecurity.effect"
 import {
   attempt,
   attemptSync,
   decryptSessionPersonalData,
   getLast7DaysStart,
+  getSuperadminByUserId,
   jsonResult,
   notifyAdminAction,
   parseUserIdSearch,
@@ -142,6 +156,10 @@ type ManagementOperationName =
   | "grantInvites"
   | "revokeSession"
   | "updateUser"
+  | "billingDetail"
+  | "addBillingWalletEntry"
+  | "setBillingPlan"
+  | "endBillingPlan"
 
 export type AdminManagementOperations = Pick<
   AdminOperationsShape,
@@ -1481,6 +1499,227 @@ const validateCount = (
   count >= 1 &&
   count <= max
 
+type AdminBillingDetail = Awaited<ReturnType<typeof adminBillingDetail>>
+type BillingSubscriptionRow = AdminBillingDetail["subscriptions"][number]
+type BillingWalletEntryRow = AdminBillingDetail["walletEntries"][number]
+type BillingOrderRow = AdminBillingDetail["orders"][number]
+
+const billingErrorStatus = {
+  not_found: 404,
+  invalid_input: 400,
+  stripe_managed: 409,
+} as const satisfies Record<BillingAdminError["code"], number>
+
+/** Runs a billing admin call, surfacing its typed refusals as admin rejections. */
+const attemptBilling = <A>(
+  operation: string,
+  run: () => PromiseLike<A>,
+): Effect.Effect<A, AdminRejected | AdminOperationFailure> =>
+  Effect.tryPromise({
+    try: run,
+    catch: (cause) =>
+      cause instanceof BillingAdminError
+        ? new AdminRejected({
+            status: billingErrorStatus[cause.code],
+            error: cause.code,
+          })
+        : new AdminOperationFailure({
+            operation,
+            cause,
+          }),
+  })
+
+const isoOrNull = (value: Date | null): string | null =>
+  value?.toISOString() ?? null
+
+const serializeBillingSubscription = (row: BillingSubscriptionRow) => ({
+  id: row.id,
+  userId: row.userId,
+  spaceId: row.spaceId,
+  plan: row.plan,
+  interval: row.interval,
+  funding: row.funding,
+  status: row.status,
+  seats: row.seats,
+  paidThrough: isoOrNull(row.paidThrough),
+  cancelAtPeriodEnd: row.cancelAtPeriodEnd,
+  payerUserId: row.payerUserId,
+  stripeSubscriptionId: row.stripeSubscriptionId,
+  livemode: row.livemode,
+  note: row.note,
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+  endedAt: isoOrNull(row.endedAt),
+})
+
+const serializeBillingWalletEntry = (row: BillingWalletEntryRow) => ({
+  id: row.id,
+  userId: row.userId,
+  spaceId: row.spaceId,
+  currency: row.currency,
+  amount: row.amount,
+  kind: row.kind,
+  reference: row.reference,
+  subscriptionId: row.subscriptionId,
+  adminId: row.adminId,
+  createdAt: row.createdAt.toISOString(),
+})
+
+const serializeBillingOrder = (row: BillingOrderRow) => ({
+  id: row.id,
+  buyerUserId: row.buyerUserId,
+  userId: row.userId,
+  spaceId: row.spaceId,
+  planCode: row.planCode,
+  quantity: row.quantity,
+  status: row.status,
+  livemode: row.livemode,
+  checkoutSessionId: row.checkoutSessionId,
+  stripeSubscriptionId: row.stripeSubscriptionId,
+  paymentIntentId: row.paymentIntentId,
+  subscriptionId: row.subscriptionId,
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
+})
+
+const describeBillingSubject = (subject: AdminBillingSubject): string =>
+  subject.userId !== undefined
+    ? `user ${subject.userId}`
+    : `space ${subject.spaceId}`
+
+const formatMinorUnits = (currency: "usd" | "btc", amount: number): string =>
+  currency === "usd"
+    ? `${amount < 0 ? "-" : ""}$${(Math.abs(amount) / 100).toFixed(2)}`
+    : `${amount} sats`
+
+/** Wallet entries record which superadmin made them; an unlinked admin records none. */
+const superadminIdFor = (session: AdminSessionValue) =>
+  attempt(
+    "admin.billing.lookup-admin",
+    async () => (await getSuperadminByUserId(session.userId))?.id ?? null,
+  )
+
+const billingDetailOperation: AdminOperationsShape["billingDetail"] =
+  (subject) =>
+    attemptBilling("admin.billing.detail", () => adminBillingDetail(subject)).pipe(
+      Effect.map((detail) =>
+        jsonResult({
+          ok: true as const,
+          isPro: detail.isPro,
+          live: detail.live ? serializeBillingSubscription(detail.live) : null,
+          subscriptions: detail.subscriptions.map(serializeBillingSubscription),
+          wallet: detail.wallet,
+          walletEntries: detail.walletEntries.map(serializeBillingWalletEntry),
+          orders: detail.orders.map(serializeBillingOrder),
+        }),
+      ),
+    )
+
+const addBillingWalletEntryOperation: AdminOperationsShape["addBillingWalletEntry"] =
+  (subject, input, session, request) =>
+    Effect.gen(function* () {
+      const adminId = yield* superadminIdFor(session)
+      const entry = yield* attemptBilling(
+        "admin.billing.wallet.add",
+        () =>
+          adminAddWalletEntry(
+            subject,
+            {
+              currency: input.currency,
+              amount: input.amount,
+              kind: input.kind,
+              reference: input.reference?.trim() || undefined,
+            },
+            adminId,
+          ),
+      )
+      yield* attempt(
+        "admin.billing.wallet.add.notify",
+        () =>
+          notifyAdminAction({
+            actionTaken: `Added ${formatMinorUnits(input.currency, input.amount)} (${input.kind}) to the wallet of ${describeBillingSubject(subject)}`,
+            actorEmail: session.email,
+            request,
+          }),
+      )
+      return jsonResult({
+        ok: true as const,
+        entry: serializeBillingWalletEntry(entry),
+      })
+    })
+
+const setBillingPlanOperation: AdminOperationsShape["setBillingPlan"] =
+  (subject, input, session, request) =>
+    Effect.gen(function* () {
+      const paidThrough =
+        input.paidThrough === null ? null : new Date(input.paidThrough)
+      if (paidThrough !== null && Number.isNaN(paidThrough.getTime())) {
+        return yield* reject(400, "invalid_input")
+      }
+      if (input.seats !== undefined && !validateCount(input.seats, 100_000)) {
+        return yield* reject(400, "invalid_input")
+      }
+      const adminId = yield* superadminIdFor(session)
+      const note = input.note?.trim() || undefined
+      const subscription = yield* attemptBilling(
+        "admin.billing.plan.set",
+        () =>
+          adminSetPlan(
+            subject,
+            {
+              plan: input.plan,
+              funding: input.funding,
+              paidThrough,
+              seats: input.seats,
+              note,
+              walletDebit: input.walletDebit,
+            },
+            adminId,
+          ),
+      )
+      const until = paidThrough ? `through ${paidThrough.toISOString()}` : "with no end date"
+      const debit = input.walletDebit
+        ? `, debiting ${formatMinorUnits(input.walletDebit.currency, input.walletDebit.amount)}`
+        : ""
+      yield* attempt(
+        "admin.billing.plan.set.notify",
+        () =>
+          notifyAdminAction({
+            actionTaken: `Set ${input.plan} (${input.funding}) ${until} for ${describeBillingSubject(subject)}${debit}`,
+            actorEmail: session.email,
+            request,
+          }),
+      )
+      return jsonResult({
+        ok: true as const,
+        subscription: serializeBillingSubscription(subscription),
+      })
+    })
+
+const endBillingPlanOperation: AdminOperationsShape["endBillingPlan"] =
+  (subject, session, request) =>
+    Effect.gen(function* () {
+      const ended = yield* attemptBilling(
+        "admin.billing.plan.end",
+        () => adminEndPlan(subject),
+      )
+      if (ended) {
+        yield* attempt(
+          "admin.billing.plan.end.notify",
+          () =>
+            notifyAdminAction({
+              actionTaken: `Ended the ${ended.plan} plan of ${describeBillingSubject(subject)}`,
+              actorEmail: session.email,
+              request,
+            }),
+        )
+      }
+      return jsonResult({
+        ok: true as const,
+        subscription: ended ? serializeBillingSubscription(ended) : null,
+      })
+    })
+
 export const makeAdminManagementOperations = (
   dependencies: {
     readonly sendProviderEmail?: Parameters<typeof makeTestEmailProviderOperation>[0] | undefined
@@ -1506,6 +1745,10 @@ export const makeAdminManagementOperations = (
     users: usersOperation,
     avatar: avatarOperation,
     userDetail: userDetailOperation,
+    billingDetail: billingDetailOperation,
+    addBillingWalletEntry: addBillingWalletEntryOperation,
+    setBillingPlan: setBillingPlanOperation,
+    endBillingPlan: endBillingPlanOperation,
     invites: invitesOperation,
     generateInvites: (input, session, request) =>
       Effect.gen(function* () {

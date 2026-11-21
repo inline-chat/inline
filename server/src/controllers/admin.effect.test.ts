@@ -251,6 +251,11 @@ const makeOperations = (
     revokeSession: () =>
       called("revokeSession"),
     updateUser: () => called("updateUser"),
+    billingDetail: () => called("billingDetail"),
+    addBillingWalletEntry: () =>
+      called("addBillingWalletEntry"),
+    setBillingPlan: () => called("setBillingPlan"),
+    endBillingPlan: () => called("endBillingPlan"),
     ...overrides,
   }
 }
@@ -437,9 +442,11 @@ describe("AdminRouteGroup", () => {
         "GET /admin/reserved-usernames",
         "GET /admin/server-config",
         "GET /admin/spaces",
+        "GET /admin/spaces/{id}/billing",
         "GET /admin/users",
         "GET /admin/users/{id}",
         "GET /admin/users/{id}/avatar",
+        "GET /admin/users/{id}/billing",
         "GET /admin/waitlist",
         "POST /admin/auth/login",
         "POST /admin/auth/dev-login",
@@ -457,6 +464,12 @@ describe("AdminRouteGroup", () => {
         "POST /admin/email-provider-test",
         "POST /admin/invites/generate",
         "POST /admin/reserved-usernames",
+        "POST /admin/spaces/{id}/billing/plan",
+        "POST /admin/spaces/{id}/billing/plan/end",
+        "POST /admin/spaces/{id}/billing/wallet",
+        "POST /admin/users/{id}/billing/plan",
+        "POST /admin/users/{id}/billing/plan/end",
+        "POST /admin/users/{id}/billing/wallet",
         "POST /admin/users/{id}/invites",
         "POST /admin/users/{id}/sessions/{sessionId}/revoke",
         "POST /admin/users/{id}/update",
@@ -1058,6 +1071,182 @@ describe("AdminRouteGroup", () => {
           on: "query",
         })
         expect(probe.calls).toEqual([])
+      },
+    )
+  })
+
+  it("routes user and space billing to subject-shaped operations behind the right guards", async () => {
+    const subjects: Array<[string, unknown]> = []
+    const subscription = {
+      id: 3,
+      userId: null,
+      spaceId: 9,
+      plan: "team",
+      interval: "none",
+      funding: "comp",
+      status: "active",
+      seats: 4,
+      paidThrough: null,
+      cancelAtPeriodEnd: false,
+      payerUserId: null,
+      stripeSubscriptionId: null,
+      livemode: false,
+      note: null,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      endedAt: null,
+    }
+    await withKernel(
+      async ({ handler, probe }) => {
+        const detail = await handler(
+          adminRequest("/admin/spaces/9/billing"),
+        )
+        expect(detail.status).toBe(200)
+        expect(await detail.json()).toEqual({
+          ok: true,
+          isPro: true,
+          live: subscription,
+          subscriptions: [subscription],
+          wallet: { btc: 150_000 },
+          walletEntries: [],
+          orders: [],
+        })
+
+        const invalidSpace = await handler(
+          adminRequest(
+            "/admin/spaces/not-a-space/billing/wallet",
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+              },
+              body: JSON.stringify({
+                currency: "usd",
+                amount: 500,
+                kind: "admin_topup",
+              }),
+            },
+          ),
+        )
+        expect(invalidSpace.status).toBe(400)
+        expect(await invalidSpace.json()).toEqual({
+          ok: false,
+          error: "invalid_space",
+        })
+
+        const invalidPlan = await handler(
+          adminRequest("/admin/users/5/billing/plan", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              plan: "gold",
+              funding: "comp",
+              paidThrough: null,
+            }),
+          }),
+        )
+        expect(invalidPlan.status).toBe(422)
+
+        const stripeManaged = await handler(
+          adminRequest("/admin/users/5/billing/plan/end", {
+            method: "POST",
+          }),
+        )
+        expect(stripeManaged.status).toBe(409)
+        expect(await stripeManaged.json()).toEqual({
+          ok: false,
+          error: "stripe_managed",
+        })
+
+        expect(subjects).toEqual([
+          ["billingDetail", { spaceId: 9 }],
+          ["endBillingPlan", { userId: 5 }],
+        ])
+        expect(probe.calls).toEqual([])
+      },
+      {
+        operations: {
+          billingDetail: (subject) => {
+            subjects.push(["billingDetail", subject])
+            return Effect.succeed({
+              kind: "json",
+              body: {
+                ok: true,
+                isPro: true,
+                live: subscription,
+                subscriptions: [subscription],
+                wallet: { btc: 150_000 },
+                walletEntries: [],
+                orders: [],
+              },
+            })
+          },
+          endBillingPlan: (subject) => {
+            subjects.push(["endBillingPlan", subject])
+            return Effect.fail(
+              new AdminRejected({
+                status: 409,
+                error: "stripe_managed",
+              }),
+            )
+          },
+        },
+      },
+    )
+
+    const staleStepUp: Probe = {
+      calls: [],
+      sessionTokens: [],
+      session: session({
+        stepUpAt: new Date(0),
+      }),
+    }
+    await withKernel(
+      async ({ handler }) => {
+        const read = await handler(
+          adminRequest("/admin/users/5/billing"),
+        )
+        expect(read.status).toBe(200)
+
+        const write = await handler(
+          adminRequest("/admin/users/5/billing/wallet", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              currency: "btc",
+              amount: 10_000,
+              kind: "btc_topup",
+            }),
+          }),
+        )
+        expect(write.status).toBe(403)
+        expect(await write.json()).toEqual({
+          ok: false,
+          error: "step_up_required",
+        })
+        expect(staleStepUp.calls).toEqual([])
+      },
+      {
+        probe: staleStepUp,
+        operations: {
+          billingDetail: () =>
+            Effect.succeed({
+              kind: "json",
+              body: {
+                ok: true,
+                isPro: false,
+                live: null,
+                subscriptions: [],
+                wallet: {},
+                walletEntries: [],
+                orders: [],
+              },
+            }),
+        },
       },
     )
   })

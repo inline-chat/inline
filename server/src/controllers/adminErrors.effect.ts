@@ -283,6 +283,18 @@ export const AdminUpdateUserBadRequest = jsonError(
   ["invalid_user", "invalid_email", "no_updates"],
 )
 
+export const AdminBillingBadRequest = jsonError(
+  "AdminBillingBadRequest",
+  400,
+  ["invalid_user", "invalid_space", "invalid_input"],
+)
+
+export const AdminBillingConflict = jsonError(
+  "AdminBillingConflict",
+  409,
+  ["stripe_managed"],
+)
+
 export const AdminServerConfigBadRequest = jsonError(
   "AdminServerConfigBadRequest",
   400,

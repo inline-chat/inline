@@ -2,6 +2,7 @@ import {
   Effect,
 } from "effect"
 import {
+  type HttpServerRequest,
   HttpServerResponse,
 } from "effect/unstable/http"
 import {
@@ -21,7 +22,9 @@ import {
   defineHttpRouteGroup,
 } from "../core/http/routeGroup"
 import {
+  type AdminBillingSubject,
   AdminOperations,
+  type AdminRejected,
 } from "./adminOperations.effect"
 import {
   AdminAvatarAuthentication,
@@ -44,6 +47,8 @@ import {
   AdminAvatarBadRequest,
   AdminAvatarNotFound,
   AdminAvatarServiceUnavailable,
+  AdminBillingBadRequest,
+  AdminBillingConflict,
   AdminGrantInvitesBadRequest,
   AdminInvalidCountBadRequest,
   AdminInvalidSessionBadRequest,
@@ -82,6 +87,11 @@ import {
   AdminActiveUsersResult,
   AdminAppMetricsResult,
   AdminAvatarBody,
+  AdminBillingDetailResult,
+  AdminBillingPlanResult,
+  AdminBillingSetPlanInput,
+  AdminBillingWalletEntryInput,
+  AdminBillingWalletEntryResult,
   AdminCreateEmailCampaignInput,
   AdminEmailCampaignPreviewInput,
   AdminEmailCampaignPreviewResult,
@@ -112,6 +122,8 @@ import {
   AdminServerConfigSettingResult,
   AdminSessionIdParam,
   AdminSetPasswordInput,
+  AdminSpaceIdParam,
+  AdminSpaceIdParams,
   AdminSpacesResult,
   AdminStepUpInput,
   AdminStepUpResult,
@@ -802,6 +814,142 @@ const updateUserEndpoint = stepUpEndpoint(
   ),
 )
 
+const userBillingEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminUserBilling",
+    "/admin/users/:id/billing",
+    {
+      params: AdminUserIdParams.fields,
+      success: AdminBillingDetailResult,
+      error: [
+        AdminBillingBadRequest,
+        AdminNotFound,
+      ],
+    },
+  ),
+)
+
+const spaceBillingEndpoint = setupEndpoint(
+  HttpApiEndpoint.get(
+    "adminSpaceBilling",
+    "/admin/spaces/:id/billing",
+    {
+      params: AdminSpaceIdParams.fields,
+      success: AdminBillingDetailResult,
+      error: [
+        AdminBillingBadRequest,
+        AdminNotFound,
+      ],
+    },
+  ),
+)
+
+const userBillingWalletEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminUserBillingWallet",
+    "/admin/users/:id/billing/wallet",
+    {
+      params: AdminUserIdParams.fields,
+      payload: AdminBillingWalletEntryInput,
+      success: AdminBillingWalletEntryResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+      ],
+    },
+  ),
+)
+
+const spaceBillingWalletEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminSpaceBillingWallet",
+    "/admin/spaces/:id/billing/wallet",
+    {
+      params: AdminSpaceIdParams.fields,
+      payload: AdminBillingWalletEntryInput,
+      success: AdminBillingWalletEntryResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+      ],
+    },
+  ),
+)
+
+const userBillingPlanEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminUserBillingPlan",
+    "/admin/users/:id/billing/plan",
+    {
+      params: AdminUserIdParams.fields,
+      payload: AdminBillingSetPlanInput,
+      success: AdminBillingPlanResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
+const spaceBillingPlanEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminSpaceBillingPlan",
+    "/admin/spaces/:id/billing/plan",
+    {
+      params: AdminSpaceIdParams.fields,
+      payload: AdminBillingSetPlanInput,
+      success: AdminBillingPlanResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
+const userBillingPlanEndEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminUserBillingPlanEnd",
+    "/admin/users/:id/billing/plan/end",
+    {
+      params: AdminUserIdParams.fields,
+      success: AdminBillingPlanResult,
+      error: [
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
+const spaceBillingPlanEndEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminSpaceBillingPlanEnd",
+    "/admin/spaces/:id/billing/plan/end",
+    {
+      params: AdminSpaceIdParams.fields,
+      success: AdminBillingPlanResult,
+      error: [
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
 export const AdminApiGroup = HttpApiGroup.make(
   "admin",
 ).add(
@@ -842,6 +990,14 @@ export const AdminApiGroup = HttpApiGroup.make(
   grantInvitesEndpoint,
   revokeSessionEndpoint,
   updateUserEndpoint,
+  userBillingEndpoint,
+  spaceBillingEndpoint,
+  userBillingWalletEndpoint,
+  spaceBillingWalletEndpoint,
+  userBillingPlanEndpoint,
+  spaceBillingPlanEndpoint,
+  userBillingPlanEndEndpoint,
+  spaceBillingPlanEndEndpoint,
 )
 
 export const makeAdminRouteGroup = () => {
@@ -868,6 +1024,141 @@ export const makeAdminRouteGroup = () => {
             R
           >,
         ) => Effect.provide(effect, services)
+
+        const billingSubject = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ): Effect.Effect<AdminBillingSubject, AdminRejected> =>
+          kind === "user"
+            ? decodePathParam(
+                request,
+                2,
+                AdminUserIdParam,
+                {
+                  status: 400,
+                  error: "invalid_user",
+                },
+              ).pipe(
+                Effect.map((userId) => ({ userId })),
+              )
+            : decodePathParam(
+                request,
+                2,
+                AdminSpaceIdParam,
+                {
+                  status: 400,
+                  error: "invalid_space",
+                },
+              ).pipe(
+                Effect.map((spaceId) => ({ spaceId })),
+              )
+
+        const billingDetail = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ) =>
+          run(
+            complete(
+              `admin.${kind}s.billing`,
+              AdminBillingDetailResult,
+              withSession((session) =>
+                billingSubject(request, kind).pipe(
+                  Effect.flatMap((subject) =>
+                    operations.billingDetail(
+                      subject,
+                      session,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+        const billingWallet = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ) =>
+          run(
+            complete(
+              `admin.${kind}s.billing.wallet`,
+              AdminBillingWalletEntryResult,
+              decodeBody(
+                request,
+                AdminBillingWalletEntryInput,
+              ).pipe(
+                Effect.flatMap(({ input, info }) =>
+                  withSession((session) =>
+                    billingSubject(request, kind).pipe(
+                      Effect.flatMap((subject) =>
+                        operations.addBillingWalletEntry(
+                          subject,
+                          input,
+                          session,
+                          info,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+        const billingPlan = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ) =>
+          run(
+            complete(
+              `admin.${kind}s.billing.plan`,
+              AdminBillingPlanResult,
+              decodeBody(
+                request,
+                AdminBillingSetPlanInput,
+              ).pipe(
+                Effect.flatMap(({ input, info }) =>
+                  withSession((session) =>
+                    billingSubject(request, kind).pipe(
+                      Effect.flatMap((subject) =>
+                        operations.setBillingPlan(
+                          subject,
+                          input,
+                          session,
+                          info,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+        const billingPlanEnd = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ) =>
+          run(
+            complete(
+              `admin.${kind}s.billing.plan.end`,
+              AdminBillingPlanResult,
+              infoOnly(request).pipe(
+                Effect.flatMap((info) =>
+                  withSession((session) =>
+                    billingSubject(request, kind).pipe(
+                      Effect.flatMap((subject) =>
+                        operations.endBillingPlan(
+                          subject,
+                          session,
+                          info,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
 
         return groupHandlers
           .handleRaw(
@@ -1652,6 +1943,38 @@ export const makeAdminRouteGroup = () => {
                   ),
                 ),
               ),
+          )
+          .handleRaw(
+            "adminUserBilling",
+            ({ request }) => billingDetail(request, "user"),
+          )
+          .handleRaw(
+            "adminSpaceBilling",
+            ({ request }) => billingDetail(request, "space"),
+          )
+          .handleRaw(
+            "adminUserBillingWallet",
+            ({ request }) => billingWallet(request, "user"),
+          )
+          .handleRaw(
+            "adminSpaceBillingWallet",
+            ({ request }) => billingWallet(request, "space"),
+          )
+          .handleRaw(
+            "adminUserBillingPlan",
+            ({ request }) => billingPlan(request, "user"),
+          )
+          .handleRaw(
+            "adminSpaceBillingPlan",
+            ({ request }) => billingPlan(request, "space"),
+          )
+          .handleRaw(
+            "adminUserBillingPlanEnd",
+            ({ request }) => billingPlanEnd(request, "user"),
+          )
+          .handleRaw(
+            "adminSpaceBillingPlanEnd",
+            ({ request }) => billingPlanEnd(request, "space"),
           )
       }),
   )
