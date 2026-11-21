@@ -47,11 +47,18 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     blockViews.values.lazy.compactMap { $0.contentView as? MessageAlbumView }.first
   }
 
-  /// The album item under `point` (in this view's coordinates): actions aimed at one photo
-  /// (reply, save, copy) go to it. Nil off the grid or for a message that isn't an album.
+  /// The album's file rows, if its message is an album with files.
+  var albumFilesView: MessageAlbumFilesView? {
+    blockViews.values.lazy.compactMap { $0.contentView as? MessageAlbumFilesView }.first
+  }
+
+  /// The album item under `point` (in this view's coordinates): actions aimed at one photo or
+  /// file (reply, save, copy) go to it. Nil off the grid and rows, or for a message that isn't
+  /// an album.
   func albumItem(at point: CGPoint) -> FullMessage? {
-    guard let albumView else { return nil }
-    return albumView.item(at: convert(point, to: albumView))
+    if let albumView, let item = albumView.item(at: convert(point, to: albumView)) { return item }
+    guard let albumFilesView else { return nil }
+    return albumFilesView.item(at: convert(point, to: albumFilesView))
   }
   /// Local state that changes the layout, such as an opened disclosure, changed; the host
   /// replans the row.

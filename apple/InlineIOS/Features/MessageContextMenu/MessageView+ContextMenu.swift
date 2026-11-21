@@ -54,8 +54,13 @@ extension MessageView {
     blockViews.values.lazy.compactMap { ($0.contentView as? NewPhotoView)?.getCurrentImage() }.first
   }
 
-  /// Opens the document this message shows, for a failed message's menu.
-  func openContextMenuDocument() {
+  /// Opens the document this message shows, for a failed message's menu: an album's file with
+  /// `messageId`, else the message's own.
+  func openContextMenuDocument(messageId: Int64? = nil) {
+    if let messageId, let row = albumFilesView?.rowView(messageId: messageId) {
+      row.openFile()
+      return
+    }
     blockViews.values.lazy.compactMap { $0.contentView as? DocumentView }.first?.openFile()
   }
 

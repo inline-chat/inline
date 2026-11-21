@@ -2,7 +2,8 @@ import InlineKit
 import InlineMessageLayout
 import UIKit
 
-/// An album's tiles: one photo or video per item, placed by `AlbumMosaic` in the chosen
+/// An album's tiles: one per photo or video (`MessageAlbum.mediaItems`; its files are rows
+/// under the grid, `MessageAlbumFilesView`), placed by `AlbumMosaic` in the chosen
 /// `AlbumLayoutStyle`. Each tile is the item's own media view, so loading, video playback,
 /// upload progress and the gallery work per item exactly as for a single photo or video.
 /// Grid-shaped styles leave rounding to the host; stacks, strips and cards round each tile.
@@ -28,12 +29,18 @@ final class MessageAlbumView: UIView, UIScrollViewDelegate {
     let width = min(maximumWidth, availableWidth - (framed ? 2 * mediaInset : 0))
     // Telegram-style albums fill a 280 × 355 box (about Telegram's 300 × 380), scaled to the width.
     let maxHeight = style == .telegram ? width * 380 / 300 : maximumHeight
-    return AlbumMosaic.layout(
+    let grid = PixelGrid(scale: scale)
+    let mosaic = AlbumMosaic.layout(
       style: style,
-      aspectRatios: album.items.map(aspectRatio),
+      aspectRatios: album.mediaItems.map(aspectRatio),
       metrics: .init(width: width, maxHeight: maxHeight, spacing: 2, minRowHeight: 56, maxRowHeight: width * 0.8),
-      grid: PixelGrid(scale: scale)
+      grid: grid
     )
+    guard album.hasFiles else { return mosaic }
+    // A lone photo over files is at least as wide as the files' rows ask, in the bubble's padding.
+    let filesWidth = MessageAlbumFilesView.preferredWidth(for: album.fileItems)
+      + MessageLayoutMetrics().bubbleInsets.horizontal - (framed ? 2 * mediaInset : 0)
+    return mosaic.widened(toAtLeast: min(width, filesWidth), grid: grid)
   }
 
   /// Width over height of an item's media; square when unknown.
@@ -101,14 +108,15 @@ final class MessageAlbumView: UIView, UIScrollViewDelegate {
 
   func configure(album: MessageAlbum, mosaic: AlbumMosaic, isRightToLeft: Bool) {
     let host = tileHost(for: mosaic)
-    let ids = Set(album.items.map(\.id))
+    let items = album.mediaItems
+    let ids = Set(items.map(\.id))
     for (id, tile) in tiles where !ids.contains(id) || tile.view.superview !== host {
       tile.view.removeFromSuperview()
       tiles[id] = nil
       tileConstraints[id] = nil
     }
     let content = mosaic.contentSize ?? mosaic.size
-    for (index, item) in album.items.enumerated() where index < mosaic.tiles.count {
+    for (index, item) in items.enumerated() where index < mosaic.tiles.count {
       let planned = mosaic.tiles[index]
       var frame = planned.frame
       if isRightToLeft {
@@ -131,7 +139,7 @@ final class MessageAlbumView: UIView, UIScrollViewDelegate {
       }
     }
     // Draw order: a stack's first card in front; otherwise in order.
-    let ordered = album.items.compactMap { tiles[$0.id]?.view }
+    let ordered = items.compactMap { tiles[$0.id]?.view }
     for view in mosaic.drawsFirstOnTop ? ordered.reversed() : ordered {
       host.bringSubviewToFront(view)
     }
@@ -260,9 +268,10 @@ final class MessageAlbumView: UIView, UIScrollViewDelegate {
       countLabel = label
       return label
     }()
-    let videos = album.items.filter { $0.videoInfo != nil }.count
-    let noun = videos == 0 ? "photos" : videos == album.items.count ? "videos" : "items"
-    label.text = "\(album.items.count) \(noun)"
+    let items = album.mediaItems
+    let videos = items.filter { $0.videoInfo != nil }.count
+    let noun = videos == 0 ? "photos" : videos == items.count ? "videos" : "items"
+    label.text = "\(items.count) \(noun)"
     label.isHidden = false
     let size = label.intrinsicContentSize
     label.frame = CGRect(x: front.frame.maxX - size.width - 8, y: front.frame.minY + 8, width: size.width, height: 20)

@@ -12,15 +12,16 @@ extension ComposeView: UIDocumentPickerDelegate {
     // Import before the callback so async preparation never depends on a Files provider's URL lifetime.
     let documentPicker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
     documentPicker.delegate = self
-    documentPicker.allowsMultipleSelection = false
+    // Several files go out together, as one album.
+    documentPicker.allowsMultipleSelection = true
 
     attachmentFlowPresenter()?.present(documentPicker, animated: true)
   }
 
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-    guard let url = urls.first else { return }
-
-    addFile(url)
+    for url in urls {
+      addFile(url)
+    }
   }
 
   func addFile(_ url: URL) {
