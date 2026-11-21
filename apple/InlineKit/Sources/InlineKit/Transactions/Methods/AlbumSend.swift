@@ -90,13 +90,14 @@ final class AlbumSendBarrier: @unchecked Sendable {
 }
 
 public extension TransactionSendMessage {
-  /// Photos and videos sent together form albums of at most this many.
+  /// Photos, videos and files sent together form albums of at most this many.
   static let maxAlbumSize = 10
 
-  /// The sends for a compose with attachments, in order: one per attachment. Neighbouring
-  /// photos and videos become albums of up to `maxAlbumSize` (a longer run is split into
-  /// several); documents and voice notes are sent alone. The text, reply and entities ride on
-  /// the first send, which is the album's caption when it starts one.
+  /// The sends for a compose with attachments: one per attachment. Neighbouring photos, videos
+  /// and files become albums of up to `maxAlbumSize` (a longer run is split into several);
+  /// voice notes are sent alone. Within an album the photos and videos go first, then the
+  /// files, as the bubble draws them. The text, reply and entities ride on the first send,
+  /// which is the album's caption when it starts one.
   ///
   /// Albums are registered with `AlbumSendBarrier` here, so admit every returned send.
   static func sends(
@@ -108,11 +109,13 @@ public extension TransactionSendMessage {
     entities: MessageEntities? = nil,
     sendMode: MessageSendMode? = nil
   ) -> [TransactionSendMessage] {
-    sends(
+    // The caption goes on whichever item is sent first (a photo moved ahead of a file).
+    let first = sendOrder(mediaItems).first
+    return sends(
       peerId: peerId,
       chatId: chatId,
       items: mediaItems.enumerated().map { index, media in
-        AlbumSendItem(media: media, text: index == 0 ? text : nil, entities: index == 0 ? entities : nil)
+        AlbumSendItem(media: media, text: index == first ? text : nil, entities: index == first ? entities : nil)
       },
       replyToMsgId: replyToMsgId,
       sendMode: sendMode
@@ -130,7 +133,7 @@ public extension TransactionSendMessage {
   ) -> [TransactionSendMessage] {
     var sends: [TransactionSendMessage] = []
     sends.reserveCapacity(items.count)
-    for run in albumRuns(items.map(\.media.isAlbumEligible)) {
+    for run in albumSendRuns(items.map(\.media)) {
       let groupedId: Int64? = run.count > 1 ? Int64.random(in: 1 ... Int64.max) : nil
       var ids: [String] = []
       for index in run {
@@ -140,7 +143,7 @@ public extension TransactionSendMessage {
           peerId: peerId,
           chatId: chatId,
           mediaItems: [item.media],
-          replyToMsgId: index == 0 ? replyToMsgId : nil,
+          replyToMsgId: sends.isEmpty ? replyToMsgId : nil,
           entities: item.entities,
           sendMode: sendMode,
           groupedId: groupedId
@@ -159,6 +162,19 @@ public extension TransactionSendMessage {
       }
     }
     return sends
+  }
+
+  /// Indexes of `media` in the order they are sent, by album: `albumRuns`, each run's photos
+  /// and videos first, then its files, each in their order.
+  static func albumSendRuns(_ media: [FileMediaItem]) -> [[Int]] {
+    albumRuns(media.map(\.isAlbumEligible)).map { run in
+      run.filter { media[$0].isAlbumMedia } + run.filter { !media[$0].isAlbumMedia }
+    }
+  }
+
+  /// Indexes of `media` in the order they are sent.
+  static func sendOrder(_ media: [FileMediaItem]) -> [Int] {
+    albumSendRuns(media).flatMap(\.self)
   }
 
   /// Index runs in order: consecutive eligible items in runs of at most `maxAlbumSize`, every
@@ -194,8 +210,16 @@ public struct AlbumSendItem: Sendable {
 }
 
 extension FileMediaItem {
-  /// Photos and videos join albums; documents and voice notes are sent alone.
+  /// Photos, videos and documents join albums; voice notes are sent alone.
   var isAlbumEligible: Bool {
+    switch self {
+      case .photo, .video, .document: true
+      case .voice: false
+    }
+  }
+
+  /// Photos and videos: the album's grid. Documents are its file rows.
+  var isAlbumMedia: Bool {
     switch self {
       case .photo, .video: true
       case .document, .voice: false

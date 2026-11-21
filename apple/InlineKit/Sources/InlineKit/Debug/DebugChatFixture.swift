@@ -114,8 +114,9 @@ public final class DebugChatFixture {
   ) throws {
     let id = Int64(index)
     let run = (index / runLength) % 7
-    // Albums: four photos every 41 messages, three every 47, a captioned pair every 61, one sender
-    // each, kept off the messages the other kinds own (service, agent blocks, files).
+    // Albums: four photos every 41 messages, three every 47, a captioned pair every 61, three files
+    // every 43, two photos and two files every 59, one sender each, kept off the messages the
+    // other kinds own (service, agent blocks, files).
     let ownedElsewhere = index % 97 == 0 || index % 41 == 0 || index % 61 == 0
     let album: (start: Int, size: Int)? = if ownedElsewhere {
       nil
@@ -125,16 +126,36 @@ public final class DebugChatFixture {
       (index - index % 61 + 30, 2)
     } else if (10 ..< 13).contains(index % 47) {
       (index - index % 47 + 10, 3)
+    } else if (5 ..< 8).contains(index % 43) {
+      (index - index % 43 + 5, 3)
+    } else if (40 ..< 44).contains(index % 59) {
+      (index - index % 59 + 40, 4)
     } else {
       nil
     }
+    // Which items are files: all of the 43s, the last two of the 59s.
+    let albumFile = album.map { album in
+      album.start % 43 == 5 && album.size == 3 || album.start % 59 == 40 && album.size == 4 && index - album.start >= 2
+    } ?? false
     let senderRun = album.map { ($0.start / runLength) % 7 } ?? run
     let from: Int64 = [2, 2, 3, 1, 4, 5, 1][senderRun]
     var text: String? = Self.texts[(index * 7 + run) % Self.texts.count]
     var payload: Client_MessageContentPayload?
     var photoId: Int64?
     var groupedId: Int64?
-    if let album {
+    var documentId: Int64?
+    if let album, albumFile {
+      groupedId = 50_000 + Int64(album.start)
+      let names = ["Roadmap.pdf", "design-assets.zip", "Budget 2027.xlsx", "Meeting notes.docx"]
+      let document = Document(
+        id: 6_000_000 + id, documentId: 6_000_000 + id, date: now, fileName: names[(index - album.start) % names.count],
+        mimeType: "application/octet-stream", size: 120_000 * (index - album.start + 1), cdnUrl: nil,
+        localPath: nil, thumbnailPhotoId: nil
+      )
+      try document.insert(db)
+      documentId = document.documentId
+      text = index == album.start && album.size == 3 ? "Files for Monday" : nil
+    } else if let album {
       groupedId = 50_000 + Int64(album.start)
       photoId = 9_000 + id
       let photo = try Photo(photoId: 9_000 + id, date: now, format: .jpeg).insertAndFetch(db)
@@ -143,7 +164,8 @@ public final class DebugChatFixture {
       var size = PhotoSize(photoId: photo.id ?? 0, type: "f", width: 1_200, height: tall ? 1_600 : 800)
       size.localPath = Self.photoFile(tall: tall)
       try size.insert(db)
-      text = index == album.start && album.size == 2 ? "Two from the weekend" : nil
+      text = index == album.start && album.size == 2 ? "Two from the weekend"
+        : index == album.start && album.size == 4 && album.start % 59 == 40 ? "Shots and the specs" : nil
     } else if index % 97 == 0 {
       text = "Pinned a message"
       payload = .with { $0.serviceMessage = .with { $0.pinnedMessage = .with { $0.messageID = id - 3 } } }
@@ -184,7 +206,6 @@ public final class DebugChatFixture {
       blocks = rich.payload
     }
     // A file every 61st message.
-    var documentId: Int64?
     if photoId == nil, videoId == nil, payload == nil, blocks == nil, index % 61 == 0 {
       let document = Document(
         id: 6_000_000 + id, documentId: 6_000_000 + id, date: now, fileName: "timeline-notes-\(index).pdf",

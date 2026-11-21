@@ -11,6 +11,18 @@ struct MessageAlbumsTests {
     PhotoInfo(photo: Photo(id: id, photoId: id, format: .jpeg))
   }
 
+  private func documentInfo(_ id: Int64, name: String = "a.pdf") -> DocumentInfo {
+    DocumentInfo(document: Document(
+      id: id, documentId: id, date: start, fileName: name, mimeType: "application/pdf", size: 1, localPath: name
+    ))
+  }
+
+  private func file(_ id: Int64, from: Int64 = 1, group: Int64? = nil, text: String? = nil) -> FullMessage {
+    var full = message(id, from: from, group: group, text: text, media: false)
+    full.documentInfo = documentInfo(id)
+    return full
+  }
+
   private func message(
     _ id: Int64, from: Int64 = 1, group: Int64? = nil, text: String? = nil, media: Bool = true,
     status: MessageSendingStatus? = nil, sticker: Bool = false
@@ -46,6 +58,25 @@ struct MessageAlbumsTests {
     #expect(shape(rows) == [[1, 2, 3], [4], [5], [6], [7], [8], [9], [10]])
   }
 
+  @Test("files join albums with photos and videos; the grid takes the media, the rows the files")
+  func files() throws {
+    let rows = MessageAlbums.rows(in: [
+      file(1, group: 7), message(2, group: 7), file(3, group: 7, text: "notes"), message(4, group: 7),
+      file(5, group: 8), file(6, group: 8),
+      file(7, from: 2, group: 8), // another sender
+      file(8), // no album id
+    ])
+    #expect(shape(rows) == [[1, 2, 3, 4], [5, 6], [7], [8]])
+    let mixed = try #require(rows[0].album)
+    #expect(mixed.mediaItems.map(\.message.messageId) == [2, 4])
+    #expect(mixed.fileItems.map(\.message.messageId) == [1, 3])
+    #expect(mixed.hasMedia && mixed.hasFiles)
+    #expect(mixed.captionItem?.message.messageId == 3)
+    let files = try #require(rows[1].album)
+    #expect(!files.hasMedia && files.hasFiles)
+    #expect(files.bubbleMessage.documentInfo == nil)
+  }
+
   @Test("a run longer than ten splits")
   func maxSize() {
     let rows = MessageAlbums.rows(in: (1 ... 12).map { message($0, group: 3) })
@@ -76,7 +107,7 @@ struct MessageAlbumsTests {
     #expect(shape(MessageAlbums.rows(in: [message(1, group: 1)])) == [[1]])
   }
 
-  @Test("album send runs: neighbouring photos and videos, at most ten; others alone")
+  @Test("album send runs: neighbouring eligible items, at most ten; others alone")
   func sendRuns() {
     let runs = TransactionSendMessage.albumRuns([true, true, false, true, true, true] + Array(repeating: true, count: 11))
     #expect(runs == [[0, 1], [2], [3, 4, 5, 6, 7, 8, 9, 10, 11, 12], [13, 14, 15, 16]])
@@ -87,25 +118,38 @@ struct MessageAlbumsTests {
   @Test("compose sends: one album id per run, caption and reply on the first send")
   func composeSends() {
     let photos: [FileMediaItem] = (1 ... 3).map { .photo(photo($0)) }
-    let document = Document(
-      id: 9, documentId: -9, date: Date(), fileName: "a.pdf", mimeType: "application/pdf", size: 1, localPath: "a.pdf"
-    )
     let sends = TransactionSendMessage.sends(
       text: "hello", peerId: .thread(id: 1), chatId: 1,
-      mediaItems: photos + [.document(DocumentInfo(document: document))], replyToMsgId: 5
+      mediaItems: photos + [.document(documentInfo(-9))], replyToMsgId: 5
     )
     #expect(sends.count == 4)
     #expect(sends.map(\.text) == ["hello", nil, nil, nil])
     #expect(sends.map(\.replyToMsgId) == [5, nil, nil, nil])
     let albumId = sends[0].groupedId
     #expect(albumId != nil)
-    #expect(sends[1].groupedId == albumId && sends[2].groupedId == albumId)
-    #expect(sends[3].groupedId == nil)
+    #expect(sends.allSatisfy { $0.groupedId == albumId })
     #expect(AlbumSendBarrier.shared.isRegistered(transactionId: sends[0].id))
     for send in sends {
       AlbumSendBarrier.shared.settle(transactionId: send.id)
     }
     #expect(!AlbumSendBarrier.shared.isRegistered(transactionId: sends[0].id))
+  }
+
+  @Test("compose sends: photos and videos go ahead of files, the caption on the first send; voice alone")
+  func composeSendOrder() {
+    let media: [FileMediaItem] = [
+      .document(documentInfo(-1, name: "a.pdf")), .photo(photo(2)), .document(documentInfo(-3, name: "b.zip")),
+      .photo(photo(4)), .voice(Client_MessageVoiceContent()),
+    ]
+    #expect(TransactionSendMessage.albumSendRuns(media) == [[1, 3, 0, 2], [4]])
+    let sends = TransactionSendMessage.sends(text: "look", peerId: .thread(id: 1), chatId: 1, mediaItems: media)
+    #expect(sends.map(\.text) == ["look", nil, nil, nil, nil])
+    #expect(sends.map { $0.attachments.first?.media.isAlbumMedia } == [true, true, false, false, false])
+    #expect(sends[0].groupedId != nil && sends[3].groupedId == sends[0].groupedId)
+    #expect(sends[4].groupedId == nil)
+    for send in sends {
+      AlbumSendBarrier.shared.settle(transactionId: send.id)
+    }
   }
 
   /// An upload that finishes when `open` is called.
