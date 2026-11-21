@@ -28,6 +28,15 @@ struct SettingsView: View {
 
       Section {
         SettingsNavigationRow(
+          title: "Plan",
+          systemImage: "creditcard.fill",
+          color: .green,
+          destination: PlanSettingsView()
+        )
+      }
+
+      Section {
+        SettingsNavigationRow(
           title: "General",
           systemImage: "gear",
           color: .gray,
