@@ -54,7 +54,7 @@ export const encodeUser = ({
     email: includeContact ? user.email ?? undefined : undefined,
     phoneNumber: includeContact ? user.phoneNumber ?? undefined : undefined,
     // Personal Pro is the owner's own billing state; other viewers never see it.
-    isPro: includeContact ? user.isPro === true : undefined,
+    isPro: includeContact && typeof user.isPro === "boolean" ? user.isPro : undefined,
     pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,
     min: min ?? false,
     status: min && !(includeBotStatus && user.bot === true) && !focus

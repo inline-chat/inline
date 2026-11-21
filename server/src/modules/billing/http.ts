@@ -1,3 +1,4 @@
+import { readBoundedBody } from "@in/server/realtime/httpRpc"
 import { Log } from "@in/server/utils/log"
 import { CheckoutServiceError } from "./checkoutClient"
 import { applyNotification, checkoutConfig, parseNotification } from "./service"
@@ -26,8 +27,10 @@ export const handleBillingWebhook = async (request: Request): Promise<Response> 
 
   const length = Number(request.headers.get("content-length") ?? "0")
   if (length > maxBodyBytes) return json({ error: "too_large" }, 413)
-  const body = await request.text()
-  if (body.length > maxBodyBytes) return json({ error: "too_large" }, 413)
+  // Chunked bodies carry no length; the bounded reader enforces the cap while streaming.
+  const bytes = await readBoundedBody(request, maxBodyBytes)
+  if (!bytes) return json({ error: "too_large" }, 413)
+  const body = new TextDecoder().decode(bytes)
 
   if (!verifyCheckoutSignature(config.webhookSecret, request.headers.get("noor-checkout-signature"), body)) {
     return json({ error: "invalid_signature" }, 400)

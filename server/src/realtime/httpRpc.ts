@@ -162,7 +162,7 @@ const isProtobufContentType = (value: string | null): boolean => {
 }
 
 /** Reads at most `limit` bytes; resolves undefined when the body is larger. */
-const readBoundedBody = async (request: Request, limit: number): Promise<Uint8Array | undefined> => {
+export const readBoundedBody = async (request: Request, limit: number): Promise<Uint8Array | undefined> => {
   const body = request.body
   if (!body) return new Uint8Array()
   const reader = body.getReader()

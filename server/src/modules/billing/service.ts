@@ -53,6 +53,7 @@ export class BillingError extends Error {
     | "already_subscribed"
     | "no_subscription"
     | "not_payer"
+    | "checkout_in_progress"
     | "checkout_failed") {
     super(code)
   }
@@ -76,6 +77,8 @@ export interface CheckoutNotification {
   readonly status?: string | null
   readonly paymentStatus?: string | null
   readonly amountRefunded?: number | null
+  /** False for a partial refund. Absent from older service builds, treated as full. */
+  readonly fullyRefunded?: boolean | null
 }
 
 export const parseNotification = (body: string): CheckoutNotification | null => {
@@ -147,6 +150,8 @@ export const applyNotification = async (config: CheckoutConfig, event: CheckoutN
           .where(and(eq(billingOrders.id, order.id), eq(billingOrders.status, "pending")))
         break
       case "charge.refunded":
+        // A partial refund (goodwill credit) keeps the plan; a full refund ends it.
+        if (event.fullyRefunded === false) break
         await tx.update(billingOrders).set({ status: "refunded", updatedAt: now }).where(eq(billingOrders.id, order.id))
         if (plan.mode === "payment") await revokePrepaid(tx, order, now)
         break
@@ -239,7 +244,11 @@ const reconcileStripeSubscription = async (
   }
 
   if (ended) return
-  await endOtherLive(tx, subject, null, now)
+  // Until Stripe reports a paid subscription (for example still incomplete during 3D Secure),
+  // keep any live comp or prepaid plan and park this row as ended; it revives once paid.
+  const access = grantsAccess({ funding: "stripe", ...values, endedAt: null })
+  const otherLive = await liveSubscription(tx, subject, true)
+  if (access) await endOtherLive(tx, subject, null, now)
   const [created] = await tx.insert(billingSubscriptions).values({
     userId: order.userId,
     spaceId: order.spaceId,
@@ -250,6 +259,7 @@ const reconcileStripeSubscription = async (
     stripeSubscriptionId: remote.id,
     livemode: order.livemode,
     ...values,
+    endedAt: !access && otherLive ? now : null,
   }).returning({ id: billingSubscriptions.id })
   await linkOrder(tx, order, created!.id, remote.id)
 }
@@ -288,6 +298,8 @@ export const availablePlans = (config: CheckoutConfig | null = checkoutConfig())
 
 const newOrderId = () => `ord_${randomBytes(12).toString("base64url")}`
 const reusableOrderMs = 20 * 60 * 60 * 1000
+/** Stripe Checkout sessions stay open for 24 hours. */
+const openSessionMs = 24 * 60 * 60 * 1000
 
 export const createCheckout = async (input: { userId: number; planCode: string; spaceId?: number }) => {
   const config = checkoutConfig()
@@ -305,16 +317,28 @@ export const createCheckout = async (input: { userId: number; planCode: string; 
   const quantity = plan.perSeat && input.spaceId !== undefined ? await countSeats(input.spaceId) : 1
   const [buyer] = await db.select({ email: users.email }).from(users).where(eq(users.id, input.userId)).limit(1)
 
-  // Reuse a recent identical attempt so repeated taps don't create new Stripe sessions.
-  const [recent] = await db.select().from(billingOrders).where(and(
-    eq(billingOrders.buyerUserId, input.userId),
-    eq(billingOrders.planCode, plan.code),
-    eq(billingOrders.quantity, quantity),
+  // One open checkout per subject, so two admins (or monthly then yearly) can't both pay.
+  // Repeated taps reuse the identical attempt; the same buyer switching plans closes the old one.
+  const pending = await db.select().from(billingOrders).where(and(
     eq(billingOrders.status, "pending"),
     eq(billingOrders.livemode, config.live),
     input.spaceId !== undefined ? eq(billingOrders.spaceId, input.spaceId) : eq(billingOrders.userId, input.userId),
-    gt(billingOrders.createdAt, new Date(Date.now() - reusableOrderMs)),
-  )).orderBy(desc(billingOrders.createdAt)).limit(1)
+    gt(billingOrders.createdAt, new Date(Date.now() - openSessionMs)),
+  )).orderBy(desc(billingOrders.createdAt))
+  let recent: DbBillingOrder | undefined
+  for (const order of pending) {
+    const identical = order.buyerUserId === input.userId && order.planCode === plan.code && order.quantity === quantity
+    if (identical && !recent && order.createdAt.getTime() > Date.now() - reusableOrderMs) {
+      recent = order
+      continue
+    }
+    if (!order.checkoutSessionId) continue
+    if (order.buyerUserId !== input.userId) throw new BillingError("checkout_in_progress")
+    const closed = await checkoutService.expireSession(config, order.checkoutSessionId).catch(() => null)
+    if (closed?.status !== "expired") throw new BillingError("checkout_in_progress")
+    await db.update(billingOrders).set({ status: "expired", updatedAt: new Date() })
+      .where(and(eq(billingOrders.id, order.id), eq(billingOrders.status, "pending")))
+  }
   if (recent?.checkoutUrl) return { url: recent.checkoutUrl, orderId: recent.id }
 
   const orderId = recent?.id ?? newOrderId()

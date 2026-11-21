@@ -77,6 +77,8 @@ const request = async <T>(config: CheckoutConfig, method: "GET" | "POST", path: 
 export const checkoutService = {
   createSession: (config: CheckoutConfig, input: { orderId: string; plan: string; quantity: number; customerEmail?: string }) =>
     request<CheckoutSessionInfo>(config, "POST", "/sessions", input),
+  expireSession: (config: CheckoutConfig, id: string) =>
+    request<CheckoutSessionInfo>(config, "POST", `/sessions/${encodeURIComponent(id)}/expire`),
   getSession: (config: CheckoutConfig, id: string) =>
     request<CheckoutSessionInfo>(config, "GET", `/sessions/${encodeURIComponent(id)}`),
   getSubscription: (config: CheckoutConfig, id: string) =>

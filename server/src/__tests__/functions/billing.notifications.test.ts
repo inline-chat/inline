@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { db } from "../../db"
 import { billingEvents, billingOrders, billingSubscriptions, members, spaces, users } from "../../db/schema"
 import { checkoutService, type CheckoutConfig } from "../../modules/billing/checkoutClient"
@@ -8,7 +8,7 @@ import { setupTestLifecycle, testUtils } from "../setup"
 
 const config: CheckoutConfig = {
   baseUrl: "https://checkout.example", appId: "inline", live: false,
-  apiToken: "t".repeat(40), webhookSecret: "s".repeat(40), plans: ["sandbox-test", "team-monthly", "pro-monthly"],
+  apiToken: "t".repeat(40), webhookSecret: "s".repeat(40), plans: ["sandbox-test", "team-monthly", "team-yearly", "pro-monthly"],
 }
 
 const event = (overrides: Record<string, unknown>) => ({
@@ -116,6 +116,56 @@ describe("billing notifications", () => {
     ;[row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
     expect(row!.isPro).toBe(false)
     get.mockRestore()
+  })
+
+  test("an unpaid Stripe subscription doesn't end a comp until Stripe reports it paid", async () => {
+    await db.insert(billingSubscriptions).values({ spaceId: space.id, plan: "team", interval: "none", funding: "comp", status: "active" })
+    await db.update(spaces).set({ isPro: true }).where(eq(spaces.id, space.id))
+    const { orderId } = await startCheckout("team-monthly", space.id) as any
+    const periodEnd = Math.floor(Date.now() / 1000) + 30 * 86_400
+    let remote = { id: "sub_3ds", status: "incomplete", cancelAtPeriodEnd: false, currentPeriodEnd: periodEnd, quantity: 1, orderId, plan: "team-monthly" }
+    const get = spyOn(checkoutService, "getSubscription").mockImplementation(async () => remote)
+
+    await applyNotification(config, event({ type: "customer.subscription.created", orderId, plan: "team-monthly", subscriptionId: "sub_3ds" }))
+    let live = await db.select().from(billingSubscriptions).where(and(eq(billingSubscriptions.spaceId, space.id), isNull(billingSubscriptions.endedAt)))
+    expect(live.map((row) => row.funding)).toEqual(["comp"])
+    let [row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+    expect(row!.isPro).toBe(true)
+
+    remote = { ...remote, status: "active" }
+    await applyNotification(config, event({ type: "customer.subscription.updated", orderId, plan: "team-monthly", subscriptionId: "sub_3ds" }))
+    live = await db.select().from(billingSubscriptions).where(and(eq(billingSubscriptions.spaceId, space.id), isNull(billingSubscriptions.endedAt)))
+    expect(live.map((sub) => sub.funding)).toEqual(["stripe"])
+    ;[row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+    expect(row!.isPro).toBe(true)
+    get.mockRestore()
+  })
+
+  test("one open checkout per space: another admin is refused, the same buyer switching plans closes the old one", async () => {
+    const first = await startCheckout("team-monthly", space.id)
+    const admin = await testUtils.createUser("billing-second-admin@example.com")
+    await db.insert(members).values({ userId: admin.id, spaceId: space.id, role: "admin" })
+    await expect(createCheckout({ userId: admin.id, planCode: "team-yearly", spaceId: space.id })).rejects.toThrow("checkout_in_progress")
+
+    const expire = spyOn(checkoutService, "expireSession").mockImplementation(async (_c, id) => ({
+      id, url: null, status: "expired", paymentStatus: "unpaid", subscriptionId: null, paymentIntentId: null,
+    }))
+    const second = await startCheckout("team-yearly", space.id)
+    expect(expire.mock.calls.map((call) => call[1])).toEqual([`cs_test_${first.orderId}`])
+    expect(second.orderId).not.toBe(first.orderId)
+    const [old] = await db.select().from(billingOrders).where(eq(billingOrders.id, first.orderId))
+    expect(old!.status).toBe("expired")
+    expire.mockRestore()
+  })
+
+  test("a partial refund keeps a one-time plan", async () => {
+    const { orderId } = await startCheckout("sandbox-test", space.id)
+    await applyNotification(config, event({ type: "checkout.session.completed", orderId, plan: "sandbox-test", paymentStatus: "paid" }))
+    await applyNotification(config, event({ type: "charge.refunded", orderId, plan: "sandbox-test", amountRefunded: 500, fullyRefunded: false }))
+    const [row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+    expect(row!.isPro).toBe(true)
+    const [order] = await db.select().from(billingOrders).where(eq(billingOrders.id, orderId))
+    expect(order!.status).toBe("paid")
   })
 
   test("a lapsed prepaid period expires in the sweep", async () => {
