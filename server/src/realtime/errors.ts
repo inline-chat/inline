@@ -290,7 +290,8 @@ export class RealtimeRpcError extends Error {
       case "INVITE_CODE_NOT_FOUND":
       case "INVITE_CODE_TAKEN":
       case "SIGNUPS_DISABLED":
-        // These login failures have public copy but no dedicated RPC enum case.
+      case "SPACE_LAST_OWNER":
+        // These failures have public copy but no dedicated RPC enum case.
         return new RealtimeRpcError(RpcError_Code.BAD_REQUEST, error.description ?? error.message, error.code)
       // TODO
       default:

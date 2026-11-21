@@ -14,6 +14,7 @@ export const ApiError = {
   SPACE_INVALID: ["SPACE_INVALID", 400, "The space is invalid"],
   SPACE_CREATOR_REQUIRED: ["SPACE_CREATOR_REQUIRED", 400, "You must be the creator of space for this action"],
   SPACE_ADMIN_REQUIRED: ["SPACE_ADMIN_REQUIRED", 400, "You must be an admin of space for this action"],
+  SPACE_LAST_OWNER: ["SPACE_LAST_OWNER", 400, "You are the only owner of this space. Delete the space instead of leaving it."],
   USER_INVALID: ["USER_INVALID", 400, "The user is invalid"],
   EMAIL_CODE_INVALID: ["EMAIL_CODE_INVALID", 400, "The email code is invalid"],
   EMAIL_CODE_EMPTY: ["EMAIL_CODE_EMPTY", 400, "The email code is empty"],

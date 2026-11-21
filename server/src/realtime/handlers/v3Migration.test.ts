@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { db, schema } from "@in/server/db"
 import {
   createSpaceV3,
   deleteSpaceV3,
@@ -34,10 +35,13 @@ describe("V3 migration RPCs", () => {
     expect(owned.chat.title).toBe("Protocol Town")
     expect(owned.dialog.open).toBe(true)
 
-    const joined = await createSpaceV3({ name: "Disposable" }, context(member.id, memberSession.session.id))
-    if (!joined.space) throw new Error("missing joined space")
-    await leaveSpaceV3({ spaceId: joined.space.id }, context(member.id, memberSession.session.id))
-    await deleteSpaceV3({ spaceId: owned.space.id }, context(owner.id, ownerSession.session.id))
+    const spaceId = owned.space.id
+    await db.insert(schema.members).values({ spaceId: Number(spaceId), userId: member.id, role: "member" })
+    await leaveSpaceV3({ spaceId }, context(member.id, memberSession.session.id))
+    // The creator is the only owner, so they delete the Space instead of leaving it.
+    await expect(leaveSpaceV3({ spaceId }, context(owner.id, ownerSession.session.id)))
+      .rejects.toMatchObject({ type: "SPACE_LAST_OWNER" })
+    await deleteSpaceV3({ spaceId }, context(owner.id, ownerSession.session.id))
   })
 
   test("updates only the current session metadata", async () => {

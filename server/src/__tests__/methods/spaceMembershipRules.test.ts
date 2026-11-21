@@ -203,6 +203,66 @@ describe("space membership rules", () => {
     expect(await hasChatAccess(privateThread.id, removedBot.id)).toBe(false)
   })
 
+  test("the last owner cannot leave, but an owner with a co-owner can", async () => {
+    const owner = await testUtils.createUser("rules-last-owner@example.com")
+    const coOwner = await testUtils.createUser("rules-last-co-owner@example.com")
+    const member = await testUtils.createUser("rules-last-member@example.com")
+    const space = await testUtils.createSpace("Last Owner")
+    if (!space) throw new Error("Failed to create Space")
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: owner.id, role: "owner" },
+      { spaceId: space.id, userId: coOwner.id, role: "owner" },
+      { spaceId: space.id, userId: member.id, role: "member" },
+    ])
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    try {
+      await leaveSpace({ spaceId: space.id }, legacyContext(coOwner.id))
+      expect(await memberUserIds(space.id)).toEqual([owner.id, member.id].sort((left, right) => left - right))
+
+      const attempt = leaveSpace({ spaceId: space.id }, legacyContext(owner.id))
+      await expect(attempt).rejects.toBeInstanceOf(InlineError)
+      await expect(attempt).rejects.toMatchObject({ type: "SPACE_LAST_OWNER" })
+      expect(await memberUserIds(space.id)).toContain(owner.id)
+
+      expect(RealtimeRpcError.fromInlineError(new InlineError(InlineError.ApiError.SPACE_LAST_OWNER))).toMatchObject({
+        code: RealtimeRpcError.Code.BAD_REQUEST,
+        message: "You are the only owner of this space. Delete the space instead of leaving it.",
+      })
+
+      await leaveSpace({ spaceId: space.id }, legacyContext(member.id))
+    } finally {
+      push.mockRestore()
+    }
+    expect(await memberUserIds(space.id)).toEqual([owner.id])
+  })
+
+  test("two owners leaving at once leave one owner behind", async () => {
+    const first = await testUtils.createUser("rules-race-first@example.com")
+    const second = await testUtils.createUser("rules-race-second@example.com")
+    const space = await testUtils.createSpace("Owner Race")
+    if (!space) throw new Error("Failed to create Space")
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: first.id, role: "owner" },
+      { spaceId: space.id, userId: second.id, role: "owner" },
+    ])
+
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockResolvedValue(undefined)
+    let results: PromiseSettledResult<unknown>[]
+    try {
+      results = await Promise.allSettled([
+        leaveSpace({ spaceId: space.id }, legacyContext(first.id)),
+        leaveSpace({ spaceId: space.id }, legacyContext(second.id)),
+      ])
+    } finally {
+      push.mockRestore()
+    }
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    const rejected = results.find((result) => result.status === "rejected")
+    expect(rejected?.status === "rejected" && rejected.reason).toMatchObject({ type: "SPACE_LAST_OWNER" })
+    expect(await memberUserIds(space.id)).toHaveLength(1)
+  })
+
   test("deleting a Space requires a current owner, not the original creator", async () => {
     const creator = await testUtils.createUser("rules-delete-creator@example.com")
     const owner = await testUtils.createUser("rules-delete-owner@example.com")
