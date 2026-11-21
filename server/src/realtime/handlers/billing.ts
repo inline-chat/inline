@@ -60,15 +60,17 @@ const encodeSubscription = (subscription: DbBillingSubscription, viewerUserId: n
 
 const encodeAccount = async (subject: { userId: number } | { spaceId: number }, viewerUserId: number): Promise<BillingAccount> => {
   const billing = await subjectBilling(subject)
-  const hasWallet = billing.wallet.usd !== undefined || billing.wallet.btc !== undefined
+  // Show credit only when some balance remains; a top-up fully spent on a plan nets to zero.
+  const usd = billing.wallet.usd ? billing.wallet.usd : undefined
+  const btc = billing.wallet.btc ? billing.wallet.btc : undefined
   return {
     spaceId: "spaceId" in subject ? BigInt(subject.spaceId) : undefined,
     isPro: billing.isPro,
     subscription: billing.subscription ? encodeSubscription(billing.subscription, viewerUserId) : undefined,
-    wallet: hasWallet
+    wallet: usd !== undefined || btc !== undefined
       ? {
-          usdCents: billing.wallet.usd !== undefined ? BigInt(billing.wallet.usd) : undefined,
-          btcSats: billing.wallet.btc !== undefined ? BigInt(billing.wallet.btc) : undefined,
+          usdCents: usd !== undefined ? BigInt(usd) : undefined,
+          btcSats: btc !== undefined ? BigInt(btc) : undefined,
         }
       : undefined,
   }
