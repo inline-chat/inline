@@ -1078,7 +1078,9 @@ fn previous_char_boundary(value: &str, maximum: usize) -> usize {
     boundary
 }
 
-fn sanitize_visible_text(value: &str) -> String {
+/// Removes terminal escape sequences and non-whitespace control characters
+/// before text is published to native clients or assigned rich-text ranges.
+pub fn sanitize_visible_text(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut chars = value.chars().peekable();
     while let Some(character) = chars.next() {

@@ -718,6 +718,26 @@ impl BridgeStore {
         Ok(changed == 1)
     }
 
+    /// Retires controls owned by a runtime that will no longer handle them.
+    /// Completed picks keep their session links; unfinished picks use the
+    /// existing terminal-card recovery path, including after a failed edit.
+    pub fn expire_session_pickers_for_installation(
+        &self,
+        installation_id: &InstallationId,
+        now: i64,
+    ) -> StoreResult<usize> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        Ok(connection.execute(
+            "UPDATE session_pickers SET
+                state = CASE WHEN thread_chat_id IS NULL THEN 'expired' ELSE 'failed' END,
+                lease_owner = NULL, lease_expires_at = NULL,
+                terminal_projected = 0, updated_at = ?2
+             WHERE installation_id = ?1
+               AND state IN ('publishing', 'active', 'opening', 'retryable')",
+            params![installation_id.as_str(), now],
+        )?)
+    }
+
     pub fn recover_session_pickers(
         &self,
         installation_id: &InstallationId,
@@ -1903,6 +1923,103 @@ mod tests {
         assert_eq!(retained.state, SessionPickerState::Opening);
         assert_eq!(retained.thread_chat_id, Some(21));
         assert_eq!(retained.agent_session_id, Some(30));
+    }
+
+    #[test]
+    fn runtime_switch_retires_only_unfinished_pickers_and_keeps_cleanup_retryable() {
+        for (state, thread, expected) in [
+            ("publishing", None, SessionPickerState::Expired),
+            ("active", None, SessionPickerState::Expired),
+            ("opening", Some(21), SessionPickerState::Failed),
+            ("retryable", Some(21), SessionPickerState::Failed),
+            ("completed", Some(21), SessionPickerState::Completed),
+        ] {
+            let (store, picker, _workspace) = memory_fixture();
+            store.insert_session_picker(&picker).unwrap();
+            if state != "publishing" {
+                store
+                    .attach_session_picker_message(&picker.callback_token, 13, 101)
+                    .unwrap();
+            }
+            // Seed the persisted checkpoints an interrupted process can leave.
+            store
+                .connection
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE session_pickers SET state = ?1, thread_chat_id = ?2,
+                 lease_owner = 'old-process', lease_expires_at = 150 WHERE callback_token = ?3",
+                    params![state, thread, picker.callback_token],
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .expire_session_pickers_for_installation(
+                        &InstallationId::new("another-installation").unwrap(),
+                        110
+                    )
+                    .unwrap(),
+                0
+            );
+            let completed = state == "completed";
+            assert_eq!(
+                store
+                    .expire_session_pickers_for_installation(&picker.installation_id, 110)
+                    .unwrap(),
+                usize::from(!completed)
+            );
+            assert_eq!(
+                store
+                    .expire_session_pickers_for_installation(&picker.installation_id, 111)
+                    .unwrap(),
+                0
+            );
+            store
+                .recover_session_pickers(&picker.installation_id, 112)
+                .unwrap();
+            let current = store
+                .session_picker(&picker.callback_token)
+                .unwrap()
+                .unwrap();
+            assert_eq!(current.state, expected);
+            assert_eq!(current.thread_chat_id, thread);
+            if !completed {
+                assert!(current.lease_owner.is_none());
+                assert!(current.lease_expires_at.is_none());
+                assert!(
+                    store
+                        .recoverable_session_picker_commands(&picker.installation_id)
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+            let cards = store
+                .session_picker_recovery_cards(&picker.installation_id)
+                .unwrap();
+            assert_eq!(
+                cards.len(),
+                usize::from(!completed && state != "publishing")
+            );
+            if !cards.is_empty() {
+                // A failed UI edit remains pending; only a successful edit clears it.
+                assert_eq!(
+                    store
+                        .session_picker_recovery_cards(&picker.installation_id)
+                        .unwrap()
+                        .len(),
+                    1
+                );
+                store
+                    .mark_session_picker_terminal_projected(&picker.callback_token, 113)
+                    .unwrap();
+                assert!(
+                    store
+                        .session_picker_recovery_cards(&picker.installation_id)
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
     }
 
     #[test]
