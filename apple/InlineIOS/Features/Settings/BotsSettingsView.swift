@@ -19,42 +19,54 @@ struct BotsSettingsView: View {
   @State private var copiedTokenPasteboardChangeCount: Int?
   /// The bot that was just created, while its "who can message it" step shows.
   @State private var newBot: UserInfo?
+  /// Edit mode: the selected bots and the last bulk change.
+  @State private var bulk: BotBulkEditModel
+
+  /// `bulk` starts Settings → Bots in a given edit state (debug harness).
+  @MainActor
+  init(bulk: BotBulkEditModel? = nil) {
+    _bulk = State(initialValue: bulk ?? BotBulkEditModel())
+  }
 
   var body: some View {
-    List {
-      Section {
-        TextField("Bot Name", text: $name)
-          .textContentType(.name)
+    List(selection: Binding(get: { bulk.selection }, set: { bulk.setSelection($0) })) {
+      if bulk.isEditing {
+        IOSBotBulkFailureSection(model: bulk)
+      } else {
+        Section {
+          TextField("Bot Name", text: $name)
+            .textContentType(.name)
 
-        HStack(spacing: 2) {
-          Text("@", comment: "Fixed prefix shown before an editable bot username.")
-            .foregroundStyle(.secondary)
-          TextField("username_bot", text: $username)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-        }
-
-        Button {
-          createBot()
-        } label: {
-          if model.isCreating {
-            HStack {
-              ProgressView()
-              Text("Creating Bot…")
-            }
-          } else {
-            Label("Create Bot", systemImage: "plus")
+          HStack(spacing: 2) {
+            Text("@", comment: "Fixed prefix shown before an editable bot username.")
+              .foregroundStyle(.secondary)
+            TextField("username_bot", text: $username)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
           }
-        }
-        .disabled(!canCreate)
-      } header: {
-        Text("Create Bot")
-      } footer: {
-        Text("Bot usernames must end with “bot”.")
-      }
 
-      if let errorMessage = model.errorMessage {
-        IOSBotErrorSection(message: errorMessage)
+          Button {
+            createBot()
+          } label: {
+            if model.isCreating {
+              HStack {
+                ProgressView()
+                Text("Creating Bot…")
+              }
+            } else {
+              Label("Create Bot", systemImage: "plus")
+            }
+          }
+          .disabled(!canCreate)
+        } header: {
+          Text("Create Bot")
+        } footer: {
+          Text("Bot usernames must end with “bot”.")
+        }
+
+        if let errorMessage = model.errorMessage {
+          IOSBotErrorSection(message: errorMessage)
+        }
       }
 
       Section("Your Bots") {
@@ -72,34 +84,66 @@ struct BotsSettingsView: View {
           )
         } else {
           ForEach(model.bots, id: \.id) { bot in
-            IOSBotSettingsRow(
-              bot: bot,
-              token: model.revealedTokens[bot.id],
-              isBusy: model.busyBotIDs.contains(bot.id),
-              model: model,
-              copyToken: copyToken,
-              requestDelete: { botToDelete = bot }
-            )
+            if bulk.isEditing {
+              IOSBotSelectableRow(bot: bot, isSelectable: bulk.isSelectable(bot.id), note: bulk.rowNote(for: bot.id))
+            } else {
+              IOSBotSettingsRow(
+                bot: bot,
+                token: model.revealedTokens[bot.id],
+                isBusy: model.busyBotIDs.contains(bot.id),
+                model: model,
+                copyToken: copyToken,
+                requestDelete: { botToDelete = bot }
+              )
+            }
           }
         }
       }
     }
     .listStyle(.insetGrouped)
-    .navigationTitle("Bots")
+    .environment(\.editMode, .constant(bulk.isEditing ? .active : .inactive))
+    .animation(.default, value: bulk.isEditing)
+    .navigationTitle(bulk.isEditing ? bulkTitle : "Bots")
     .navigationBarTitleDisplayMode(.inline)
+    .navigationBarBackButtonHidden(bulk.isEditing)
     .refreshable {
       await model.load(realtimeV2)
     }
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          Task { await model.load(realtimeV2) }
-        } label: {
-          Label("Refresh Bots", systemImage: "arrow.clockwise")
+      if bulk.isEditing {
+        ToolbarItem(placement: .topBarLeading) {
+          Button(bulk.isAllSelected(botIDs) ? "Deselect All" : "Select All") {
+            bulk.toggleSelectAll(botIDs)
+          }
+          .disabled(bulk.isRunning)
         }
-        .disabled(model.isLoading)
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Done") { bulk.endEditing() }
+            .fontWeight(.semibold)
+            .disabled(bulk.isRunning)
+        }
+        ToolbarItemGroup(placement: .bottomBar) {
+          Spacer()
+          IOSBotBulkChangeMenu(model: bulk, botUserIDs: botIDs)
+          Spacer()
+        }
+      } else {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
+            Task { await model.load(realtimeV2) }
+          } label: {
+            Label("Refresh Bots", systemImage: "arrow.clockwise")
+          }
+          .disabled(model.isLoading)
+        }
+        if model.bots.count > 1 {
+          ToolbarItem(placement: .topBarTrailing) {
+            Button("Edit") { bulk.beginEditing() }
+          }
+        }
       }
     }
+    .toolbar(bulk.isEditing ? .visible : .automatic, for: .bottomBar)
     .confirmationDialog(
       "Delete Bot?",
       isPresented: Binding(
@@ -130,6 +174,14 @@ struct BotsSettingsView: View {
     .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
       clearSensitiveState()
     }
+  }
+
+  private var botIDs: [Int64] { model.bots.map(\.id) }
+
+  /// "3 Selected", like Mail and Files.
+  private var bulkTitle: String {
+    let count = bulk.selectedBots(in: botIDs).count
+    return count == 0 ? String(localized: "Select Bots") : String(localized: "\(count) Selected")
   }
 
   private var sanitizedUsername: String {
@@ -224,6 +276,12 @@ final class IOSBotsSettingsModel {
 
   func load(_ realtimeV2: RealtimeV2, failure: String = "Could not load bots. Pull to try again.") async {
     guard !isLoading else { return }
+    #if DEBUG
+    if let fixture = BotsSettingsDebugFixture.settingsBots {
+      bots = fixture
+      return
+    }
+    #endif
     isLoading = true
     errorMessage = nil
     defer { isLoading = false }
@@ -514,8 +572,14 @@ private struct IOSBotSettingsRow: View {
   }
 }
 
-private struct IOSManagedBotSummary: View {
+struct IOSManagedBotSummary: View {
   let bot: InlineProtocol.User
+  /// False in edit mode for a bot the viewer can't change.
+  var isSelectable = true
+  /// Why the last bulk change didn't update this bot, in edit mode.
+  var note: (text: String, isFailure: Bool)?
+  @ObservedObject private var grants = AgentGrantStore.shared
+  @ObservedObject private var work = AgentWorkStateStore.shared
 
   var body: some View {
     HStack(spacing: 10) {
@@ -528,8 +592,23 @@ private struct IOSManagedBotSummary: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+        if let subtitle = isSelectable ? BotSettingsSubtitle.text(botUserID: bot.id, work: work, grants: grants) : BotSettingsSubtitle.notYours {
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        if let note {
+          Text(note.text)
+            .font(.caption)
+            .foregroundStyle(note.isFailure ? Color.red : Color.secondary)
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .task(id: bot.id) {
+      grants.ensureLoaded(botUserID: bot.id)
+      await work.loadBotSettings(botUserID: bot.id)
     }
   }
 }

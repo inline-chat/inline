@@ -17,9 +17,17 @@ struct PeerInfoHarnessRootView: View {
   /// A case named at launch renders as the root, so captures never race a sheet.
   @State private var launchItem: SpaceChatItem?
   @State private var launchFailure: String?
+  /// Settings → Bots in the state a `--peerinfo-harness-case settings-bots…` names.
+  @State private var botsModel: BotBulkEditModel?
 
   var body: some View {
-    if let launchItem {
+    if let botsModel {
+      NavigationStack {
+        BotsSettingsView(bulk: botsModel)
+      }
+      .environment(router)
+      .environmentObject(nav)
+    } else if let launchItem {
       NavigationStack {
         ChatInfoView(chatItem: launchItem, isPresentedModally: true)
       }
@@ -32,9 +40,17 @@ struct PeerInfoHarnessRootView: View {
 
   private var list: some View {
     NavigationStack {
-      List(PeerInfoDebugFixture.cases) { item in
-        Button(item.title) { open(item.peer) }
-          .accessibilityIdentifier("peerinfo-\(item.id)")
+      List {
+        ForEach(PeerInfoDebugFixture.cases) { item in
+          Button(item.title) { open(item.peer) }
+            .accessibilityIdentifier("peerinfo-\(item.id)")
+        }
+        ForEach(BotsSettingsDebugFixture.Case.allCases, id: \.rawValue) { item in
+          Button(item.title) {
+            Task { botsModel = await BotsSettingsDebugFixture.bulkModel(for: item) }
+          }
+          .accessibilityIdentifier("peerinfo-\(item.rawValue)")
+        }
       }
       .navigationTitle("Chat Info Harness")
       .safeAreaInset(edge: .top) {
@@ -55,7 +71,12 @@ struct PeerInfoHarnessRootView: View {
       didSeed = true
       PeerInfoDebugFixture.seed()
       PeerInfoDebugFixture.seedAgents()
+      BotsSettingsDebugFixture.seed()
       if let id = TimelineHarnessRootView.argument("--peerinfo-harness-case"),
+         let botsCase = BotsSettingsDebugFixture.Case(rawValue: id)
+      {
+        botsModel = await BotsSettingsDebugFixture.bulkModel(for: botsCase)
+      } else if let id = TimelineHarnessRootView.argument("--peerinfo-harness-case"),
          let item = PeerInfoDebugFixture.cases.first(where: { $0.id == id })
       {
         launchItem = FullChatViewModel.cachedChatItem(peer: item.peer)
