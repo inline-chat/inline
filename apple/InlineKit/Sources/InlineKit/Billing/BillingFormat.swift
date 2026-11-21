@@ -10,6 +10,7 @@ public enum BillingFormat {
     case "pro": "Pro"
     case "believer": "Believer"
     case "team": "Team"
+    case "business": "Business"
     case "enterprise": "Enterprise"
     default: plan.capitalized
     }

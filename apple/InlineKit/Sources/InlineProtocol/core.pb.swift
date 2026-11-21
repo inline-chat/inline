@@ -20810,7 +20810,7 @@ public nonisolated struct BillingSubscription: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// pro | believer | team | enterprise
+  /// pro | believer | team | business | enterprise
   public var plan: String = String()
 
   /// month | year | three_years | none
@@ -20882,10 +20882,10 @@ public nonisolated struct BillingPlanOffer: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Checkout code, for example pro-monthly, believer or team-yearly.
+  /// Checkout code, for example pro-monthly, believer, team-yearly or business-monthly.
   public var code: String = String()
 
-  /// pro | believer | team
+  /// pro | believer | team | business
   public var plan: String = String()
 
   /// month | year | three_years | none
