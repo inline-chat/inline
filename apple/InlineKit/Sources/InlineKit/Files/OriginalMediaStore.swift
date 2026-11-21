@@ -1,8 +1,11 @@
+import AVFoundation
 import Foundation
+import ImageIO
 import Logger
+import UniformTypeIdentifiers
 
 /// Keeps the untouched file behind an attached photo or video until its message goes out, so
-/// the composer's Original toggle can send that file instead of the compressed copy. Copies are
+/// Send as Original can switch the item to that file instead of the compressed copy. Copies are
 /// clones on APFS, so keeping them costs almost no space. They live in the temporary directory:
 /// if the system clears it, the item is simply sent compressed.
 public enum OriginalMediaStore {
@@ -90,56 +93,169 @@ public enum OriginalMediaStore {
   }
 }
 
-public extension FileMediaItem {
-  /// Whether the composer's Original toggle changes how this item is sent.
-  var canSendAsOriginal: Bool {
-    switch self {
-    case .photo, .video: true
-    case .document, .voice: false
-    }
+/// What sending one photo or video as its original would send, for the menu that offers it.
+public struct OriginalMediaSummary: Sendable, Equatable {
+  public var byteCount: Int64
+  public var includesLocation: Bool
+
+  public init(byteCount: Int64, includesLocation: Bool) {
+    self.byteCount = byteCount
+    self.includesLocation = includesLocation
   }
 
-  /// The composer's send with Original on: each photo and video is swapped for its untouched
-  /// file, in order. An item whose original is gone is sent as it is.
-  static func withOriginals(_ items: [FileMediaItem]) async -> [FileMediaItem] {
-    var result: [FileMediaItem] = []
-    result.reserveCapacity(items.count)
-    for item in items {
-      guard item.canSendAsOriginal else {
-        result.append(item)
-        continue
-      }
-      do {
-        result.append(try await item.replacedWithOriginalDocument() ?? item)
-      } catch {
-        Log.shared.error("Couldn't send the original file; sending the compressed one", error: error)
-        result.append(item)
-      }
-    }
-    return result
+  /// "2.8 MB · Includes location"
+  public var detailText: String {
+    let size = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+    return includesLocation ? "\(size) · Includes location" : size
   }
+}
 
-  /// The untouched file behind a photo or video, saved as a document to send in its place, the
-  /// way Telegram's Send as File works: same bytes, same metadata. The compressed item is
-  /// removed. Returns nil when there is no original to send (the item is then sent as it is).
-  func replacedWithOriginalDocument() async throws -> FileMediaItem? {
-    switch self {
-    case let .photo(photoInfo):
-      guard let original = OriginalMediaStore.original(for: self) else { return nil }
-      let document = try await FileCache.saveDocumentWithThumbnail(url: original)
-      OriginalMediaStore.discard(for: self)
-      await FileCache.discardLocalPhoto(photoInfo)
-      return .document(document)
-    case let .video(videoInfo):
-      // The cached video is already an untouched copy; a kept original adds its real file name.
-      let original = OriginalMediaStore.original(for: self) ?? localFileURL()
-      guard let original, FileManager.default.fileExists(atPath: original.path) else { return nil }
-      let document = try await FileCache.saveDocumentWithThumbnail(url: original)
-      OriginalMediaStore.discard(for: self)
-      await FileCache.discardLocalVideo(videoInfo)
-      return .document(document)
-    case .document, .voice:
+public extension OriginalMediaStore {
+  /// The size of the untouched file behind `media` and whether it carries a location. Nil when
+  /// there is nothing to send as original. Reads only file headers.
+  @concurrent
+  static func summary(for media: FileMediaItem) async -> OriginalMediaSummary? {
+    let url: URL?
+    switch media {
+    case .photo:
+      url = original(for: media)
+    case .video:
+      url = original(for: media) ?? media.localFileURL()
+    case .document:
+      // An image or video file that Send as Original switched to (or that was attached as one).
+      guard media.canSwitchOriginal else { return nil }
+      url = media.localFileURL()
+    case .voice:
       return nil
     }
+    guard let url,
+          let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+    else {
+      return nil
+    }
+    let includesLocation = if media.isVideoForOriginal {
+      await videoIncludesLocation(url)
+    } else {
+      imageIncludesLocation(url)
+    }
+    return OriginalMediaSummary(byteCount: size.int64Value, includesLocation: includesLocation)
+  }
+
+  internal static func imageIncludesLocation(_ url: URL) -> Bool {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary)
+          as? [CFString: Any],
+          let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any]
+    else {
+      return false
+    }
+    return gps[kCGImagePropertyGPSLatitude] != nil
+  }
+
+  internal static func videoIncludesLocation(_ url: URL) async -> Bool {
+    guard let items = try? await AVURLAsset(url: url).load(.metadata) else { return false }
+    return items.contains { item in
+      item.commonKey == .commonKeyLocation
+        || (item.identifier?.rawValue.localizedCaseInsensitiveContains("location") ?? false)
+    }
+  }
+}
+
+public extension FileMediaItem {
+  /// Whether the item's menu offers Send as Original. A photo or video switches to its untouched
+  /// file; an image or video file switches back to a compressed photo or video.
+  var canSwitchOriginal: Bool {
+    switch self {
+    case .photo, .video:
+      true
+    case let .document(info):
+      Self.switchableFileTypes(mimeType: info.document.mimeType, fileName: info.document.fileName)
+        .contains { $0.conforms(to: .movie) || Self.isCompressibleImage($0) }
+    case .voice:
+      false
+    }
+  }
+
+  /// True when the item goes as a file, unchanged: Send as Original is on.
+  var isSentAsFile: Bool {
+    if case .document = self { true } else { false }
+  }
+
+  /// The other form of this attachment, made without touching this item's files. A photo or
+  /// video becomes a document of its untouched file; an image or video document becomes a
+  /// compressed photo or video. Nil when it can't switch: no original was kept, or the image
+  /// can only go as a file. The caller keeps one form and discards the other with
+  /// `discardUnsent()`.
+  func switchedForOriginal() async throws -> FileMediaItem? {
+    switch self {
+    case .photo:
+      guard let original = OriginalMediaStore.original(for: self) else { return nil }
+      return .document(try await FileCache.saveDocumentWithThumbnail(url: original))
+    case .video:
+      // The cached video is an untouched copy too; a kept original adds its real file name.
+      let original = OriginalMediaStore.original(for: self) ?? localFileURL()
+      guard let original, FileManager.default.fileExists(atPath: original.path) else { return nil }
+      return .document(try await FileCache.saveDocumentWithThumbnail(url: original))
+    case let .document(info):
+      guard canSwitchOriginal, let url = localFileURL(), FileManager.default.fileExists(atPath: url.path) else {
+        return nil
+      }
+      let media = if isVideoForOriginal {
+        try await AttachmentMediaMaterializer.video(url, originalFileName: info.document.fileName)
+      } else {
+        try await AttachmentMediaMaterializer.photo(.file(url), originalFileName: info.document.fileName)
+      }
+      guard !media.isSentAsFile else {
+        await media.discardUnsent()
+        return nil
+      }
+      return media
+    case .voice:
+      return nil
+    }
+  }
+
+  /// Removes the local files and rows of an attachment that leaves the composer unsent, such as
+  /// the form Send as Original switched away from.
+  func discardUnsent() async {
+    switch self {
+    case let .photo(info):
+      OriginalMediaStore.discard(for: self)
+      await FileCache.discardLocalPhoto(info)
+    case let .video(info):
+      OriginalMediaStore.discard(for: self)
+      await FileCache.discardLocalVideo(info)
+    case let .document(info):
+      await FileCache.discardLocalDocument(info)
+    case .voice:
+      break
+    }
+  }
+
+  internal var isVideoForOriginal: Bool {
+    switch self {
+    case .video:
+      true
+    case let .document(info):
+      Self.switchableFileTypes(mimeType: info.document.mimeType, fileName: info.document.fileName)
+        .contains { $0.conforms(to: .movie) }
+    case .photo, .voice:
+      false
+    }
+  }
+
+  internal static func switchableFileTypes(mimeType: String?, fileName: String?) -> [UTType] {
+    let fromMime = mimeType.flatMap { UTType(mimeType: $0) }
+    let fromName = fileName.flatMap { name -> UTType? in
+      let ext = (name as NSString).pathExtension
+      return ext.isEmpty ? nil : UTType(filenameExtension: ext)
+    }
+    return [fromMime, fromName].compactMap { $0 }
+  }
+
+  /// A still image the photo preparer can compress. GIFs stay files (they'd lose their motion),
+  /// and so does vector art.
+  internal static func isCompressibleImage(_ type: UTType) -> Bool {
+    type.conforms(to: .image) && !type.conforms(to: .gif) && !type.conforms(to: .svg)
   }
 }
