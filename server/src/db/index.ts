@@ -41,6 +41,8 @@ export const initDb = (databaseUrl: string) => {
   db = createDatabase(clients.queryClient)
 }
 
+export const queryPoolCapacity = () => clients.diagnosticsConfiguration.queryPoolMax
+
 export const checkDatabaseHealth = () => {
   const database = clients.checkHealth()
   const migrations = migrationHead()

@@ -26,6 +26,7 @@ import {
   BotWebhookDeliveryProcess,
 } from "../../modules/botUpdates/delivery.effect"
 import { McpEventsProcess } from "../../modules/mcpEvents/worker.effect"
+import { CloudSearchProcess } from "../../modules/search/cloudWorker.effect"
 import { ChatAccessVerifierProcess } from "../../modules/authorization/chatAccessVerifier.effect"
 import {
   BlockContentImageProcess,
@@ -456,6 +457,7 @@ export const startCoreProductionServer = async <
     const result = await bridge.runPromiseExit(Effect.all([
       BotWebhookDeliveryProcess.use((process) => process.stop).pipe(Effect.exit),
       McpEventsProcess.use((process) => process.stop).pipe(Effect.exit),
+      CloudSearchProcess.use((process) => process.stop).pipe(Effect.exit),
       ChatAccessVerifierProcess.use((process) => process.stop).pipe(Effect.exit),
       BlockContentImageProcess.use((process) => process.stop).pipe(Effect.exit),
       NativeUploadProcess.use((process) => process.stop).pipe(Effect.exit),
@@ -648,6 +650,7 @@ export const startCoreProductionServer = async <
               ),
               McpEventsProcess.use((process) => process.start),
               ChatAccessVerifierProcess.use((process) => process.start),
+              CloudSearchProcess.use((process) => process.start),
               BlockContentImageProcess.use(
                 (process) => process.start,
               ),

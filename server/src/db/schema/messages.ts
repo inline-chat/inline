@@ -127,6 +127,8 @@ export const messages = pgTable(
     chatIdMessageIdDescIndex: index("messages_chat_id_message_id_desc_idx").on(table.chatId, table.messageId.desc()),
     randomIdPerSenderIndex: unique("random_id_per_sender_unique").on(table.randomId, table.fromId),
     unreadCountIndex: index("unread_count_index").on(table.chatId, table.messageId, table.fromId),
+    searchChronologyIndex: index("messages_chat_search_date_idx").on(table.chatId, table.date.desc(), table.globalId.desc()),
+    documentIndex: index("messages_document_id_idx").on(table.documentId).where(sql`${table.documentId} is not null`),
     blockContentIdIndex: index("messages_block_content_id_idx").on(table.blockContentId),
     activityDateIndex: index("messages_activity_date_from_id_idx")
       .on(table.date, table.fromId)

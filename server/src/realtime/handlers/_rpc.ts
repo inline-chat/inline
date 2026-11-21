@@ -16,6 +16,7 @@ import { getMessages } from "@in/server/realtime/handlers/messages.getMessages"
 import { getThreadReferences } from "@in/server/realtime/handlers/messages.getThreadReferences"
 import { getThreadSubthreads } from "@in/server/realtime/handlers/messages.getThreadSubthreads"
 import { getChat } from "@in/server/realtime/handlers/messages.getChat"
+import { searchMessagesGlobalHandler } from "./messages.searchMessagesGlobal"
 import { searchMessages } from "@in/server/realtime/handlers/messages.searchMessages"
 import { searchExternalResources } from "@in/server/realtime/handlers/externalResources.search"
 import { addReaction } from "./messages.addReactions"
@@ -372,6 +373,11 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "getThreadSubthreads", getThreadSubthreads: result }
     }
 
+    case Method.SEARCH_MESSAGES_GLOBAL: {
+      if (call.input.oneofKind !== "searchMessagesGlobal") throw RealtimeRpcError.BadRequest()
+      const result = await searchMessagesGlobalHandler(call.input.searchMessagesGlobal, handlerContext)
+      return { oneofKind: "searchMessagesGlobal", searchMessagesGlobal: result }
+    }
     case Method.SEARCH_MESSAGES: {
       if (call.input.oneofKind !== "searchMessages") {
         throw RealtimeRpcError.BadRequest()
