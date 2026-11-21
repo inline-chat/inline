@@ -101,6 +101,8 @@ final class ChatRouteToolbarTitleModel {
   var reference: ThreadReference?
   var status: Status = .none
   var badgeSpaceID: Int64?
+  /// The DM peer whose name badges the title shows.
+  var badgeUser: User?
   var showsInlineTeamBadge = false
   var canRename = false
   var isEditingTitle = false
@@ -342,6 +344,8 @@ final class ChatRouteToolbarTitleModel {
     iconPeer = resolvedIconPeer()
     showsInlineTeamBadge = resolvedInlineTeamBadgeVisibility()
     badgeSpaceID = contextSpaceId ?? resolvedChat()?.spaceId
+    // Like Telegram, your own badges stay off your self-DM's title.
+    badgeUser = peer.asUserId() == nil ? nil : resolvedUserInfo()?.user.nilIfCurrentUser
     updateParentChatSubscription()
     updateSpaceSubscription()
     breadcrumb = resolvedBreadcrumb()

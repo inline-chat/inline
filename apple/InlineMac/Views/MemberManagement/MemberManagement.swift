@@ -230,8 +230,7 @@ public struct MemberManagementView: View {
             .lineLimit(1)
             .truncationMode(.tail)
 
-          SpaceMemberBadge(userID: member.userInfo.user.id, spaceID: member.member.spaceId)
-            .id("\(member.userInfo.user.id):\(member.member.spaceId)")
+          UserNameBadges(user: member.userInfo.user, spaceID: member.member.spaceId)
 
           if isInlineStaff(member.userInfo.user) {
             inlineStaffBadge

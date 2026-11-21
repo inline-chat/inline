@@ -232,9 +232,16 @@ private struct AccountSettingsRow: View {
       UserAvatar(userInfo: root.currentUserInfo ?? .deleted, size: 36)
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(root.currentUser?.fullName ?? "User not loaded")
-          .font(.body)
-          .fontWeight(.medium)
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+          Text(root.currentUser?.fullName ?? "User not loaded")
+            .font(.body)
+            .fontWeight(.medium)
+            .lineLimit(1)
+
+          if let user = root.currentUser {
+            AccountPlanTag(user: user, size: 13)
+          }
+        }
 
         Text("Your Account")
           .font(.caption)

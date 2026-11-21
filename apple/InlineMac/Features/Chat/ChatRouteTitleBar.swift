@@ -189,9 +189,17 @@ struct ChatRouteTitleBar: View {
         .lineLimit(1)
         .truncationMode(.tail)
 
-      if let userID = model.peer.asUserId(), let spaceID = model.badgeSpaceID {
-        SpaceMemberBadge(userID: userID, spaceID: spaceID, size: 14)
-          .id("\(userID):\(spaceID)")
+      if let user = model.badgeUser {
+        if let badge = user.badge {
+          UserBadgeView(badge, size: 14, baselineOffset: 3, labelsItself: false)
+            .inlineTooltip(verbatim: badge.title, placement: .below)
+        }
+        // In a space, that space's badge; elsewhere, the Pro space the person represents
+        // (the Inline Team badge stands in for it).
+        if !user.bot, !(model.showsInlineTeamBadge && model.badgeSpaceID == nil) {
+          SpaceMemberBadge(userID: user.id, spaceID: model.badgeSpaceID, size: 14)
+            .id("\(user.id):\(model.badgeSpaceID.map(String.init) ?? "affiliation")")
+        }
       }
 
       if model.showsInlineTeamBadge {

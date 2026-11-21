@@ -370,11 +370,17 @@ struct ChatInfo: View {
       avatar
         .padding(.bottom, 4)
 
-      Text(chatTitle)
-        .font(.title2.weight(.semibold))
-        .multilineTextAlignment(.center)
-        .textSelection(.enabled)
-        .accessibilityAddTraits(.isHeader)
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text(chatTitle)
+          .font(.title2.weight(.semibold))
+          .multilineTextAlignment(.center)
+          .textSelection(.enabled)
+          .accessibilityAddTraits(.isHeader)
+
+        if let user = userInfo?.user {
+          UserNameBadges(user: user, spaceID: nil, size: 18)
+        }
+      }
 
       subtitle
     }
