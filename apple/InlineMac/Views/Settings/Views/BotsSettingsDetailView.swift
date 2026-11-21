@@ -12,6 +12,8 @@ struct BotsSettingsDetailView: View {
   @Environment(\.realtimeV2) private var realtimeV2
 
   @StateObject private var viewModel = BotsSettingsViewModel()
+  /// The Edit Bots sheet: open while editing, with its selection and failures.
+  @State private var bulk: BotBulkEditModel
   @State private var name = ""
   @State private var username = ""
   @FocusState private var focusedField: Field?
@@ -25,6 +27,12 @@ struct BotsSettingsDetailView: View {
   @State private var createdBotToOpen: InlineProtocol.User?
 
   private let log = Log.scoped("BotsSettings")
+
+  /// `bulk` opens Settings → Bots in a given editing state (debug harness).
+  @MainActor
+  init(bulk: BotBulkEditModel? = nil) {
+    _bulk = State(initialValue: bulk ?? BotBulkEditModel())
+  }
 
   var body: some View {
     Form {
@@ -178,10 +186,17 @@ struct BotsSettingsDetailView: View {
           }
         }
       } header: {
-        SettingsSectionHeader(
-          .yourBots,
-          subtitle: "Manage bots used by integrations and automated workflows."
-        )
+        HStack(alignment: .firstTextBaseline) {
+          SettingsSectionHeader(
+            .yourBots,
+            subtitle: "Manage bots used by integrations and automated workflows."
+          )
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+          if viewModel.bots.count > 1 {
+            BotBulkEditButton(model: bulk)
+          }
+        }
         .settingsSearchHeaderAnchor(.yourBots)
       }
 
@@ -206,6 +221,9 @@ struct BotsSettingsDetailView: View {
         currentUserId: auth.currentUserId,
         force: false
       )
+    }
+    .sheet(isPresented: Binding(get: { bulk.isEditing }, set: { if !$0 { bulk.endEditing() } })) {
+      BotEditSheet(bots: viewModel.bots, model: bulk, onDone: { bulk.endEditing() })
     }
     .sheet(item: $botToEdit) { item in
       BotProfileEditorSheet(bot: item.bot) { updatedBot in
@@ -439,6 +457,14 @@ final class BotsSettingsViewModel: ObservableObject {
       return
     }
     guard !isLoading else { return }
+    #if DEBUG
+    if let fixture = BotsSettingsDebugFixture.settingsBots {
+      bots = fixture
+      hasLoaded = true
+      lastLoadedUserId = currentUserId
+      return
+    }
+    #endif
 
     isLoading = true
     loadError = nil
@@ -644,7 +670,7 @@ private struct BotRow: View {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
-          BotAccessSummaryLabel(botUserID: bot.id, isOwned: isOwned)
+          BotSettingsSubtitleLabel(botUserID: bot.id, isAdmin: !isOwned)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1410,30 +1436,3 @@ private struct TokenRow: View {
   BotsSettingsDetailView()
 }
 
-/// "Only you", "Acme and 2 people" or "Everyone" under a bot in Settings, so
-/// who can message each bot is visible without opening anything.
-private struct BotAccessSummaryLabel: View {
-  let botUserID: Int64
-  let isOwned: Bool
-  @ObservedObject private var grants = AgentGrantStore.shared
-
-  var body: some View {
-    Group {
-      if let owned = grants.ownedGrants(botUserID: botUserID) {
-        let summary = owned.sharedWithSummary(
-          openToEveryone: grants.openToEveryoneByBotUserID[botUserID] == true
-        )
-        Label(
-          isOwned ? "Shared with: \(summary)" : "You’re an admin · Shared with: \(summary)",
-          systemImage: grants.openToEveryoneByBotUserID[botUserID] == true ? "globe" : "lock.fill"
-        )
-      } else if !isOwned {
-        Label("You’re an admin", systemImage: "lock.fill")
-      }
-    }
-    .font(.caption)
-    .foregroundStyle(.secondary)
-    .labelStyle(.titleAndIcon)
-    .task(id: botUserID) { grants.ensureLoaded(botUserID: botUserID) }
-  }
-}

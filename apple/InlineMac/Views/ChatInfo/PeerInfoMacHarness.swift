@@ -7,7 +7,7 @@ import SwiftUI
 /// of chat info on an in-memory database, signed in as a fixture user, instead
 /// of the app's windows. Nothing reaches the server. `--peerinfo-harness-case
 /// ID` selects a case (see `PeerInfoDebugFixture.cases`), `--peerinfo-harness-dark`
-/// shows it in dark mode.
+/// shows it in dark mode, `--peerinfo-harness-background` leaves focus alone.
 @MainActor
 enum PeerInfoMacHarness {
   private static var window: NSWindow?
@@ -18,6 +18,7 @@ enum PeerInfoMacHarness {
     }
     PeerInfoDebugFixture.seed(dependencies.database)
     PeerInfoDebugFixture.seedAgents()
+    BotsSettingsDebugFixture.seed()
     let root = PeerInfoMacHarnessView()
       .environment(dependencies: dependencies)
     let controller = NSHostingController(rootView: root)
@@ -26,8 +27,14 @@ enum PeerInfoMacHarness {
     window.styleMask = [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView]
     window.setContentSize(NSSize(width: 980, height: 860))
     window.center()
-    window.makeKeyAndOrderFront(nil)
-    NSApp.activate(ignoringOtherApps: true)
+    // `--peerinfo-harness-background` shows the window without taking focus,
+    // so unattended captures don't swallow someone's typing.
+    if CommandLine.arguments.contains("--peerinfo-harness-background") {
+      window.orderFrontRegardless()
+    } else {
+      window.makeKeyAndOrderFront(nil)
+      NSApp.activate(ignoringOtherApps: true)
+    }
     self.window = window
   }
 }
@@ -43,16 +50,40 @@ private struct PeerInfoMacHarnessView: View {
 
   var body: some View {
     NavigationSplitView {
-      List(PeerInfoDebugFixture.cases, selection: $selection) { item in
-        Text(item.title).tag(item.id)
+      List(selection: $selection) {
+        ForEach(PeerInfoDebugFixture.cases) { item in
+          Text(item.title).tag(item.id)
+        }
+        ForEach(BotsSettingsDebugFixture.Case.allCases, id: \.rawValue) { item in
+          Text(item.title).tag(item.rawValue)
+        }
       }
       .navigationSplitViewColumnWidth(200)
     } detail: {
-      if let item = PeerInfoDebugFixture.cases.first(where: { $0.id == selection }) {
+      if let selection, let botsCase = BotsSettingsDebugFixture.Case(rawValue: selection) {
+        BotsSettingsHarnessCase(harnessCase: botsCase)
+          .id(selection)
+      } else if let item = PeerInfoDebugFixture.cases.first(where: { $0.id == selection }) {
         ChatInfo(peerId: item.peer)
           .id(item.id)
       }
     }
+  }
+}
+/// Settings → Bots in the state a case names (edit mode, a partial failure).
+private struct BotsSettingsHarnessCase: View {
+  let harnessCase: BotsSettingsDebugFixture.Case
+  @State private var model: BotBulkEditModel?
+
+  var body: some View {
+    ZStack {
+      if let model {
+        BotsSettingsDetailView(bulk: model)
+      } else {
+        ProgressView()
+      }
+    }
+    .task { model = await BotsSettingsDebugFixture.bulkModel(for: harnessCase) }
   }
 }
 #endif
