@@ -14,6 +14,8 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
   private let closeButtonSize: CGFloat = 20
   private let videoURL: URL?
   private var hoverTrackingArea: NSTrackingArea?
+  /// Send as Original, offered once the video is ready.
+  let originalOption = SendAsOriginalOption()
 
   init(
     thumbnail: NSImage?,
@@ -59,6 +61,17 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
     configureCloseButtonBackground(closeButtonBackground)
     configureCloseButton(closeButton)
     setupView()
+    setupContextMenu()
+  }
+
+  private func setupContextMenu() {
+    let menu = NSMenu()
+    let removeItem = NSMenuItem(title: "Remove", action: #selector(removeButtonClicked), keyEquivalent: "")
+    removeItem.target = self
+    removeItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+    menu.addItem(removeItem)
+    originalOption.install(in: menu)
+    self.menu = menu
   }
 
   @available(*, unavailable)

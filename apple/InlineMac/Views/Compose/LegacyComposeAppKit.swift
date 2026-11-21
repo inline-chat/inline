@@ -90,6 +90,8 @@ class LegacyComposeAppKit: NSView {
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
 
   // [uniqueId: FileMediaItem]
+  /// Attachments being switched between photo and file by Send as Original.
+  private var switchingAttachmentIds: Set<String> = []
   private var attachmentItems: [String: FileMediaItem] = [:] {
     didSet {
       updateSendButtonIfNeeded()
@@ -1770,29 +1772,19 @@ class LegacyComposeAppKit: NSView {
     }
     let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
-    let sendsOriginals = attachments.sendsMediaAsOriginal
     func enqueueAttachments(replyToMessageId: Int64?) {
-      func enqueue(_ mediaItems: [FileMediaItem]) {
-        // Neighbouring photos and videos go out as albums; the text is the first one's caption.
-        for send in TransactionSendMessage.sends(
-          text: text,
-          peerId: destinationPeerId,
-          chatId: destinationChatId, // FIXME: chatId fallback
-          mediaItems: mediaItems,
-          replyToMsgId: replyToMessageId,
-          entities: entities,
-          sendMode: effectiveSendMode
-        ) {
-          Transactions.shared.mutate(transaction: .sendMessage(send))
-        }
-      }
-      guard sendsOriginals else {
-        enqueue(attachmentItemsSnapshot)
-        return
-      }
-      // Original: each photo and video goes as its untouched file, in the same order.
-      Task { @MainActor in
-        enqueue(await FileMediaItem.withOriginals(attachmentItemsSnapshot))
+      // Neighbouring items go out as albums, photos and videos before files (Send as Original
+      // items among them); the text is the caption of the first one sent.
+      for send in TransactionSendMessage.sends(
+        text: text,
+        peerId: destinationPeerId,
+        chatId: destinationChatId, // FIXME: chatId fallback
+        mediaItems: attachmentItemsSnapshot,
+        replyToMsgId: replyToMessageId,
+        entities: entities,
+        sendMode: effectiveSendMode
+      ) {
+        Transactions.shared.mutate(transaction: .sendMessage(send))
       }
     }
 
@@ -3293,7 +3285,7 @@ extension LegacyComposeAppKit {
           return
         }
         attachmentItems[attachment.id] = attachment.media
-        attachments.addImageView(image, id: attachment.id)
+        attachments.addImageView(image, id: attachment.id, media: attachment.media)
       case let .video(videoInfo):
         attachmentItems[attachment.id] = attachment.media
         attachments.addVideoView(videoInfo, id: attachment.id)
@@ -3326,6 +3318,53 @@ extension LegacyComposeAppKit {
 extension LegacyComposeAppKit: ComposeImplementation, ComposeAttachmentOwner {
   var view: NSView {
     self
+  }
+
+  /// Send as Original from an item's menu: switches a photo or video to a file of its untouched
+  /// original, or an image or video file back to a compressed photo or video. The item changes
+  /// in place once the other form is ready: a file moves to the file list, where it's sent
+  /// after the photos and videos.
+  func switchOriginal(attachmentId id: String) {
+    guard let media = attachmentItems[id], media.canSwitchOriginal, !switchingAttachmentIds.contains(id) else {
+      return
+    }
+    switchingAttachmentIds.insert(id)
+    Task { @MainActor [weak self] in
+      let switched: FileMediaItem?
+      do {
+        switched = try await media.switchedForOriginal()
+      } catch {
+        Log.shared.error("Couldn't switch the attachment for Send as Original", error: error)
+        switched = nil
+      }
+      guard let self else {
+        await switched?.discardUnsent()
+        return
+      }
+      switchingAttachmentIds.remove(id)
+      guard let switched else {
+        if attachmentItems[id] != nil {
+          ToastCenter.shared.showError(
+            media.isSentAsFile ? "This file can only be sent as a file." : "The original is no longer available."
+          )
+        }
+        return
+      }
+      // Sent or removed while switching: keep nothing new.
+      guard attachmentItems[id] != nil, let attachment = replaceStoredAttachment(id: id, with: switched) else {
+        await switched.discardUnsent()
+        return
+      }
+      attachmentItems.removeValue(forKey: id)
+      removeDraftAttachmentPlaceholder(id: id)
+      renderDraftAttachment(attachment)
+      updateHeight(animate: true)
+      await media.discardUnsent()
+    }
+  }
+
+  private func replaceStoredAttachment(id: String, with media: FileMediaItem) -> Drafts2Attachment? {
+    drafts2.replaceAttachment(peer: peerId, id: id, with: media)
   }
 
   func composeAttachmentsDidChangeStaged(_: Bool) {

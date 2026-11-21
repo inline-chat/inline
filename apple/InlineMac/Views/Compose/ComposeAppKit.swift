@@ -24,6 +24,8 @@ protocol ComposeAttachmentOwner: AnyObject {
   func removeImage(_ id: String)
   func removeVideo(_ id: String)
   func removeFile(_ id: String)
+  /// Send as Original from an item's menu: switches it between a photo or video and its file.
+  func switchOriginal(attachmentId id: String)
   /// Called when the attachment strip goes from empty to non-empty or back.
   func composeAttachmentsDidChangeStaged(_ hasAttachments: Bool)
 }

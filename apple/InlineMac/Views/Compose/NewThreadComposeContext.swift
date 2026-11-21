@@ -101,6 +101,15 @@ final class NewThreadComposeAttachmentStore {
     attachments.contains { $0.id == id }
   }
 
+  /// Puts another form of the same item in an attachment's place (Send as Original). Nil when
+  /// `id` has left the draft.
+  func replace(id: String, with media: FileMediaItem) -> Drafts2Attachment? {
+    guard let index = attachments.firstIndex(where: { $0.id == id }) else { return nil }
+    let attachment = Drafts2Attachment(id: media.getItemUniqueId(), media: media, createdAt: attachments[index].createdAt)
+    attachments[index] = attachment
+    return attachment
+  }
+
   func clear() {
     let activeTasks = Array(tasks.values)
     tasks.removeAll()
@@ -187,25 +196,6 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
 
 /// The immutable authoring result captured synchronously from the real Glass
 /// editor before any thread creation or network work starts.
-extension PreparedNewThreadDraft {
-  /// The same draft with each photo and video swapped for its untouched file (Original on).
-  func withOriginalMedia() async -> PreparedNewThreadDraft {
-    let media = await FileMediaItem.withOriginals(attachments.map(\.media))
-    let swapped = zip(attachments, media).map { attachment, media in
-      Drafts2Attachment(id: media.getItemUniqueId(), media: media, createdAt: attachment.createdAt)
-    }
-    return PreparedNewThreadDraft(
-      authorUserID: authorUserID,
-      text: text,
-      entities: entities,
-      attachments: swapped,
-      destination: destination,
-      sendSilently: sendSilently,
-      agentContext: agentContext
-    )
-  }
-}
-
 struct PreparedNewThreadDraft {
   let authorUserID: Int64
   let text: String

@@ -46,6 +46,11 @@ final class ComposeAttachments: NSView {
     return false
   }
   private var mediaMeta: [String: MediaMeta] = [:]
+  /// Reads what Send as Original would send for each ready photo, video or image file, for its menu.
+  private var originalSummaryTasks: [String: Task<Void, Never>] = [:]
+  /// Send as Original for image and video files in the file list, checked: choosing it switches
+  /// the file back to a compressed photo or video.
+  private var documentOriginalOptions: [String: SendAsOriginalOption] = [:]
 
   private enum MediaSection {
     case media
@@ -84,30 +89,6 @@ final class ComposeAttachments: NSView {
   private var documentCollectionHeightConstraint: NSLayoutConstraint!
   private var mediaTopConstraint: NSLayoutConstraint!
   private var documentsLeadingConstraint: NSLayoutConstraint!
-  private var mediaTrailingConstraint: NSLayoutConstraint!
-  private var mediaTrailingToToggleConstraint: NSLayoutConstraint!
-
-  /// Off: photos and videos go compressed, with no location or camera details. On: they go as
-  /// their untouched files. Resets when the attachments are cleared, after a send.
-  private(set) var sendsMediaAsOriginal = false {
-    didSet { originalToggle.state = sendsMediaAsOriginal ? .on : .off }
-  }
-
-  private lazy var originalToggle: NSButton = {
-    let button = NSButton(checkboxWithTitle: "Original", target: self, action: #selector(toggleOriginal))
-    button.controlSize = .small
-    button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-    button.contentTintColor = .secondaryLabelColor
-    button.toolTip = "Send photos and videos as files, unchanged, including their location and camera details."
-    button.setAccessibilityLabel("Send originals")
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.isHidden = true
-    return button
-  }()
-
-  @objc private func toggleOriginal() {
-    sendsMediaAsOriginal = originalToggle.state == .on
-  }
   private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
   private var isExternallyCollapsed = false
 
@@ -200,10 +181,6 @@ final class ComposeAttachments: NSView {
       self.documentScrollHeightConstraint.constant = documentViewportHeight
       self.documentCollectionHeightConstraint.constant = documentContentHeight
       self.mediaScrollView.isHidden = mediaHeight == 0
-      let showsOriginalToggle = mediaHeight > 0
-      self.originalToggle.isHidden = !showsOriginalToggle
-      self.mediaTrailingConstraint.isActive = !showsOriginalToggle
-      self.mediaTrailingToToggleConstraint.isActive = showsOriginalToggle
       self.documentScrollView.isHidden = self.isExternallyCollapsed || self.documentModels.isEmpty
       self.documentLayout.sectionInset = (!self.isExternallyCollapsed && mediaHeight == 0 && !self.documentModels.isEmpty)
         ? NSEdgeInsets(top: self.verticalPadding, left: 0, bottom: self.verticalPadding, right: 0)
@@ -286,17 +263,6 @@ final class ComposeAttachments: NSView {
 
     addSubview(mediaScrollView)
     addSubview(documentScrollView)
-    addSubview(originalToggle)
-
-    mediaTrailingConstraint = mediaScrollView.trailingAnchor.constraint(equalTo: trailingAnchor)
-    mediaTrailingToToggleConstraint = mediaScrollView.trailingAnchor.constraint(
-      equalTo: originalToggle.leadingAnchor,
-      constant: -8
-    )
-    NSLayoutConstraint.activate([
-      originalToggle.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalContentInset),
-      originalToggle.centerYAnchor.constraint(equalTo: mediaScrollView.centerYAnchor),
-    ])
 
     documentsLeadingConstraint = documentCollectionView.leadingAnchor.constraint(
       equalTo: documentClipView.leadingAnchor,
@@ -310,7 +276,7 @@ final class ComposeAttachments: NSView {
       documentCollectionHeightConstraint,
 
       mediaScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      mediaTrailingConstraint,
+      mediaScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       mediaScrollView.topAnchor.constraint(equalTo: topAnchor),
 
       documentsLeadingConstraint,
@@ -331,13 +297,16 @@ final class ComposeAttachments: NSView {
 
   public func removeImageView(id: String) {
     guard attachments.removeValue(forKey: id) != nil else { return }
+    originalSummaryTasks.removeValue(forKey: id)?.cancel()
     orderedMediaIds.removeAll { $0 == id }
     mediaMeta.removeValue(forKey: id)
     applyMediaSnapshot()
     updateHeight(animated: true)
   }
 
-  public func addImageView(_ image: NSImage, id: String) {
+  /// `media` is the ready photo, or nil while it is still being prepared. A ready photo's menu
+  /// offers Send as Original.
+  public func addImageView(_ image: NSImage, id: String, media: FileMediaItem? = nil) {
     if attachments[id] != nil { return }
     let aspectRatio = image.size.width / max(image.size.height, 1)
     mediaMeta[id] = .init(kind: .image, aspectRatio: aspectRatio)
@@ -354,10 +323,14 @@ final class ComposeAttachments: NSView {
     attachmentView.translatesAutoresizingMaskIntoConstraints = false
 
     attachments[id] = attachmentView
+    if let media {
+      offerSendAsOriginal(on: attachmentView.originalOption, id: id, media: media)
+    }
     applyMediaSnapshot()
     updateHeight(animated: true)
   }
 
+  /// A ready video: its menu offers Send as Original.
   public func addVideoView(_ videoInfo: VideoInfo, id: String) {
     let thumbnail: NSImage? = {
       guard let localPath = videoInfo.thumbnail?.sizes.first?.localPath else { return nil }
@@ -371,6 +344,27 @@ final class ComposeAttachments: NSView {
     }()
 
     addVideoView(thumbnail: thumbnail, videoURL: videoURL, id: id)
+    if let view = videoAttachments[id] {
+      offerSendAsOriginal(on: view.originalOption, id: id, media: .video(videoInfo))
+    }
+  }
+
+  /// Checked for a file, unchecked for a photo or video. Choosing it asks the owner to switch
+  /// the item to its other form, which replaces this view.
+  private func offerSendAsOriginal(on option: SendAsOriginalOption, id: String, media: FileMediaItem) {
+    guard media.canSwitchOriginal else { return }
+    option.isOffered = true
+    option.isOn = media.isSentAsFile
+    option.onChange = { [weak self] in
+      self?.compose?.switchOriginal(attachmentId: id)
+    }
+    originalSummaryTasks[id]?.cancel()
+    originalSummaryTasks[id] = Task { [weak self, weak option] in
+      let summary = await OriginalMediaStore.summary(for: media)
+      guard !Task.isCancelled else { return }
+      option?.setSummary(summary)
+      self?.originalSummaryTasks.removeValue(forKey: id)
+    }
   }
 
   public func addVideoView(thumbnail: NSImage?, videoURL: URL?, id: String) {
@@ -405,6 +399,7 @@ final class ComposeAttachments: NSView {
 
   public func removeVideoView(id: String) {
     guard videoAttachments.removeValue(forKey: id) != nil else { return }
+    originalSummaryTasks.removeValue(forKey: id)?.cancel()
     orderedMediaIds.removeAll { $0 == id }
     mediaMeta.removeValue(forKey: id)
     applyMediaSnapshot()
@@ -458,6 +453,12 @@ final class ComposeAttachments: NSView {
 
   public func addDocumentView(_ documentInfo: DocumentInfo, id: String) {
     documentModels[id] = .ready(documentInfo)
+    let media = FileMediaItem.document(documentInfo)
+    if media.canSwitchOriginal {
+      let option = SendAsOriginalOption()
+      offerSendAsOriginal(on: option, id: id, media: media)
+      documentOriginalOptions[id] = option
+    }
     if !orderedDocumentIds.contains(id) {
       orderedDocumentIds.append(id)
     }
@@ -467,6 +468,8 @@ final class ComposeAttachments: NSView {
 
   public func removeDocumentView(id: String) {
     guard documentModels.removeValue(forKey: id) != nil else { return }
+    documentOriginalOptions.removeValue(forKey: id)
+    originalSummaryTasks.removeValue(forKey: id)?.cancel()
     orderedDocumentIds.removeAll { $0 == id }
     applyDocumentSnapshot()
     updateHeight(animated: true)
@@ -474,6 +477,7 @@ final class ComposeAttachments: NSView {
 
   public func clearDocumentViews(animated: Bool = false) {
     documentModels.removeAll()
+    documentOriginalOptions.removeAll()
     orderedDocumentIds.removeAll()
     applyDocumentSnapshot()
   }
@@ -482,7 +486,8 @@ final class ComposeAttachments: NSView {
 
   public func clearViews(animated: Bool = false) {
     attachments.removeAll()
-    sendsMediaAsOriginal = false
+    originalSummaryTasks.values.forEach { $0.cancel() }
+    originalSummaryTasks.removeAll()
 
     videoAttachments.removeAll()
     orderedMediaIds.removeAll()
@@ -542,7 +547,7 @@ final class ComposeAttachments: NSView {
         for: indexPath
       )
       guard let documentItem = item as? DocumentAttachmentCollectionItem else { return item }
-      documentItem.configure(with: model) { [weak self] in
+      documentItem.configure(with: model, originalOption: documentOriginalOptions[id]) { [weak self] in
         self?.compose?.removeFile(id)
       }
       return documentItem
@@ -661,6 +666,62 @@ extension ComposeAttachments: NSCollectionViewDelegateFlowLayout {
 
 // MARK: - Helpers
 
+// MARK: - Send as Original
+
+/// The Send as Original item in an attachment's menu. Unchecked on a photo or video, which goes
+/// compressed without location or camera details; checked on an image or video file, which goes
+/// untouched. Choosing it asks the owner to switch the item to its other form.
+@MainActor
+final class SendAsOriginalOption: NSObject, NSMenuItemValidation {
+  /// Only ready photos and videos offer it; a tile still being prepared doesn't.
+  var isOffered = false {
+    didSet {
+      menuItem.isHidden = !isOffered
+      separator.isHidden = !isOffered
+    }
+  }
+
+  var isOn = false {
+    didSet { menuItem.state = isOn ? .on : .off }
+  }
+
+  var onChange: (() -> Void)?
+
+  /// The untouched file is gone (the system cleared temporary files), so there's nothing to switch to.
+  private var isMissingOriginal = false
+
+  let menuItem = NSMenuItem(title: "Send as Original", action: #selector(toggle), keyEquivalent: "")
+  let separator = NSMenuItem.separator()
+
+  override init() {
+    super.init()
+    menuItem.target = self
+    menuItem.image = NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
+    menuItem.isHidden = true
+    separator.isHidden = true
+  }
+
+  /// Puts the item first in `menu`.
+  func install(in menu: NSMenu) {
+    menu.insertItem(separator, at: 0)
+    menu.insertItem(menuItem, at: 0)
+  }
+
+  /// The original's size and whether it carries a location, or nil when it is gone.
+  func setSummary(_ summary: OriginalMediaSummary?) {
+    isMissingOriginal = summary == nil
+    menuItem.subtitle = summary?.detailText ?? "The original is no longer available"
+  }
+
+  @objc private func toggle() {
+    onChange?()
+  }
+
+  func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    menuItem !== self.menuItem || !isMissingOriginal
+  }
+}
+
 private struct MediaMeta {
   enum Kind {
     case image
@@ -747,7 +808,11 @@ private final class DocumentAttachmentCollectionItem: NSCollectionViewItem {
     (view as? AttachmentHostView)?.host(nil)
   }
 
-  func configure(with model: DocumentAttachmentModel, onRemove: @escaping () -> Void) {
+  func configure(
+    with model: DocumentAttachmentModel,
+    originalOption: SendAsOriginalOption?,
+    onRemove: @escaping () -> Void
+  ) {
     let child: NSView = switch model {
     case let .pending(presentation):
       PendingDocumentAttachmentView(presentation: presentation, onRemove: onRemove)
@@ -755,6 +820,25 @@ private final class DocumentAttachmentCollectionItem: NSCollectionViewItem {
       DocumentView(documentInfo: documentInfo, removeAction: onRemove)
     }
     (view as? AttachmentHostView)?.host(child)
+    view.menu = originalOption.map { option in
+      // An image or video file: Send as Original, checked, switches it back to a photo or video.
+      let menu = NSMenu()
+      let removeItem = NSMenuItem(title: "Remove", action: #selector(RemoveTarget.remove), keyEquivalent: "")
+      let target = RemoveTarget(onRemove)
+      removeItem.target = target
+      removeItem.representedObject = target
+      removeItem.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+      menu.addItem(removeItem)
+      option.install(in: menu)
+      return menu
+    }
+  }
+
+  /// Keeps the Remove action alive for as long as its menu item.
+  private final class RemoveTarget: NSObject {
+    let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func remove() { action() }
   }
 }
 
