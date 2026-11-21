@@ -654,7 +654,7 @@ func inlineProtocolRpcMethodIsReadOnly(_ method: InlineProtocol.Method) -> Bool 
        .getGridHome, .getExternalProfilePhoto, .getChatTranscript,
        .searchExternalResources, .listConnectors, .searchUsers, .getUsers,
        .resolveURLPreview, .getBotAgent, .listBotAgents, .getConnectorConfig, .getSpace,
-       .getUploadState, .getFilePart, .getCommonChats:
+       .getUploadState, .getFilePart, .getCommonChats, .getBilling:
     true
   default:
     false
