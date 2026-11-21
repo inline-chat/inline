@@ -13,6 +13,8 @@ class ImageAttachmentView: NSView, QLPreviewItem {
   private var width: CGFloat = 80
   private let closeButtonSize: CGFloat = 20
   private var hoverTrackingArea: NSTrackingArea?
+  /// Send as Original, offered once the photo is ready.
+  let originalOption = SendAsOriginalOption()
 
   init(
     image: NSImage,
@@ -173,6 +175,7 @@ class ImageAttachmentView: NSView, QLPreviewItem {
     copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: nil)
     menu.addItem(copyItem)
 
+    originalOption.install(in: menu)
     self.menu = menu
   }
 
