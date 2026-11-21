@@ -120,9 +120,18 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
 
   @objc private func keyboardWillChangeFrame(_ notification: Notification) {
     guard let end = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+    let current = view?.window?.screen.coordinateSpace.bounds
+    let posted = current.map { Self.screen(for: end, current: $0) }
+    // An empty frame for the other orientation (iPhone posts a portrait one after turning to landscape) says
+    // nothing about either.
+    if let posted, posted != current, end.height < 1 { return }
     keyboardFrame = end
-    keyboardScreen = view?.window?.screen.coordinateSpace.bounds
+    keyboardScreen = posted
     guard !isSuspended, !isInteractive else { return }
+    // A frame for the other orientation: on iPhone the keyboard posts its new one just before the screen turns.
+    // Measured against the screen as it is, it read as floating and the composer dropped to the bottom; it is
+    // measured when the view takes the new size, inside the turn, so the composer moves straight to it.
+    if let posted, posted != current { return }
     let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0
     if turn != nil {
       // Mid-turn the keyboard posts the frames of its rotating snapshot, unanimated: empty, then shrunk in the
@@ -137,6 +146,15 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
       return
     }
     deliver(end, duration: duration)
+  }
+
+  /// The screen a keyboard frame was posted for. Around a rotation the iPhone keyboard posts frames for the other
+  /// orientation (its new frame just before the turn, an empty one for the old orientation after it): a frame
+  /// that runs past the screen as it is but fits it turned belongs to the turned screen.
+  private static func screen(for frame: CGRect, current: CGRect) -> CGRect {
+    func fits(_ screen: CGRect) -> Bool { frame.maxX <= screen.maxX + 1 && frame.maxY <= screen.maxY + 1 }
+    let turned = CGRect(x: current.minX, y: current.minY, width: current.height, height: current.width)
+    return !fits(current) && fits(turned) ? turned : current
   }
 
   /// Call from the tracked view's layout. When its size changed (a rotation, a window resize), what the
