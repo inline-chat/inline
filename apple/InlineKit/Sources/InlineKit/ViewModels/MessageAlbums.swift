@@ -1,6 +1,7 @@
 import Foundation
 
-/// Photos and videos sent together, drawn as one grid in one bubble.
+/// Photos, videos and files sent together, drawn as one bubble: the photos and videos as one
+/// grid, then the files as a list of rows under it.
 ///
 /// Each item stays its own message (reply to, forward, save or delete one photo by its message
 /// id); an album is how lists show a run of them. View models keep messages flat, and row
@@ -23,6 +24,18 @@ public struct MessageAlbum: Codable, Hashable, Sendable {
 
   /// The newest item: the album's time.
   public var newest: FullMessage { items[items.count - 1] }
+
+  /// The photos and videos, in order: the grid.
+  public var mediaItems: [FullMessage] { items.filter(MessageAlbums.isMedia) }
+
+  /// The files, in order: the rows under the grid.
+  public var fileItems: [FullMessage] { items.filter { !MessageAlbums.isMedia($0) } }
+
+  /// Whether the album has a grid (any photo or video).
+  public var hasMedia: Bool { items.contains(where: MessageAlbums.isMedia) }
+
+  /// Whether the album has file rows (any file).
+  public var hasFiles: Bool { items.contains { !MessageAlbums.isMedia($0) } }
 
   /// The item whose text is the album's caption: the first with text.
   public var captionItem: FullMessage? {
@@ -87,11 +100,19 @@ public enum MessageAlbums {
   /// The most items one album draws; a longer run (only from a misbehaving sender) splits.
   public static let maxSize = 10
 
-  /// Whether a message can be drawn as part of an album: a photo or video, not a sticker.
+  /// Whether a message can be drawn as part of an album: a photo, video or file; not a sticker
+  /// or a voice note.
   public static func isEligible(_ message: FullMessage) -> Bool {
     let model = message.message
-    guard model.groupedId != nil, model.isSticker != true, !model.isServiceMessage else { return false }
-    return message.photoInfo != nil || message.videoInfo != nil
+    guard model.groupedId != nil, model.isSticker != true, !model.isServiceMessage, !model.hasVoice else {
+      return false
+    }
+    return isMedia(message) || message.documentInfo != nil
+  }
+
+  /// A photo or video: an item of the album's grid. Other items are files.
+  public static func isMedia(_ message: FullMessage) -> Bool {
+    message.photoInfo != nil || message.videoInfo != nil
   }
 
   /// `later` directly follows `earlier` in the same album: same sender, same album id.

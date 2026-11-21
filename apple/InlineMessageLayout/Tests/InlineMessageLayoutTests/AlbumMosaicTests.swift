@@ -198,5 +198,16 @@ struct AlbumMosaicTests {
     #expect(two.rows == [2])
     #expect(two.tiles[0].frame.height == 120)
   }
-}
 
+  @Test("a lone tile widens to a minimum, keeping its height; several tiles stay as laid out")
+  func widened() {
+    let portrait = AlbumMosaic.layout(style: .telegram, aspectRatios: [0.5], metrics: metrics, grid: grid)
+    #expect(portrait.size.width < 200)
+    let wide = portrait.widened(toAtLeast: 240, grid: grid)
+    #expect(wide.size == CGSize(width: 240, height: portrait.size.height))
+    #expect(wide.tiles[0].frame == CGRect(x: 0, y: 0, width: 240, height: portrait.size.height))
+    #expect(portrait.widened(toAtLeast: 100, grid: grid) == portrait)
+    let pair = layout([0.5, 0.5])
+    #expect(pair.widened(toAtLeast: 400, grid: grid) == pair)
+  }
+}

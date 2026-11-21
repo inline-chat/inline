@@ -190,3 +190,17 @@ public struct AlbumMosaic: Equatable, Sendable {
     return AlbumMosaic(size: CGSize(width: width, height: height), tiles: tiles, rows: rows)
   }
 }
+
+public extension AlbumMosaic {
+  /// A lone tile at least `width` wide, cropped to it: the photo or video over an album's files,
+  /// so a portrait one doesn't narrow the bubble and cut the file names short. Mosaics of more
+  /// tiles, or that scroll, are returned as they are.
+  func widened(toAtLeast width: CGFloat, grid: PixelGrid) -> AlbumMosaic {
+    guard tiles.count == 1, scrolling == .none, size.width < width else { return self }
+    var widened = self
+    let width = grid.floor(width)
+    widened.size.width = width
+    widened.tiles[0].frame.size.width = width
+    return widened
+  }
+}
