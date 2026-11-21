@@ -3,6 +3,7 @@ import Foundation
 import InlineKit
 import Logger
 import InlineUI
+import Nuke
 import UIKit
 
 /// One page in the media gallery.
@@ -123,11 +124,18 @@ struct MediaGalleryItem: Hashable {
     return MediaGalleryURLs.isExpired(mediaURL) || MediaGalleryURLs.isExpired(thumbnailURL)
   }
 
+  /// The stripped thumbnail with the bubble's blur and saturation, at the photo's aspect ratio.
+  /// Cached, so repeated reads return the same image.
   var strippedImage: UIImage? {
-    guard let strippedThumbnail,
-          let data = InlineTinyThumbnailDecoder.decodeJPEGData(from: strippedThumbnail)
-    else { return nil }
-    return UIImage(data: data)
+    InlineTinyThumbnailImage.blurred(strippedBytes: strippedThumbnail)
+  }
+
+  /// The photo the chat bubble already decoded, from the memory cache. Bubbles load the local
+  /// file with this request, so a photo that's been on screen opens without waiting.
+  var bubbleCachedImage: UIImage? {
+    guard kind == .photo, let mediaURL, mediaURL.isFileURL else { return nil }
+    let request = ImageRequest(url: mediaURL, processors: [.resize(width: 300)])
+    return ImagePipeline.shared.cache.cachedImage(for: request, caches: .memory)?.image
   }
 }
 

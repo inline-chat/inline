@@ -13,7 +13,7 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   let scrollView = UIScrollView()
   let imageView = UIImageView()
   private let playerView = MediaGalleryPlayerView()
-  private let spinner = UIActivityIndicatorView(style: .large)
+  private let downloadRing = MediaGalleryDownloadRing()
   private let retryButton = UIButton(type: .system)
   private let playButton = UIButton(type: .custom)
 
@@ -21,7 +21,7 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   private var imageTask: ImageTask?
   private var fullResolutionTask: ImageTask?
   /// The page shows its final image for zoom 1: a photo decoded at page size, or a video's poster.
-  private var hasFullImage = false
+  private(set) var hasFullImage = false
   /// The photo was swapped for its full-resolution decode, for zooming.
   private var isFullResolution = false
   /// The link the displayed photo loaded from, which the full-resolution decode reuses.
@@ -30,8 +30,13 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   private var triedFallback = false
   private var readyObservation: NSKeyValueObservation?
   private var pageGap: CGFloat = 0
-  /// A load failed and fresh links were requested; keep the spinner, not Retry.
+  /// A load failed and fresh links were requested; keep the ring, not Retry.
   private(set) var isAwaitingFreshLinks = false
+  /// The photo has been loading long enough to show the download ring.
+  private var isLoadingSlowly = false
+  /// Share, copy or save waits for this page's original, so the ring stays up for it.
+  private var isWaitingForOriginal = false
+  private var waitWork: DispatchWorkItem?
 
   var onSingleTap: (() -> Void)?
   var onPlayTap: (() -> Void)?
@@ -60,6 +65,10 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   /// Called when the photo can't load. Return true if fresh links were requested.
   var onLoadFailed: ((MediaGalleryItem) -> Bool)?
 
+  private let holdGesture = UILongPressGestureRecognizer()
+  private lazy var retryCenterX = retryButton.centerXAnchor.constraint(equalTo: contentView.leadingAnchor)
+  private lazy var retryCenterY = retryButton.centerYAnchor.constraint(equalTo: contentView.topAnchor)
+
   override init(frame: CGRect) {
     super.init(frame: frame)
     contentView.clipsToBounds = false
@@ -80,19 +89,26 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     scrollView.addSubview(imageView)
     imageView.addSubview(playerView)
 
-    spinner.color = .secondaryLabel
-    spinner.hidesWhenStopped = true
-    contentView.addSubview(spinner)
+    contentView.addSubview(downloadRing)
 
     var retry = MediaGalleryChromeStyle.glassConfiguration()
     retry.title = NSLocalizedString("Retry", comment: "Gallery retry loading a photo")
     retry.image = UIImage(systemName: "arrow.clockwise")
     retry.imagePadding = 8
     retry.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+    retry.titleLineBreakMode = .byTruncatingTail
     retryButton.configuration = retry
     retryButton.isHidden = true
     retryButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
     contentView.addSubview(retryButton)
+    // Sized by its title through Auto Layout: a button applies a new title in its own layout pass,
+    // so measuring it by hand read the previous, shorter title and wrapped the new one.
+    retryButton.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      retryCenterX,
+      retryCenterY,
+      retryButton.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -64),
+    ])
 
     let playImage = UIImage(
       systemName: "play.fill",
@@ -117,9 +133,12 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     feedbackView.alpha = 0
     contentView.addSubview(feedbackView)
 
-    let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
-    hold.minimumPressDuration = 0.3
-    scrollView.addGestureRecognizer(hold)
+    holdGesture.addTarget(self, action: #selector(handleHold(_:)))
+    holdGesture.minimumPressDuration = 0.3
+    // Only a playing video speeds up from a hold. On a photo the hold would claim the touch
+    // and a swipe after a short pause wouldn't page.
+    holdGesture.delegate = self
+    scrollView.addGestureRecognizer(holdGesture)
 
     let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
     doubleTap.numberOfTapsRequired = 2
@@ -146,14 +165,21 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     hasFullImage = false
     triedFallback = false
     isAwaitingFreshLinks = false
+    cancelPendingSpinner()
+    waitWork?.cancel()
+    waitWork = nil
+    isLoadingSlowly = false
+    isWaitingForOriginal = false
+    downloadRing.reset()
+    imageView.layer.removeAnimation(forKey: "placeholderFade")
     imageView.image = nil
     detachPlayer()
     scrollView.transform = .identity
     scrollView.alpha = 1
     retryButton.isHidden = true
-    spinner.stopAnimating()
     videoState = VideoState()
     bufferingView.isHidden = true
+    bufferingView.alpha = 1
     playButton.alpha = 1
     feedbackView.alpha = 0
     setRetryTitle(forVideo: false)
@@ -166,6 +192,9 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   }
 
   override func layoutSubviews() {
+    let pageCenter = CGPoint(x: pageSize.width / 2, y: pageSize.height / 2)
+    if retryCenterX.constant != pageCenter.x { retryCenterX.constant = pageCenter.x }
+    if retryCenterY.constant != pageCenter.y { retryCenterY.constant = pageCenter.y }
     super.layoutSubviews()
     let page = CGRect(origin: .zero, size: pageSize)
     if scrollView.bounds.size != page.size || scrollView.center != CGPoint(x: page.midX, y: page.midY) {
@@ -175,21 +204,25 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
       scrollView.transform = transform
       layoutContent(resetZoom: true)
     }
-    spinner.center = CGPoint(x: page.midX, y: page.midY)
-    retryButton.sizeToFit()
-    retryButton.center = CGPoint(x: page.midX, y: page.midY)
+    downloadRing.bounds = CGRect(x: 0, y: 0, width: MediaGalleryDownloadRing.diameter, height: MediaGalleryDownloadRing.diameter)
+    downloadRing.center = CGPoint(x: page.midX, y: page.midY)
     playButton.bounds = CGRect(x: 0, y: 0, width: 64, height: 64)
     playButton.center = CGPoint(x: page.midX, y: page.midY)
     bufferingView.frame = playButton.frame
     bufferingSpinner.center = CGPoint(x: 32, y: 32)
   }
 
-  /// The image's aspect: the loaded image, else the item's metadata.
+  /// The media's aspect: the loaded image, else the item's metadata, else the placeholder. A
+  /// placeholder (a cropped bubble snapshot, a tiny stripped thumbnail) only approximates it, and
+  /// laying out by it would make the page jump when the real image lands.
   private var contentAspectSize: CGSize? {
-    if let image = imageView.image, image.size.width > 0, image.size.height > 0 {
-      return image.size
+    let image = imageView.image.flatMap { $0.size.width > 0 && $0.size.height > 0 ? $0.size : nil }
+    // A video keeps its own size: the player draws into this frame, and a poster can be
+    // encoded at a slightly different shape.
+    if hasFullImage, let image, item?.kind == .photo || item?.pixelSize == nil {
+      return image
     }
-    return item?.pixelSize
+    return item?.pixelSize ?? image
   }
 
   /// Where the media sits at zoom 1, in this cell's page coordinates.
@@ -258,6 +291,8 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     imageTask = nil
     fullResolutionTask?.cancel()
     fullResolutionTask = nil
+    cancelPendingSpinner()
+    setLoadingRing(false)
     isFullResolution = false
     loadedURL = nil
     self.item = item
@@ -267,8 +302,13 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     retryButton.isHidden = true
     playButton.isHidden = item.kind != .video
 
+    // The sharpest image already in memory covers the page until its own decode lands: the
+    // opening thumbnail, the bubble's decode, a strip or poster thumbnail, then the blurred
+    // stripped thumbnail the bubble shows while it loads.
     let placeholderImage = placeholder
+      ?? item.bubbleCachedImage
       ?? Self.cachedImage(item.thumbnailURL)
+      ?? MediaGalleryThumbnailStrip.cachedThumbnail(for: item)
       ?? item.strippedImage
     imageView.image = placeholderImage
     setNeedsLayout()
@@ -279,10 +319,12 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
       case .photo:
         load(url: item.mediaURL)
       case .video:
-        if placeholderImage == nil || placeholderImage === item.strippedImage {
+        // The poster loads even under a bubble snapshot: the snapshot is the bubble's crop at
+        // the bubble's resolution, not the video's frame.
+        if item.thumbnailURL != nil {
           load(url: item.thumbnailURL)
         } else {
-          hasFullImage = true
+          hasFullImage = placeholderImage != nil
         }
     }
   }
@@ -320,28 +362,33 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
 
   private func load(url: URL?) {
     guard let url, let item else {
-      spinner.stopAnimating()
+      setLoadingRing(false)
       return
     }
 
     let request = request(for: url, item: item)
     if let cached = Self.cachedImage(request) {
       loadedURL = url
-      show(cached)
+      show(cached, animated: false)
       return
     }
 
-    if imageView.image == nil {
-      spinner.startAnimating()
-    }
+    // A local decode lands in a few frames; only a slow load earns the ring, so fast pages
+    // don't flash one.
+    scheduleSpinner()
     let itemID = item.id
-    imageTask = ImagePipeline.shared.loadImage(with: request) { [weak self] result in
+    imageTask = ImagePipeline.shared.loadImage(with: request, progress: { [weak self] _, completed, total in
+      MainActor.assumeIsolated {
+        guard let self, self.item?.id == itemID, total > 0 else { return }
+        self.downloadRing.setProgress(Double(completed) / Double(total))
+      }
+    }) { [weak self] result in
       guard let self, self.item?.id == itemID else { return }
       self.imageTask = nil
       switch result {
         case let .success(response):
           self.loadedURL = url
-          self.show(response.image)
+          self.show(response.image, animated: true)
         case .failure:
           if !self.triedFallback, let fallback = item.fallbackURL, fallback != url {
             self.triedFallback = true
@@ -356,17 +403,18 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
   /// Old messages can carry expired signed links. Ask for fresh ones once; offer Retry
   /// only when that's already been tried. A video falls back to its player.
   private func loadDidFail(_ item: MediaGalleryItem) {
+    cancelPendingSpinner()
     guard item.kind == .photo, !hasFullImage else {
-      spinner.stopAnimating()
+      setLoadingRing(false)
       return
     }
     if onLoadFailed?(item) == true {
       isAwaitingFreshLinks = true
-      spinner.startAnimating()
+      setLoadingRing(true)
       retryButton.isHidden = true
       return
     }
-    spinner.stopAnimating()
+    setLoadingRing(false)
     retryButton.isHidden = false
   }
 
@@ -399,14 +447,97 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     }
   }
 
-  private func show(_ image: UIImage) {
+  /// Shows the page's own image. One that arrives while a placeholder is on screen cross-fades
+  /// over it rather than popping in.
+  private func show(_ image: UIImage, animated: Bool) {
     isAwaitingFreshLinks = false
-    spinner.stopAnimating()
+    cancelPendingSpinner()
+    setLoadingRing(false, filled: animated)
     retryButton.isHidden = true
     hasFullImage = true
     let wasZoomed = isZoomed
+    let fades = animated && imageView.image != nil && window != nil && !isHidden
     imageView.image = image
     layoutContent(resetZoom: !wasZoomed)
+    if fades {
+      let fade = CATransition()
+      fade.type = .fade
+      fade.duration = 0.18
+      fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      imageView.layer.add(fade, forKey: "placeholderFade")
+    }
+  }
+
+  private var spinnerWork: DispatchWorkItem?
+
+  private func scheduleSpinner() {
+    cancelPendingSpinner()
+    // A video's poster loads under its play button, which already says the page is ready.
+    guard item?.kind == .photo else { return }
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, !self.hasFullImage, self.retryButton.isHidden else { return }
+      self.setLoadingRing(true)
+    }
+    spinnerWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + (imageView.image == nil ? 0.1 : 0.35), execute: work)
+  }
+
+  private func cancelPendingSpinner() {
+    spinnerWork?.cancel()
+    spinnerWork = nil
+  }
+
+  private func setLoadingRing(_ loading: Bool, filled: Bool = false) {
+    isLoadingSlowly = loading
+    updateRing(filled: filled)
+  }
+
+  /// Share, copy or save is waiting for this page's original to download. The ring shows once the
+  /// wait is long enough to notice, and fills as the download arrives.
+  func setWaitingForOriginal(_ waiting: Bool, finished: Bool = true) {
+    waitWork?.cancel()
+    waitWork = nil
+    guard waiting else {
+      guard isWaitingForOriginal else { return }
+      isWaitingForOriginal = false
+      updateRing(filled: finished)
+      return
+    }
+    guard !isWaitingForOriginal else { return }
+    let work = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.isWaitingForOriginal = true
+      self.updateRing()
+    }
+    waitWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+  }
+
+  func setWaitingProgress(_ fraction: Double) {
+    guard isWaitingForOriginal else { return }
+    downloadRing.setProgress(fraction)
+  }
+
+  private var showsPlayButton: Bool {
+    item?.kind == .video && !videoState.isPlaying && !videoState.isFailed && !videoState.isBuffering
+      && !downloadRing.isShowing
+  }
+
+  /// The ring sits where a video's play button and buffering spinner do, so it takes their place.
+  private func updateRing(filled: Bool = false) {
+    let wasShowing = downloadRing.isShowing
+    if isLoadingSlowly || isWaitingForOriginal {
+      downloadRing.show()
+    } else {
+      downloadRing.hide(filled: filled)
+    }
+    guard item?.kind == .video, wasShowing != downloadRing.isShowing else { return }
+    let showsPlay = showsPlayButton
+    if showsPlay { playButton.isHidden = false }
+    UIView.animate(withDuration: 0.15) {
+      self.playButton.alpha = showsPlay ? 1 : 0
+      self.bufferingView.alpha = self.downloadRing.isShowing ? 0 : 1
+    }
   }
 
   private func setRetryTitle(forVideo: Bool) {
@@ -461,8 +592,8 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     readyObservation = nil
     playerView.playerLayer.player = nil
     setVideoState(VideoState())
-    playButton.alpha = 1
-    playButton.isHidden = item?.kind != .video
+    playButton.alpha = showsPlayButton ? 1 : 0
+    playButton.isHidden = !showsPlayButton
   }
 
   /// Play when paused, replay at the end, a spinner while buffering, Retry after a failure.
@@ -470,7 +601,7 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     guard item?.kind == .video, state != videoState else { return }
     let ended = state.isAtEnd != videoState.isAtEnd
     videoState = state
-    let showsPlay = !state.isPlaying && !state.isFailed && !state.isBuffering
+    let showsPlay = showsPlayButton
     if ended || playButton.configuration?.image == nil {
       playButton.configuration?.image = UIImage(
         systemName: state.isAtEnd ? "arrow.counterclockwise" : "play.fill",
@@ -482,7 +613,7 @@ final class MediaGalleryPageCell: UICollectionViewCell, UIScrollViewDelegate {
     UIView.animate(withDuration: 0.15) {
       self.playButton.alpha = showsPlay ? 1 : 0
     } completion: { _ in
-      self.playButton.isHidden = !(!self.videoState.isPlaying && !self.videoState.isFailed && !self.videoState.isBuffering)
+      self.playButton.isHidden = !self.showsPlayButton
     }
     bufferingView.isHidden = !state.isBuffering
     setRetryTitle(forVideo: state.isFailed)
@@ -638,5 +769,20 @@ enum MediaGalleryImageRequests {
   static func needsFullResolution(item: MediaGalleryItem, displayedPixelSize: CGFloat) -> Bool {
     guard let size = item.pixelSize else { return true }
     return max(size.width, size.height) > displayedPixelSize * 1.2
+  }
+}
+
+extension MediaGalleryPageCell: UIGestureRecognizerDelegate {
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard gestureRecognizer === holdGesture else { return super.gestureRecognizerShouldBegin(gestureRecognizer) }
+    return item?.kind == .video && videoState.isPlaying
+  }
+
+  /// A hold never blocks paging or the dismiss drag.
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    gestureRecognizer === holdGesture
   }
 }
