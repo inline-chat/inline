@@ -16,6 +16,8 @@ struct MessageBlock {
     case video
     /// Photos and videos sent together, in one grid.
     case album
+    /// An album's files, one row each, under its grid.
+    case albumFiles
     case document
     case voice
     /// A link preview under the text.
@@ -90,7 +92,7 @@ extension MessageBlock {
       )))
     }
 
-    if let album {
+    if let album, album.hasMedia {
       // Edge-to-edge media may be as wide as the bubble's body. Planned at a width the body
       // allows, so the planner never scales the grid and the tiles keep their frames.
       let mosaic = MessageAlbumView.mosaic(
@@ -119,7 +121,17 @@ extension MessageBlock {
       )))
     }
 
-    if let document = message.documentInfo?.document {
+    if let album, album.hasFiles {
+      let files = album.fileItems
+      var block = MessageBlock(kind: .albumFiles, input: .init(
+        id: "files",
+        position: .aboveText,
+        width: .fixed(min(MessageAlbumFilesView.preferredWidth(for: files), maximumContentWidth)),
+        height: MessageAlbumFilesView.height(count: files.count)
+      ))
+      block.album = album
+      blocks.append(block)
+    } else if let document = message.documentInfo?.document {
       blocks.append(MessageBlock(kind: .document, input: .init(
         id: "document",
         position: .aboveText,
@@ -220,7 +232,8 @@ extension MessageBlock {
       case .reply: "Reply to \(message.repliedToMessage?.from?.shortDisplayName ?? "message")"
       case .photo: "Photo"
       case .video: "Video"
-      case .album: "Album, \(block.album?.items.count ?? 0) items"
+      case .album: "Album, \(block.album?.mediaItems.count ?? 0) items"
+      case .albumFiles: "\(block.album?.fileItems.count ?? 0) files"
       case .document: message.documentInfo?.document.fileName ?? "File"
       case .voice: "Voice message"
       case .preview: block.attachment?.urlPreview?.title ?? "Link preview"
@@ -316,6 +329,11 @@ final class MessageBlockHostView: UIView {
       video.masksOwnCorners = false
       video.bubbleBleed = bubbleBleed
       video.update(with: message)
+
+    case .albumFiles:
+      guard let album = block.album else { break }
+      let files = contentView as? MessageAlbumFilesView ?? install(MessageAlbumFilesView(), fills: true)
+      files.configure(items: album.fileItems, outgoing: outgoing)
 
     case .document:
       if let document = contentView as? DocumentView {

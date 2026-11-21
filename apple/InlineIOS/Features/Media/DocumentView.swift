@@ -10,7 +10,7 @@ import UIKit
 class DocumentView: UIView, UIGestureRecognizerDelegate {
   // MARK: - Properties
 
-  private var fullMessage: FullMessage?
+  private(set) var fullMessage: FullMessage?
   private var outgoing: Bool
   private var isBeingRemoved = false
   private static let log = Log.scoped("DocumentView", level: .info)

@@ -157,7 +157,7 @@ final class TimelineMessageMenu: NSObject {
             let content = row(placement.id)?.content, let rowMessage = TimelineMessagesView.actionMessage(of: content),
             let rowView = list.view(for: placement.id) as? TimelineRowView
       else { continue }
-      // On an album, the menu is for the photo or video under the finger.
+      // On an album, the menu is for the photo, video or file under the finger.
       let message = rowView.shownMessageView.flatMap { $0.albumItem(at: list.convert(point, to: $0)) } ?? rowMessage
       // The actions button keeps its own touches.
       if rowView.isActionsButton(at: list.convert(point, to: rowView)) { return nil }
@@ -323,7 +323,7 @@ final class TimelineMessageMenu: NSObject {
     return actions.actionsMenu(
       for: message,
       photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView, for: message) },
-      openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) },
+      openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView, for: message) },
       richCopy: { [weak self] in Self.richCopy(in: self?.list?.view(for: id) as? TimelineRowView, for: message) },
       includeReactionsAction: true
     )
@@ -442,7 +442,7 @@ final class TimelineMessageMenu: NSObject {
           return actions.actionsMenu(
             for: fullMessage,
             photo: { [weak rowView] in Self.photo(in: rowView, for: fullMessage) },
-            openDocument: { [weak rowView] in Self.openDocument(in: rowView) },
+            openDocument: { [weak rowView] in Self.openDocument(in: rowView, for: fullMessage) },
             richCopy: { [weak rowView] in Self.richCopy(in: rowView, for: fullMessage) },
             includesTextCopy: !hasTextSelection,
             offersSelectText: selectableText == nil
@@ -593,9 +593,10 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
     return messageView.wholeMessageClipboardDocument()
   }
 
-  private static func openDocument(in rowView: TimelineRowView?) {
+  /// Opens `message`'s file: the row's own, or one of an album's files.
+  private static func openDocument(in rowView: TimelineRowView?, for message: FullMessage) {
     if let messageView = rowView?.shownMessageView {
-      messageView.openContextMenuDocument()
+      messageView.openContextMenuDocument(messageId: message.message.messageId)
     } else {
       rowView?.shownLegacyView?.documentView.openFile()
     }
@@ -634,7 +635,7 @@ extension TimelineMessageMenu: UIContextMenuInteractionDelegate {
       menu = actions.actionsMenu(
         for: fullMessage,
         photo: { [weak self] in Self.photo(in: self?.list?.view(for: id) as? TimelineRowView, for: fullMessage) },
-        openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView) },
+        openDocument: { [weak self] in Self.openDocument(in: self?.list?.view(for: id) as? TimelineRowView, for: fullMessage) },
         richCopy: { [weak self] in Self.richCopy(in: self?.list?.view(for: id) as? TimelineRowView, for: fullMessage) }
       )
       // The reaction bar under the preview, as the collection view's system menu shows it.

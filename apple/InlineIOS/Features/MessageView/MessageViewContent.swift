@@ -124,9 +124,10 @@ struct MessageViewContent {
     var blocks = MessageBlock.blocks(for: message, album: album, context: context, maximumContentWidth: contentWidth)
     guard !text.isEmpty || !blocks.isEmpty else { return nil }
     let isEmoji = blocks.isEmpty && text.containsOnlyEmojis
-    // Captionless media carries its time in a dark pill over its corner, and fills the bubble.
-    let hasMedia = blocks.contains { $0.input.isEdgeToEdge }
-    let overlaysMedia = hasMedia && text.isEmpty && message.reactions.isEmpty
+    // Captionless media carries its time in a dark pill over its corner, and fills the bubble,
+    // when nothing (an album's files) sits under it.
+    let endsWithMedia = blocks.last { $0.input.position == .aboveText }?.input.isEdgeToEdge == true
+    let overlaysMedia = endsWithMedia && text.isEmpty && message.reactions.isEmpty
     // Media sits in a thin frame of the bubble's colour (`mediaInset`), so the bubble shows even
     // without a caption. Album styles whose tiles stand apart (stacks, strips, cards) float bare.
     let floatsMedia = blocks.contains { ($0.mosaic?.tileCornerRadius ?? 0) > 0 }
