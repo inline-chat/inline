@@ -32,7 +32,8 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
   var renderStyle: MessageRenderStyle
   var interactionMode: MessageInteractionMode = .normal
   var replyThreadTitle: String? = nil
-  /// Photos and videos sent with the row's message, drawn as one grid in its photo's place.
+  /// Photos, videos and files sent with the row's message: the photos and videos drawn as one
+  /// grid in its photo's place, the files as rows in its document's place.
   var album: MessageAlbum? = nil
 
   /// Used in cache key
@@ -42,10 +43,18 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
 }
 
 extension MessageViewInputProps {
-  /// The album's items and their shapes, so a grid that gains or loses an item is measured again.
+  /// The album's items and their shapes, so a grid or file list that gains or loses an item (or a
+  /// file that gains a thumbnail, which makes its row taller) is measured again.
   var albumSignature: String {
     guard let album else { return "" }
-    return "AL\(album.items.map { "\($0.id):\($0.photoInfo?.id ?? $0.videoInfo?.id ?? 0)" }.joined(separator: ","))"
+    return "AL\(album.items.map(Self.albumItemSignature).joined(separator: ","))"
+  }
+
+  private static func albumItemSignature(_ item: FullMessage) -> String {
+    if let document = item.documentInfo {
+      return "\(item.id):F\(document.id)\(document.thumbnail != nil ? "T" : "")"
+    }
+    return "\(item.id):\(item.photoInfo?.id ?? item.videoInfo?.id ?? 0)"
   }
 }
 

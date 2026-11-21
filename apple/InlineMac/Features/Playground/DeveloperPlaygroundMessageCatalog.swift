@@ -355,6 +355,8 @@ private enum DeveloperMessageCatalogSection: String, CaseIterable, Identifiable 
         .init(.photo, "Photo", "Local deterministic image without a caption"),
         .init(.photoCaption, "Photo with caption", "Native photo slot plus text"),
         .init(.album, "Album", "Four photos sent together, in one grid, with a caption"),
+        .init(.fileAlbum, "File album", "Three files sent together, one row each, in one bubble"),
+        .init(.mixedAlbum, "Photos and files", "Two photos and two files sent together: the grid, then the files, then the caption"),
         .init(.video, "Video", "Video dimensions, thumbnail, duration, and play treatment"),
         .init(.pdf, "PDF document", "Document name, MIME type, and file size"),
         .init(.archive, "Archive file", "Generic file presentation through the document slot"),
@@ -454,6 +456,8 @@ private enum DeveloperMessageCatalogKind: String, Identifiable {
   case photo
   case photoCaption
   case album
+  case fileAlbum
+  case mixedAlbum
   case video
   case pdf
   case archive
@@ -614,6 +618,41 @@ private enum DeveloperMessageCatalogFactory {
           photo: photoInfo(id: itemId + 1, width: shape.0, height: shape.1)
         ).message
         item.message.groupedId = 77
+        return item
+      }
+      let album = MessageAlbum(items: items)!
+      return DeveloperMessageFixture(
+        message: album.bubbleMessage, conversation: .space, groupPosition: .isolated, isRtl: false, album: album
+      )
+    case .fileAlbum, .mixedAlbum:
+      let files: [(String, String, Int)] = [
+        ("Launch checklist.pdf", "application/pdf", 824_000),
+        ("inline-assets.zip", "application/zip", 4_800_000),
+        ("Quarterly numbers.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 96_000),
+      ]
+      let isMixed = kind == .mixedAlbum
+      var items: [FullMessage] = []
+      if isMixed {
+        for (index, shape) in [(CGFloat(384), CGFloat(256)), (CGFloat(288), CGFloat(384))].enumerated() {
+          let itemId = id + Int64(index) * 10
+          items.append(fixture(
+            id: itemId,
+            text: index == 0 ? "Photos and the files for the handoff" : nil,
+            photo: photoInfo(id: itemId + 1, width: shape.0, height: shape.1)
+          ).message)
+        }
+      }
+      for (index, file) in files.prefix(isMixed ? 2 : 3).enumerated() {
+        let itemId = id + Int64(items.count + index) * 10
+        items.append(fixture(
+          id: itemId,
+          text: !isMixed && index == 0 ? "Everything for Monday" : nil,
+          document: documentInfo(id: itemId + 1, fileName: file.0, mimeType: file.1, size: file.2)
+        ).message)
+      }
+      items = items.map { item in
+        var item = item
+        item.message.groupedId = isMixed ? 79 : 78
         return item
       }
       let album = MessageAlbum(items: items)!
