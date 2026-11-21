@@ -56,6 +56,8 @@ export const users = pgTable(
     appearInGlobalSearch: boolean("appear_in_global_search").default(true).notNull(),
     // Server-controlled entitlement derived from billing_subscriptions; never client-set.
     isPro: boolean("is_pro").default(false).notNull(),
+    /** Public badge next to the name: pro | believer (from the personal plan, derived with `isPro`). Null: none. */
+    badge: varchar("badge", { length: 16 }),
 
     /** Next monotonic thread number available in this user's scope. */
     nextThreadNumber: integer("next_thread_number").default(1).notNull(),
@@ -96,13 +98,15 @@ export function userNotDeleted(): SQL {
 }
 
 type DbUserRow = typeof users.$inferSelect
-export type DbUser = Omit<DbUserRow, "shareTimeZone" | "appearInGlobalSearch" | "isPro"> & {
+export type DbUser = Omit<DbUserRow, "shareTimeZone" | "appearInGlobalSearch" | "isPro" | "badge"> & {
   /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
   shareTimeZone?: boolean
   /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
   appearInGlobalSearch?: boolean
   /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
   isPro?: boolean
+  /** Optional only for legacy in-memory fixtures; persisted rows always provide it. */
+  badge?: string | null
 }
 export type DbUserWithPhoto = DbUser & { photo?: (DbFile & { thumbs?: DbFile[] | null }) | null }
 export type DbUserWithProfile = DbUser & {

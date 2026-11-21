@@ -200,15 +200,19 @@ describe("billing admin", () => {
     expect(detail.wallet).toEqual({ usd: 0, btc: 250_000 })
     let [row] = await db.select().from(users).where(eq(users.id, user.id))
     expect(row!.isPro).toBe(true)
+    expect(row!.badge).toBe("pro")
 
     // Replacing keeps one live row.
     await adminSetPlan({ userId: user.id }, { plan: "believer", funding: "prepaid", paidThrough: null }, null)
     detail = await adminBillingDetail({ userId: user.id })
     expect(detail.live).toMatchObject({ plan: "believer", paidThrough: null })
     expect(detail.subscriptions.filter((sub) => sub.endedAt === null)).toHaveLength(1)
+    ;[row] = await db.select().from(users).where(eq(users.id, user.id))
+    expect(row!.badge).toBe("believer")
 
     await adminEndPlan({ userId: user.id })
     ;[row] = await db.select().from(users).where(eq(users.id, user.id))
     expect(row!.isPro).toBe(false)
+    expect(row!.badge).toBeNull()
   })
 })

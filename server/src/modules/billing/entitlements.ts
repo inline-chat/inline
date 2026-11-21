@@ -44,16 +44,23 @@ export const subjectOf = (row: { userId: number | null; spaceId: number | null }
 export const subjectKey = (subject: Subject) =>
   subject.userId !== undefined ? `user:${subject.userId}` : `space:${subject.spaceId}`
 
+/** The public badge a personal plan shows. */
+export const badgeForPlan = (plan: string): "pro" | "believer" => plan === "believer" ? "believer" : "pro"
+
 /**
- * Writes the derived `is_pro` flag for a subject. When it changes, records the durable
+ * Writes the derived `is_pro` flag (and a user's public `badge`) for a subject. When it changes, records the durable
  * update in the same transaction and returns the live push to run after commit.
  */
 export const refreshProFlag = async (tx: Transaction, subject: Subject, now = Date.now()): Promise<ProPush | null> => {
   const live = await liveSubscription(tx, subject)
   const isPro = live ? grantsAccess(live, now) : false
   if (subject.userId !== undefined) {
-    const changed = await tx.update(users).set({ isPro })
-      .where(and(eq(users.id, subject.userId), sql`${users.isPro} is distinct from ${isPro}`))
+    const badge = isPro && live ? badgeForPlan(live.plan) : null
+    const changed = await tx.update(users).set({ isPro, badge })
+      .where(and(
+        eq(users.id, subject.userId),
+        or(sql`${users.isPro} is distinct from ${isPro}`, sql`${users.badge} is distinct from ${badge}`),
+      ))
       .returning({ id: users.id })
     return changed.length > 0 ? enqueueProUpdate(tx, subject) : null
   }

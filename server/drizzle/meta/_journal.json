@@ -1240,6 +1240,13 @@
       "when": 1795291836376,
       "tag": "0176_global-message-search",
       "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "7",
+      "when": 1795297094467,
+      "tag": "0177_user-badge",
+      "breakpoints": true
     }
   ]
 }

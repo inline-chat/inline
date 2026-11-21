@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { findPlan, prepaidEnd } from "./catalog"
 import { loadCheckoutConfig } from "./checkoutClient"
-import { grantsAccess, STRIPE_RENEWAL_GRACE_MS } from "./entitlements"
+import { badgeForPlan, grantsAccess, STRIPE_RENEWAL_GRACE_MS } from "./entitlements"
 import { verifyCheckoutSignature } from "./signature"
 
 const secret = "s".repeat(40)
@@ -64,5 +64,13 @@ describe("catalog and config", () => {
       INLINE_CHECKOUT_API_TOKEN: "t", INLINE_CHECKOUT_WEBHOOK_SECRET: "s", INLINE_CHECKOUT_PLAN: "sandbox-test",
     })
     expect(config).toMatchObject({ baseUrl: "https://checkout.noor.to", live: false, plans: ["sandbox-test"] })
+  })
+})
+
+describe("badgeForPlan", () => {
+  test("believer keeps its own badge; every other personal plan shows Pro", () => {
+    expect(badgeForPlan("believer")).toBe("believer")
+    expect(badgeForPlan("pro")).toBe("pro")
+    expect(badgeForPlan("enterprise")).toBe("pro")
   })
 })

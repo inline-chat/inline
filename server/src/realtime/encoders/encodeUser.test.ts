@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { DbUser } from "@in/server/db/schema"
 import { encodeUser } from "@in/server/realtime/encoders/encodeUser"
+import { UserBadge_Kind } from "@inline-chat/protocol/core"
 
 const user: DbUser = {
   id: 100,
@@ -57,5 +58,21 @@ describe("encodeUser time-zone privacy", () => {
   test("keeps ordinary and hidden min projections redacted", () => {
     expect(encodeUser({ user: { ...user, shareTimeZone: true }, min: true, viewerUserId: 200 }).timeZone).toBeUndefined()
     expect(encodeUser({ user, min: true, includeTimeZone: true, viewerUserId: 200 }).timeZone).toBeUndefined()
+  })
+})
+
+describe("encodeUser badge", () => {
+  test("shows the badge to every viewer, min projections included, without the billing flag", () => {
+    const pro = { ...user, isPro: true, badge: "believer" }
+    const peer = encodeUser({ user: pro, viewerUserId: 200 })
+    expect(peer.badge).toEqual({ kind: UserBadge_Kind.BELIEVER })
+    expect(peer.isPro).toBeUndefined()
+    expect(encodeUser({ user: pro, min: true }).badge).toEqual({ kind: UserBadge_Kind.BELIEVER })
+    expect(encodeUser({ user: { ...pro, badge: "pro" }, viewerUserId: 200 }).badge).toEqual({ kind: UserBadge_Kind.PRO })
+  })
+
+  test("sends no badge without a personal plan", () => {
+    expect(encodeUser({ user: { ...user, badge: null }, viewerUserId: 200 }).badge).toBeUndefined()
+    expect(encodeUser({ user, viewerUserId: 200 }).badge).toBeUndefined()
   })
 })

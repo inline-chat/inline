@@ -1,5 +1,5 @@
 import type { DbBotAvatarAsset, DbFile, DbUser } from "@in/server/db/schema"
-import { type FocusStatus, User, UserStatus_Status } from "@inline-chat/protocol/core"
+import { type FocusStatus, User, UserBadge_Kind, UserStatus_Status } from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { encodeBotAvatar } from "@in/server/realtime/encoders/encodeBotAvatar"
@@ -55,6 +55,8 @@ export const encodeUser = ({
     phoneNumber: includeContact ? user.phoneNumber ?? undefined : undefined,
     // Personal Pro is the owner's own billing state; other viewers never see it.
     isPro: includeContact && typeof user.isPro === "boolean" ? user.isPro : undefined,
+    // The badge is public, unlike the billing state behind it, and rides min projections too.
+    badge: encodeBadge(user.badge),
     pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,
     min: min ?? false,
     status: min && !(includeBotStatus && user.bot === true) && !focus
@@ -85,5 +87,16 @@ export const encodeUser = ({
       !min && botAvatar && botAvatarFile
         ? encodeBotAvatar({ avatar: botAvatar, file: botAvatarFile })
         : undefined,
+  }
+}
+
+const encodeBadge = (badge: string | null | undefined): User["badge"] => {
+  switch (badge) {
+    case "pro":
+      return { kind: UserBadge_Kind.PRO }
+    case "believer":
+      return { kind: UserBadge_Kind.BELIEVER }
+    default:
+      return undefined
   }
 }
