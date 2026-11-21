@@ -3874,11 +3874,77 @@ public nonisolated struct User: @unchecked Sendable {
   /// Clears the value of `isPro`. Subsequent reads from it will return its default value.
   public mutating func clearIsPro() {_uniqueStorage()._isPro = nil}
 
+  /// Public badge next to the user's name, sent to every viewer, min
+  /// projections included. Absent: no badge.
+  public var badge: UserBadge {
+    get {_storage._badge ?? UserBadge()}
+    set {_uniqueStorage()._badge = newValue}
+  }
+  /// Returns true if `badge` has been explicitly set.
+  public var hasBadge: Bool {_storage._badge != nil}
+  /// Clears the value of `badge`. Subsequent reads from it will return its default value.
+  public mutating func clearBadge() {_uniqueStorage()._badge = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// A badge shown next to a user's name.
+public nonisolated struct UserBadge: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var kind: UserBadge.Kind = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+
+    /// Personal Pro plan checkmark.
+    case pro // = 1
+
+    /// Personal Believer plan checkmark.
+    case believer // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .pro
+      case 2: self = .believer
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .pro: return 1
+      case .believer: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [UserBadge.Kind] = [
+      .unspecified,
+      .pro,
+      .believer,
+    ]
+
+  }
+
+  public init() {}
 }
 
 /// A bot acts for its owner. Inline evaluates what a bot does as the bot plus
@@ -31558,7 +31624,7 @@ nonisolated extension BotPresenceState.Kind: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "User"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}first_name\0\u{3}last_name\0\u{1}username\0\u{3}phone_number\0\u{1}email\0\u{1}min\0\u{1}status\0\u{3}profile_photo\0\u{4}\u{2}pending_setup\0\u{3}time_zone\0\u{1}bot\0\u{3}bot_avatar\0\u{1}bio\0\u{3}bot_info\0\u{3}is_pro\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}first_name\0\u{3}last_name\0\u{1}username\0\u{3}phone_number\0\u{1}email\0\u{1}min\0\u{1}status\0\u{3}profile_photo\0\u{4}\u{2}pending_setup\0\u{3}time_zone\0\u{1}bot\0\u{3}bot_avatar\0\u{1}bio\0\u{3}bot_info\0\u{3}is_pro\0\u{1}badge\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -31577,6 +31643,7 @@ nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     var _bio: String? = nil
     var _botInfo: BotInfo? = nil
     var _isPro: Bool? = nil
+    var _badge: UserBadge? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -31603,6 +31670,7 @@ nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       _bio = source._bio
       _botInfo = source._botInfo
       _isPro = source._isPro
+      _badge = source._badge
     }
   }
 
@@ -31637,6 +31705,7 @@ nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
         case 15: try { try decoder.decodeSingularStringField(value: &_storage._bio) }()
         case 16: try { try decoder.decodeSingularMessageField(value: &_storage._botInfo) }()
         case 17: try { try decoder.decodeSingularBoolField(value: &_storage._isPro) }()
+        case 18: try { try decoder.decodeSingularMessageField(value: &_storage._badge) }()
         default: break
         }
       }
@@ -31697,6 +31766,9 @@ nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       try { if let v = _storage._isPro {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 17)
       } }()
+      try { if let v = _storage._badge {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -31722,6 +31794,7 @@ nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
         if _storage._bio != rhs_storage._bio {return false}
         if _storage._botInfo != rhs_storage._botInfo {return false}
         if _storage._isPro != rhs_storage._isPro {return false}
+        if _storage._badge != rhs_storage._badge {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -31729,6 +31802,40 @@ nonisolated extension User: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
+}
+
+nonisolated extension UserBadge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UserBadge"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UserBadge, rhs: UserBadge) -> Bool {
+    if lhs.kind != rhs.kind {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UserBadge.Kind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0KIND_UNSPECIFIED\0\u{1}KIND_PRO\0\u{1}KIND_BELIEVER\0")
 }
 
 nonisolated extension BotInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

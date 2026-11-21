@@ -107,6 +107,8 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var profileLocalPath: String?
   public var profileFileUniqueId: String?
   public var bot: Bool = false
+  /// Public badge next to the name, from the server. Nil: none.
+  public var badge: UserBadgeKind? = nil
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -126,6 +128,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let profileLocalPath = Column(CodingKeys.profileLocalPath)
     static let profileFileUniqueId = Column(CodingKeys.profileFileUniqueId)
     static let bot = Column(CodingKeys.bot)
+    static let badge = Column(CodingKeys.badge)
   }
 
   // Add hasMany for all files (including historical profile photos)
@@ -285,6 +288,11 @@ public extension User {
   func isCurrentUser() -> Bool {
     id == Auth.shared.getCurrentUserId()
   }
+
+  /// Nil for the signed-in user, for places that hide your own name badges.
+  var nilIfCurrentUser: User? {
+    isCurrentUser() ? nil : self
+  }
 }
 
 // TODO: add a get color item for the user
@@ -353,6 +361,8 @@ public extension ApiUser {
       user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
       user.timeZone = user.timeZone ?? existing.timeZone
       user.bot = bot ?? existing.bot
+      // The legacy API carries no badge.
+      user.badge = existing.badge
       user.profileCdnUrl = profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
       user.profileFileUniqueId = profileFileUniqueId ?? existing.profileFileUniqueId
@@ -393,6 +403,8 @@ public extension User {
     date = Date() // unused field
     // don't preserve pendingSetup
     bot = user.hasBot ? user.bot : false
+    // Sent in every projection, min included, so absence means no badge.
+    badge = user.hasBadge ? UserBadgeKind(user.badge.kind) : nil
 
     if !min {
       email = user.hasEmail ? user.email : nil
@@ -695,4 +707,29 @@ private func normalizedAvatarIdentityValue(_ value: String?) -> String? {
 enum UserAvatarCacheError: Error {
   case userNotFound(Int64)
   case stalePhoto
+}
+
+// MARK: - Badge
+
+/// A badge shown next to a user's name. Kinds this build doesn't know arrive as none.
+public enum UserBadgeKind: String, Codable, Hashable, Sendable, DatabaseValueConvertible {
+  /// Personal Pro plan checkmark.
+  case pro
+  /// Personal Believer plan checkmark.
+  case believer
+
+  init?(_ kind: InlineProtocol.UserBadge.Kind) {
+    switch kind {
+    case .pro: self = .pro
+    case .believer: self = .believer
+    default: return nil
+    }
+  }
+
+  public var title: String {
+    switch self {
+    case .pro: "Pro"
+    case .believer: "Believer"
+    }
+  }
 }

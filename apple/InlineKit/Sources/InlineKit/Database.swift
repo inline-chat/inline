@@ -1553,6 +1553,14 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user badge") { db in
+      // Public badge next to a user's name (Pro or Believer checkmark). Existing rows stay nil
+      // until their users are fetched again.
+      try db.alter(table: "user") { table in
+        table.add(column: "badge", .text)
+      }
+    }
+
     return migrator
   }
 }

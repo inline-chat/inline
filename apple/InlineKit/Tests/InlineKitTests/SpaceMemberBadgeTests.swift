@@ -180,4 +180,76 @@ struct SpaceMemberBadgeTests {
     #expect(model.space == nil)
   }
 
+
+  @Test("without a space in context, the earliest Pro space joined as a full member with a photo")
+  func affiliation() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    try queue.write { db in
+      try InlineKit.User(id: 7, email: nil, firstName: "Member").save(db)
+      let free = InlineKit.Space(id: 10, name: "Free", date: .now, photoFileUniqueId: "f", photoURL: "https://example.com/f.png", isPro: false)
+      let guestPro = InlineKit.Space(id: 11, name: "Guest", date: .now, photoFileUniqueId: "g", photoURL: "https://example.com/g.png", isPro: true)
+      let team = InlineKit.Space(id: 12, name: "Team", date: .now, photoFileUniqueId: "t", photoURL: "https://example.com/t.png", isPro: true)
+      let later = InlineKit.Space(id: 13, name: "Later", date: .now, photoFileUniqueId: "l", photoURL: "https://example.com/l.png", isPro: true)
+      for space in [free, guestPro, team, later] { try space.save(db) }
+      try Member(id: 1, date: Date(timeIntervalSince1970: 1), userId: 7, spaceId: 10, role: .member).save(db)
+      var guest = Member(id: 2, date: Date(timeIntervalSince1970: 2), userId: 7, spaceId: 11, role: .member)
+      guest.canAccessPublicChats = false
+      try guest.save(db)
+      try Member(id: 4, date: Date(timeIntervalSince1970: 4), userId: 7, spaceId: 13, role: .member).save(db)
+      try Member(id: 3, date: Date(timeIntervalSince1970: 3), userId: 7, spaceId: 12, role: .member).save(db)
+      #expect(try SpaceMemberBadgePolicy.affiliation(db, userID: 7)?.id == 12)
+      #expect(try SpaceMemberBadgePolicy.affiliation(db, userID: 8) == nil)
+    }
+  }
+
+  @Test("team plans list every Pro space covering a full member in join order, photo or not")
+  func teamPlans() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    try queue.write { db in
+      try InlineKit.User(id: 7, email: nil, firstName: "Member").save(db)
+      let bare = InlineKit.Space(id: 20, name: "Bare", date: .now, isPro: true)
+      let free = InlineKit.Space(id: 21, name: "Free", date: .now, isPro: false)
+      let guestPro = InlineKit.Space(id: 22, name: "Guest", date: .now, isPro: true)
+      let team = InlineKit.Space(id: 23, name: "Team", date: .now, photoFileUniqueId: "t", photoURL: "https://example.com/t.png", isPro: true)
+      for space in [bare, free, guestPro, team] { try space.save(db) }
+      try Member(id: 1, date: Date(timeIntervalSince1970: 1), userId: 7, spaceId: 20, role: .member).save(db)
+      try Member(id: 2, date: Date(timeIntervalSince1970: 2), userId: 7, spaceId: 21, role: .member).save(db)
+      var guest = Member(id: 3, date: Date(timeIntervalSince1970: 3), userId: 7, spaceId: 22, role: .member)
+      guest.canAccessPublicChats = false
+      try guest.save(db)
+      try Member(id: 4, date: Date(timeIntervalSince1970: 4), userId: 7, spaceId: 23, role: .member).save(db)
+      #expect(try SpaceMemberBadgePolicy.teamPlans(db, userID: 7).map(\.id) == [20, 23])
+      // The affiliation badge skips the team without a photo.
+      #expect(try SpaceMemberBadgePolicy.affiliation(db, userID: 7)?.id == 23)
+      #expect(try SpaceMemberBadgePolicy.teamPlans(db, userID: 8).isEmpty)
+    }
+  }
+
+  @Test("the user badge survives protocol saves, min ones included, and clears when removed")
+  func userBadgePersistence() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+    try queue.write { db in
+      let believer = InlineProtocol.User.with {
+        $0.id = 7
+        $0.firstName = "Mo"
+        $0.badge = .with { $0.kind = .believer }
+      }
+      #expect(try InlineKit.User.save(db, user: believer).badge == .believer)
+      #expect(try InlineKit.User.fetchOne(db, id: 7)?.badge == .believer)
+      let minPro = InlineProtocol.User.with {
+        $0.id = 7
+        $0.min = true
+        $0.badge = .with { $0.kind = .pro }
+      }
+      _ = try InlineKit.User.save(db, user: minPro)
+      #expect(try InlineKit.User.fetchOne(db, id: 7)?.badge == .pro)
+      _ = try InlineKit.User.save(db, user: .with { $0.id = 7; $0.min = true })
+      #expect(try InlineKit.User.fetchOne(db, id: 7)?.badge == nil)
+      let unknown = InlineProtocol.User.with { $0.id = 7; $0.badge = .with { $0.kind = .UNRECOGNIZED(9) } }
+      #expect(try InlineKit.User.save(db, user: unknown).badge == nil)
+    }
+  }
 }
