@@ -85,6 +85,16 @@ struct ChatToolbarLeadingView: View {
     )
   }
 
+  /// The DM peer whose name badges the title shows.
+  private var badgeUser: User? {
+    guard let peerUserID = peerId.asUserId(),
+          let user = fullChatViewModel.peerUser,
+          user.id == peerUserID
+    else { return nil }
+    // Like Telegram, your own badges stay off your self-DM's title.
+    return user.nilIfCurrentUser
+  }
+
   private var activeContextSpaceId: Int64? {
     if let contextSpaceId {
       return contextSpaceId
@@ -190,6 +200,7 @@ struct ChatToolbarLeadingView: View {
       ChatToolbarTitleStack(
         title: title,
         showsInlineTeamBadge: showsInlineTeamBadge,
+        badgeUser: badgeUser,
         badgeSpaceID: activeContextSpaceId,
         minimumHeight: toolbarAvatarSize,
         peerId: peerId,
@@ -332,6 +343,7 @@ enum ChatSubtitle: Equatable {
 private struct ChatToolbarTitleStack: View {
   let title: String
   let showsInlineTeamBadge: Bool
+  let badgeUser: User?
   let badgeSpaceID: Int64?
   let minimumHeight: CGFloat
   let peerId: Peer
@@ -348,6 +360,7 @@ private struct ChatToolbarTitleStack: View {
   init(
     title: String,
     showsInlineTeamBadge: Bool,
+    badgeUser: User?,
     badgeSpaceID: Int64?,
     minimumHeight: CGFloat,
     peerId: Peer,
@@ -360,6 +373,7 @@ private struct ChatToolbarTitleStack: View {
   ) {
     self.title = title
     self.showsInlineTeamBadge = showsInlineTeamBadge
+    self.badgeUser = badgeUser
     self.badgeSpaceID = badgeSpaceID
     self.minimumHeight = minimumHeight
     self.peerId = peerId
@@ -419,9 +433,15 @@ private struct ChatToolbarTitleStack: View {
           title.isEmpty ? Text("Open chat info") : Text("Open chat info for \(title)")
         )
 
-        if let userID = peerId.asUserId(), let spaceID = badgeSpaceID {
-          SpaceMemberBadge(userID: userID, spaceID: spaceID, size: 17)
-            .id("\(userID):\(spaceID)")
+        if let badgeUser {
+          // In a space, that space's badge; elsewhere, the Pro space the person represents
+          // (the Inline Team badge stands in for it).
+          UserNameBadges(
+            user: badgeUser,
+            spaceID: badgeSpaceID,
+            size: 17,
+            showsTeam: !(showsInlineTeamBadge && badgeSpaceID == nil)
+          )
         }
 
         if showsInlineTeamBadge {

@@ -27,9 +27,15 @@ struct ProfileRow: View {
         .padding(.trailing, 6)
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(fullName)
-          .font(.body)
-          .fontWeight(.medium)
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+          Text(fullName)
+            .font(.body)
+            .fontWeight(.medium)
+
+          if !isChatInfo {
+            AccountPlanTag(user: user, size: 15)
+          }
+        }
 
         if !isChatInfo {
           Text(user.email ?? "")

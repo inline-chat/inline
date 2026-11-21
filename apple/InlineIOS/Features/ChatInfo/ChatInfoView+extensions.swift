@@ -211,15 +211,19 @@ extension ChatInfoView {
         .frame(width: avatarSize, height: avatarSize)
         .padding(.bottom, 4)
 
-        Text(userInfo.user.fullName)
-          .font(.title2.weight(.semibold))
-          .multilineTextAlignment(.center)
-          .accessibilityAddTraits(.isHeader)
-          .contextMenu {
-            Button("Copy Name", systemImage: "doc.on.doc") {
-              PeerInfoIOSPasteboard.copy(userInfo.user.fullName, toast: "Copied name")
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Text(userInfo.user.fullName)
+            .font(.title2.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .accessibilityAddTraits(.isHeader)
+            .contextMenu {
+              Button("Copy Name", systemImage: "doc.on.doc") {
+                PeerInfoIOSPasteboard.copy(userInfo.user.fullName, toast: "Copied name")
+              }
             }
-          }
+
+          UserNameBadges(user: userInfo.user, spaceID: nil, size: 20)
+        }
         dmSubtitle(userInfo)
       } else if isEditingInfo {
         VStack(spacing: 12) {

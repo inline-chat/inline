@@ -27,8 +27,7 @@ struct MemberItemRow: View {
       }
       .buttonStyle(.plain)
 
-      SpaceMemberBadge(userID: member.userInfo.user.id, spaceID: member.member.spaceId)
-        .id("\(member.userInfo.user.id):\(member.member.spaceId)")
+      UserNameBadges(user: member.userInfo.user, spaceID: member.member.spaceId, size: 16)
     }
     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
   }
