@@ -128,6 +128,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var attachmentUploadBindingTasks: [String: Task<Void, Never>] = [:]
   private var attachmentUploadStartTasks: [String: Task<Void, Never>] = [:]
   private var quickLookPreviewURL: URL?
+  /// The photo attachment open in the Quick Look markup editor; its edited copy replaces it.
+  private var quickLookEditingAttachmentId: String?
   private var documentInteractionController: UIDocumentInteractionController?
 
   private var hasActiveAttachmentUploads: Bool {
@@ -2101,6 +2103,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     log.debug("Removed attachment with id: \(id)")
   }
 
+  /// Swaps an attachment for another in the same strip position, as after editing a photo.
+  func replaceAttachment(_ id: String, with mediaItem: FileMediaItem) {
+    guard attachmentItems[id] != nil else { return }
+    let newId = mediaItem.getItemUniqueId()
+    let order = attachmentOrder.map { $0 == id ? newId : $0 }
+    attachmentItems.removeValue(forKey: id)
+    attachmentItems[newId] = mediaItem
+    attachmentOrder = Self.updatedAttachmentOrder(order, items: attachmentItems)
+    handleAttachmentItemsChanged(animated: false)
+    log.debug("Replaced attachment \(id) with \(newId)")
+  }
+
   func removeImage(_ id: String) {
     removeAttachment(id)
   }
@@ -2344,7 +2358,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       attachmentStackView.addArrangedSubview(preview)
     }
 
-    for (id, mediaItem) in attachmentItems {
+    for id in attachmentOrder {
+      guard let mediaItem = attachmentItems[id] else { continue }
       let preview = ComposeAttachmentPreviewItemView(
         attachmentId: id,
         mediaItem: mediaItem,
@@ -2423,12 +2438,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     switch mediaItem {
     case .photo:
-      let viewer = MediaGalleryViewController(
-        imageURL: fileURL,
-        sourceView: sourceView,
-        sourceCornerRadius: 16
-      )
-      presenter.present(viewer, animated: false)
+      presentPhotoEditor(attachmentId: attachmentId, fileURL: fileURL, presenter: presenter)
     case .video:
       let viewer = MediaGalleryViewController(
         videoURL: fileURL,
@@ -2443,9 +2453,46 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
+  /// Opens a photo in Quick Look with markup enabled, so it can be drawn on and annotated before
+  /// sending. Saving makes an edited copy that replaces the attachment.
+  private func presentPhotoEditor(attachmentId: String, fileURL: URL, presenter: UIViewController) {
+    quickLookPreviewURL = fileURL
+    quickLookEditingAttachmentId = attachmentId
+    let previewController = QLPreviewController()
+    previewController.dataSource = self
+    previewController.delegate = self
+    presenter.present(previewController, animated: true)
+  }
+
+  private func applyEditedPhoto(from editedURL: URL, replacing attachmentId: String) {
+    Task { [weak self] in
+      let result = await Task.detached(priority: .userInitiated) { () -> Result<FileMediaItem, Error> in
+        defer { try? FileManager.default.removeItem(at: editedURL) }
+        guard let image = UIImage(contentsOfFile: editedURL.path) else {
+          return .failure(CocoaError(.fileReadCorruptFile))
+        }
+        return Result { .photo(try FileCache.savePhoto(image: image, optimize: true)) }
+      }.value
+
+      guard let self else { return }
+      switch result {
+      case let .success(mediaItem):
+        replaceAttachment(attachmentId, with: mediaItem)
+      case let .failure(error):
+        log.error("Failed to apply edited photo", error: error)
+        ToastManager.shared.showToast(
+          "Couldn't save the edited photo.",
+          type: .error,
+          systemImage: "exclamationmark.triangle.fill"
+        )
+      }
+    }
+  }
+
   private func presentDocumentPreview(fileURL: URL, sourceView: UIView, presenter: UIViewController) {
     if QLPreviewController.canPreview(fileURL as NSURL) {
       quickLookPreviewURL = fileURL
+      quickLookEditingAttachmentId = nil
       let previewController = QLPreviewController()
       previewController.dataSource = self
       previewController.delegate = self
@@ -2518,13 +2565,46 @@ extension ComposeView: QLPreviewControllerDataSource, QLPreviewControllerDelegat
 
   func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
     if let quickLookPreviewURL {
-      return quickLookPreviewURL as NSURL
+      // A photo's cache file has a UUID name; show a plain title over the editor instead.
+      let title = quickLookEditingAttachmentId == nil ? nil : "Photo"
+      return ComposeQuickLookItem(url: quickLookPreviewURL, title: title)
     }
 
     return NSURL(fileURLWithPath: "/")
   }
 
+  func previewController(
+    _ controller: QLPreviewController,
+    editingModeFor previewItem: QLPreviewItem
+  ) -> QLPreviewItemEditingMode {
+    // A copy, never in place: the original may already be uploading, and it stays put if the
+    // edit is discarded.
+    quickLookEditingAttachmentId == nil ? .disabled : .createCopy
+  }
+
+  func previewController(
+    _ controller: QLPreviewController,
+    didSaveEditedCopyOf previewItem: QLPreviewItem,
+    at modifiedContentsURL: URL
+  ) {
+    guard let attachmentId = quickLookEditingAttachmentId else { return }
+    // Quick Look removes its copy once this returns; keep our own until it is imported.
+    let editedURL = FileHelpers.getTrueTemporaryDirectory()
+      .appendingPathComponent("edited-\(UUID().uuidString).\(modifiedContentsURL.pathExtension)")
+    do {
+      try FileManager.default.copyItem(at: modifiedContentsURL, to: editedURL)
+    } catch {
+      log.error("Failed to copy edited photo", error: error)
+      return
+    }
+    DispatchQueue.main.async { [weak self] in
+      self?.applyEditedPhoto(from: editedURL, replacing: attachmentId)
+    }
+  }
+
   func previewControllerDidDismiss(_ controller: QLPreviewController) {
+    // The editing id stays: Quick Look may hand over the edited copy after dismissing, and the
+    // next preview sets its own.
     quickLookPreviewURL = nil
   }
 }
@@ -2538,6 +2618,16 @@ extension ComposeView: UIDocumentInteractionControllerDelegate {
     if documentInteractionController === controller {
       documentInteractionController = nil
     }
+  }
+}
+
+private final class ComposeQuickLookItem: NSObject, QLPreviewItem {
+  let previewItemURL: URL?
+  let previewItemTitle: String?
+
+  init(url: URL, title: String?) {
+    previewItemURL = url
+    previewItemTitle = title
   }
 }
 
