@@ -4519,7 +4519,7 @@ message BillingAccount {
 }
 
 message BillingSubscription {
-  // pro | believer | team | enterprise
+  // pro | believer | team | business | enterprise
   string plan = 1;
   // month | year | three_years | none
   string interval = 2;
@@ -4541,9 +4541,9 @@ message BillingWallet {
 }
 
 message BillingPlanOffer {
-  // Checkout code, for example pro-monthly, believer or team-yearly.
+  // Checkout code, for example pro-monthly, believer, team-yearly or business-monthly.
   string code = 1;
-  // pro | believer | team
+  // pro | believer | team | business
   string plan = 2;
   // month | year | three_years | none
   string interval = 3;

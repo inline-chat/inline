@@ -12004,7 +12004,7 @@ export interface BillingAccount {
  */
 export interface BillingSubscription {
     /**
-     * pro | believer | team | enterprise
+     * pro | believer | team | business | enterprise
      *
      * @generated from protobuf field: string plan = 1;
      */
@@ -12066,13 +12066,13 @@ export interface BillingWallet {
  */
 export interface BillingPlanOffer {
     /**
-     * Checkout code, for example pro-monthly, believer or team-yearly.
+     * Checkout code, for example pro-monthly, believer, team-yearly or business-monthly.
      *
      * @generated from protobuf field: string code = 1;
      */
     code: string;
     /**
-     * pro | believer | team
+     * pro | believer | team | business
      *
      * @generated from protobuf field: string plan = 2;
      */
