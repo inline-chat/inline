@@ -475,8 +475,11 @@ final class NewVideoView: UIView {
       transferProgressView.trailingAnchor.constraint(equalTo: overlayBackground.trailingAnchor, constant: -3),
       transferProgressView.bottomAnchor.constraint(equalTo: overlayBackground.bottomAnchor, constant: -3),
 
-      cancelTransferButton.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
-      cancelTransferButton.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),
+      // The whole progress circle cancels; a glyph-sized button let taps on the ring open the video.
+      cancelTransferButton.topAnchor.constraint(equalTo: overlayBackground.topAnchor),
+      cancelTransferButton.leadingAnchor.constraint(equalTo: overlayBackground.leadingAnchor),
+      cancelTransferButton.trailingAnchor.constraint(equalTo: overlayBackground.trailingAnchor),
+      cancelTransferButton.bottomAnchor.constraint(equalTo: overlayBackground.bottomAnchor),
 
       durationBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       durationBadge.topAnchor.constraint(equalTo: topAnchor, constant: 6),
