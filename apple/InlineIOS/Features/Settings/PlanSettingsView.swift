@@ -1,3 +1,4 @@
+import Auth
 import GRDB
 import InlineKit
 import InlineProtocol
@@ -81,12 +82,17 @@ struct PlanSettingsView: View {
 @MainActor
 @Observable
 final class PlanSettingsModel {
-  private static var cached: GetBillingResult?
-  private static var cachedSpaceNames: [Int64: String] = [:]
+  /// Last result for this run and the account it belongs to, so reopening the pane draws on the
+  /// first frame without ever showing another account's plan after a switch.
+  private static var cached: (userID: Int64, billing: GetBillingResult, spaceNames: [Int64: String])?
+  private static var cachedForCurrentUser: (billing: GetBillingResult, spaceNames: [Int64: String])? {
+    guard let cached, cached.userID == Auth.shared.getCurrentUserId() else { return nil }
+    return (cached.billing, cached.spaceNames)
+  }
 
   private let log = Log.scoped("PlanSettings")
-  private(set) var billing: GetBillingResult? = PlanSettingsModel.cached
-  private(set) var spaceNames: [Int64: String] = PlanSettingsModel.cachedSpaceNames
+  private(set) var billing: GetBillingResult? = PlanSettingsModel.cachedForCurrentUser?.billing
+  private(set) var spaceNames: [Int64: String] = PlanSettingsModel.cachedForCurrentUser?.spaceNames ?? [:]
   private(set) var failed = false
 
   func load(_ realtime: RealtimeV2) async {
@@ -98,8 +104,9 @@ final class PlanSettingsModel {
       spaceNames = Dictionary(uniqueKeysWithValues: spaces.map { ($0.id, $0.name) })
       billing = response
       failed = false
-      Self.cached = response
-      Self.cachedSpaceNames = spaceNames
+      if let userID = Auth.shared.getCurrentUserId() {
+        Self.cached = (userID, response, spaceNames)
+      }
     } catch {
       log.error("Failed to load plan", error: error)
       if billing == nil { failed = true }
