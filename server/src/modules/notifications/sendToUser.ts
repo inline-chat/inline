@@ -24,6 +24,7 @@ import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings
 import { normalizeGlobalNotificationMode } from "./notificationSettingsCompat"
 import { resolveEffectiveNotificationMode } from "./dialogNotificationSettings"
 import { getInheritedDialogNotificationSettings } from "./inheritedDialogNotificationSettings"
+import { getAppBadgeCount } from "./appBadge"
 
 type AlertPushPayload = {
   kind: "alert"
@@ -229,6 +230,7 @@ export const buildApnNotification = ({
   onEncryptionError,
   onPayloadTooLarge,
   syncOps,
+  badge,
 }: {
   session: PushContentSession
   recipientUserId: number
@@ -238,6 +240,8 @@ export const buildApnNotification = ({
   nowSeconds: number
   /** Recent read/delete state carried inside encrypted message content. */
   syncOps?: NotificationSyncOps
+  /** App icon badge for visible pushes. Background pushes cannot carry one. */
+  badge?: number
   encrypt?: typeof encryptSendMessagePushContent
   onEncryptionError?: (error: unknown) => void
   onPayloadTooLarge?: (bytes: number) => void
@@ -274,6 +278,7 @@ export const buildApnNotification = ({
 
   if (payload.kind === "send_message" || payload.kind === "alert") {
     notification.expiry = nowSeconds + visiblePushLifetimeSeconds
+    if (badge !== undefined) notification.badge = badge
   }
   if (payload.kind === "send_message") {
     // A retried send of the same message replaces the shown alert instead of stacking a duplicate.
@@ -425,6 +430,32 @@ export const buildApnNotification = ({
   return finalize()
 }
 
+/**
+ * Sets the app icon badge and nothing else: no alert, no sound, no extension, no app launch.
+ * Unlike background pushes it also reaches an app the person force-quit.
+ */
+export const buildApnBadgeNotification = ({
+  badge,
+  recipientUserId,
+  topic,
+  nowSeconds,
+}: {
+  badge: number
+  recipientUserId: number
+  topic: string
+  nowSeconds: number
+}): Notification => {
+  const notification = new Notification()
+  notification.topic = topic
+  configureAlertNotification(notification)
+  notification.priority = 5
+  notification.badge = badge
+  notification.expiry = nowSeconds + 60 * 60
+  notification.collapseId = "badge"
+  notification.payload = { kind: "badge", recipientUserId: String(recipientUserId) }
+  return notification
+}
+
 export type PreparedPushSubmission = () => Promise<void>
 
 /** Resolve devices and build payloads before the caller's final content-access check. */
@@ -471,6 +502,16 @@ export const preparePushNotificationToUser = async (
       }
     }
 
+    // Visible pushes carry the badge; a read also sends a badge-only push to lower it.
+    let badge: number | undefined
+    if (hasApnsSession && payload.kind !== "message_deleted") {
+      try {
+        badge = await getAppBadgeCount(userId)
+      } catch (error) {
+        log.warn("App badge count unavailable", { error, userId })
+      }
+    }
+
     const submissions: PreparedPushSubmission[] = []
     for (const session of userSessions) {
       if (session.pushNotificationProvider === "expo_android") {
@@ -495,6 +536,7 @@ export const preparePushNotificationToUser = async (
         topic,
         nowSeconds: Math.floor(Date.now() / 1_000),
         syncOps,
+        badge,
         onEncryptionError: (error) => {
           log.error("Failed to encrypt push content", {
             error,
@@ -508,9 +550,15 @@ export const preparePushNotificationToUser = async (
         },
       })
       if (!notification) continue
+      const notifications = [notification]
+      if (payload.kind === "messages_read" && badge !== undefined) {
+        notifications.push(
+          buildApnBadgeNotification({ badge, recipientUserId: userId, topic, nowSeconds: Math.floor(Date.now() / 1_000) }),
+        )
+      }
 
       const token = session.applePushToken
-      const sendPush = async () => {
+      const sendPush = async (notification: Notification) => {
         if (!token) return
         try {
           const result = await apnProvider.send(notification, token)
@@ -561,7 +609,7 @@ export const preparePushNotificationToUser = async (
       submissions.push(() => {
         // APNs completion stays detached from the caller as before. Register
         // it so shutdown and test teardown still join the provider result.
-        applicationBackgroundWork.track(sendPush())
+        for (const notification of notifications) applicationBackgroundWork.track(sendPush(notification))
         return Promise.resolve()
       })
     }

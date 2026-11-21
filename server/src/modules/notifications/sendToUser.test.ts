@@ -11,6 +11,7 @@ import {
 import { maxNotificationNameBytes, messageNotificationBody, notificationText } from "./messagePreview"
 import {
   ApnTokenRejectionGuard,
+  buildApnBadgeNotification,
   buildApnNotification,
   buildExpoPushMessage,
   shouldClearApplePushTokenForFailures,
@@ -694,5 +695,46 @@ describe("sendToUser APN payloads", () => {
     })
     expect(notification?.payload).not.toHaveProperty("userId")
     expect(notification?.aps.alert).toEqual({ title: "New message", body: "Open Inline to read it." })
+  })
+})
+
+describe("app icon badge", () => {
+  const sendMessage = {
+    kind: "send_message" as const,
+    senderUserId: 1,
+    threadId: "chat_7",
+    title: "Alice",
+    body: "hi",
+    messageId: "42",
+  }
+  const compile = (notification: unknown) =>
+    JSON.parse(JSON.stringify(notification)) as Record<string, unknown> & { aps: Record<string, unknown> }
+
+  it("rides on visible message pushes", () => {
+    const notification = buildApnNotification({
+      session: unencryptedSession, payload: sendMessage, recipientUserId: 12, silent: false,
+      topic: "chat.inline.Inline", nowSeconds: 100, badge: 3,
+    })
+    expect(compile(notification).aps["badge"]).toBe(3)
+  })
+
+  it("never rides on background read pushes", () => {
+    const notification = buildApnNotification({
+      session: unencryptedSession, recipientUserId: 12, silent: false, topic: "chat.inline.Inline",
+      nowSeconds: 100, badge: 3,
+      payload: { kind: "messages_read", threadId: "chat_7", readUpToMessageId: "42" },
+    })
+    expect(compile(notification).aps["badge"]).toBeUndefined()
+  })
+
+  it("badge-only push shows nothing and wakes nothing", () => {
+    const notification = buildApnBadgeNotification({
+      badge: 0, recipientUserId: 12, topic: "chat.inline.Inline", nowSeconds: 100,
+    })
+    const compiled = compile(notification)
+    expect(compiled.aps).toEqual({ badge: 0 })
+    expect(notification.pushType).toBe("alert")
+    expect(notification.priority).toBe(5)
+    expect(notification.collapseId).toBe("badge")
   })
 })
