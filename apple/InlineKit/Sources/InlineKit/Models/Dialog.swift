@@ -575,6 +575,27 @@ public extension Dialog {
     OR "dialog"."unreadMark" = 1
   )
   """
+  /// SQL predicate for the app badge (iOS icon, macOS Dock): the chats the chat list shows in blue.
+  /// A prominent unread chat, or any chat with an unseen mention or reply, muted or not.
+  /// Queries must join `chat` as `"chat"`. The server mirrors this in `getAppBadgeCount`.
+  static let appBadgeSQL = """
+  (
+    (\(unreadSQL) AND \(prominentUnreadSQL))
+    OR COALESCE("dialog"."unreadMentionsCount", 0) > 0
+  )
+  """
+
+  /// Number of visible chats counted by `appBadgeSQL`.
+  static func fetchAppBadgeCount(_ db: Database) throws -> Int {
+    try Int.fetchOne(db, sql: """
+      SELECT COUNT(*)
+      FROM "dialog"
+      LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
+      WHERE \(chatListVisibilitySQL)
+        AND ("dialog"."archived" IS NULL OR "dialog"."archived" = 0)
+        AND \(appBadgeSQL)
+      """) ?? 0
+  }
 
   static func nextSidebarOrder(_ db: Database) throws -> String {
     try sidebarOrder(db, placement: .bottom)
