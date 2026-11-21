@@ -453,6 +453,18 @@ public final class AgentWorkStateStore: ObservableObject {
     defaultOutputModes[botUserID] = mode
   }
 
+  /// The stored default, nil while it never loaded (no Detailed fallback).
+  func storedDefaultOutputMode(botUserID: Int64) -> AgentThreadOutputMode? {
+    hydrateIfNeeded()
+    return defaultOutputModes[botUserID]
+  }
+
+  /// Puts back what was stored before a failed change, including "not loaded".
+  func restoreDefaultOutputMode(_ mode: AgentThreadOutputMode?, botUserID: Int64) {
+    hydrateIfNeeded()
+    if defaultOutputModes[botUserID] != mode { defaultOutputModes[botUserID] = mode }
+  }
+
   /// Refreshes one chat's sessions, or the viewer's busy sessions everywhere
   /// when `peer` is nil (sidebar badges after launch or reconnect).
   public func refresh(peer: Peer? = nil) async {

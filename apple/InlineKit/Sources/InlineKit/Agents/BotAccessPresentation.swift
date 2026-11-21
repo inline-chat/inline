@@ -33,6 +33,14 @@ public struct BotNoAccessNotice: Equatable, Sendable {
 }
 
 public extension OwnedAgentGrants {
+  /// "Only you", "Everyone" or "You + 3" (people, spaces and groups added),
+  /// for a bot's one-line subtitle in Settings → Bots.
+  func compactSharingSummary(openToEveryone: Bool) -> String {
+    if openToEveryone { return String(localized: "Everyone") }
+    let added = userIDs.count + spaceIDs.count + groupIDs.count
+    return added == 0 ? String(localized: "Only you") : String(localized: "You + \(added)")
+  }
+
   /// "Only you", "3 people", "Acme and 2 people", or "Everyone" for the
   /// owner's summary row. `spaceNames` are the granted spaces the app knows.
   func sharedWithSummary(openToEveryone: Bool, spaceNames: [String] = []) -> String {

@@ -83,7 +83,9 @@ public extension AgentWorkStateStore {
 
   func updateDefaultOutputMode(_ mode: AgentThreadOutputMode, botUserID: Int64) async throws {
     let owner = try beginOutputModeRequest()
-    let previous = defaultOutputMode(botUserID: botUserID)
+    // The stored value, not the Detailed fallback: a bot whose default never
+    // loaded must stay unknown after a failure, not read as already Detailed.
+    let previous = storedDefaultOutputMode(botUserID: botUserID)
     setDefaultOutputMode(mode, botUserID: botUserID)
     do {
       let response = try await callOutputModeRPC(
@@ -101,7 +103,7 @@ public extension AgentWorkStateStore {
         apply(runtime: result.runtime)
       }
     } catch {
-      if isCurrentOutputModeRequest(owner) { setDefaultOutputMode(previous, botUserID: botUserID) }
+      if isCurrentOutputModeRequest(owner) { restoreDefaultOutputMode(previous, botUserID: botUserID) }
       throw error
     }
   }
