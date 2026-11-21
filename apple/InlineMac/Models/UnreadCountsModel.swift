@@ -49,14 +49,14 @@ enum UnreadCountsTimeFrame: Equatable, Sendable {
 struct UnreadCountsSnapshot: Equatable, Sendable {
   static let empty = UnreadCountsSnapshot(
     unreadChatCount: 0,
-    prominentUnreadChatCount: 0,
+    appBadgeChatCount: 0,
     scopedUnopenedProminentUnreadCount: 0,
     scopedUnopenedOtherUnreadCount: 0,
     prominentUnreadOutsideSelectedSpaceCount: 0
   )
 
   let unreadChatCount: Int
-  let prominentUnreadChatCount: Int
+  let appBadgeChatCount: Int
   let scopedUnopenedProminentUnreadCount: Int
   let scopedUnopenedOtherUnreadCount: Int
   let prominentUnreadOutsideSelectedSpaceCount: Int
@@ -73,7 +73,7 @@ final class UnreadCountsModel {
   static let shared = UnreadCountsModel(database: .shared)
 
   private(set) var unreadChatCount = 0
-  private(set) var prominentUnreadChatCount = 0
+  private(set) var appBadgeChatCount = 0
   private(set) var scopedUnopenedProminentUnreadCount = 0
   private(set) var scopedUnopenedOtherUnreadCount = 0
   private(set) var prominentUnreadOutsideSelectedSpaceCount = 0
@@ -235,22 +235,22 @@ final class UnreadCountsModel {
   private func apply(_ snapshot: UnreadCountsSnapshot) {
     let previous = UnreadCountsSnapshot(
       unreadChatCount: unreadChatCount,
-      prominentUnreadChatCount: prominentUnreadChatCount,
+      appBadgeChatCount: appBadgeChatCount,
       scopedUnopenedProminentUnreadCount: scopedUnopenedProminentUnreadCount,
       scopedUnopenedOtherUnreadCount: scopedUnopenedOtherUnreadCount,
       prominentUnreadOutsideSelectedSpaceCount: prominentUnreadOutsideSelectedSpaceCount
     )
-    let prominentChanged = previous.prominentUnreadChatCount != snapshot.prominentUnreadChatCount
+    let prominentChanged = previous.appBadgeChatCount != snapshot.appBadgeChatCount
     let scopedProminentChanged = previous.scopedUnopenedProminentUnreadCount !=
       snapshot.scopedUnopenedProminentUnreadCount
     if prominentChanged || scopedProminentChanged {
       log.info(
-        "[UnreadDiag] unread_counts prominent=\(previous.prominentUnreadChatCount)->\(snapshot.prominentUnreadChatCount) unreadChats=\(previous.unreadChatCount)->\(snapshot.unreadChatCount) scopedProminent=\(previous.scopedUnopenedProminentUnreadCount)->\(snapshot.scopedUnopenedProminentUnreadCount)"
+        "[UnreadDiag] unread_counts badge=\(previous.appBadgeChatCount)->\(snapshot.appBadgeChatCount) unreadChats=\(previous.unreadChatCount)->\(snapshot.unreadChatCount) scopedProminent=\(previous.scopedUnopenedProminentUnreadCount)->\(snapshot.scopedUnopenedProminentUnreadCount)"
       )
     }
 
     unreadChatCount = snapshot.unreadChatCount
-    prominentUnreadChatCount = snapshot.prominentUnreadChatCount
+    appBadgeChatCount = snapshot.appBadgeChatCount
     scopedUnopenedProminentUnreadCount = snapshot.scopedUnopenedProminentUnreadCount
     scopedUnopenedOtherUnreadCount = snapshot.scopedUnopenedOtherUnreadCount
     prominentUnreadOutsideSelectedSpaceCount = snapshot.prominentUnreadOutsideSelectedSpaceCount
@@ -290,8 +290,6 @@ final class UnreadCountsModel {
       )
       SELECT
         COUNT(*) AS "unreadChatCount",
-        COALESCE(SUM(CASE WHEN "isProminent" THEN 1 ELSE 0 END), 0)
-          AS "prominentUnreadChatCount",
         COALESCE(SUM(CASE WHEN "isProminent" AND NOT "isOpenInSidebar" AND "isInSidebarScope"
           THEN 1 ELSE 0 END), 0) AS "scopedUnopenedProminentUnreadCount",
         COALESCE(SUM(CASE WHEN NOT "isProminent" AND NOT "isOpenInSidebar" AND "isInSidebarScope"
@@ -309,14 +307,15 @@ final class UnreadCountsModel {
     }
 
     let unreadChatCount: Int = row["unreadChatCount"]
-    let prominentUnreadChatCount: Int = row["prominentUnreadChatCount"]
+    // Also counts read chats with an unseen mention, which the unread CTE above leaves out.
+    let appBadgeChatCount = try Dialog.fetchAppBadgeCount(db)
     let scopedUnopenedProminentUnreadCount: Int = row["scopedUnopenedProminentUnreadCount"]
     let scopedUnopenedOtherUnreadCount: Int = row["scopedUnopenedOtherUnreadCount"]
     let prominentUnreadOutsideSelectedSpaceCount: Int = row["prominentUnreadOutsideSelectedSpaceCount"]
 
     return UnreadCountsSnapshot(
       unreadChatCount: unreadChatCount,
-      prominentUnreadChatCount: prominentUnreadChatCount,
+      appBadgeChatCount: appBadgeChatCount,
       scopedUnopenedProminentUnreadCount: scopedUnopenedProminentUnreadCount,
       scopedUnopenedOtherUnreadCount: scopedUnopenedOtherUnreadCount,
       prominentUnreadOutsideSelectedSpaceCount: prominentUnreadOutsideSelectedSpaceCount
