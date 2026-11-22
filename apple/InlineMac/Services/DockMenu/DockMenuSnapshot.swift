@@ -16,7 +16,7 @@ struct DockMenuSnapshot {
     let dialogs = try Dialog.fetchAll(db, sql: """
       SELECT "dialog".*
       FROM "dialog"
-      LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
+      \(Dialog.chatListChatJoinSQL)
       LEFT JOIN "message" AS "lastMessage"
         ON "lastMessage"."chatId" = "chat"."id"
         AND "lastMessage"."messageId" = "chat"."lastMsgId"
