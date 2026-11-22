@@ -541,7 +541,7 @@ export class SessionsModel {
   }
 
   // Helper method to decrypt personal data
-  private static decryptPersonalData(session: DbSession): SessionPersonalData {
+  static decryptPersonalData(session: DbSession): SessionPersonalData {
     try {
       if (!session.personalDataEncrypted || !session.personalDataIv || !session.personalDataTag) {
         return {}

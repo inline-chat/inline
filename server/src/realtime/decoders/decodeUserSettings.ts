@@ -7,6 +7,7 @@ import {
 } from "@in/server/db/models/userSettings/types"
 import type { PrivacyPatch } from "@in/server/modules/privacy/privacyRules"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { validateIanaTimezone } from "@in/server/utils/validate"
 import { decodeProtocolNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
 
 export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGeneralInput | undefined => {
@@ -53,6 +54,11 @@ const decodePrivacyPatch = (settings: NonNullable<UserSettings["privacySettings"
   if (settings.transcribeVoiceMessages !== undefined) patch.transcribeVoiceMessages = settings.transcribeVoiceMessages
   if (settings.timeZone) patch.timeZone = decodePrivacyRule(settings.timeZone)
   if (settings.focusStatus) patch.focusStatus = decodePrivacyRule(settings.focusStatus)
+  if (settings.manualTimeZone !== undefined) {
+    const timeZone = settings.manualTimeZone.trim()
+    if (timeZone && !validateIanaTimezone(timeZone)) throw RealtimeRpcError.BadRequest()
+    patch.manualTimeZone = timeZone
+  }
   return patch
 }
 
