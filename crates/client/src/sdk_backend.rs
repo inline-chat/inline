@@ -684,12 +684,8 @@ impl SdkBackend {
                     ));
                 }
                 let url = inline_protocol_v3_url(&self.realtime_url);
-                let now_seconds = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|error| {
-                        BackendError::new(ClientErrorCategory::Internal, error.to_string())
-                    })?
-                    .as_secs() as i64;
+                // Expiry is server time, so judge it by the learned server clock.
+                let now_seconds = inline_sdk::inline_protocol_estimated_server_unix_seconds();
                 let locally_expired =
                     temporary_authorization_needs_regeneration(temporary, now_seconds);
                 let regenerate = if locally_expired {

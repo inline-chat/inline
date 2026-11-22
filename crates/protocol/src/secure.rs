@@ -673,7 +673,10 @@ pub fn decrypt_record(
         || !valid_server_salts.contains(&server_salt)
         || message_id == 0
         || !valid_direction
-        || !(now_seconds - 300..=now_seconds + 30).contains(&message_seconds)
+        // Like MTProto, only the server holds message IDs to its clock. A client never drops a
+        // server record for its time, or it could drop the 16/17 that corrects a wrong clock.
+        || (direction == Direction::ClientToServer
+            && !(now_seconds - 300..=now_seconds + 30).contains(&message_seconds))
         || sequence_number < 0
     {
         return Err(InvalidEncryptedRecord);
@@ -858,6 +861,52 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn holds_only_client_records_to_the_clock_window() {
+        let auth_key: Vec<u8> = (0..=255).collect();
+        let padding: Vec<u8> = (0xa0..=0xb7).collect();
+        let salts = BTreeSet::from([1]);
+        let record = |direction, message_id| {
+            let fields = RecordFields {
+                server_salt: 1,
+                session_id: 2,
+                message_id,
+                sequence_number: 1,
+                body: vec![0xa6, 0x4a, 0x7d, 0xeb, 3, 0, 0, 0],
+            };
+            encrypt_record(&auth_key, direction, &fields, &padding).unwrap()
+        };
+        // A client accepts a server record whatever its time, so a clock correction gets through.
+        let server = record(Direction::ServerToClient, (1_700_000_000 << 32) | 1);
+        for now in [1_700_000_000 - 86_400, 1_700_000_000 + 86_400] {
+            assert!(
+                decrypt_record(
+                    &server,
+                    &auth_key,
+                    Direction::ServerToClient,
+                    2,
+                    &salts,
+                    now
+                )
+                .is_ok()
+            );
+        }
+        let client = record(Direction::ClientToServer, (1_700_000_000 << 32) | 4);
+        for now in [1_700_000_000 + 301, 1_700_000_000 - 31] {
+            assert!(
+                decrypt_record(
+                    &client,
+                    &auth_key,
+                    Direction::ClientToServer,
+                    2,
+                    &salts,
+                    now
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

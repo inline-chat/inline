@@ -62,8 +62,9 @@ pub use realtime::{
 pub use realtime_v3::{
     INLINE_PROTOCOL_PRODUCTION_PUBLIC_RING_JSON, InlineProtocolAuthorization,
     InlineProtocolPublicKey, InlineProtocolV3Connection, InlineProtocolV3Error,
-    InlineProtocolV3Options, inline_protocol_production_public_key_ring,
-    inline_protocol_production_rsa_keys,
+    InlineProtocolV3Options, inline_protocol_estimated_server_unix_seconds,
+    inline_protocol_production_public_key_ring, inline_protocol_production_rsa_keys,
+    inline_protocol_server_time_offset_millis, set_inline_protocol_server_time_offset_millis,
 };
 
 /// Convenient imports for common SDK consumers.

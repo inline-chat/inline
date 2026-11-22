@@ -75,7 +75,7 @@ async fn native_login_bind_rpc_and_reconnect() {
     drop(temporary);
     let mut reconnected = InlineProtocolV3Connection::connect(InlineProtocolV3Options::reconnect(
         &url,
-        temporary_authorization,
+        temporary_authorization.clone(),
     ))
     .await
     .unwrap();
@@ -86,4 +86,35 @@ async fn native_login_bind_rpc_and_reconnect() {
         })
         .await
         .unwrap();
+    drop(reconnected);
+
+    // A process that never learned the server time starts from the device clock; a wrong
+    // clock then costs one 16/17 resend instead of failing.
+    let learned = inline_sdk::inline_protocol_server_time_offset_millis().unwrap();
+    inline_sdk::set_inline_protocol_server_time_offset_millis(None);
+    let mut fresh = InlineProtocolV3Connection::connect(InlineProtocolV3Options::reconnect(
+        &url,
+        temporary_authorization,
+    ))
+    .await
+    .unwrap();
+    fresh
+        .call_rpc(proto::RpcCall {
+            method: proto::Method::GetMe as i32,
+            input: Some(proto::rpc_call::Input::GetMe(proto::GetMeInput {})),
+        })
+        .await
+        .unwrap();
+    let relearned = inline_sdk::inline_protocol_server_time_offset_millis().unwrap();
+    assert!(
+        (relearned - learned).abs() < 5_000,
+        "offset {learned} then {relearned}"
+    );
+    if let Ok(expected) = std::env::var("INLINE_V3_LIVE_EXPECTED_OFFSET_MS") {
+        let expected: i64 = expected.parse().unwrap();
+        assert!(
+            (relearned - expected).abs() < 5_000,
+            "offset {relearned}, expected {expected}"
+        );
+    }
 }

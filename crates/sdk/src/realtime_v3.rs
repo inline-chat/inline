@@ -23,7 +23,7 @@ use inline_protocol::secure::{
 use prost::Message;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::io::Read as _;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -381,6 +381,41 @@ fn authenticated_application_result_failure(
 type WebSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+/// Server time minus this host's wall clock, learned from authenticated server messages and
+/// shared by every connection in the process, like MTProto's global time difference.
+/// `i64::MIN` means unknown.
+static SERVER_TIME_OFFSET_MILLIS: AtomicI64 = AtomicI64::new(i64::MIN);
+
+/// Server time minus the local wall clock, once a connection in this process sampled it or a
+/// host seeded it from a previous run.
+pub fn inline_protocol_server_time_offset_millis() -> Option<i64> {
+    match SERVER_TIME_OFFSET_MILLIS.load(Ordering::Relaxed) {
+        i64::MIN => None,
+        value => Some(value),
+    }
+}
+
+/// Seeds or clears the process-wide offset, so a host can persist it across runs. A cached-key
+/// reconnect and a new handshake then start from server time instead of a wrong device clock.
+pub fn set_inline_protocol_server_time_offset_millis(value: Option<i64>) {
+    SERVER_TIME_OFFSET_MILLIS.store(value.unwrap_or(i64::MIN), Ordering::Relaxed);
+}
+
+/// The estimated server time in Unix seconds: this host's clock plus the learned offset. Use it
+/// for any local decision about server-issued times, such as temporary-key expiry.
+pub fn inline_protocol_estimated_server_unix_seconds() -> i64 {
+    estimated_server_unix_millis().unwrap_or_default() / 1_000
+}
+
+fn estimated_server_unix_millis() -> Result<i64, InlineProtocolV3Error> {
+    Ok(unix_millis()?.saturating_add(inline_protocol_server_time_offset_millis().unwrap_or(0)))
+}
+
+fn record_server_time(server_unix_millis: i64) -> Result<(), InlineProtocolV3Error> {
+    set_inline_protocol_server_time_offset_millis(Some(server_unix_millis - unix_millis()?));
+    Ok(())
+}
+
 /// Stateful, serialized Realtime V3 connection.
 pub struct InlineProtocolV3Connection {
     url: String,
@@ -455,7 +490,8 @@ impl InlineProtocolV3Connection {
         .await
         .map_err(|_| InlineProtocolV3Error::Timeout)??;
         let session_id = random_i64()?;
-        let now_seconds = unix_millis()? / 1_000;
+        // A seed, not a sample: the first authenticated server message replaces it.
+        let now_seconds = estimated_server_unix_millis()? / 1_000;
         let placeholder = InlineProtocolAuthorization {
             key: [0; 256],
             key_id: [0; 8],
@@ -505,6 +541,11 @@ impl InlineProtocolV3Connection {
                         connection.authorization = authorization.into();
                         connection.server_unix_millis = i64::from(server_time) * 1_000;
                         connection.monotonic_anchor = Instant::now();
+                        record_server_time(connection.server_unix_millis)?;
+                        // Encrypted IDs start fresh: the handshake IDs came from the device's
+                        // estimate, and carrying them over would hold every session ID ahead
+                        // of a fast clock.
+                        connection.last_message_id = 0;
                         break;
                     }
                 }
@@ -836,7 +877,7 @@ impl InlineProtocolV3Connection {
     async fn send_prepared_content(
         &mut self,
         mut message_id: i64,
-        sequence_number: i32,
+        mut sequence_number: i32,
         body: Vec<u8>,
         read_only: bool,
     ) -> Result<(i64, Vec<u8>), InlineProtocolV3Error> {
@@ -878,12 +919,15 @@ impl InlineProtocolV3Connection {
                 let code = read_i32(&fields.body, 16)?;
                 if code == 16 || code == 17 {
                     self.sample_message_id(fields.message_id)?;
+                    self.recover_time_rejection(code, fields.message_id);
                 } else if code == 48 && constructor == BAD_SERVER_SALT {
                     self.authorization.server_salt = read_i64(&fields.body, 20)?;
                 } else {
                     return Err(InlineProtocolV3Error::Protocol);
                 }
                 message_id = self.next_message_id()?;
+                // A fresh sequence number keeps the resend in order with anything accepted since.
+                sequence_number = self.next_sequence(true);
                 self.send_encrypted(
                     message_id,
                     sequence_number,
@@ -1148,8 +1192,25 @@ impl InlineProtocolV3Connection {
         self.next_message_id_at(millis)
     }
 
+    /// Handshake IDs use the raw device clock: the server does not judge them by time, and an
+    /// older server that does must not see a stale learned offset.
     fn next_system_message_id(&mut self) -> Result<i64, InlineProtocolV3Error> {
         self.next_message_id_at(unix_millis()?)
+    }
+
+    /// After a 17 this clock ran ahead, and the server stored none of the IDs it rejected. If the
+    /// last ID is past the server window (server time + 30 s), fall back to the start of the
+    /// window's last second: new IDs then stay inside it and above anything it could have
+    /// accepted. IDs already inside it, such as earlier resends, are kept. Without this a clock
+    /// that ran ahead would loop on 17 forever. A 16 needs no fallback: the corrected clock is
+    /// later than every ID already sent.
+    fn recover_time_rejection(&mut self, code: i32, server_message_id: i64) {
+        if code == 17 {
+            let edge = ((server_message_id >> 32) + 30) << 32;
+            if self.last_message_id >= edge + (1 << 32) {
+                self.last_message_id = edge;
+            }
+        }
     }
 
     fn next_message_id_at(&mut self, millis: i64) -> Result<i64, InlineProtocolV3Error> {
@@ -1172,7 +1233,7 @@ impl InlineProtocolV3Connection {
         }
         self.server_unix_millis = (message_id >> 32) * 1_000;
         self.monotonic_anchor = Instant::now();
-        Ok(())
+        record_server_time(self.server_unix_millis)
     }
 
     fn server_now_millis(&self) -> i64 {
@@ -1430,8 +1491,11 @@ pub(crate) async fn run_inline_protocol_v3_session(
                             connection.authorization.server_salt = salt;
                         } else if code != 16 && code != 17 {
                             break;
+                        } else {
+                            connection.recover_time_rejection(code, fields.message_id);
                         }
                         let Ok(message_id) = connection.next_message_id() else { break };
+                        ping.sequence_number = connection.next_sequence(false);
                         if connection
                             .send_encrypted(message_id, ping.sequence_number, &ping.body, false, None)
                             .await
@@ -1457,8 +1521,13 @@ pub(crate) async fn run_inline_protocol_v3_session(
                         connection.authorization.server_salt = salt;
                     } else if code != 16 && code != 17 {
                         break;
+                    } else {
+                        connection.recover_time_rejection(code, fields.message_id);
                     }
+                    let mut rpc = rpc;
                     let Ok(message_id) = connection.next_message_id() else { break };
+                    // A fresh sequence number keeps the resend in order with anything accepted since.
+                    rpc.sequence_number = connection.next_sequence(true);
                     if connection
                         .send_encrypted(message_id, rpc.sequence_number, &rpc.body, true, None)
                         .await
