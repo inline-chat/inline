@@ -100,7 +100,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   // Experimental
   case newThreadAgentPicker
   case sidebarAgentRowNewThread
-  case richContentRenderer
   case inlineMathAttachments
   case messageWidgets
   case quickForward
@@ -168,7 +167,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .softwareUpdate, .automaticUpdates, .updateChannel:
       .updates
 #endif
-    case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
+    case .newThreadAgentPicker, .sidebarAgentRowNewThread, .inlineMathAttachments,
          .messageWidgets, .quickForward, .stableChatRoute, .coreTextMessageText,
          .fileBrowser, .nativeFileDownloads:
       .experimental
@@ -250,7 +249,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 #endif
     case .newThreadAgentPicker: "New Thread Agent Picker"
     case .sidebarAgentRowNewThread: "Agent Row New Thread Button"
-    case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
     case .messageWidgets: "Message Widgets"
     case .quickForward: "Quick Forward"
@@ -317,7 +315,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .softwareUpdate: "Status"
     case .automaticUpdates, .updateChannel: "Automatic Updates"
 #endif
-    case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
+    case .newThreadAgentPicker, .sidebarAgentRowNewThread, .inlineMathAttachments,
          .messageWidgets:
       "Agents"
     case .quickForward, .stableChatRoute, .coreTextMessageText: "Messages"
@@ -402,7 +400,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 #endif
     case .newThreadAgentPicker: ["agent", "thread", "composer"]
     case .sidebarAgentRowNewThread: ["agent", "thread", "sidebar", "plus"]
-    case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
     case .messageWidgets: ["html", "widget", "visualization", "chart"]
     case .quickForward: ["forward"]

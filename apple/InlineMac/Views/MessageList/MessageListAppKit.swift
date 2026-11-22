@@ -2171,7 +2171,6 @@ class MessageListAppKit: NSViewController {
   @objc private func richBlockLayoutStateDidChange(_ notification: Notification) {
     textSelection.setNeedsRefresh()
     guard !isDisposed,
-          AppSettings.shared.richContentRendererEnabled,
           let stableID = notification.userInfo?["messageStableID"] as? Int64,
           stableID != 0
     else { return }

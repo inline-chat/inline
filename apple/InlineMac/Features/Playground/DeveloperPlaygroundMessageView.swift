@@ -237,8 +237,7 @@ struct DeveloperProductionMessageRow: NSViewRepresentable {
     let layout = MessageSizeCalculator.shared.calculateSize(
       for: fixture.message,
       with: inputProps,
-      tableWidth: width,
-      richContentRendererOverride: fixture.message.message.blockContent == nil ? nil : true
+      tableWidth: width
     ).3
     let props = MessageViewProps(
       firstInGroup: inputProps.firstInGroup,

@@ -74,7 +74,7 @@ struct ChatRouteView: View {
       // controller avoids mutating a live message renderer when the setting changes.
       // The stable route keeps its host across chats and swaps the chat inside it.
       .id(
-        "chat-\(settings.stableChatRouteEnabled ? "route" : peer.toString())-\(settings.messageRenderStyle.rawValue)-rich:\(settings.richContentRendererEnabled)-inline-math:\(settings.richTextInlineMathEnabled)-widgets:\(settings.messageWidgetsEnabled)-ct-text:\(settings.coreTextMessageTextEnabled)"
+        "chat-\(settings.stableChatRouteEnabled ? "route" : peer.toString())-\(settings.messageRenderStyle.rawValue)-inline-math:\(settings.richTextInlineMathEnabled)-widgets:\(settings.messageWidgetsEnabled)-ct-text:\(settings.coreTextMessageTextEnabled)"
       )
       .frame(minWidth: Theme.chatViewMinWidth, maxWidth: .infinity, maxHeight: .infinity)
       .chatScrollEdgeEffect()

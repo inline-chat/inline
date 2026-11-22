@@ -152,7 +152,6 @@ final class AppSettings: ObservableObject {
   static let sidebarActiveRowStyleKey = "sidebarActiveRowStyle"
   static let sidebarModeKey = "sidebarMode"
   static let showGridInSidebarKey = "showGridInSidebar"
-  static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
   static let richTextInlineMathEnabledKey = "experimental.richTextInlineMathEnabled"
   static let messageWidgetsEnabledKey = "experimental.messageWidgetsEnabled"
   static let stableChatRouteEnabledKey = "experimental.stableChatRouteEnabled"
@@ -529,15 +528,6 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Experimental Settings
 
-  @Published var richContentRendererEnabled: Bool {
-    didSet {
-      UserDefaults.standard.set(
-        richContentRendererEnabled,
-        forKey: Self.richContentRendererEnabledKey
-      )
-    }
-  }
-
   /// Live HTML widgets that bots send in messages. Off until the host is ready.
   @Published var messageWidgetsEnabled: Bool {
     didSet {
@@ -654,9 +644,6 @@ final class AppSettings: ObservableObject {
     } else {
       unreadBadgeStyle = .defaultValue
     }
-    richContentRendererEnabled = UserDefaults.standard.object(
-      forKey: Self.richContentRendererEnabledKey
-    ) as? Bool ?? true
     messageWidgetsEnabled = UserDefaults.standard.object(forKey: Self.messageWidgetsEnabledKey) as? Bool ?? false
     stableChatRouteEnabled = UserDefaults.standard.object(forKey: Self.stableChatRouteEnabledKey) as? Bool ?? false
     coreTextMessageTextEnabled = UserDefaults.standard.object(forKey: Self.coreTextMessageTextEnabledKey) as? Bool ?? false

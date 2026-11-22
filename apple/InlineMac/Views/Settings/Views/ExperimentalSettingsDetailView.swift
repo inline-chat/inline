@@ -46,13 +46,6 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.sidebarAgentRowNewThread)
-      Toggle(isOn: $settings.richContentRendererEnabled) {
-        SettingsRowLabel(
-          .richContentRenderer,
-          description: "Render supported agent Markdown as native rich-content blocks in messages."
-        )
-      }
-      .settingsSearchAnchor(.richContentRenderer)
       Toggle(isOn: $settings.richTextInlineMathEnabled) {
         SettingsRowLabel(
           .inlineMathAttachments,

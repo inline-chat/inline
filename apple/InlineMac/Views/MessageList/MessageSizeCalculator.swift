@@ -719,14 +719,12 @@ class MessageSizeCalculator {
   func calculateBubbleSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat,
-    richContentRendererOverride: Bool? = nil
+    tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     calculateBubbleSizeInternal(
       for: message,
       with: props,
-      tableWidth: width,
-      richContentRendererEnabled: richContentRendererOverride ?? AppSettings.shared.richContentRendererEnabled
+      tableWidth: width
     )
   }
 
@@ -735,14 +733,12 @@ class MessageSizeCalculator {
   func calculateMinimalSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat,
-    richContentRendererOverride: Bool? = nil
+    tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     calculateMinimalSizeInternal(
       for: message,
       with: props,
-      tableWidth: width,
-      richContentRendererEnabled: richContentRendererOverride ?? AppSettings.shared.richContentRendererEnabled
+      tableWidth: width
     )
   }
 
@@ -750,23 +746,20 @@ class MessageSizeCalculator {
   func calculateSize(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat,
-    richContentRendererOverride: Bool? = nil
+    tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     switch props.renderStyle {
     case .bubble:
       return calculateBubbleSize(
         for: message,
         with: props,
-        tableWidth: width,
-        richContentRendererOverride: richContentRendererOverride
+        tableWidth: width
       )
     case .minimal:
       return calculateMinimalSize(
         for: message,
         with: props,
-        tableWidth: width,
-        richContentRendererOverride: richContentRendererOverride
+        tableWidth: width
       )
     }
   }
@@ -788,8 +781,7 @@ class MessageSizeCalculator {
   private func calculateBubbleSizeInternal(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat,
-    richContentRendererEnabled: Bool
+    tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     syncTypography()
     #if DEBUG
@@ -1002,8 +994,7 @@ class MessageSizeCalculator {
     log.trace("availableWidth \(availableWidth) for text \(text)")
     #endif
 
-    if richContentRendererEnabled,
-       message.translationText == nil,
+    if message.translationText == nil,
        text.utf8.elementsEqual((message.message.text ?? "").utf8),
        let blockContentPayload = message.message.blockContentPayload
     {
@@ -1769,8 +1760,7 @@ class MessageSizeCalculator {
   private func calculateMinimalSizeInternal(
     for message: FullMessage,
     with props: MessageViewInputProps,
-    tableWidth width: CGFloat,
-    richContentRendererEnabled: Bool
+    tableWidth width: CGFloat
   ) -> (NSSize, NSSize, NSSize?, LayoutPlans) {
     syncTypography()
     let hasText = message.message.hasText
@@ -1833,8 +1823,7 @@ class MessageSizeCalculator {
     var documentWidth: CGFloat?
     var attachmentsWidth: CGFloat?
 
-    if richContentRendererEnabled,
-       message.translationText == nil,
+    if message.translationText == nil,
        text.utf8.elementsEqual((message.message.text ?? "").utf8),
        let blockContentPayload = message.message.blockContentPayload
     {
