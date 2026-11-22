@@ -1732,9 +1732,11 @@ public actor UpdatesEngine: Sendable {
       // count is usable only for the same read frontier and exact Chat
       // sequence covered by this page. A future count would include messages
       // that are still buffered and would be counted again on live delivery.
+      // Nor take a count from before this device's own read that is still in flight.
       guard dialog.hasUnreadCount, dialog.unreadCount >= 0,
             dialog.hasReadMaxID, dialog.readMaxID >= 0,
             dialog.readMaxID == max(0, existing.readInboxMaxId ?? 0),
+            !LocalReadsInFlight.contains(dialogID: existing.id),
             dialog.hasChatID, existing.chatId == dialog.chatID,
             let snapshot = chatSnapshots[dialog.chatID],
             validatedPeer(snapshot.peerID) == peer,
