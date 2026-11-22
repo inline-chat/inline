@@ -175,9 +175,7 @@ final class MessagesCollectionView: UICollectionView {
     self.theme = theme
     self.openAnchor = openAnchor
     self.unreadFetchBoundary = isPreview ? nil : unreadFetchBoundary
-    let implementation = messageViewImplementation ?? NextMessageViewFeature.selectedImplementation(
-      allowsOverride: SettingsBuildAudience.showsDebugTools
-    )
+    let implementation = messageViewImplementation ?? .next
     let contextMenuImplementation = MessageContextMenuRollout.implementation(isPreview: isPreview)
     let coordinator = Coordinator(
       peerId: peerId,

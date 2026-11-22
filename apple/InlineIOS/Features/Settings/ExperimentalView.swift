@@ -9,9 +9,6 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
-  @AppStorage(NextMessageViewFeature.preferenceKey)
-  private var nextMessageViewEnabled = true
-
   @AppStorage(MessageContextMenuFeature.preferenceKey)
   private var customContextMenuEnabled = true
 
@@ -71,14 +68,6 @@ struct ExperimentalView: View {
               .labelsHidden()
           }
           SettingsItem(
-            icon: "text.bubble.fill",
-            iconColor: .orange,
-            title: "Next Message View"
-          ) {
-            Toggle("Next Message View", isOn: $nextMessageViewEnabled)
-              .labelsHidden()
-          }
-          SettingsItem(
             icon: "square.grid.2x2.fill",
             iconColor: .teal,
             title: "Album Layout"
@@ -94,7 +83,7 @@ struct ExperimentalView: View {
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("The next message view is on by default. Turn it off to compare with the previous view. Album Layout picks how photos sent together are drawn in the next message view. Reopen the chat after changing either.")
+          Text("Album Layout picks how photos sent together are drawn in the next message view. Reopen the chat after changing it.")
         }
       }
     }
