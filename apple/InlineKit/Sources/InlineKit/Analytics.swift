@@ -52,6 +52,7 @@ public final class Analytics: Sendable {
       options.dsn = InlineConfig.SentryDSN
       options.debug = false
       options.tracesSampleRate = 0.1
+      options.enableFileIOTracing = false
       options.swiftAsyncStacktraces = true
       options.enableLogs = true
       options.releaseName = releaseName
