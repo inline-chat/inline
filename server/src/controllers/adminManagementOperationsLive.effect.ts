@@ -110,6 +110,7 @@ import {
   adminFinancialsOverview,
   adminRecordPayment,
   adminSetPlan,
+  adminStartCreditPlan,
   BillingAdminError,
 } from "@in/server/modules/billing/admin"
 import {
@@ -163,6 +164,7 @@ type ManagementOperationName =
   | "setBillingPlan"
   | "endBillingPlan"
   | "recordBillingPayment"
+  | "startBillingCreditPlan"
   | "financials"
 
 export type AdminManagementOperations = Pick<
@@ -1550,6 +1552,10 @@ const serializeBillingSubscription = (row: BillingSubscriptionRow) => ({
   payerUserId: row.payerUserId,
   stripeSubscriptionId: row.stripeSubscriptionId,
   livemode: row.livemode,
+  chargeAmount: row.chargeAmount,
+  chargeCurrency: row.chargeCurrency,
+  chargeInterval: row.chargeInterval,
+  chargeUsdCents: row.chargeUsdCents,
   note: row.note,
   createdAt: row.createdAt.toISOString(),
   updatedAt: row.updatedAt.toISOString(),
@@ -1567,6 +1573,7 @@ const serializeBillingWalletEntry = (row: BillingWalletEntryRow) => ({
   subscriptionId: row.subscriptionId,
   adminId: row.adminId,
   occurredAt: isoOrNull(row.occurredAt),
+  periodStart: isoOrNull(row.periodStart),
   createdAt: row.createdAt.toISOString(),
 })
 
@@ -1614,6 +1621,16 @@ const formatMinorUnits = (currency: "usd" | "btc", amount: number): string =>
   currency === "usd"
     ? `${amount < 0 ? "-" : ""}$${(Math.abs(amount) / 100).toFixed(2)}`
     : `${amount} sats`
+
+/** For example "team (4 seats) at 120000 sats per month". */
+const describeCreditPlan = (plan: {
+  readonly plan: string
+  readonly seats?: number | undefined
+  readonly chargeAmount: number
+  readonly chargeCurrency: "usd" | "btc"
+  readonly chargeInterval: "month" | "year"
+}): string =>
+  `${plan.plan}${plan.seats !== undefined ? ` (${plan.seats} seats)` : ""} at ${formatMinorUnits(plan.chargeCurrency, plan.chargeAmount)} per ${plan.chargeInterval}`
 
 /** Wallet entries record which superadmin made them; an unlinked admin records none. */
 const superadminIdFor = (session: AdminSessionValue) =>
@@ -1753,9 +1770,9 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
       const occurredAt = input.occurredAt === undefined
         ? undefined
         : yield* billingDate(input.occurredAt)
-      const paidThrough = input.plan !== undefined && input.plan.paidThrough !== null
-        ? yield* billingDate(input.plan.paidThrough)
-        : null
+      const startAt = input.plan?.startAt === undefined
+        ? undefined
+        : yield* billingDate(input.plan.startAt)
       const adminId = yield* superadminIdFor(session)
       const result = yield* attemptBilling(
         "admin.billing.payment.record",
@@ -1771,7 +1788,10 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
                 ? {
                     plan: input.plan.plan,
                     seats: input.plan.seats,
-                    paidThrough,
+                    chargeAmount: input.plan.chargeAmount,
+                    chargeInterval: input.plan.chargeInterval,
+                    chargeUsdCents: input.plan.chargeUsdCents,
+                    startAt,
                     note: input.plan.note?.trim() || undefined,
                   }
                 : undefined,
@@ -1780,7 +1800,7 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
           ),
       )
       const plan = input.plan
-        ? `, paying for ${input.plan.plan} ${paidThrough ? `through ${paidThrough.toISOString()}` : "with no end date"}`
+        ? `, starting ${describeCreditPlan({ ...input.plan, chargeCurrency: input.currency })} from credit`
         : ""
       yield* attempt(
         "admin.billing.payment.record.notify",
@@ -1798,15 +1818,59 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
       })
     })
 
+const startBillingCreditPlanOperation: AdminOperationsShape["startBillingCreditPlan"] =
+  (subject, input, session, request) =>
+    Effect.gen(function* () {
+      const startAt = input.startAt === undefined
+        ? undefined
+        : yield* billingDate(input.startAt)
+      const adminId = yield* superadminIdFor(session)
+      const subscription = yield* attemptBilling(
+        "admin.billing.credit-plan.start",
+        () =>
+          adminStartCreditPlan(
+            subject,
+            {
+              plan: input.plan,
+              seats: input.seats,
+              chargeAmount: input.chargeAmount,
+              chargeCurrency: input.chargeCurrency,
+              chargeInterval: input.chargeInterval,
+              chargeUsdCents: input.chargeUsdCents,
+              startAt,
+              note: input.note?.trim() || undefined,
+            },
+            adminId,
+          ),
+      )
+      yield* attempt(
+        "admin.billing.credit-plan.start.notify",
+        () =>
+          notifyAdminAction({
+            actionTaken: `Started ${describeCreditPlan(input)} from credit for ${describeBillingSubject(subject)}`,
+            actorEmail: session.email,
+            request,
+          }),
+      )
+      return jsonResult({
+        ok: true as const,
+        subscription: serializeBillingSubscription(subscription),
+      })
+    })
+
 const financialsOperation: AdminOperationsShape["financials"] =
   () =>
     attempt("admin.billing.financials", () => adminFinancialsOverview()).pipe(
       Effect.map((overview) =>
         jsonResult({
           ok: true as const,
+          mrr: overview.mrr,
           live: overview.live.map((row) => ({
             ...serializeBillingSubscription(row),
             isPro: row.isPro,
+            creditBalance: row.creditBalance,
+            creditRunsOutAt: isoOrNull(row.creditRunsOutAt),
+            monthlyUsdCents: row.monthlyUsdCents,
             ...subjectNames(row),
           })),
           balances: overview.balances.map((row) => ({
@@ -1859,6 +1923,7 @@ export const makeAdminManagementOperations = (
     setBillingPlan: setBillingPlanOperation,
     endBillingPlan: endBillingPlanOperation,
     recordBillingPayment: recordBillingPaymentOperation,
+    startBillingCreditPlan: startBillingCreditPlanOperation,
     financials: financialsOperation,
     invites: invitesOperation,
     generateInvites: (input, session, request) =>

@@ -901,6 +901,13 @@ const AdminBillingSubscription = Schema.Struct({
   payerUserId: NullableEntityId,
   stripeSubscriptionId: NullableString,
   livemode: Schema.Boolean,
+  /** Credit plans: what each period draws from credit, in minor units of chargeCurrency. */
+  chargeAmount: NullableInteger,
+  chargeCurrency: NullableString,
+  /** month | year */
+  chargeInterval: NullableString,
+  /** USD value of one charge, for MRR reporting only. */
+  chargeUsdCents: NullableInteger,
   note: NullableString,
   createdAt: Schema.String,
   updatedAt: Schema.String,
@@ -922,6 +929,8 @@ const AdminBillingWalletEntry = Schema.Struct({
   adminId: NullableEntityId,
   /** When the money moved, if recorded later than that; otherwise null and createdAt applies. */
   occurredAt: NullableString,
+  /** Credit plan charges: the start of the period paid for. */
+  periodStart: NullableString,
   createdAt: Schema.String,
 }).annotate({
   identifier: "AdminBillingWalletEntry",
@@ -1013,6 +1022,20 @@ export const AdminBillingPlanResult = Schema.Struct({
   identifier: "AdminBillingPlanResult",
 })
 
+/** A plan paid from credit: one charge per period, drawn in the credit's own currency. */
+const AdminBillingCreditPlanFields = {
+  plan: AdminBillingPlanCode,
+  seats: Schema.optionalKey(Schema.Number),
+  /** Positive minor units drawn per period: USD cents or BTC sats. */
+  chargeAmount: Schema.Number,
+  chargeInterval: Schema.Literals(["month", "year"]),
+  /** USD cents one charge is worth, for MRR; defaults to the list price where one exists. */
+  chargeUsdCents: Schema.optionalKey(Schema.Number),
+  /** ISO 8601 start of the first period (default now); a past date charges the periods since. */
+  startAt: OptionalString,
+  note: OptionalString,
+}
+
 export const AdminBillingRecordPaymentInput = Schema.Struct({
   currency: AdminBillingCurrency,
   /** Positive minor units received: USD cents or BTC sats. Never converted. */
@@ -1021,18 +1044,23 @@ export const AdminBillingRecordPaymentInput = Schema.Struct({
   reference: OptionalString,
   /** ISO 8601 timestamp of when the payment was made, if not now. */
   occurredAt: OptionalString,
-  /** The plan this payment pays for; the whole amount is charged to it. */
+  /**
+   * Starts a plan paid from credit, charged per period in the payment's currency. Without it
+   * the payment only tops up credit and any live credit plan catches up.
+   */
   plan: Schema.optionalKey(
-    Schema.Struct({
-      plan: AdminBillingPlanCode,
-      seats: Schema.optionalKey(Schema.Number),
-      /** ISO 8601 timestamp, or null for no end date. */
-      paidThrough: NullableString,
-      note: OptionalString,
-    }),
+    Schema.Struct(AdminBillingCreditPlanFields),
   ),
 }).annotate({
   identifier: "AdminBillingRecordPaymentInput",
+})
+
+export const AdminBillingCreditPlanInput = Schema.Struct({
+  ...AdminBillingCreditPlanFields,
+  /** The credit currency each period is drawn from. */
+  chargeCurrency: AdminBillingCurrency,
+}).annotate({
+  identifier: "AdminBillingCreditPlanInput",
 })
 
 export const AdminBillingRecordPaymentResult = Schema.Struct({
@@ -1052,10 +1080,32 @@ const AdminBillingSubjectNames = {
 
 export const AdminFinancialsResult = Schema.Struct({
   ok: Schema.Literal(true),
+  /** Recurring revenue of live plans with access, in USD cents per month (ARR is 12x). */
+  mrr: Schema.Struct({
+    mrrUsdCents: WireSafeInteger,
+    arrUsdCents: WireSafeInteger,
+    stripeUsdCents: WireSafeInteger,
+    creditUsdCents: WireSafeInteger,
+    payingPlans: WireSafeInteger,
+    compPlans: WireSafeInteger,
+    /** Live paid plans with no known USD value. */
+    unpricedPlans: WireSafeInteger,
+    /** Monthly draw from credit per currency, in minor units as charged (never converted). */
+    creditMonthlyByCurrency: Schema.Struct({
+      usd: Schema.optionalKey(WireSafeInteger),
+      btc: Schema.optionalKey(WireSafeInteger),
+    }),
+  }),
   live: Schema.Array(
     Schema.Struct({
       ...AdminBillingSubscription.fields,
       isPro: Schema.Boolean,
+      /** Credit plans: the balance in chargeCurrency's minor units. */
+      creditBalance: NullableInteger,
+      /** Credit plans: when the current credit runs out if nothing is added. */
+      creditRunsOutAt: NullableString,
+      /** USD cents per month this plan represents; null when paid but unpriced. */
+      monthlyUsdCents: NullableInteger,
       ...AdminBillingSubjectNames,
     }),
   ),

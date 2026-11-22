@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 335,
+  "count": 337,
   "methodCounts": {
     "DELETE": 1,
     "GET": 158,
-    "POST": 174,
+    "POST": 176,
     "PUT": 1,
     "WS": 1
   },
-  "sha256": "5288be96ed172be69fc63788999f7c0f94a3fe84e7ca5a61be0d79259c28c86c",
+  "sha256": "a573454036e641287617e60c1634f8b5edd1244e88747b83114934d695505b21",
   "routes": [
     {
       "method": "DELETE",
@@ -740,6 +740,10 @@
     },
     {
       "method": "POST",
+      "path": "/admin/spaces/{id}/billing/credit-plan"
+    },
+    {
+      "method": "POST",
       "path": "/admin/spaces/{id}/billing/payment"
     },
     {
@@ -753,6 +757,10 @@
     {
       "method": "POST",
       "path": "/admin/spaces/{id}/billing/wallet"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/{id}/billing/credit-plan"
     },
     {
       "method": "POST",

@@ -258,6 +258,8 @@ const makeOperations = (
     endBillingPlan: () => called("endBillingPlan"),
     recordBillingPayment: () =>
       called("recordBillingPayment"),
+    startBillingCreditPlan: () =>
+      called("startBillingCreditPlan"),
     financials: () => called("financials"),
     ...overrides,
   }
@@ -468,10 +470,12 @@ describe("AdminRouteGroup", () => {
         "POST /admin/email-provider-test",
         "POST /admin/invites/generate",
         "POST /admin/reserved-usernames",
+        "POST /admin/spaces/{id}/billing/credit-plan",
         "POST /admin/spaces/{id}/billing/payment",
         "POST /admin/spaces/{id}/billing/plan",
         "POST /admin/spaces/{id}/billing/plan/end",
         "POST /admin/spaces/{id}/billing/wallet",
+        "POST /admin/users/{id}/billing/credit-plan",
         "POST /admin/users/{id}/billing/payment",
         "POST /admin/users/{id}/billing/plan",
         "POST /admin/users/{id}/billing/plan/end",
@@ -1097,6 +1101,10 @@ describe("AdminRouteGroup", () => {
       payerUserId: null,
       stripeSubscriptionId: null,
       livemode: false,
+      chargeAmount: null,
+      chargeCurrency: null,
+      chargeInterval: null,
+      chargeUsdCents: null,
       note: null,
       createdAt: "2026-11-01T00:00:00.000Z",
       updatedAt: "2026-11-01T00:00:00.000Z",
@@ -1257,8 +1265,9 @@ describe("AdminRouteGroup", () => {
     )
   })
 
-  it("routes payments and the financials overview behind the right guards", async () => {
+  it("routes payments, credit plans and the financials overview behind the right guards", async () => {
     const payments: Array<[unknown, unknown]> = []
+    const creditPlans: Array<[unknown, unknown]> = []
     const credit = {
       id: 11,
       userId: null,
@@ -1270,11 +1279,56 @@ describe("AdminRouteGroup", () => {
       subscriptionId: null,
       adminId: 2,
       occurredAt: "2026-10-01T12:00:00.000Z",
+      periodStart: null,
       createdAt: "2026-11-01T00:00:00.000Z",
+    }
+    const creditPlan = {
+      id: 12,
+      userId: null,
+      spaceId: 9,
+      plan: "business",
+      interval: "none",
+      funding: "wallet",
+      status: "active",
+      seats: 3,
+      paidThrough: "2026-11-01T12:00:00.000Z",
+      cancelAtPeriodEnd: false,
+      payerUserId: null,
+      stripeSubscriptionId: null,
+      livemode: false,
+      chargeAmount: 10_000,
+      chargeCurrency: "btc",
+      chargeInterval: "month",
+      chargeUsdCents: 9_000,
+      note: null,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      endedAt: null,
     }
     const financials = {
       ok: true,
-      live: [],
+      mrr: {
+        mrrUsdCents: 9_000,
+        arrUsdCents: 108_000,
+        stripeUsdCents: 0,
+        creditUsdCents: 9_000,
+        payingPlans: 1,
+        compPlans: 0,
+        unpricedPlans: 0,
+        creditMonthlyByCurrency: { btc: 10_000 },
+      },
+      live: [
+        {
+          ...creditPlan,
+          isPro: true,
+          creditBalance: 40_000,
+          creditRunsOutAt: "2027-03-01T12:00:00.000Z",
+          monthlyUsdCents: 9_000,
+          userName: null,
+          username: null,
+          spaceName: "Fake Space",
+        },
+      ],
       balances: [
         {
           userId: null,
@@ -1313,7 +1367,10 @@ describe("AdminRouteGroup", () => {
               plan: {
                 plan: "business",
                 seats: 3,
-                paidThrough: null,
+                chargeAmount: 10_000,
+                chargeInterval: "month",
+                chargeUsdCents: 9_000,
+                startAt: "2026-10-01T12:00:00.000Z",
               },
             }),
           }),
@@ -1322,7 +1379,83 @@ describe("AdminRouteGroup", () => {
         expect(await payment.json()).toEqual({
           ok: true,
           credit,
-          subscription: null,
+          subscription: creditPlan,
+        })
+
+        const oldPlanShape = await handler(
+          adminRequest("/admin/spaces/9/billing/payment", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              currency: "btc",
+              amount: 50_000,
+              plan: {
+                plan: "business",
+                paidThrough: null,
+              },
+            }),
+          }),
+        )
+        expect(oldPlanShape.status).toBe(422)
+
+        const started = await handler(
+          adminRequest("/admin/users/5/billing/credit-plan", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              plan: "pro",
+              chargeAmount: 1_000,
+              chargeCurrency: "usd",
+              chargeInterval: "year",
+            }),
+          }),
+        )
+        expect(started.status).toBe(200)
+        expect(await started.json()).toEqual({
+          ok: true,
+          subscription: creditPlan,
+        })
+
+        for (const invalid of [
+          { plan: "pro", chargeAmount: 1_000, chargeCurrency: "eur", chargeInterval: "month" },
+          { plan: "pro", chargeAmount: 1_000, chargeCurrency: "usd", chargeInterval: "week" },
+          { plan: "pro", chargeCurrency: "usd", chargeInterval: "month" },
+        ]) {
+          const rejected = await handler(
+            adminRequest("/admin/spaces/9/billing/credit-plan", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+              },
+              body: JSON.stringify(invalid),
+            }),
+          )
+          expect(rejected.status).toBe(422)
+        }
+
+        const stripeManaged = await handler(
+          adminRequest("/admin/spaces/9/billing/credit-plan", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              plan: "team",
+              seats: 2,
+              chargeAmount: 4_000,
+              chargeCurrency: "usd",
+              chargeInterval: "month",
+            }),
+          }),
+        )
+        expect(stripeManaged.status).toBe(409)
+        expect(await stripeManaged.json()).toEqual({
+          ok: false,
+          error: "stripe_managed",
         })
 
         const unknownCurrency = await handler(
@@ -1356,8 +1489,32 @@ describe("AdminRouteGroup", () => {
               plan: {
                 plan: "business",
                 seats: 3,
-                paidThrough: null,
+                chargeAmount: 10_000,
+                chargeInterval: "month",
+                chargeUsdCents: 9_000,
+                startAt: "2026-10-01T12:00:00.000Z",
               },
+            },
+          ],
+        ])
+        expect(creditPlans).toEqual([
+          [
+            { userId: 5 },
+            {
+              plan: "pro",
+              chargeAmount: 1_000,
+              chargeCurrency: "usd",
+              chargeInterval: "year",
+            },
+          ],
+          [
+            { spaceId: 9 },
+            {
+              plan: "team",
+              seats: 2,
+              chargeAmount: 4_000,
+              chargeCurrency: "usd",
+              chargeInterval: "month",
             },
           ],
         ])
@@ -1369,8 +1526,22 @@ describe("AdminRouteGroup", () => {
             payments.push([subject, input])
             return Effect.succeed({
               kind: "json",
-              body: { ok: true, credit, subscription: null },
+              body: { ok: true, credit, subscription: creditPlan },
             })
+          },
+          startBillingCreditPlan: (subject, input) => {
+            creditPlans.push([subject, input])
+            return subject.spaceId !== undefined
+              ? Effect.fail(
+                  new AdminRejected({
+                    status: 409,
+                    error: "stripe_managed",
+                  }),
+                )
+              : Effect.succeed({
+                  kind: "json",
+                  body: { ok: true, subscription: creditPlan },
+                })
           },
           financials: () =>
             Effect.succeed({
@@ -1412,6 +1583,26 @@ describe("AdminRouteGroup", () => {
           ok: false,
           error: "step_up_required",
         })
+
+        const creditPlanWrite = await handler(
+          adminRequest("/admin/spaces/9/billing/credit-plan", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              plan: "team",
+              chargeAmount: 4_000,
+              chargeCurrency: "usd",
+              chargeInterval: "month",
+            }),
+          }),
+        )
+        expect(creditPlanWrite.status).toBe(403)
+        expect(await creditPlanWrite.json()).toEqual({
+          ok: false,
+          error: "step_up_required",
+        })
         expect(staleStepUp.calls).toEqual([])
       },
       {
@@ -1422,6 +1613,16 @@ describe("AdminRouteGroup", () => {
               kind: "json",
               body: {
                 ok: true,
+                mrr: {
+                  mrrUsdCents: 0,
+                  arrUsdCents: 0,
+                  stripeUsdCents: 0,
+                  creditUsdCents: 0,
+                  payingPlans: 0,
+                  compPlans: 0,
+                  unpricedPlans: 0,
+                  creditMonthlyByCurrency: {},
+                },
                 live: [],
                 balances: [],
                 entries: [],

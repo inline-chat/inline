@@ -31,6 +31,7 @@ import {
   subjectOf,
   type Subject,
 } from "./entitlements"
+import { dueCreditPlanIds, renewCreditPlan } from "./credit"
 import { runProPushes, type ProPush } from "./notify"
 
 const log = new Log("billing")
@@ -425,10 +426,16 @@ export const manageableSpaceIds = async (userId: number) => {
 // MARK: - Periodic work
 
 /** Ends lapsed periods and refreshes derived flags. Safe to run on any server. */
-export const sweepBilling = async () => {
+export const sweepBilling = async (now = new Date()) => {
   const pushes: ProPush[] = []
+  // Credit plans renew first, so only plans whose credit ran out lapse below.
+  for (const id of await dueCreditPlanIds(now)) {
+    await db.transaction((tx) => renewCreditPlan(tx, id, now)).catch((error: unknown) => {
+      log.error("billing credit renewal failed", { subscription: id, error })
+    })
+  }
   await db.transaction(async (tx) => {
-    for (const subject of await expireLapsedSubscriptions(tx)) {
+    for (const subject of await expireLapsedSubscriptions(tx, now)) {
       const push = await refreshProFlag(tx, subject)
       if (push) pushes.push(push)
     }
