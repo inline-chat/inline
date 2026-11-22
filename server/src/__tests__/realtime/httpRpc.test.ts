@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test"
+import * as Sentry from "@sentry/bun"
 import { eq } from "drizzle-orm"
 import {
   GetChatHistoryInput,
@@ -27,6 +28,7 @@ import {
 } from "@in/server/realtime/httpRpc"
 import { toRealtimeRpcError } from "@in/server/realtime/rpcErrorBoundary"
 import type { HandlerContext } from "@in/server/realtime/types"
+import { sampleServerTrace } from "@in/server/utils/sentrySampling"
 import { connectionManager } from "@in/server/ws/connections"
 
 setupTestLifecycle()
@@ -255,6 +257,20 @@ describe("stateless HTTP RPC", () => {
 
   test("is mounted on the production application without the per-IP legacy budget", async () => {
     const { chat, token } = await fixture()
+    const methods: unknown[] = []
+    const sentry = Sentry.init({
+      dsn: "https://0123456789abcdef0123456789abcdef@example.invalid/1",
+      tracesSampler: sampleServerTrace,
+      transport: () => ({ send: async () => ({}), flush: async () => true }),
+      beforeSendTransaction: (event) => {
+        if (event.transaction?.endsWith(HTTP_RPC_PATH)) methods.push(event.contexts?.trace?.data?.["rpc.method"])
+        return null
+      },
+    })
+    const sampledTraceHeaders = {
+      "sentry-trace": `${"a".repeat(32)}-${"b".repeat(16)}-1`,
+      baggage: "sentry-sample_rate=1,sentry-sample_rand=0.01",
+    }
     const host = await startCoreHttpServer({
       application: makeCandidateHttpApplication({ middleware: { isProduction: false } }),
       hostname: "127.0.0.1",
@@ -263,7 +279,7 @@ describe("stateless HTTP RPC", () => {
     try {
       const response = await fetch(`http://127.0.0.1:${host.port}${HTTP_RPC_PATH}`, {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": HTTP_RPC_CONTENT_TYPE },
+        headers: { ...sampledTraceHeaders, authorization: `Bearer ${token}`, "content-type": HTTP_RPC_CONTENT_TYPE },
         body: encode(historyCall(chat.id)),
       })
       expect(response.status).toBe(200)
@@ -274,13 +290,16 @@ describe("stateless HTTP RPC", () => {
 
       const unauthenticated = await fetch(`http://127.0.0.1:${host.port}${HTTP_RPC_PATH}`, {
         method: "POST",
-        headers: { "content-type": HTTP_RPC_CONTENT_TYPE },
+        headers: { ...sampledTraceHeaders, "content-type": HTTP_RPC_CONTENT_TYPE },
         body: encode(historyCall(chat.id)),
       })
       expect(unauthenticated.status).toBe(401)
       expect(unauthenticated.headers.get(HTTP_RPC_AUTH_REASON_HEADER)).toBe("INVALID_AUTH")
+      await sentry?.flush(1_000)
+      expect(methods).toEqual(["GET_CHAT_HISTORY", undefined])
     } finally {
       await host.shutdown()
+      await sentry?.close(1_000)
     }
   })
 })

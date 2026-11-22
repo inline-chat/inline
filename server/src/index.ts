@@ -2,6 +2,7 @@ import "dotenv/config"
 import { validateDatabaseStartup } from "@in/server/db"
 import * as Sentry from "@sentry/bun"
 import { beforeSendEvent, beforeSendSpan } from "@in/server/utils/sentryPrivacy"
+import { sampleServerTrace } from "@in/server/utils/sentrySampling"
 import { recordErrorBurst } from "@in/server/modules/monitoring/errorBurstAlerts"
 import {
   API_BASE_URL,
@@ -65,7 +66,7 @@ Sentry.init({
   release: sentryRelease,
   dist: sentryDist,
   environment: NODE_ENV,
-  tracesSampleRate: 1,
+  tracesSampler: sampleServerTrace,
   enabled: shouldEnableServerSentry(NODE_ENV),
   enableLogs: true,
   beforeSendLog,

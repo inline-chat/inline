@@ -1,3 +1,4 @@
+import { getActiveSpan } from "@sentry/bun"
 import {
   ConnectionError_Reason,
   Method,
@@ -256,6 +257,8 @@ export const handleHttpRpcRequest = async (request: Request, options: HttpRpcReq
     if (!HTTP_RPC_METHODS.has(call.method)) {
       return errorResponse(RealtimeRpcError.UnsupportedRpcMethod(call.method))
     }
+
+    getActiveSpan()?.setAttribute("rpc.method", methodName(call.method))
 
     const handlerContext: HandlerContext = {
       userId: identity.userId,
