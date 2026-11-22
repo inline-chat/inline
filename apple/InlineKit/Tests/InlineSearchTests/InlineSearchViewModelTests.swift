@@ -573,6 +573,116 @@ struct InlineSearchViewModelTests {
     #expect(projection.chats.map(\.peer) == [.user(id: secondId), .user(id: firstId)])
   }
 
+  @Test("account-wide hits come first, newest first, then local-only hits")
+  func cloudHitsLeadLocalOnlyHits() async throws {
+    let model = try await cloudModel(client: StaticCloudClient(pagesByCursor: [
+      "": CloudMessageSearchPage(
+        results: [cloudHit(messageId: 9), cloudHit(messageId: 2)],
+        nextCursor: nil,
+        indexIncomplete: true
+      ),
+    ]))
+    model.search("deploy")
+    #expect(model.isSearchingCloudMessages)
+    await model.localTask?.value
+    await model.cloudTask?.value
+    #expect(model.messages.map(\.messageId) == [9, 2, 1])
+    #expect(model.messages.map(\.isChatStored) == [false, true, true])
+    guard case .cloud = model.messages[1] else {
+      Issue.record("The server's copy of a stored hit should lead")
+      return
+    }
+    #expect(model.messagesIndexIncomplete)
+    #expect(model.hasMoreMessages == false)
+    #expect(model.isSearching == false)
+  }
+
+  @Test("the server's cursor pages account-wide hits")
+  func cloudCursorPages() async throws {
+    let model = try await cloudModel(client: StaticCloudClient(pagesByCursor: [
+      "": CloudMessageSearchPage(results: [cloudHit(messageId: 9)], nextCursor: "next", indexIncomplete: false),
+      "next": CloudMessageSearchPage(results: [cloudHit(messageId: 7)], nextCursor: nil, indexIncomplete: false),
+    ]))
+    model.search("deploy")
+    await model.localTask?.value
+    await model.cloudTask?.value
+    // Older local hits wait for the server's older pages.
+    #expect(model.messages.map(\.messageId) == [9])
+    #expect(model.hasMoreMessages)
+    model.loadMoreMessages()
+    await model.moreMessagesTask?.value
+    #expect(model.messages.map(\.messageId) == [9, 7, 2, 1])
+    #expect(model.hasMoreMessages == false)
+  }
+
+  @Test("an unreachable account-wide search keeps this device's hits")
+  func cloudFailureKeepsLocalHits() async throws {
+    let model = try await cloudModel(client: StaticCloudClient(pagesByCursor: [:], fails: true))
+    model.search("deploy")
+    await model.localTask?.value
+    await model.cloudTask?.value
+    #expect(model.messages.map(\.messageId) == [2, 1])
+    #expect(model.cloudMessagesUnavailable)
+    #expect(model.errorText == nil)
+  }
+
+  @Test("an excerpt starts just before its first match")
+  func excerptTrimsToFirstMatch() {
+    let text = String(repeating: "lead ", count: 10) + "deploy now"
+    let (trimmed, ranges) = InlineSearchMessageResult.trimmed(text, highlights: [NSRange(location: 50, length: 6)])
+    #expect(trimmed.hasPrefix("…"))
+    #expect((trimmed as NSString).substring(with: ranges[0]) == "deploy")
+    #expect((trimmed as NSString).length < 30)
+    let short = InlineSearchMessageResult.trimmed("deploy now", highlights: [NSRange(location: 0, length: 6)])
+    #expect(short.0 == "deploy now")
+  }
+
+  @Test("merging lists a message once and keeps local order after server hits")
+  func mergeDedupes() {
+    let merged = InlineSearchMessageResult.merge(
+      cloud: [cloudHit(messageId: 3), cloudHit(messageId: 3)],
+      local: []
+    )
+    #expect(merged.map(\.messageId) == [3])
+    #expect(InlineSearchMessageResult.merge(cloud: nil, local: []).isEmpty)
+  }
+
+  private func cloudModel(client: StaticCloudClient) async throws -> InlineSearchViewModel {
+    let (queue, db) = try makeInMemoryDB()
+    try await queue.write { db in
+      try seedUser(db, id: userId, firstName: "Search", lastName: "User", username: "search")
+      try seedThread(db, id: threadId, title: "Deploy Room", spaceId: nil)
+      try seedDialog(db, chat: try Chat.fetchOne(db, id: threadId)!)
+      try seedMessage(db, chatId: threadId, messageId: 1, fromUserId: userId, text: "deploy one")
+      try seedMessage(db, chatId: threadId, messageId: 2, fromUserId: userId, text: "deploy two")
+    }
+    return InlineSearchViewModel(
+      db: db,
+      scope: InlineSearchScope(includeGlobalUsers: false, messageSort: .newest),
+      limits: InlineSearchLimits(globalDebounceNanoseconds: 0),
+      globalClient: StaticGlobalClient(),
+      cloudClient: client
+    )
+  }
+
+  nonisolated private func cloudHit(messageId: Int64) -> CloudMessageSearchResult {
+    CloudMessageSearchResult(
+      peer: .thread(id: threadId),
+      chatId: threadId,
+      messageId: messageId,
+      date: Date(timeIntervalSince1970: TimeInterval(messageId)),
+      fromUserId: userId,
+      snippet: "deploy \(messageId)",
+      highlights: [NSRange(location: 0, length: 6)],
+      matchedFileName: false,
+      chat: nil,
+      space: nil,
+      peerUser: nil,
+      sender: nil,
+      isChatStored: messageId <= 2
+    )
+  }
+
   nonisolated private func makeInMemoryDB() throws -> (DatabaseQueue, AppDatabase) {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     let appDatabase = try AppDatabase(queue)
@@ -673,6 +783,20 @@ struct InlineSearchViewModelTests {
     guard var chat = try Chat.fetchOne(db, id: chatId) else { return }
     chat.lastMsgId = messageId
     try chat.update(db)
+  }
+}
+
+private struct StaticCloudClient: InlineCloudMessageSearching {
+  let pagesByCursor: [String: CloudMessageSearchPage]
+  var fails = false
+
+  func searchMessages(
+    query _: String,
+    scope _: CloudMessageSearchScope,
+    cursor: String?
+  ) async throws -> CloudMessageSearchPage {
+    if fails { throw URLError(.notConnectedToInternet) }
+    return pagesByCursor[cursor ?? ""] ?? CloudMessageSearchPage(results: [], nextCursor: nil, indexIncomplete: false)
   }
 }
 
