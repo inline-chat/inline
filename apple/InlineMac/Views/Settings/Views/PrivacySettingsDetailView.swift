@@ -7,6 +7,7 @@ struct PrivacySettingsDetailView: View {
   @State private var fileLinkSenders: [LocalFileLinkTrust.Sender] = []
   @State private var isEditingTimeZoneExceptions = false
   @State private var isEditingFocusExceptions = false
+  @State private var isPickingTimeZone = false
   @ObservedObject private var focusReporter = FocusStatusReporter.shared
 
   var body: some View {
@@ -24,6 +25,24 @@ struct PrivacySettingsDetailView: View {
       }
 
       Section {
+        if privacy.supportsManualTimeZone {
+          Toggle(isOn: timeZoneAutomatic) {
+            SettingsRowLabel(
+              .timeZoneAutomatic,
+              description: "Use the time zone of your Mac or iPhone. Turn this off to pick one yourself."
+            )
+          }
+          .settingsSearchAnchor(.timeZoneAutomatic)
+
+          if let manualTimeZone = privacy.manualTimeZone {
+            LabeledContent("Time Zone") {
+              Button("\(manualTimeZone.pickerTitle)…") {
+                isPickingTimeZone = true
+              }
+            }
+          }
+        }
+
         Picker(selection: timeZoneAudience) {
           Text("Everyone").tag(PrivacyRuleValue.Audience.everyone)
           Text("Nobody").tag(PrivacyRuleValue.Audience.nobody)
@@ -111,6 +130,11 @@ struct PrivacySettingsDetailView: View {
         privacy.setFocusStatusRule(rule)
       }
     }
+    .sheet(isPresented: $isPickingTimeZone) {
+      ManualTimeZoneSheet(selection: privacy.manualTimeZone) { timeZone in
+        privacy.setManualTimeZone(timeZone)
+      }
+    }
     .sheet(isPresented: $isEditingTimeZoneExceptions) {
       PrivacyPeopleEditor(
         title: timeZoneRule.exceptionsTitle,
@@ -124,6 +148,16 @@ struct PrivacySettingsDetailView: View {
         privacy.setTimeZoneRule(rule)
       }
     }
+  }
+
+  /// Turning automatic off starts from the time zone this Mac is in.
+  private var timeZoneAutomatic: Binding<Bool> {
+    Binding(
+      get: { privacy.manualTimeZone == nil },
+      set: { automatic in
+        privacy.setManualTimeZone(automatic ? nil : TimeZone.autoupdatingCurrent)
+      }
+    )
   }
 
   private var timeZoneRule: PrivacyRuleValue {
@@ -180,6 +214,29 @@ struct PrivacySettingsDetailView: View {
         Text("Allow Inline under Focus › Focus Status in System Settings to share it from this Mac.")
           .font(.callout)
           .foregroundStyle(.secondary)
+    }
+  }
+}
+
+private struct ManualTimeZoneSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  let selection: TimeZone?
+  let onSelect: (TimeZone) -> Void
+
+  var body: some View {
+    NavigationStack {
+      TimeZonePickerList(selection: selection) { timeZone in
+        onSelect(timeZone)
+        dismiss()
+      }
+      .listStyle(.inset)
+      .navigationTitle("Time Zone")
+      .frame(width: 420, height: 500)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") { dismiss() }
+        }
+      }
     }
   }
 }
