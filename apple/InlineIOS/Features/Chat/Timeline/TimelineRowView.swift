@@ -11,10 +11,10 @@ final class TimelineRowView: UIView {
   enum LabelStyle {
     /// A day: a small pill in the middle.
     case pill
-    /// The unread line: text with a rule either side.
+    /// The unread line: text on a subtle full-width band.
     case line
     case plain
-    /// Tappable text, as the line without its rules (the collapsed-history row).
+    /// Tappable text, as the line without its band (the collapsed-history row).
     case action
     /// A quiet line under the newest message with a moon, as `StatusNoticeCell` draws it.
     case notice
@@ -33,7 +33,8 @@ final class TimelineRowView: UIView {
   private var label: UILabel?
   /// A day row: the plain style of the list's date badge.
   private var pill: TimelineDatePill?
-  private var rules: [UIView] = []
+  /// The unread line's band, behind its label.
+  private var band: UIView?
   private var style = LabelStyle.plain
 
   // Swipe to reply
@@ -230,7 +231,7 @@ final class TimelineRowView: UIView {
     removeLegacy()
     label?.isHidden = true
     pill?.isHidden = true
-    for rule in rules { rule.isHidden = true }
+    band?.isHidden = true
     if let messageView {
       messageView.isHidden = false
       return messageView
@@ -273,7 +274,7 @@ final class TimelineRowView: UIView {
     messageView?.isHidden = true
     label?.isHidden = true
     pill?.isHidden = true
-    for rule in rules { rule.isHidden = true }
+    band?.isHidden = true
     let outgoing = message.message.out == true
     let isService = message.message.isServiceMessage
     let tail: MessageBubbleTailSide = grouping.isLastInGroup && !isService ? (outgoing ? .trailing : .leading) : .none
@@ -419,14 +420,14 @@ final class TimelineRowView: UIView {
     label.text = text
     switch style {
       case .pill: label.font = .preferredFont(forTextStyle: .footnote)
-      // As `MessageListSeparatorCell` draws it, growing with the text size as the row does.
+      // As `MessageListSeparatorCell` draws it (band and text colour set below), growing with the text size.
       case .line, .action: label.font = TimelineLabelMetrics.font(weight: .semibold, traits: traitCollection)
       case .plain: label.font = .preferredFont(forTextStyle: .caption1)
       case .notice: label.font = TimelineLabelMetrics.font(traits: traitCollection)
     }
     // The notice's moon is drawn at its size when shown; a new text size shows the row again.
     label.adjustsFontForContentSizeCategory = style != .notice
-    label.textColor = .secondaryLabel
+    label.textColor = style == .line ? MessageListSeparatorStyle.textColor : .secondaryLabel
     label.accessibilityLabel = nil
     if style == .notice {
       let line = NSMutableAttributedString()
@@ -443,15 +444,13 @@ final class TimelineRowView: UIView {
       label.attributedText = line
       label.accessibilityLabel = text
     }
-    if style == .line, rules.isEmpty {
-      rules = (0 ..< 2).map { _ in
-        let rule = UIView()
-        rule.backgroundColor = .separator
-        addSubview(rule)
-        return rule
-      }
+    if style == .line, band == nil {
+      let band = UIView()
+      band.backgroundColor = MessageListSeparatorStyle.bandColor
+      insertSubview(band, belowSubview: label)
+      self.band = band
     }
-    for rule in rules { rule.isHidden = style != .line }
+    band?.isHidden = style != .line
     // A pill takes its own tap; the label is hidden behind it.
     onLabelTap = style == .pill ? nil : onTap
     label.isUserInteractionEnabled = onLabelTap != nil
@@ -491,13 +490,8 @@ final class TimelineRowView: UIView {
     label.frame = CGRect(
       x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height
     )
-    if rules.count == 2, !rules[0].isHidden {
-      let hairline = 1 / max(1, traitCollection.displayScale)
-      let y = label.frame.midY - hairline / 2
-      rules[0].frame = CGRect(x: 16, y: y, width: max(0, label.frame.minX - 10 - 16), height: hairline)
-      rules[1].frame = CGRect(
-        x: label.frame.maxX + 10, y: y, width: max(0, bounds.width - 16 - label.frame.maxX - 10), height: hairline
-      )
+    if let band, !band.isHidden {
+      band.frame = bounds.insetBy(dx: 0, dy: MessageListSeparatorStyle.bandInset)
     }
   }
 

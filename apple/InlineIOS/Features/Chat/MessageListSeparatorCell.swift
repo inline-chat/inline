@@ -1,11 +1,29 @@
 import UIKit
 
+/// The unread line's look, shared by the collection view's cell and the timeline's row: a subtle
+/// full-width band behind the text, as the macOS list draws it.
+enum MessageListSeparatorStyle {
+  /// Space between the row's edges and the band, top and bottom.
+  static let bandInset: CGFloat = 4
+
+  static let bandColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark
+      ? UIColor.white.withAlphaComponent(0.08)
+      : UIColor.black.withAlphaComponent(0.05)
+  }
+
+  static let textColor = UIColor { traits in
+    traits.userInterfaceStyle == .dark
+      ? UIColor.white.withAlphaComponent(0.72)
+      : UIColor.black.withAlphaComponent(0.6)
+  }
+}
+
 final class MessageListSeparatorCell: UICollectionViewCell {
   static let reuseIdentifier = "MessageListSeparatorCell"
 
   private let label = UILabel()
-  private let leadingLine = UIView()
-  private let trailingLine = UIView()
+  private let band = UIView()
   private var onTap: (() -> Void)?
 
   override init(frame: CGRect) {
@@ -18,10 +36,10 @@ final class MessageListSeparatorCell: UICollectionViewCell {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configure(title: String, showsLines: Bool = true, onTap: (() -> Void)? = nil) {
+  func configure(title: String, showsBand: Bool = true, onTap: (() -> Void)? = nil) {
     label.text = title
-    leadingLine.isHidden = !showsLines
-    trailingLine.isHidden = !showsLines
+    band.isHidden = !showsBand
+    label.textColor = showsBand ? MessageListSeparatorStyle.textColor : .secondaryLabel
     self.onTap = onTap
     label.isUserInteractionEnabled = onTap != nil
   }
@@ -29,8 +47,8 @@ final class MessageListSeparatorCell: UICollectionViewCell {
   override func prepareForReuse() {
     super.prepareForReuse()
     label.text = nil
-    leadingLine.isHidden = false
-    trailingLine.isHidden = false
+    band.isHidden = false
+    label.textColor = MessageListSeparatorStyle.textColor
     label.isUserInteractionEnabled = false
     onTap = nil
   }
@@ -39,34 +57,30 @@ final class MessageListSeparatorCell: UICollectionViewCell {
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
 
     label.font = .systemFont(ofSize: 12, weight: .semibold)
-    label.textColor = .secondaryLabel
+    label.textColor = MessageListSeparatorStyle.textColor
     label.textAlignment = .center
     label.setContentCompressionResistancePriority(.required, for: .horizontal)
     label.translatesAutoresizingMaskIntoConstraints = false
 
-    for line in [leadingLine, trailingLine] {
-      line.backgroundColor = .separator
-      line.translatesAutoresizingMaskIntoConstraints = false
-      contentView.addSubview(line)
-    }
+    band.backgroundColor = MessageListSeparatorStyle.bandColor
+    band.translatesAutoresizingMaskIntoConstraints = false
+    contentView.addSubview(band)
     contentView.addSubview(label)
     label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTapLabel)))
 
+    let inset = MessageListSeparatorStyle.bandInset
     NSLayoutConstraint.activate([
       contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
 
+      band.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+      band.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+      band.topAnchor.constraint(equalTo: contentView.topAnchor, constant: inset),
+      band.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -inset),
+
       label.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
       label.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-
-      leadingLine.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-      leadingLine.trailingAnchor.constraint(equalTo: label.leadingAnchor, constant: -10),
-      leadingLine.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-      leadingLine.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
-
-      trailingLine.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 10),
-      trailingLine.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-      trailingLine.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-      trailingLine.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale),
+      label.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 16),
+      label.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -16),
     ])
   }
 
