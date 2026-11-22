@@ -435,4 +435,29 @@ private extension Comparable {
     #expect(fixture.maxY(100) == 540)
     #expect(fixture.state.layout.position == .latest)
   }
+
+  @Test func `scrolled up, a rotation and back returns to the same place though rows rewrap`() {
+    let portrait = TimelineViewport(width: 320, height: 600, topInset: 50, bottomInset: 60)
+    let landscape = TimelineViewport(width: 600, height: 320, topInset: 50, bottomInset: 60)
+    var fixture = Fixture(viewport: portrait)
+    let rows = Array(0 ..< 100)
+    fixture.apply(.init(rows: rows, scroll: .latest))
+    // Scrolled up, row 60 the lowest visible one, 20 pt of it under the usable bottom.
+    fixture.apply(.init(scroll: .to(60, .bottom(-20))))
+    let before = fixture.y(60)
+    // Landscape: rows rewrap shorter, so row 61 comes into view below row 60.
+    fixture.defaultHeight = 20
+    fixture.apply(.init(viewport: landscape))
+    #expect(fixture.y(61).map { $0 < landscape.usableBottom } == true)
+    fixture.defaultHeight = 50
+    fixture.apply(.init(viewport: portrait))
+    #expect(fixture.y(60) == before)
+    // The reader scrolls: the next rotation keeps what is lowest on screen then.
+    fixture.apply(.init(scroll: .by(-100)))
+    let scrolled = fixture.state.layout.position
+    fixture.apply(.init(viewport: landscape))
+    fixture.apply(.init(viewport: portrait))
+    #expect(fixture.state.layout.position == scrolled)
+    checkInvariants(fixture.state.layout, rows: rows)
+  }
 }

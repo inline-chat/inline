@@ -94,6 +94,10 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
   public var margins: TimelineMargins
   /// Rows from a loaded end at which more history is asked for.
   public var demandThreshold = 12
+  /// The reading row when the view's size started changing, kept through size changes until the reader
+  /// scrolls. A new width rewraps rows, so the lowest visible row can become another one; following that
+  /// row back brought a rotation and back 58 pt off the place it left.
+  private var sizeAnchor: ID?
 
   public init(viewport: TimelineViewport, margins: TimelineMargins = .standard) {
     layout = .empty(viewport: viewport)
@@ -130,6 +134,16 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
     }
 
     let viewport = update.viewport ?? previous.viewport
+    if update.scroll != .preserve { sizeAnchor = nil }
+    let resized = abs(viewport.width - previous.viewport.width) > 0.01
+      || abs(viewport.height - previous.viewport.height) > 0.01
+    if resized, update.scroll == .preserve, case let .row(id, _) = position {
+      if let anchor = sizeAnchor, let placed = previous.placement(for: anchor), index[anchor] != nil {
+        position = .row(anchor, top: placed.y)
+      } else {
+        sizeAnchor = id
+      }
+    }
     if case let .row(id, top) = position, update.followsBottomInset {
       // A reading row keeps its distance from the usable bottom: it follows the keyboard, the
       // composer and a change of the view's height.
@@ -166,6 +180,7 @@ public struct TimelineState<ID: Hashable & Sendable>: Sendable {
       rows: rows, index: index, viewport: viewport, position: position, margins: margins,
       allowsOverscroll: update.allowsOverscroll, spanEnd: spanEnd, height: height
     )
+    if layout.position == .latest { sizeAnchor = nil }
     return Self.change(from: previous, previousIndex: previousIndex, to: layout, index: index, coverage: coverage,
                        demandThreshold: demandThreshold)
   }
