@@ -22,6 +22,8 @@ pub enum AuthError {
     LogoutInProgress,
 }
 
+const MAX_SAVED_SERVER_TIME_OFFSET_MS: u64 = 366 * 86_400_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct SecretsFile {
@@ -32,6 +34,10 @@ struct SecretsFile {
     inline_protocol_permanent: Option<StoredInlineProtocolAuthorization>,
     inline_protocol_temporary: Option<StoredInlineProtocolAuthorization>,
     inline_protocol_pending_challenge: Option<String>,
+    /// Server time minus this machine's clock, saved with the keys so each CLI run starts from
+    /// server time instead of a wrong device clock.
+    #[serde(default)]
+    inline_protocol_server_time_offset_ms: Option<i64>,
     #[serde(default)]
     logout_in_progress: bool,
 }
@@ -211,9 +217,34 @@ impl AuthStore {
         secrets.inline_protocol_permanent = Some(permanent.into());
         secrets.inline_protocol_temporary = Some(temporary.into());
         secrets.inline_protocol_pending_challenge = None;
+        if let Some(offset) = inline_sdk::inline_protocol_server_time_offset_millis() {
+            secrets.inline_protocol_server_time_offset_ms = Some(offset);
+        }
         secrets.logout_in_progress = false;
         secrets.api_base_url = Some(self.api_base_url.clone());
         secrets.updated_at = Some(current_epoch_seconds() as i64);
+        self.write_secrets(&secrets)
+    }
+
+    /// Saves the learned server-time offset when it moved by more than a few seconds since the
+    /// saved one, so the next run starts from the corrected clock. Best effort.
+    pub fn store_inline_protocol_server_time_offset_if_moved(&self) -> Result<(), AuthError> {
+        let Some(offset) = inline_sdk::inline_protocol_server_time_offset_millis() else {
+            return Ok(());
+        };
+        let Some(mut secrets) = self.read_secrets_for_current_api()? else {
+            return Ok(());
+        };
+        if secrets.logout_in_progress || secrets.inline_protocol_temporary.is_none() {
+            return Ok(());
+        }
+        if secrets
+            .inline_protocol_server_time_offset_ms
+            .is_some_and(|saved| saved.abs_diff(offset) < 5_000)
+        {
+            return Ok(());
+        }
+        secrets.inline_protocol_server_time_offset_ms = Some(offset);
         self.write_secrets(&secrets)
     }
 
@@ -245,6 +276,14 @@ impl AuthStore {
         let Some(temporary) = secrets.inline_protocol_temporary else {
             return Ok(None);
         };
+        if inline_sdk::inline_protocol_server_time_offset_millis().is_none() {
+            // A value beyond a year is corrupt, not clock skew.
+            inline_sdk::set_inline_protocol_server_time_offset_millis(
+                secrets
+                    .inline_protocol_server_time_offset_ms
+                    .filter(|offset| offset.unsigned_abs() <= MAX_SAVED_SERVER_TIME_OFFSET_MS),
+            );
+        }
         let permanent = secrets.inline_protocol_permanent.ok_or_else(|| {
             AuthError::InvalidInlineProtocol(
                 "temporary authorization has no permanent owner".into(),

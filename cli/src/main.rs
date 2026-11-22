@@ -6407,9 +6407,8 @@ async fn perform_auth_logout(
         let remote_logout = async {
             if let Some((permanent, temporary)) = inline_protocol_authorizations {
                 let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
-                let now_seconds = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_secs() as i64;
+                // Expiry is server time, so judge it by the learned server clock.
+                let now_seconds = inline_sdk::inline_protocol_estimated_server_unix_seconds();
                 let mut connection =
                     if auth::temporary_authorization_needs_regeneration(&temporary, now_seconds) {
                         let keys = identity::resolve_inline_protocol_public_ring()?;
@@ -6480,13 +6479,13 @@ async fn connect_authenticated_realtime(
 
     if let Some((permanent, temporary)) = auth_store.load_inline_protocol_authorizations()? {
         let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
-        let now_seconds = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
+        // Expiry is server time, so judge it by the learned server clock.
+        let now_seconds = inline_sdk::inline_protocol_estimated_server_unix_seconds();
         if !auth::temporary_authorization_needs_regeneration(&temporary, now_seconds) {
             match identity::reconnect_inline_protocol(&url, temporary).await {
                 Ok(mut cached) => match cached.call(proto::GetMeInput {}).await {
                     Ok(_) if !cached.temporary_key_rotation_due() => {
+                        let _ = auth_store.store_inline_protocol_server_time_offset_if_moved();
                         return Ok(AuthenticatedRealtime::V3 {
                             connection: cached,
                             auth_store: auth_store.clone(),

@@ -54,9 +54,8 @@ impl OwnerSession {
             } => {
                 validate_inline_protocol_authorizations(&permanent, &temporary)?;
                 let url = format!("{}/v3", config.realtime_url.trim_end_matches('/'));
-                let now_seconds = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_secs() as i64;
+                // Expiry is server time, so judge it by the learned server clock.
+                let now_seconds = inline_sdk::inline_protocol_estimated_server_unix_seconds();
                 if !temporary_authorization_needs_regeneration(&temporary, now_seconds) {
                     match identity::reconnect_inline_protocol(&url, temporary).await {
                         Ok(mut cached) => match cached.call(proto::GetMeInput {}).await {
