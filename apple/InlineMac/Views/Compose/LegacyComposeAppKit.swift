@@ -3345,7 +3345,7 @@ extension LegacyComposeAppKit: ComposeImplementation, ComposeAttachmentOwner {
       guard let switched else {
         if attachmentItems[id] != nil {
           ToastCenter.shared.showError(
-            media.isSentAsFile ? "This file can only be sent as a file." : "The original is no longer available."
+            media.isSentAsFile ? "This file can only be sent as a file." : "There's no original file for this item."
           )
         }
         return
