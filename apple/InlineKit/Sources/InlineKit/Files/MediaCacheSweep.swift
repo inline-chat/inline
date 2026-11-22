@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineCompat
 import InlineConfig
 import Logger
 

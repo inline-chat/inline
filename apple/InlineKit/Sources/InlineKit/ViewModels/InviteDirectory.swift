@@ -85,7 +85,7 @@ public enum InviteDirectory {
     guard !query.isEmpty else { return true }
     let name = "\(userInfo.user.firstName ?? "") \(userInfo.user.lastName ?? "")"
       .trimmingCharacters(in: .whitespaces)
-    let usernameQuery = query.trimmingPrefix("@")
+    let usernameQuery = query.compatTrimmingPrefix("@")
     return name.localizedCaseInsensitiveContains(query) ||
       (userInfo.user.username?.localizedCaseInsensitiveContains(usernameQuery) == true) ||
       (includeEmail && userInfo.user.email?.localizedCaseInsensitiveContains(query) == true)
@@ -136,7 +136,7 @@ public enum InviteDirectory {
 
   private static func normalizedQuery(_ value: String) -> String {
     value.trimmingCharacters(in: .whitespacesAndNewlines)
-      .trimmingPrefix("@")
+      .compatTrimmingPrefix("@")
       .lowercased()
   }
 

@@ -1,5 +1,6 @@
 import AsyncAlgorithms
 import Auth
+import InlineCompat
 import InlineProtocol
 
 enum ProtocolSessionEvent: Sendable {

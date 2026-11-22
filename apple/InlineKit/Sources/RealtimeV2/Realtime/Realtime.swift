@@ -2,6 +2,7 @@ import AsyncAlgorithms
 import Auth
 import Combine
 import Foundation
+import InlineCompat
 import InlineProtocol
 import Logger
 

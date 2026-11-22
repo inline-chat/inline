@@ -2,6 +2,7 @@ import AnimatedMedia
 import Auth
 import Foundation
 import GRDB
+import InlineCompat
 import InlineProtocol
 import Logger
 import Nuke
@@ -1198,6 +1199,23 @@ enum FileCacheError: Error {
 
 // MARK: - Video helpers
 
+/// `AVAssetImageGenerator.image(at:)` before iOS 16. Cancelling the generator ends the request
+/// with an error, like the async API.
+private func legacyGeneratedImage(_ generator: AVAssetImageGenerator, at time: CMTime) async throws -> CGImage {
+  try await withCheckedThrowingContinuation { continuation in
+    generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, image, _, result, error in
+      switch (result, image) {
+      case let (.succeeded, image?):
+        continuation.resume(returning: image)
+      case (.cancelled, _):
+        continuation.resume(throwing: error ?? CancellationError())
+      default:
+        continuation.resume(throwing: error ?? CocoaError(.fileReadUnknown))
+      }
+    }
+  }
+}
+
 private func generateThumbnailImage(from asset: AVAsset) async throws -> PlatformImage {
   let imageGenerator = AVAssetImageGenerator(asset: asset)
   imageGenerator.appliesPreferredTrackTransform = true
@@ -1208,7 +1226,10 @@ private func generateThumbnailImage(from asset: AVAsset) async throws -> Platfor
   }) {
     let duration = try await box.asset.load(.duration)
     let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
-    return try await box.generator.image(at: time).image
+    if #available(iOS 16.0, macOS 13.0, *) {
+      return try await box.generator.image(at: time).image
+    }
+    return try await legacyGeneratedImage(box.generator, at: time)
   }
 
   #if os(iOS)

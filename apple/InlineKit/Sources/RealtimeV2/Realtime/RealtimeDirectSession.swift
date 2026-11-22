@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import InlineProtocol
 
 /// A single short-lived realtime connection for auxiliary processes that only issue direct RPCs.

@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import Observation
 #if os(iOS)
 import AVFAudio
@@ -7,8 +8,8 @@ import AVFAudio
 /// A generation fence for the few Inline features that share the process audio session.
 /// It does not own players or decide when they should resume.
 @MainActor
-@Observable
-public final class InlineAudioSession {
+public final class InlineAudioSession: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public static let shared = InlineAudioSession()
 
   public enum Owner: Equatable, Sendable {
@@ -20,33 +21,33 @@ public final class InlineAudioSession {
     fileprivate let generation: UInt64
   }
 
-  public private(set) var current: Token?
-  @ObservationIgnored public var willAcquire: ((Owner) -> Void)?
-  @ObservationIgnored private var generation: UInt64 = 0
-  @ObservationIgnored private let deactivate: () -> Void
-  @ObservationIgnored private let backend: (any InlineAudioSessionBackend)?
-  @ObservationIgnored private var transitionTail: Task<Void, Never>?
+  @Tracked public private(set) var current: Token? = nil
+  public var willAcquire: ((Owner) -> Void)?
+  private var generation: UInt64 = 0
+  private let deactivate: () -> Void
+  private let backend: (any InlineAudioSessionBackend)?
+  private var transitionTail: Task<Void, Never>?
 
-  public private(set) var isQuarantined = false
-  public private(set) var isSpeakerPreferred = false
-  public private(set) var isSpeakerOutputActive = false
-  public private(set) var currentRouteName = "Audio"
-  public private(set) var supportsReceiverRouting = false
+  @Tracked public private(set) var isQuarantined = false
+  @Tracked public private(set) var isSpeakerPreferred = false
+  @Tracked public private(set) var isSpeakerOutputActive = false
+  @Tracked public private(set) var currentRouteName = "Audio"
+  @Tracked public private(set) var supportsReceiverRouting = false
   public var isGridActive: Bool {
     gridToken != nil
   }
 
-  @ObservationIgnored private var gridToken: Token?
-  @ObservationIgnored private var gridEpoch: UInt64 = 0
-  @ObservationIgnored private var gridRequestedEpoch: UInt64 = 0
-  @ObservationIgnored private var gridDemandActive = false
-  @ObservationIgnored private var gridMediaQuiescent = true
-  @ObservationIgnored private var gridDirectionsIdle = true
-  @ObservationIgnored private var gridNativeActive = false
-  @ObservationIgnored private var gridTransitions = 0
-  @ObservationIgnored private var gridRetiring = false
-  @ObservationIgnored private var gridRetirementTask: Task<Void, Never>?
-  @ObservationIgnored private var gridRestartRequired = false
+  private var gridToken: Token?
+  private var gridEpoch: UInt64 = 0
+  private var gridRequestedEpoch: UInt64 = 0
+  private var gridDemandActive = false
+  private var gridMediaQuiescent = true
+  private var gridDirectionsIdle = true
+  private var gridNativeActive = false
+  private var gridTransitions = 0
+  private var gridRetiring = false
+  private var gridRetirementTask: Task<Void, Never>?
+  private var gridRestartRequired = false
 
   struct Configuration: Sendable {
     let category: String
@@ -379,6 +380,9 @@ public final class InlineAudioSession {
   }
   #endif
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension InlineAudioSession: Observable {}
 
 /// A controlled async boundary for testing the same production transition chain without hardware.
 protocol InlineAudioSessionBackend: Sendable {

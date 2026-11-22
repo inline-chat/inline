@@ -1,40 +1,41 @@
 import AVFoundation
 import Foundation
+import InlineCompat
 import Observation
 
 /// The only loaded-player and playback-position owner. Message admission lives in the app adapter.
 @MainActor
-@Observable
-public final class AudioPlaybackCenter {
+public final class AudioPlaybackCenter: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public static let shared = AudioPlaybackCenter(usesSystemIntegration: true)
 
-  public private(set) var item: AudioPlaybackItem?
-  public private(set) var sourceURL: URL?
-  public private(set) var display: AudioPlaybackDisplay?
-  public private(set) var openTarget: AudioPlaybackOpenTarget?
-  public private(set) var isPlaying = false
-  public private(set) var isStarting = false
-  public private(set) var currentTime: TimeInterval = 0
-  public private(set) var duration: TimeInterval = 0
-  public private(set) var playbackRate: Float
-  public private(set) var volume: Float
-  public private(set) var playbackError: String?
+  @Tracked public private(set) var item: AudioPlaybackItem? = nil
+  @Tracked public private(set) var sourceURL: URL? = nil
+  @Tracked public private(set) var display: AudioPlaybackDisplay? = nil
+  @Tracked public private(set) var openTarget: AudioPlaybackOpenTarget? = nil
+  @Tracked public private(set) var isPlaying = false
+  @Tracked public private(set) var isStarting = false
+  @Tracked public private(set) var currentTime: TimeInterval = 0
+  @Tracked public private(set) var duration: TimeInterval = 0
+  @Tracked public private(set) var playbackRate: Float
+  @Tracked public private(set) var volume: Float
+  @Tracked public private(set) var playbackError: String? = nil
 
-  @ObservationIgnored public var canResume: () -> Bool = { true }
-  @ObservationIgnored public var onUserIntent: (() -> Void)?
-  @ObservationIgnored public var onAudioTakeover: ((InlineAudioSession.Owner) -> Void)?
-  @ObservationIgnored private let engine: AudioPlaybackEngine
-  @ObservationIgnored private let userDefaults: UserDefaults
-  @ObservationIgnored private let audioSession: InlineAudioSession
-  @ObservationIgnored private var sessionToken: InlineAudioSession.Token?
-  @ObservationIgnored private var progressTimer: Timer?
-  @ObservationIgnored private var progressVisible = true
-  @ObservationIgnored private var revision: UInt64 = 0
-  @ObservationIgnored private var interruptionIntent: (item: AudioPlaybackItem, revision: UInt64)?
-  @ObservationIgnored private var hasPlayed = false
-  @ObservationIgnored private var permitsSystemControls = false
+  public var canResume: () -> Bool = { true }
+  public var onUserIntent: (() -> Void)?
+  public var onAudioTakeover: ((InlineAudioSession.Owner) -> Void)?
+  private let engine: AudioPlaybackEngine
+  private let userDefaults: UserDefaults
+  private let audioSession: InlineAudioSession
+  private var sessionToken: InlineAudioSession.Token?
+  private var progressTimer: Timer?
+  private var progressVisible = true
+  private var revision: UInt64 = 0
+  private var interruptionIntent: (item: AudioPlaybackItem, revision: UInt64)?
+  private var hasPlayed = false
+  private var permitsSystemControls = false
   #if os(iOS)
-  @ObservationIgnored private var systemIntegration: IOSVoicePlaybackSystem?
+  private var systemIntegration: IOSVoicePlaybackSystem?
   #endif
 
   private static let playbackRateDefaultsKey = "inline.sharedAudioPlayer.playbackRate"
@@ -418,3 +419,6 @@ public final class AudioPlaybackCenter {
     return min(max(Float(value), 0), 1)
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension AudioPlaybackCenter: Observable {}

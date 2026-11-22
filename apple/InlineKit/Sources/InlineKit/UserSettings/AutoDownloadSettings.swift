@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import InlineCompat
 import Network
 import os
 
@@ -107,7 +108,7 @@ final class NetworkCostMonitor: @unchecked Sendable {
   static let shared = NetworkCostMonitor()
 
   private let monitor = NWPathMonitor()
-  private let state = OSAllocatedUnfairLock(initialState: false)
+  private let state = Mutex(false)
 
   private init() {
     monitor.pathUpdateHandler = { [state] path in

@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import InlineKit
 #if os(iOS)
 import InlineAudioPlayback
@@ -11,23 +12,23 @@ import Observation
 import RealtimeV2
 
 @MainActor
-@Observable
-public final class GridRoomService {
-  public private(set) var grids: [Int64: InlineProtocol.Grid] = [:]
-  public private(set) var enabledSpaceIDs = Set<Int64>()
-  public private(set) var homeSpaces: [GridHomeSpace] = []
-  public private(set) var currentCall: GridCurrentCall?
-  public private(set) var callTransferEnabled = false
-  public private(set) var membershipMutationInFlight = false
+public final class GridRoomService: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var grids: [Int64: InlineProtocol.Grid] = [:]
+  @Tracked public private(set) var enabledSpaceIDs = Set<Int64>()
+  @Tracked public private(set) var homeSpaces: [GridHomeSpace] = []
+  @Tracked public private(set) var currentCall: GridCurrentCall? = nil
+  @Tracked public private(set) var callTransferEnabled = false
+  @Tracked public private(set) var membershipMutationInFlight = false
   /// A room made here keeps its stand-in's identity, so it does not appear
   /// twice when the server's room replaces the stand-in.
-  public private(set) var roomIdentityAliases: [Int64: Int64] = [:]
+  @Tracked public private(set) var roomIdentityAliases: [Int64: Int64] = [:]
   public var pendingMembership: GridPendingMembership? {
     membershipMutationInFlight ? submittedMembership : nil
   }
 
-  private var submittedMembership: GridPendingMembership?
-  private var localAdmission: GridLocalAdmission?
+  @Tracked private var submittedMembership: GridPendingMembership? = nil
+  @Tracked private var localAdmission: GridLocalAdmission? = nil
   public var hasLocalAdmission: Bool {
     localAdmission != nil
   }
@@ -36,12 +37,12 @@ public final class GridRoomService {
     currentMediaTarget()?.rtcSessionID.rawValue
   }
 
-  public private(set) var loadingSpaceIDs = Set<Int64>()
-  public private(set) var failedLoadSpaceIDs = Set<Int64>()
-  public private(set) var lastError: String?
-  public private(set) var networkRefreshRevision = 0
-  public private(set) var networkAvailable = true
-  public private(set) var pendingTranscriptionRequestIDs: [Int64: String] = [:]
+  @Tracked public private(set) var loadingSpaceIDs = Set<Int64>()
+  @Tracked public private(set) var failedLoadSpaceIDs = Set<Int64>()
+  @Tracked public private(set) var lastError: String? = nil
+  @Tracked public private(set) var networkRefreshRevision = 0
+  @Tracked public private(set) var networkAvailable = true
+  @Tracked public private(set) var pendingTranscriptionRequestIDs: [Int64: String] = [:]
   public var connectionRecoveryAttempt: Int {
     media.recoveryAttempt
   }
@@ -73,72 +74,72 @@ public final class GridRoomService {
 
   /// On by default: a short cue when you open or close your microphone
   /// yourself. Automatic changes stay silent.
-  public var playsMicrophoneSounds: Bool {
+  @Tracked public var playsMicrophoneSounds: Bool {
     didSet { userDefaults.set(playsMicrophoneSounds, forKey: Self.microphoneSoundsKey) }
   }
 
-  @ObservationIgnored private let userDefaults: UserDefaults
+  private let userDefaults: UserDefaults
   private static let microphoneSoundsKey = "grid.microphoneSounds"
-  @ObservationIgnored private var platformEffects = GridPlatformEffects()
+  private var platformEffects = GridPlatformEffects()
   /// A cold start may resume the call the server still lists for this
   /// session, once, until the user's first explicit Grid action in this
   /// process. Resuming can then never undo a choice the user made.
-  @ObservationIgnored private var mayResumeAfterRestart = true
-  @ObservationIgnored private let realtime: RealtimeV2
-  @ObservationIgnored private let auth: AuthHandle
-  @ObservationIgnored private var authAuthorityObserver: NSObjectProtocol?
-  @ObservationIgnored private var localIntentRevision = 0
-  @ObservationIgnored private var selfReadEpoch = 0
-  @ObservationIgnored private var selfReadSequence = 0
-  @ObservationIgnored private var lastAcceptedSelfReadSequence = 0
-  @ObservationIgnored private var cancelPendingMembershipClaim = false
-  @ObservationIgnored private var retentionTask: Task<Void, Never>?
-  @ObservationIgnored private var pendingRetention: (eligible: Bool, accountToken: AuthAccountMutationToken)?
-  @ObservationIgnored private var lastRetainedMediaEligible = false
-  @ObservationIgnored private let api: GridRoomAPI
-  @ObservationIgnored private let avatarStateSync: GridAvatarStateSync
-  @ObservationIgnored private let membershipSync: GridMembershipSync
-  @ObservationIgnored private let mediaCoordinator: GridMediaCoordinator
-  @ObservationIgnored private let homePreferences: GridHomePreferences
-  @ObservationIgnored private var lifecycleTask: Task<Void, Never>?
-  @ObservationIgnored private var mediaEventsTask: Task<Void, Never>?
-  @ObservationIgnored private var membershipEventsTask: Task<Void, Never>?
-  @ObservationIgnored private var lastNetworkPathSnapshot: GridNetworkPathSnapshot?
-  @ObservationIgnored private let lifecycle: GridRoomLifecycle
-  @ObservationIgnored private var pendingReloadSpaceIDs = Set<Int64>()
-  @ObservationIgnored private var pendingConnectionSpaceIDs = Set<Int64>()
-  @ObservationIgnored private var roomMutationRevisions: [OptimisticRoomMutationKey: Int] = [:]
-  @ObservationIgnored private var pendingRoomMutations: [OptimisticRoomMutationKey: OptimisticRoomMutation] = [:]
-  @ObservationIgnored private var membershipMutationRevision = 0
-  @ObservationIgnored private var retiredMembershipRevision = 0
-  @ObservationIgnored private var pendingMembershipMutations: [Int: OptimisticMembershipMutation] = [:]
+  private var mayResumeAfterRestart = true
+  private let realtime: RealtimeV2
+  private let auth: AuthHandle
+  private var authAuthorityObserver: NSObjectProtocol?
+  private var localIntentRevision = 0
+  private var selfReadEpoch = 0
+  private var selfReadSequence = 0
+  private var lastAcceptedSelfReadSequence = 0
+  private var cancelPendingMembershipClaim = false
+  private var retentionTask: Task<Void, Never>?
+  private var pendingRetention: (eligible: Bool, accountToken: AuthAccountMutationToken)?
+  private var lastRetainedMediaEligible = false
+  private let api: GridRoomAPI
+  private let avatarStateSync: GridAvatarStateSync
+  private let membershipSync: GridMembershipSync
+  private let mediaCoordinator: GridMediaCoordinator
+  private let homePreferences: GridHomePreferences
+  private var lifecycleTask: Task<Void, Never>?
+  private var mediaEventsTask: Task<Void, Never>?
+  private var membershipEventsTask: Task<Void, Never>?
+  private var lastNetworkPathSnapshot: GridNetworkPathSnapshot?
+  private let lifecycle: GridRoomLifecycle
+  private var pendingReloadSpaceIDs = Set<Int64>()
+  private var pendingConnectionSpaceIDs = Set<Int64>()
+  private var roomMutationRevisions: [OptimisticRoomMutationKey: Int] = [:]
+  private var pendingRoomMutations: [OptimisticRoomMutationKey: OptimisticRoomMutation] = [:]
+  private var membershipMutationRevision = 0
+  private var retiredMembershipRevision = 0
+  private var pendingMembershipMutations: [Int: OptimisticMembershipMutation] = [:]
   /// The newest room the user picked while an earlier change is still at the
   /// server. A tap is never dropped: the latest one shows at once and is sent
   /// as soon as the change in flight settles.
-  @ObservationIgnored private var queuedMembership: QueuedMembership?
-  @ObservationIgnored private var membershipRollbackBaseline =
+  private var queuedMembership: QueuedMembership?
+  private var membershipRollbackBaseline =
     GridOptimisticState.MembershipRollbackBaseline()
-  @ObservationIgnored private var acceptedOwnedRoom: GridOwnedRoomAuthority?
-  @ObservationIgnored private var lastAcceptedSnapshotRevisions: [Int64: Int64] = [:]
-  @ObservationIgnored private var spaceAccessRevisions: [Int64: Int] = [:]
-  @ObservationIgnored private var homeLoadRevision = 0
-  @ObservationIgnored private var lastRealtimeConnectionState: RealtimeConnectionState?
-  @ObservationIgnored private var pendingCredentialTarget: GridMediaTarget?
-  @ObservationIgnored private var credentialRetryTask: Task<Void, Never>?
-  @ObservationIgnored private var credentialRetryTarget: GridMediaTarget?
-  @ObservationIgnored private var credentialRetryAttempt = 0
-  @ObservationIgnored private var aloneAutoMuteTask: Task<Void, Never>?
-  @ObservationIgnored private var aloneAutoMuteTarget: GridAloneAutoMuteTarget?
-  @ObservationIgnored private var screenShareAloneTask: Task<Void, Never>?
-  @ObservationIgnored private var screenShareAloneTarget: GridScreenShareAloneTarget?
-  @ObservationIgnored private var screenShareAloneGrace = GridScreenShareAloneGraceState()
-  @ObservationIgnored private var screenShareNotificationTarget: GridMediaTarget?
-  @ObservationIgnored private var observedRemoteScreenShares: [String: GridScreenShareNotice] = [:]
-  @ObservationIgnored private var hasPrimedScreenSharePresentationEdges = false
-  @ObservationIgnored private var pendingScreenShareOpenTasks:
+  private var acceptedOwnedRoom: GridOwnedRoomAuthority?
+  private var lastAcceptedSnapshotRevisions: [Int64: Int64] = [:]
+  private var spaceAccessRevisions: [Int64: Int] = [:]
+  private var homeLoadRevision = 0
+  private var lastRealtimeConnectionState: RealtimeConnectionState?
+  private var pendingCredentialTarget: GridMediaTarget?
+  private var credentialRetryTask: Task<Void, Never>?
+  private var credentialRetryTarget: GridMediaTarget?
+  private var credentialRetryAttempt = 0
+  private var aloneAutoMuteTask: Task<Void, Never>?
+  private var aloneAutoMuteTarget: GridAloneAutoMuteTarget?
+  private var screenShareAloneTask: Task<Void, Never>?
+  private var screenShareAloneTarget: GridScreenShareAloneTarget?
+  private var screenShareAloneGrace = GridScreenShareAloneGraceState()
+  private var screenShareNotificationTarget: GridMediaTarget?
+  private var observedRemoteScreenShares: [String: GridScreenShareNotice] = [:]
+  private var hasPrimedScreenSharePresentationEdges = false
+  private var pendingScreenShareOpenTasks:
     [String: GridPendingScreenShareOpen] = [:]
-  @ObservationIgnored private var mediaInteractionStartedAt: Date?
-  @ObservationIgnored private let log = Log.scoped("GridRoomService")
+  private var mediaInteractionStartedAt: Date?
+  private let log = Log.scoped("GridRoomService")
   private static let aloneMediaGraceSeconds = 5
   private static let connectedCredentialRefreshMargin: TimeInterval = 90
 
@@ -2483,6 +2484,9 @@ public final class GridRoomService {
     }
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension GridRoomService: Observable {}
 
 private struct OptimisticRoomMutationKey: Hashable {
   let roomID: Int64

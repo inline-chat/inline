@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import InlineCompat
 
 public enum RealtimeConnectionDisplayPhase: Sendable {
   case coldStart

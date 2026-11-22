@@ -11,7 +11,7 @@ let package = Package(
   name: "InlineKit",
   defaultLocalization: "en",
   platforms: [
-    .iOS(.v18),
+    .iOS(.v15),
     .macOS(.v15),
   ],
   products: [
@@ -70,6 +70,7 @@ let package = Package(
     ),
   ],
   dependencies: [
+    .package(path: "../InlineCompat"),
     .package(path: "../InlineThumbnailing"),
     .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
     .package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.0"),
@@ -113,12 +114,16 @@ let package = Package(
     // network stack.
     .target(
       name: "InlineNotificationFence",
+      dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
+      ],
       swiftSettings: swiftSettings
     ),
 
     .target(
       name: "Logger",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "Sentry", package: "sentry-cocoa"),
       ],
       swiftSettings: swiftSettings
@@ -127,6 +132,7 @@ let package = Package(
     .target(
       name: "InlineKit",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "ZIPFoundation", package: "ZIPFoundation"),
         .product(name: "InlineThumbnailing", package: "InlineThumbnailing"),
         .product(name: "GRDB", package: "GRDB.swift"),
@@ -155,18 +161,25 @@ let package = Package(
     // can be tested without a database or a network.
     .target(
       name: "InlineObjectCache",
+      dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
+      ],
       swiftSettings: swiftSettings
     ),
 
     .target(
       name: "InlineGrid",
-      dependencies: ["InlineKit", "InlineRTC", "InlineAudioPlayback", "InlineProtocol", "RealtimeV2", "Auth", "Logger"],
+      dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
+        "InlineKit", "InlineRTC", "InlineAudioPlayback", "InlineProtocol", "RealtimeV2", "Auth", "Logger",
+      ],
       swiftSettings: swiftSettings
     ),
 
     .target(
       name: "InlineRTC",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "Atomics", package: "swift-atomics"),
         .product(name: "LiveKit", package: "client-sdk-swift"),
         "Logger",
@@ -197,12 +210,16 @@ let package = Package(
 
     .target(
       name: "InlineAudioPlayback",
+      dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
+      ],
       swiftSettings: swiftSettings
     ),
 
     .target(
       name: "Auth",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         "InlineConfig",
         "InlineNotificationFence",
         "InlineProtocol",
@@ -214,6 +231,7 @@ let package = Package(
     .target(
       name: "InlineProtocol",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "BigInt", package: "BigInt"),
         .product(name: "SwiftProtobuf", package: "swift-protobuf"),
         "Logger",
@@ -236,6 +254,7 @@ let package = Package(
     .target(
       name: "RealtimeV2",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         .product(name: "Collections", package: "swift-collections"),
         "Logger",
@@ -252,6 +271,7 @@ let package = Package(
     .target(
       name: "InlineSearch",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         "InlineKit",
       ],
       swiftSettings: swiftSettings

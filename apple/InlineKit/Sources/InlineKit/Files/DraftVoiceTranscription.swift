@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import InlineProtocol
 
 /// Sends transient dictation audio without creating a stored file or chat message.

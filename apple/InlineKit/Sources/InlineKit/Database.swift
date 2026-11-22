@@ -1,6 +1,7 @@
 @_spi(LogoutCoordinator) import Auth
 import Foundation
 import GRDB
+import InlineCompat
 import InlineConfig
 import Logger
 import os
@@ -148,7 +149,7 @@ private enum PersistentStoreStartupDiagnostics {
 public final class AppDatabase: @unchecked Sendable {
   private struct Storage: Sendable {
     let writer: any DatabaseWriter
-    var poolPassphrase: OSAllocatedUnfairLock<String>?
+    var poolPassphrase: Mutex<String>?
   }
 
   public let translationPreferences = DialogTranslationPreferences()
@@ -243,7 +244,7 @@ public final class AppDatabase: @unchecked Sendable {
   }
 
   convenience init(path: String, passphrase: String) throws {
-    let currentPassphrase = OSAllocatedUnfairLock(initialState: passphrase)
+    let currentPassphrase = Mutex(passphrase)
     let configuration = Self.makeConfiguration { currentPassphrase.withLock { $0 } }
     let pool = try DatabasePool(path: path, configuration: configuration)
     try self.init(storage: Storage(writer: pool, poolPassphrase: currentPassphrase))
@@ -2243,7 +2244,7 @@ public extension AppDatabase {
     }
 
     var pathForLog = databasePath
-    pathForLog.replace(" ", with: "\\ ")
+    pathForLog = pathForLog.replacingOccurrences(of: " ", with: "\\ ")
     log.debug("Database path: \(pathForLog)")
     let keySpan = PerformanceTrace.begin("DatabaseKeyLoad", category: .launch)
     let keyAvailability = DatabaseKeyStore.load()

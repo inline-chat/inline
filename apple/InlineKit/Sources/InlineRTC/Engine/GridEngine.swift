@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import Logger
 
 /// Process-wide ownership boundary for realtime media.

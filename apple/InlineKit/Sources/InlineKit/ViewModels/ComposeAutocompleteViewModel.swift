@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import InlineCompat
 import Logger
 
 public enum ComposeAutocompleteKind: String, Hashable, Sendable {

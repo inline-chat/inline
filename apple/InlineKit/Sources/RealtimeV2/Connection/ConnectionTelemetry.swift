@@ -1,6 +1,6 @@
 import Foundation
 import Logger
-import Synchronization
+import InlineCompat
 
 /// One connection state change in fixed program vocabulary.
 struct ConnectionTransitionRecord: Sendable, Equatable {

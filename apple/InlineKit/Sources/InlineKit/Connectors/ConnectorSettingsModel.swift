@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import InlineProtocol
 import Observation
 
@@ -62,16 +63,16 @@ public enum ConnectorSettingsClient {
 }
 
 @MainActor
-@Observable
-public final class ConnectorSettingsModel {
-  public private(set) var snapshot: ConnectorSettingsSnapshot?
-  public var selectedScopeID: ScopeID?
-  public private(set) var isLoading = false
-  public private(set) var activeProviders: Set<ConnectorKind> = []
-  public var errorMessage: String?
+public final class ConnectorSettingsModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var snapshot: ConnectorSettingsSnapshot? = nil
+  @Tracked public var selectedScopeID: ScopeID? = nil
+  @Tracked public private(set) var isLoading = false
+  @Tracked public private(set) var activeProviders: Set<ConnectorKind> = []
+  @Tracked public var errorMessage: String? = nil
 
   private let initialScopeID: ScopeID?
-  private var loadGeneration = 0
+  @Tracked private var loadGeneration = 0
 
   public init(initialScopeID: ScopeID? = nil) {
     self.initialScopeID = initialScopeID
@@ -185,3 +186,6 @@ public final class ConnectorSettingsModel {
     return normalized.prefix(1).uppercased() + normalized.dropFirst()
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension ConnectorSettingsModel: Observable {}

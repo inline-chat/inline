@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 public protocol ConnectionTimeProvider: Sendable {
   func now() -> Date

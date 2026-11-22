@@ -1,6 +1,7 @@
 import Auth
 import Foundation
 import GRDB
+import InlineCompat
 import InlineProtocol
 
 public enum ChatFileKind: String, CaseIterable, Sendable {

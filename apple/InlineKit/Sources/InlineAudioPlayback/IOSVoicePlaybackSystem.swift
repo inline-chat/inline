@@ -177,7 +177,7 @@ final class IOSVoicePlaybackSystem {
     }
   }
 
-  @available(iOS, introduced: 18.0, deprecated: 27.0)
+  @available(iOS, introduced: 15.0, deprecated: 27.0)
   private func observeLegacyInterruptions() {
     let notifications = NotificationCenter.default
     notifications.publisher(for: AVAudioSession.interruptionNotification)

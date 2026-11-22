@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import Logger
 import Observation
 import RealtimeV2
@@ -8,24 +9,24 @@ import RealtimeV2
 /// server's user search. Excludes bots, the viewer and people who already
 /// have access.
 @MainActor
-@Observable
-public final class BotAccessPeopleSearch {
-  public var query = "" {
+public final class BotAccessPeopleSearch: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public var query = "" {
     didSet { if query != oldValue { search() } }
   }
 
-  public private(set) var results: [UserInfo] = []
-  public private(set) var isSearching = false
+  @Tracked public private(set) var results: [UserInfo] = []
+  @Tracked public private(set) var isSearching = false
 
   /// People already listed, kept out of the results.
-  @ObservationIgnored public var excludedUserIDs: Set<Int64> = []
+  public var excludedUserIDs: Set<Int64> = []
 
-  @ObservationIgnored private let botUserID: Int64
-  @ObservationIgnored private let realtime: RealtimeV2
-  @ObservationIgnored private let database: AppDatabase
-  @ObservationIgnored private var task: Task<Void, Never>?
-  @ObservationIgnored private var generation: UInt64 = 0
-  @ObservationIgnored private let log = Log.scoped("BotAccessPeopleSearch")
+  private let botUserID: Int64
+  private let realtime: RealtimeV2
+  private let database: AppDatabase
+  private var task: Task<Void, Never>?
+  private var generation: UInt64 = 0
+  private let log = Log.scoped("BotAccessPeopleSearch")
 
   public init(botUserID: Int64, realtime: RealtimeV2, database: AppDatabase = .shared) {
     self.botUserID = botUserID
@@ -85,3 +86,6 @@ public final class BotAccessPeopleSearch {
     users.filter { !$0.user.bot && $0.user.pendingSetup != true }
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension BotAccessPeopleSearch: Observable {}

@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import InlineKit
 import Observation
 
@@ -30,20 +31,20 @@ public struct InChatSearchTiming: Sendable {
 /// pages could hold a message between the current match and the next loaded one, the step
 /// waits for that page.
 @MainActor
-@Observable
-public final class InChatSearchViewModel {
-  public private(set) var query = ""
-  public private(set) var matches: [InChatSearchHit] = []
-  public private(set) var currentMessageId: Int64?
-  public private(set) var remoteFailed = false
+public final class InChatSearchViewModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var query = ""
+  @Tracked public private(set) var matches: [InChatSearchHit] = []
+  @Tracked public private(set) var currentMessageId: Int64? = nil
+  @Tracked public private(set) var remoteFailed = false
   /// Every match in the chat according to the server, once its count arrives.
-  public private(set) var totalCount: Int?
+  @Tracked public private(set) var totalCount: Int? = nil
 
   /// Called when the current match changes so the chat can scroll to it.
-  @ObservationIgnored public var onSelect: (@MainActor (InChatSearchSelection) -> Void)?
+  public var onSelect: (@MainActor (InChatSearchSelection) -> Void)?
 
   /// Hides matches in history the viewer cleared for themselves.
-  public var collapsedMaxId: Int64? {
+  @Tracked public var collapsedMaxId: Int64? = nil {
     didSet {
       guard collapsedMaxId != oldValue else { return }
       rebuildMatches()
@@ -119,18 +120,18 @@ public final class InChatSearchViewModel {
     InChatSearchText.snippet(InChatSearchText.matchedText(of: hit, query: query), query: query)
   }
 
-  @ObservationIgnored private let source: any InChatSearchSource
-  @ObservationIgnored private let timing: InChatSearchTiming
-  @ObservationIgnored private let pageLimit: Int
-  @ObservationIgnored private var token: UInt64 = 0
-  private var countTask: Task<Void, Never>?
+  private let source: any InChatSearchSource
+  private let timing: InChatSearchTiming
+  private let pageLimit: Int
+  private var token: UInt64 = 0
+  @Tracked private var countTask: Task<Void, Never>? = nil
   /// The user moved off the newest match, so later pages must not move the selection.
-  @ObservationIgnored private var userNavigated = false
+  private var userNavigated = false
   /// `matches` still shows the previous query's results while the new query's first page
   /// loads, so typing never flashes an empty list. They are shown, never stepped through.
-  @ObservationIgnored private var showsStaleMatches = false
-  private var pendingStep: Step?
-  private var sources: [SourceState] = [SourceState(kind: .local), SourceState(kind: .remote)]
+  private var showsStaleMatches = false
+  @Tracked private var pendingStep: Step? = nil
+  @Tracked private var sources: [SourceState] = [SourceState(kind: .local), SourceState(kind: .remote)]
 
   private enum Step { case older }
 
@@ -441,6 +442,9 @@ public final class InChatSearchViewModel {
     }
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension InChatSearchViewModel: Observable {}
 
 /// Snippet and highlight text for search matches.
 public enum InChatSearchText {

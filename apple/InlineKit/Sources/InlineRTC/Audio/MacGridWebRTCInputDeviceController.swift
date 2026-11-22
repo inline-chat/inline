@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import InlineCompat
 import LiveKit
 
 struct MacGridWebRTCInputDevice: Equatable, Sendable {

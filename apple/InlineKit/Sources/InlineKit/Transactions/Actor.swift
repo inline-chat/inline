@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import RealtimeV2
 
 /// Runs transactions, retry, etc

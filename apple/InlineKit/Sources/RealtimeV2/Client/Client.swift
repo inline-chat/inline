@@ -1,3 +1,4 @@
+import InlineCompat
 import InlineConfig
 import AsyncAlgorithms
 import Auth

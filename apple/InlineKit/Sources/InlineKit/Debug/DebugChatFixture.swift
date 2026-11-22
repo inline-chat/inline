@@ -3,6 +3,7 @@ import CoreGraphics
 import Foundation
 import GRDB
 import ImageIO
+import InlineCompat
 import InlineProtocol
 
 /// A signed-out, in-memory chat for list development (debug builds only):

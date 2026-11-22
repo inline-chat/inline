@@ -1,5 +1,6 @@
 import Auth
 import Combine
+import InlineCompat
 import Logger
 import Observation
 import SwiftUI
@@ -21,16 +22,19 @@ public struct ComposeActionPresentation: Equatable, Sendable {
 }
 
 @MainActor
-@Observable
-public final class ComposeActionActivityState {
+public final class ComposeActionActivityState: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public let peer: Peer
-  public fileprivate(set) var presentation: ComposeActionPresentation?
+  @Tracked public fileprivate(set) var presentation: ComposeActionPresentation? = nil
 
   fileprivate init(peer: Peer, presentation: ComposeActionPresentation?) {
     self.peer = peer
     self.presentation = presentation
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension ComposeActionActivityState: Observable {}
 
 private final class WeakComposeActionActivityState {
   weak var value: ComposeActionActivityState?

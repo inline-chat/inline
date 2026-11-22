@@ -1,5 +1,6 @@
 import Collections
 import Foundation
+import InlineCompat
 import Logger
 
 enum TransactionDequeueResult {

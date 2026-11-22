@@ -1,4 +1,4 @@
-import Synchronization
+import InlineCompat
 
 /// Dialogs this device has marked read locally while the server has not confirmed it yet.
 ///

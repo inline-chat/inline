@@ -2,6 +2,7 @@ import Auth
 import Combine
 import Foundation
 import GRDB
+import InlineCompat
 import Logger
 import RealtimeV2
 

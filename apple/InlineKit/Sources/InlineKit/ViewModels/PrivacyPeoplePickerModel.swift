@@ -2,6 +2,7 @@ import Auth
 import Combine
 import Foundation
 import GRDB
+import InlineCompat
 import Logger
 
 /// Backs the people list of a privacy exception: who is in it, plus DM

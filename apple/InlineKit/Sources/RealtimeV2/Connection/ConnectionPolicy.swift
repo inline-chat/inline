@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 public struct ConnectionPolicy: Sendable {
   public var backoff: BackoffPolicy

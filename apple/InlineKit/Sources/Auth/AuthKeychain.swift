@@ -1,7 +1,7 @@
 import Foundation
 import InlineConfig
 import Security
-import Synchronization
+import InlineCompat
 
 enum KeychainReadOutcome<Value> {
   case success(Value, usedFallback: Bool)

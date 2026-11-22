@@ -1,8 +1,10 @@
 import Combine
 import Foundation
 import GRDB
+import InlineCompat
 import InlineProtocol
 import Logger
+import Observation
 import RealtimeV2
 
 /// The Threads tab of chat info: subthreads of a thread, or the threads the
@@ -11,8 +13,8 @@ import RealtimeV2
 /// Rows render from the local database first and refresh from the server, so
 /// the tab opens with what is cached instead of a spinner.
 @MainActor
-@Observable
-public final class PeerInfoThreadsModel {
+public final class PeerInfoThreadsModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public struct Item: Identifiable, Equatable, Sendable {
     public var chat: Chat
     public var dialog: Dialog?
@@ -39,20 +41,20 @@ public final class PeerInfoThreadsModel {
     case common(userId: Int64)
   }
 
-  public private(set) var items: [Item] = []
-  public private(set) var loadState: LoadState = .idle
+  @Tracked public private(set) var items: [Item] = []
+  @Tracked public private(set) var loadState: LoadState = .idle
 
   public let source: Source
 
-  @ObservationIgnored private let db: AppDatabase
-  @ObservationIgnored private let realtime: RealtimeV2
-  @ObservationIgnored private var observation: AnyCancellable?
-  @ObservationIgnored private var loadTask: Task<Void, Never>?
+  private let db: AppDatabase
+  private let realtime: RealtimeV2
+  private var observation: AnyCancellable?
+  private var loadTask: Task<Void, Never>?
   /// Common chats come back as an ordered list of IDs; the database holds the rows.
-  @ObservationIgnored private var commonChatIds: [Int64] = []
-  @ObservationIgnored private var nextCommonOffset: InlineProtocol.ChatListOffset?
-  @ObservationIgnored private var nextSubthreadOffset: Int64?
-  @ObservationIgnored private let log = Log.scoped("PeerInfoThreads")
+  private var commonChatIds: [Int64] = []
+  private var nextCommonOffset: InlineProtocol.ChatListOffset?
+  private var nextSubthreadOffset: Int64?
+  private let log = Log.scoped("PeerInfoThreads")
 
   private static let pageSize: Int32 = 30
   /// Common-chat IDs per user for this launch, so reopening a profile is instant.
@@ -268,3 +270,6 @@ public final class PeerInfoThreadsModel {
     }
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension PeerInfoThreadsModel: Observable {}

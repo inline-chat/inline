@@ -1,6 +1,7 @@
 import Auth
 import Foundation
 import GRDB
+import InlineCompat
 import InlineProtocol
 import Logger
 import RealtimeV2

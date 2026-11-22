@@ -1,6 +1,6 @@
 import Foundation
 import Security
-import Synchronization
+import InlineCompat
 @preconcurrency import UserNotifications
 
 /// The account that owns this device's notifications, published by the app for its notification

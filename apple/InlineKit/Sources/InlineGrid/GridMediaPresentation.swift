@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import InlineKit
 import InlineRTC
 import Observation
@@ -16,53 +17,53 @@ public enum GridScreenCaptureIssue: Equatable, Sendable {
 }
 
 @MainActor
-@Observable
-public final class GridMediaPresentation {
-  public fileprivate(set) var connectionState: GridMediaConnectionStatus = .disconnected
+public final class GridMediaPresentation: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public fileprivate(set) var connectionState: GridMediaConnectionStatus = .disconnected
   /// True while an established or attempted call is being recovered, as
   /// opposed to its first connect. Retries never surface as errors.
-  public fileprivate(set) var isReconnecting = false
-  public fileprivate(set) var audioState: InlineRTCAudioState = .cold
-  public fileprivate(set) var isAudioSafetyPaused = false
-  public fileprivate(set) var isMicrophoneEnabled: Bool
-  public fileprivate(set) var autoUnmuteOnJoin: Bool
-  public fileprivate(set) var autoMuteWhenAlone: Bool
-  public fileprivate(set) var inputDevices: [AudioInputDeviceDescriptor] = []
-  public fileprivate(set) var automaticInputDeviceName = "System Default"
-  public fileprivate(set) var activeInputDeviceID: String?
-  public fileprivate(set) var inputSelection: AudioInputSelection
-  public fileprivate(set) var isFallingBackToAutomaticInput = false
-  public fileprivate(set) var outputDevices: [AudioOutputDeviceDescriptor] = []
-  public fileprivate(set) var automaticOutputDeviceName = "System Default"
-  public fileprivate(set) var activeOutputDeviceID: String?
-  public fileprivate(set) var outputSelection: AudioOutputSelection
-  public fileprivate(set) var isFallingBackToAutomaticOutput = false
-  public fileprivate(set) var participantAudioLevels: [String: Float] = [:]
-  public fileprivate(set) var participantScreenShareIntents: [String: Bool] = [:]
-  public fileprivate(set) var connectedParticipantIdentities = Set<String>()
-  public fileprivate(set) var hasParticipantMediaSnapshot = false
-  public fileprivate(set) var reconnectCount = 0
-  public fileprivate(set) var recoveryAttempt = 0
-  public fileprivate(set) var lastConnectDurationMilliseconds: Int?
-  public fileprivate(set) var lastDisconnectDurationMilliseconds: Int?
-  public fileprivate(set) var lastConnectionError: String?
-  public fileprivate(set) var isMicrophoneCapturePrepared = false
-  public fileprivate(set) var microphonePermission: InlineRTCMicrophonePermission = .notDetermined
-  public fileprivate(set) var microphonePublicationState: InlineRTCMicrophoneState = .notRequested
-  public fileprivate(set) var localAudioFlowState: InlineRTCAudioFlowState = .unknown
-  public fileprivate(set) var remoteAudioFlowStates: [String: InlineRTCAudioFlowState] = [:]
-  public fileprivate(set) var abandonedProviderOperationCount = 0
-  public fileprivate(set) var providerCircuitOpen = false
-  public fileprivate(set) var outputVolume: Float
-  public fileprivate(set) var screenCaptureSources: [InlineRTCScreenCaptureSource] = []
-  public fileprivate(set) var selectedScreenCaptureSource: InlineRTCScreenCaptureSource?
-  public fileprivate(set) var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
-  public fileprivate(set) var screenShareEpisodeID: UInt64 = 0
-  public fileprivate(set) var screenShareState: InlineRTCScreenShareState = .off
-  public fileprivate(set) var screenShares: [InlineRTCScreenShare] = []
-  public fileprivate(set) var isRefreshingScreenCaptureSources = false
-  public fileprivate(set) var screenCaptureError: String?
-  public fileprivate(set) var screenCaptureIssue: GridScreenCaptureIssue?
+  @Tracked public fileprivate(set) var isReconnecting = false
+  @Tracked public fileprivate(set) var audioState: InlineRTCAudioState = .cold
+  @Tracked public fileprivate(set) var isAudioSafetyPaused = false
+  @Tracked public fileprivate(set) var isMicrophoneEnabled: Bool
+  @Tracked public fileprivate(set) var autoUnmuteOnJoin: Bool
+  @Tracked public fileprivate(set) var autoMuteWhenAlone: Bool
+  @Tracked public fileprivate(set) var inputDevices: [AudioInputDeviceDescriptor] = []
+  @Tracked public fileprivate(set) var automaticInputDeviceName = "System Default"
+  @Tracked public fileprivate(set) var activeInputDeviceID: String? = nil
+  @Tracked public fileprivate(set) var inputSelection: AudioInputSelection
+  @Tracked public fileprivate(set) var isFallingBackToAutomaticInput = false
+  @Tracked public fileprivate(set) var outputDevices: [AudioOutputDeviceDescriptor] = []
+  @Tracked public fileprivate(set) var automaticOutputDeviceName = "System Default"
+  @Tracked public fileprivate(set) var activeOutputDeviceID: String? = nil
+  @Tracked public fileprivate(set) var outputSelection: AudioOutputSelection
+  @Tracked public fileprivate(set) var isFallingBackToAutomaticOutput = false
+  @Tracked public fileprivate(set) var participantAudioLevels: [String: Float] = [:]
+  @Tracked public fileprivate(set) var participantScreenShareIntents: [String: Bool] = [:]
+  @Tracked public fileprivate(set) var connectedParticipantIdentities = Set<String>()
+  @Tracked public fileprivate(set) var hasParticipantMediaSnapshot = false
+  @Tracked public fileprivate(set) var reconnectCount = 0
+  @Tracked public fileprivate(set) var recoveryAttempt = 0
+  @Tracked public fileprivate(set) var lastConnectDurationMilliseconds: Int? = nil
+  @Tracked public fileprivate(set) var lastDisconnectDurationMilliseconds: Int? = nil
+  @Tracked public fileprivate(set) var lastConnectionError: String? = nil
+  @Tracked public fileprivate(set) var isMicrophoneCapturePrepared = false
+  @Tracked public fileprivate(set) var microphonePermission: InlineRTCMicrophonePermission = .notDetermined
+  @Tracked public fileprivate(set) var microphonePublicationState: InlineRTCMicrophoneState = .notRequested
+  @Tracked public fileprivate(set) var localAudioFlowState: InlineRTCAudioFlowState = .unknown
+  @Tracked public fileprivate(set) var remoteAudioFlowStates: [String: InlineRTCAudioFlowState] = [:]
+  @Tracked public fileprivate(set) var abandonedProviderOperationCount = 0
+  @Tracked public fileprivate(set) var providerCircuitOpen = false
+  @Tracked public fileprivate(set) var outputVolume: Float
+  @Tracked public fileprivate(set) var screenCaptureSources: [InlineRTCScreenCaptureSource] = []
+  @Tracked public fileprivate(set) var selectedScreenCaptureSource: InlineRTCScreenCaptureSource? = nil
+  @Tracked public fileprivate(set) var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
+  @Tracked public fileprivate(set) var screenShareEpisodeID: UInt64 = 0
+  @Tracked public fileprivate(set) var screenShareState: InlineRTCScreenShareState = .off
+  @Tracked public fileprivate(set) var screenShares: [InlineRTCScreenShare] = []
+  @Tracked public fileprivate(set) var isRefreshingScreenCaptureSources = false
+  @Tracked public fileprivate(set) var screenCaptureError: String? = nil
+  @Tracked public fileprivate(set) var screenCaptureIssue: GridScreenCaptureIssue? = nil
 
   fileprivate init(
     microphoneEnabled: Bool,
@@ -107,6 +108,9 @@ public final class GridMediaPresentation {
   }
 
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension GridMediaPresentation: Observable {}
 
 /// The sole writer for `GridMediaPresentation`. Views only receive the
 /// presentation reference and therefore cannot feed state back into its owner.

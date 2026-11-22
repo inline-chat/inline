@@ -2,6 +2,7 @@ import Auth
 import Combine
 import Foundation
 import GRDB
+import InlineCompat
 import InlineProtocol
 import Logger
 import Observation
@@ -243,8 +244,8 @@ private struct BotChatSettingsQueuedMutation: Equatable, Sendable {
 }
 
 @MainActor
-@Observable
-public final class BotChatSettingsCoordinator {
+public final class BotChatSettingsCoordinator: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public typealias DiscoveryFetcher = @Sendable (Peer) async throws -> InlineProtocol.GetPeerBotsResult
   public typealias SettingsRequester = @Sendable (Peer, Int64) async throws -> InlineProtocol.BotChatSettingsResponse
   public typealias ItemInvoker = @Sendable (
@@ -256,39 +257,39 @@ public final class BotChatSettingsCoordinator {
   ) async throws -> InlineProtocol.BotChatSettingsResponse
 
   public let peer: Peer
-  public private(set) var bots: [BotChatSettingsBot] = []
+  @Tracked public private(set) var bots: [BotChatSettingsBot] = []
   /// Bots in this chat that declare the Output setting (`BotCapability.outputMode`),
   /// such as the Hermes and OpenClaw plugins, which report no runtime.
-  public private(set) var outputModeBotIDs: Set<Int64> = []
-  public private(set) var selectedBotID: Int64?
-  public private(set) var isDiscovering = false
-  public private(set) var isMutating = false
+  @Tracked public private(set) var outputModeBotIDs: Set<Int64> = []
+  @Tracked public private(set) var selectedBotID: Int64? = nil
+  @Tracked public private(set) var isDiscovering = false
+  @Tracked public private(set) var isMutating = false
 
-  @ObservationIgnored private let discoveryFetcher: DiscoveryFetcher
-  @ObservationIgnored private let settingsRequester: SettingsRequester
-  @ObservationIgnored private let itemInvoker: ItemInvoker
-  @ObservationIgnored private let retryDelays: [Duration]
-  @ObservationIgnored private let transientMutationRetryDelay: Duration
-  @ObservationIgnored private let documentCache: BotChatSettingsDocumentCache?
-  @ObservationIgnored private let accountID: Int64?
-  @ObservationIgnored private let log = Log.scoped("BotChatSettingsCoordinator")
-  private var stateByBotID: [Int64: BotChatSettingsBotState] = [:]
-  @ObservationIgnored private var didManuallySelectBot = false
-  @ObservationIgnored private var generation = 0
-  @ObservationIgnored private var discoveryGeneration = 0
-  @ObservationIgnored private var discoveryTask: Task<Void, Never>?
-  @ObservationIgnored private var retryTask: Task<Void, Never>?
-  @ObservationIgnored private var requestTask: Task<Void, Never>?
-  @ObservationIgnored private var requestBotID: Int64?
-  @ObservationIgnored private var requestTraceID: Int?
-  @ObservationIgnored private var mutationTask: Task<Void, Never>?
-  @ObservationIgnored private var activeMutation: BotChatSettingsQueuedMutation?
-  @ObservationIgnored private var mutationQueue: [BotChatSettingsQueuedMutation] = []
-  @ObservationIgnored private var confirmedDocumentByBotID: [Int64: BotChatSettingsModel.Document] = [:]
-  @ObservationIgnored private var discoveryObservation: AnyCancellable?
-  @ObservationIgnored private var cacheObservation: AnyCancellable?
-  @ObservationIgnored private var hasReceivedDiscoverySnapshot = false
-  @ObservationIgnored private var nextTraceID = 1
+  private let discoveryFetcher: DiscoveryFetcher
+  private let settingsRequester: SettingsRequester
+  private let itemInvoker: ItemInvoker
+  private let retryDelays: [Duration]
+  private let transientMutationRetryDelay: Duration
+  private let documentCache: BotChatSettingsDocumentCache?
+  private let accountID: Int64?
+  private let log = Log.scoped("BotChatSettingsCoordinator")
+  @Tracked private var stateByBotID: [Int64: BotChatSettingsBotState] = [:]
+  private var didManuallySelectBot = false
+  private var generation = 0
+  private var discoveryGeneration = 0
+  private var discoveryTask: Task<Void, Never>?
+  private var retryTask: Task<Void, Never>?
+  private var requestTask: Task<Void, Never>?
+  private var requestBotID: Int64?
+  private var requestTraceID: Int?
+  private var mutationTask: Task<Void, Never>?
+  private var activeMutation: BotChatSettingsQueuedMutation?
+  private var mutationQueue: [BotChatSettingsQueuedMutation] = []
+  private var confirmedDocumentByBotID: [Int64: BotChatSettingsModel.Document] = [:]
+  private var discoveryObservation: AnyCancellable?
+  private var cacheObservation: AnyCancellable?
+  private var hasReceivedDiscoverySnapshot = false
+  private var nextTraceID = 1
   // TODO(bot-chat-settings): observe bot-initiated capability and document invalidations after V1.
 
   public convenience init(peer: Peer, realtime: RealtimeV2 = Api.realtime) {
@@ -1103,6 +1104,9 @@ public final class BotChatSettingsCoordinator {
     return result.response
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension BotChatSettingsCoordinator: Observable {}
 
 private enum BotChatSettingsCoordinatorError: Error { case invalidResponse }
 

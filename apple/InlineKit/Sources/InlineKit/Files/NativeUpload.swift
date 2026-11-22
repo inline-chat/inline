@@ -2,6 +2,7 @@ import CryptoKit
 import Darwin
 import Foundation
 import Auth
+import InlineCompat
 import InlineConfig
 import InlineProtocol
 import Logger

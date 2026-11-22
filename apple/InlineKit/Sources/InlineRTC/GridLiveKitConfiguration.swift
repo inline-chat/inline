@@ -339,11 +339,14 @@ struct InlineRTCConfiguration: Equatable, Sendable {
     manager.isVoiceProcessingBypassed = voiceProcessing.bypassed
     manager.isVoiceProcessingAGCEnabled = voiceProcessing.automaticGainControlEnabled
     manager.isAdvancedDuckingEnabled = voiceProcessing.advancedDuckingEnabled
-    manager.duckingLevel = switch voiceProcessing.duckingLevel {
-    case .systemDefault: .default
-    case .minimum: .min
-    case .medium: .mid
-    case .maximum: .max
+    // Ducking levels need iOS 17; older systems keep Apple's fixed ducking amount.
+    if #available(iOS 17.0, *) {
+      manager.duckingLevel = switch voiceProcessing.duckingLevel {
+      case .systemDefault: .default
+      case .minimum: .min
+      case .medium: .mid
+      case .maximum: .max
+      }
     }
   }
 }

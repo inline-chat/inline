@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import Logger
 
 /// Copies a remote avatar into the profile cache once per account and photo, however many

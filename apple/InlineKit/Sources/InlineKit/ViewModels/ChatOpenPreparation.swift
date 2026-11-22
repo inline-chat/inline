@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 /// Reads a chat's first message window off the main actor, so its view is built complete in the
 /// first frame. Navigation waits for the read before showing a chat, as Telegram waits for a chat

@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import Logger
 
 protocol GridRTCDriver: Sendable {

@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 import Sentry
 import Darwin
-import Synchronization
+import InlineCompat
 
 /// Supplies a bounded, non-sensitive error discriminator for release telemetry.
 /// Values must describe only static program state (for example, an enum case or

@@ -1,3 +1,4 @@
+import InlineCompat
 public struct GridScreenShareAloneGraceState: Equatable, Sendable {
   public static let graceDuration: Duration = .seconds(5)
 

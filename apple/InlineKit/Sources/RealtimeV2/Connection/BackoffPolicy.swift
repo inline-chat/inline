@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 public struct BackoffPolicy: Sendable {
   public var delay: @Sendable (_ attempt: UInt32) -> Duration

@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import ZIPFoundation
 
 /// Creates an owned ZIP archive. Call from an attachment worker, never from

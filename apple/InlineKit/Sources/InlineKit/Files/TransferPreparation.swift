@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 enum TransferPreparationError: LocalizedError, Sendable {
   case timedOut

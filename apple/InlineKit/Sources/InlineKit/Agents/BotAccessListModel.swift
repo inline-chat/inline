@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import InlineCompat
 import Logger
 import Observation
 
@@ -8,20 +9,20 @@ import Observation
 /// `AgentGrantStore`; this holds what the screen adds around it (names of
 /// spaces and groups, what is in flight, the last failure).
 @MainActor
-@Observable
-public final class BotAccessListModel {
+public final class BotAccessListModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public let botUserID: Int64
 
   /// The viewer's spaces, by name: the ones they can share a bot with.
-  public private(set) var spaces: [Space] = []
-  public private(set) var groupsByID: [Int64: UserGroup] = [:]
-  public private(set) var pending: Set<AgentGrantSubject> = []
-  public private(set) var isChangingOpen = false
-  public var errorMessage: String?
+  @Tracked public private(set) var spaces: [Space] = []
+  @Tracked public private(set) var groupsByID: [Int64: UserGroup] = [:]
+  @Tracked public private(set) var pending: Set<AgentGrantSubject> = []
+  @Tracked public private(set) var isChangingOpen = false
+  @Tracked public var errorMessage: String? = nil
 
-  @ObservationIgnored private let database: AppDatabase
-  @ObservationIgnored private let grants: AgentGrantStore
-  @ObservationIgnored private let log = Log.scoped("BotAccessListModel")
+  private let database: AppDatabase
+  private let grants: AgentGrantStore
+  private let log = Log.scoped("BotAccessListModel")
 
   public init(botUserID: Int64, database: AppDatabase = .shared, grants: AgentGrantStore? = nil) {
     self.botUserID = botUserID
@@ -132,3 +133,6 @@ public final class BotAccessListModel {
     }
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension BotAccessListModel: Observable {}

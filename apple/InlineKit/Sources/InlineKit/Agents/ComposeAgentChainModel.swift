@@ -1,7 +1,7 @@
 import Combine
 import Foundation
+import InlineCompat
 import InlineProtocol
-import Observation
 
 /// Where Agent control failures show; each app points this at its toasts.
 @MainActor
@@ -252,7 +252,7 @@ public final class ComposeAgentChainModel: ObservableObject {
 
   private func observeSettings() {
     guard let settings else { return }
-    withObservationTracking {
+    withCompatObservationTracking {
       _ = settings.selectedBotID
       _ = settings.selectedState
     } onChange: { [weak self] in

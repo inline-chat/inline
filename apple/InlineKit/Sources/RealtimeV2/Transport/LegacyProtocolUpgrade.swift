@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import InlineConfig
 import InlineProtocol
 import Logger

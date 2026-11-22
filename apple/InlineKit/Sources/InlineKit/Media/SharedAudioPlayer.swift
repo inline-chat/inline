@@ -3,8 +3,8 @@ import Combine
 import Foundation
 import GRDB
 @_exported import InlineAudioPlayback
+import InlineCompat
 import Logger
-import Observation
 #if os(iOS)
 import UIKit
 #endif
@@ -435,7 +435,7 @@ public final class SharedAudioPlayer: ObservableObject {
   }
 
   private func observeCenter() {
-    withObservationTracking {
+    withCompatObservationTracking {
       _ = center.state
       _ = center.isStarting
       _ = center.playbackError

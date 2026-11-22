@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import Logger
 import Network
 

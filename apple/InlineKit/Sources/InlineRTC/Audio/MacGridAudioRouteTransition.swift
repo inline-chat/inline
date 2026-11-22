@@ -1,6 +1,7 @@
 #if os(macOS)
 import CoreAudio
 import Foundation
+import InlineCompat
 
 struct MacGridAudioOutputRouteSignature: Equatable {
   let deviceID: AudioDeviceID

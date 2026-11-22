@@ -1,3 +1,4 @@
+import InlineCompat
 /// What one remote fetch did with its batch. An ID in neither set was not there to fetch.
 public struct ObjectFetchOutcome<ID: Hashable & Sendable>: Sendable {
   /// Fetched and saved.

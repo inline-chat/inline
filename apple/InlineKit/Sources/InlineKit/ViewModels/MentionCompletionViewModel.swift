@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineCompat
 import Observation
 
 /// Where a mention candidate comes from, strongest first. A user reachable
@@ -186,15 +187,15 @@ public enum MentionCompletionItem: Hashable, Identifiable, Sendable {
 }
 
 @MainActor
-@Observable
-public final class MentionCompletionViewModel {
-  public private(set) var query = ""
-  public private(set) var items: [MentionCompletionItem] = []
-  public private(set) var selectedIndex = 0
+public final class MentionCompletionViewModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var query = ""
+  @Tracked public private(set) var items: [MentionCompletionItem] = []
+  @Tracked public private(set) var selectedIndex = 0
 
-  @ObservationIgnored private var candidates: [MentionCompletionCandidate] = []
-  @ObservationIgnored private let currentUserId: @MainActor () -> Int64?
-  @ObservationIgnored private let locale: Locale
+  private var candidates: [MentionCompletionCandidate] = []
+  private let currentUserId: @MainActor () -> Int64?
+  private let locale: Locale
 
   public init(
     currentUserId: @escaping @MainActor () -> Int64? = { Auth.shared.getCurrentUserId() },
@@ -428,6 +429,9 @@ public final class MentionCompletionViewModel {
     text.filter { !$0.isWhitespace }
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension MentionCompletionViewModel: Observable {}
 
 private enum MentionMatchRank: Int, CaseIterable {
   case exactUsername

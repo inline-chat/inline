@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 /// Opt-in call diagnostics for people debugging their own situation. Nothing
 /// here drives media behavior; it is a read-only projection of WebRTC stats and

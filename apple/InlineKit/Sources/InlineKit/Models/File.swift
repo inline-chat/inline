@@ -311,7 +311,7 @@ public extension File {
     return
       FileHelpers
         .getDocumentsDirectory()
-        .appending(path: localPath)
+        .compatAppending(path: localPath)
   }
 
   func getRemoteURL() -> URL? {

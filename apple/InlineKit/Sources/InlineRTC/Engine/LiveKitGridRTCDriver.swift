@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import LiveKit
 import Logger
 

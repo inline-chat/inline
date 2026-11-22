@@ -1,27 +1,28 @@
 import Foundation
+import InlineCompat
 import Logger
 import Observation
 
 /// Drives the Data & Storage pages on both platforms.
 @MainActor
-@Observable
-public final class StorageUsageViewModel {
-  public private(set) var report: StorageUsageReport?
+public final class StorageUsageViewModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var report: StorageUsageReport? = nil
   /// The latest totals: from the report, or from the last scan until one finishes.
-  public private(set) var summary: StorageUsageSummary
-  public private(set) var isScanning = false
-  public private(set) var isClearing = false
-  public var selectedCategories: Set<StorageCategory> = Set(StorageCategory.allCases)
-  public private(set) var keepMedia: StorageKeepMedia = .current
-  public private(set) var cacheLimit: StorageCacheLimit = .current
-  public var errorMessage: String?
+  @Tracked public private(set) var summary: StorageUsageSummary
+  @Tracked public private(set) var isScanning = false
+  @Tracked public private(set) var isClearing = false
+  @Tracked public var selectedCategories: Set<StorageCategory> = Set(StorageCategory.allCases)
+  @Tracked public private(set) var keepMedia: StorageKeepMedia = .current
+  @Tracked public private(set) var cacheLimit: StorageCacheLimit = .current
+  @Tracked public var errorMessage: String? = nil
 
   /// True once there is something to draw: a finished scan or the last one's totals.
   public var hasSummary: Bool { report != nil || hasCachedSummary }
 
-  @ObservationIgnored private let service: StorageUsageService
-  @ObservationIgnored private let hasCachedSummary: Bool
-  @ObservationIgnored private let log = Log.scoped("StorageUsageViewModel")
+  private let service: StorageUsageService
+  private let hasCachedSummary: Bool
+  private let log = Log.scoped("StorageUsageViewModel")
 
   public init(service: StorageUsageService = .shared) {
     self.service = service
@@ -158,6 +159,9 @@ public final class StorageUsageViewModel {
     return await remove(items)
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension StorageUsageViewModel: Observable {}
 
 public extension Int64 {
   /// Byte count formatted the way Finder shows file sizes.

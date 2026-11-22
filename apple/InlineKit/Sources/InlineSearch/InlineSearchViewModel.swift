@@ -1,19 +1,20 @@
 import Foundation
+import InlineCompat
 import InlineKit
 import Observation
 
 @MainActor
-@Observable
-public final class InlineSearchViewModel {
-  public private(set) var query = ""
-  public private(set) var chats: [InlineSearchChatResult] = []
-  public private(set) var messages: [LocalMessageSearchResult] = []
-  public private(set) var globalUsers: [InlineSearchGlobalUserResult] = []
-  public private(set) var hasMoreMessages = false
-  public private(set) var isSearchingLocal = false
-  public private(set) var isSearchingGlobal = false
-  public private(set) var isLoadingMoreMessages = false
-  public private(set) var errorText: String?
+public final class InlineSearchViewModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var query = ""
+  @Tracked public private(set) var chats: [InlineSearchChatResult] = []
+  @Tracked public private(set) var messages: [LocalMessageSearchResult] = []
+  @Tracked public private(set) var globalUsers: [InlineSearchGlobalUserResult] = []
+  @Tracked public private(set) var hasMoreMessages = false
+  @Tracked public private(set) var isSearchingLocal = false
+  @Tracked public private(set) var isSearchingGlobal = false
+  @Tracked public private(set) var isLoadingMoreMessages = false
+  @Tracked public private(set) var errorText: String? = nil
 
   public var isSearching: Bool {
     isSearchingLocal || isSearchingGlobal || isLoadingMoreMessages
@@ -23,17 +24,17 @@ public final class InlineSearchViewModel {
     chats.isEmpty == false || messages.isEmpty == false || globalUsers.isEmpty == false
   }
 
-  @ObservationIgnored private let engine: InlineSearchEngine
-  @ObservationIgnored private let limits: InlineSearchLimits
-  @ObservationIgnored private var scope: InlineSearchScope
-  @ObservationIgnored private var searchToken: UInt64 = 0
+  private let engine: InlineSearchEngine
+  private let limits: InlineSearchLimits
+  private var scope: InlineSearchScope
+  private var searchToken: UInt64 = 0
   // Internal read access lets integration tests await actual completion,
   // including stale requests, without adding sleeps or replacing the engine.
-  @ObservationIgnored private(set) var localTask: Task<Void, Never>?
-  @ObservationIgnored private(set) var globalTask: Task<Void, Never>?
-  @ObservationIgnored private(set) var moreMessagesTask: Task<Void, Never>?
-  @ObservationIgnored private var localErrorText: String?
-  @ObservationIgnored private var globalErrorText: String?
+  private(set) var localTask: Task<Void, Never>?
+  private(set) var globalTask: Task<Void, Never>?
+  private(set) var moreMessagesTask: Task<Void, Never>?
+  private var localErrorText: String?
+  private var globalErrorText: String?
 
   public init(
     db: AppDatabase,
@@ -230,3 +231,6 @@ public final class InlineSearchViewModel {
     errorText = values.isEmpty ? nil : values.joined(separator: "\n")
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension InlineSearchViewModel: Observable {}

@@ -500,7 +500,7 @@ public extension User {
     }
     return
       User.getProfileCacheDirectory()
-        .appending(path: profileLocalPath)
+        .compatAppending(path: profileLocalPath)
   }
 
   func getRemoteURL() -> URL? {

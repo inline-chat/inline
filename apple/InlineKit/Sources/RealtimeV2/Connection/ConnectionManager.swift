@@ -1,5 +1,6 @@
 import AsyncAlgorithms
 import Foundation
+import InlineCompat
 import Logger
 
 private struct ConnectionCommand: Sendable {

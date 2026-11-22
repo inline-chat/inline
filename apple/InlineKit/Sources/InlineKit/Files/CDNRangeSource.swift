@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import InlineCompat
 import InlineProtocol
 
 /// HTTP failures from the CDN range source, classified for the download engine's retry policy.

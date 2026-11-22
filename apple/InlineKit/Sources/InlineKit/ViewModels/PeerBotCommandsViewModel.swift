@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import InlineProtocol
 import Logger
 import Observation
@@ -257,19 +258,19 @@ public struct ManagedBotAgentDraft: Equatable, Sendable {
 /// The single client update path for bot-owner Agent management. Ordinary
 /// discovery intentionally stays on the sanitized BotAgentDirectory path.
 @MainActor
-@Observable
-public final class BotAgentsSettingsModel {
-  public private(set) var agents: [InlineProtocol.BotAgent] = []
-  public private(set) var skills: [InlineProtocol.BotSkill] = []
-  public private(set) var isLoading = false
-  public private(set) var isLoadingSkills = false
-  public private(set) var savingAgentId: Int64?
-  public private(set) var deletingAgentIds: Set<Int64> = []
-  public private(set) var errorMessage: String?
-  public private(set) var skillErrorMessage: String?
+public final class BotAgentsSettingsModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
+  @Tracked public private(set) var agents: [InlineProtocol.BotAgent] = []
+  @Tracked public private(set) var skills: [InlineProtocol.BotSkill] = []
+  @Tracked public private(set) var isLoading = false
+  @Tracked public private(set) var isLoadingSkills = false
+  @Tracked public private(set) var savingAgentId: Int64? = nil
+  @Tracked public private(set) var deletingAgentIds: Set<Int64> = []
+  @Tracked public private(set) var errorMessage: String? = nil
+  @Tracked public private(set) var skillErrorMessage: String? = nil
 
   public let botUserId: Int64
-  @ObservationIgnored private let directory: BotAgentDirectory
+  private let directory: BotAgentDirectory
 
   public init(botUserId: Int64, directory: BotAgentDirectory = .shared) {
     self.botUserId = botUserId
@@ -414,6 +415,9 @@ public final class BotAgentsSettingsModel {
   }
 }
 
+@available(iOS 17.0, macOS 14.0, *)
+extension BotAgentsSettingsModel: Observable {}
+
 public struct PeerBotCommandSuggestion: Identifiable, Hashable, Sendable {
   public let command: String
   public let description: String
@@ -501,8 +505,8 @@ public final class PeerBotCommandsStore {
 }
 
 @MainActor
-@Observable
-public final class PeerBotCommandsViewModel {
+public final class PeerBotCommandsViewModel: CompatObservable {
+  public let observationRegistrar = CompatObservationRegistrar()
   public enum LoadState: Equatable {
     case idle
     case loading
@@ -513,18 +517,18 @@ public final class PeerBotCommandsViewModel {
   public typealias Fetcher = @Sendable (Peer) async throws -> [InlineProtocol.PeerBotCommands]
   public typealias UserInfoResolver = @MainActor (Int64, InlineProtocol.User) -> UserInfo
 
-  public private(set) var peer: Peer
-  public private(set) var loadState: LoadState = .idle
-  public private(set) var botGroups: [InlineProtocol.PeerBotCommands] = []
+  @Tracked public private(set) var peer: Peer
+  @Tracked public private(set) var loadState: LoadState = .idle
+  @Tracked public private(set) var botGroups: [InlineProtocol.PeerBotCommands] = []
 
-  @ObservationIgnored private let fetcher: Fetcher
-  @ObservationIgnored private let userInfoResolver: UserInfoResolver
-  @ObservationIgnored private let store: PeerBotCommandsStore
-  @ObservationIgnored private let now: @MainActor () -> Date
-  @ObservationIgnored private let cacheTTL: TimeInterval
-  @ObservationIgnored private let log = Log.scoped("PeerBotCommandsViewModel")
-  @ObservationIgnored private var loadTask: Task<Void, Never>?
-  @ObservationIgnored private var loadGeneration = UUID()
+  private let fetcher: Fetcher
+  private let userInfoResolver: UserInfoResolver
+  private let store: PeerBotCommandsStore
+  private let now: @MainActor () -> Date
+  private let cacheTTL: TimeInterval
+  private let log = Log.scoped("PeerBotCommandsViewModel")
+  private var loadTask: Task<Void, Never>?
+  private var loadGeneration = UUID()
 
   public init(peer: Peer, fetcher: @escaping Fetcher) {
     self.peer = peer
@@ -781,6 +785,9 @@ public final class PeerBotCommandsViewModel {
     return "Bot"
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension PeerBotCommandsViewModel: Observable {}
 
 private enum PeerBotCommandsViewModelError: Error {
   case invalidResponse

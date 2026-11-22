@@ -2,6 +2,7 @@ import Auth
 import CryptoKit
 import Darwin
 import Foundation
+import InlineCompat
 import InlineProtocol
 import RealtimeV2
 

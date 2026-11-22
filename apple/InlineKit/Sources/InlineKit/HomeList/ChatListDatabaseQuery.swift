@@ -348,7 +348,7 @@ public enum ChatListDatabaseQuery {
 
   private static func preparedAvatarLocalURL(path: String?, directory: URL?) -> URL? {
     guard let path, path.isEmpty == false, let directory else { return nil }
-    let url = directory.appending(path: path)
+    let url = directory.compatAppending(path: path)
     return FileManager.default.fileExists(atPath: url.path) ? url : nil
   }
 

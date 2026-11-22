@@ -1,6 +1,7 @@
 import AVFoundation
 import Atomics
 import Foundation
+import InlineCompat
 import LiveKit
 import Logger
 

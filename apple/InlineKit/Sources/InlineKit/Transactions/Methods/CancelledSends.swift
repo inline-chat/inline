@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+import InlineCompat
 
 /// Sends the user cancelled after they may already have reached the server.
 ///

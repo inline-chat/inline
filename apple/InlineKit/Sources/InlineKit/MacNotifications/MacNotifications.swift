@@ -6,6 +6,7 @@ import Foundation
 import GRDB
 import ImageIO
 import InlineAvatarCore
+import InlineCompat
 import InlineProtocol
 import Logger
 import UniformTypeIdentifiers

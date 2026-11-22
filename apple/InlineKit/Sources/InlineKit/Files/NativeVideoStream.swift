@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import InlineCompat
 import UniformTypeIdentifiers
 
 /// Plays a video while it downloads natively. AVFoundation's reads are served from the
