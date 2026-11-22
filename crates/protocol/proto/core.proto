@@ -4115,6 +4115,12 @@ message PrivacySettings {
   // If false, voice messages this user sends are not sent to a transcription
   // service. Absent means true (the default).
   optional bool transcribe_voice_messages = 5;
+
+  // An IANA time zone the user picked instead of their device's. Empty means
+  // automatic: the time zone follows the user's Apple devices. Absent leaves
+  // the current choice unchanged on save, and from a server means it does not
+  // support a manual time zone.
+  optional string manual_time_zone = 6;
 }
 
 // Who can see one piece of the user's information. The user always sees their own.
