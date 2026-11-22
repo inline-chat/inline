@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import InlineCompat
 @preconcurrency import QuickLookThumbnailing
 import UniformTypeIdentifiers
 

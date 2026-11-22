@@ -1,5 +1,5 @@
 import Foundation
-import Synchronization
+import InlineCompat
 
 /// Process-wide LRU of computed tokens, bounded by the total UTF-16 length of
 /// the cached sources. Lookups are synchronous so views can color code on

@@ -2,6 +2,7 @@ import CoreGraphics
 import CoreText
 import Foundation
 import ImageIO
+import InlineCompat
 import InlineMath
 import UniformTypeIdentifiers
 

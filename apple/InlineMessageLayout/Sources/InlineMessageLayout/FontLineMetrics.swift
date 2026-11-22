@@ -1,7 +1,7 @@
 import CoreGraphics
 import CoreText
 import Foundation
-import Synchronization
+import InlineCompat
 
 /// How tall each line is and where its baseline sits.
 public enum TextLineHeight: Hashable, Sendable {

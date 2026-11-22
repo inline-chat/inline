@@ -38,7 +38,9 @@ extension TimelineTiming {
         spring.duration = CFTimeInterval(duration)
         // As the system keyboard's own animation is set up (read on device, iOS 27.2).
         spring.timingFunction = CAMediaTimingFunction(name: .linear)
-        spring.allowsOverdamping = false
+        if #available(iOS 17.0, *) {
+          spring.allowsOverdamping = false
+        }
         animation = spring
       case let .curve(duration, c1x, c1y, c2x, c2y):
         animation = CABasicAnimation(keyPath: keyPath)

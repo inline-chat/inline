@@ -1,4 +1,5 @@
 #if canImport(UIKit)
+import InlineCompat
 import QuartzCore
 import TimelineCore
 import UIKit

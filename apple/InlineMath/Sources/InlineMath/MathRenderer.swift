@@ -1,6 +1,6 @@
 import Foundation
 import CoreGraphics
-import Synchronization
+import InlineCompat
 internal import SwiftMathCore
 
 public struct MathColor: Sendable, Hashable {

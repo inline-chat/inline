@@ -4,11 +4,12 @@ import PackageDescription
 
 let package = Package(
   name: "InlineSyntaxHighlighting",
-  platforms: [.macOS(.v15), .iOS(.v18)],
+  platforms: [.macOS(.v15), .iOS(.v15)],
   products: [
     .library(name: "InlineSyntaxHighlighting", targets: ["InlineSyntaxHighlighting"]),
   ],
   dependencies: [
+    .package(path: "../InlineCompat"),
     .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter.git", exact: "0.9.0"),
     .package(url: "https://github.com/alex-pinkus/tree-sitter-swift.git", exact: "0.7.3-with-generated-files"),
     .package(url: "https://github.com/tree-sitter/tree-sitter-typescript.git", exact: "0.23.2"),
@@ -26,6 +27,7 @@ let package = Package(
     .target(
       name: "InlineSyntaxHighlighting",
       dependencies: [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
         .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
         .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),

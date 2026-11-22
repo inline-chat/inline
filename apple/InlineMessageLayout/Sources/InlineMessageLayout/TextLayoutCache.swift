@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import Synchronization
+import InlineCompat
 
 /// Thread-safe cache of typeset text, bounded by the UTF-16 length it holds.
 ///

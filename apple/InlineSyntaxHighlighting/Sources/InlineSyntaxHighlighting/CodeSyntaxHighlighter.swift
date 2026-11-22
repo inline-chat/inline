@@ -1,6 +1,6 @@
 import Foundation
 import SwiftTreeSitter
-import Synchronization
+import InlineCompat
 import TreeSitterBash
 import TreeSitterCSS
 import TreeSitterGo

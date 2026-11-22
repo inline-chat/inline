@@ -1,7 +1,7 @@
 import CoreGraphics
 import CoreText
 import Foundation
-import Synchronization
+import InlineCompat
 
 public struct TextLayoutStyle: Hashable, Sendable {
   /// Extra space between lines of one paragraph.

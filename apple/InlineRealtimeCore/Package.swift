@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "InlineRealtimeCore",
-  platforms: [.macOS(.v15), .iOS(.v18)],
+  platforms: [.macOS(.v15), .iOS(.v15)],
   products: [.library(name: "RealtimeCore", targets: ["RealtimeCore"])],
   targets: [
     .target(name: "RealtimeCore"),

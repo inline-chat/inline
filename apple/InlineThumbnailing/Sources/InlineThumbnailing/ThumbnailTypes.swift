@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 public enum ThumbnailCohort: String, CaseIterable, Sendable {
   case core
