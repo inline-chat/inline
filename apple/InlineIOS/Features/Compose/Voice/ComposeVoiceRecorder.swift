@@ -221,7 +221,7 @@ final class ComposeVoiceRecorder: NSObject, AVAudioRecorderDelegate {
     let outputs = session.currentRoute.outputs.prefix(4).map(\.portType.rawValue).joined(separator: ",")
     let ownsSession = sessionToken.map { InlineAudioSession.shared.owns($0) } ?? false
     let preferredInput = session.preferredInput?.portType.rawValue ?? "automatic"
-    let diagnostic = "Voice capture event=\(event) recorderSeconds=\(capturedDuration) wallSeconds=\(wallDuration) recording=\(recorder?.isRecording ?? false) ownsSession=\(ownsSession) inputAvailable=\(session.isInputAvailable) inputMuted=\(AVAudioApplication.shared.isInputMuted) sampleRate=\(session.sampleRate) category=\(session.category.rawValue) mode=\(session.mode.rawValue) inputs=\(inputs) outputs=\(outputs) preferredInput=\(preferredInput) meterMaximum=\(samples.max() ?? 0)"
+    let diagnostic = "Voice capture event=\(event) recorderSeconds=\(capturedDuration) wallSeconds=\(wallDuration) recording=\(recorder?.isRecording ?? false) ownsSession=\(ownsSession) inputAvailable=\(session.isInputAvailable) inputMuted=\(MicrophonePermission.isInputMuted) sampleRate=\(session.sampleRate) category=\(session.category.rawValue) mode=\(session.mode.rawValue) inputs=\(inputs) outputs=\(outputs) preferredInput=\(preferredInput) meterMaximum=\(samples.max() ?? 0)"
     log.info(diagnostic)
     #if DEBUG
     // Device launch consoles forward stdout, while unified logs require a separate stream.

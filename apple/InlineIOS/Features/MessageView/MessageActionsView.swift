@@ -68,7 +68,9 @@ final class MessageActionsView: UIView {
     action.text = "Measure"
     button.configure(action: action, outgoing: false)
     button.useMinimalPresentation()
-    button.traitOverrides.preferredContentSizeCategory = traits.preferredContentSizeCategory
+    if #available(iOS 17.0, *) {
+      button.traitOverrides.preferredContentSizeCategory = traits.preferredContentSizeCategory
+    }
     let row = ceil(button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height)
     return CGFloat(rowCount) * row + CGFloat(rowCount - 1) * rowSpacing
   }

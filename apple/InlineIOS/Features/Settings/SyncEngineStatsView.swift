@@ -2,6 +2,7 @@ import Foundation
 import RealtimeV2
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct SyncEngineStatsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @State private var syncStats: SyncStats?
@@ -285,6 +286,7 @@ private struct SyncDebugConnectionRow: View {
 }
 #endif
 
+@available(iOS 17.0, *)
 #Preview("Sync Engine Stats") {
   NavigationView {
     SyncEngineStatsView()

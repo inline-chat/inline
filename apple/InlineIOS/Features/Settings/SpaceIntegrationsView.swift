@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct SpaceIntegrationsView: View {
   let spaceId: Int64
   @State private var model: ConnectorSettingsModel
@@ -27,6 +28,7 @@ struct SpaceIntegrationsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   NavigationView {
     SpaceIntegrationsView(spaceId: 1)

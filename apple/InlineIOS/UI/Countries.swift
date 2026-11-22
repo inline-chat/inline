@@ -1,5 +1,6 @@
 import Foundation
 
+@available(iOS 16.0, *)
 struct Country: Identifiable, Hashable {
   let id = UUID()
   let name: String

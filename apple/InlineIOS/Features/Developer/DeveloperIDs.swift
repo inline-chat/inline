@@ -17,6 +17,7 @@ enum DeveloperIDs {
 }
 
 /// Chat Info card listing IDs that copy on tap; hidden while Developer Mode is off.
+@available(iOS 16.0, *)
 struct DeveloperIDsCard: View {
   let entries: [DeveloperIDs.Entry]
 

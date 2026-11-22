@@ -5,6 +5,7 @@ import InlineUI
 import Logger
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct SpaceSettingsView: View {
   let spaceId: Int64
   let usesRouterNavigation: Bool
@@ -165,7 +166,7 @@ struct SpaceSettingsView: View {
     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
        let rootVC = windowScene.windows.first?.rootViewController
     {
-      rootVC.topmostPresentedViewController.present(alert, animated: true)
+      rootVC.topmostPresented.present(alert, animated: true)
     }
   }
 }
@@ -313,6 +314,7 @@ private struct SpaceUrlPreviewExclusionRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   SpaceSettingsView(spaceId: 1)
 }

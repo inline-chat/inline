@@ -2,6 +2,7 @@ import Logger
 import QuickLook
 import SwiftUI
 
+@available(iOS 17.0, *)
 extension DocumentRow {
   @ViewBuilder
   var quickLookPreview: some View {

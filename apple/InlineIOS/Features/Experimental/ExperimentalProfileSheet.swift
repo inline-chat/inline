@@ -40,6 +40,7 @@ struct ExperimentalProfileToolbarLabel: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct ExperimentalProfileView: View {
   @Query(CurrentUser()) private var currentUser: UserInfo?
 
@@ -501,6 +502,7 @@ private struct ExperimentalUsernameAvailabilityStatus: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct ExperimentalProfileContactSection: View {
   let email: String?
   let phoneNumber: String?
@@ -518,6 +520,7 @@ private struct ExperimentalProfileContactSection: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct ExperimentalProfileAboutSection: View {
   @Binding var bio: String
 

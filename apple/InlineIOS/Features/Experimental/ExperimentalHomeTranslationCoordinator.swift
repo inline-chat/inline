@@ -1,7 +1,6 @@
 import Foundation
 import GRDB
 import InlineKit
-import Observation
 import Translation
 
 private struct HomeTranslationMessageKey: Hashable, Sendable {
@@ -10,16 +9,15 @@ private struct HomeTranslationMessageKey: Hashable, Sendable {
 }
 
 @MainActor
-@Observable
 final class ExperimentalHomeTranslationCoordinator {
   private static let batchLimit = 24
 
-  @ObservationIgnored private let core = Core()
-  @ObservationIgnored private var task: Task<Void, Never>?
-  @ObservationIgnored private var retryTask: Task<Void, Never>?
-  @ObservationIgnored private var latestPresentation = ChatListPresentation.empty
-  @ObservationIgnored private var latestCurrentPeers = Set<Peer>()
-  @ObservationIgnored private var generation: UInt64 = 0
+  private let core = Core()
+  private var task: Task<Void, Never>?
+  private var retryTask: Task<Void, Never>?
+  private var latestPresentation = ChatListPresentation.empty
+  private var latestCurrentPeers = Set<Peer>()
+  private var generation: UInt64 = 0
 
   func process(
     presentation: ChatListPresentation,

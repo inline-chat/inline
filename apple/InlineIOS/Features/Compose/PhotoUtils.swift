@@ -1,3 +1,4 @@
+import InlineCompatUI
 import AVFoundation
 import Auth
 import InlineKit
@@ -88,6 +89,13 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
     guard let resolvedPresenter = presenter ?? attachmentFlowPresenter() else { return }
 
+    guard #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) else {
+      presentLegacySendConfirmation(count: 1, presenter: resolvedPresenter) { [weak self] caption in
+        self?.sendImage(image, caption: caption)
+      }
+      return
+    }
+
     selectedImage = image
     previewViewModel.isPresented = true
     currentPreviewUsesAttachmentPicker = attachmentPickerViewController != nil
@@ -127,6 +135,15 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
     guard let resolvedPresenter = presenter ?? attachmentFlowPresenter() else { return }
 
+    guard #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) else {
+      presentLegacySendConfirmation(count: images.count, presenter: resolvedPresenter) { [weak self] caption in
+        var items = images.map { PhotoItem(image: $0, caption: nil) }
+        if !caption.isEmpty, !items.isEmpty { items[0].caption = caption }
+        self?.sendMultipleImages(items)
+      }
+      return
+    }
+
     multiPhotoPreviewViewModel.setPhotos(images)
     multiPhotoPreviewViewModel.isPresented = true
     currentPreviewUsesAttachmentPicker = attachmentPickerViewController != nil
@@ -155,6 +172,29 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     previewVC.modalTransitionStyle = .crossDissolve
 
     resolvedPresenter.present(previewVC, animated: true)
+  }
+
+  /// iOS 15–16 stand-in for the full-screen preview: confirm with an optional caption.
+  private func presentLegacySendConfirmation(
+    count: Int,
+    presenter: UIViewController,
+    send: @escaping (String) -> Void
+  ) {
+    let alert = UIAlertController(
+      title: count == 1 ? "Send Photo" : "Send \(count) Photos",
+      message: nil,
+      preferredStyle: .alert
+    )
+    alert.addTextField { field in
+      field.placeholder = "Add a caption"
+      field.autocapitalizationType = .sentences
+    }
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+    alert.addAction(UIAlertAction(title: "Send", style: .default) { [weak alert] _ in
+      let caption = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      send(caption)
+    })
+    presenter.present(alert, animated: true)
   }
 
   // MARK: - UIImagePickerControllerDelegate

@@ -3,6 +3,7 @@ import InlineKit
 import Logger
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct DebugView: View {
   @State private var isClearing = false
   @State private var showClearAlert = false
@@ -14,7 +15,7 @@ struct DebugView: View {
     List {
       #if DEBUG || DEBUG_BUILD
       Section("Playgrounds") {
-        NavigationLink(destination: DeveloperPlaygroundsView()) {
+        NavigationLink(destination: EmptyView()) {
           SettingsItem(
             icon: "hammer.fill",
             iconColor: .orange,
@@ -108,6 +109,7 @@ struct DebugView: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IntentDonationDebugSection: View {
   @State private var isClearing = false
   @State private var showConfirmation = false
@@ -178,6 +180,7 @@ private struct IntentDonationDebugSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview("Debug") {
   NavigationView {
     DebugView()

@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+@available(iOS 16.0, *)
 struct ChatVisibilityParticipantsSheet: View {
   @ObservedObject var spaceViewModel: SpaceFullMembersViewModel
   @Binding var selectedParticipants: Set<Int64>

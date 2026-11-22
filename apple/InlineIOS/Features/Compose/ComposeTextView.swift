@@ -182,7 +182,9 @@ class ComposeTextView: UITextView {
     allowsEditingTextAttributes = true
     // Keyboard stickers, Memoji and Genmoji arrive as adaptive image glyphs, which keeps them
     // distinct from dropped images (plain text attachments) so they can be sent as stickers.
-    supportsAdaptiveImageGlyph = true
+    if #available(iOS 18.0, *) {
+      supportsAdaptiveImageGlyph = true
+    }
     font = .systemFont(ofSize: 17)
     typingAttributes[.font] = font
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
@@ -579,7 +581,7 @@ class ComposeTextView: UITextView {
     for range in rangesToProcess where range.location < snapshot.length {
       let attributes = snapshot.attributes(at: range.location, effectiveRange: nil)
       // Check stickers first: a sticker must never fall through to the dropped-photo path.
-      let media: InsertedMedia = if let glyph = attributes[.adaptiveImageGlyph] as? NSAdaptiveImageGlyph {
+      let media: InsertedMedia = if #available(iOS 18.0, *), let glyph = attributes[.adaptiveImageGlyph] as? NSAdaptiveImageGlyph {
         .sticker(glyph.imageContent)
       } else if let droppedImage = imageFromTextAttachment(attributes: attributes) {
         .droppedImage(droppedImage)
@@ -927,7 +929,8 @@ class ComposeTextView: UITextView {
   }
 
   private func hasValidStickerAttributes() -> Bool {
-    guard let attributedText else { return false }
+    // Adaptive image glyphs (keyboard stickers, Genmoji) exist from iOS 18.
+    guard #available(iOS 18.0, *), let attributedText else { return false }
 
     var hasValidSticker = false
     attributedText.enumerateAttribute(

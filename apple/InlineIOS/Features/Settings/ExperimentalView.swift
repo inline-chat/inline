@@ -4,6 +4,7 @@ import InlineIOSUI
 import InlineMessageLayout
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct ExperimentalView: View {
   @ObservedObject private var auth = Auth.shared
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
@@ -108,6 +109,7 @@ struct ExperimentalView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview("Experimental") {
   NavigationStack {
     ExperimentalView()

@@ -1,6 +1,7 @@
 import InlineKit
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct CreateNewChatView: View {
   @EnvironmentObject var compactSpaceList: CompactSpaceList
 

@@ -3,6 +3,7 @@ import InlineUI
 import Logger
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct CreateSpaceView: View {
   let onCreated: (Int64) -> Void
 
@@ -140,6 +141,7 @@ struct CreateSpaceView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   CreateSpaceView(onCreated: { _ in })
 }

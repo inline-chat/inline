@@ -1,3 +1,4 @@
+import InlineCompatUI
 import Auth
 import InlineIOSUI
 import InlineKit
@@ -552,7 +553,7 @@ extension MessageMotion {
         completion: completion
       )
     case let .spring(duration, bounce):
-      UIView.animate(
+      UIView.compatAnimate(
         springDuration: duration,
         bounce: bounce,
         initialSpringVelocity: 0,

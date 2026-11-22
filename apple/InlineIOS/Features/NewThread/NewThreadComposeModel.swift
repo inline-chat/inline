@@ -13,6 +13,7 @@ import UIKit
 /// `AllChatsNewThreadComposeModel`: mentions decide who is in the thread, the first
 /// mentioned Agent (or bot) becomes the thread's Agent, and its model, reasoning and
 /// folder can be chosen before the first message.
+@available(iOS 17.0, *)
 @MainActor
 final class NewThreadComposeModel: ObservableObject {
   struct AgentTarget: Equatable {

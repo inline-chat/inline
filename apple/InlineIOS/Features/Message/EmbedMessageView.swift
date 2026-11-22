@@ -1,3 +1,4 @@
+import InlineCompatUI
 import InlineKit
 import InlineUI
 import Translation
@@ -321,7 +322,7 @@ private extension EmbedMessageView {
   }
 
   func setupViews() {
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: EmbedMessageView, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (view: EmbedMessageView, _: UITraitCollection) in
       view.applyAppearance()
       view.invalidateIntrinsicContentSize()
     }

@@ -7,6 +7,7 @@ import SwiftUI
 /// microphone. A tap starts a new transcript thread or stops the run; a long
 /// press opens the transcript. The server reports transcription unavailable
 /// outside Pro Spaces, so the toggle stays hidden there.
+@available(iOS 17.0, *)
 struct GridTranscriptionButton: View {
   let store: GridRoomService
   let room: GridRoom

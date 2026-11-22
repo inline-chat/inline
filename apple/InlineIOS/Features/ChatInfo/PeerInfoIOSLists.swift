@@ -7,6 +7,7 @@ import UIKit
 /// The Members tab: who can read a thread, directly or through a group. You
 /// come first, then owners and admins, then everyone by name. Tapping a person
 /// opens their info; long-press for Message, bot access and Remove.
+@available(iOS 18.0, *)
 struct PeerInfoIOSMembersList: View {
   @ObservedObject var participants: ChatParticipantsWithMembersViewModel
   let roles: [Int64: MemberRole]
@@ -196,6 +197,7 @@ struct PeerInfoIOSMembersList: View {
 
 /// The Threads tab: subthreads of a thread, or threads shared with a person
 /// or bot. Tapping opens the thread; long-press for its info and link.
+@available(iOS 18.0, *)
 struct PeerInfoIOSThreadsList: View {
   let model: PeerInfoThreadsModel
   let emptyMessage: String

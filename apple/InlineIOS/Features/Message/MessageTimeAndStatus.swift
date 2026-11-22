@@ -1,3 +1,4 @@
+import InlineCompatUI
 import InlineKit
 import UIKit
 
@@ -79,7 +80,7 @@ class MessageTimeAndStatus: UIView {
     displayedStatus = status ?? message.message.status
     super.init(frame: .zero)
     setupViews()
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: MessageTimeAndStatus, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (view: MessageTimeAndStatus, _: UITraitCollection) in
       view.dateLabel.font = ChatTypography.font(11, style: .caption2, compatibleWith: view.traitCollection)
       view.symbolWidthConstraint?.constant = view.symbolSize
       view.symbolHeightConstraint?.constant = view.symbolSize

@@ -70,7 +70,7 @@ private struct ChatToolbarHardBackgroundMaterial: UIViewRepresentable {
 }
 
 @available(iOS 27.0, *)
-private final class ChatToolbarHardBackgroundMaterialView: UIView {
+final class ChatToolbarHardBackgroundMaterialView: UIView {
   private enum Material {
     // CAFilter radius is not visually portable across backdrop-layer sampling scales.
     // Tune Hard against iOS 27 Home's rendered clarity, not its raw radius value.

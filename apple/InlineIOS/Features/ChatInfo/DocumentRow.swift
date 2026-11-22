@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 /// "size · date". Tapping downloads, cancels or opens the file, as the tile shows.
 ///
 /// The row draws only its content; `chatInfoResourceRow(_:)` adds the card around it.
+@available(iOS 17.0, *)
 struct DocumentRow: View {
   // MARK: - Properties
 

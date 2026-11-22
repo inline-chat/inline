@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 import UIKit
 
+@available(iOS 16.0, *)
 enum ChatInfoTab: CaseIterable, Hashable, Identifiable {
   case info
   case media
@@ -27,6 +28,7 @@ enum ChatInfoTab: CaseIterable, Hashable, Identifiable {
 ///
 /// Liquid Glass on iOS 26, a material capsule before. Selecting another tab plays a
 /// selection haptic; tapping the selected one calls `onReselect` (scroll to top).
+@available(iOS 17.0, *)
 struct ChatInfoTabBar<Tab: Hashable & Identifiable>: View {
   let tabs: [Tab]
   @Binding var selection: Tab
@@ -83,12 +85,14 @@ struct ChatInfoTabBar<Tab: Hashable & Identifiable>: View {
   }
 }
 
+@available(iOS 17.0, *)
 extension ChatInfoTabBar where Tab == ChatInfoTab {
   init(tabs: [ChatInfoTab], selection: Binding<ChatInfoTab>, onReselect: ((ChatInfoTab) -> Void)? = nil) {
     self.init(tabs: tabs, selection: selection, title: { String(localized: $0.title) }, onReselect: onReselect)
   }
 }
 
+@available(iOS 17.0, *)
 extension ChatInfoTabBar where Tab == PeerInfoTab {
   init(tabs: [PeerInfoTab], selection: Binding<PeerInfoTab>, onReselect: ((PeerInfoTab) -> Void)? = nil) {
     self.init(tabs: tabs, selection: selection, title: \.title, onReselect: onReselect)

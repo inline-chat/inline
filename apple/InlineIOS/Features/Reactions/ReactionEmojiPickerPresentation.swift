@@ -3,6 +3,7 @@ import UIKit
 
 /// A separate presentation surface lets the native sheet cover a live context
 /// menu without asking UIKit to dismiss the menu's presentation first.
+@available(iOS 18.0, *)
 @MainActor
 final class ReactionEmojiPickerPresentation {
   private var overlayWindow: UIWindow?
@@ -64,6 +65,7 @@ final class ReactionEmojiPickerPresentation {
   }
 }
 
+@available(iOS 18.0, *)
 private final class ReactionEmojiPickerHostingController: UIHostingController<ReactionEmojiPickerSheet> {
   var onDismiss: (() -> Void)?
 

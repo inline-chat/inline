@@ -46,7 +46,6 @@ class OnboardingNavigation: ObservableObject {
   @Published var existingUser: Bool? = nil
   @Published var profileName = ""
   @Published var profileUsername = ""
-  @Published var profilePhoto: OnboardingProfilePhoto?
   private var profileDraftUserId: Int64?
 
   var canGoBack: Bool {
@@ -70,7 +69,6 @@ class OnboardingNavigation: ObservableObject {
     profileDraftUserId = userId
     profileName = ""
     profileUsername = ""
-    profilePhoto = nil
   }
 
   func reset() {
@@ -80,6 +78,5 @@ class OnboardingNavigation: ObservableObject {
     profileDraftUserId = nil
     profileName = ""
     profileUsername = ""
-    profilePhoto = nil
   }
 }

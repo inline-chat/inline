@@ -2,25 +2,25 @@ import InlineKit
 import SwiftUI
 
 enum DialogNotificationSettingsPresentation {
-  static let globalDescription: LocalizedStringResource =
-    "Follows the parent chat’s settings, or your global settings for a top-level chat."
-  static let overrideDescription: LocalizedStringResource =
-    "Overrides inherited notification settings for this chat."
+  static let globalDescription = String(
+    localized: "Follows the parent chat’s settings, or your global settings for a top-level chat."
+  )
+  static let overrideDescription = String(localized: "Overrides inherited notification settings for this chat.")
   static let overrideOptions: [DialogNotificationSettingSelection] = [.all, .mentions, .none]
 
   static func title(
     for selection: DialogNotificationSettingSelection,
     globalMode: NotificationMode
-  ) -> LocalizedStringResource {
+  ) -> String {
     switch selection {
     case .global:
-      "Default"
+      String(localized: "Default")
     case .all:
-      "All"
+      String(localized: "All")
     case .mentions:
-      "Mentions"
+      String(localized: "Mentions")
     case .none:
-      "None"
+      String(localized: "None")
     }
   }
 
@@ -93,7 +93,7 @@ struct DialogNotificationSettingsMenuContent: View {
 struct DialogNotificationPickerOptionLabel: View {
   let selection: DialogNotificationSettingSelection
   let globalMode: NotificationMode
-  let title: LocalizedStringResource
+  let title: String
 
   var body: some View {
     Label {

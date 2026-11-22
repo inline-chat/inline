@@ -151,22 +151,26 @@ public enum CompatTrait: Sendable, Hashable {
 }
 
 extension UIView {
-  /// Calls `handler` after any of `traits` changes for this view. Lives as long as the view.
-  public func compatRegisterForTraitChanges(
+  /// `registerForTraitChanges` (iOS 17) with the same call shape: the closure's first parameter
+  /// is the view, typed as the caller's class. Before iOS 17 an invisible relay subview forwards
+  /// `traitCollectionDidChange`. Returns the registration (or relay) to keep or ignore.
+  @discardableResult
+  public func compatRegisterForTraitChanges<View: UIView>(
     _ traits: [CompatTrait],
-    handler: @escaping @MainActor (UIView, UITraitCollection) -> Void
-  ) {
+    handler: @escaping @MainActor (View, UITraitCollection) -> Void
+  ) -> AnyObject? {
     if #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) {
-      registerForTraitChanges(traits.map(\.nativeTrait)) { (view: UIView, previous: UITraitCollection) in
+      return registerForTraitChanges(traits.map(\.nativeTrait)) { (view: UIView, previous: UITraitCollection) in
+        guard let view = view as? View else { return }
         handler(view, previous)
-      }
-      return
+      } as AnyObject
     }
     let relay = TraitRelayView(traits: Set(traits)) { [weak self] previous in
-      guard let self else { return }
-      handler(self, previous)
+      guard let view = self as? View else { return }
+      handler(view, previous)
     }
     addSubview(relay)
+    return relay
   }
 }
 
@@ -182,7 +186,7 @@ extension UIViewController {
       }
       return
     }
-    view.compatRegisterForTraitChanges(traits) { [weak self] _, previous in
+    view.compatRegisterForTraitChanges(traits) { [weak self] (_: UIView, previous: UITraitCollection) in
       guard let self else { return }
       handler(self, previous)
     }
@@ -241,6 +245,44 @@ private final class TraitRelayView: UIView {
     if traits.contains(where: { $0.differs(previousTraitCollection, traitCollection) }) {
       onChange(previousTraitCollection)
     }
+  }
+}
+
+// MARK: - Spring animations (springDuration/bounce: iOS 17)
+
+extension UIView {
+  /// `animate(springDuration:bounce:…)` on iOS 17+; before, the closest damping-ratio spring
+  /// (bounce 0 → critically damped, higher bounce → lower damping).
+  public static func compatAnimate(
+    springDuration duration: TimeInterval = 0.5,
+    bounce: CGFloat = 0,
+    initialSpringVelocity: CGFloat = 0,
+    delay: TimeInterval = 0,
+    options: UIView.AnimationOptions = [],
+    animations: @escaping () -> Void,
+    completion: ((Bool) -> Void)? = nil
+  ) {
+    if #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) {
+      UIView.animate(
+        springDuration: duration,
+        bounce: bounce,
+        initialSpringVelocity: initialSpringVelocity,
+        delay: delay,
+        options: options,
+        animations: animations,
+        completion: completion
+      )
+      return
+    }
+    UIView.animate(
+      withDuration: duration,
+      delay: delay,
+      usingSpringWithDamping: max(0.05, min(1, 1 - bounce)),
+      initialSpringVelocity: initialSpringVelocity,
+      options: options,
+      animations: animations,
+      completion: completion
+    )
   }
 }
 
@@ -366,6 +408,50 @@ extension UIScrollView {
     case .hard: bottomEdgeEffect.style = .hard
     case .hidden: bottomEdgeEffect.isHidden = true
     }
+  }
+}
+
+// MARK: - Menus (subtitle, keepsMenuPresented: iOS 16)
+
+extension UIMenuElement {
+  /// `subtitle` (iOS 16); nil before.
+  public var compatSubtitle: String? {
+    if #available(iOS 16.0, *) { return subtitle }
+    return nil
+  }
+}
+
+extension UIMenuElement.Attributes {
+  /// `.keepsMenuPresented` on iOS 16+, no attribute before (the menu closes after the action).
+  public static var compatKeepsMenuPresented: UIMenuElement.Attributes {
+    if #available(iOS 16.0, *) { return .keepsMenuPresented }
+    return []
+  }
+
+  /// Whether the action asked to keep the menu open (never before iOS 16).
+  public var compatContainsKeepsMenuPresented: Bool {
+    if #available(iOS 16.0, *) { return contains(.keepsMenuPresented) }
+    return false
+  }
+}
+
+// MARK: - Scroll motion (isScrollAnimating / stopScrollingAndZooming: iOS 17.4)
+
+extension UIScrollView {
+  /// Whether a programmatic scroll animation is running. Unknown (false) before iOS 17.4.
+  public var compatIsScrollAnimating: Bool {
+    if #available(iOS 17.4, *), CompatRuntime.allows(.iOS17) { return isScrollAnimating }
+    return false
+  }
+
+  /// Stops deceleration and scroll animations. Before iOS 17.4, re-setting the offset without
+  /// animation stops both.
+  public func compatStopScrollingAndZooming() {
+    if #available(iOS 17.4, *), CompatRuntime.allows(.iOS17) {
+      stopScrollingAndZooming()
+      return
+    }
+    setContentOffset(contentOffset, animated: false)
   }
 }
 

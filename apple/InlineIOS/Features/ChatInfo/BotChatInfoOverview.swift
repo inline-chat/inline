@@ -5,6 +5,7 @@ import SwiftUI
 
 /// The owner's bot settings, opened from chat info. The settings page needs the
 /// owner's bot record, which only the bot list returns.
+@available(iOS 17.0, *)
 struct OwnedBotSettingsDestination: View {
   let botUserID: Int64
   let model: IOSBotsSettingsModel
@@ -38,6 +39,7 @@ struct OwnedBotSettingsDestination: View {
 // MARK: - Building blocks
 
 /// "● Online" under a bot's name in its chat info header.
+@available(iOS 17.0, *)
 struct BotInfoStatusLine: View {
   let user: User
   @ObservedObject private var store = AgentWorkStateStore.shared
@@ -68,6 +70,7 @@ extension BotStatusSummary.Tone {
 }
 
 /// A titled card, like a grouped list section.
+@available(iOS 17.0, *)
 struct BotInfoSection<Content: View>: View {
   let title: LocalizedStringKey
   let footer: String?
@@ -106,6 +109,7 @@ struct BotInfoSection<Content: View>: View {
 
 /// A Settings-style row: a tinted symbol tile, a title, an optional value on
 /// the trailing edge and an optional line under the title.
+@available(iOS 17.0, *)
 struct BotInfoRow<Value: View, Detail: View>: View {
   let systemImage: String
   let tint: Color
@@ -159,6 +163,7 @@ struct BotInfoRow<Value: View, Detail: View>: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct BotInfoValueRow: View {
   let systemImage: String
   let tint: Color
@@ -176,6 +181,8 @@ struct BotInfoValueRow: View {
   }
 }
 
+@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct BotInfoIconTile: View {
   let systemImage: String
   let tint: Color
@@ -191,6 +198,7 @@ struct BotInfoIconTile: View {
 }
 
 /// Inset to line up with row titles, past the icon tile.
+@available(iOS 17.0, *)
 struct BotInfoDivider: View {
   var body: some View {
     Divider()
@@ -199,6 +207,7 @@ struct BotInfoDivider: View {
 }
 
 /// Overlapping avatars of people with access.
+@available(iOS 17.0, *)
 struct BotAccessAvatarStack: View {
   let userIDs: [Int64]
   let cachedUser: (Int64) -> UserInfo?

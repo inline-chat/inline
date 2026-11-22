@@ -7,6 +7,7 @@ import SwiftUI
 /// Content for a section of the chat info page's scroll view; it has no scroll view
 /// of its own. Rows are sliced card segments in one lazy stack, so a month with
 /// hundreds of files never builds as one view.
+@available(iOS 17.0, *)
 struct DocumentsTabView: View {
   @ObservedObject var documentsViewModel: ChatDocumentsViewModel
   let peerUserId: Int64?

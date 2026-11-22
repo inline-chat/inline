@@ -74,8 +74,12 @@ final class AppIconBadgeService {
 
   /// Not deduplicated: pushes change the badge behind this service's back while inactive.
   private func apply(_ count: Int) {
-    UNUserNotificationCenter.current().setBadgeCount(count) { [log] error in
-      if let error { log.error("Setting the app badge failed", error: error) }
+    if #available(iOS 16.0, *) {
+      UNUserNotificationCenter.current().setBadgeCount(count) { [log] error in
+        if let error { log.error("Setting the app badge failed", error: error) }
+      }
+    } else {
+      UIApplication.shared.applicationIconBadgeNumber = count
     }
   }
 }

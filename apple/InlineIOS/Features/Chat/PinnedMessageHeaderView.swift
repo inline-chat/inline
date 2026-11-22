@@ -1,9 +1,9 @@
+import InlineCompatUI
 import Combine
 import GRDB
 import InlineKit
 import InlineIOSUI
 import Logger
-import SwiftUI
 import Translation
 import UIKit
 
@@ -46,14 +46,11 @@ final class PinnedMessageHeaderView: UIView {
   private var presentationGeneration = 0
   private var audioObservations: Set<AnyCancellable> = []
 
-  private lazy var voiceHostingController: UIHostingController<VoicePlaybackPill> = {
-    let controller = UIHostingController(rootView: VoicePlaybackPill { [weak self] target in
-      self?.onOpenVoiceMessage?(target)
-    })
-    controller.safeAreaRegions = []
-    controller.view.backgroundColor = .clear
-    controller.view.translatesAutoresizingMaskIntoConstraints = false
-    return controller
+  private lazy var voicePillView: VoicePlaybackPillView = {
+    let view = VoicePlaybackPillView()
+    view.onOpen = { [weak self] target in self?.onOpenVoiceMessage?(target) }
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   private let backgroundView: UIView = {
@@ -142,8 +139,8 @@ final class PinnedMessageHeaderView: UIView {
     setupConstraints()
     updateHeaderPresentation(animated: false)
     if showsVoicePlayback { observeAudioPlayback() }
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: PinnedMessageHeaderView, _: UITraitCollection) in
-      view.voiceHeightConstraint?.constant = VoicePlaybackPill.preferredHeight(compatibleWith: view.traitCollection)
+    compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (view: PinnedMessageHeaderView, _: UITraitCollection) in
+      view.voiceHeightConstraint?.constant = VoicePlaybackPillView.preferredHeight(compatibleWith: view.traitCollection)
       view.updateHeaderPresentation()
     }
   }
@@ -159,12 +156,12 @@ final class PinnedMessageHeaderView: UIView {
     isHidden = true
     backgroundView.isHidden = true
     backgroundView.alpha = 0
-    voiceHostingController.view.isHidden = true
-    voiceHostingController.view.alpha = 0
+    voicePillView.isHidden = true
+    voicePillView.alpha = 0
 
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(backgroundView)
-    addSubview(voiceHostingController.view)
+    addSubview(voicePillView)
 
     if #unavailable(iOS 26.0) {
       backgroundView.addSubview(fallbackMaterialView)
@@ -192,8 +189,8 @@ final class PinnedMessageHeaderView: UIView {
       constant: Constants.backgroundTopInset
     )
     closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize)
-    voiceHeightConstraint = voiceHostingController.view.heightAnchor.constraint(
-      equalToConstant: VoicePlaybackPill.preferredHeight(compatibleWith: traitCollection)
+    voiceHeightConstraint = voicePillView.heightAnchor.constraint(
+      equalToConstant: VoicePlaybackPillView.preferredHeight(compatibleWith: traitCollection)
     )
     embedLeadingConstraint = embedView.leadingAnchor.constraint(
       equalTo: primaryButton.leadingAnchor,
@@ -204,11 +201,11 @@ final class PinnedMessageHeaderView: UIView {
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
       backgroundViewTopConstraint!,
-      backgroundView.heightAnchor.constraint(equalToConstant: VoicePlaybackPill.height),
+      backgroundView.heightAnchor.constraint(equalToConstant: VoicePlaybackPillView.height),
 
-      voiceHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
-      voiceHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
-      voiceHostingController.view.topAnchor.constraint(equalTo: topAnchor, constant: Constants.backgroundTopInset),
+      voicePillView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
+      voicePillView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
+      voicePillView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.backgroundTopInset),
       voiceHeightConstraint!,
 
       primaryButton.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
@@ -320,7 +317,7 @@ final class PinnedMessageHeaderView: UIView {
     let hasPin = currentMessageId != nil
     let showsVoice = isVoiceVisible
     let isVisible = hasPin || showsVoice
-    let voiceView: UIView = voiceHostingController.view
+    let voiceView: UIView = voicePillView
     let animates = animated && window != nil && !UIAccessibility.isReduceMotionEnabled
     presentationGeneration += 1
     let generation = presentationGeneration
@@ -369,7 +366,7 @@ final class PinnedMessageHeaderView: UIView {
       finish()
       return
     }
-    UIView.animate(
+    UIView.compatAnimate(
       springDuration: Constants.transitionDuration,
       bounce: 0.1,
       options: [.beginFromCurrentState, .allowUserInteraction],
@@ -384,7 +381,7 @@ final class PinnedMessageHeaderView: UIView {
   var displayedHeight: CGFloat { currentPreferredHeight }
 
   private var voiceSlotHeight: CGFloat {
-    VoicePlaybackPill.preferredHeight(compatibleWith: traitCollection)
+    VoicePlaybackPillView.preferredHeight(compatibleWith: traitCollection)
       + Constants.backgroundTopInset + Constants.backgroundBottomInset
   }
 
@@ -699,7 +696,7 @@ private final class PinnedMessageStripeView: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     isUserInteractionEnabled = false
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: PinnedMessageStripeView, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.userInterfaceStyle]) { (view: PinnedMessageStripeView, _: UITraitCollection) in
       view.applyColors()
     }
   }

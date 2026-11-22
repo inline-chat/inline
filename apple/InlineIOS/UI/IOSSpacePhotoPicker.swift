@@ -3,6 +3,7 @@ import InlineUI
 import RealtimeV2
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct IOSSpacePhotoPicker: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @Binding var photoData: Data?
@@ -91,9 +92,8 @@ struct IOSSpacePhotoPicker: View {
     .sheet(isPresented: $showsXPicker, onDismiss: {
       showsCropper = pickedImage != nil
     }, content: {
-      OnboardingXPhotoPicker(initialPhoto: nil, cropToSquare: false, lookupPhoto: lookupXPhoto) { photo in
-        pickedImage = photo.image
-      }
+      // The X photo lookup lived in the SwiftUI onboarding, which this build drops.
+      EmptyView()
     })
     .alert("Could Not Update Space Photo", isPresented: Binding(
       get: { errorMessage != nil },
@@ -131,17 +131,5 @@ struct IOSSpacePhotoPicker: View {
     errorMessage = nil
   }
 
-  private func lookupXPhoto(_ username: String) async throws -> Data {
-    let result = try await realtimeV2.getExternalProfilePhoto(provider: .x, username: username)
-    switch result.status {
-    case .externalProfilePhotoFound where !result.photo.isEmpty:
-      return result.photo
-    case .externalProfilePhotoNotFound:
-      throw OnboardingProfilePhotoError.notFound
-    case .externalProfilePhotoUnavailable:
-      throw OnboardingProfilePhotoError.unavailable
-    case .unspecified, .externalProfilePhotoFound, .UNRECOGNIZED:
-      throw OnboardingProfilePhotoError.invalidImage
-    }
-  }
+
 }

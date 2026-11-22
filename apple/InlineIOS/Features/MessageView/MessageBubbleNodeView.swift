@@ -1,3 +1,4 @@
+import InlineCompatUI
 import UIKit
 
 /// The bubble fill. It draws through a nine-slice mask, so the fill, corners and tail follow the
@@ -18,12 +19,12 @@ final class MessageBubbleNodeView: UIView {
     backgroundColor = .clear
     fill.isUserInteractionEnabled = false
     addSubview(fill)
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: MessageBubbleNodeView, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.userInterfaceStyle]) { (view: MessageBubbleNodeView, _: UITraitCollection) in
       view.updateColors()
     }
     // The mask is rendered at the display scale; a view configured before joining a window
     // re-renders it once the real scale is known.
-    registerForTraitChanges([UITraitDisplayScale.self]) { (view: MessageBubbleNodeView, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.displayScale]) { (view: MessageBubbleNodeView, _: UITraitCollection) in
       view.fill.configure(side: view.side, scale: view.maskScale)
       view.highlightFill?.configure(side: view.side, scale: view.maskScale)
     }

@@ -6,26 +6,29 @@ import SwiftUI
 import AppKit
 #endif
 
+/// What a forward carries, independent of the sheet that picked it (usable on every OS).
+public struct ForwardMessagesSelection: Sendable {
+  public let fromPeerId: Peer
+  public let sourceChatId: Int64
+  public let messageIds: [Int64]
+  public let previewMessageId: Int64
+
+  public init(
+    fromPeerId: Peer,
+    sourceChatId: Int64,
+    messageIds: [Int64],
+    previewMessageId: Int64
+  ) {
+    self.fromPeerId = fromPeerId
+    self.sourceChatId = sourceChatId
+    self.messageIds = messageIds
+    self.previewMessageId = previewMessageId
+  }
+}
+
 @available(iOS 17.0, *)
 public struct ForwardMessagesSheet: View {
-  public struct ForwardMessagesSelection: Sendable {
-    public let fromPeerId: Peer
-    public let sourceChatId: Int64
-    public let messageIds: [Int64]
-    public let previewMessageId: Int64
-
-    public init(
-      fromPeerId: Peer,
-      sourceChatId: Int64,
-      messageIds: [Int64],
-      previewMessageId: Int64
-    ) {
-      self.fromPeerId = fromPeerId
-      self.sourceChatId = sourceChatId
-      self.messageIds = messageIds
-      self.previewMessageId = previewMessageId
-    }
-  }
+  public typealias ForwardMessagesSelection = InlineUI.ForwardMessagesSelection
 
   public typealias ForwardMessagesSelectHandler = (_ destination: HomeChatItem, _ selection: ForwardMessagesSelection)
     -> Void

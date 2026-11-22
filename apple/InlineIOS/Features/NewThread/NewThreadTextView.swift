@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 /// Commands the New Thread composer sends to its editor.
+@available(iOS 17.0, *)
 @MainActor
 final class NewThreadTextController {
   fileprivate weak var textView: NewThreadUITextView?
@@ -83,6 +84,7 @@ final class NewThreadTextController {
 
 /// A growing UIKit text view for the New Thread composer, so mentions keep their
 /// attributes (SwiftUI's `TextField` can't carry them).
+@available(iOS 17.0, *)
 struct NewThreadTextView: UIViewRepresentable {
   static let font = UIFont.preferredFont(forTextStyle: .body)
 
@@ -191,6 +193,7 @@ struct NewThreadTextView: UIViewRepresentable {
   }
 }
 
+@available(iOS 17.0, *)
 final class NewThreadUITextView: UITextView {
   var placeholder = "" {
     didSet { placeholderLabel.text = placeholder }

@@ -3,6 +3,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct HelpSettingsView: View {
   let onSelectSpace: (Int64) -> Void
 
@@ -19,6 +20,7 @@ struct HelpSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpCommunitySection: View {
   private enum Action: Hashable {
     case townHall
@@ -110,6 +112,7 @@ private struct HelpCommunitySection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpActionLabel: View {
   let title: LocalizedStringResource
   var description: LocalizedStringResource?
@@ -128,6 +131,7 @@ private struct HelpActionLabel: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpResourcesSection: View {
   var body: some View {
     Section("Resources") {
@@ -165,6 +169,7 @@ private struct HelpResourcesSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpAppSection: View {
   private let metadata = SettingsReleaseMetadata.current
 
@@ -178,6 +183,7 @@ private struct HelpAppSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpLegalSection: View {
   var body: some View {
     Section("Legal") {
@@ -195,6 +201,7 @@ private struct HelpLegalSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct SettingsReleaseSummary: View {
   private let metadata = SettingsReleaseMetadata.current
 
@@ -207,6 +214,7 @@ struct SettingsReleaseSummary: View {
 }
 
 /// Opens the bundled What's New sheet, or the web changelog when this build has none.
+@available(iOS 17.0, *)
 private struct HelpWhatsNewRow: View {
   @State private var isPresented = false
 
@@ -230,6 +238,7 @@ private struct HelpWhatsNewRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpLinkRow: View {
   let title: LocalizedStringResource
   var description: LocalizedStringResource?
@@ -251,6 +260,7 @@ private struct HelpLinkRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct HelpDetailRow: View {
   let title: LocalizedStringResource
   var description: LocalizedStringResource?
@@ -292,10 +302,12 @@ private struct HelpDetailRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private enum HelpActionError: Error {
   case invalidResponse
 }
 
+@available(iOS 17.0, *)
 private struct SettingsReleaseMetadata {
   let version: String
   let build: String

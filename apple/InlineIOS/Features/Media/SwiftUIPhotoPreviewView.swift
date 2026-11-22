@@ -102,6 +102,7 @@ class SwiftUIPhotoPreviewViewModel: ObservableObject {
   }
 }
 
+@available(iOS 17.0, *)
 struct SwiftUIPhotoPreviewView: View {
   @ObservedObject var viewModel: SwiftUIPhotoPreviewViewModel
   @Binding var isPresented: Bool
@@ -665,6 +666,7 @@ struct ScaleButtonStyle2: ButtonStyle {
 
 // MARK: - Preview
 
+@available(iOS 17.0, *)
 #Preview {
   let vm = SwiftUIPhotoPreviewViewModel()
   vm.setPhotos([

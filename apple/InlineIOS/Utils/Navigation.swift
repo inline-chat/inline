@@ -1,5 +1,6 @@
 import InlineKit
-import SwiftUI
+import Combine
+import Foundation
 
 @MainActor
 class Navigation: ObservableObject, @unchecked Sendable {
@@ -49,22 +50,11 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   // MARK: - Published Properties
 
-  @Published var navigationPath = NavigationPath()
   @Published var activeSheet: Destination?
   @Published var activeDestination: Destination?
 
   // MARK: - Computed Properties
 
-  var currentStack: NavigationPath {
-    navigationPath
-  }
-
-  var currentStackBinding: Binding<NavigationPath> {
-    Binding(
-      get: { self.navigationPath },
-      set: { self.navigationPath = $0 }
-    )
-  }
 
   // MARK: - Navigation Actions
 
@@ -77,51 +67,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
   @Published var pathComponents: [Destination] = [] {
     didSet {
       saveNavigationState()
-    }
-  }
-
-  @ViewBuilder
-  func destinationView(for destination: Destination) -> some View {
-    switch destination {
-      case let .chat(peer):
-        ChatView(peer: peer, onOpenSpace: { _ in self.popToRoot() })
-          .id(peer)
-      case let .space(id):
-        LegacySpaceDestinationRedirect(spaceID: id) { _ in
-          self.popToRoot()
-        }
-      case .settings:
-        SettingsView(onSelectSpace: { _ in self.popToRoot() })
-      case .main:
-        HomeView()
-      case .archivedChats:
-        ArchivedChatsView()
-      case .createSpace:
-        CreateSpace(onCreated: { _ in self.popToRoot() })
-      case let .createThread(spaceId):
-        CreateChatIOSView(spaceId: spaceId)
-      case let .chatInfo(chatItem):
-        ChatInfoView(chatItem: chatItem)
-      case let .spaceSettings(spaceId):
-        SpaceSettingsView(spaceId: spaceId)
-      case let .spaceIntegrations(spaceId):
-        SpaceIntegrationsView(spaceId: spaceId)
-      case let .integrationOptions(spaceId, provider):
-        IntegrationOptionsView(spaceId: spaceId, provider: provider)
-    }
-  }
-
-  @ViewBuilder
-  func sheetContent(for destination: Destination) -> some View {
-    switch destination {
-      case let .createThread(spaceId):
-        CreateChatIOSView(spaceId: spaceId)
-          .presentationCornerRadius(18)
-      case .createSpace:
-        CreateSpace(onCreated: { _ in self.popToRoot() })
-          .presentationCornerRadius(18)
-      default:
-        EmptyView()
     }
   }
 
@@ -211,9 +156,7 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   func pop() {
     guard !pathComponents.isEmpty else { return }
-    withAnimation(.snappy) {
-      pathComponents.removeLast()
-    }
+    pathComponents.removeLast()
   }
 
   func dismissSheet() {
@@ -224,7 +167,6 @@ class Navigation: ObservableObject, @unchecked Sendable {
 
   func reset() {
     pathComponents = []
-    navigationPath = NavigationPath()
     activeSheet = nil
     activeDestination = nil
 

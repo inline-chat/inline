@@ -6,6 +6,7 @@ import MCEmojiPicker
 import SwiftUI
 import UIKit
 
+@available(iOS 18.0, *)
 extension ChatInfoView {
   func cancelParticipantSearch(clearResults: Bool = true) {
     participantSearchGeneration &+= 1

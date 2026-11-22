@@ -143,10 +143,10 @@ extension MessageBlock {
         id: "voice",
         position: .aboveText,
         width: .flexible(
-          preferred: VoiceMessageBubble.preferredBubbleWidth(duration: model.voiceContent?.duration ?? 0),
+          preferred: VoiceMessageBubbleView.preferredBubbleWidth(duration: model.voiceContent?.duration ?? 0),
           minimum: 120
         ),
-        height: VoiceMessageBubble.bubbleHeight
+        height: VoiceMessageBubbleView.bubbleHeight
       )))
     }
 
@@ -251,7 +251,7 @@ final class MessageBlockHostView: UIView {
   let kind: MessageBlock.Kind
   private(set) var contentView: UIView?
   private var textView: MessageTextView?
-  private var voiceController: UIHostingController<VoiceMessageBubble>?
+  private var voiceView: VoiceMessageBubbleView?
   private var message: FullMessage?
 
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
@@ -406,15 +406,10 @@ final class MessageBlockHostView: UIView {
       view.configure(message: message.message, excluding: block.hiddenActionIDs)
 
     case .voice:
-      let root = VoiceMessageBubble(message: message.message, outgoing: outgoing)
-      if let voiceController {
-        voiceController.rootView = root
+      if let voiceView, voiceView.superview === self {
+        voiceView.update(message: message.message)
       } else {
-        let controller = UIHostingController(rootView: root)
-        controller.safeAreaRegions = []
-        controller.view.backgroundColor = .clear
-        voiceController = controller
-        install(controller.view, fills: true)
+        voiceView = install(VoiceMessageBubbleView(message: message.message, outgoing: outgoing), fills: true)
       }
     }
   }
@@ -522,7 +517,9 @@ enum MessageBlockMeasure {
     default:
       return 0
     }
-    view.traitOverrides.preferredContentSizeCategory = traits.preferredContentSizeCategory
+    if #available(iOS 17.0, *) {
+      view.traitOverrides.preferredContentSizeCategory = traits.preferredContentSizeCategory
+    }
     let size = view.systemLayoutSizeFitting(
       CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
       withHorizontalFittingPriority: .required,

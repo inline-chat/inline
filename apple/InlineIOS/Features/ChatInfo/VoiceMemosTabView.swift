@@ -11,6 +11,7 @@ import SwiftUI
 /// publishes on every playback tick and checks the file on disk in `body`, so only the
 /// selected message gets one; every other row is two lines of text and a play glyph.
 /// Tapping a row plays it inline, downloading first when needed.
+@available(iOS 17.0, *)
 struct VoiceMemosTabView: View {
   @ObservedObject var voiceMemosViewModel: ChatVoiceMemosViewModel
   let onShowInChat: (Message) -> Void
@@ -67,6 +68,7 @@ struct VoiceMemosTabView: View {
 
 /// Which voice message the shared player has selected (playing, paused or downloading),
 /// published only when the selection changes rather than on every playback tick.
+@available(iOS 17.0, *)
 @MainActor
 @Observable
 final class ChatInfoResourceVoiceSelection {
@@ -106,6 +108,7 @@ final class ChatInfoResourceVoiceSelection {
   }
 }
 
+@available(iOS 17.0, *)
 private struct ChatInfoResourceVoiceRow: View, Equatable {
   let voiceMemo: VoiceMemoMessage
   let isSelected: Bool

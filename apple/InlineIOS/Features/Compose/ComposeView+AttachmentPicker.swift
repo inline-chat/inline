@@ -1,3 +1,4 @@
+import InlineCompatUI
 import InlineIOSUI
 import InlineKit
 import Photos
@@ -18,6 +19,11 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
       guard let self else { return }
       guard self.attachmentPickerViewController == nil else { return }
       guard let presenter = self.attachmentPickerPresenter() else { return }
+
+      guard #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) else {
+        self.presentLegacyAttachmentMenu(from: presenter)
+        return
+      }
 
       let rootView = AttachmentPickerSheet(
         actions: AttachmentPickerActions(
@@ -67,6 +73,40 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
       self.attachmentPickerViewController = controller
       presenter.present(controller, animated: true)
     }
+  }
+
+  /// iOS 15–16: the same choices as the attachment sheet, as a native action sheet.
+  private func presentLegacyAttachmentMenu(from presenter: UIViewController) {
+    let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+    sheet.addAction(UIAlertAction(title: "Photo Library", style: .default) { [weak self] _ in
+      self?.attachmentPickerViewController = nil
+      self?.presentPicker()
+    })
+    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+      sheet.addAction(UIAlertAction(title: "Camera", style: .default) { [weak self] _ in
+        self?.attachmentPickerViewController = nil
+        self?.presentCamera()
+      })
+    }
+    sheet.addAction(UIAlertAction(title: "Files", style: .default) { [weak self] _ in
+      self?.attachmentPickerViewController = nil
+      self?.presentFileManager()
+    })
+    if commandLaunchState().isEnabled {
+      sheet.addAction(UIAlertAction(title: "Commands", style: .default) { [weak self] _ in
+        self?.attachmentPickerViewController = nil
+        self?.showCommandsFromAttachmentPicker()
+      })
+    }
+    sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+      self?.attachmentPickerViewController = nil
+    })
+    if let popover = sheet.popoverPresentationController {
+      popover.sourceView = plusButton
+      popover.sourceRect = plusButton.bounds
+    }
+    attachmentPickerViewController = sheet
+    presenter.present(sheet, animated: true)
   }
 
   /// Offered only while the draft would reach an Agent; remembered for

@@ -5,6 +5,7 @@ import TextProcessing
 import Translation
 import UIKit
 
+@available(iOS 17.0, *)
 struct SettingsNavigationRow<Destination: View>: View {
   let title: LocalizedStringResource
   let systemImage: String
@@ -20,6 +21,7 @@ struct SettingsNavigationRow<Destination: View>: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct GeneralSettingsView: View {
   @AppStorage(InAppLinkPreferences.openLinksInAppKey)
   private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
@@ -132,6 +134,7 @@ struct GeneralSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct AppearanceSettingsView: View {
   @AppStorage(EmojiSkinTonePreferenceStore.key)
   private var preferredEmojiSkinToneRawValue = EmojiSkinTone.standard.rawValue
@@ -214,6 +217,7 @@ private struct ChatToolbarBackgroundModeSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct NotificationsSettingsView: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
@@ -259,6 +263,7 @@ struct NotificationsSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct PrivacySettingsView: View {
   @ObservedObject private var privacy = INUserSettings.current.privacy
 
@@ -327,6 +332,7 @@ struct PrivacySettingsView: View {
 }
 
 /// Which privacy rule a settings page edits, with its wording.
+@available(iOS 17.0, *)
 enum PrivacyRuleKind {
   case timeZone
   case focusStatus
@@ -354,6 +360,7 @@ enum PrivacyRuleKind {
   }
 }
 
+@available(iOS 17.0, *)
 struct PrivacyRuleSettingsView: View {
   let kind: PrivacyRuleKind
   @ObservedObject private var privacy = INUserSettings.current.privacy
@@ -516,6 +523,7 @@ struct PrivacyRuleSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct ManualTimeZonePickerPage: View {
   @Environment(\.dismiss) private var dismiss
   let selection: TimeZone
@@ -532,6 +540,7 @@ private struct ManualTimeZonePickerPage: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct ClearCacheSettingsSection: View {
   @State private var isClearing = false
   @State private var showClearCacheAlert = false

@@ -1,3 +1,4 @@
+import InlineCompatUI
 import UIKit
 
 /// The menu's actions, drawn like the platform menu from a `UIMenu`. Inline menus become
@@ -174,7 +175,7 @@ final class MessageContextMenuActionsView: UIView, UIGestureRecognizerDelegate {
       completion()
       return
     }
-    UIView.animate(
+    UIView.compatAnimate(
       springDuration: motion.pageSpringDuration,
       bounce: 0,
       initialSpringVelocity: 0,
@@ -615,7 +616,7 @@ final class MessageContextMenuRowView: UIControl {
     switch element {
     case let .action(action):
       title = action.title
-      subtitle = action.subtitle
+      subtitle = action.compatSubtitle
       image = action.image ?? (action.state == .on ? UIImage(systemName: "checkmark") : nil)
       if action.attributes.contains(.destructive) { color = .systemRed }
       if action.attributes.contains(.disabled) {
@@ -791,7 +792,7 @@ extension MessageContextMenuActionsView.Element {
   var identity: String {
     switch self {
     case let .action(action):
-      "action|\(action.title)|\(action.subtitle ?? "")|\(action.attributes.rawValue)|\(action.state.rawValue)"
+      "action|\(action.title)|\(action.compatSubtitle ?? "")|\(action.attributes.rawValue)|\(action.state.rawValue)"
     case let .submenu(menu):
       "menu|\(menu.title)"
     case let .back(menu):

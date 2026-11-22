@@ -47,7 +47,9 @@ final class MediaGalleryVideoPlayer {
     player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
     player.actionAtItemEnd = .pause
     player.isMuted = Self.prefersMuted
-    player.defaultRate = Self.preferredRate
+    if #available(iOS 16.0, *) {
+      player.defaultRate = Self.preferredRate
+    }
     observe()
 
     Task { @MainActor [weak self] in
@@ -99,11 +101,15 @@ final class MediaGalleryVideoPlayer {
     }
   }
 
+  /// `defaultRate` (iOS 16) makes play() use the chosen speed; before, the rate is reapplied on play.
   var rate: Float {
-    get { player.defaultRate }
+    get {
+      if #available(iOS 16.0, *) { return player.defaultRate }
+      return Self.preferredRate
+    }
     set {
       Self.preferredRate = newValue
-      player.defaultRate = newValue
+      if #available(iOS 16.0, *) { player.defaultRate = newValue }
       if player.timeControlStatus != .paused {
         player.rate = newValue
       }

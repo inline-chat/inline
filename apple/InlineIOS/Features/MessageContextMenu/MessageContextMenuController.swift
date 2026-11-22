@@ -1,3 +1,4 @@
+import InlineCompatUI
 import InlineMessageLayout
 import TextProcessing
 import UIKit
@@ -474,7 +475,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     switch row.element {
     case let .action(action):
       guard !action.attributes.contains(.disabled) else { return }
-      if action.attributes.contains(.keepsMenuPresented) {
+      if action.attributes.compatContainsKeepsMenuPresented {
         row.sendAction(action)
       } else {
         // The handler runs once the menu is gone, so anything it presents shows on top.
@@ -565,7 +566,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
       actions.append(UIAction(
         title: "Select All",
         image: UIImage(systemName: "selection.pin.in.out"),
-        attributes: .keepsMenuPresented
+        attributes: .compatKeepsMenuPresented
       ) { [weak selectionView] _ in
         selectionView?.selectAll()
       })

@@ -10,6 +10,7 @@ import UIKit
 /// Finding links runs `NSDataDetector` and a regex over the message text. It used to
 /// run for every message on every render; now it runs once per message and is reused
 /// across pages until that message changes.
+@available(iOS 17.0, *)
 struct LinksTabView: View {
   @ObservedObject var linksViewModel: ChatLinksViewModel
   let onShowInChat: (InlineKit.Message) -> Void
@@ -70,6 +71,7 @@ struct ChatInfoResourceLinkItem: Identifiable, Equatable {
 }
 
 /// Sections plus a per-message memo of parsed links.
+@available(iOS 16.0, *)
 @MainActor
 final class ChatInfoResourceLinksModel {
   let list = ChatInfoResourceListModel<LinkMessage, ChatInfoResourceLinkItem>()
@@ -165,6 +167,7 @@ struct LinkRowItem: Identifiable, Equatable {
   let url: URL?
 }
 
+@available(iOS 16.0, *)
 private struct ChatInfoResourceLinkRow: View, Equatable {
   let item: ChatInfoResourceLinkItem
   let onShowInChat: (InlineKit.Message) -> Void

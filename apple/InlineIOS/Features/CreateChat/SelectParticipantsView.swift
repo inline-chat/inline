@@ -4,6 +4,7 @@ import InlineUI
 import Logger
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct SelectParticipantsView: View {
   @State private var searchText = ""
 
@@ -123,6 +124,7 @@ struct SelectParticipantsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct UserRow: View {
   let userInfo: UserInfo
   @Binding var selectedParticipants: Set<Int64>

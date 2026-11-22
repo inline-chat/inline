@@ -1,6 +1,7 @@
 import InlineTheme
 import SwiftUI
 
+@available(iOS 16.0, *)
 struct ThemeSelectionView: View {
   @EnvironmentObject private var themeManager: ThemeManager
   @Environment(\.colorScheme) private var colorScheme
@@ -223,6 +224,7 @@ private struct ThemePreviewMessage: View {
   }
 }
 
+@available(iOS 16.0, *)
 #Preview("Theme Selection") {
   NavigationStack {
     ThemeSelectionView()

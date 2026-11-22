@@ -4,7 +4,6 @@ import GRDB
 import InlineKit
 import InlineUI
 import Logger
-import SwiftUI
 import Translation
 
 struct ExperimentalHomeListConfiguration: Equatable, Sendable {
@@ -42,6 +41,8 @@ struct ExperimentalHomeListState: Equatable, Sendable {
 @MainActor
 final class ExperimentalHomeListStore: ObservableObject {
   @Published private(set) var state: ExperimentalHomeListState = .loading
+  /// Whether the latest `state` change is a structural update worth animating.
+  private(set) var lastUpdateAnimates = false
 
   private let database: AppDatabase
   private let workerQueue = DispatchQueue(
@@ -236,17 +237,9 @@ final class ExperimentalHomeListStore: ObservableObject {
       errorDescription: nil,
       revision: state.revision + 1
     )
-    if update.shouldAnimate {
-      withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
-        state = nextState
-      }
-    } else {
-      var transaction = Transaction(animation: nil)
-      transaction.disablesAnimations = true
-      withTransaction(transaction) {
-        state = nextState
-      }
-    }
+    // Lists read this when `state` publishes to decide whether to animate the diff.
+    lastUpdateAnimates = update.shouldAnimate
+    state = nextState
     let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
     span.end("duration_ms=\(durationMs)")
     PerformanceTrace.slowBreadcrumb(

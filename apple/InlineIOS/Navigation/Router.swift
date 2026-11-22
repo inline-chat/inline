@@ -1,5 +1,8 @@
 import Foundation
+import InlineCompat
+#if canImport(Observation)
 import Observation
+#endif
 
 public enum NavigationPersistenceMode: Sendable {
   case userDefaults
@@ -15,15 +18,16 @@ public enum NavigationPersistenceMode: Sendable {
 ///   - Tab: Must conform to TabType and Codable
 ///   - Destination: Must conform to DestinationType and Codable
 ///   - Sheet: Must conform to SheetType and Codable
-@Observable
 @MainActor
-public final class NavigationModel<Tab: TabType, Destination: DestinationType, Sheet: SheetType> {
+public final class NavigationModel<Tab: TabType, Destination: DestinationType, Sheet: SheetType>: CompatObservable {
+  public nonisolated let observationRegistrar = CompatObservationRegistrar()
+
   private struct PersistentState: Codable {
     let paths: [Tab: [Destination]]
     let selectedTab: Tab
   }
 
-  private var paths: [Tab: [Destination]] = [:] {
+  @Tracked private var paths: [Tab: [Destination]] = [:] {
     didSet {
       // Any navigation supersedes one still waiting for its destination's preparation.
       cancelPendingNavigation()
@@ -37,7 +41,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     let destination: Destination
   }
 
-  private var pendingNavigation: PendingNavigation?
+  @Tracked private var pendingNavigation: PendingNavigation?
 
   /// The destination the app asked to show and is still preparing, so the control that asked can
   /// show the request registered, as Telegram keeps a tapped row lit until its chat is ready.
@@ -45,7 +49,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     pendingNavigation?.destination
   }
 
-  public var selectedTab: Tab {
+  @Tracked public var selectedTab: Tab {
     didSet {
       cancelPendingNavigation()
       recordNavigation(from: HistoryEntry(tab: oldValue, path: paths[oldValue] ?? []))
@@ -55,16 +59,16 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   /// Changes whenever the selected tab or a navigation path changes. Scene owners
   /// use this to persist one router snapshot per window.
-  public private(set) var persistenceRevision = 0
+  @Tracked public private(set) var persistenceRevision = 0
 
   /// Changes when an external route should dismiss transient UI, including when
   /// the destination is already visible and the navigation path is deduplicated.
-  public private(set) var presentationResetRevision = 0
+  @Tracked public private(set) var presentationResetRevision = 0
 
-  public var presentedSheet: Sheet?
+  @Tracked public var presentedSheet: Sheet?
 
   /// Opt-in, in-memory history for a scene. Phone navigation leaves this disabled.
-  public var tracksHistory = false {
+  @Tracked public var tracksHistory = false {
     didSet {
       if tracksHistory != oldValue { clearHistory() }
     }
@@ -75,10 +79,10 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     let path: [Destination]
   }
 
-  private var backHistory: [HistoryEntry] = []
-  private var forwardHistory: [HistoryEntry] = []
-  @ObservationIgnored private var isApplyingHistory = false
-  @ObservationIgnored private var isApplyingNativeNavigation = false
+  @Tracked private var backHistory: [HistoryEntry] = []
+  @Tracked private var forwardHistory: [HistoryEntry] = []
+  private var isApplyingHistory = false
+  private var isApplyingNativeNavigation = false
 
   public var canGoBack: Bool { tracksHistory && (!backHistory.isEmpty || selectedTabPath.count > 1) }
   public var canGoForward: Bool { tracksHistory && !forwardHistory.isEmpty }
@@ -180,18 +184,18 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   }
 
   // Store the initial tab for proper reset behavior
-  @ObservationIgnored private let initialTab: Tab
+  private let initialTab: Tab
 
   // Persistence keys
-  @ObservationIgnored private let defaults: UserDefaults
-  @ObservationIgnored private let persistenceMode: NavigationPersistenceMode
-  @ObservationIgnored private let stateKey: String
-  @ObservationIgnored private let pathsKey: String
-  @ObservationIgnored private let selectedTabKey: String
-  @ObservationIgnored private let presentedSheetKey: String
-  @ObservationIgnored private let encoder = JSONEncoder()
-  @ObservationIgnored private let decoder = JSONDecoder()
-  @ObservationIgnored private var isRestoring = false
+  private let defaults: UserDefaults
+  private let persistenceMode: NavigationPersistenceMode
+  private let stateKey: String
+  private let pathsKey: String
+  private let selectedTabKey: String
+  private let presentedSheetKey: String
+  private let encoder = JSONEncoder()
+  private let decoder = JSONDecoder()
+  private var isRestoring = false
 
   /// Initialize the navigation model with persistence support
   /// - Parameters:
@@ -451,3 +455,6 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     navigationStateDidChange()
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension NavigationModel: Observable {}

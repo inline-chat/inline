@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 
+@available(iOS 17.0, *)
 @MainActor
 struct ComposeVoiceInputView: View {
   @ObservedObject var viewModel: ComposeVoiceRecordingViewModel
@@ -184,6 +185,7 @@ struct ComposeVoiceInputView: View {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 private struct VoiceIconControl: View {
   let systemName: String
@@ -206,6 +208,7 @@ private struct VoiceIconControl: View {
   }
 }
 
+@available(iOS 17.0, *)
 private enum VoiceControlMetrics {
   /// Apple's minimum comfortable touch target.
   static let hitSize: CGFloat = 44
@@ -214,6 +217,7 @@ private enum VoiceControlMetrics {
 }
 
 /// Filled circle matching the compose send button, with a full 44pt hit area.
+@available(iOS 17.0, *)
 private struct VoiceIconButtonStyle: ButtonStyle {
   let isPrimary: Bool
   @Environment(\.isEnabled) private var isEnabled
@@ -243,6 +247,7 @@ private struct VoiceIconButtonStyle: ButtonStyle {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 private enum VoiceHaptics {
   static func tap() {

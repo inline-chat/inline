@@ -76,6 +76,9 @@
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
+		C15A00062FB0000100000001 /* InlineCompat in Frameworks */ = {isa = PBXBuildFile; productRef = C15A00032FB0000100000001 /* InlineCompat */; };
+		C15A00072FB0000100000001 /* InlineCompatUI in Frameworks */ = {isa = PBXBuildFile; productRef = C15A00042FB0000100000001 /* InlineCompatUI */; };
+		C15A00082FB0000100000001 /* InlineIOSFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = C15A00052FB0000100000001 /* InlineIOSFoundation */; };
 		F1A0B1C32F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */; };
 		F1A0B1C52F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C62F10432100A1B2C3 /* InlineMessageLayout */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
@@ -160,6 +163,8 @@
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		CD82F7F52F3618650012BA81 /* InlineIOSUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSUI; sourceTree = "<group>"; };
+		C15A00012FB0000100000001 /* InlineCompat */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineCompat; sourceTree = "<group>"; };
+		C15A00022FB0000100000001 /* InlineIOSFoundation */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSFoundation; sourceTree = "<group>"; };
 		F1A0B1C42F10432100A1B2C3 /* InlineMessageLayout */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMessageLayout; sourceTree = "<group>"; };
 		E5A100012FA0000100000001 /* InlineSyntaxHighlighting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineSyntaxHighlighting; sourceTree = "<group>"; };
 		E60906022FA1000100000001 /* InlineMessageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMessageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -329,9 +334,6 @@
 				CD735FF02E493C8E00F7BFFE /* Translation in Frameworks */,
 				CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */,
 				C3AEE6AC2D4FCDD0005D1179 /* NukeUI in Frameworks */,
-				B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */,
-				B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */,
-				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
 				C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */,
 				B7E8E0E42EBA637100EA23B8 /* ContextMenuAccessoryStructs in Frameworks */,
 				CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */,
@@ -343,6 +345,9 @@
 				D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */,
+				C15A00062FB0000100000001 /* InlineCompat in Frameworks */,
+				C15A00072FB0000100000001 /* InlineCompatUI in Frameworks */,
+				C15A00082FB0000100000001 /* InlineIOSFoundation in Frameworks */,
 				F1A0B1C32F10432100A1B2C3 /* InlineMessageLayout in Frameworks */,
 				E609060C2FA1000100000001 /* InlineSyntaxHighlighting in Frameworks */,
 				A83010012F52000100000001 /* InlineAppIntents in Frameworks */,
@@ -429,6 +434,8 @@
 				AB1E0B0A2FB0000100000003 /* InlineWebWidget */,
 				E5A100012FA0000100000001 /* InlineSyntaxHighlighting */,
 				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
+				C15A00012FB0000100000001 /* InlineCompat */,
+				C15A00022FB0000100000001 /* InlineIOSFoundation */,
 				F1A0B1C42F10432100A1B2C3 /* InlineMessageLayout */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
@@ -583,11 +590,12 @@
 				C3AEE6A92D4FCDC9005D1179 /* Nuke */,
 				C3AEE6AB2D4FCDD0005D1179 /* NukeUI */,
 				C37F343F2D5A4D4800D7D7CC /* MCEmojiPicker */,
-				B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */,
-				B7F71EB82DDB3BA70091C872 /* RenderMeThis */,
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
 				D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */,
+				C15A00032FB0000100000001 /* InlineCompat */,
+				C15A00042FB0000100000001 /* InlineCompatUI */,
+				C15A00052FB0000100000001 /* InlineIOSFoundation */,
 				F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */,
 				E5A100022FA0000100000001 /* InlineSyntaxHighlighting */,
 				A83010002F52000100000001 /* InlineAppIntents */,
@@ -1296,7 +1304,7 @@
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				INLINE_URL_SCHEME = "inline-debug";
 				INLINE_URL_SCHEME_ALIAS = "inline-debug";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1344,7 +1352,7 @@
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				INLINE_URL_SCHEME = inline;
 				INLINE_URL_SCHEME_ALIAS = in;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1736,7 +1744,7 @@
 				INLINE_URL_SCHEME = "inline-dev";
 				INLINE_URL_SCHEME_ALIAS = "inline-dev";
 				INLINE_USER_PROFILE = devbuild;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1992,7 +2000,7 @@
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				INLINE_URL_SCHEME = "inline-debug";
 				INLINE_URL_SCHEME_ALIAS = "inline-debug";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -2564,6 +2572,18 @@
 		D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIOSUI;
+		};
+		C15A00032FB0000100000001 /* InlineCompat */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineCompat;
+		};
+		C15A00042FB0000100000001 /* InlineCompatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineCompatUI;
+		};
+		C15A00052FB0000100000001 /* InlineIOSFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineIOSFoundation;
 		};
 		F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */ = {
 			isa = XCSwiftPackageProductDependency;

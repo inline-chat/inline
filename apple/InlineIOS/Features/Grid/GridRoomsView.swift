@@ -10,6 +10,7 @@ import SwiftUI
 import UIKit
 
 /// Uses the same process-owned room service as Home and the active call.
+@available(iOS 17.0, *)
 struct GridDestinationView: View {
   let initialSpaceID: Int64?
   @EnvironmentObject private var spaceList: CompactSpaceList
@@ -23,6 +24,7 @@ struct GridDestinationView: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct GridRoomsView: View {
   let store: GridRoomService
   let spaces: [InlineKit.Space]
@@ -140,6 +142,7 @@ struct GridRoomsView: View {
 
 /// Only known audio messages reach the interface. SDK and RPC error
 /// descriptions can contain diagnostics that do not belong there.
+@available(iOS 17.0, *)
 private enum GridJoinBlock {
   static func message(for error: String) -> String? {
     let known: [InlineAudioSessionError] = [.recordingOwnsAudio, .quarantined, .retirementPending]
@@ -147,6 +150,7 @@ private enum GridJoinBlock {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridSpacePicker: View {
   let homeSpaces: [GridHomeSpace]
   let spaces: [InlineKit.Space]
@@ -195,6 +199,7 @@ private struct GridSpacePicker: View {
 
 /// The one call state every Grid surface on iPhone renders. Home, the rooms
 /// and the dock all derive it here, so they never disagree mid-transition.
+@available(iOS 17.0, *)
 enum GridLocalCall: Equatable {
   enum Claim: Equatable {
     case join
@@ -281,6 +286,7 @@ enum GridLocalCall: Equatable {
 
 /// The local call's media link. Being alone in a room has no media session
 /// by design, so that is not a pending state.
+@available(iOS 17.0, *)
 enum GridCallLink: Equatable {
   case live
   case alone
@@ -313,6 +319,7 @@ enum GridCallLink: Equatable {
 }
 
 /// The Mac's connecting indicator: a small pulsing accent dot on your face.
+@available(iOS 17.0, *)
 struct GridConnectingDot: View {
   @State private var isPulsing = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -338,6 +345,7 @@ struct GridConnectingDot: View {
 
 // MARK: - Rooms
 
+@available(iOS 17.0, *)
 enum GridRoomTitle {
   /// Named rooms keep their name; others are described by who else is in them.
   static func title(for room: GridRoom) -> String {
@@ -361,6 +369,7 @@ enum GridRoomTitle {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridRoomList: View {
   let store: GridRoomService
   let spaceID: Int64
@@ -417,6 +426,7 @@ private struct GridRoomList: View {
 
 /// A room is a bubble of faces, as on the Mac. Tap to join; in your room, tap
 /// your face to mute. Names and room actions live in the long-press menu.
+@available(iOS 17.0, *)
 private struct GridRoomCapsule: View {
   let store: GridRoomService
   let call: GridLocalCall
@@ -596,6 +606,7 @@ private struct GridRoomCapsule: View {
 /// as the person speaks, with a faint halo outside it while they talk and a
 /// crossed-mic badge while muted. Your own face in your room toggles your
 /// microphone.
+@available(iOS 17.0, *)
 private struct GridRoomFace: View {
   let store: GridRoomService
   let call: GridLocalCall
@@ -680,6 +691,7 @@ private struct GridRoomFace: View {
 
 /// Bottom controls for your call: the same row from the tap on a room until
 /// you leave, otherwise a way to bring the call here.
+@available(iOS 17.0, *)
 struct GridCallDock: View {
   let store: GridRoomService
 
@@ -718,6 +730,7 @@ struct GridCallDock: View {
   }
 }
 
+@available(iOS 17.0, *)
 enum GridCallOwner {
   static func label(for call: GridCurrentCall) -> String {
     switch call.ownerClientType.lowercased() {
@@ -732,6 +745,7 @@ enum GridCallOwner {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridDockNotice: View {
   let text: String
   var isProblem = false
@@ -760,6 +774,7 @@ private struct GridDockNotice: View {
 
 /// Problems the call can't fix by retrying, as the Mac's small notices above
 /// the controls. Connecting and reconnecting never show here.
+@available(iOS 17.0, *)
 private struct GridCallProblem {
   let text: String
   let actionTitle: String
@@ -800,6 +815,7 @@ private struct GridCallProblem {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridLocalCallControls: View {
   let store: GridRoomService
   let call: GridLocalCall
@@ -831,6 +847,7 @@ private struct GridLocalCallControls: View {
 /// Toggles your microphone, as on the Mac: any time you are in a room, alone
 /// or not. The choice carries into your next join. A tap during an audio
 /// safety pause is the user's decision and ends the pause.
+@available(iOS 17.0, *)
 struct GridMicrophoneToggle<Label: View>: View {
   let store: GridRoomService
   let spaceID: Int64
@@ -885,6 +902,7 @@ struct GridMicrophoneToggle<Label: View>: View {
 }
 
 /// The Mac's mic control: green with a white mic when on, plain when muted.
+@available(iOS 17.0, *)
 struct GridMicrophoneButton: View {
   enum Style {
     case compact
@@ -917,6 +935,7 @@ struct GridMicrophoneButton: View {
 }
 
 /// The Mac's leave control: a pink door.
+@available(iOS 17.0, *)
 struct GridLeaveButton: View {
   enum Style {
     case compact
@@ -949,6 +968,7 @@ struct GridLeaveButton: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridNativeAudioRoutePicker: UIViewRepresentable {
   let routeName: String
 
@@ -967,6 +987,7 @@ private struct GridNativeAudioRoutePicker: UIViewRepresentable {
   }
 }
 
+@available(iOS 17.0, *)
 private extension View {
   @ViewBuilder
   func gridGlassCapsule() -> some View {
@@ -987,6 +1008,7 @@ private extension View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridRoomFlowLayout: Layout {
   let spacing: CGFloat
 

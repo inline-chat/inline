@@ -9,6 +9,7 @@ import Security
 import Sentry
 import UIKit
 
+@main
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, ObservableObject {
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
@@ -26,11 +27,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     _ application: UIApplication,
     willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    // Crash reporting first; identify only after persistent storage is admitted.
+    Analytics.start(identifyAuthenticatedUser: false)
+    if #available(iOS 18.0, *) {
+      InlineShortcuts.registerNavigation(routerRegistry: sceneRouterRegistry)
+      InlineShortcuts.updateAppShortcutParameters()
+    }
     // Set up notification delegate here to not miss anything
     let notificationCenter = UNUserNotificationCenter.current()
     notificationCenter.delegate = self
     setupAppDataUpdater()
     return true
+  }
+
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(name: "Default", sessionRole: connectingSceneSession.role)
+    configuration.delegateClass = SceneDelegate.self
+    return configuration
   }
 
   func application(

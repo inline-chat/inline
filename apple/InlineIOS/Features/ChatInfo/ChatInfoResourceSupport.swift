@@ -283,6 +283,7 @@ struct ChatInfoResourceSectionHeader: View {
   }
 }
 
+@available(iOS 17.0, *)
 extension View {
   /// Draws one row's slice of an inset grouped card, so a month of thousands of
   /// rows stays lazy instead of living in one card-sized `VStack`.
@@ -291,6 +292,7 @@ extension View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct ChatInfoResourceRowChrome: ViewModifier {
   let position: ChatInfoResourceRowPosition
   @Environment(\.displayScale) private var displayScale

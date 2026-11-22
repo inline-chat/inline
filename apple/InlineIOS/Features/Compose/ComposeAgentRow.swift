@@ -9,6 +9,7 @@ final class ComposeAgentRowState: ObservableObject {
   @Published var isAvailable = false
 }
 
+@available(iOS 17.0, *)
 struct ComposeAgentRowHost: View {
   @ObservedObject var state: ComposeAgentRowState
   let onAttach: () -> Void
@@ -24,6 +25,7 @@ struct ComposeAgentRowHost: View {
 /// The row under the text in the agent card: plus, the Agent, its folder
 /// before the first turn, model and reasoning menus, then context and the
 /// stop or resume circle. Send and voice stay UIKit, after the row.
+@available(iOS 17.0, *)
 struct ComposeAgentRow: View {
   @ObservedObject var model: ComposeAgentChainModel
   @ObservedObject private var grants = AgentGrantStore.shared
@@ -130,6 +132,7 @@ struct ComposeAgentRow: View {
 
 /// A quiet label that opens a native pull-down menu: "Default — X" when the
 /// harness has a default, then the options with a checkmark on the choice.
+@available(iOS 17.0, *)
 struct ComposeAgentOptionMenu: View {
   let title: String
   let systemImage: String?
@@ -210,6 +213,7 @@ struct ComposeAgentOptionMenu: View {
 }
 
 /// How full this thread's context is; a tap opens the usage popover.
+@available(iOS 17.0, *)
 private struct ComposeAgentContextRing: View {
   let fill: ComposeAgentChainModel.ContextFill?
   let onTap: (CGRect) -> Void
@@ -251,6 +255,7 @@ private struct ComposeAgentContextRing: View {
 
 /// Stop while the Agent works, play when its work is paused. Sending stays
 /// available; a message while it works steers.
+@available(iOS 17.0, *)
 private struct ComposeAgentRunCircle: View {
   @ObservedObject var model: ComposeAgentChainModel
   let work: AgentWorkState
@@ -277,6 +282,7 @@ private struct ComposeAgentRunCircle: View {
 
 /// The usage popover: each account limit as a track, then this thread's
 /// context.
+@available(iOS 17.0, *)
 struct ComposeAgentUsageView: View {
   @ObservedObject var model: ComposeAgentChainModel
 

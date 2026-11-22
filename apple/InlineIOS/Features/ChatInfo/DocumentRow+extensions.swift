@@ -3,6 +3,7 @@ import InlineUI
 import Logger
 import SwiftUI
 
+@available(iOS 17.0, *)
 extension DocumentRow {
   // MARK: - UI Components
 
@@ -121,6 +122,7 @@ extension DocumentRow {
 }
 
 /// Tile colors by file kind, as Files and Telegram tint documents.
+@available(iOS 17.0, *)
 enum ChatInfoResourceFileStyle {
   static func tint(mimeType: String?, fileName: String?) -> Color {
     let mime = mimeType?.lowercased() ?? ""

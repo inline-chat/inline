@@ -8,6 +8,7 @@ import Logger
 import SwiftUI
 import Translation
 
+@available(iOS 18.0, *)
 struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   let isPresentedModally: Bool
@@ -962,6 +963,7 @@ struct ChatInfoView: View {
   }
 }
 
+@available(iOS 18.0, *)
 private struct IOSClearChatHistorySheet: View {
   let peer: Peer
   let chatTitle: String
@@ -1097,6 +1099,7 @@ private struct IOSClearChatHistorySheet: View {
   }
 }
 
+@available(iOS 18.0, *)
 private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
   case all
   case keep(Int)
@@ -1133,6 +1136,7 @@ private enum IOSClearChatHistoryRange: Hashable, Identifiable, CaseIterable {
   }
 }
 
+@available(iOS 18.0, *)
 struct ParticipantAvatarView: UIViewRepresentable {
   let userInfo: UserInfo
   let size: CGFloat
@@ -1263,6 +1267,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
   }
 }
 
+@available(iOS 18.0, *)
 @MainActor
 private final class ChatInfoResourcesState: ObservableObject {
   @Published private(set) var media: ChatMediaViewModel?
@@ -1336,6 +1341,7 @@ private final class ChatInfoResourcesState: ObservableObject {
 
 // MARK: - Peer info model
 
+@available(iOS 18.0, *)
 extension ChatInfoView {
   var subject: PeerInfoSubject {
     PeerInfoSubject.resolve(

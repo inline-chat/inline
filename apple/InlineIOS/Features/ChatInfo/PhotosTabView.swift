@@ -15,6 +15,7 @@ import UIKit
 ///   the memory cache in the first frame when it's there, and never animates a spinner;
 /// - cells are `Equatable` over their display data, so model updates skip unchanged cells;
 /// - an appearing cell does an index compare for pagination and prefetching, not a task.
+@available(iOS 17.0, *)
 struct MediaTabView: View {
   @ObservedObject var mediaViewModel: ChatMediaViewModel
   let onShowInChat: (Message) -> Void

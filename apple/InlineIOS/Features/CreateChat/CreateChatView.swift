@@ -14,6 +14,7 @@ enum ChatType {
   case `private`
 }
 
+@available(iOS 17.0, *)
 struct CreateChatView: View {
   @State private var selectedRoute: Route = .createNewChat
   @State private var text = ""
@@ -130,6 +131,7 @@ struct CreateChatView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   CreateChatView(spaceId: nil)
 }

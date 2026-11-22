@@ -1,3 +1,4 @@
+import InlineCompatUI
 import Combine
 import GRDB
 import InlineKit
@@ -30,6 +31,7 @@ extension ComposeView {
     agentRunWork != nil && !isAgentLayout && !isVoiceActive
   }
 
+  @available(iOS 17.0, *)
   func makeAgentRowHostingController() -> UIHostingController<ComposeAgentRowHost> {
     let controller = UIHostingController(rootView: ComposeAgentRowHost(
       state: agentRowState,
@@ -83,7 +85,8 @@ extension ComposeView {
       .removeDuplicates()
       .sink { [weak self] available in
         guard let self else { return }
-        agentRowState.isAvailable = available
+        // The agent row is SwiftUI (iOS 17+); before that the composer stays a plain one.
+        agentRowState.isAvailable = available && ComposeView.hostsSwiftUISurfaces
         applyAgentLayout(agentLayoutIsWanted, animated: window != nil)
       }
       .store(in: &agentCancellables)
@@ -259,6 +262,7 @@ extension ComposeView {
 
   /// The ring's popover: 5-hour and weekly limits, then this thread's context.
   func presentAgentUsage(from globalFrame: CGRect) {
+    guard #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) else { return }
     guard let agentChain, let presenter = attachmentPickerPresenter() else { return }
     agentChain.prepareUsage()
     let controller = UIHostingController(rootView: ComposeAgentUsageView(model: agentChain))

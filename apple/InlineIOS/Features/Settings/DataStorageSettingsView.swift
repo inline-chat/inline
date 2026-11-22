@@ -4,6 +4,7 @@ import InlineUI
 import QuickLook
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct DataStorageSettingsView: View {
   @ObservedObject private var autoDownload = INUserSettings.current.autoDownload
   @State private var storage = StorageUsageViewModel()
@@ -249,6 +250,7 @@ struct DataStorageSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 private enum PendingCleanup: Identifiable {
   case keepMedia(StorageKeepMedia, bytes: Int64)
   case cacheLimit(StorageCacheLimit, bytes: Int64)
@@ -274,6 +276,7 @@ private enum PendingCleanup: Identifiable {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 private enum StorageFeedback {
   static func freed(_ bytes: Int64) {
@@ -290,6 +293,7 @@ private enum StorageFeedback {
 
 // MARK: - Donut
 
+@available(iOS 17.0, *)
 private struct StorageDonut: View {
   let summary: StorageUsageSummary
   let isLoading: Bool
@@ -387,6 +391,7 @@ private struct StorageDonut: View {
 
 // MARK: - Rows
 
+@available(iOS 17.0, *)
 private struct StorageCategoryIcon: View {
   let systemImage: String
   let color: Color
@@ -400,6 +405,7 @@ private struct StorageCategoryIcon: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct StorageCategoryRow<Destination: View>: View {
   let category: StorageCategory
   let bytes: Int64
@@ -453,6 +459,7 @@ private struct StorageCategoryRow<Destination: View>: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct StorageChatIcon: View {
   let usage: StorageChatUsage
 
@@ -475,6 +482,7 @@ private struct StorageChatIcon: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct StorageChatRow: View {
   let usage: StorageChatUsage
   let largestBytes: Int64
@@ -516,6 +524,7 @@ private struct StorageChatRow: View {
 // MARK: - Chats
 
 /// Chats ordered by the space their downloads take.
+@available(iOS 17.0, *)
 private struct StorageChatsView: View {
   let storage: StorageUsageViewModel
 
@@ -577,11 +586,13 @@ private struct StorageChatsView: View {
 
 // MARK: - Items
 
+@available(iOS 17.0, *)
 enum StorageItemsScope: Hashable {
   case category(StorageCategory)
   case chat(Int64)
 }
 
+@available(iOS 17.0, *)
 private enum StorageItemsSort: String, CaseIterable, Identifiable {
   case size = "Size"
   case date = "Date"
@@ -589,6 +600,7 @@ private enum StorageItemsSort: String, CaseIterable, Identifiable {
 }
 
 /// Every download in a category or chat, largest first, with swipe and multi-select removal.
+@available(iOS 17.0, *)
 struct StorageItemsView: View {
   let scope: StorageItemsScope
   let storage: StorageUsageViewModel
@@ -740,6 +752,7 @@ struct StorageItemsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct StorageItemRow: View {
   let item: StorageItem
   let chatTitle: String?

@@ -3,7 +3,6 @@ import GRDB
 import InlineIOSUI
 import InlineKit
 import Logger
-import SwiftUI
 
 @MainActor
 enum VoicePlaybackNavigation {
@@ -99,75 +98,5 @@ enum VoicePlaybackNavigation {
       type: .error,
       systemImage: "exclamationmark.triangle"
     )
-  }
-}
-
-/// Lives inside a navigation page so the capsule remains below its toolbar.
-private struct RootVoicePlaybackSlot: View {
-  let router: Router
-  let destination: Destination?
-  let tab: AppTab?
-  var chatPlaceholderPeer: Peer?
-  var isEnabled = true
-  @ObservedObject private var player = SharedAudioPlayer.shared
-  @State private var isVisible = false
-  @Environment(\.scenePhase) private var scenePhase
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  private var isActive: Bool {
-    guard isEnabled, router.presentedSheet == nil else { return false }
-    if let chatPlaceholderPeer {
-      return router.selectedTabPath.last?.chatPeer == chatPlaceholderPeer
-    }
-    return router.selectedTabPath.last?.chatPeer == nil
-      && router.selectedTabPath.last == destination
-      && (tab == nil || router.selectedTab == tab)
-  }
-
-  var body: some View {
-    VStack(spacing: 0) {
-      if isActive, player.isVoiceSelected {
-        VoicePlaybackPill { target in
-          VoicePlaybackNavigation.open(target, router: router)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .transition(.scale(scale: 0.92, anchor: .top).combined(with: .opacity))
-      }
-    }
-    .frame(maxWidth: .infinity)
-    // Only playback starting or ending animates; navigation swaps the slot instantly.
-    .animation(reduceMotion ? nil : .snappy(duration: 0.26), value: player.isVoiceSelected)
-    .onAppear { isVisible = true }
-    .onDisappear { isVisible = false }
-    .alert("Voice playback failed", isPresented: Binding(
-      get: { isVisible && scenePhase == .active && isActive && player.playbackError != nil },
-      set: {
-        if !$0 {
-          player.clearPlaybackError()
-        }
-      }
-    )) {
-      Button("OK", role: .cancel) { player.clearPlaybackError() }
-    } message: {
-      Text(player.playbackError ?? "")
-    }
-  }
-}
-
-extension View {
-  func voicePlaybackRootPill(router: Router, destination: Destination? = nil, tab: AppTab? = nil) -> some View {
-    safeAreaInset(edge: .top, spacing: 0) {
-      RootVoicePlaybackSlot(router: router, destination: destination, tab: tab)
-    }
-  }
-
-  func voicePlaybackChatPlaceholder(router: Router, peer: Peer, isPlaceholder: Bool) -> some View {
-    safeAreaInset(edge: .top, spacing: 0) {
-      RootVoicePlaybackSlot(
-        router: router, destination: nil, tab: nil,
-        chatPlaceholderPeer: peer, isEnabled: isPlaceholder
-      )
-    }
   }
 }

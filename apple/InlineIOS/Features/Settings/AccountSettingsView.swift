@@ -4,6 +4,7 @@ import Logger
 import RealtimeV2
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct AccountSessionsSettingsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
 

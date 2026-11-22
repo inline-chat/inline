@@ -33,7 +33,8 @@ final class MessageTextSelectionView: UIView, UIGestureRecognizerDelegate {
   private var anchorWord: NSRange?
   private var draggedHandle: (isStart: Bool, offset: CGPoint)?
   private let feedback = UISelectionFeedbackGenerator()
-  private var loupe: UITextLoupeSession?
+  /// `UITextLoupeSession` (iOS 17), stored untyped for the iOS 15 build. No loupe before 17.
+  private var loupe: AnyObject?
   private let autoscroll = SelectionAutoscroll()
 
   init(text: TextSelectionSurfaces, colors: Colors) {
@@ -242,7 +243,7 @@ final class MessageTextSelectionView: UIView, UIGestureRecognizerDelegate {
 
   private func endDrag() {
     autoscroll.stop()
-    loupe?.invalidate()
+    if #available(iOS 17.0, *) { (loupe as? UITextLoupeSession)?.invalidate() }
     loupe = nil
   }
 
@@ -260,12 +261,13 @@ final class MessageTextSelectionView: UIView, UIGestureRecognizerDelegate {
   // MARK: - Loupe
 
   private func beginLoupe(at point: CGPoint, widget: UIView?) {
-    loupe?.invalidate()
+    guard #available(iOS 17.0, *) else { return }
+    (loupe as? UITextLoupeSession)?.invalidate()
     loupe = UITextLoupeSession.begin(at: point, fromSelectionWidgetView: widget, in: self)
   }
 
   private func moveLoupe(to point: CGPoint, caret: CGRect?) {
-    guard let loupe, let caret else { return }
+    guard #available(iOS 17.0, *), let loupe = loupe as? UITextLoupeSession, let caret else { return }
     loupe.move(to: point, withCaretRect: caret, trackingCaret: true)
   }
 

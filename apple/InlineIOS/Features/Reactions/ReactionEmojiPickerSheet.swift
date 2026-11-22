@@ -2,6 +2,7 @@ import InlineUI
 import SwiftUI
 import TextProcessing
 
+@available(iOS 18.0, *)
 struct ReactionEmojiPickerSheet: View {
   let selectedEmojis: Set<String>
   let onSelect: (String) -> Void

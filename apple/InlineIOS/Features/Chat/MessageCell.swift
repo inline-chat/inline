@@ -1,3 +1,4 @@
+import InlineCompatUI
 import InlineIOSUI
 import InlineKit
 import InlineMessageLayout
@@ -227,7 +228,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     setupContentSize()
     setupSwipeGestures()
     setupReplyIndicator()
-    registerForTraitChanges([UITraitDisplayScale.self]) { (cell: MessageCollectionViewCell, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.displayScale]) { (cell: MessageCollectionViewCell, _: UITraitCollection) in
       guard cell.showsNextMessageView else { return }
       cell.applyNextLayout(motion: .immediate)
     }

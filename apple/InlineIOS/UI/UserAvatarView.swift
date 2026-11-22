@@ -1,7 +1,6 @@
 import Auth
 import InlineKit
 import InlineUI
-import SwiftUI
 import UIKit
 
 final class UserAvatarView: UIView {
@@ -11,7 +10,8 @@ final class UserAvatarView: UIView {
   private var widthConstraint: NSLayoutConstraint?
   private var heightConstraint: NSLayoutConstraint?
   private var currentRenderSignature: RenderSignature?
-  private var hostingController: UIHostingController<MessageViaAvatar<UserAvatar>>?
+  /// Pure UIKit drawing (initials, photo, agent badge); no SwiftUI host per avatar.
+  private let layerView = UserAvatarLayerView()
 
   private struct RenderSignature: Equatable {
     let userId: Int64
@@ -44,7 +44,17 @@ final class UserAvatarView: UIView {
   private func setupViews() {
     backgroundColor = .clear
     isOpaque = false
-    clipsToBounds = true
+    // The agent badge sits on the avatar's edge, so it must not be clipped.
+    clipsToBounds = false
+    layerView.isUserInteractionEnabled = false
+    layerView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(layerView)
+    NSLayoutConstraint.activate([
+      layerView.topAnchor.constraint(equalTo: topAnchor),
+      layerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      layerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      layerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
   }
 
   override func layoutSubviews() {
@@ -87,33 +97,7 @@ final class UserAvatarView: UIView {
   }
 
   private func updateAvatar(with userInfo: UserInfo, viaMark: MessageViaPresentation.Mark?) {
-    let rootView = MessageViaAvatar(avatarSize: size, mark: viaMark, ringColor: Color(uiColor: .systemBackground)) {
-      UserAvatar(
-        userInfo: userInfo,
-        size: size
-      )
-    }
-
-    if let hostingController {
-      hostingController.rootView = rootView
-      return
-    }
-
-    let controller = UIHostingController(rootView: rootView)
-    controller.safeAreaRegions = []
-    controller.view.translatesAutoresizingMaskIntoConstraints = false
-    controller.view.backgroundColor = .clear
-    controller.view.clipsToBounds = true
-    controller.view.isUserInteractionEnabled = false
-
-    addSubview(controller.view)
-    NSLayoutConstraint.activate([
-      controller.view.topAnchor.constraint(equalTo: topAnchor),
-      controller.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-      controller.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-      controller.view.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-    hostingController = controller
+    layerView.configure(with: userInfo, size: size, viaMark: viaMark)
   }
 
   func currentImage() -> UIImage? {

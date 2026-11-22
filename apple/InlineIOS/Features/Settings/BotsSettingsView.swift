@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+@available(iOS 17.0, *)
 struct BotsSettingsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
 
@@ -191,6 +192,7 @@ struct BotsSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 @Observable
 final class IOSBotsSettingsModel {
@@ -435,6 +437,7 @@ final class IOSBotsSettingsModel {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSBotErrorSection: View {
   let message: String
 
@@ -446,6 +449,7 @@ private struct IOSBotErrorSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSBotSettingsRow: View {
   @Environment(\.realtimeV2) private var realtimeV2
 
@@ -514,6 +518,7 @@ private struct IOSBotSettingsRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSManagedBotSummary: View {
   let bot: InlineProtocol.User
 
@@ -534,6 +539,7 @@ private struct IOSManagedBotSummary: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct IOSManagedBotSettingsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(Router.self) private var router
@@ -764,6 +770,7 @@ struct IOSManagedBotSettingsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 struct IOSManagedBotPhotoEditor: View {
   let bot: InlineProtocol.User
   let isBusy: Bool
@@ -809,6 +816,7 @@ struct IOSManagedBotPhotoEditor: View {
 
 /// The agent-wide default for how the bot replies. Threads can override it.
 /// Output mode applies to agents that report a runtime or declare the setting.
+@available(iOS 17.0, *)
 private struct IOSManagedBotOutputSection: View {
   let botUserID: Int64
   @ObservedObject private var store = AgentWorkStateStore.shared
@@ -864,6 +872,7 @@ private struct IOSManagedBotOutputSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSManagedBotAvatarSection: View {
   let bot: InlineProtocol.User
   let isBusy: Bool
@@ -890,6 +899,7 @@ private struct IOSManagedBotAvatarSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSBotAgentsSection: View {
   @State private var model: BotAgentsSettingsModel
   @State private var editorItem: IOSBotAgentEditorItem?
@@ -1003,11 +1013,13 @@ private struct IOSBotAgentsSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSBotAgentEditorItem: Identifiable {
   let agent: InlineProtocol.BotAgent?
   let id = UUID()
 }
 
+@available(iOS 17.0, *)
 private struct IOSBotAgentEditor: View {
   @Environment(\.dismiss) private var dismiss
   @State private var draft: ManagedBotAgentDraft
@@ -1138,6 +1150,7 @@ private struct IOSBotAgentEditor: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct IOSManagedBotAccessSection: View {
   let token: String?
   let isBusy: Bool
@@ -1173,6 +1186,7 @@ private struct IOSManagedBotAccessSection: View {
 }
 
 /// Who can message the bot, one tap from its settings.
+@available(iOS 17.0, *)
 private struct IOSManagedBotSharingSection: View {
   let bot: InlineProtocol.User
   @ObservedObject private var grants = AgentGrantStore.shared

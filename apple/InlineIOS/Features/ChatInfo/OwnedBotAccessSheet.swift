@@ -8,6 +8,7 @@ import SwiftUI
 /// Who can reach a bot the viewer owns, from its chat info or a thread's
 /// participants: everyone, or the people and spaces the owner adds. Entries
 /// are removed in place.
+@available(iOS 17.0, *)
 struct BotAccessView: View {
   let bot: UserInfo
   /// A thread's direct participants, offered as toggles. Empty in the bot's own chat.
@@ -334,6 +335,7 @@ struct BotAccessView: View {
 }
 
 /// Searches people and gives each one tapped access to the bot.
+@available(iOS 17.0, *)
 private struct BotAccessAddPeopleSheet: View {
   let bot: UserInfo
 
@@ -457,6 +459,7 @@ private struct BotAccessAddPeopleSheet: View {
 }
 
 /// A bot's access list from a thread's participants, as its own sheet.
+@available(iOS 17.0, *)
 struct OwnedBotAccessSheet: View {
   let bot: UserInfo
   let participants: [UserInfo]
@@ -476,6 +479,7 @@ struct OwnedBotAccessSheet: View {
 }
 
 /// Marks a participant who has access to the selected bot.
+@available(iOS 17.0, *)
 struct AgentAccessBadge: View {
   var size: CGFloat = 20
 

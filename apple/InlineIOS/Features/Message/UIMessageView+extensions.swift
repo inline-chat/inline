@@ -1,3 +1,4 @@
+import InlineCompatUI
 import Auth
 import GRDB
 import InlineKit
@@ -22,7 +23,7 @@ final class MessageBubbleView: UIView {
   private var highlightFillView: MessageBubbleFillView?
   private var lightingAlphas: (top: CGFloat, bottom: CGFloat)?
   private var lightingVector: (startY: CGFloat, endY: CGFloat)?
-  private var colorTraitRegistration: UITraitChangeRegistration?
+  private var colorTraitRegistration: AnyObject?
   private var contentLeadingConstraint: NSLayoutConstraint?
   private var contentTrailingConstraint: NSLayoutConstraint?
 
@@ -71,7 +72,7 @@ final class MessageBubbleView: UIView {
       contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
-    colorTraitRegistration = registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+    colorTraitRegistration = compatRegisterForTraitChanges([.userInterfaceStyle]) {
       (view: MessageBubbleView, _: UITraitCollection) in
       view.updateShape()
     }
@@ -406,7 +407,12 @@ extension UIMessageView {
   }
 
   func createMessageLabel(usingTextLayoutManager: Bool = true) -> UITextView {
-    let textView = CodeBlockTextView(usingTextLayoutManager: usingTextLayoutManager)
+    // TextKit 2 text views exist from iOS 16; iOS 15 uses TextKit 1.
+    let textView: CodeBlockTextView = if #available(iOS 16.0, *) {
+      CodeBlockTextView(usingTextLayoutManager: usingTextLayoutManager)
+    } else {
+      CodeBlockTextView(frame: .zero, textContainer: nil)
+    }
     textView.backgroundColor = .clear
     textView.textAlignment = .natural
     textView.font = messageBodyFont
@@ -487,29 +493,21 @@ extension UIMessageView {
     return view
   }
 
-  func createVoiceMessageViewController() -> UIHostingController<VoiceMessageBubble> {
-    let controller = UIHostingController(
-      rootView: VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing)
-    )
-    controller.safeAreaRegions = []
-    controller.view.translatesAutoresizingMaskIntoConstraints = false
-    controller.view.backgroundColor = .clear
+  func createVoiceMessageView() -> VoiceMessageBubbleView {
+    let view = VoiceMessageBubbleView(message: fullMessage.message, outgoing: outgoing)
+    view.translatesAutoresizingMaskIntoConstraints = false
 
-    // Propose the standalone width without preventing the parent stack from
-    // stretching the voice surface to match a wider text or preview child.
-    // Above the hosting view's hugging: at a tie the row first lays out at the preferred
-    // width, then collapses to the minimum once SwiftUI reports its own narrow ideal width.
-    let preferredWidth = controller.view.widthAnchor.constraint(
-      equalToConstant: VoiceMessageBubble.preferredBubbleWidth(duration: fullMessage.message.voiceContent?.duration ?? 0)
+    // Propose the standalone width without preventing the parent stack from stretching the
+    // voice surface to match a wider text or preview child.
+    let preferredWidth = view.widthAnchor.constraint(
+      equalToConstant: VoiceMessageBubbleView.preferredBubbleWidth(duration: fullMessage.message.voiceContent?.duration ?? 0)
     )
     preferredWidth.priority = .defaultHigh
-
     NSLayoutConstraint.activate([
-      controller.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+      view.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
       preferredWidth,
-      controller.view.heightAnchor.constraint(equalToConstant: VoiceMessageBubble.bubbleHeight),
     ])
-    return controller
+    return view
   }
 
   func createMessageAttachmentEmbed() -> MessageAttachmentEmbed {

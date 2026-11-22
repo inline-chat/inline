@@ -1,5 +1,6 @@
 import InlineKit
-import SwiftUI
+import Combine
+import UIKit
 
 enum ToastType {
   case info
@@ -128,9 +129,7 @@ class ToastManager: ObservableObject {
       progressToastId = nil
     }
 
-    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-      currentToast = newToast
-    }
+    currentToast = newToast
 
     if type != .loading, !shouldStayVisible {
       setupTimer(duration: type.duration)
@@ -161,9 +160,7 @@ class ToastManager: ObservableObject {
     )
     progressToastId = nil
 
-    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-      currentToast = newToast
-    }
+    currentToast = newToast
   }
 
   func updateProgressToast(message: String, systemImage: String? = nil) {
@@ -184,9 +181,7 @@ class ToastManager: ObservableObject {
       placement: currentToast.placement
     )
 
-    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-      self.currentToast = updatedToast
-    }
+    self.currentToast = updatedToast
   }
 
   func showProgressStep(_ step: Int, message: String, systemImage: String? = nil) {
@@ -202,9 +197,7 @@ class ToastManager: ObservableObject {
   }
 
   func hideToast() {
-    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-      currentToast = nil
-    }
+    currentToast = nil
     timer?.invalidate()
     timer = nil
     progressToastId = nil
@@ -213,9 +206,7 @@ class ToastManager: ObservableObject {
   private func setupTimer(duration: Double) {
     timer?.invalidate()
     timer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
-      withAnimation(.linear(duration: 0.2)) {
-        self?.hideToast()
-      }
+      self?.hideToast()
     }
   }
 }

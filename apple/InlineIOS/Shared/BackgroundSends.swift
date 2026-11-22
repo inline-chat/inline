@@ -1,3 +1,4 @@
+import InlineCompat
 import BackgroundTasks
 import Combine
 import Foundation

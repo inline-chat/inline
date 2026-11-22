@@ -1,3 +1,4 @@
+import InlineCompatUI
 
 import Auth
 import Combine
@@ -367,7 +368,7 @@ class UIMessageView: UIView {
   lazy var videoView = createVideoView()
   lazy var floatingMetadataView = createFloatingMetadataView()
   lazy var documentView = createDocumentView()
-  lazy var voiceMessageViewController = createVoiceMessageViewController()
+  lazy var voiceMessageView = createVoiceMessageView()
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
   lazy var metadataView = createMessageTimeAndStatus()
   lazy var messageActionsContainer = createMessageActionsContainer()
@@ -438,7 +439,7 @@ class UIMessageView: UIView {
     handleLinkTap()
     if buildHierarchy {
       setupViews()
-      registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: UIMessageView, _: UITraitCollection) in
+      compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (view: UIMessageView, _: UITraitCollection) in
         view.refreshMessageTypography()
         if view.message.isServiceMessage {
           view.serviceLabel.font = .preferredFont(forTextStyle: .caption1, compatibleWith: view.traitCollection)
@@ -1401,7 +1402,7 @@ class UIMessageView: UIView {
     guard fullMessage.documentInfo != nil || shouldShowVoiceMessage else { return }
 
     if shouldShowVoiceMessage {
-      containerStack.addArrangedSubview(voiceMessageViewController.view)
+      containerStack.addArrangedSubview(voiceMessageView)
       return
     }
 

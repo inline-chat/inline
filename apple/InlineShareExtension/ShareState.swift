@@ -2,6 +2,7 @@ import Auth
 import AVFoundation
 import Foundation
 import ImageIO
+import InlineCompat
 import InlineIntents
 import InlineKit
 import InlineProtocol

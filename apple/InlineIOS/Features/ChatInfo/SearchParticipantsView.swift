@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct SearchParticipantsView: View {
   @Binding var searchText: String
   let searchResults: [UserInfo]

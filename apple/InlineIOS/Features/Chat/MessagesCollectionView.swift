@@ -1,3 +1,4 @@
+import InlineCompatUI
 import Auth
 import Combine
 import ContextMenuAccessoryStructs
@@ -199,7 +200,7 @@ final class MessagesCollectionView: UICollectionView {
     super.init(frame: .zero, collectionViewLayout: layout)
 
     setupCollectionView()
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (
+    compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (
       view: MessagesCollectionView,
       _: UITraitCollection
     ) in
@@ -5609,16 +5610,16 @@ private extension MessagesCollectionView {
       if isInteracting,
          let collectionView = currentCollectionView,
          !collectionView.isDragging,
-         collectionView.isDecelerating || collectionView.isScrollAnimating
+         collectionView.isDecelerating || collectionView.compatIsScrollAnimating
       {
         // A date press should stop existing motion and still reach the button on this tap.
         #if DEBUG || DEBUG_BUILD
         Log.shared.debug(
-          "date-navigation event=stop-scroll decelerating=\(collectionView.isDecelerating) animating=\(collectionView.isScrollAnimating)"
+          "date-navigation event=stop-scroll decelerating=\(collectionView.isDecelerating) animating=\(collectionView.compatIsScrollAnimating)"
         )
         #endif
         isUserScrollInEffect = false
-        collectionView.stopScrollingAndZooming()
+        collectionView.compatStopScrollingAndZooming()
       }
 
       // Stopping motion can schedule a hide through scroll delegate callbacks.

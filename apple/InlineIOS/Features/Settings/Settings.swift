@@ -4,6 +4,7 @@ import InlineKit
 import SwiftUI
 import TextProcessing
 
+@available(iOS 17.0, *)
 struct SettingsView: View {
   let onSelectSpace: (Int64) -> Void
 
@@ -148,6 +149,7 @@ enum SettingsBuildAudience {
   }
 }
 
+@available(iOS 17.0, *)
 extension EmojiSkinTone {
   var settingsLabel: LocalizedStringResource {
     switch self {
@@ -167,6 +169,7 @@ extension EmojiSkinTone {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview("Settings") {
   SettingsView(onSelectSpace: { _ in })
     .environmentObject(RootData(db: AppDatabase.empty(), auth: Auth.shared))

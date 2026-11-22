@@ -1,5 +1,6 @@
 import SwiftUI
 
+@available(iOS 17.0, *)
 @MainActor
 struct ComposeVoiceWaveformView: View {
   enum Motion {
@@ -211,6 +212,7 @@ private struct ComposeVoiceWaveformBars: View {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 private struct ComposeVoiceWaveformReel: View {
   let bars: [CGFloat]

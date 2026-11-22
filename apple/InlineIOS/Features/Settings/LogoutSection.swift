@@ -1,6 +1,7 @@
 import InlineKit
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct LogoutSection: View {
   @EnvironmentObject private var mainRouter: MainViewRouter
   @EnvironmentObject private var navigation: Navigation

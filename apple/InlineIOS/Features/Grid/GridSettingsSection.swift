@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Grid's sound preference for General settings. Shown only to people who
 /// have Grid in one of their spaces, like the Grid entry on Home.
+@available(iOS 17.0, *)
 struct GridSettingsSection: View {
   private let store = GridIOSRuntime.shared.rooms
 

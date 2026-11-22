@@ -531,7 +531,7 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
   }
 
   private func ensureMicrophoneAccess() async -> MicrophoneAccessGrant? {
-    switch AVAudioApplication.shared.recordPermission {
+    switch MicrophonePermission.state {
     case .granted:
       return .authorized
     case .undetermined:
@@ -558,7 +558,7 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
     try? await Task.sleep(nanoseconds: Self.microphonePermissionSettleDelay)
     guard self.operationId == operationId else { return false }
 
-    if AVAudioApplication.shared.recordPermission == .granted {
+    if MicrophonePermission.isGranted {
       return true
     }
 
@@ -588,11 +588,7 @@ final class ComposeVoiceRecordingViewModel: NSObject, ObservableObject, AVAudioP
   }
 
   private func requestMicrophoneAccess() async -> Bool {
-    await withCheckedContinuation { continuation in
-      AVAudioApplication.requestRecordPermission { granted in
-        continuation.resume(returning: granted)
-      }
-    }
+    await MicrophonePermission.request()
   }
 
   private func openAppSettings() {

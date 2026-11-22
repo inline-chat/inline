@@ -1,3 +1,4 @@
+import InlineCompatUI
 import Combine
 import InlineKit
 import InlineMessageLayout
@@ -39,7 +40,7 @@ final class RichCardView: UIView {
     super.init(frame: frame)
     clipsToBounds = false
     isAccessibilityElement = false
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.userInterfaceStyle]) { (self: Self, _: UITraitCollection) in
       self.updateChrome()
     }
   }
@@ -496,7 +497,7 @@ final class RichCardButton: UIControl {
     addSubview(spinner)
     isAccessibilityElement = true
     accessibilityTraits = .button
-    registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
+    compatRegisterForTraitChanges([.userInterfaceStyle]) { (self: Self, _: UITraitCollection) in
       self.updateStyle()
     }
   }

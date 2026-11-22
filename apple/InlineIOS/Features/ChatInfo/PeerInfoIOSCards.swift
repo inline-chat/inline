@@ -8,6 +8,7 @@ import UIKit
 // keep their other actions in the long-press menu.
 
 /// An inset grouped card, with an optional caption above and footnote below.
+@available(iOS 18.0, *)
 struct PeerInfoIOSCard<Content: View>: View {
   private let title: String?
   private let footer: String?
@@ -176,6 +177,7 @@ enum PeerInfoIOSPasteboard {
 
 /// Bio, username, email and phone, each only when shared with you. Local time
 /// is in the subtitle.
+@available(iOS 18.0, *)
 struct PeerInfoIOSPersonCard: View {
   let user: User
   @Environment(\.openURL) private var openURL
@@ -227,6 +229,7 @@ struct PeerInfoIOSPersonCard: View {
 
 /// The bot's bio, what it runs on, and who can message it. Owners open the
 /// access list from here; everyone else sees the owner.
+@available(iOS 18.0, *)
 struct PeerInfoIOSBotCard: View {
   let bot: UserInfo
   let onOpenOwner: (Int64) -> Void
@@ -368,6 +371,7 @@ struct PeerInfoIOSBotCard: View {
 }
 
 /// Every runtime detail, behind the one-line runtime row.
+@available(iOS 18.0, *)
 private struct PeerInfoIOSRuntimeSheet: View {
   let user: User
   @ObservedObject private var store = AgentWorkStateStore.shared
@@ -410,6 +414,7 @@ private struct PeerInfoIOSRuntimeSheet: View {
 // MARK: - Thread
 
 /// Where a thread lives: its space, and for a subthread where it came from.
+@available(iOS 18.0, *)
 struct PeerInfoIOSPlaceCard: View {
   let subject: PeerInfoSubject
   let space: Space?

@@ -1,3 +1,6 @@
+import ObjectiveC
+import MCEmojiPicker
+import InlineCompatUI
 import Auth
 import ContextMenuAccessoryStructs
 import InlineIOSUI
@@ -34,7 +37,8 @@ final class MessageMenuActions: NSObject {
 
   private var hasLinearConnected = false
   private var linearTeamId: String?
-  private var reactionPickerPresentation: ReactionEmojiPickerPresentation?
+  /// `ReactionEmojiPickerPresentation` (iOS 17+), stored untyped for the iOS 15 build.
+  private var reactionPickerPresentation: AnyObject?
 
   init(peerId: Peer, spaceId: Int64?, theme: IOSThemeSnapshot) {
     self.peerId = peerId
@@ -456,6 +460,10 @@ final class MessageMenuActions: NSObject {
     let selectedEmojis = Set(current.reactions
       .filter { $0.reaction.userId == Auth.shared.getCurrentUserId() }
       .map(\.reaction.emoji))
+    guard #available(iOS 18.0, *), CompatRuntime.allows(.iOS18) else {
+      presentLegacyEmojiPicker(for: fullMessage, presenter: presenter)
+      return
+    }
     let picker = ReactionEmojiPickerSheet(selectedEmojis: selectedEmojis) { [weak self] emoji in
       self?.react(fullMessage.id) { [weak self] in
         self?.toggleReaction(
@@ -479,6 +487,29 @@ final class MessageMenuActions: NSObject {
         self?.onEmojiSheetDismissed()
       }
     )
+  }
+
+  /// iOS 15–16: the UIKit emoji picker, presented from the chat.
+  private func presentLegacyEmojiPicker(for fullMessage: FullMessage, presenter: UIViewController) {
+    let picker = MCEmojiPickerViewController()
+    let delegate = LegacyEmojiPickerDelegate { [weak self] emoji in
+      self?.react(fullMessage.id) { [weak self] in
+        self?.toggleReaction(
+          emoji,
+          messageStableId: fullMessage.id,
+          messageId: fullMessage.message.messageId,
+          chatId: fullMessage.message.chatId,
+          randomId: fullMessage.message.randomId
+        )
+      }
+    }
+    picker.delegate = delegate
+    objc_setAssociatedObject(picker, &LegacyEmojiPickerDelegate.key, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    picker.sourceView = presenter.view
+    picker.modalPresentationStyle = .pageSheet
+    picker.compatConfigureSheet(detents: [.medium, .large])
+    presenter.present(picker, animated: true)
+    onEmojiSheetDismissed()
   }
 
   func toggleReaction(_ emoji: String, messageStableId: Int64, messageId: Int64, chatId: Int64, randomId: Int64?) {
@@ -625,6 +656,12 @@ final class MessageMenuActions: NSObject {
 
   func presentForwardSheet(_ fullMessage: FullMessage) {
     guard let viewController = presenter() else { return }
+    guard #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) else {
+      ToastManager.shared.showToast(
+        "Forwarding needs iOS 17 or later for now", type: .info, systemImage: "arrowshape.turn.up.right"
+      )
+      return
+    }
     let rootView = InlineUI.ForwardMessagesSheet(
       messages: [fullMessage],
       onSelect: { destination, selection in
@@ -654,7 +691,7 @@ final class MessageMenuActions: NSObject {
 
   private static func forwardMessages(
     destinations: [HomeChatItem],
-    selection: InlineUI.ForwardMessagesSheet.ForwardMessagesSelection
+    selection: InlineUI.ForwardMessagesSelection
   ) async {
     guard !destinations.isEmpty else { return }
     guard !selection.messageIds.isEmpty else {
@@ -883,5 +920,19 @@ extension MessageMenuActions: NotionTaskManagerDelegate {
     Task { @MainActor in
       ToastManager.shared.updateProgressToast(message: message, systemImage: systemImage)
     }
+  }
+}
+
+/// Bridges MCEmojiPicker's delegate to a closure.
+private final class LegacyEmojiPickerDelegate: NSObject, MCEmojiPickerDelegate {
+  nonisolated(unsafe) static var key: UInt8 = 0
+  private let onPick: @MainActor (String) -> Void
+
+  init(onPick: @escaping @MainActor (String) -> Void) {
+    self.onPick = onPick
+  }
+
+  func didGetEmoji(emoji: String) {
+    MainActor.assumeIsolated { onPick(emoji) }
   }
 }

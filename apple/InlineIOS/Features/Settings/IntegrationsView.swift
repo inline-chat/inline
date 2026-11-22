@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct ConnectorsView: View {
   @State private var model = ConnectorSettingsModel()
   @Environment(Router.self) private var router
@@ -27,6 +28,7 @@ struct ConnectorsView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   NavigationView {
     ConnectorsView()

@@ -11,6 +11,7 @@ struct GridScreenShareSelection: Identifiable {
   var id: String { "\(mediaSessionIdentity):\(publicationID)" }
 }
 
+@available(iOS 17.0, *)
 struct GridScreenShareViewer: View {
   let store: GridRoomService
   let selection: GridScreenShareSelection

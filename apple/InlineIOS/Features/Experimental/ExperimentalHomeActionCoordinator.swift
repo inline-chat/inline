@@ -1,12 +1,8 @@
 import InlineKit
-import Observation
 
 @MainActor
-@Observable
 final class ExperimentalHomeActionCoordinator {
-  @ObservationIgnored
   private var pendingPeers = Set<Peer>()
-  @ObservationIgnored
   private var deferredPinUpdates: [Peer: Bool] = [:]
 
   func deferPinUpdate(peer: Peer, pinned: Bool) {

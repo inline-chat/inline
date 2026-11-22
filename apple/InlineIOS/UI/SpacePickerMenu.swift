@@ -144,6 +144,7 @@ private struct SpacePickerToolbarIcon: View {
 }
 
 // TODO: Remove the old sheet picker after the compact menu UX is accepted.
+@available(iOS 16.0, *)
 private struct SpacePickerSheet: View {
   let spaces: [Space]
   let selectedSpaceId: Int64?
@@ -215,6 +216,7 @@ private struct SpacePickerSheet: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct SpacePickerRow: View {
   let title: String
   let space: Space?

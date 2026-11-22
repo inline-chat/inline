@@ -12,14 +12,14 @@ enum IPadSidebarAccountMenu {
     let modes: [NotificationMode] = [.all, .mentions, .onlyMentions, .none]
     let notifications = UIMenu(
       title: "Notifications",
-      subtitle: String(localized: notificationMode.valueTitle),
+      subtitle: notificationMode.title,
       image: UIImage(systemName: notificationMode.systemImage),
       children: modes.map { mode in
         // `importantOnly` is the legacy form of "Any message to you".
         let isSelected = mode == notificationMode
           || (mode == .mentions && notificationMode == .importantOnly)
         return UIAction(
-          title: String(localized: mode.valueTitle),
+          title: mode.title,
           image: UIImage(systemName: mode.systemImage),
           state: isSelected ? .on : .off
         ) { _ in

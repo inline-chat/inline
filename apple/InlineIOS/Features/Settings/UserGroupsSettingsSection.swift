@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct UserGroupsSettingsSection: View {
   @ObservedObject var viewModel: UserGroupsViewModel
   let canManage: Bool
@@ -78,6 +79,7 @@ struct UserGroupsSettingsSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct UserGroupSettingsRow: View {
   let group: UserGroup
   let members: [UserGroupMemberInfo]
@@ -124,6 +126,7 @@ private struct UserGroupSettingsRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct UserGroupEditorView: View {
   @ObservedObject var viewModel: UserGroupsViewModel
   let group: UserGroup?

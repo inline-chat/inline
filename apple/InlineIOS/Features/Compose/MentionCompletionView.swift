@@ -1,7 +1,6 @@
 import InlineKit
 import InlineUI
 import Logger
-import SwiftUI
 import UIKit
 
 protocol MentionCompletionDelegate: AnyObject {
@@ -354,30 +353,44 @@ public class MentionCompletionView: UIView {
   }
 }
 
+/// Avatar with the online dot cut into its edge, like `onlineIndicator`, drawn in UIKit.
 private final class OnlineBotMentionAvatarView: UIView {
-  private let hostingController: UIHostingController<AnyView>
+  private let avatar = UserAvatarLayerView()
+  private let dot = UIView()
+  private let cutout = CAShapeLayer()
+  private let size: CGFloat
 
   init(userInfo: UserInfo, size: CGFloat) {
-    hostingController = UIHostingController(rootView: AnyView(
-      UserAvatar(userInfo: userInfo, size: size)
-        .onlineIndicator(true, avatarSize: size)
-        .frame(width: size, height: size)
-    ))
+    self.size = size
     super.init(frame: .zero)
-    let hosted = hostingController.view!
-    hosted.backgroundColor = .clear
-    hosted.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(hosted)
-    NSLayoutConstraint.activate([
-      hosted.topAnchor.constraint(equalTo: topAnchor),
-      hosted.bottomAnchor.constraint(equalTo: bottomAnchor),
-      hosted.leadingAnchor.constraint(equalTo: leadingAnchor),
-      hosted.trailingAnchor.constraint(equalTo: trailingAnchor),
-    ])
+    avatar.configure(with: userInfo, size: size)
+    avatar.layer.mask = cutout
+    addSubview(avatar)
+    dot.backgroundColor = .systemGreen
+    accessibilityValue = "online"
+    addSubview(dot)
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    avatar.frame = bounds
+    // Sized so the dot's center sits on the avatar's circle at 45°.
+    let dotSize = max(6, (size * 0.28).rounded())
+    let gap = max(1.5, (size * 0.05).rounded())
+    let dotFrame = CGRect(
+      x: bounds.maxX - dotSize, y: bounds.maxY - dotSize, width: dotSize, height: dotSize
+    )
+    dot.frame = dotFrame
+    dot.layer.cornerRadius = dotSize / 2
+    let path = UIBezierPath(rect: bounds)
+    path.append(UIBezierPath(ovalIn: dotFrame.insetBy(dx: -gap, dy: -gap)))
+    cutout.frame = bounds
+    cutout.fillRule = .evenOdd
+    cutout.path = path.cgPath
   }
 }

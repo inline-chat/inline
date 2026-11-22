@@ -1,3 +1,4 @@
+import InlineCompatUI
 import AVFoundation
 import Combine
 import CoreServices
@@ -237,30 +238,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var attachmentScrollView = makeAttachmentScrollView()
   lazy var attachmentStackView = makeAttachmentStackView()
   private(set) lazy var voiceViewModel = ComposeVoiceRecordingViewModel()
-  private lazy var voiceInputHostingController: UIHostingController<ComposeVoiceInputView> = {
-    let controller = UIHostingController(rootView: ComposeVoiceInputView(
-      viewModel: voiceViewModel,
-      onStop: { [weak self] in
-        self?.stopVoiceRecording()
-      },
-      onPlay: { [weak self] in
-        self?.toggleVoicePlayback()
-      },
-      onDiscard: { [weak self] in
-        self?.discardVoiceRecordingTapped()
-      },
-      onSend: { [weak self] in
-        self?.voiceSendTapped(sendMode: nil)
-      },
-      onSendSilently: { [weak self] in
-        self?.voiceSendTapped(sendMode: .modeSilent)
-      }
-    ))
-    controller.safeAreaRegions = []
-    return controller
-  }()
+  /// The recording surface is SwiftUI (iOS 17+). Earlier systems don't offer voice recording yet.
   private lazy var voiceInputView: UIView = {
-    let view = voiceInputHostingController.view!
+    let view: UIView
+    if #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) {
+      view = makeVoiceInputHostingController().view
+    } else {
+      view = UIView()
+    }
     view.translatesAutoresizingMaskIntoConstraints = false
     view.backgroundColor = .clear
     view.isHidden = true
@@ -279,8 +264,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var agentCancellables: Set<AnyCancellable> = []
   var isAgentLayout = false
   let agentRowState = ComposeAgentRowState()
-  lazy var agentRowHostingController = makeAgentRowHostingController()
-  var agentRowView: UIView { agentRowHostingController.view }
+  /// The agent card row is SwiftUI (iOS 17+); earlier systems keep an empty, hidden slot.
+  lazy var agentRowView: UIView = {
+    if #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) {
+      let controller = makeAgentRowHostingController()
+      agentRowHost = controller
+      return controller.view
+    }
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    view.alpha = 0
+    return view
+  }()
+  /// Keeps the iOS 17+ hosting controller alive (stored untyped for the iOS 15 build).
+  var agentRowHost: AnyObject?
   var textViewBottomToContentConstraint: NSLayoutConstraint?
   var textViewBottomToAgentRowConstraint: NSLayoutConstraint?
   var textViewTrailingToSendConstraint: NSLayoutConstraint?
@@ -887,7 +885,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       guard canStartVoiceRecording else { return }
       // A first-use permission prompt steals the touch; leave that recording
       // running as a tap recording instead of stopping it on the cancelled hold.
-      isVoiceHoldRecording = AVAudioApplication.shared.recordPermission == .granted
+      isVoiceHoldRecording = MicrophonePermission.isGranted
       stopVoiceWhenRecordingStarts = false
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
       startVoiceRecordingTapped()
@@ -1010,8 +1008,39 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func updateTrailingControlVisibility(_ state: ComposeTrailingControlState, animated: Bool) {
+    // Without the recording surface (before iOS 17) the send button takes the voice slot.
+    let state: ComposeTrailingControlState = Self.hostsSwiftUISurfaces || state != .voice ? state : .send
     updateVoiceButtonVisibility(visible: state == .voice, animated: animated)
     sendButton.isHidden = state != .send
+  }
+
+  static var hostsSwiftUISurfaces: Bool {
+    if #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) { return true }
+    return false
+  }
+
+  @available(iOS 17.0, *)
+  private func makeVoiceInputHostingController() -> UIHostingController<ComposeVoiceInputView> {
+    let controller = UIHostingController(rootView: ComposeVoiceInputView(
+      viewModel: voiceViewModel,
+      onStop: { [weak self] in
+        self?.stopVoiceRecording()
+      },
+      onPlay: { [weak self] in
+        self?.toggleVoicePlayback()
+      },
+      onDiscard: { [weak self] in
+        self?.discardVoiceRecordingTapped()
+      },
+      onSend: { [weak self] in
+        self?.voiceSendTapped(sendMode: nil)
+      },
+      onSendSilently: { [weak self] in
+        self?.voiceSendTapped(sendMode: .modeSilent)
+      }
+    ))
+    controller.safeAreaRegions = []
+    return controller
   }
 
   private func updateVoiceButtonVisibility(visible: Bool, animated: Bool) {

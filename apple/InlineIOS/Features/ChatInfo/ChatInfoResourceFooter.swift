@@ -9,6 +9,7 @@ import SwiftUI
 /// page whenever the row count or load state changes, which also fills pages too short
 /// to scroll. Visibility comes from geometry, not `onAppear`, because the tab sits in
 /// the page's lazy stack and may not be lazy itself.
+@available(iOS 17.0, *)
 struct ChatInfoResourceFooter: View {
   struct Empty {
     let systemImage: String

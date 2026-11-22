@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Agent Settings: the agent, this chat's output, the provider's settings,
 /// then usage. Same arrangement as the Mac popover (`BotChatSettingsLayout`).
+@available(iOS 17.0, *)
 struct BotChatSettingsSheet: View {
   let coordinator: BotChatSettingsCoordinator
 
@@ -29,6 +30,7 @@ struct BotChatSettingsSheet: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct BotChatSettingsSheetContent: View {
   let coordinator: BotChatSettingsCoordinator
   @ObservedObject private var agentWork = AgentWorkStateStore.shared
@@ -155,6 +157,7 @@ private struct BotChatSettingsIOSProblemSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct BotChatSettingsIOSSection: View {
   let section: BotChatSettingsModel.Section
   let pendingItemIDs: Set<String>
@@ -180,6 +183,7 @@ private struct BotChatSettingsIOSSection: View {
 }
 
 /// Limits and the context window as bars, with Compact beside the context.
+@available(iOS 17.0, *)
 private struct BotChatSettingsIOSUsageSection: View {
   let layout: BotChatSettingsLayout
   let pendingItemIDs: Set<String>
@@ -234,6 +238,7 @@ private struct BotChatSettingsIOSUsageSection: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct BotChatSettingsIOSItem: View {
   let item: BotChatSettingsModel.Item
   let isPending: Bool
@@ -351,6 +356,7 @@ private struct BotChatSettingsIOSItem: View {
 }
 
 /// Recent folders on the agent's machine; adding one happens there.
+@available(iOS 16.0, *)
 private struct BotChatSettingsIOSFolderControl: View {
   let label: String
   let presentation: BotChatSettingsModel.FolderPresentation

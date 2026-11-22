@@ -1,3 +1,4 @@
+import InlineCompatUI
 import UIKit
 
 /// The timeline's small labels (day badges, the unread line, notices) grow with the reader's text size
@@ -87,7 +88,7 @@ final class TimelineDatePill: UIView {
     accessibilityTraits = .button
     isUserInteractionEnabled = false
     // The label takes the new size by itself; its capsule is sized here.
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (pill: TimelineDatePill, _) in
+    compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (pill: TimelineDatePill, _) in
       pill.setNeedsLayout()
     }
   }

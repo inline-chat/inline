@@ -1,3 +1,4 @@
+import InlineCompatUI
 import InlineKit
 import InlineUI
 import Nuke
@@ -251,7 +252,7 @@ private final class ChatInfoResourceThumbnailBadge: UIView {
     label.textColor = .white
     label.adjustsFontForContentSizeCategory = true
     addSubview(label)
-    registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (badge: ChatInfoResourceThumbnailBadge, _) in
+    compatRegisterForTraitChanges([.preferredContentSizeCategory]) { (badge: ChatInfoResourceThumbnailBadge, _) in
       badge.superview?.setNeedsLayout()
     }
   }

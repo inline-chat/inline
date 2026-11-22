@@ -6,6 +6,7 @@ import SwiftUI
 
 /// Discovery is deliberately separate from call ownership. A bounded avatar
 /// preview must never decide which device owns the user's current call.
+@available(iOS 17.0, *)
 @MainActor
 struct GridHomeEntryProjection {
   let isEligible: Bool
@@ -43,12 +44,14 @@ struct GridHomeEntryProjection {
   }
 }
 
+@available(iOS 17.0, *)
 extension View {
   func gridHomeEntry(isVisible: Bool = true, onOpen: @escaping () -> Void) -> some View {
     modifier(GridHomeEntryModifier(isVisible: isVisible, onOpen: onOpen))
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridHomeEntryModifier: ViewModifier {
   let isVisible: Bool
   let onOpen: () -> Void
@@ -73,6 +76,7 @@ private struct GridHomeEntryModifier: ViewModifier {
 }
 
 /// What Home shows above the chat list, most specific first.
+@available(iOS 17.0, *)
 @MainActor
 private enum GridHomeBarState {
   /// This device is joining or carries the call: the room with its controls.
@@ -113,6 +117,7 @@ private enum GridHomeBarState {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridHomeBar: View {
   let store: GridRoomService
   let isVisible: Bool
@@ -151,6 +156,7 @@ private struct GridHomeBar: View {
 
 // MARK: - Capsules
 
+@available(iOS 17.0, *)
 private struct GridHomeLiveCapsule: View {
   let projection: GridHomeEntryProjection
   let onOpen: () -> Void
@@ -175,6 +181,7 @@ private struct GridHomeLiveCapsule: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridHomeInCallCapsule: View {
   let store: GridRoomService
   let call: GridLocalCall
@@ -220,6 +227,7 @@ private struct GridHomeInCallCapsule: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct GridHomeElsewhereCapsule: View {
   let store: GridRoomService
   let call: GridCurrentCall
@@ -263,6 +271,7 @@ private struct GridHomeElsewhereCapsule: View {
 // MARK: - Shared pieces
 
 /// Overlapping avatars with an optional speaking ring.
+@available(iOS 17.0, *)
 struct GridStackedAvatars: View {
   let avatars: [GridAvatar]
   let size: CGFloat
@@ -281,6 +290,7 @@ struct GridStackedAvatars: View {
   }
 }
 
+@available(iOS 17.0, *)
 private extension View {
   @ViewBuilder
   func gridHomeCapsuleChrome(tint: Color?) -> some View {

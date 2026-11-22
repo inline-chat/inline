@@ -1,3 +1,4 @@
+import InlineCompatUI
 import AVFoundation
 import Combine
 import InlineKit
@@ -1431,7 +1432,7 @@ final class MediaGalleryViewController: UIViewController {
         if abs(pager.contentOffset.x - pageOffset.x) > 0.5 {
           pager.setContentOffset(pageOffset, animated: true)
         }
-        UIView.animate(springDuration: 0.32, bounce: 0.12) {
+        UIView.compatAnimate(springDuration: 0.32, bounce: 0.12) {
           cell.scrollView.transform = .identity
           self.backgroundView.alpha = 1
           self.applyChromeAlpha()

@@ -6,6 +6,7 @@ import SwiftUI
 /// this thread, its menu holding the agent's default as a submenu, like on
 /// Mac. Shown for agents that report a runtime or declare the Output
 /// capability. The caller loads the values (`loadOutputModes`).
+@available(iOS 17.0, *)
 struct AgentOutputModeSection: View {
   enum Style {
     /// A form section with the summary as its footer.

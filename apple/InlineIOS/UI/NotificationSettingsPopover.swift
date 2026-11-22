@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 
 /// A button that opens the notification settings popover for iOS.
+@available(iOS 17.0, *)
 struct NotificationSettingsButton: View {
   @ObservedObject private var notificationSettings: NotificationSettingsManager
 
@@ -68,15 +69,8 @@ struct NotificationSettingsButton: View {
   }
 }
 
+@available(iOS 17.0, *)
 extension NotificationMode {
-  var systemImage: String {
-    switch self {
-    case .all: "bell"
-    case .none: "bell.slash"
-    case .mentions, .importantOnly, .onlyMentions: "at"
-    }
-  }
-
   var valueTitle: LocalizedStringResource {
     switch self {
     case .all:
@@ -91,6 +85,7 @@ extension NotificationMode {
   }
 }
 
+@available(iOS 17.0, *)
 struct NotificationSettingsPopoverContent: View {
   let notificationSettings: NotificationSettingsManager
   let onSelection: () -> Void
@@ -110,6 +105,7 @@ struct NotificationSettingsPopoverContent: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct NotificationSettingsList: View {
   @ObservedObject private var notificationSettings: NotificationSettingsManager
 
@@ -189,6 +185,7 @@ private struct NotificationSettingsList: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct NotificationSettingsItem<Value: Equatable>: View {
   var systemImage: String
   var title: LocalizedStringResource

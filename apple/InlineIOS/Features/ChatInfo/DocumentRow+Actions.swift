@@ -6,6 +6,7 @@ import QuickLook
 import SwiftUI
 import UIKit
 
+@available(iOS 17.0, *)
 extension DocumentRow {
   func viewTapped() {
     guard !isBeingRemoved else { return }

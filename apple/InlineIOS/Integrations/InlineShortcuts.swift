@@ -5,10 +5,12 @@ import Auth
 import UIKit
 
 /// The app only registers the module and its entry phrases. All execution stays in InlineAppIntents.
+@available(iOS 18.0, *)
 struct InlineIOSIntentsPackage: AppIntentsPackage {
   static var includedPackages: [any AppIntentsPackage.Type] { [InlineAppIntentsPackage.self] }
 }
 
+@available(iOS 18.0, *)
 struct InlineShortcuts: AppShortcutsProvider {
   @MainActor
   static func registerNavigation(routerRegistry: IOSSceneRouterRegistry) {

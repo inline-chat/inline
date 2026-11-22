@@ -1,5 +1,6 @@
 import SwiftUI
 
+@available(iOS 17.0, *)
 struct CircularCropView: View {
   let image: UIImage
   let cornerRadiusRatio: CGFloat
@@ -356,6 +357,7 @@ struct CircularCropView: View {
 }
 
 #if DEBUG
+@available(iOS 17.0, *)
 struct CircularCropView_Previews: PreviewProvider {
   static var previews: some View {
     CircularCropView(image: UIImage(systemName: "person.crop.circle")!) { _ in }
