@@ -185,7 +185,8 @@ final class ChatViewController: UIViewController {
       initialMessages: initialMessages,
       isPreview: options.isPreview,
       theme: ThemeManager.shared.snapshot(variant: style),
-      usesTimeline: TimelineFeature.isEnabled(allowsOverride: SettingsBuildAudience.showsDebugTools)
+      // Always the new timeline message list on this branch.
+      usesTimeline: true
     )
     container.translatesAutoresizingMaskIntoConstraints = false
     view.insertSubview(container, at: 0)

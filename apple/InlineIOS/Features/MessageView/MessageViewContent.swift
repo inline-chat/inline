@@ -48,12 +48,21 @@ struct MessageRowContext: Equatable {
   }
 
   var traits: UITraitCollection {
-    UITraitCollection { traits in
-      traits.preferredContentSizeCategory = contentSizeCategory
-      traits.displayScale = displayScale
-      traits.layoutDirection = isRightToLeft ? .rightToLeft : .leftToRight
-      traits.userInterfaceStyle = theme.variant == .dark ? .dark : .light
+    if #available(iOS 17.0, *) {
+      return UITraitCollection { traits in
+        traits.preferredContentSizeCategory = contentSizeCategory
+        traits.displayScale = displayScale
+        traits.layoutDirection = isRightToLeft ? .rightToLeft : .leftToRight
+        traits.userInterfaceStyle = theme.variant == .dark ? .dark : .light
+      }
     }
+    // `init(mutations:)` is iOS 17; it throws "unrecognized selector" on iOS 15.
+    return UITraitCollection(traitsFrom: [
+      UITraitCollection(preferredContentSizeCategory: contentSizeCategory),
+      UITraitCollection(displayScale: displayScale),
+      UITraitCollection(layoutDirection: isRightToLeft ? .rightToLeft : .leftToRight),
+      UITraitCollection(userInterfaceStyle: theme.variant == .dark ? .dark : .light),
+    ])
   }
 }
 
