@@ -478,18 +478,33 @@ public extension InlineProtocol.Dialog {
       if activityCounts == nil || preservingExistingReadState {
         newDialog.copyActivityCounts(from: existing)
       }
-      if preservingExistingReadState {
+      // The server owns read state, but this dialog can be older than what is applied here.
+      // Like `UpdateReadMaxId`, the read cursor never moves back, and the count and mark that go
+      // with it stay too (Telegram's `localReadMarkIsAheadOfServer`).
+      let localReadMaxId = max(0, existing.readInboxMaxId ?? 0)
+      let serverReadMaxId = hasReadMaxID ? max(0, readMaxID) : 0
+      if preservingExistingReadState || serverReadMaxId < localReadMaxId {
         newDialog.unreadMark = existing.unreadMark
         newDialog.readInboxMaxId = existing.readInboxMaxId
+        newDialog.unreadCount = existing.unreadCount
+      }
+      if preservingExistingReadState {
         newDialog.readOutboxMaxId = existing.readOutboxMaxId
-        // The server owns the count. Keep the local one only when the snapshot is not ordered
-        // with it: another read cursor, or a chat cursor this device is ahead of or behind. Like
-        // Telegram resetting a peer's read state from a dialog whose pts matches local state.
-        let countIsOrdered = unreadCountIsOrdered
-          && hasUnreadCount && unreadCount >= 0
-          && hasReadMaxID && readMaxID == max(0, existing.readInboxMaxId ?? 0)
-          && existing.chatId == (hasChatID ? chatID : nil)
-        newDialog.unreadCount = countIsOrdered ? Int(unreadCount) : existing.unreadCount
+        // A kept count is replaced only by one ordered with it: the same read cursor and a chat
+        // cursor this device is neither ahead of nor behind. Like Telegram resetting a peer's read
+        // state from a dialog whose pts matches local state.
+        if unreadCountIsOrdered, hasUnreadCount, unreadCount >= 0,
+           serverReadMaxId == localReadMaxId,
+           existing.chatId == (hasChatID ? chatID : nil)
+        {
+          newDialog.unreadCount = Int(unreadCount)
+        }
+      }
+      // This device's own read has not reached the server's cursor yet: the server's count and
+      // mark predate it (see `LocalReadsInFlight`).
+      if serverReadMaxId <= localReadMaxId, LocalReadsInFlight.contains(dialogID: existing.id) {
+        newDialog.unreadMark = existing.unreadMark
+        newDialog.unreadCount = existing.unreadCount
       }
       if let activityCounts, !preservingExistingReadState {
         try newDialog.applySnapshotActivityCounts(db, activityCounts, existing: existing)

@@ -34,6 +34,11 @@ public struct ReadMessagesTransaction: Transaction2 {
 
   private var readsActivity: Bool { context.readActivity == true }
 
+  private func endReadInFlight() {
+    guard let intentID = context.intentId else { return }
+    LocalReadsInFlight.end(dialogID: Dialog.getDialogId(peerId: context.peerId), intentID: intentID)
+  }
+
   public var executionKey: TransactionExecutionKey? { .readState(context.peerId) }
   public var reconnectReplayPolicy: TransactionReconnectPolicy? {
     context.maxId == nil ? .neverReplay : .replaySafe
@@ -55,7 +60,9 @@ public struct ReadMessagesTransaction: Transaction2 {
     // A bounded automatic read must wait for the server's authoritative
     // UpdateReadMaxId. Only the explicit nil marker means "mark all" and keeps
     // the existing optimistic interaction contract.
-    guard context.maxId == nil, context.intentId != nil else { return }
+    guard context.maxId == nil, let intentID = context.intentId else { return }
+    // Before the local write, so no server dialog lands between it and the guard.
+    LocalReadsInFlight.begin(dialogID: Dialog.getDialogId(peerId: context.peerId), intentID: intentID)
     do {
       let snapshot = try await AppDatabase.shared.dbWriter.write { db -> DialogMutationSnapshot? in
         guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else { return nil }
@@ -97,6 +104,7 @@ public struct ReadMessagesTransaction: Transaction2 {
 
     log.trace("result: \(result)")
     await Api.realtime.applyUpdatesAndWait(result.updates)
+    endReadInFlight()
     await DialogMutationRollbackTracker.shared.complete(
       intentID: context.intentId,
       peer: context.peerId,
@@ -106,15 +114,18 @@ public struct ReadMessagesTransaction: Transaction2 {
 
   // Neither outcome rolls back, so the intent must stop owning its fields.
   public func commitOutcomeUnknown() async {
+    endReadInFlight()
     await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .read)
   }
 
   public func cancelled() async {
+    endReadInFlight()
     await DialogMutationRollbackTracker.shared.complete(intentID: context.intentId, peer: context.peerId, kind: .read)
   }
 
   public func failed(error: TransactionError2) async {
     log.error("ReadMessages transaction failed", error: error)
+    endReadInFlight()
     guard let rollback = await DialogMutationRollbackTracker.shared.takeForRollback(
       intentID: context.intentId,
       peer: context.peerId,
