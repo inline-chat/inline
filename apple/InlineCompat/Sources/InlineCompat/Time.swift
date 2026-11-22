@@ -273,13 +273,13 @@ public struct CompatSuspendingClock: Sendable {
 
 // MARK: - Task.sleep
 
+// On iOS these shadow the iOS 16 APIs. On macOS (where the native ones exist) they are
+// disfavored, so code that writes `Task.sleep(for: .milliseconds(250))` keeps the native
+// ContinuousClock sleep and its tolerance.
+#if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
 extension Task where Success == Never, Failure == Never {
-  /// `Task.sleep(for:)` for the compat duration. Shadows the iOS 16 API on iOS.
-  public static func sleep(
-    for duration: CompatDuration,
-    tolerance: CompatDuration? = nil
-  ) async throws {
-    try await Task.sleep(nanoseconds: duration.compatNonNegativeNanoseconds)
+  public static func sleep(for duration: CompatDuration, tolerance: CompatDuration? = nil) async throws {
+    try await compatSleep(for: duration)
   }
 
   public static func sleep(
@@ -297,6 +297,36 @@ extension Task where Success == Never, Failure == Never {
   ) async throws {
     try await clock.sleep(until: deadline, tolerance: tolerance)
   }
+}
+#else
+extension Task where Success == Never, Failure == Never {
+  @_disfavoredOverload
+  public static func sleep(for duration: CompatDuration, tolerance: CompatDuration? = nil) async throws {
+    try await compatSleep(for: duration)
+  }
+
+  @_disfavoredOverload
+  public static func sleep(
+    until deadline: CompatContinuousClock.Instant,
+    tolerance: CompatDuration? = nil,
+    clock: CompatContinuousClock = CompatContinuousClock()
+  ) async throws {
+    try await clock.sleep(until: deadline, tolerance: tolerance)
+  }
+
+  @_disfavoredOverload
+  public static func sleep(
+    until deadline: CompatSuspendingClock.Instant,
+    tolerance: CompatDuration? = nil,
+    clock: CompatSuspendingClock
+  ) async throws {
+    try await clock.sleep(until: deadline, tolerance: tolerance)
+  }
+}
+#endif
+
+private func compatSleep(for duration: CompatDuration) async throws {
+  try await Task.sleep(nanoseconds: duration.compatNonNegativeNanoseconds)
 }
 
 // MARK: - Mach time

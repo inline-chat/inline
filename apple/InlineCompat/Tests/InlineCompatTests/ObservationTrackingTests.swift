@@ -67,12 +67,14 @@ struct ObservationTrackingTests {
     #expect(seen.values == [1], "one-shot: later changes do not fire again")
   }
 
-  @Test("writing the same value still counts as a change", arguments: SubjectKind.allCases)
+  @Test("writing an equal value is not a change, like the @Observable macro", arguments: SubjectKind.allCases)
   func sameValueWrite(_ kind: SubjectKind) {
     let subject = makeSubject(kind)
     let fired = Recorder<Int>()
     withCompatObservationTracking { _ = subject.count } onChange: { fired.append(1) }
     subject.count = subject.count
+    #expect(fired.count == 0)
+    subject.count += 1
     #expect(fired.count == 1)
   }
 
@@ -600,3 +602,39 @@ struct NativeObservationInteropTests {
   }
 }
 #endif
+
+@Suite("Tracked equality skip")
+@MainActor
+struct TrackedEqualitySkipTests {
+  final class Box {}
+
+  final class Model: CompatObservable {
+    let observationRegistrar = CompatObservationRegistrar(forceFallback: true)
+    @Tracked var number = 1
+    @Tracked var object = Box()
+    @Tracked var plain: [Int] = []
+  }
+
+  @Test func equalAndIdenticalWritesDoNotNotify() {
+    let model = Model()
+    let box = model.object
+    let fired = Recorder<Int>()
+    withCompatObservationTracking {
+      _ = model.number
+      _ = model.object
+    } onChange: { fired.append(1) }
+    model.number = 1
+    model.object = box
+    #expect(fired.count == 0)
+    model.number = 2
+    #expect(fired.count == 1)
+  }
+
+  @Test func differentObjectNotifies() {
+    let model = Model()
+    let fired = Recorder<Int>()
+    withCompatObservationTracking { _ = model.object } onChange: { fired.append(1) }
+    model.object = Box()
+    #expect(fired.count == 1)
+  }
+}

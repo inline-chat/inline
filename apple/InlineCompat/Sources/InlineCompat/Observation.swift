@@ -60,6 +60,11 @@ public struct Tracked<Value> {
       return subject[keyPath: storageKeyPath].storage
     }
     set {
+      // Like the @Observable macro: an equal value or the same object is not a change.
+      guard compatShouldNotifyObservers(subject[keyPath: storageKeyPath].storage, newValue) else {
+        subject[keyPath: storageKeyPath].storage = newValue
+        return
+      }
       subject.observationRegistrar.withMutation(of: subject, keyPath: wrappedKeyPath) {
         subject[keyPath: storageKeyPath].storage = newValue
       }
@@ -68,6 +73,23 @@ public struct Tracked<Value> {
 }
 
 extension Tracked: Sendable where Value: Sendable {}
+
+/// Mirrors the @Observable macro's `shouldNotifyObservers`: identical objects and equal
+/// `Equatable` values do not notify. Other types always notify.
+@usableFromInline
+func compatShouldNotifyObservers<Value>(_ old: Value, _ new: Value) -> Bool {
+  if Value.self is AnyClass, let oldObject = old as AnyObject?, let newObject = new as AnyObject? {
+    return oldObject !== newObject
+  }
+  guard let old = old as? any Equatable else { return true }
+  return !compatIsEqual(old, new)
+}
+
+@usableFromInline
+func compatIsEqual<T: Equatable>(_ lhs: T, _ rhs: Any) -> Bool {
+  guard let rhs = rhs as? T else { return false }
+  return lhs == rhs
+}
 
 // MARK: - Registrar
 
