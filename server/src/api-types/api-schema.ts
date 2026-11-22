@@ -16,6 +16,7 @@ import type { DbReaction } from "../db/schema/reactions"
 import { InlineError } from "@in/server/types/errors"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { encodedDialogOpen } from "@in/server/modules/dialogOpen"
+import { displayMessageText } from "@in/server/modules/message/displayText"
 
 // const BigIntString = Type.Transform(Type.BigInt())
 //   .Decode((value) => String(value))
@@ -379,7 +380,7 @@ export const encodeMessageInfo = (
     TMessageInfo,
     Value.Clean(TMessageInfo, {
       ...message,
-      text,
+      text: displayMessageText(text),
       id: message.messageId,
       randomId: out && message.randomId ? message.randomId.toString() : undefined,
       out: out,
