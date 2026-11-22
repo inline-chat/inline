@@ -367,6 +367,10 @@ struct PrivacyRuleSettingsView: View {
   var body: some View {
     let rule = currentRule
     List {
+      if kind == .timeZone, privacy.supportsManualTimeZone {
+        timeZoneChoiceSection
+      }
+
       Section {
         Picker(kind.pickerTitle, selection: audience) {
           Text("Everyone").tag(PrivacyRuleValue.Audience.everyone)
@@ -426,6 +430,34 @@ struct PrivacyRuleSettingsView: View {
     }
   }
 
+  @ViewBuilder
+  private var timeZoneChoiceSection: some View {
+    Section {
+      Toggle("Set Automatically", isOn: timeZoneAutomatic)
+      if let manualTimeZone = privacy.manualTimeZone {
+        NavigationLink {
+          ManualTimeZonePickerPage(selection: manualTimeZone) { timeZone in
+            privacy.setManualTimeZone(timeZone)
+          }
+        } label: {
+          LabeledContent("Time Zone", value: manualTimeZone.pickerTitle)
+        }
+      }
+    } footer: {
+      Text("Use the time zone of your iPhone or Mac. Turn this off to pick one yourself.")
+    }
+  }
+
+  /// Turning automatic off starts from the time zone this iPhone is in.
+  private var timeZoneAutomatic: Binding<Bool> {
+    Binding(
+      get: { privacy.manualTimeZone == nil },
+      set: { automatic in
+        privacy.setManualTimeZone(automatic ? nil : TimeZone.autoupdatingCurrent)
+      }
+    )
+  }
+
   /// Apple's own permission, needed before this iPhone can read Focus at all.
   @ViewBuilder
   private var focusAccessSection: some View {
@@ -481,6 +513,22 @@ struct PrivacyRuleSettingsView: View {
   private func exceptionsCount(_ rule: PrivacyRuleValue) -> String {
     let count = rule.exceptions.count
     return count == 0 ? "Add" : (count == 1 ? "1 person" : "\(count) people")
+  }
+}
+
+private struct ManualTimeZonePickerPage: View {
+  @Environment(\.dismiss) private var dismiss
+  let selection: TimeZone
+  let onSelect: (TimeZone) -> Void
+
+  var body: some View {
+    TimeZonePickerList(selection: selection) { timeZone in
+      onSelect(timeZone)
+      dismiss()
+    }
+    .listStyle(.plain)
+    .navigationTitle("Time Zone")
+    .navigationBarTitleDisplayMode(.inline)
   }
 }
 
