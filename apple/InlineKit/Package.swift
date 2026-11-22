@@ -253,6 +253,7 @@ let package = Package(
       name: "InlineSearch",
       dependencies: [
         "InlineKit",
+        "Logger",
       ],
       swiftSettings: swiftSettings
     ),

@@ -3,13 +3,14 @@ import { billingOrders, billingSubscriptions, billingWalletEntries, spaces, user
 import type { Transaction } from "@in/server/db/types"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { listMonthlyUsdCents, listPeriodUsdCents, plansBySubject, type BillingPlan } from "./catalog"
-import { creditBalance, creditRunsOutAt, renewCreditPlan } from "./credit"
+import { btcUsdSpot } from "./btcPrice"
+import { creditBalance, creditRunsOutAt, prefetchRates, renewCreditPlan, satsForUsdCents, type RateFor } from "./credit"
 import { grantsAccess, liveSubscription, refreshProFlag, subjectOf, type Subject } from "./entitlements"
 import { runProPushes, type ProPush } from "./notify"
 import { walletBalances } from "./service"
 
 export class BillingAdminError extends Error {
-  constructor(readonly code: "not_found" | "invalid_input" | "stripe_managed") {
+  constructor(readonly code: "not_found" | "invalid_input" | "stripe_managed" | "rate_unavailable") {
     super(code)
   }
 }
@@ -51,6 +52,8 @@ export interface WalletEntryInput {
   readonly reference?: string | undefined
   /** When the money moved, if not now. */
   readonly occurredAt?: Date | undefined
+  /** USD value at the time, for reporting (for BTC: what it was worth that day). */
+  readonly usdCents?: number | undefined
 }
 
 const validEntry = (entry: WalletEntryInput) =>
@@ -69,6 +72,7 @@ export const adminAddWalletEntry = async (subject: Subject, entry: WalletEntryIn
     kind: entry.kind,
     reference: entry.reference ?? null,
     occurredAt: entry.occurredAt ?? null,
+    usdCents: entry.usdCents ?? null,
     adminId,
   }).returning()
   return row!
@@ -81,6 +85,8 @@ export interface RecordPaymentInput {
   /** Transaction hash, invoice number or other note. */
   readonly reference?: string | undefined
   readonly occurredAt?: Date | undefined
+  /** USD value of the payment when it was made (reporting only; never converts the credit). */
+  readonly usdCents?: number | undefined
   /**
    * Optionally start a plan paid from this credit, drawn down per period in the payment's
    * currency. Without it, the credit tops up the balance and any live credit plan keeps renewing.
@@ -91,11 +97,14 @@ export interface RecordPaymentInput {
 export interface CreditPlanInput {
   readonly plan: BillingPlan
   readonly seats?: number | undefined
-  /** What each period draws from credit, in minor units of `chargeCurrency`. */
-  readonly chargeAmount: number
+  /**
+   * Optional fixed amount each period draws, in minor units of `chargeCurrency`. Usually left
+   * out: the period is priced in USD (`chargeUsdCents`) and BTC credit is drawn at that period's rate.
+   */
+  readonly chargeAmount?: number | undefined
   readonly chargeCurrency: "usd" | "btc"
   readonly chargeInterval: "month" | "year"
-  /** USD value of one charge, for MRR; defaults to the catalog list price when one exists. */
+  /** Price of one period in USD cents; defaults to the catalog list price when one exists. Counts toward MRR. */
   readonly chargeUsdCents?: number | undefined
   /** First period starts here (default now). A past date charges the periods since then. */
   readonly startAt?: Date | undefined
@@ -104,7 +113,9 @@ export interface CreditPlanInput {
 
 const validateCreditPlan = (subject: Subject, input: CreditPlanInput) => {
   validatePlan(subject, { plan: input.plan, funding: "wallet", seats: input.seats })
-  if (!Number.isSafeInteger(input.chargeAmount) || input.chargeAmount <= 0) throw new BillingAdminError("invalid_input")
+  if (input.chargeAmount !== undefined && (!Number.isSafeInteger(input.chargeAmount) || input.chargeAmount <= 0)) throw new BillingAdminError("invalid_input")
+  const price = input.chargeUsdCents ?? listPeriodUsdCents(input.plan, input.chargeInterval, input.seats ?? 1)
+  if (input.chargeAmount === undefined && !(price !== null && price > 0)) throw new BillingAdminError("invalid_input")
   if (input.chargeCurrency !== "usd" && input.chargeCurrency !== "btc") throw new BillingAdminError("invalid_input")
   if (input.chargeInterval !== "month" && input.chargeInterval !== "year") throw new BillingAdminError("invalid_input")
   if (input.chargeUsdCents !== undefined && !(Number.isSafeInteger(input.chargeUsdCents) && input.chargeUsdCents >= 0)) throw new BillingAdminError("invalid_input")
@@ -112,8 +123,18 @@ const validateCreditPlan = (subject: Subject, input: CreditPlanInput) => {
   if (input.startAt !== undefined && input.startAt.getTime() > Date.now() + 60_000) throw new BillingAdminError("invalid_input")
 }
 
+/**
+ * A BTC plan priced in USD needs the first period's rate to start: otherwise it would start
+ * unpaid and could lapse before a rate arrives. Admins retry when the price sources are back.
+ */
+const requireFirstRate = (input: CreditPlanInput, rateFor: RateFor, now: Date) => {
+  if (input.chargeCurrency === "btc" && input.chargeAmount === undefined && rateFor(input.startAt ?? now) === null) {
+    throw new BillingAdminError("rate_unavailable")
+  }
+}
+
 /** Starts a credit plan inside the caller's transaction and charges any periods already due. */
-const startCreditPlan = async (tx: Transaction, subject: Subject, input: CreditPlanInput, now: Date) => {
+const startCreditPlan = async (tx: Transaction, subject: Subject, input: CreditPlanInput, now: Date, rateFor: RateFor) => {
   const startAt = input.startAt ?? now
   const created = await replaceWithManualPlan(tx, subject, {
     plan: input.plan, funding: "wallet", paidThrough: startAt, seats: input.seats, note: input.note,
@@ -121,12 +142,12 @@ const startCreditPlan = async (tx: Transaction, subject: Subject, input: CreditP
   // Default the reporting value to the list price for that exact period (yearly plans have their own price).
   const usdPerCharge = input.chargeUsdCents ?? listPeriodUsdCents(input.plan, input.chargeInterval, input.seats ?? 1)
   await tx.update(billingSubscriptions).set({
-    chargeAmount: input.chargeAmount,
+    chargeAmount: input.chargeAmount ?? null,
     chargeCurrency: input.chargeCurrency,
     chargeInterval: input.chargeInterval,
     chargeUsdCents: usdPerCharge,
   }).where(eq(billingSubscriptions.id, created.id))
-  await renewCreditPlan(tx, created.id, now)
+  await renewCreditPlan(tx, created.id, now, rateFor)
   const [subscription] = await tx.select().from(billingSubscriptions).where(eq(billingSubscriptions.id, created.id))
   return subscription!
 }
@@ -135,9 +156,11 @@ const startCreditPlan = async (tx: Transaction, subject: Subject, input: CreditP
 export const adminStartCreditPlan = async (subject: Subject, input: CreditPlanInput, _adminId: number | null, now = new Date()) => {
   validateCreditPlan(subject, input)
   await requireSubject(subject)
+  const rateFor = await prefetchRates({ chargeCurrency: input.chargeCurrency, chargeInterval: input.chargeInterval, paidThrough: input.startAt ?? now }, now)
+  requireFirstRate(input, rateFor, now)
   const pushes: ProPush[] = []
   const subscription = await db.transaction(async (tx) => {
-    const sub = await startCreditPlan(tx, subject, input, now)
+    const sub = await startCreditPlan(tx, subject, input, now, rateFor)
     const push = await refreshProFlag(tx, subject, now.getTime())
     if (push) pushes.push(push)
     return sub
@@ -157,8 +180,15 @@ export const adminRecordPayment = async (subject: Subject, input: RecordPaymentI
   if (input.reference !== undefined && input.reference.length > 500) throw new BillingAdminError("invalid_input")
   const plan = input.plan ? { ...input.plan, chargeCurrency: input.currency } : undefined
   if (plan) validateCreditPlan(subject, plan)
+  if (input.usdCents !== undefined && !(Number.isSafeInteger(input.usdCents) && input.usdCents >= 0)) throw new BillingAdminError("invalid_input")
   await requireSubject(subject)
   const now = new Date()
+  // Rates are fetched before the transaction: for the new plan's periods, or the live plan's.
+  const liveBefore = plan ? null : await liveSubscription(db, subject)
+  const rateFor = plan
+    ? await prefetchRates({ chargeCurrency: plan.chargeCurrency, chargeInterval: plan.chargeInterval, paidThrough: plan.startAt ?? now }, now)
+    : liveBefore ? await prefetchRates(liveBefore, now) : () => null
+  if (plan) requireFirstRate(plan, rateFor, now)
 
   const pushes: ProPush[] = []
   const result = await db.transaction(async (tx) => {
@@ -170,15 +200,16 @@ export const adminRecordPayment = async (subject: Subject, input: RecordPaymentI
       kind,
       reference: input.reference ?? null,
       occurredAt: input.occurredAt ?? null,
+      usdCents: input.usdCents ?? null,
       adminId,
     }).returning()
     let subscription: DbBillingSubscription | null = null
     if (plan) {
-      subscription = await startCreditPlan(tx, subject, plan, now)
+      subscription = await startCreditPlan(tx, subject, plan, now, rateFor)
     } else {
       // A top-up can let a live credit plan catch up on a period it couldn't cover.
       const live = await liveSubscription(tx, subject)
-      if (live?.funding === "wallet" && live.chargeAmount !== null) await renewCreditPlan(tx, live.id, now)
+      if (live?.funding === "wallet" && live.chargeCurrency !== null) await renewCreditPlan(tx, live.id, now, rateFor)
     }
     const push = await refreshProFlag(tx, subject, now.getTime())
     if (push) pushes.push(push)
@@ -329,6 +360,9 @@ export const adminFinancialsOverview = async () => {
     .where(sql`${billingWalletEntries.amount} > 0 and ${billingWalletEntries.kind} in ('btc_topup', 'admin_topup', 'legacy_import')`)
     .groupBy(billingWalletEntries.currency)
   const now = Date.now()
+  const btcUsd = live.some((row) => row.subscription.chargeCurrency === "btc") || balances.some((row) => row.currency === "btc")
+    ? await btcUsdSpot(now)
+    : null
   const liveRows = await Promise.all(live.map(async (row) => {
     const sub = row.subscription
     const balance = sub.chargeCurrency ? await creditBalance(db, subjectOf(sub), sub.chargeCurrency) : null
@@ -336,7 +370,7 @@ export const adminFinancialsOverview = async () => {
       ...sub,
       isPro: grantsAccess(sub, now),
       creditBalance: balance,
-      creditRunsOutAt: balance === null ? null : creditRunsOutAt(sub, balance),
+      creditRunsOutAt: balance === null ? null : creditRunsOutAt(sub, balance, btcUsd),
       monthlyUsdCents: monthlyRevenueUsdCents(sub),
       userName: row.userName,
       username: row.username,
@@ -356,15 +390,22 @@ export const adminFinancialsOverview = async () => {
     /** Live paid plans with no known USD value (custom enterprise without a set value). */
     unpricedPlans: liveRows.filter((row) => row.isPro && row.funding !== "comp" && row.monthlyUsdCents === null).length,
     /** Monthly draw from credit in each currency, as charged (not converted). */
-    creditMonthlyByCurrency: liveRows.filter((row) => row.isPro && row.chargeAmount !== null && row.chargeCurrency !== null)
+    /** Monthly draw from credit per currency; USD-priced BTC plans are estimated at today's rate. */
+    creditMonthlyByCurrency: liveRows.filter((row) => row.isPro && row.chargeCurrency !== null)
       .reduce<Record<string, number>>((acc, row) => {
-        const perMonth = row.chargeInterval === "year" ? row.chargeAmount! / 12 : row.chargeAmount!
-        acc[row.chargeCurrency!] = Math.round((acc[row.chargeCurrency!] ?? 0) + perMonth)
+        const currency = row.chargeCurrency!
+        const perMonth = row.chargeAmount !== null
+          ? (row.chargeInterval === "year" ? row.chargeAmount / 12 : row.chargeAmount)
+          : currency === "usd" ? (row.monthlyUsdCents ?? 0)
+          : btcUsd !== null && row.monthlyUsdCents ? satsForUsdCents(row.monthlyUsdCents, btcUsd) : 0
+        acc[currency] = Math.round((acc[currency] ?? 0) + perMonth)
         return acc
       }, {}),
   }
   return {
     mrr,
+    /** Current BTC price used for run-out estimates (null when unavailable or not needed). */
+    btcUsd,
     live: liveRows,
     balances: balances.map((row) => ({ ...row, balance: Number(row.balance) })),
     entries: entries.map((row) => ({ ...row.entry, userName: row.userName, username: row.username, spaceName: row.spaceName })),
@@ -382,7 +423,7 @@ export const monthlyRevenueUsdCents = (sub: DbBillingSubscription): number | nul
   if (sub.funding === "comp" || sub.funding === "prepaid") return 0
   if (sub.funding === "stripe") return listMonthlyUsdCents(sub.plan, sub.interval, sub.seats)
   if (sub.funding === "wallet") {
-    if (sub.chargeUsdCents === null) return sub.chargeAmount === null ? 0 : null
+    if (sub.chargeUsdCents === null) return sub.chargeCurrency === null ? 0 : null
     return sub.chargeInterval === "year" ? Math.round(sub.chargeUsdCents / 12) : sub.chargeUsdCents
   }
   return 0

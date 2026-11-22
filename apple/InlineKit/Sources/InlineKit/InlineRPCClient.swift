@@ -111,6 +111,30 @@ public actor InlineRPCClient {
     return result
   }
 
+  /// One page of the account-wide whole-word message search. Nothing is saved.
+  public func searchMessagesGlobal(
+    query: String,
+    spaceID: Int64?,
+    homeOnly: Bool,
+    includeArchived: Bool,
+    cursor: String?,
+    limit: Int32
+  ) async throws -> InlineProtocol.SearchMessagesGlobalResult {
+    let response = try await callRpcDirect(
+      method: .searchMessagesGlobal,
+      input: .searchMessagesGlobal(.with {
+        $0.query = query
+        if let spaceID { $0.spaceID = spaceID }
+        if homeOnly { $0.homeOnly = true }
+        $0.includeArchived = includeArchived
+        if let cursor { $0.cursor = cursor }
+        $0.limit = limit
+      })
+    )
+    guard case let .searchMessagesGlobal(result)? = response else { throw InlineRPCClientError.unexpectedResponse }
+    return result
+  }
+
   /// Public profiles by ID. The server accepts up to 50 IDs and omits users it does not have.
   public func getUsers(
     ids: [Int64], accountToken: AuthAccountMutationToken? = nil

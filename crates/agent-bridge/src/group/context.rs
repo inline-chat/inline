@@ -281,11 +281,12 @@ impl PassiveBatch {
     }
 
     pub fn push(&mut self, message: ContextMessage) {
-        if self
+        if let Some(queued) = self
             .messages
-            .iter()
-            .any(|queued| queued.message_id == message.message_id)
+            .iter_mut()
+            .find(|queued| queued.message_id == message.message_id)
         {
+            *queued = message;
             return;
         }
         if self.messages.len() == MAX_PASSIVE_BUFFER {
@@ -694,5 +695,26 @@ mod tests {
             MAX_PASSIVE_BUFFER as u64 + 5
         );
         assert!(drained.included_message_ids[0] >= 5);
+    }
+
+    #[test]
+    fn streamed_edits_replace_context_without_counting_as_more_messages() {
+        let mut batch = PassiveBatch::new(3);
+        batch.push(message(1, ContextAuthorRole::Agent, "Working"));
+        batch.push(message(2, ContextAuthorRole::Owner, "Follow-up"));
+        for revision in 1..=100 {
+            batch.push(message(
+                1,
+                ContextAuthorRole::Agent,
+                &format!("Progress {revision}"),
+            ));
+        }
+        assert_eq!(batch.len(), 2);
+        let context = batch.drain(ContextBudget::bytes(MAX_BYTES)).unwrap();
+        assert_eq!(context.included_message_ids, [1, 2]);
+        assert_eq!(context.omitted, 0);
+        assert!(context.text.contains("Progress 100"));
+        assert!(!context.text.contains("Working"));
+        assert!(context.text.find("Progress 100") < context.text.find("Follow-up"));
     }
 }

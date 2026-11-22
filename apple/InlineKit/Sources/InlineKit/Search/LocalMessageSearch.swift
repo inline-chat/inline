@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import GRDB
 import Logger
@@ -72,6 +73,18 @@ public struct LocalMessageSearchResult: Sendable, Hashable, Identifiable {
   public var contextTitle: String? {
     space?.displayName
   }
+
+  /// Who wrote it, in chats with more than one other person.
+  public var senderName: String? {
+    searchSenderName(peer: peer, fromUserId: message.message.fromId, sender: message.from)
+  }
+}
+
+/// "You", or the sender's short name; nil in direct messages, where the title names them.
+func searchSenderName(peer: Peer, fromUserId: Int64, sender: User?) -> String? {
+  guard case .thread = peer else { return nil }
+  if fromUserId == Auth.getCurrentUserId() { return "You" }
+  return sender?.shortDisplayName
 }
 
 public enum LocalMessageSearch {

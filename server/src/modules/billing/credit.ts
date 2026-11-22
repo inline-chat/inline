@@ -2,6 +2,7 @@ import { db } from "@in/server/db"
 import { billingSubscriptions, billingWalletEntries, type DbBillingSubscription } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm"
+import { btcUsdForPeriod } from "./btcPrice"
 import { subjectOf, type Subject } from "./entitlements"
 
 /** Renew a day before the paid period ends so access never gaps. */
@@ -41,8 +42,56 @@ export const creditBalance = async (tx: Transaction | typeof db, subject: Subjec
 }
 
 const isCreditPlan = (sub: DbBillingSubscription) =>
-  sub.endedAt === null && sub.funding === "wallet" && sub.chargeAmount !== null && sub.chargeCurrency !== null
+  sub.endedAt === null && sub.funding === "wallet" && sub.chargeCurrency !== null
+  && (sub.chargeAmount !== null || (sub.chargeUsdCents ?? 0) > 0)
   && (sub.chargeInterval === "month" || sub.chargeInterval === "year") && sub.paidThrough !== null
+
+/** BTC price (USD per BTC) to charge a period starting at the given date with; null when unknown. */
+export type RateFor = (periodStart: Date) => number | null
+
+/** Sats for a USD amount at a BTC price, rounded up so the period is never undercharged. */
+export const satsForUsdCents = (usdCents: number, btcUsd: number) => Math.ceil((usdCents / 100 / btcUsd) * 100_000_000)
+
+/**
+ * What one full period draws from credit, in the credit's minor units, and its USD value.
+ * Fixed plans draw `charge_amount`; USD-priced plans draw the price, converted to sats at the
+ * period's rate for BTC credit. Null when a needed rate is unknown.
+ */
+const periodCharge = (sub: DbBillingSubscription, periodStart: Date, rateFor: RateFor): { amount: number; usdCents: number | null } | null => {
+  if (sub.chargeAmount !== null) {
+    const rate = sub.chargeCurrency === "btc" ? rateFor(periodStart) : null
+    const usd = sub.chargeCurrency === "usd" ? sub.chargeAmount : rate === null ? sub.chargeUsdCents : Math.round((sub.chargeAmount / 100_000_000) * rate * 100)
+    return { amount: sub.chargeAmount, usdCents: usd }
+  }
+  const price = sub.chargeUsdCents!
+  if (sub.chargeCurrency === "usd") return { amount: price, usdCents: price }
+  const rate = rateFor(periodStart)
+  return rate === null ? null : { amount: satsForUsdCents(price, rate), usdCents: price }
+}
+
+/** The period starts a renewal run may charge, from `paid_through` up to the renewal window. */
+const dueStarts = (paidThrough: Date, interval: ChargeInterval, now: Date) => {
+  const starts: Date[] = []
+  let start = paidThrough
+  while (starts.length < MAX_PERIODS_PER_RUN && start.getTime() <= now.getTime() + RENEW_AHEAD_MS) {
+    starts.push(start)
+    start = periodEnd(start, interval)
+  }
+  return starts
+}
+
+/**
+ * Fetches BTC rates for a plan's due periods before any transaction, so no row lock is held
+ * across the network. Plans that don't need BTC conversion get an empty lookup.
+ */
+export const prefetchRates = async (sub: Pick<DbBillingSubscription, "chargeCurrency" | "chargeInterval" | "paidThrough">, now: Date): Promise<RateFor> => {
+  if (sub.chargeCurrency !== "btc" || !sub.paidThrough || (sub.chargeInterval !== "month" && sub.chargeInterval !== "year")) return () => null
+  const rates = new Map<number, number | null>()
+  for (const start of dueStarts(sub.paidThrough, sub.chargeInterval, now)) {
+    rates.set(start.getTime(), await btcUsdForPeriod(start, now))
+  }
+  return (periodStart) => rates.get(periodStart.getTime()) ?? null
+}
 
 /**
  * Draws due periods from credit for one credit plan, inside the caller's transaction.
@@ -50,7 +99,7 @@ const isCreditPlan = (sub: DbBillingSubscription) =>
  * whole period, it charges what's left and extends by that fraction; with no credit it stops
  * and the plan lapses at `paid_through`. Returns how many charges were written.
  */
-export const renewCreditPlan = async (tx: Transaction, subscriptionId: number, now = new Date()): Promise<number> => {
+export const renewCreditPlan = async (tx: Transaction, subscriptionId: number, now = new Date(), rateFor: RateFor = () => null): Promise<number> => {
   let charged = 0
   for (let i = 0; i < MAX_PERIODS_PER_RUN; i++) {
     const [sub] = await tx.select().from(billingSubscriptions).where(eq(billingSubscriptions.id, subscriptionId)).for("update")
@@ -60,8 +109,11 @@ export const renewCreditPlan = async (tx: Transaction, subscriptionId: number, n
     const subject = subjectOf(sub)
     const balance = await creditBalance(tx, subject, sub.chargeCurrency!)
     if (balance <= 0) break
-    const amount = Math.min(sub.chargeAmount!, balance)
-    const fraction = amount / sub.chargeAmount!
+    // Without the period's BTC rate, wait for the next sweep (renewal starts a day early).
+    const full = periodCharge(sub, periodStart, rateFor)
+    if (!full) break
+    const amount = Math.min(full.amount, balance)
+    const fraction = amount / full.amount
     const inserted = await tx.insert(billingWalletEntries).values({
       userId: sub.userId,
       spaceId: sub.spaceId,
@@ -72,6 +124,7 @@ export const renewCreditPlan = async (tx: Transaction, subscriptionId: number, n
       subscriptionId: sub.id,
       periodStart,
       occurredAt: periodStart,
+      usdCents: full.usdCents === null ? null : -Math.round(full.usdCents * fraction),
     }).onConflictDoNothing().returning({ id: billingWalletEntries.id })
     if (inserted.length === 0) break
     await tx.update(billingSubscriptions)
@@ -88,20 +141,25 @@ export const dueCreditPlanIds = async (now = new Date()) => {
   const rows = await db.select({ id: billingSubscriptions.id }).from(billingSubscriptions).where(and(
     isNull(billingSubscriptions.endedAt),
     eq(billingSubscriptions.funding, "wallet"),
-    isNotNull(billingSubscriptions.chargeAmount),
+    isNotNull(billingSubscriptions.chargeCurrency),
     lte(billingSubscriptions.paidThrough, new Date(now.getTime() + RENEW_AHEAD_MS)),
   ))
   return rows.map((row) => row.id)
 }
 
-/** When the current credit runs out if nothing is added: paid-through plus the periods it still covers. */
-export const creditRunsOutAt = (sub: DbBillingSubscription, balance: number): Date | null => {
+/**
+ * When the current credit runs out if nothing is added: paid-through plus the periods it still
+ * covers. BTC credit priced in USD is estimated at today's rate (`spotBtcUsd`); null without one.
+ */
+export const creditRunsOutAt = (sub: DbBillingSubscription, balance: number, spotBtcUsd: number | null = null): Date | null => {
   if (!isCreditPlan(sub)) return null
+  const per = periodCharge(sub, sub.paidThrough!, () => spotBtcUsd)
+  if (!per) return null
   let end = sub.paidThrough!
   let remaining = Math.max(0, balance)
   for (let i = 0; i < 240 && remaining > 0; i++) {
-    const amount = Math.min(sub.chargeAmount!, remaining)
-    end = periodEnd(end, sub.chargeInterval as ChargeInterval, amount / sub.chargeAmount!)
+    const amount = Math.min(per.amount, remaining)
+    end = periodEnd(end, sub.chargeInterval as ChargeInterval, amount / per.amount)
     remaining -= amount
   }
   return end

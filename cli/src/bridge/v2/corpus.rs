@@ -138,6 +138,32 @@ fn transcripts(root: &Path) -> Vec<PathBuf> {
     files
 }
 
+fn validate_ranges(value: &Value, units: &[u16]) {
+    match value {
+        Value::Object(fields) => {
+            if let (Some(offset), Some(length)) = (
+                fields.get("offset").and_then(Value::as_i64),
+                fields.get("length").and_then(Value::as_i64),
+            ) {
+                assert!(offset >= 0 && length >= 0);
+                let range = units
+                    .get(offset as usize..(offset + length) as usize)
+                    .expect("rich-text range exceeds the published text");
+                String::from_utf16(range).expect("rich-text range splits a Unicode scalar");
+            }
+            for value in fields.values() {
+                validate_ranges(value, units);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_ranges(item, units);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[test]
 #[ignore = "reads local transcripts; set INLINE_RENDER_CORPUS"]
 fn real_turns_render_within_inlines_limits() {
@@ -185,6 +211,14 @@ fn real_turns_render_within_inlines_limits() {
                     };
                     messages += 1;
                     let size = Size::of(doc);
+                    assert!(
+                        !doc.text.contains('\0'),
+                        "native database decoding stops at NUL"
+                    );
+                    validate_ranges(
+                        &serde_json::to_value(&doc.blocks).unwrap(),
+                        &doc.text.encode_utf16().collect::<Vec<_>>(),
+                    );
                     assert!(
                         size.fits(),
                         "{} turn {turns_seen}: a message over Inline's limits: {size:?}",

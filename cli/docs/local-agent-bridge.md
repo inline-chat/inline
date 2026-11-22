@@ -16,6 +16,29 @@ requires explicit handoff mentions and warns against reciprocal loops. The Rust
 bridge is bundled with the Inline CLI and runs as one per-user background
 service; agent processes and project files remain on the user's computer.
 
+## Updates and restarts
+
+The bridge applies a staged update once active work and pending publication
+finish; open idle sessions do not block it, and there is no extra quiet period.
+Automatic activations stay at least six hours apart. Running `inline update` by
+hand asks the bridge to adopt the staged runtime at its next idle moment
+instead, skipping that spacing but not the idle wait or the trial. Admission
+closes atomically before the old runtime stops, so new work cannot race the
+handoff.
+
+`inline bridge status` and `inline bridge doctor` show the running CLI version,
+the retained supervisor's version, and pending updates or rollbacks. The binary
+in the bridge's `bin` directory belongs to the supervisor; its `--version` can
+differ from the runtime doing agent work.
+
+A deliberate `inline bridge stop` or `restart` during a candidate's startup
+probation leaves that candidate available for retry. Crashes and failed health
+checks still trigger rollback. A restart preserves native session bindings,
+thread settings, and durable delivery records. Existing sessions reopen when
+you next message them; input with an uncertain delivery is reconciled rather
+than automatically sent again. Unsent input interrupted by a manual restart
+asks you to resend it.
+
 ## Setup
 
 Authenticate the provider's own CLI first, then run setup. If the Inline CLI is
