@@ -2434,7 +2434,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       guard let switched else {
         self.previewTile(for: attachmentId)?.setSwitching(false)
         ToastManager.shared.showToast(
-          item.isSentAsFile ? "This file can only be sent as a file." : "The original is no longer available.",
+          item.isSentAsFile ? "This file can only be sent as a file." : "There's no original file for this item.",
           type: .error,
           systemImage: "exclamationmark.triangle.fill"
         )
@@ -2460,7 +2460,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     case let .available(summary):
       return .init(isOn: isOn, detail: summary.detailText, isAvailable: !isSwitching)
     case .unavailable:
-      return .init(isOn: isOn, detail: "The original is no longer available", isAvailable: false)
+      return .init(isOn: isOn, detail: "No original file kept", isAvailable: false)
     case .loading, nil:
       return .init(isOn: isOn, detail: nil, isAvailable: !isSwitching)
     }
