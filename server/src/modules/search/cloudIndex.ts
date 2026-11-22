@@ -110,6 +110,8 @@ export async function runCloudSearchIndexBatch(
   input: {
     limit?: number
     historicalOnly?: boolean
+    /** Leave historical rows to the paced history batch. */
+    liveOnly?: boolean
     beforePublish?: (messageGlobalId: bigint) => Promise<void>
   } = {},
 ) {
@@ -118,7 +120,7 @@ export async function runCloudSearchIndexBatch(
       select message_global_id from message_search_documents where not ready
         and (claim_until is null or claim_until <= now())
         and failed_attempts < 5
-        ${input.historicalOnly ? sql`and historical` : sql``}
+        ${input.historicalOnly ? sql`and historical` : input.liveOnly ? sql`and not historical` : sql``}
       order by historical, message_global_id limit ${Math.max(1, Math.min(input.limit ?? 16, 100))} for update skip locked
     ), leased as (
     update message_search_documents sd set claim_until = now() + interval '1 minute', work_version = nextval('message_search_work_version')

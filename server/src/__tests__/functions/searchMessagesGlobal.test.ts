@@ -23,6 +23,7 @@ import {
   requeueObsoleteSearchDocuments,
   runCloudSearchIndexBatch,
 } from "@in/server/modules/search/cloudIndex"
+import { CloudSearchWorker, HISTORY_BATCH, historyPauseMs } from "@in/server/modules/search/cloudWorker"
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { setupTestLifecycle, testUtils } from "../setup"
@@ -622,6 +623,38 @@ describe("global message search RPC", () => {
       .where(eq(schema.messages.globalId, bad!.globalId))
     await drain()
     expect((await search(ctx, "recovered")).indexIncomplete).toBe(false)
+  })
+
+  test("history is paced per worker while live sends are not", async () => {
+    const { chat, user, ctx } = await fixture()
+    await db.execute(sql`insert into messages(chat_id,message_id,from_id,text)
+      select ${chat.id},i,${user.id},'history' from generate_series(1,40) i`)
+    await db.delete(schema.messageSearchDocuments)
+    const indexedHistory = async () => {
+      const [row] = await db.execute<{ count: number }>(sql`select count(*)::int as count
+        from message_search_documents where historical and ready`)
+      return row!.count
+    }
+    const worker = new CloudSearchWorker()
+    await worker.pollOnce() // The drained queue is refilled from the scan.
+    expect(await indexedHistory()).toBe(0)
+    await worker.pollOnce()
+    expect(await indexedHistory()).toBe(HISTORY_BATCH)
+    expect(worker.historyNotBefore - Date.now()).toBeGreaterThan(1_000)
+    await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 41, text: "unpaced" })
+    await worker.pollOnce()
+    expect(await indexedHistory()).toBe(HISTORY_BATCH)
+    expect((await search(ctx, "unpaced")).hits).toHaveLength(1)
+    worker.historyNotBefore = 0
+    await worker.pollOnce()
+    expect(await indexedHistory()).toBe(2 * HISTORY_BATCH)
+    await worker.stop()
+
+    expect(historyPauseMs(0, 5)).toBe(0)
+    // A quick batch waits out the rate cap; a slow one keeps history to a fifth of the time.
+    expect(historyPauseMs(16, 100)).toBe(1_900)
+    expect(historyPauseMs(16, 1_000)).toBe(4_000)
+    expect(historyPauseMs(16, 60_000)).toBe(30_000)
   })
 
   test("the reader rollout switch and stored bot identity independently deny retrieval", async () => {
