@@ -1,10 +1,10 @@
 import { AgentRuntimeStatus } from "@inline-chat/protocol/core"
 import { agentRuntimes, agentSettings, members, spaces, users } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
-import { insertSystemGrants, revokeSystemGrants, sharedGrantMask, type GrantSubject } from "@in/server/modules/agents/grants"
+import { grantsRevision, insertSystemGrants, lockBotGrants, revokeSystemGrants, sharedGrantMask, type GrantSubject } from "@in/server/modules/agents/grants"
 import { effectiveRuntimeStatus } from "@in/server/modules/agents/runtime"
 import { setOpenToEveryoneBySystem } from "@in/server/modules/agents/settings"
-import { and, eq, inArray, isNull, not, sql } from "drizzle-orm"
+import { and, eq, inArray, sql } from "drizzle-orm"
 import { DataTaskSkip, defineDataTask, type DataTaskItem, type Json } from "../dataTask"
 
 /**
@@ -20,6 +20,11 @@ import { DataTaskSkip, defineDataTask, type DataTaskItem, type Json } from "../d
  *   private spaces or in threads with other people. Grant those spaces and
  *   people what an app share grants, then close it, so none of them lose it.
  * - close: nobody but the owner ever used it or shares a chat with it.
+ *
+ * Each item re-runs these rules for its bot when it applies and skips if
+ * they no longer give its plan, so a later run replans it. Revert restores
+ * "Everyone" only while the owner has changed neither the bot's settings nor
+ * its access list since.
  *
  * Production dry run on 2026-11-21: 222 bots; 10 keep-open (bobabot among
  * them), 11 share-and-close (10 space grants, largest space 6 people, and 1
@@ -45,6 +50,7 @@ with cohort as (
     and u.bot is true
     and u.deleted is not true
     and u.bot_creator_id is not null
+    /* one bot */
 ),
 humans as (
   select id from users where bot is not true and deleted is not true
@@ -134,6 +140,14 @@ from cohort c
 order by c.bot_id
 `
 
+const ONE_BOT = "/* one bot */"
+
+/** The cohort query narrowed to one bot, so apply can re-run the plan's own rules on current data. */
+function cohortRowSql(botUserId: number) {
+  const [head, tail] = cohortSql.split(ONE_BOT)
+  return sql.join([sql.raw(head!), sql`and s.bot_user_id = ${botUserId}`, sql.raw(tail!)], sql.raw(" "))
+}
+
 export type CohortRow = {
   botUserId: number
   ownerUserId: number
@@ -166,7 +180,7 @@ function botPlan(value: Json): BotPlan {
   return plan
 }
 
-type Applied = { openToEveryone: false; settingsRevision: string; grantIds: string[] }
+type Applied = { openToEveryone: false; settingsRevision: string; grantsRevision: string; grantIds: string[] }
 
 async function lockedSettings(tx: Transaction, botUserId: number) {
   const [row] = await tx.select().from(agentSettings).where(eq(agentSettings.botUserId, botUserId)).for("update").limit(1)
@@ -179,21 +193,33 @@ async function ownedBot(tx: Transaction, plan: BotPlan) {
   return bot
 }
 
-/** Someone besides the owner wrote to the bot or in a thread where it posted, as `usedByOthers` counts. */
-async function usedByOthersNow(tx: Transaction, plan: BotPlan): Promise<boolean> {
-  const rows = await tx.execute(sql`
-    select 1 from messages m
-    join users h on h.id = m.from_id and h.bot is not true and h.deleted is not true
-    where m.from_id not in (${plan.botUserId}, ${plan.ownerUserId})
-      and (
-        m.chat_id in (select id from chats where type = 'private' and ${plan.botUserId} in (min_user_id, max_user_id))
-        or m.chat_id in (
-          select distinct b.chat_id from messages b join chats ch on ch.id = b.chat_id and ch.type = 'thread'
-          where b.from_id = ${plan.botUserId}
-        )
-      )
-    limit 1`)
-  return rows.length > 0
+const sameIds = (a: readonly number[], b: readonly number[]) =>
+  a.length === b.length && a.every((id, index) => id === Number(b[index]))
+
+/**
+ * Re-runs the cohort rules for this bot on current data and skips it unless
+ * they still give the reviewed plan: a bot someone used since stays open, and
+ * one that left a planned space, a space made public, or a person who got
+ * their own grant since all replan on a later run instead of applying stale
+ * grants. The planned spaces and the bot's and owner's memberships in them stay
+ * locked until commit, so they can't change under the grants.
+ */
+async function recheckSharing(tx: Transaction, plan: BotPlan): Promise<void> {
+  await lockBotGrants(tx, plan.botUserId)
+  if (plan.spaceIds.length > 0) {
+    await tx.select({ id: spaces.id }).from(spaces).where(inArray(spaces.id, plan.spaceIds)).for("share")
+    await tx
+      .select({ id: members.id })
+      .from(members)
+      .where(and(inArray(members.spaceId, plan.spaceIds), inArray(members.userId, [plan.botUserId, plan.ownerUserId])))
+      .for("share")
+  }
+  const [current] = (await tx.execute(cohortRowSql(plan.botUserId))) as unknown as CohortRow[]
+  if (!current || Number(current.ownerUserId) !== plan.ownerUserId) throw new DataTaskSkip("left the cohort since the plan")
+  if (Number(current.usedByOthers) > 0) throw new DataTaskSkip("used by others since the plan")
+  if (!sameIds(plan.userIds, current.userIds) || !sameIds(plan.spaceIds, current.spaceIds)) {
+    throw new DataTaskSkip("sharing changed since the plan")
+  }
 }
 
 const MAX_PERSON_GRANTS = 10
@@ -269,28 +295,20 @@ export default defineDataTask({
     const settings = await lockedSettings(tx, plan.botUserId)
     if (!settings?.openToEveryone || settings.updatedBy !== null) throw new DataTaskSkip("settings changed since the plan")
     const bot = await ownedBot(tx, plan)
-    if (await usedByOthersNow(tx, plan)) throw new DataTaskSkip("used by others since the plan")
+    await recheckSharing(tx, plan)
 
-    const people = plan.userIds.length === 0 ? [] : await tx
-      .select({ id: users.id })
-      .from(users)
-      .where(and(inArray(users.id, plan.userIds), not(eq(users.bot, true)), sql`${users.deleted} is not true`))
-    const ownerSpaces = plan.spaceIds.length === 0 ? [] : await tx
-      .select({ id: spaces.id })
-      .from(spaces)
-      .innerJoin(members, and(eq(members.spaceId, spaces.id), eq(members.userId, plan.ownerUserId)))
-      .where(and(inArray(spaces.id, plan.spaceIds), isNull(spaces.deleted)))
     const subjects: GrantSubject[] = [
-      ...people.map((row) => ({ kind: "user" as const, id: row.id })),
-      ...ownerSpaces.map((row) => ({ kind: "space" as const, id: row.id })),
+      ...plan.userIds.map((id) => ({ kind: "user" as const, id })),
+      ...plan.spaceIds.map((id) => ({ kind: "space" as const, id })),
     ]
-
     // Grants first, so the settings update reaches the new grantees too.
     const grants = await insertSystemGrants(tx, bot, plan.ownerUserId, subjects, sharedGrantMask)
     const closed = await setOpenToEveryoneBySystem(tx, bot.id, plan.ownerUserId, false)
     const after: Applied = {
       openToEveryone: false,
       settingsRevision: closed.row.revision.toString(),
+      // Revert compares it: any later grant edit, a revoke included, keeps the bot closed.
+      grantsRevision: (await grantsRevision(bot.id, tx)).toString(),
       grantIds: grants.rows.map((row) => row.id.toString()),
     }
     return {
@@ -308,6 +326,11 @@ export default defineDataTask({
     const settings = await lockedSettings(tx, plan.botUserId)
     if (!settings || settings.openToEveryone || settings.revision.toString() !== after.settingsRevision) {
       throw new DataTaskSkip("settings changed since apply")
+    }
+    // An owner who granted, edited or revoked access since chose who reaches the bot; reopening it would undo that.
+    await lockBotGrants(tx, plan.botUserId)
+    if ((await grantsRevision(plan.botUserId, tx)).toString() !== after.grantsRevision) {
+      throw new DataTaskSkip("access list changed since apply")
     }
     // A running bridge answers only its access list; opening it would show a composer it refuses.
     const [runtime] = await tx.select().from(agentRuntimes).where(eq(agentRuntimes.botUserId, plan.botUserId)).limit(1)

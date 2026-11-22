@@ -27,6 +27,32 @@ export class DataTaskVerifyFailed extends DataTaskError {
   }
 }
 
+/**
+ * The run applying this item is no longer the task's live run: another
+ * process took its lease over, so its plan has no authority any more.
+ */
+export class DataTaskLeaseLost extends DataTaskError {
+  constructor() {
+    super("lease lost")
+    this.name = "DataTaskLeaseLost"
+  }
+}
+
+/**
+ * Renews the run's lease inside `query`'s transaction, or throws
+ * `DataTaskLeaseLost` if the run is no longer running. The update holds the
+ * run row until commit, and a takeover locks that row first, so an item
+ * either commits under a live lease or is never applied.
+ */
+export async function holdLease(query: Pick<typeof db, "update">, runId: bigint): Promise<void> {
+  const rows = await query
+    .update(dataTaskRuns)
+    .set({ heartbeatAt: sql`now()` })
+    .where(and(eq(dataTaskRuns.id, runId), eq(dataTaskRuns.status, "running")))
+    .returning({ id: dataTaskRuns.id })
+  if (rows.length === 0) throw new DataTaskLeaseLost()
+}
+
 /** JSON with sorted keys, so equal plans hash equal whatever order keys were built in. */
 export function canonicalJson(value: Json): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value)
@@ -91,12 +117,14 @@ export type ItemOutcome = { kind: "applied" } | { kind: "already" } | { kind: "s
 /**
  * Applies one item in its own transaction, with its ledger row and `verify`.
  * An item with a ledger row is never applied again, even after a revert.
+ * With `runId`, the item commits only while that run holds the task's lease.
  */
-export async function applyDataTaskItem(task: DataTask, item: DataTaskItem, planHash: string): Promise<ItemOutcome> {
+export async function applyDataTaskItem(task: DataTask, item: DataTaskItem, planHash: string, runId?: bigint): Promise<ItemOutcome> {
   let change: DataTaskChange | undefined
   try {
     change = await db.transaction(async (tx) => {
       await lockItem(tx, task.id, item.key)
+      if (runId !== undefined) await holdLease(tx, runId)
       const [existing] = await tx
         .select({ id: dataTaskItems.id })
         .from(dataTaskItems)

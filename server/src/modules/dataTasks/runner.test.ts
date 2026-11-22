@@ -180,6 +180,51 @@ describe("automatic data tasks", () => {
     expect((await runsOf("leased")).map((run) => [run.status, run.reason])).toEqual([["failed", "lease expired"], ["completed", null]])
   })
 
+  test("a run that lost its lease applies nothing more from its plan, and cannot complete the task", async () => {
+    const [first, second, third] = await usersWithBio(["todo", "todo", "todo"])
+    const task = bioTask("fenced", [first!, second!, third!])
+    let takenOver: Awaited<ReturnType<typeof runPendingDataTasks>> | undefined
+    // The first run stalls after its first item: its lease goes stale and another process takes over,
+    // while the rest of the old plan no longer applies (the other users became noops).
+    const sleep = async () => {
+      if (takenOver) return
+      await db.update(dataTaskRuns).set({ heartbeatAt: sql`now() - interval '10 minutes'` }).where(eq(dataTaskRuns.taskId, "fenced"))
+      await db.update(users).set({ bio: "keep" }).where(and(inArray(users.id, [first!, second!, third!]), eq(users.bio, "todo")))
+      takenOver = await runPendingDataTasks({ tasks: [task], sleep: noSleep })
+    }
+    const [stale] = await runPendingDataTasks({ tasks: [task], sleep })
+    expect(takenOver).toEqual([{ taskId: "fenced", status: "completed", applied: 0, skipped: 0 }])
+    expect(stale).toEqual({ taskId: "fenced", status: "failed", applied: 1, skipped: 0, reason: "lease lost" })
+    // Only the item applied under the live lease changed.
+    expect((await Promise.all([first!, second!, third!].map(bioOf))).sort()).toEqual(["done", "keep", "keep"])
+    expect(await ledgerKeys("fenced")).toHaveLength(1)
+    expect((await runsOf("fenced")).map((run) => [run.status, run.reason])).toEqual([["failed", "lease expired"], ["completed", null]])
+  })
+
+  test("a plan that outlived its lease is neither recorded nor applied", async () => {
+    const [a] = await usersWithBio(["todo"])
+    const base = bioTask("slow-plan", [a!])
+    let nested: Awaited<ReturnType<typeof runPendingDataTasks>> | undefined
+    const slow = defineDataTask({
+      ...base,
+      async select(query) {
+        const items = await base.select(query)
+        if (!nested) {
+          // While this plan runs, the lease goes stale and another process completes the task.
+          nested = []
+          await db.update(dataTaskRuns).set({ heartbeatAt: sql`now() - interval '10 minutes'` }).where(eq(dataTaskRuns.taskId, "slow-plan"))
+          nested = await runPendingDataTasks({ tasks: [base], sleep: noSleep })
+        }
+        return items
+      },
+    })
+    const [stale] = await runPendingDataTasks({ tasks: [slow], sleep: noSleep })
+    expect(nested).toEqual([{ taskId: "slow-plan", status: "completed", applied: 1, skipped: 0 }])
+    expect(stale).toEqual({ taskId: "slow-plan", status: "failed", applied: 0, skipped: 0, reason: "lease lost" })
+    const runs = await runsOf("slow-plan")
+    expect(runs.map((run) => [run.status, run.items])).toEqual([["failed", 0], ["completed", 1]])
+  })
+
   test("DATA_TASKS_PAUSED stops every run", async () => {
     const [a] = await usersWithBio(["todo"])
     process.env["DATA_TASKS_PAUSED"] = "1"

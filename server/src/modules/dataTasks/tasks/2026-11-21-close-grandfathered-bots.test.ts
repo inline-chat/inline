@@ -4,7 +4,9 @@ import { db } from "@in/server/db"
 import * as schema from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { canMessageBot } from "@in/server/modules/agents/access"
-import { and, eq, sql } from "drizzle-orm"
+import { deleteAgentGrant, setAgentGrant } from "@in/server/modules/agents/grants"
+import { AgentGrantOperation } from "@inline-chat/protocol/core"
+import { and, eq, isNull, sql } from "drizzle-orm"
 import { runPendingDataTasks } from "../automatic"
 import { applyDataTaskItem, planDataTask, planViolation, revertDataTask } from "../runner"
 import task from "./2026-11-21-close-grandfathered-bots"
@@ -173,5 +175,91 @@ describe("2026-11-21-close-grandfathered-bots", () => {
     expect(await settingsOf(c)).toMatchObject({ openToEveryone: true, updatedBy: null })
     expect(await settingsOf(a)).toMatchObject({ openToEveryone: true, updatedBy: owner.id })
     expect(await settingsOf(b)).toMatchObject({ openToEveryone: false, updatedBy: owner.id })
+  })
+
+  test("applies only the sharing it planned: a bot that left a space, a space made public or a revoked person replans", async () => {
+    const owner = await person("owner3")
+    const teammate = await person("teammate3")
+    const team = (await testUtils.createSpace("Team 3"))!
+    const lounge = (await testUtils.createSpace("Lounge 3"))!
+    for (const space of [team, lounge]) {
+      await db.insert(schema.members).values([
+        { spaceId: space.id, userId: owner.id, role: "owner" },
+        { spaceId: space.id, userId: teammate.id, role: "member" },
+      ])
+    }
+    const left = await bot("left", owner)
+    await db.insert(schema.members).values({ spaceId: team.id, userId: left.id, role: "member" })
+    const publicSpace = await bot("public_space", owner)
+    await db.insert(schema.members).values({ spaceId: lounge.id, userId: publicSpace.id, role: "member" })
+    const revoked = await bot("revoked", owner)
+    const quiet = (await testUtils.createChat(team.id, "Quiet 3", "thread", false, owner.id))!
+    await testUtils.addParticipant(quiet.id, revoked.id)
+    await testUtils.addParticipant(quiet.id, teammate.id)
+
+    const plan = await planDataTask(task)
+    const itemOf = (botUser: schema.DbUser) => plan.items.find((item) => item.key === `bot:${botUser.id}`)!
+    expect(itemOf(left).plan).toMatchObject({ spaceIds: [team.id] })
+    expect(itemOf(publicSpace).plan).toMatchObject({ spaceIds: [lounge.id] })
+    expect(itemOf(revoked).plan).toMatchObject({ userIds: [teammate.id] })
+
+    // After the plan: the bot leaves Team, Lounge goes public, and the owner shares then unshares with the teammate.
+    await db.delete(schema.members).where(and(eq(schema.members.spaceId, team.id), eq(schema.members.userId, left.id)))
+    await db.update(schema.spaces).set({ isPublic: true }).where(eq(schema.spaces.id, lounge.id))
+    await setAgentGrant({ botUserId: BigInt(revoked.id), userId: BigInt(teammate.id), operations: [AgentGrantOperation.INVOKE] }, owner.id)
+    await deleteAgentGrant({ botUserId: BigInt(revoked.id), userId: BigInt(teammate.id) }, owner.id)
+
+    for (const stale of [left, publicSpace, revoked]) {
+      expect(await applyDataTaskItem(task, itemOf(stale), plan.hash)).toEqual({ kind: "skipped", reason: "sharing changed since the plan" })
+      expect(await settingsOf(stale)).toMatchObject({ openToEveryone: true, updatedBy: null })
+    }
+    expect(await activeGrants(left)).toHaveLength(0)
+    expect(await activeGrants(publicSpace)).toHaveLength(0)
+
+    // The next run replans from current data: each closes, and nobody gets a grant the plan no longer gives.
+    const [report] = await runPendingDataTasks({ tasks: [task], sleep: async () => {} })
+    expect(report).toMatchObject({ status: "completed", skipped: 0 })
+    for (const replanned of [left, publicSpace, revoked]) {
+      expect(await settingsOf(replanned)).toMatchObject({ openToEveryone: false, updatedBy: null })
+      expect(await activeGrants(replanned)).toHaveLength(0)
+    }
+    expect(await canMessageBot(revoked, teammate.id)).toBe(false)
+  })
+
+  test("revert keeps a bot closed once its owner granted or revoked access since", async () => {
+    const owner = await person("owner4")
+    const teammate = await person("teammate4")
+    const stranger = await person("stranger4")
+    const space = (await testUtils.createSpace("Team 4"))!
+    await db.insert(schema.members).values([
+      { spaceId: space.id, userId: owner.id, role: "owner" },
+      { spaceId: space.id, userId: teammate.id, role: "member" },
+    ])
+    const unshared = await bot("unshared", owner)
+    await db.insert(schema.members).values({ spaceId: space.id, userId: unshared.id, role: "member" })
+    const extended = await bot("extended", owner)
+    const untouched = await bot("untouched", owner)
+    await db.insert(schema.members).values({ spaceId: space.id, userId: untouched.id, role: "member" })
+    expect((await runPendingDataTasks({ tasks: [task], sleep: async () => {} }))[0]).toMatchObject({ status: "completed", applied: 3 })
+
+    // The owner revokes the space grant the task made, and shares another bot with someone.
+    const spaceSubject = { subject: { oneofKind: "spaceId" as const, spaceId: BigInt(space.id) } }
+    await deleteAgentGrant({ botUserId: BigInt(unshared.id), userId: 0n, subject: spaceSubject }, owner.id)
+    await setAgentGrant({ botUserId: BigInt(extended.id), userId: BigInt(stranger.id), operations: [AgentGrantOperation.INVOKE] }, owner.id)
+
+    const summary = await revertDataTask(task)
+    expect(summary.reverted).toBe(1)
+    expect(summary.skipped.sort((a, b) => a.key.localeCompare(b.key))).toEqual(
+      [unshared, extended].map((botUser) => ({ key: `bot:${botUser.id}`, reason: "access list changed since apply" }))
+        .sort((a, b) => a.key.localeCompare(b.key)),
+    )
+    expect(await settingsOf(unshared)).toMatchObject({ openToEveryone: false })
+    expect(await canMessageBot(unshared, teammate.id)).toBe(false)
+    expect(await settingsOf(extended)).toMatchObject({ openToEveryone: false })
+    expect(await canMessageBot(extended, stranger.id)).toBe(true)
+    expect(await settingsOf(untouched)).toMatchObject({ openToEveryone: true, updatedBy: null })
+    const untouchedGrants = await db.select().from(schema.agentGrants)
+      .where(and(eq(schema.agentGrants.botUserId, untouched.id), isNull(schema.agentGrants.revokedAt)))
+    expect(untouchedGrants).toHaveLength(0)
   })
 })

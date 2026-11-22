@@ -40,7 +40,8 @@ const MAX_IMPORT_USERS = 256
 const nextRevision = () => sql`nextval('agent_grant_revision')`
 
 /** Serializes every grant write for one bot, so the import's "no rows yet" check never races an edit. */
-async function lockBotGrants(tx: Transaction, botUserId: number): Promise<void> {
+/** Serializes grant writes for one bot until the transaction ends. */
+export async function lockBotGrants(tx: Transaction, botUserId: number): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agent_grants'), ${botUserId})`)
 }
 

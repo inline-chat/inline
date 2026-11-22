@@ -4,7 +4,7 @@ import { Log } from "@in/server/utils/log"
 import { and, eq, sql } from "drizzle-orm"
 import type { DataTask } from "./dataTask"
 import { dataTasks } from "./registry"
-import { applyDataTaskItem, DataTaskError, planDataTask, planViolation } from "./runner"
+import { applyDataTaskItem, DataTaskError, DataTaskLeaseLost, holdLease, planDataTask, planViolation } from "./runner"
 
 const log = new Log("dataTasks")
 
@@ -77,11 +77,13 @@ async function claimRun(taskId: string, sourceCommit: string | undefined): Promi
       .where(and(eq(dataTaskRuns.taskId, taskId), eq(dataTaskRuns.status, "completed")))
       .limit(1)
     if (completed) return undefined
+    // Locked, so an item committing under the old lease finishes first and its renewal counts.
     const [running] = await tx
       .select({ id: dataTaskRuns.id, live: sql<boolean>`${dataTaskRuns.heartbeatAt} > now() - make_interval(secs => ${LEASE_STALE_SECONDS})` })
       .from(dataTaskRuns)
       .where(and(eq(dataTaskRuns.taskId, taskId), eq(dataTaskRuns.status, "running")))
       .limit(1)
+      .for("update")
     if (running?.live) return undefined
     if (running) {
       await tx
@@ -107,8 +109,14 @@ async function heartbeat(runId: bigint, applied: number, skipped: number): Promi
   return rows.length > 0
 }
 
+/** A run another process took over stops without touching the run row, which is no longer its own. */
+function leaseLost(report: DataTaskRunReport): DataTaskRunReport {
+  log.warn("data task lost its lease", { taskId: report.taskId, applied: report.applied, skipped: report.skipped })
+  return { ...report, status: "failed", reason: "lease lost" }
+}
+
 async function finish(runId: bigint, report: DataTaskRunReport): Promise<DataTaskRunReport> {
-  await db
+  const rows = await db
     .update(dataTaskRuns)
     .set({
       status: report.status as DataTaskRunStatus,
@@ -119,6 +127,8 @@ async function finish(runId: bigint, report: DataTaskRunReport): Promise<DataTas
       finishedAt: sql`now()`,
     })
     .where(and(eq(dataTaskRuns.id, runId), eq(dataTaskRuns.status, "running")))
+    .returning({ id: dataTaskRuns.id })
+  if (rows.length === 0) return leaseLost(report)
   const fields = { taskId: report.taskId, applied: report.applied, skipped: report.skipped, reason: report.reason }
   if (report.status === "completed") log.info("data task completed", fields)
   else if (report.status === "paused") log.info("data task paused", fields)
@@ -134,7 +144,11 @@ async function runTask(task: DataTask, runId: bigint, options: RunPendingOptions
   const report: DataTaskRunReport = { taskId: task.id, status: "running", applied: 0, skipped: 0 }
   try {
     const plan = await planDataTask(task)
-    await db.update(dataTaskRuns).set({ planHash: plan.hash, items: plan.items.length }).where(eq(dataTaskRuns.id, runId))
+    // A slow plan may have outlived the lease; only a run still holding it records and applies its plan.
+    await db.transaction(async (tx) => {
+      await holdLease(tx, runId)
+      await tx.update(dataTaskRuns).set({ planHash: plan.hash, items: plan.items.length }).where(eq(dataTaskRuns.id, runId))
+    })
 
     // Nothing is applied from a plan past its reviewed limits.
     const violation = planViolation(task, plan)
@@ -147,7 +161,7 @@ async function runTask(task: DataTask, runId: bigint, options: RunPendingOptions
       if (options.shouldStop?.()) return finish(runId, { ...report, status: "paused", reason: "process stopping" })
       if (Date.now() - started > budgetMs) return finish(runId, { ...report, status: "paused", reason: "time budget" })
 
-      const outcome = await applyDataTaskItem(task, item, plan.hash)
+      const outcome = await applyDataTaskItem(task, item, plan.hash, runId)
       if (outcome.kind === "already") continue
       if (outcome.kind === "applied") report.applied++
       else {
@@ -157,12 +171,13 @@ async function runTask(task: DataTask, runId: bigint, options: RunPendingOptions
         }
       }
       if (++touched % HEARTBEAT_EVERY_ITEMS === 0 && !(await heartbeat(runId, report.applied, report.skipped))) {
-        return { ...report, status: "failed", reason: "lease lost" }
+        return leaseLost(report)
       }
       await sleep(task.pauseMs ?? DEFAULT_PAUSE_MS)
     }
     return finish(runId, { ...report, status: "completed" })
   } catch (error) {
+    if (error instanceof DataTaskLeaseLost) return leaseLost(report)
     // Only our own bounded messages are kept; database errors may carry SQL.
     const reason = error instanceof DataTaskError ? error.message : `unexpected ${error instanceof Error ? error.name : "error"}`
     log.error("data task run threw", error, { taskId: task.id })

@@ -31,12 +31,14 @@ that hasn't completed, 2 minutes after boot and then hourly. Tasks run in
 registry order; one that doesn't complete holds back the ones after it.
 
 1. **Lease.** A `running` row in `data_task_runs` keeps one run per task across
-   processes. It is renewed as the run goes and taken over once it is 2 minutes stale.
+   processes. It is renewed by every item and taken over once it is 2 minutes stale.
+   Recording the plan, each item and completion commit only while the run still
+   holds the lease, so a run that lost it stops without applying anything more.
 2. **Plan.** `select` runs, merged with the items the ledger already holds, and is hashed.
 3. **Limits.** If the plan exceeds `limits` (total items, items per tier, unknown
    tiers) or fails `check`, the run is **blocked**: nothing is applied.
 4. **Items.** Each item commits on its own transaction, together with its ledger row:
-   `apply` locks and re-checks it, and `verify` checks the result before commit.
+   `apply` locks and re-checks it against current data, and `verify` checks the result before commit.
    A failed `verify` rolls the item back and **fails** the run.
    An item that no longer qualifies is skipped; more than `maxSkips` blocks the run.
 5. **Completion.** A `completed` run ends the task for good, like a migration. Rows
@@ -62,7 +64,9 @@ Add `src/modules/dataTasks/tasks/<date>-<slug>.ts` and register it in
   transaction, and returns `before` and `after`. Throw `DataTaskSkip` if the item
   no longer qualifies, such as when the owner changed it since.
 - `verify(tx, item)` returns a reason if the applied item is wrong.
-- `revert(tx, entry)` restores `before`, skipping items changed since.
+- `revert(tx, entry)` restores `before`, skipping items changed since. Record in
+  `after` whatever a later owner choice would change (a settings revision, the
+  access-list revision), so revert never undoes it.
 
 Each task gets a Postgres test with a fixture per tier and a case per limit.
 `2026-11-21-close-grandfathered-bots.test.ts` is the reference.
