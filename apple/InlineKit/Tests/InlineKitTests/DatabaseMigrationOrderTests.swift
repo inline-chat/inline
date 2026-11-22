@@ -15,8 +15,8 @@ struct DatabaseMigrationOrderTests {
     let writer = try DatabaseQueue()
     try migrator.migrate(writer, upTo: "space profile pictures")
     try writer.write { db in
-      try User(id: 1, email: nil, firstName: "Deleted author").insert(db)
-      try User(id: 2, email: nil, firstName: "Retained author").insert(db)
+      try User(id: 1, email: nil, firstName: "Deleted author").insertIntoPartialSchema(db)
+      try User(id: 2, email: nil, firstName: "Retained author").insertIntoPartialSchema(db)
       try db.execute(sql: "INSERT INTO chat (id, date) VALUES (7, '2026-10-08 00:00:00')")
       try db.execute(
         sql: """
@@ -198,7 +198,7 @@ struct DatabaseMigrationOrderTests {
     try migrator.migrate(writer, upTo: previousTailMigration)
 
     try writer.write { db in
-      try User(id: 1, email: nil, firstName: "Mo").insert(db)
+      try User(id: 1, email: nil, firstName: "Mo").insertIntoPartialSchema(db)
       try db.execute(
         sql: "UPDATE user SET lastOnline = ? WHERE id = 1",
         arguments: [Int64(1_723_000_000_000)]
@@ -230,7 +230,7 @@ struct DatabaseMigrationOrderTests {
     try migrator.migrate(writer, upTo: "dialog collapsed max id")
 
     try writer.write { db in
-      try User(id: 1, email: nil, firstName: "Mo").insert(db)
+      try User(id: 1, email: nil, firstName: "Mo").insertIntoPartialSchema(db)
       try db.execute(
         sql: "UPDATE user SET lastOnline = ? WHERE id = 1",
         arguments: [Int64(1_723_000_000_000)]

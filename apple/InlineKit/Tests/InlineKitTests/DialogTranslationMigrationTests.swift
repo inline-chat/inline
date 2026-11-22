@@ -15,9 +15,9 @@ struct DialogTranslationMigrationTests {
     let queue = try DatabaseQueue()
     try migrator.migrate(queue, upTo: "dialogTranslationEnabled")
     try queue.write { db in
-      try InlineKit.User(id: 8_001, email: "enabled@example.com", firstName: "Enabled").insert(db)
-      try InlineKit.User(id: 8_002, email: "disabled@example.com", firstName: "Disabled").insert(db)
-      try InlineKit.User(id: 8_003, email: "unset@example.com", firstName: "Unset").insert(db)
+      try InlineKit.User(id: 8_001, email: "enabled@example.com", firstName: "Enabled").insertIntoPartialSchema(db)
+      try InlineKit.User(id: 8_002, email: "disabled@example.com", firstName: "Disabled").insertIntoPartialSchema(db)
+      try InlineKit.User(id: 8_003, email: "unset@example.com", firstName: "Unset").insertIntoPartialSchema(db)
       try db.execute(sql: """
       INSERT INTO dialog (id, peerUserId, translationEnabled) VALUES (8001, 8001, 1);
       INSERT INTO dialog (id, peerUserId, translationEnabled) VALUES (8002, 8002, 0);
