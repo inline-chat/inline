@@ -551,7 +551,7 @@ final class ChatRouteToolbarTitleModel {
   private func resolvedLocalTime(for user: User? = nil) -> String? {
     let user = user ?? resolvedUserInfo()?.user
     guard let user else { return nil }
-    guard let timeZone = user.timeZone, timeZone != TimeZone.current.identifier else { return nil }
+    guard let timeZone = user.timeZone, !TimeZoneFormatter.shared.matchesViewer(timeZoneId: timeZone) else { return nil }
     guard let text = TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone), !text.isEmpty else {
       return nil
     }
