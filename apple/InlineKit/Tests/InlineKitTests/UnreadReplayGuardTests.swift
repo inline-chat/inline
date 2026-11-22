@@ -31,6 +31,69 @@ struct UnreadReplayGuardTests {
     }
   }
 
+  @Test("an incoming service message does not raise unread, like the server count")
+  func serviceMessageDoesNotIncrementUnread() throws {
+    let dbQueue = try makeInMemoryDB()
+    try dbQueue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
+      var update = makeNewMessageUpdate(messageId: 21)
+      update.message.serviceMessage.pinnedMessage = .with { $0.messageID = 1 }
+      try update.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
+      #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 21)
+
+      try makeNewMessageUpdate(messageId: 22).apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 1)
+    }
+  }
+
+  @Test("validation asks about dialogs whose unread count may include a service message")
+  func validationCandidatesHoldUnreadServiceRows() throws {
+    let dbQueue = try makeInMemoryDB()
+    try dbQueue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
+      var service = makeNewMessageUpdate(messageId: 21)
+      service.message.serviceMessage.pinnedMessage = .with { $0.messageID = 1 }
+      try service.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try UnreadCountValidation.candidatePeers(db).isEmpty)
+
+      // The count an older build stored for that service row.
+      try Dialog.filter(Dialog.Columns.peerThreadId == chatId).updateAll(db, Dialog.Columns.unreadCount.set(to: 1))
+      #expect(try UnreadCountValidation.candidatePeers(db) == [.thread(id: chatId)])
+
+      // Once read past it, the service row no longer explains any unread.
+      try Dialog.filter(Dialog.Columns.peerThreadId == chatId).updateAll(db, Dialog.Columns.readInboxMaxId.set(to: 21))
+      #expect(try UnreadCountValidation.candidatePeers(db).isEmpty)
+    }
+  }
+
+  @Test("a snapshot not ordered with the local chat cursor keeps the local unread count")
+  func unorderedSnapshotKeepsLocalUnread() throws {
+    let dbQueue = try makeInMemoryDB()
+    try dbQueue.write { (db: Database) throws in
+      try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
+      // A live message the snapshot predates: its count lags the one applied here.
+      try makeNewMessageUpdate(messageId: 21).apply(db, publishChanges: false, suppressNotifications: true)
+      try makeProtocolDialog(readMaxId: 20, unreadCount: 0).saveFull(db, preservingExistingReadState: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 1)
+
+      try makeProtocolDialog(readMaxId: 20, unreadCount: 0)
+        .saveFull(db, preservingExistingReadState: true, unreadCountIsOrdered: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
+    }
+  }
+
+  private func makeProtocolDialog(readMaxId: Int64, unreadCount: Int32) -> InlineProtocol.Dialog {
+    .with {
+      $0.peer = .with { $0.chat.chatID = chatId }
+      $0.chatID = chatId
+      $0.readMaxID = readMaxId
+      $0.unreadCount = unreadCount
+      $0.archived = false
+      $0.pinned = false
+    }
+  }
+
   @Test("transcripts stay out of sidebar activity during history and chat-tail deletion")
   func transcriptActivityHistoryAndDeletion() throws {
     let queue = try makeInMemoryDB()

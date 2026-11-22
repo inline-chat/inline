@@ -2639,8 +2639,8 @@ extension InlineProtocol.UpdateNewMessage {
       var didIncrement = false
       var reason = "not_newer_than_read_max"
 
-      if !msg.countsAsUnread {
-        reason = "quiet_message"
+      if !msg.countsTowardUnread {
+        reason = msg.countsAsUnread ? "service_message" : "quiet_message"
       } else if !incrementUnreadCount {
         reason = "increment_disabled"
       } else if hadMessage {

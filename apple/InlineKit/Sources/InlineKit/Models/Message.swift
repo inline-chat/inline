@@ -919,6 +919,24 @@ public extension Message {
     return contentPayload.countsAsUnread
   }
 
+  /// Whether this message adds to the dialog's unread count. Mirrors the server's count (an
+  /// incoming message that counts as unread and has no system payload), so a local count raised
+  /// by a live message is one the server's count agrees with.
+  var countsTowardUnread: Bool {
+    out != true && countsAsUnread && contentPayload?.hasServiceMessage != true
+  }
+
+  /// Stored messages after `readInboxMaxId` that count toward unread, for a recount over history
+  /// this device holds in full.
+  internal static func localUnreadCount(_ db: Database, chatId: Int64, after readInboxMaxId: Int64) throws -> Int {
+    try Message
+      .filter(Message.Columns.chatId == chatId)
+      .filter(Message.Columns.messageId > readInboxMaxId)
+      .filter(Message.Columns.out == false)
+      .fetchAll(db)
+      .count(where: \.countsTowardUnread)
+  }
+
   /// The agent that sent this for its sender, or nil when the sender sent it themselves.
   var via: MessageVia? {
     guard let contentPayload, contentPayload.hasVia, contentPayload.via.source != nil else { return nil }

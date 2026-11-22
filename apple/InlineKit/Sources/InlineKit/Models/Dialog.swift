@@ -429,9 +429,12 @@ public extension ApiDialog {
 
 public extension InlineProtocol.Dialog {
   @discardableResult
+  /// - Parameter unreadCountIsOrdered: the chat snapshot that came with this dialog is at exactly
+  ///   the local chat cursor, so its unread count covers the same messages this device applied.
   func saveFull(
     _ db: Database,
-    preservingExistingReadState: Bool = false
+    preservingExistingReadState: Bool = false,
+    unreadCountIsOrdered: Bool = false
   )
     throws -> Dialog
   {
@@ -476,10 +479,17 @@ public extension InlineProtocol.Dialog {
         newDialog.copyActivityCounts(from: existing)
       }
       if preservingExistingReadState {
-        newDialog.unreadCount = existing.unreadCount
+        newDialog.unreadMark = existing.unreadMark
         newDialog.readInboxMaxId = existing.readInboxMaxId
         newDialog.readOutboxMaxId = existing.readOutboxMaxId
-        newDialog.unreadMark = existing.unreadMark
+        // The server owns the count. Keep the local one only when the snapshot is not ordered
+        // with it: another read cursor, or a chat cursor this device is ahead of or behind. Like
+        // Telegram resetting a peer's read state from a dialog whose pts matches local state.
+        let countIsOrdered = unreadCountIsOrdered
+          && hasUnreadCount && unreadCount >= 0
+          && hasReadMaxID && readMaxID == max(0, existing.readInboxMaxId ?? 0)
+          && existing.chatId == (hasChatID ? chatID : nil)
+        newDialog.unreadCount = countIsOrdered ? Int(unreadCount) : existing.unreadCount
       }
       if let activityCounts, !preservingExistingReadState {
         try newDialog.applySnapshotActivityCounts(db, activityCounts, existing: existing)
@@ -550,6 +560,10 @@ public extension Dialog {
   """
   static let chatListVisibilitySQL =
     "((\"dialog\".\"chatListHidden\" IS NULL OR \"dialog\".\"chatListHidden\" = 0) AND \(catalogActiveSQL))"
+  /// Joins the chat a chat list row is drawn from. A dialog without one is never rendered, so
+  /// anything counting chat list rows (the app badge) joins the same way.
+  static let chatListChatJoinSQL =
+    #"JOIN "chat" ON "chat"."id" = COALESCE("dialog"."chatId", "dialog"."peerThreadId")"#
   static let sidebarInboxVisibilitySQL =
     "(\(chatListVisibilitySQL) AND (\"dialog\".\"open\" = 1 OR \"dialog\".\"pinned\" = 1))"
   /// SQL predicate: the dialog's own notification mode is "none" (muted).
@@ -585,12 +599,12 @@ public extension Dialog {
   )
   """
 
-  /// Number of visible chats counted by `appBadgeSQL`.
+  /// Number of chat list rows counted by `appBadgeSQL`.
   static func fetchAppBadgeCount(_ db: Database) throws -> Int {
     try Int.fetchOne(db, sql: """
       SELECT COUNT(*)
       FROM "dialog"
-      LEFT JOIN "chat" ON "chat"."id" = "dialog"."chatId"
+      \(chatListChatJoinSQL)
       WHERE \(chatListVisibilitySQL)
         AND ("dialog"."archived" IS NULL OR "dialog"."archived" = 0)
         AND \(appBadgeSQL)
