@@ -5,6 +5,7 @@
 //! readable plain text and records each block's range as it goes.
 
 use inline_agent_bridge::harness::{FieldInput, QuestionForm};
+use inline_agent_bridge::sanitize_visible_text;
 use inline_protocol::proto;
 
 /// One message: fallback text plus structured blocks.
@@ -27,7 +28,7 @@ impl Doc {
     /// Markdown, so headings, lists, code and links render.
     pub(crate) fn markdown(text: &str) -> Self {
         Self {
-            text: text.trim().to_owned(),
+            text: sanitize_visible_text(text).trim().to_owned(),
             blocks: Vec::new(),
             markdown: true,
             entities: Vec::new(),
@@ -53,6 +54,7 @@ impl Doc {
 
     /// Adds a paragraph after the existing content.
     pub(crate) fn append_paragraph(&mut self, text: &str) {
+        let text = sanitize_visible_text(text);
         if text.trim().is_empty() {
             return;
         }
@@ -60,11 +62,11 @@ impl Doc {
             self.text.push('\n');
         }
         if self.markdown {
-            self.text.push_str(text);
+            self.text.push_str(&text);
             return;
         }
         let offset = self.text.encode_utf16().count() as i64;
-        self.text.push_str(text);
+        self.text.push_str(&text);
         self.blocks.push(proto::Block {
             kind: Some(proto::block::Kind::Paragraph(proto::BlockText {
                 offset,
@@ -79,6 +81,8 @@ impl Doc {
     /// Adds a footer line after the existing content, such as a decided
     /// card's outcome.
     pub(crate) fn append_footer(&mut self, text: &str) {
+        let text = sanitize_visible_text(text);
+        let text = text.as_str();
         if text.trim().is_empty() || self.markdown {
             return;
         }
@@ -168,24 +172,19 @@ impl DocBuilder {
     /// [`finish`](Self::finish) drops the message's trailing newlines, and a
     /// range must never reach past the text.
     pub(crate) fn span(&mut self, text: &str) -> proto::BlockText {
-        let text = text.trim_end_matches(LINE_END);
-        let offset = self.utf16;
-        let length = text.encode_utf16().count() as i64;
-        self.text.push_str(text);
-        self.utf16 += length;
-        self.push_raw("\n");
-        proto::BlockText {
-            offset,
-            length,
-            ..Default::default()
-        }
+        let span = self.inline_span(text);
+        self.newline();
+        span
     }
 
     /// Appends the agent's Markdown as its own line, styled: inline code,
     /// bold, italic and links become entities over the plain text, the way
     /// Inline styles a Markdown message. Returns its range like [`span`](Self::span).
     pub(crate) fn markdown_span(&mut self, markdown: &str) -> proto::BlockText {
-        let styled = crate::bridge::v2::blocks::markdown::inline(markdown);
+        // Sanitize before styling: the entities below are measured on this
+        // text, so removing characters later would shift every one of them.
+        let markdown = sanitize_visible_text(markdown);
+        let styled = crate::bridge::v2::blocks::markdown::inline(&markdown);
         let text = styled.text.trim_end_matches(LINE_END);
         let end = text.encode_utf16().count() as i64;
         let offset = self.utf16;
@@ -224,6 +223,10 @@ impl DocBuilder {
     /// Appends text on the current line and returns its range, without a
     /// newline: a span followed by more text on the same line.
     pub(crate) fn inline_span(&mut self, text: &str) -> proto::BlockText {
+        // Sanitize before calculating offsets: removing bytes afterwards
+        // corrupts all subsequent UTF-16 ranges. NUL also truncates GRDB's
+        // native String decoding, making otherwise valid blocks disappear.
+        let text = sanitize_visible_text(text);
         let text = text.trim_end_matches(LINE_END);
         let offset = self.utf16;
         self.push_raw(text);
@@ -271,6 +274,7 @@ impl DocBuilder {
     }
 
     pub(crate) fn paragraph(&mut self, text: &str) {
+        let text = sanitize_visible_text(text);
         if text.trim().is_empty() {
             return;
         }
@@ -284,6 +288,7 @@ impl DocBuilder {
     }
 
     pub(crate) fn code(&mut self, text: &str, language: Option<&str>) {
+        let text = sanitize_visible_text(text);
         if text.is_empty() {
             return;
         }
@@ -301,16 +306,8 @@ impl DocBuilder {
             if value.trim().is_empty() {
                 continue;
             }
-            let label_span = {
-                let offset = self.utf16;
-                let text = format!("{label}: ");
-                self.push_raw(&text);
-                proto::BlockText {
-                    offset,
-                    length: label.encode_utf16().count() as i64,
-                    ..Default::default()
-                }
-            };
+            let label_span = self.inline_span(label);
+            self.push_raw(": ");
             let value_span = self.span(value.trim_end());
             blocks.push(proto::BlockField {
                 label: Some(label_span),
@@ -505,31 +502,18 @@ impl DocBuilder {
         status: Status,
         build: impl FnOnce(&mut DocBuilder),
     ) {
-        let summary = summary.trim_end_matches(LINE_END);
-        let summary_offset = self.utf16;
-        let summary_len = summary.encode_utf16().count() as i64;
-        self.push_raw(summary);
+        let summary = self.inline_span(summary);
         let meta = meta
             .map(|meta| meta.trim_end_matches(LINE_END))
             .filter(|meta| !meta.is_empty())
             .map(|meta| {
                 self.push_raw(" · ");
-                let offset = self.utf16;
-                self.push_raw(meta);
-                proto::BlockText {
-                    offset,
-                    length: meta.encode_utf16().count() as i64,
-                    ..Default::default()
-                }
+                self.inline_span(meta)
             });
         self.push_raw("\n");
         let children = self.nested(build);
         self.push_block(proto::block::Kind::Disclosure(proto::BlockDisclosure {
-            summary: Some(proto::BlockText {
-                offset: summary_offset,
-                length: summary_len,
-                ..Default::default()
-            }),
+            summary: Some(summary),
             children,
             activity_kind: activity as i32,
             status: status.proto(),
@@ -549,20 +533,11 @@ impl DocBuilder {
         elapsed: Option<Elapsed<'_>>,
         build: impl FnOnce(&mut DocBuilder),
     ) {
-        let summary = summary.trim_end_matches(LINE_END);
-        let summary_offset = self.utf16;
-        let summary_len = summary.encode_utf16().count() as i64;
-        self.push_raw(summary);
+        let summary = self.inline_span(summary);
         let elapsed = elapsed.filter(|_| working);
         let meta = elapsed.as_ref().map(|elapsed| {
             self.push_raw(" · ");
-            let offset = self.utf16;
-            self.push_raw(elapsed.text);
-            proto::BlockText {
-                offset,
-                length: elapsed.text.encode_utf16().count() as i64,
-                ..Default::default()
-            }
+            self.inline_span(elapsed.text)
         });
         self.push_raw("\n");
         let children = self.nested(build);
@@ -572,11 +547,7 @@ impl DocBuilder {
             proto::block_disclosure::Kind::Default
         };
         self.push_block(proto::block::Kind::Disclosure(proto::BlockDisclosure {
-            summary: Some(proto::BlockText {
-                offset: summary_offset,
-                length: summary_len,
-                ..Default::default()
-            }),
+            summary: Some(summary),
             kind: kind as i32,
             initially_open: Some(working),
             children,
@@ -719,5 +690,91 @@ mod tests {
             panic!("expected diff");
         };
         assert_eq!((diff.additions, diff.deletions), (Some(1), Some(1)));
+    }
+
+    #[test]
+    fn binary_tool_output_is_sanitized_before_block_ranges_are_written() {
+        let mut builder = DocBuilder::new();
+        builder.progress("Work\0ing", true, None, |progress| {
+            progress.disclosure(
+                "Ran\0 command 🚀",
+                Some("1\u{1b}[31ms\u{1b}[0m"),
+                ActivityKind::Command,
+                Status::Done,
+                |row| row.code("before\0\u{12}\u{1b}[31mafter 🚀\u{1b}[0m\r\n\tend", None),
+            );
+        });
+        let doc = builder.finish();
+        assert_eq!(
+            doc.text,
+            "Working\nRan command 🚀 · 1s\nbeforeafter 🚀\n\tend"
+        );
+        let Some(proto::block::Kind::Disclosure(progress)) = &doc.blocks[0].kind else {
+            panic!()
+        };
+        assert_eq!(slice(&doc, progress.summary.as_ref().unwrap()), "Working");
+        let Some(proto::block::Kind::Disclosure(row)) = &progress.children[0].kind else {
+            panic!()
+        };
+        assert_eq!(slice(&doc, row.summary.as_ref().unwrap()), "Ran command 🚀");
+        assert_eq!(slice(&doc, row.meta.as_ref().unwrap()), "1s");
+        let Some(proto::block::Kind::Code(code)) = &row.children[0].kind else {
+            panic!()
+        };
+        assert_eq!(
+            slice(&doc, code.text.as_ref().unwrap()),
+            "beforeafter 🚀\n\tend"
+        );
+    }
+
+    #[test]
+    fn control_only_text_adds_no_block() {
+        let mut builder = DocBuilder::new();
+        builder.paragraph("\0\u{12}");
+        builder.code("\0\u{1b}[31m", None);
+        assert!(builder.blocks.is_empty());
+        assert!(builder.finish().text.is_empty());
+    }
+
+    #[test]
+    fn field_ranges_end_before_trailing_newlines_and_labels_are_sanitized() {
+        let mut builder = DocBuilder::new();
+        builder.fields(&[("Rea\0son", "done 🚀\n\n".to_owned(), false)]);
+        let doc = builder.finish();
+        let Some(proto::block::Kind::Fields(fields)) = &doc.blocks[0].kind else {
+            panic!()
+        };
+        assert_eq!(
+            slice(&doc, fields.fields[0].label.as_ref().unwrap()),
+            "Reason"
+        );
+        assert_eq!(
+            slice(&doc, fields.fields[0].value.as_ref().unwrap()),
+            "done 🚀"
+        );
+        assert!(!Doc::markdown("before\0after").text.contains('\0'));
+    }
+
+    #[test]
+    fn styled_prose_ranges_survive_control_characters() {
+        let mut builder = DocBuilder::new();
+        builder.markdown_paragraph("ru\0n `cargo\u{1b}[31m test` 🚀 **now**");
+        let doc = builder.finish();
+        assert!(!doc.text.contains('\0'));
+        let styled: Vec<String> = doc
+            .entities
+            .iter()
+            .map(|entity| {
+                slice(
+                    &doc,
+                    &proto::BlockText {
+                        offset: entity.offset,
+                        length: entity.length,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(styled, ["cargo test", "now"]);
     }
 }
