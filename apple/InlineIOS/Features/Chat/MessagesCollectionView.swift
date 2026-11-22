@@ -3685,7 +3685,7 @@ private extension MessagesCollectionView {
           case let .unreadSeparator(title):
             cell.configure(title: title)
           case let .collapsedHistory(title):
-            cell.configure(title: title, showsLines: false) { [weak self] in
+            cell.configure(title: title, showsBand: false) { [weak self] in
               guard let collectionView = self?.currentCollectionView as? MessagesCollectionView else { return }
               Task { @MainActor in
                 do {
