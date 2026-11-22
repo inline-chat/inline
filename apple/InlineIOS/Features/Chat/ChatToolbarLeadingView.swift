@@ -115,7 +115,7 @@ struct ChatToolbarLeadingView: View {
 
   private var localTimeText: String? {
     guard let timeZone = fullChatViewModel.peerUserInfo?.user.timeZone,
-          timeZone != TimeZone.current.identifier,
+          !TimeZoneFormatter.shared.matchesViewer(timeZoneId: timeZone),
           let text = TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone),
           !text.isEmpty
     else { return nil }
@@ -134,7 +134,7 @@ struct ChatToolbarLeadingView: View {
     if isPrivateChat,
        let user = fullChatViewModel.peerUserInfo?.user,
        let timeZone = user.timeZone,
-       timeZone != TimeZone.current.identifier,
+       !TimeZoneFormatter.shared.matchesViewer(timeZoneId: timeZone),
        let text = TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timeZone),
        !text.isEmpty {
       return .timezone(text)
