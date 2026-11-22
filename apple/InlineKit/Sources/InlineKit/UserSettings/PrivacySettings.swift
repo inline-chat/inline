@@ -85,19 +85,25 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
   /// The voice transcription choice. Nil until a server sends one or the user
   /// sets it; saves then omit it so a stale device cannot undo an opt-out.
   @Published public private(set) var transcribeVoiceMessagesValue: Bool?
+  /// The time zone choice: empty is automatic, otherwise an IANA identifier.
+  /// Nil until a server that supports it sends one or the user sets it; saves
+  /// then omit it so a stale device cannot undo the choice.
+  @Published public private(set) var manualTimeZoneValue: String?
 
   public init(
     shareTimeZone: Bool = true,
     appearInGlobalSearch: Bool = true,
     timeZoneRule: PrivacyRuleValue? = nil,
     focusStatusRule: PrivacyRuleValue? = nil,
-    transcribeVoiceMessages: Bool? = nil
+    transcribeVoiceMessages: Bool? = nil,
+    manualTimeZone: String? = nil
   ) {
     self.shareTimeZone = shareTimeZone
     self.appearInGlobalSearch = appearInGlobalSearch
     self.timeZoneRule = timeZoneRule
     self.focusStatusRule = focusStatusRule
     transcribeVoiceMessagesValue = transcribeVoiceMessages
+    manualTimeZoneValue = manualTimeZone
   }
 
   convenience init(from settings: InlineProtocol.PrivacySettings) {
@@ -106,7 +112,8 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
       appearInGlobalSearch: settings.hasAppearInGlobalSearch ? settings.appearInGlobalSearch : true,
       timeZoneRule: settings.hasTimeZone ? PrivacyRuleValue(from: settings.timeZone) : nil,
       focusStatusRule: settings.hasFocusStatus ? PrivacyRuleValue(from: settings.focusStatus) : nil,
-      transcribeVoiceMessages: settings.hasTranscribeVoiceMessages ? settings.transcribeVoiceMessages : nil
+      transcribeVoiceMessages: settings.hasTranscribeVoiceMessages ? settings.transcribeVoiceMessages : nil,
+      manualTimeZone: settings.hasManualTimeZone ? settings.manualTimeZone : nil
     )
   }
 
@@ -119,6 +126,28 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
   /// Applies a server value without treating it as a local edit.
   func replaceTranscribeVoiceMessages(_ value: Bool?) {
     if transcribeVoiceMessagesValue != value { transcribeVoiceMessagesValue = value }
+  }
+
+  /// Whether this account's server can store a manual time zone.
+  public var supportsManualTimeZone: Bool {
+    manualTimeZoneValue != nil
+  }
+
+  /// The time zone the user picked, or nil when it follows their devices.
+  public var manualTimeZone: TimeZone? {
+    guard let manualTimeZoneValue, !manualTimeZoneValue.isEmpty else { return nil }
+    return TimeZone(identifier: manualTimeZoneValue)
+  }
+
+  /// Pins the time zone, or passes nil to follow the user's devices again.
+  public func setManualTimeZone(_ timeZone: TimeZone?) {
+    let value = timeZone?.identifier ?? ""
+    if manualTimeZoneValue != value { manualTimeZoneValue = value }
+  }
+
+  /// Applies a server value without treating it as a local edit.
+  func replaceManualTimeZone(_ value: String?) {
+    if manualTimeZoneValue != value { manualTimeZoneValue = value }
   }
 
   /// Focus status is opt-in: nobody sees it until the user adds an audience.
@@ -164,6 +193,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
       if let timeZoneRule { $0.timeZone = timeZoneRule.toProtocol() }
       if let focusStatusRule { $0.focusStatus = focusStatusRule.toProtocol() }
       if let transcribeVoiceMessagesValue { $0.transcribeVoiceMessages = transcribeVoiceMessagesValue }
+      if let manualTimeZoneValue { $0.manualTimeZone = manualTimeZoneValue }
     }
   }
 
@@ -173,6 +203,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     case timeZoneRule
     case focusStatusRule
     case transcribeVoiceMessages
+    case manualTimeZone
   }
 
   public required init(from decoder: Decoder) throws {
@@ -182,6 +213,7 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     timeZoneRule = try container.decodeIfPresent(PrivacyRuleValue.self, forKey: .timeZoneRule)
     focusStatusRule = try container.decodeIfPresent(PrivacyRuleValue.self, forKey: .focusStatusRule)
     transcribeVoiceMessagesValue = try container.decodeIfPresent(Bool.self, forKey: .transcribeVoiceMessages)
+    manualTimeZoneValue = try container.decodeIfPresent(String.self, forKey: .manualTimeZone)
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -191,5 +223,6 @@ public final class PrivacySettingsManager: ObservableObject, Codable, @unchecked
     try container.encodeIfPresent(timeZoneRule, forKey: .timeZoneRule)
     try container.encodeIfPresent(focusStatusRule, forKey: .focusStatusRule)
     try container.encodeIfPresent(transcribeVoiceMessagesValue, forKey: .transcribeVoiceMessages)
+    try container.encodeIfPresent(manualTimeZoneValue, forKey: .manualTimeZone)
   }
 }
