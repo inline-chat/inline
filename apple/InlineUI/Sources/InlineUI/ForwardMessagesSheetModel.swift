@@ -3,6 +3,7 @@ import InlineKit
 import Logger
 import Observation
 
+@available(iOS 17.0, *)
 @MainActor
 @Observable
 final class ForwardMessagesSheetModel {

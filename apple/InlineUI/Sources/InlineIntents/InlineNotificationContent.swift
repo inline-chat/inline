@@ -16,7 +16,9 @@ public extension InlineMessageIntentDonation {
     content.userInfo = original.userInfo
     content.attachments = original.attachments
     content.relevanceScore = original.relevanceScore
-    content.filterCriteria = original.filterCriteria
+    if #available(iOS 16.0, *) {
+      content.filterCriteria = original.filterCriteria
+    }
     #if os(iOS)
     content.launchImageName = original.launchImageName
     #endif

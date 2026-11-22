@@ -5,6 +5,7 @@ import SwiftUI
 ///
 /// Callers wrap it in a `Button` or `Menu` with `.buttonStyle(.plain)` and
 /// pass `PeerInfoActionTileButtonStyle` so the pressed state matches.
+@available(iOS 17.0, *)
 public struct PeerInfoActionTile: View {
   private let title: String
   private let systemImage: String

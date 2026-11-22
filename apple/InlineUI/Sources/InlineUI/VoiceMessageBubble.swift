@@ -4,6 +4,7 @@ import InlineKit
 import InlineProtocol
 import SwiftUI
 
+@available(iOS 17.0, *)
 @MainActor
 public struct VoiceMessageBubble: View {
   public enum Mode {

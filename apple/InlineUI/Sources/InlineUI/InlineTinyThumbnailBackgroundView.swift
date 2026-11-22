@@ -1,6 +1,7 @@
 import CoreImage
 import Foundation
 import ImageIO
+import InlineCompat
 import InlineKit
 import os.signpost
 

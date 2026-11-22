@@ -11,6 +11,7 @@ import AppKit
 import UIKit
 #endif
 
+@available(iOS 17.0, *)
 @MainActor @Observable
 private final class SpaceInviteLinkModel {
   let spaceID: Int64
@@ -75,6 +76,7 @@ private final class SpaceInviteLinkModel {
   }
 }
 
+@available(iOS 17.0, *)
 struct SpaceInviteLinkButton: View {
   @State private var model: SpaceInviteLinkModel
   @State private var isPresented = false
@@ -120,6 +122,7 @@ struct SpaceInviteLinkButton: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct SpaceInviteLinkPopover: View {
   let model: SpaceInviteLinkModel
 
@@ -154,6 +157,7 @@ private struct SpaceInviteLinkPopover: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct SpaceInviteLinkActiveContent: View {
   let link: URL
   let expiresAt: Date?

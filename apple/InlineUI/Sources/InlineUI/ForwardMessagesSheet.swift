@@ -6,6 +6,7 @@ import SwiftUI
 import AppKit
 #endif
 
+@available(iOS 17.0, *)
 public struct ForwardMessagesSheet: View {
   public struct ForwardMessagesSelection: Sendable {
     public let fromPeerId: Peer

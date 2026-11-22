@@ -1,6 +1,7 @@
 import InlineKit
 import SwiftUI
 
+@available(iOS 17.0, *)
 public struct UserGroupMembersSheet: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: UserGroupDetailsViewModel
@@ -64,6 +65,7 @@ public struct UserGroupMembersSheet: View {
   }
 }
 
+@available(iOS 16.0, *)
 public struct BotAgentProfileSheet: View {
   @Environment(\.dismiss) private var dismiss
   private let agent: MentionableBotAgent
@@ -213,6 +215,7 @@ private struct UserGroupMemberRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct UserGroupUnavailableView: View {
   let errorMessage: String?
 

@@ -1,6 +1,7 @@
 import InlineKit
 import SwiftUI
 
+@available(iOS 17.0, *)
 public struct ConnectorsSettingsView: View {
   @Bindable private var model: ConnectorSettingsModel
   @State private var pendingDisconnect: PendingConnectorDisconnect?
@@ -174,6 +175,7 @@ private struct PendingConnectorDisconnect {
   let scope: ConnectorScope
 }
 
+@available(iOS 16.0, *)
 private struct ConnectorRow: View {
   let availability: ConnectorAvailability
   let scope: ConnectorScope?
@@ -216,6 +218,7 @@ private struct ConnectorRow: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct ConnectorAction: View {
   let provider: ConnectorKind
   let isAvailable: Bool

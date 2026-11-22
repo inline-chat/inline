@@ -15,7 +15,7 @@ let package = Package(
   name: "InlineUI",
 
   platforms: [
-    .iOS(.v18),
+    .iOS(.v15),
     .macOS(.v15),
   ],
 
@@ -34,6 +34,7 @@ let package = Package(
 
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
+    .package(path: "../InlineCompat"),
     .package(path: "../InlineMath"),
     .package(url: "https://github.com/onevcat/Kingfisher", from: "7.0.0"),
   ],
@@ -62,6 +63,7 @@ let package = Package(
     .target(
       name: "InlineUI",
       dependencies: baseDependencies + [
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "Kingfisher", package: "Kingfisher"),
         .product(name: "InlineAvatarCore", package: "InlineKit"),
         "ReactionPickerEmojis",
@@ -105,6 +107,7 @@ let package = Package(
       name: "Invite",
       dependencies: baseDependencies + [
         "InlineUI",
+        .product(name: "InlineCompat", package: "InlineCompat"),
         .product(name: "Logger", package: "InlineKit"),
       ],
       swiftSettings: swiftSettings

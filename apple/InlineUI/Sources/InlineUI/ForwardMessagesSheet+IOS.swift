@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 
 #if os(iOS)
+@available(iOS 17.0, *)
 struct IOSForwardMessagesSheetView: View {
   @Bindable var model: ForwardMessagesSheetModel
   let onToggleSelectionMode: () -> Void

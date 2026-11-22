@@ -300,20 +300,17 @@ public enum ThreadIconImageRenderer {
     background: ThreadIconBackground = .automatic,
     colorScheme: ColorScheme
   ) -> UIImage? {
-    let view = ThreadIconView(
-      descriptor,
-      size: size,
-      shape: shape,
-      symbolColor: symbolColor,
-      background: background
-    )
-    .environment(\.colorScheme, colorScheme)
-    .frame(width: size.points, height: size.points)
-
-    let renderer = ImageRenderer(content: view)
-    renderer.proposedSize = ProposedViewSize(width: size.points, height: size.points)
-    renderer.scale = UIScreen.main.scale
-    return renderer.uiImage
+    // Drawn by the UIKit twin, so it needs no SwiftUI `ImageRenderer` (iOS 16) and matches
+    // the icons in UIKit lists.
+    guard size.points > 0 else { return nil }
+    let view = ThreadIconLayerView(frame: CGRect(x: 0, y: 0, width: size.points, height: size.points))
+    view.overrideUserInterfaceStyle = switch colorScheme {
+    case .dark: .dark
+    case .light: .light
+    @unknown default: .unspecified
+    }
+    view.configure(descriptor, size: size, shape: shape, symbolColor: symbolColor, background: background)
+    return view.renderImage(scale: UIScreen.main.scale)
   }
   #endif
 }
@@ -323,7 +320,7 @@ private enum ResolvedBackground: Equatable {
   case gradient
 }
 
-private struct ContentScale: Equatable {
+struct ContentScale: Equatable {
   let emojiRatio: CGFloat
   let symbolRatio: CGFloat
 
@@ -346,7 +343,7 @@ private struct ContentScale: Equatable {
   }
 }
 
-private extension ThreadIconSize {
+extension ThreadIconSize {
   var cornerRadiusRatio: CGFloat {
     switch self {
     case .compact:

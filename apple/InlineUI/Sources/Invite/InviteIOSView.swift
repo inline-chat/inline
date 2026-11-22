@@ -10,6 +10,7 @@ private enum InviteIOSRoute: Hashable {
   case outcome
 }
 
+@available(iOS 17.0, *)
 struct InviteIOSView: View {
   let model: InviteComposerModel
   let onOpenChat: ((InlineKit.Peer) -> Void)?
@@ -53,6 +54,7 @@ struct InviteIOSView: View {
 
 // MARK: - Selection
 
+@available(iOS 17.0, *)
 private struct InviteIOSSelectionScreen: View {
   let model: InviteComposerModel
   let realtime: RealtimeV2
@@ -143,6 +145,7 @@ private struct InviteIOSTopBarModifier<BarContent: View>: ViewModifier {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSSearchTopBar: View {
   @Bindable var model: InviteComposerModel
   @FocusState.Binding var searchIsFocused: Bool
@@ -238,6 +241,7 @@ private struct InviteIOSSearchFieldSurface: ViewModifier {
   }
 }
 
+@available(iOS 16.0, *)
 private struct InviteIOSSelectedPeopleBar: View {
   let targets: [InviteTarget]
   let onRemove: (InviteTarget) -> Void
@@ -285,6 +289,7 @@ private struct InviteIOSSelectionToken: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSSelectionContent: View {
   let model: InviteComposerModel
   let onDismissKeyboard: () -> Void
@@ -301,6 +306,7 @@ private struct InviteIOSSelectionContent: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSResultsList: View {
   let model: InviteComposerModel
 
@@ -334,6 +340,7 @@ private struct InviteIOSResultsList: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSSelectionStatus: View {
   let model: InviteComposerModel
   let onDismissKeyboard: () -> Void
@@ -363,6 +370,7 @@ private struct InviteIOSSelectionStatus: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSCandidateSection: View {
   let title: LocalizedStringResource
   let targets: [InviteTarget]
@@ -393,6 +401,7 @@ private struct InviteIOSCandidateSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSCandidateRow: View {
   let target: InviteTarget
   let isSelected: Bool
@@ -478,6 +487,7 @@ private struct InviteIOSSmallArtwork: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSEmptyState: View {
   let isSpaceInvite: Bool
   let destinationName: String?
@@ -508,6 +518,7 @@ private struct InviteIOSSearchingState: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct InviteIOSNoResultsState: View {
   let message: LocalizedStringResource
   let onDismissKeyboard: () -> Void
@@ -530,6 +541,7 @@ private struct InviteIOSNoResultsState: View {
 
 // MARK: - Options
 
+@available(iOS 17.0, *)
 private struct InviteIOSOptionsScreen: View {
   let model: InviteComposerModel
   let onComplete: () -> Void
@@ -571,6 +583,7 @@ private struct InviteIOSOptionsScreen: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSSelectedPeopleSection: View {
   let model: InviteComposerModel
 
@@ -609,6 +622,7 @@ private struct InviteIOSReviewPersonRow: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSDestinationSection: View {
   let model: InviteComposerModel
 
@@ -642,6 +656,7 @@ private struct InviteIOSDestinationSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSAccessSection: View {
   @Bindable var model: InviteComposerModel
 
@@ -661,6 +676,7 @@ private struct InviteIOSAccessSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSDestinationPicker: View {
   let model: InviteComposerModel
   @Environment(\.dismiss) private var dismiss
@@ -700,6 +716,7 @@ private struct InviteIOSDestinationPicker: View {
   }
 }
 
+@available(iOS 16.0, *)
 private struct InviteIOSDestinationOption: View {
   let title: String
   let subtitle: LocalizedStringResource
@@ -734,6 +751,7 @@ private struct InviteIOSDestinationOption: View {
 
 // MARK: - Outcome
 
+@available(iOS 17.0, *)
 private struct InviteIOSOutcomeScreen: View {
   let model: InviteComposerModel
   let onOpenChat: ((InlineKit.Peer) -> Void)?
@@ -783,6 +801,7 @@ private struct InviteIOSOutcomeScreen: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSOutcomeSection: View {
   let title: LocalizedStringResource
   let description: LocalizedStringResource
@@ -809,6 +828,7 @@ private struct InviteIOSOutcomeSection: View {
   }
 }
 
+@available(iOS 17.0, *)
 private struct InviteIOSOutcomeRow: View {
   let model: InviteComposerModel
   let completion: InviteCompletion

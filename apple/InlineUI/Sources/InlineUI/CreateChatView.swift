@@ -3,6 +3,7 @@ import InlineProtocol
 import RealtimeV2
 import SwiftUI
 
+@available(iOS 16.4, *)
 public struct CreateChatView: View {
   @Environment(\.appDatabase) var db
   @Environment(\.realtimeV2) var realtimeV2
@@ -206,6 +207,7 @@ public struct CreateChatView: View {
   }
 }
 
+@available(iOS 16.4, *)
 #Preview {
   CreateChatView(spaceId: 1) { _ in }
     .previewsEnvironment(.empty)

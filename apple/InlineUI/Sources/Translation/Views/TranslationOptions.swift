@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 
 /// Presented in a sheet for changing translation language
+@available(iOS 16.0, *)
 public struct TranslationOptions: View {
   @State private var selectedLanguage: Language = .getCurrentLanguage()
   @Environment(\.dismiss) private var dismiss
@@ -87,6 +88,7 @@ public struct TranslationOptions: View {
   }
 }
 
+@available(iOS 16.0, *)
 #Preview {
   TranslationOptions()
 }

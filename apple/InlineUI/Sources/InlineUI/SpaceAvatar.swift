@@ -18,7 +18,7 @@ public struct SpaceAvatar: View {
       RoundedRectangle(cornerRadius: cornerRadius)
         .fill(Color.gray.opacity(0.15))
       if let value = space.photoURL, let url = URL(string: value) {
-        KFImage(source: .network(ImageResource(downloadURL: url, cacheKey: space.photoFileUniqueId ?? value)))
+        KFImage(source: .network(KF.ImageResource(downloadURL: url, cacheKey: space.photoFileUniqueId ?? value)))
           .placeholder { initials }
           .resizable()
           .scaledToFill()

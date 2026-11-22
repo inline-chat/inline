@@ -8,6 +8,7 @@ extension Color {
 }
 
 /// Translation button used in iOS nav bar and macOS toolbar
+@available(iOS 17.0, *)
 public struct TranslationButton: View {
   /// Peer
   var peer: Peer
@@ -113,6 +114,7 @@ public struct TranslationButton: View {
 }
 
 /// Button-only translation toolbar item. Presentation is owned by the caller.
+@available(iOS 17.0, *)
 public struct TranslationToolbarButton: View {
   private let peer: Peer
   private let activeColor: Color

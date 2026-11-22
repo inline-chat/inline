@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 
 /// Edits one privacy exception list: who is in it, and people to add.
+@available(iOS 16.0, *)
 public struct PrivacyPeopleEditor: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var model: PrivacyPeoplePickerModel

@@ -24,6 +24,7 @@ public enum InviteFlowStage: Hashable, Sendable {
   case outcome
 }
 
+@available(iOS 17.0, *)
 @MainActor
 public final class InviteFlowSession: Identifiable {
   public let id: UUID
@@ -38,6 +39,7 @@ public final class InviteFlowSession: Identifiable {
   }
 }
 
+@available(iOS 17.0, *)
 public struct InviteView: View {
   @Environment(\.appDatabase) private var database
   @Environment(\.realtimeV2) private var realtime
@@ -121,6 +123,7 @@ public struct InviteView: View {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor @Observable
 final class InviteComposerModel {
   enum AccessLevel: String, CaseIterable, Identifiable {
@@ -677,7 +680,10 @@ private func inviteEmailIsValid(_ value: String) -> Bool {
 
 private func inviteContactsAuthorized(_ status: CNAuthorizationStatus) -> Bool {
   #if os(iOS)
-  status == .authorized || status == .limited
+  if #available(iOS 18.0, *) {
+    return status == .authorized || status == .limited
+  }
+  return status == .authorized
   #else
   status == .authorized
   #endif
@@ -685,6 +691,7 @@ private func inviteContactsAuthorized(_ status: CNAuthorizationStatus) -> Bool {
 
 // MARK: - Contacts permission
 
+@available(iOS 16.0, *)
 private struct InviteContactsPermissionView: View {
   let isLoading: Bool
   let onAllow: () -> Void
@@ -723,6 +730,7 @@ private struct InviteContactsPermissionView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview("General invite") {
   InviteView(destination: .inline)
     .previewsEnvironment(.populated)

@@ -41,6 +41,7 @@ public enum ComposeActionAnimationInventory {
   }
 }
 
+@available(iOS 17.0, *)
 public struct ComposeActionActivityIndicator: View {
   private let action: ApiComposeAction
   private let color: Color
@@ -111,6 +112,7 @@ public struct WorkingActivityIndicator: View {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 public struct ComposeActionCompactAccessory: View {
   private let reservesSpaceWhenInactive: Bool
@@ -329,6 +331,7 @@ public struct VoiceRecordingActivityIndicator: View {
 
 /// "Sending photo / video / file": a small drawn object that animates the send.
 /// The drawing lives in `SendingActivityGlyph`, shared with AppKit.
+@available(iOS 17.0, *)
 public struct SendingActivityIndicator: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   private let kind: SendingActivityGlyph.Kind

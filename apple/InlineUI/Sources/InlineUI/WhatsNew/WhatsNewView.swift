@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// The "What's New in Inline" sheet. Marks the announcement seen as soon as it appears.
+@available(iOS 17.0, *)
 public struct WhatsNewView: View {
   private let announcement: WhatsNewAnnouncement
   private let onContinue: () -> Void
@@ -121,6 +122,7 @@ private struct WhatsNewRow: View {
 
 #if os(iOS)
 /// Pins Continue in the bottom safe area, over a soft scroll edge on iOS 26.
+@available(iOS 17.0, *)
 private struct WhatsNewContinueBar: ViewModifier {
   let onContinue: () -> Void
 
@@ -158,6 +160,7 @@ private struct WhatsNewContinueBar: ViewModifier {
 }
 #endif
 
+@available(iOS 17.0, *)
 #Preview {
   if let announcement = WhatsNewAnnouncement.current {
     WhatsNewView(announcement: announcement, onContinue: {})

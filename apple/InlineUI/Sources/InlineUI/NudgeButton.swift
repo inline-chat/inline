@@ -10,6 +10,7 @@ import AppKit
 #endif
 
 /// Native toolbar control that sends a regular Nudge on tap and reveals Urgent Nudge on hold.
+@available(iOS 17.0, *)
 public struct NudgeButton: View {
   private let log = Log.scoped("NudgeButton")
 
@@ -127,6 +128,7 @@ public struct NudgeButton: View {
 }
 
 #if os(iOS)
+@available(iOS 17.0, *)
 private struct IOSNudgeToolbarButton: View {
   let isSending: Bool
   let onNudge: () -> Void
@@ -244,6 +246,7 @@ private struct MacNudgeToolbarButton: View {
 }
 #endif
 
+@available(iOS 17.0, *)
 private struct NudgeHoldGestureModifier: ViewModifier {
   @Binding var progress: CGFloat
   @Binding var suppressNextTap: Bool
@@ -416,6 +419,7 @@ enum NudgeButtonState {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   NudgeButton(peer: .user(id: 1))
 }

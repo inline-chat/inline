@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 
 public struct ComposePlainTextPasteResult: Equatable, Sendable {
   public let text: String

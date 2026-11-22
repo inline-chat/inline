@@ -1,4 +1,5 @@
 import Foundation
+import InlineCompat
 import Observation
 
 public struct WhatsNewItem: Identifiable, Sendable {
@@ -56,8 +57,8 @@ public struct WhatsNewAnnouncement: Identifiable, Sendable {
 }
 
 @MainActor
-@Observable
-public final class WhatsNewStore {
+public final class WhatsNewStore: CompatObservable {
+  public nonisolated let observationRegistrar = CompatObservationRegistrar()
   public static let shared = WhatsNewStore(announcement: .current)
 
   private static let lastSeenIDKey = "whatsNew.lastSeenId"
@@ -66,9 +67,9 @@ public final class WhatsNewStore {
   public let announcement: WhatsNewAnnouncement?
 
   /// Set until the bundled announcement has been seen or dismissed on this device.
-  public private(set) var pending: WhatsNewAnnouncement?
+  @Tracked public private(set) var pending: WhatsNewAnnouncement? = nil
 
-  @ObservationIgnored private let defaults: UserDefaults
+  private let defaults: UserDefaults
 
   public init(announcement: WhatsNewAnnouncement?, defaults: UserDefaults = .standard) {
     let announcement = announcement.flatMap { $0.itemsForCurrentPlatform.isEmpty ? nil : $0 }
@@ -87,3 +88,6 @@ public final class WhatsNewStore {
     pending = nil
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension WhatsNewStore: Observable {}

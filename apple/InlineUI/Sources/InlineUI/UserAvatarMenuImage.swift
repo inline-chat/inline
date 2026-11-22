@@ -1,5 +1,6 @@
 #if os(iOS)
 import ImageIO
+import InlineCompat
 import InlineKit
 import Kingfisher
 import UIKit

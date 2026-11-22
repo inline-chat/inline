@@ -2,6 +2,7 @@ import InlineKit
 import SwiftUI
 
 /// Presented in a small popover when chat needs translation
+@available(iOS 17.0, *)
 public struct TranslationPrompt: View {
   var peer: Peer
   var action: (() -> Void)? = nil
@@ -52,6 +53,7 @@ public struct TranslationPrompt: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   TranslationPrompt(peer: .user(id: 1))
 }

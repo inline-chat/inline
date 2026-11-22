@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 
+@available(iOS 17.0, *)
 @MainActor
 public struct AudioWaveformView: View {
   public enum HorizontalBarsAlignment {
@@ -284,6 +285,7 @@ public struct AudioWaveformView: View {
 
 }
 
+@available(iOS 17.0, *)
 @MainActor
 private struct AudioWaveformBars: View {
   let bars: [CGFloat]
@@ -335,6 +337,7 @@ private struct AudioWaveformBars: View {
   }
 }
 
+@available(iOS 17.0, *)
 @MainActor
 private struct AudioWaveformRecordingMotion: View {
   let bars: [CGFloat]
@@ -466,6 +469,7 @@ private struct WaveformSeekModifier: ViewModifier {
   private static let tapSlop: CGFloat = 8
 }
 
+@available(iOS 17.0, *)
 private extension AudioWaveformView.HorizontalBarsAlignment {
   var frameAlignment: Alignment {
     switch self {
@@ -477,6 +481,7 @@ private extension AudioWaveformView.HorizontalBarsAlignment {
   }
 }
 
+@available(iOS 17.0, *)
 private extension AudioWaveformView.VerticalBarsAlignment {
   var stackAlignment: VerticalAlignment {
     switch self {

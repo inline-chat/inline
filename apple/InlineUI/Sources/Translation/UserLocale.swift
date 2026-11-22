@@ -26,14 +26,15 @@ public class UserLocale {
   }
 
   public static func getCurrentRegion() -> String {
-    Locale.current.region?.identifier ?? "US"
+    regionIdentifier(of: .current) ?? "US"
   }
 
   public static func getPreferredLanguage() -> String {
     let preferredLocale = Locale(identifier: Locale.preferredLanguages.first ?? "en")
 
     // Get the language code
-    let languageCode = preferredLocale.language.languageCode?.identifier ?? "en"
+    let parts = languageParts(of: preferredLocale)
+    let languageCode = parts.language ?? "en"
 
     // For most languages, just return the language code
     if languageCode != "zh" {
@@ -41,12 +42,36 @@ public class UserLocale {
     }
 
     // For Chinese, include the script code
-    if let scriptCode = preferredLocale.language.script?.identifier {
+    if let scriptCode = parts.script {
       return "\(languageCode)-\(scriptCode)"
     }
 
     // Fallback for Chinese without script code
     return "zh-Hant" // Default to Simplified Chinese
+  }
+
+  // `Locale.Language` and `Locale.region` are iOS 16; iOS 15 reads the same codes from the
+  // older per-component properties.
+  private static func languageParts(of locale: Locale) -> (language: String?, script: String?) {
+    if #available(iOS 16, *) {
+      return (locale.language.languageCode?.identifier, locale.language.script?.identifier)
+    }
+    #if os(iOS)
+    return (locale.languageCode, locale.scriptCode)
+    #else
+    return (nil, nil)
+    #endif
+  }
+
+  private static func regionIdentifier(of locale: Locale) -> String? {
+    if #available(iOS 16, *) {
+      return locale.region?.identifier
+    }
+    #if os(iOS)
+    return locale.regionCode
+    #else
+    return nil
+    #endif
   }
 
   public static func getCurrentLocaleInfo() -> (language: String, region: String) {

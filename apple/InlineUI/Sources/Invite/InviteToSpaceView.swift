@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 import AppKit
 #endif
 
+@available(iOS 17.0, *)
 public struct InviteToSpaceView: View {
   @Environment(\.appDatabase) var db
   @Environment(\.realtimeV2) var realtimeV2
@@ -439,6 +440,7 @@ public struct InviteToSpaceView: View {
   }
 }
 
+@available(iOS 17.0, *)
 #Preview {
   InviteToSpaceView(spaceId: 1)
     .previewsEnvironment(.populated)
