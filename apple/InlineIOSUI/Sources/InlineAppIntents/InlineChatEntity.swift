@@ -5,6 +5,7 @@ import AppIntents
 /// and queries additionally pin execution to `.main`; target membership protects earlier systems.
 public struct InlineAppIntentsPackage: AppIntentsPackage {}
 
+@available(iOS 16.0, *)
 public struct InlineChatEntity: AppEntity {
   public static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Inline Chat")
   public static let defaultQuery = InlineChatQuery()
@@ -31,6 +32,7 @@ public struct InlineChatEntity: AppEntity {
   }
 }
 
+@available(iOS 16.0, *)
 public struct InlineChatQuery: EntityStringQuery {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)

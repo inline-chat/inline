@@ -1,7 +1,7 @@
 import AppIntents
 import Foundation
 
-public enum InlineIntentError: Error, CustomLocalizedStringResourceConvertible {
+public enum InlineIntentError: Error {
   case unavailable
   case recipientUnavailable
   case appNotReady
@@ -17,7 +17,11 @@ public enum InlineIntentError: Error, CustomLocalizedStringResourceConvertible {
   case connectionUnavailable
   case operationNotConfirmed
   case outgoingReadStatusUnsupported
+}
 
+// `LocalizedStringResource` is iOS 16, like App Intents; the cases stay usable everywhere.
+@available(iOS 16.0, *)
+extension InlineIntentError: CustomLocalizedStringResourceConvertible {
   public var localizedStringResource: LocalizedStringResource {
     switch self {
     case .unavailable:

@@ -4,6 +4,7 @@ import SwiftUI
 import UIKit
 
 /// The compact playback surface shared by chat headers and navigation roots.
+@available(iOS 18.0, *)
 public struct VoicePlaybackPill: View {
   public static let height: CGFloat = 52
   public static func preferredHeight(compatibleWith traits: UITraitCollection) -> CGFloat {

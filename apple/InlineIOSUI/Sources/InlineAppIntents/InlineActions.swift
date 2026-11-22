@@ -1,6 +1,7 @@
 import AppIntents
 import Foundation
 
+@available(iOS 18.0, *)
 public struct OpenInlineChatIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)
@@ -34,6 +35,7 @@ public struct OpenInlineChatIntent: AppIntent {
   }
 }
 
+@available(iOS 16.0, *)
 public struct FindInlineChatsIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)
@@ -55,6 +57,7 @@ public struct FindInlineChatsIntent: AppIntent {
   }
 }
 
+@available(iOS 18.0, *)
 public struct SendInlineMessageIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)
@@ -85,6 +88,7 @@ public struct SendInlineMessageIntent: AppIntent {
   }
 }
 
+@available(iOS 16.0, *)
 public struct SaveInlineNoteIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)

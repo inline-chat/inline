@@ -56,6 +56,7 @@ private struct InlineIntentUnreadCursor {
 }
 
 /// Request-local server projection. It neither owns sync cursors nor writes a second message cache.
+@available(iOS 16.0, *)
 struct InlineIntentInbox: Sendable {
   let accountID: Int64
   let conversations: [InlineIntentConversation]
@@ -259,6 +260,7 @@ struct InlineIntentInbox: Sendable {
   }
 }
 
+@available(iOS 16.0, *)
 struct InlineIntentMessage: Sendable {
   let id: InlineIntentMessageID
   let conversation: InlineIntentConversation
@@ -288,6 +290,7 @@ struct InlineIntentMessage: Sendable {
   }
 }
 
+@available(iOS 16.0, *)
 enum InlineIntentMessaging {
   static let batchLimit = 20
 
@@ -761,6 +764,7 @@ enum InlineIntentMessaging {
   }
 }
 
+@available(iOS 16.0, *)
 struct InlineIntentMessagePage: Sendable {
   let messages: [InlineIntentMessage]
   let nextCursor: String?
@@ -772,6 +776,7 @@ struct InlineIntentConversationPage: Sendable {
   let nextCursor: String?
 }
 
+@available(iOS 16.0, *)
 public struct InlineUnreadChatPage: TransientAppEntity {
   public init() {}
   public static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Unread Inline Chats")
@@ -786,6 +791,7 @@ public struct InlineUnreadChatPage: TransientAppEntity {
   }
 }
 
+@available(iOS 16.0, *)
 public struct InlineMessagePage: TransientAppEntity {
   public init() {}
   public static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Inline Message Page")
@@ -800,6 +806,7 @@ public struct InlineMessagePage: TransientAppEntity {
   }
 }
 
+@available(iOS 16.0, *)
 public struct InlineMessageEntity: AppEntity {
   public static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Inline Message")
   public static let defaultQuery = InlineMessageQuery()
@@ -824,6 +831,7 @@ public struct InlineMessageEntity: AppEntity {
   }
 }
 
+@available(iOS 16.0, *)
 public struct InlineMessageQuery: EntityQuery {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)

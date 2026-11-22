@@ -1,6 +1,7 @@
 #if os(iOS)
 import SwiftUI
 
+@available(iOS 16.0, *)
 public struct AttachmentPickerRecentTile: View {
   private let item: AttachmentPickerModel.RecentItem
   private let isSelected: Bool

@@ -40,6 +40,7 @@ struct InlineIntentChat: Sendable {
 }
 
 /// Pure, request-local projection of the server inbox; never opens or queries SQLite.
+@available(iOS 16.0, *)
 enum InlineIntentChatStore {
   static let resultLimit = 20
 

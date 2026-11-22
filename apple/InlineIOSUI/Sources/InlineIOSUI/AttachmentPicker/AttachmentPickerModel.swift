@@ -1,10 +1,11 @@
 import Foundation
+import InlineCompat
 import Observation
 import Photos
 
 @MainActor
-@Observable
-public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver {
+public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver, CompatObservable {
+  public nonisolated let observationRegistrar = CompatObservationRegistrar()
   public static let defaultInitialRecentLimit = 25
   public static let defaultRecentLimit = 75
 
@@ -34,10 +35,10 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     }
   }
 
-  public private(set) var authorizationStatus: PHAuthorizationStatus
-  public private(set) var recentItems: [RecentItem] = []
-  public private(set) var selectedRecentItemIds: Set<String> = []
-  public private(set) var isLoading = false
+  @Tracked public private(set) var authorizationStatus: PHAuthorizationStatus
+  @Tracked public private(set) var recentItems: [RecentItem] = []
+  @Tracked public private(set) var selectedRecentItemIds: Set<String> = []
+  @Tracked public private(set) var isLoading = false
 
   public var showsLimitedAccessNotice: Bool {
     authorizationStatus == .limited
@@ -58,12 +59,12 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     recentItems.filter { selectedRecentItemIds.contains($0.localIdentifier) }
   }
 
-  @ObservationIgnored private let authorizationStatusProvider: @Sendable () -> PHAuthorizationStatus
-  @ObservationIgnored private let recentItemsProvider: @Sendable (Int) -> [RecentItem]
-  @ObservationIgnored private let initialRecentLimit: Int
-  @ObservationIgnored private let recentLimit: Int
-  @ObservationIgnored private var backgroundExpansionTask: Task<Void, Never>?
-  @ObservationIgnored private var reloadGeneration = 0
+  private let authorizationStatusProvider: @Sendable () -> PHAuthorizationStatus
+  private let recentItemsProvider: @Sendable (Int) -> [RecentItem]
+  private let initialRecentLimit: Int
+  private let recentLimit: Int
+  private var backgroundExpansionTask: Task<Void, Never>?
+  private var reloadGeneration = 0
 
   public init(
     recentLimit: Int = 75,
@@ -79,7 +80,7 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     self.recentItemsProvider = recentItemsProvider ?? {
       Self.fetchRecentItems(limit: $0)
     }
-    authorizationStatus = authorizationStatusProvider()
+    _authorizationStatus = Tracked(wrappedValue: authorizationStatusProvider())
     super.init()
     PHPhotoLibrary.shared().register(self)
   }
@@ -355,3 +356,6 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     return Array(mergedItems.prefix(limit))
   }
 }
+
+@available(iOS 17.0, macOS 14.0, *)
+extension AttachmentPickerModel: Observable {}

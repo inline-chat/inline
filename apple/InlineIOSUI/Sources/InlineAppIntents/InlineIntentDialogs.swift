@@ -1,5 +1,6 @@
 import AppIntents
 
+@available(iOS 16.0, *)
 enum InlineIntentDialogs {
   static func confirmSend(to chat: InlineIntentChat) -> IntentDialog {
     "Send this message to \(chat.title), \(chat.subtitle)?"

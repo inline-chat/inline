@@ -1,6 +1,7 @@
 import AppIntents
 import Foundation
 
+@available(iOS 16.0, *)
 public struct FindUnreadInlineChatsIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)
@@ -18,6 +19,7 @@ public struct FindUnreadInlineChatsIntent: AppIntent {
   }
 }
 
+@available(iOS 18.0, *)
 public struct ReadInlineMessagesIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)
@@ -39,6 +41,7 @@ public struct ReadInlineMessagesIntent: AppIntent {
   }
 }
 
+@available(iOS 18.0, *)
 public struct ReplyToInlineMessageIntent: AppIntent {
   #if compiler(>=6.4)
   @available(iOS 27.0, macOS 27.0, *)

@@ -9,6 +9,7 @@ import UIKit
 #endif
 
 /// Stateless adapters over the app's existing account, connection, sync, and transaction owner.
+@available(iOS 16.0, *)
 enum InlineIntentService {
   static func account() async throws -> AuthAccountMutationToken {
     #if os(iOS)
@@ -19,7 +20,11 @@ enum InlineIntentService {
     let auth = Auth.shared.handle
     if !auth.snapshot().didHydrate { await auth.refreshFromStorage() }
     guard auth.isLoggedIn(), !auth.hasPendingAccountTransition() else {
-      throw AppIntentError.UserActionRequired.signin
+      if #available(iOS 18.0, *) {
+        throw AppIntentError.UserActionRequired.signin
+      }
+      // iOS 16 and 17 have no sign-in requirement error; ask to open Inline instead.
+      throw InlineIntentError.appNotReady
     }
     return try auth.beginAccountMutation()
   }

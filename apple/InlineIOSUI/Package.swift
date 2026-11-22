@@ -6,6 +6,7 @@ import PackageDescription
 let baseDependencies: [Target.Dependency] = [
   "InlineKit",
   "InlineUI",
+  .product(name: "InlineCompat", package: "InlineCompat"),
   .product(name: "TimelineCore", package: "InlineTimeline"),
   .product(name: "TimelineUIKit", package: "InlineTimeline"),
 ]
@@ -16,7 +17,7 @@ let package = Package(
   platforms: [
     // Keep macOS here so `swift build`/`swift test` works on dev machines without needing an iOS destination.
     // iOS-only code should be gated with `#if os(iOS)` / `#if canImport(UIKit)` as needed.
-    .iOS(.v18),
+    .iOS(.v15),
     .macOS(.v15),
   ],
 
@@ -29,6 +30,7 @@ let package = Package(
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
     .package(name: "InlineUI", path: "../InlineUI"),
+    .package(path: "../InlineCompat"),
     .package(name: "InlineTimeline", path: "../InlineTimeline"),
   ],
 
