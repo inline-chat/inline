@@ -52,8 +52,8 @@ public enum AttachmentMediaMaterializer {
         try OriginalMediaStore.retain(data: data, fileName: name, for: media)
       case .cgImage, .platformImage:
         // A camera capture handed over as pixels has no file behind it: keep a full-resolution
-        // copy so Original still sends every pixel. Other pixel-only images (pastes, stickers)
-        // send the prepared photo even when marked Send as Original.
+        // copy so Send as Original still sends every pixel. Other pixel-only images (pastes,
+        // stickers) keep no original, so they stay photos.
         guard content == .camera else { break }
         let full = try MediaSendPreparation.preparePhoto(
           source,
