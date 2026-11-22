@@ -80,6 +80,25 @@ const ACK_FLUSH_DELAY_MS = 30_000
 const ACK_FLUSH_PENDING = 16
 const MAXIMUM_GZIP_OUTPUT_BYTES = 16 * 1024 * 1024
 
+/**
+ * Server time minus this host's wall clock, learned from authenticated server messages and shared
+ * by every connection in the process, like MTProto's global time difference. A cached-key
+ * reconnect starts from it instead of the raw device clock, so a wrong clock costs at most one
+ * 16/17 resend on the first connection.
+ */
+let serverTimeOffsetMilliseconds: number | undefined
+
+/** Server time minus the local wall clock, once any connection in this process has sampled it. */
+export const inlineProtocolServerTimeOffsetMilliseconds = (): number | undefined => serverTimeOffsetMilliseconds
+
+/** Seeds or clears the process-wide offset; used by tests. */
+export const setInlineProtocolServerTimeOffsetMilliseconds = (value: number | undefined): void => {
+  if (value !== undefined && !Number.isFinite(value)) throw new RangeError("Invalid server time offset")
+  serverTimeOffsetMilliseconds = value
+}
+
+const estimatedServerNowMilliseconds = (): number => Date.now() + (serverTimeOffsetMilliseconds ?? 0)
+
 const gunzip = (packed: Uint8Array, maximumOutputBytes: number): Uint8Array =>
   Uint8Array.from(gunzipSync(packed, { maxOutputLength: Math.min(maximumOutputBytes, MAXIMUM_GZIP_OUTPUT_BYTES) }))
 
@@ -288,6 +307,8 @@ export class InlineProtocolV3Connection {
   readonly #maxPendingRequestBytes: number
   readonly #inbox = new FrameInbox()
   readonly #messageIds = new MessageIdGenerator()
+  /** Unencrypted handshake IDs, kept apart so a wrong device clock cannot push session IDs ahead. */
+  readonly #handshakeMessageIds = new MessageIdGenerator()
   readonly #sequenceNumbers = new SequenceNumberGenerator()
   readonly #clock = new AuthenticatedServerClock({
     nowMilliseconds: () => performance.now(),
@@ -338,7 +359,9 @@ export class InlineProtocolV3Connection {
     try {
       await connection.#open()
       if (options.authorization) {
-        connection.#sampleAuthenticatedServerTime(Math.floor(Date.now() / 1_000))
+        // A seed, not a sample: the first authenticated server message replaces it.
+        connection.#clock.sample(Math.floor(estimatedServerNowMilliseconds() / 1_000))
+        connection.#scheduleRotationTimer()
       } else {
         await connection.#handshake(options.temporary ?? false)
       }
@@ -508,12 +531,18 @@ export class InlineProtocolV3Connection {
 
   #sampleAuthenticatedServerTime(serverUnixSeconds: number): void {
     this.#clock.sample(serverUnixSeconds)
+    this.#recordServerTimeOffset()
     this.#scheduleRotationTimer()
   }
 
   #sampleAuthenticatedServerMessage(messageId: bigint): void {
     this.#clock.sampleMessageId(messageId)
+    this.#recordServerTimeOffset()
     this.#scheduleRotationTimer()
+  }
+
+  #recordServerTimeOffset(): void {
+    serverTimeOffsetMilliseconds = this.#clock.nowMilliseconds() - Date.now()
   }
 
   #scheduleRotationTimer(): void {
@@ -645,7 +674,9 @@ export class InlineProtocolV3Connection {
     })
     let request = handshake.begin(temporary)
     for (;;) {
-      const messageId = this.#messageIds.next(Date.now(), randomLowBits(this.#random), 0)
+      // The handshake uses the raw device clock: the server does not judge handshake IDs by time,
+      // and an older server that does must not see a stale learned offset.
+      const messageId = this.#handshakeMessageIds.next(Date.now(), randomLowBits(this.#random), 0)
       this.#sendPacket(encodeUnencryptedRecord(messageId, request))
       const response = decodeUnencryptedRecord(await this.#receivePacket(
         this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
@@ -818,8 +849,11 @@ export class InlineProtocolV3Connection {
     }
     if (pending) this.#pendingContent.delete(bad.badMessageId)
     if (probeEntry) this.#pendingProbes.delete(probeEntry[0])
-    if (bad.errorCode === 16 || bad.errorCode === 17) this.#sampleAuthenticatedServerMessage(serverMessageId)
-    else if (bad.errorCode === 48 && bad.newServerSalt !== undefined) this.#setServerSalt(bad.newServerSalt)
+    if (bad.errorCode === 16 || bad.errorCode === 17) {
+      this.#sampleAuthenticatedServerMessage(serverMessageId)
+      // 17: the clock ran ahead; let IDs past the server window fall back to its edge.
+      if (bad.errorCode === 17) this.#messageIds.recoverFromTooHigh(serverMessageId)
+    } else if (bad.errorCode === 48 && bad.newServerSalt !== undefined) this.#setServerSalt(bad.newServerSalt)
     else {
       const rejected = pending ?? probeEntry![1]
       this.#releasePending(rejected.body)
@@ -830,6 +864,8 @@ export class InlineProtocolV3Connection {
     }
     const retried = pending ?? probeEntry![1]
     retried.messageId = this.#nextClientMessageId()
+    // A fresh sequence number keeps the resend in order with anything accepted since the original.
+    retried.sequenceNumber = this.#sequenceNumbers.next(pending !== undefined)
     if (pending) this.#pendingContent.set(retried.messageId, pending)
     else this.#pendingProbes.set(probeEntry![0], retried as PendingProbe)
     this.#sendEncrypted(retried.messageId, retried.sequenceNumber, retried.body, true)

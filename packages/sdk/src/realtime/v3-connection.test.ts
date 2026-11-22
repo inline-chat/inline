@@ -37,6 +37,8 @@ import {
   FrameInbox,
   InlineProtocolV3Connection,
   InlineProtocolV3Error,
+  inlineProtocolServerTimeOffsetMilliseconds,
+  setInlineProtocolServerTimeOffsetMilliseconds,
   temporaryAuthorizationNeedsRotation,
   type InlineProtocolPublicKey,
 } from "./v3-connection.js"
@@ -196,6 +198,8 @@ const testServer = async (options: {
   gzipResults?: boolean
   invalidateAfterMutation?: boolean
   interruptRecoveryBootstrap?: boolean
+  /** Server clock minus the real clock, to simulate a device whose clock is wrong. */
+  serverClockSkewMilliseconds?: number
 } = {}): Promise<{
   url: string
   publicKeys: InlineProtocolPublicKey[]
@@ -303,7 +307,7 @@ const testServer = async (options: {
         },
       },
       randomBytes: (length) => Uint8Array.from(randomBytes(length)),
-      nowMilliseconds: () => Date.now(),
+      nowMilliseconds: () => Date.now() + (options.serverClockSkewMilliseconds ?? 0),
       gunzip: () => { throw new Error("not used") },
       carrierProfile: "websocket",
       dc: 1,
@@ -393,6 +397,45 @@ const authenticatedTestConnection = async (
 }
 
 describe("InlineProtocolV3Connection", () => {
+  for (const [label, skew] of [["slow", 10 * 60_000], ["fast", -10 * 60_000]] as const) {
+    it(`logs in, reconnects with a cached key, and calls RPCs when the device clock is 10 minutes ${label}`, async () => {
+      setInlineProtocolServerTimeOffsetMilliseconds(undefined)
+      try {
+        const fixture = await testServer({ serverClockSkewMilliseconds: skew })
+        const { permanent, connection } = await authenticatedTestConnection(fixture)
+        await expect(connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } }))
+          .resolves.toMatchObject({ oneofKind: "getMe" })
+        // The handshake and every authenticated reply taught the process the server time.
+        expect(Math.abs(inlineProtocolServerTimeOffsetMilliseconds()! - skew)).toBeLessThan(5_000)
+        const authorization = connection.authorization
+        await connection.close()
+
+        // A cached-key reconnect starts from the learned offset rather than the device clock.
+        const cached = await InlineProtocolV3Connection.connect({
+          url: fixture.url, rsaPublicKeys: fixture.publicKeys, authorization,
+        })
+        await expect(cached.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } }))
+          .resolves.toMatchObject({ oneofKind: "getMe" })
+        await cached.close()
+
+        // A process that never learned the offset resyncs from the server's 16/17 and resends,
+        // keeping every concurrent request in sequence order through the correction.
+        setInlineProtocolServerTimeOffsetMilliseconds(undefined)
+        const fresh = await InlineProtocolV3Connection.connect({
+          url: fixture.url, rsaPublicKeys: fixture.publicKeys, authorization,
+        })
+        const calls = Array.from({ length: 5 }, () =>
+          fresh.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } }))
+        for (const result of await Promise.all(calls)) expect(result).toMatchObject({ oneofKind: "getMe" })
+        expect(Math.abs(inlineProtocolServerTimeOffsetMilliseconds()! - skew)).toBeLessThan(5_000)
+        await fresh.close()
+        await permanent.close()
+      } finally {
+        setInlineProtocolServerTimeOffsetMilliseconds(undefined)
+      }
+    }, 30_000)
+  }
+
   it("bounds queued inbound bytes and discards them on terminal failure", async () => {
     const inbox = new FrameInbox(4)
     inbox.push(Uint8Array.of(1, 2, 3))
@@ -873,7 +916,9 @@ describe("InlineProtocolV3Connection", () => {
     const resent = decodeClient(socket.sent[3]!, [9n])
     expect(resent.serverSalt).toBe(9n)
     expect(resent.body).toEqual(request!.body)
-    expect(resent.sequenceNumber).toBe(request!.sequenceNumber)
+    // A resend takes a fresh content sequence number so it stays in order after the original.
+    expect(resent.sequenceNumber % 2).toBe(1)
+    expect(resent.sequenceNumber).toBeGreaterThan(request!.sequenceNumber)
 
     await connection.close()
     await Promise.all([first, second])
