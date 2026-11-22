@@ -235,6 +235,14 @@ impl LoopGuards {
         guard.verdict()
     }
 
+    /// The verdict for `scope` as it stands, recording nothing: another
+    /// revision of an agent message already counted is the same turn.
+    pub fn current(&mut self, scope: i64) -> LoopVerdict {
+        self.guards
+            .get_mut(&scope)
+            .map_or(LoopVerdict::Allowed { hops: 0 }, LoopGuard::verdict)
+    }
+
     pub fn extend(&mut self, scope: i64, by: u32) {
         let default_limit = self.default_limit;
         self.guards
