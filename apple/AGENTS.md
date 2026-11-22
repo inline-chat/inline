@@ -21,7 +21,7 @@
 
 ## Builds And Checks
 
-- Never launch, boot, or run iOS/iPadOS simulators, including through tests or debug scripts, unless the user explicitly asks to use a simulator. A general build, test, debug, or validation request does not authorize simulator use.
+- iOS/iPadOS simulators are fine to use when they help verify a change, including through tests or debug scripts. Reuse an already-booted simulator rather than booting more, avoid stacking them with other heavy builds, and shut down any you booted when done.
 - Keep iPhone Mirroring stopped; do not launch or use it for development, testing, or device interaction. When work requires an iPhone, use Device Hub.
 - Prefer focused package builds/tests (`swift test`, `swift build`, Swift syntax/type checks) over full `xcodebuild`. Ideally only on touched files, and avoid repeatedly calling them for every small change.
 - Regenerate Swift protos with `bun run proto:generate-swift` from `scripts/` when needed.
@@ -33,7 +33,7 @@
 
 ## Debug And Release Commands
 
-- iOS physical-device debug: get an ID with `xcrun devicectl list devices`, then run `bun run ios:debug -- --device <id>`. Add `--no-build`, `--no-launch`, or `--no-logs` as needed. Plain `ios:debug`, `--select`, and `--list` invoke `simctl list`; use them only with explicit simulator-tooling approval. Logs go to `.tmp/ios-debug-*.log`.
+- iOS physical-device debug: get an ID with `xcrun devicectl list devices`, then run `bun run ios:debug -- --device <id>`. Add `--no-build`, `--no-launch`, or `--no-logs` as needed. Plain `ios:debug`, `--select`, and `--list` invoke `simctl list`. Logs go to `.tmp/ios-debug-*.log`.
 - macOS debug: `bun run macos:debug` builds and opens `Inline Debug.app`, stopping an existing debug instance by default. Add `--no-build`, `--no-open`, `--no-stop`, or `--no-logs` as needed. Logs go to `.tmp/macos-debug-*.log`.
 - Local macOS Sparkle build: `cd scripts && bun run macos:build-local-app -- --channel <stable|beta|tip>` produces `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app`. Keep `DevBuild` aligned with `Release` except for intentional app identity and profile settings.
 - macOS release, when authorized: `cd scripts && bun run macos:release-app -- --channel <stable|beta|tip>` publishes the direct Sparkle/DMG release.
