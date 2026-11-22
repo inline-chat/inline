@@ -6,6 +6,7 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { MessageSearchModule } from "@in/server/modules/search/messagesSearch"
+import { CloudChatSearch } from "@in/server/modules/search/cloudChatSearch"
 import { dialogs } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 
@@ -55,16 +56,18 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
         .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)))
         .limit(1)
       const afterMessageId = dialog?.collapsedMaxId ?? undefined
+      // Text counts come from the word index when the whole chat is indexed; otherwise they scan.
       const totalCount =
         mediaCountFilter !== undefined
           ? await MessageModel.countMessagesWithMediaFilter({ chatId: chat.id, filter: mediaCountFilter, afterMessageId, tx })
-          : await MessageSearchModule.countMessagesInChat({
+          : ((await CloudChatSearch.countMessages({ chatId: chat.id, keywordGroups, afterMessageId, mediaFilter, tx })) ??
+            (await MessageSearchModule.countMessagesInChat({
               chatId: chat.id,
               keywordGroups,
               afterMessageId,
               mediaFilter,
               tx,
-            })
+            })))
       log.debug("searchMessages count", { chatId: chat.id, totalCount })
       return { messages: [], seq: BigInt(chat.updateSeq ?? 0), totalCount }
     })
@@ -114,14 +117,19 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
       }
     }
 
-    const messageIds = await MessageSearchModule.searchMessagesInChat({
+    // Whole words and phrases from the word index when the whole chat is indexed.
+    // Otherwise, and for links, scan the history for substrings as before.
+    const search = {
       chatId: chat.id,
       keywordGroups,
       maxResults,
       beforeMessageId: input.offsetId ? Number(input.offsetId) : undefined,
       mediaFilter,
       tx,
-    })
+    }
+    const messageIds =
+      (hasQueries ? await CloudChatSearch.searchMessages(search) : null) ??
+      (await MessageSearchModule.searchMessagesInChat(search))
 
     if (messageIds.length === 0) {
       return { messages: [], seq: BigInt(chat.updateSeq ?? 0) }

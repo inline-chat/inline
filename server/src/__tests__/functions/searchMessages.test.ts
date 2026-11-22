@@ -6,6 +6,7 @@ import * as schema from "../../db/schema"
 import { encrypt } from "../../modules/encryption/encryption"
 import { SearchMessagesFilter } from "@inline-chat/protocol/core"
 import { and, eq } from "drizzle-orm"
+import { bootstrapSearchDocuments, runCloudSearchIndexBatch } from "../../modules/search/cloudIndex"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,
@@ -634,5 +635,87 @@ describe("searchMessages", () => {
       makeFunctionContext(userB.id),
     )
     expect(videos.totalCount).toBe(1)
+  })
+})
+
+/** Index the whole history, as the worker does once the backfill completes. */
+async function indexHistory() {
+  while (!(await bootstrapSearchDocuments())) {}
+  for (;;) {
+    const batch = await runCloudSearchIndexBatch({ limit: 100 })
+    expect(batch.failed).toBe(0)
+    if (batch.examined === 0) return
+  }
+}
+
+describe("searchMessages from the word index", () => {
+  setupTestLifecycle()
+
+  async function chatWith(texts: string[]) {
+    const tag = crypto.randomUUID().slice(0, 8)
+    const userA = (await testUtils.createUser(`index-a-${tag}@example.com`))!
+    const userB = (await testUtils.createUser(`index-b-${tag}@example.com`))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+    for (const [index, text] of texts.entries()) {
+      await testUtils.createTestMessage({ messageId: index + 1, chatId: chat.id, fromId: userA.id, text })
+    }
+    const peerId = { type: { oneofKind: "user" as const, user: { userId: BigInt(userB.id) } } }
+    const search = async (queries: string[], extra: { offsetId?: bigint; countOnly?: boolean } = {}) =>
+      searchMessages({ peerId, queries, ...extra }, makeFunctionContext(userA.id))
+    return { chat, userA, search }
+  }
+
+  test("an indexed chat matches whole words, newest first, with paging and counts", async () => {
+    const { search } = await chatWith(["alpha beta", "alphabet soup", "beta Alpha", "alpha only"])
+    await indexHistory()
+
+    const ids = async (queries: string[], offsetId?: bigint) =>
+      (await search(queries, { offsetId })).messages.map((message) => Number(message.id))
+    expect(await ids(["alpha"])).toEqual([4, 3, 1])
+    expect(await ids(["ALPHA beta"])).toEqual([3, 1])
+    expect(await ids(["alpha"], 3n)).toEqual([1])
+    expect(await ids(["soup", "only"])).toEqual([4, 2])
+    expect((await search(["alpha"], { countOnly: true })).totalCount).toBe(3)
+  })
+
+  test("a quoted phrase needs its words in order", async () => {
+    const { search } = await chatWith(["release plan ready", "plan the release"])
+    await indexHistory()
+
+    const result = await search(['"release plan"'])
+    expect(result.messages.map((message) => Number(message.id))).toEqual([1])
+    expect((await search(['"release plan"'], { countOnly: true })).totalCount).toBe(1)
+  })
+
+  test("an indexed attachment filename matches by its words", async () => {
+    const { chat, userA, search } = await chatWith([])
+    const [file] = await db
+      .insert(schema.files)
+      .values({ fileUniqueId: "file-index-doc-1", userId: userA.id, mimeType: "application/pdf", fileSize: 123 })
+      .returning()
+    const name = encrypt("Quarterly_Report_2025.pdf")
+    const [document] = await db
+      .insert(schema.documents)
+      .values({ fileId: file!.id, fileName: name.encrypted, fileNameIv: name.iv, fileNameTag: name.authTag })
+      .returning()
+    await db
+      .insert(schema.messages)
+      .values({ messageId: 1, chatId: chat.id, fromId: userA.id, mediaType: "document", documentId: document!.id })
+    await indexHistory()
+
+    expect((await search(["report 2025"])).messages).toHaveLength(1)
+    expect((await search(["report"], { countOnly: true })).totalCount).toBe(1)
+  })
+
+  test("until every message is indexed, the chat is scanned for substrings", async () => {
+    const { chat, userA, search } = await chatWith(["alphabet soup"])
+    await indexHistory()
+    expect((await search(["alpha"])).messages).toHaveLength(0)
+
+    // A new message waits for the worker, so the index can't answer for this chat yet.
+    await testUtils.createTestMessage({ messageId: 2, chatId: chat.id, fromId: userA.id, text: "alphanumeric" })
+    expect((await search(["alpha"])).messages.map((message) => Number(message.id))).toEqual([2, 1])
+    await indexHistory()
+    expect((await search(["alpha"])).messages).toHaveLength(0)
   })
 })
