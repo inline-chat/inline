@@ -17,6 +17,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
   var timeZoneRule: PrivacyRuleValue? = nil
   var focusStatusRule: PrivacyRuleValue? = nil
   var transcribeVoiceMessages: Bool? = nil
+  var manualTimeZone: String? = nil
 
   static let defaults = NotificationSettingsValues(
     mode: .all,
@@ -67,6 +68,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     timeZoneRule = privacy.timeZoneRule
     focusStatusRule = privacy.focusStatusRule
     transcribeVoiceMessages = privacy.transcribeVoiceMessagesValue
+    manualTimeZone = privacy.manualTimeZoneValue
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
     messageGestures = gestures?.accountValues
   }
@@ -92,6 +94,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     timeZoneRule = privacy.timeZoneRule
     focusStatusRule = privacy.focusStatusRule
     transcribeVoiceMessages = privacy.transcribeVoiceMessagesValue
+    manualTimeZone = privacy.manualTimeZoneValue
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
     messageGestures = settings.hasMessageGestureSettings ? MessageGestureValues(settings.messageGestureSettings) : nil
   }
@@ -118,6 +121,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     settings.replaceTimeZoneRule(timeZoneRule)
     settings.replaceFocusStatusRule(focusStatusRule)
     settings.replaceTranscribeVoiceMessages(transcribeVoiceMessages)
+    settings.replaceManualTimeZone(manualTimeZone)
   }
 
   func apply(to settings: ComposeSettingsManager) {
@@ -215,9 +219,18 @@ public class INUserSettings {
     )
 
     observeAuthenticationChanges()
+    observeViewerTimeZone()
     Task { @MainActor [weak self] in
       await self?.refresh(reason: .initialization)
     }
+  }
+
+  /// Other people's local time is compared with the manual time zone when one is set.
+  private func observeViewerTimeZone() {
+    privacy.$manualTimeZoneValue
+      .removeDuplicates()
+      .sink { TimeZoneFormatter.shared.setViewerTimeZone(identifier: $0) }
+      .store(in: &cancellables)
   }
 
   init(
@@ -855,7 +868,8 @@ private extension NotificationSettingsValues {
       appearInGlobalSearch: appearInGlobalSearch,
       timeZoneRule: timeZoneRule,
       focusStatusRule: focusStatusRule,
-      transcribeVoiceMessages: transcribeVoiceMessages
+      transcribeVoiceMessages: transcribeVoiceMessages,
+      manualTimeZone: manualTimeZone
     )
   }
 

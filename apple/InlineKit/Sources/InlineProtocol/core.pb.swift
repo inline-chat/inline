@@ -19190,6 +19190,19 @@ public nonisolated struct PrivacySettings: Sendable {
   /// Clears the value of `transcribeVoiceMessages`. Subsequent reads from it will return its default value.
   public mutating func clearTranscribeVoiceMessages() {self._transcribeVoiceMessages = nil}
 
+  /// An IANA time zone the user picked instead of their device's. Empty means
+  /// automatic: the time zone follows the user's Apple devices. Absent leaves
+  /// the current choice unchanged on save, and from a server means it does not
+  /// support a manual time zone.
+  public var manualTimeZone: String {
+    get {_manualTimeZone ?? String()}
+    set {_manualTimeZone = newValue}
+  }
+  /// Returns true if `manualTimeZone` has been explicitly set.
+  public var hasManualTimeZone: Bool {self._manualTimeZone != nil}
+  /// Clears the value of `manualTimeZone`. Subsequent reads from it will return its default value.
+  public mutating func clearManualTimeZone() {self._manualTimeZone = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -19199,6 +19212,7 @@ public nonisolated struct PrivacySettings: Sendable {
   fileprivate var _timeZone: PrivacyRule? = nil
   fileprivate var _focusStatus: PrivacyRule? = nil
   fileprivate var _transcribeVoiceMessages: Bool? = nil
+  fileprivate var _manualTimeZone: String? = nil
 }
 
 /// Who can see one piece of the user's information. The user always sees their own.
@@ -53586,7 +53600,7 @@ nonisolated extension ComposeSettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PrivacySettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0\u{3}time_zone\0\u{3}focus_status\0\u{3}transcribe_voice_messages\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0\u{3}time_zone\0\u{3}focus_status\0\u{3}transcribe_voice_messages\0\u{3}manual_time_zone\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -53599,6 +53613,7 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 3: try { try decoder.decodeSingularMessageField(value: &self._timeZone) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._focusStatus) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self._transcribeVoiceMessages) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self._manualTimeZone) }()
       default: break
       }
     }
@@ -53624,6 +53639,9 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._transcribeVoiceMessages {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
     } }()
+    try { if let v = self._manualTimeZone {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 6)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -53633,6 +53651,7 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs._timeZone != rhs._timeZone {return false}
     if lhs._focusStatus != rhs._focusStatus {return false}
     if lhs._transcribeVoiceMessages != rhs._transcribeVoiceMessages {return false}
+    if lhs._manualTimeZone != rhs._manualTimeZone {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
