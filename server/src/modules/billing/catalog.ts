@@ -46,3 +46,18 @@ export const prepaidEnd = (plan: CatalogPlan, from: Date): Date =>
   new Date(from.getTime() + (plan.prepaidDays ?? 30) * 24 * 60 * 60 * 1000)
 
 export const findPlan = (code: string): CatalogPlan | undefined => catalog.find((plan) => plan.code === code)
+
+/** List price for one period of a plan in USD cents, seat-adjusted; null when the catalog has no such price. */
+export const listPeriodUsdCents = (plan: string, interval: string, seats: number): number | null => {
+  const match = catalog.find((entry) => entry.plan === plan && entry.interval === interval && entry.mode === "subscription")
+  return match ? match.usdCents * (match.perSeat ? Math.max(1, seats) : 1) : null
+}
+
+/** Monthly list price in USD cents for a plan, seat-adjusted; null when no catalog price exists (enterprise). */
+export const listMonthlyUsdCents = (plan: string, interval: string, seats: number): number | null => {
+  const match = catalog.find((entry) => entry.plan === plan && entry.interval === interval && entry.mode === "subscription")
+  if (!match) return null
+  const months = match.interval === "year" ? 12 : match.interval === "three_years" ? 36 : 1
+  return Math.round((match.usdCents * (match.perSeat ? Math.max(1, seats) : 1)) / months)
+}
+

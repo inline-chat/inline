@@ -87,6 +87,7 @@ import {
   AdminActiveUsersResult,
   AdminAppMetricsResult,
   AdminAvatarBody,
+  AdminBillingCreditPlanInput,
   AdminBillingDetailResult,
   AdminBillingPlanResult,
   AdminBillingRecordPaymentInput,
@@ -991,6 +992,44 @@ const spaceBillingPaymentEndpoint = stepUpEndpoint(
   ),
 )
 
+const userBillingCreditPlanEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminUserBillingCreditPlan",
+    "/admin/users/:id/billing/credit-plan",
+    {
+      params: AdminUserIdParams.fields,
+      payload: AdminBillingCreditPlanInput,
+      success: AdminBillingPlanResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
+const spaceBillingCreditPlanEndpoint = stepUpEndpoint(
+  HttpApiEndpoint.post(
+    "adminSpaceBillingCreditPlan",
+    "/admin/spaces/:id/billing/credit-plan",
+    {
+      params: AdminSpaceIdParams.fields,
+      payload: AdminBillingCreditPlanInput,
+      success: AdminBillingPlanResult,
+      error: [
+        AdminTransportBadRequest,
+        AdminValidationError,
+        AdminBillingBadRequest,
+        AdminNotFound,
+        AdminBillingConflict,
+      ],
+    },
+  ),
+)
+
 const financialsEndpoint = setupEndpoint(
   HttpApiEndpoint.get(
     "adminFinancials",
@@ -1051,6 +1090,8 @@ export const AdminApiGroup = HttpApiGroup.make(
   spaceBillingPlanEndEndpoint,
   userBillingPaymentEndpoint,
   spaceBillingPaymentEndpoint,
+  userBillingCreditPlanEndpoint,
+  spaceBillingCreditPlanEndpoint,
   financialsEndpoint,
 )
 
@@ -1231,6 +1272,36 @@ export const makeAdminRouteGroup = () => {
                     billingSubject(request, kind).pipe(
                       Effect.flatMap((subject) =>
                         operations.recordBillingPayment(
+                          subject,
+                          input,
+                          session,
+                          info,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+        const billingCreditPlan = (
+          request: HttpServerRequest.HttpServerRequest,
+          kind: "user" | "space",
+        ) =>
+          run(
+            complete(
+              `admin.${kind}s.billing.credit-plan`,
+              AdminBillingPlanResult,
+              decodeBody(
+                request,
+                AdminBillingCreditPlanInput,
+              ).pipe(
+                Effect.flatMap(({ input, info }) =>
+                  withSession((session) =>
+                    billingSubject(request, kind).pipe(
+                      Effect.flatMap((subject) =>
+                        operations.startBillingCreditPlan(
                           subject,
                           input,
                           session,
@@ -2067,6 +2138,14 @@ export const makeAdminRouteGroup = () => {
           .handleRaw(
             "adminSpaceBillingPayment",
             ({ request }) => billingPayment(request, "space"),
+          )
+          .handleRaw(
+            "adminUserBillingCreditPlan",
+            ({ request }) => billingCreditPlan(request, "user"),
+          )
+          .handleRaw(
+            "adminSpaceBillingCreditPlan",
+            ({ request }) => billingCreditPlan(request, "space"),
           )
           .handleRaw(
             "adminFinancials",

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
-import { findPlan, prepaidEnd } from "./catalog"
+import { findPlan, listPeriodUsdCents, prepaidEnd } from "./catalog"
 import { loadCheckoutConfig } from "./checkoutClient"
 import { badgeForPlan, grantsAccess, STRIPE_RENEWAL_GRACE_MS } from "./entitlements"
 import { verifyCheckoutSignature } from "./signature"
@@ -54,6 +54,11 @@ describe("catalog and config", () => {
     expect(findPlan("business-yearly")).toMatchObject({ subject: "space", plan: "business", usdCents: 30_000, perSeat: true })
     expect(findPlan("believer")).toMatchObject({ subject: "user", plan: "believer", interval: "three_years", mode: "subscription", usdCents: 20_000 })
     expect(findPlan("sandbox-test")).toMatchObject({ mode: "payment", testOnly: true })
+  })
+  test("yearly list prices are their own, not twelve months", () => {
+    expect(listPeriodUsdCents("pro", "year", 1)).toBe(10_000)
+    expect(listPeriodUsdCents("business", "year", 11)).toBe(330_000)
+    expect(listPeriodUsdCents("enterprise", "month", 5)).toBeNull()
   })
   test("the sandbox one-time plan lasts thirty days", () => {
     const from = new Date(Date.UTC(2026, 10, 21, 12))

@@ -1,9 +1,10 @@
 import { db } from "@in/server/db"
-import { billingOrders, billingSubscriptions, billingWalletEntries, spaces, users } from "@in/server/db/schema"
+import { billingOrders, billingSubscriptions, billingWalletEntries, spaces, users, type DbBillingSubscription } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
-import { plansBySubject, type BillingPlan } from "./catalog"
-import { grantsAccess, liveSubscription, refreshProFlag, type Subject } from "./entitlements"
+import { listMonthlyUsdCents, listPeriodUsdCents, plansBySubject, type BillingPlan } from "./catalog"
+import { creditBalance, creditRunsOutAt, renewCreditPlan } from "./credit"
+import { grantsAccess, liveSubscription, refreshProFlag, subjectOf, type Subject } from "./entitlements"
 import { runProPushes, type ProPush } from "./notify"
 import { walletBalances } from "./service"
 
@@ -80,27 +81,84 @@ export interface RecordPaymentInput {
   /** Transaction hash, invoice number or other note. */
   readonly reference?: string | undefined
   readonly occurredAt?: Date | undefined
-  /** The plan this payment pays for. The whole amount is charged to it, so the balance nets to zero. */
-  readonly plan?: {
-    readonly plan: BillingPlan
-    readonly seats?: number | undefined
-    readonly paidThrough: Date | null
-    readonly note?: string | undefined
-  } | undefined
+  /**
+   * Optionally start a plan paid from this credit, drawn down per period in the payment's
+   * currency. Without it, the credit tops up the balance and any live credit plan keeps renewing.
+   */
+  readonly plan?: Omit<CreditPlanInput, "chargeCurrency"> | undefined
+}
+
+export interface CreditPlanInput {
+  readonly plan: BillingPlan
+  readonly seats?: number | undefined
+  /** What each period draws from credit, in minor units of `chargeCurrency`. */
+  readonly chargeAmount: number
+  readonly chargeCurrency: "usd" | "btc"
+  readonly chargeInterval: "month" | "year"
+  /** USD value of one charge, for MRR; defaults to the catalog list price when one exists. */
+  readonly chargeUsdCents?: number | undefined
+  /** First period starts here (default now). A past date charges the periods since then. */
+  readonly startAt?: Date | undefined
+  readonly note?: string | undefined
+}
+
+const validateCreditPlan = (subject: Subject, input: CreditPlanInput) => {
+  validatePlan(subject, { plan: input.plan, funding: "wallet", seats: input.seats })
+  if (!Number.isSafeInteger(input.chargeAmount) || input.chargeAmount <= 0) throw new BillingAdminError("invalid_input")
+  if (input.chargeCurrency !== "usd" && input.chargeCurrency !== "btc") throw new BillingAdminError("invalid_input")
+  if (input.chargeInterval !== "month" && input.chargeInterval !== "year") throw new BillingAdminError("invalid_input")
+  if (input.chargeUsdCents !== undefined && !(Number.isSafeInteger(input.chargeUsdCents) && input.chargeUsdCents >= 0)) throw new BillingAdminError("invalid_input")
+  // A future start would grant access until then without charging anything.
+  if (input.startAt !== undefined && input.startAt.getTime() > Date.now() + 60_000) throw new BillingAdminError("invalid_input")
+}
+
+/** Starts a credit plan inside the caller's transaction and charges any periods already due. */
+const startCreditPlan = async (tx: Transaction, subject: Subject, input: CreditPlanInput, now: Date) => {
+  const startAt = input.startAt ?? now
+  const created = await replaceWithManualPlan(tx, subject, {
+    plan: input.plan, funding: "wallet", paidThrough: startAt, seats: input.seats, note: input.note,
+  })
+  // Default the reporting value to the list price for that exact period (yearly plans have their own price).
+  const usdPerCharge = input.chargeUsdCents ?? listPeriodUsdCents(input.plan, input.chargeInterval, input.seats ?? 1)
+  await tx.update(billingSubscriptions).set({
+    chargeAmount: input.chargeAmount,
+    chargeCurrency: input.chargeCurrency,
+    chargeInterval: input.chargeInterval,
+    chargeUsdCents: usdPerCharge,
+  }).where(eq(billingSubscriptions.id, created.id))
+  await renewCreditPlan(tx, created.id, now)
+  const [subscription] = await tx.select().from(billingSubscriptions).where(eq(billingSubscriptions.id, created.id))
+  return subscription!
+}
+
+/** Starts (or replaces with) a plan paid from existing credit. */
+export const adminStartCreditPlan = async (subject: Subject, input: CreditPlanInput, _adminId: number | null, now = new Date()) => {
+  validateCreditPlan(subject, input)
+  await requireSubject(subject)
+  const pushes: ProPush[] = []
+  const subscription = await db.transaction(async (tx) => {
+    const sub = await startCreditPlan(tx, subject, input, now)
+    const push = await refreshProFlag(tx, subject, now.getTime())
+    if (push) pushes.push(push)
+    return sub
+  })
+  await runProPushes(pushes)
+  return subscription
 }
 
 /**
- * Records an off-Stripe payment (BTC, bank transfer) in one transaction: the credit, and
- * optionally the plan it buys with a matching charge. Amounts stay in their own currency.
+ * Records an off-Stripe payment (BTC, bank transfer) as credit in its own currency, and
+ * optionally starts the plan it pays for. Live credit plans then draw from it per period.
  */
 export const adminRecordPayment = async (subject: Subject, input: RecordPaymentInput, adminId: number | null) => {
   if ((input.currency !== "usd" && input.currency !== "btc") || !Number.isSafeInteger(input.amount) || input.amount <= 0) {
     throw new BillingAdminError("invalid_input")
   }
   if (input.reference !== undefined && input.reference.length > 500) throw new BillingAdminError("invalid_input")
-  const plan = input.plan
-  if (plan) validatePlan(subject, { ...plan, funding: "wallet" })
+  const plan = input.plan ? { ...input.plan, chargeCurrency: input.currency } : undefined
+  if (plan) validateCreditPlan(subject, plan)
   await requireSubject(subject)
+  const now = new Date()
 
   const pushes: ProPush[] = []
   const result = await db.transaction(async (tx) => {
@@ -114,22 +172,15 @@ export const adminRecordPayment = async (subject: Subject, input: RecordPaymentI
       occurredAt: input.occurredAt ?? null,
       adminId,
     }).returning()
-    if (!plan) return { credit: credit!, subscription: null }
-
-    const subscription = await replaceWithManualPlan(tx, subject, {
-      plan: plan.plan, funding: "wallet", paidThrough: plan.paidThrough, seats: plan.seats, note: plan.note,
-    })
-    await tx.insert(billingWalletEntries).values({
-      ...subjectColumns(subject),
-      currency: input.currency,
-      amount: -input.amount,
-      kind: "plan_charge",
-      reference: input.reference ?? null,
-      occurredAt: input.occurredAt ?? null,
-      subscriptionId: subscription.id,
-      adminId,
-    })
-    const push = await refreshProFlag(tx, subject)
+    let subscription: DbBillingSubscription | null = null
+    if (plan) {
+      subscription = await startCreditPlan(tx, subject, plan, now)
+    } else {
+      // A top-up can let a live credit plan catch up on a period it couldn't cover.
+      const live = await liveSubscription(tx, subject)
+      if (live?.funding === "wallet" && live.chargeAmount !== null) await renewCreditPlan(tx, live.id, now)
+    }
+    const push = await refreshProFlag(tx, subject, now.getTime())
     if (push) pushes.push(push)
     return { credit: credit!, subscription }
   })
@@ -277,11 +328,63 @@ export const adminFinancialsOverview = async () => {
   }).from(billingWalletEntries)
     .where(sql`${billingWalletEntries.amount} > 0 and ${billingWalletEntries.kind} in ('btc_topup', 'admin_topup', 'legacy_import')`)
     .groupBy(billingWalletEntries.currency)
+  const now = Date.now()
+  const liveRows = await Promise.all(live.map(async (row) => {
+    const sub = row.subscription
+    const balance = sub.chargeCurrency ? await creditBalance(db, subjectOf(sub), sub.chargeCurrency) : null
+    return {
+      ...sub,
+      isPro: grantsAccess(sub, now),
+      creditBalance: balance,
+      creditRunsOutAt: balance === null ? null : creditRunsOutAt(sub, balance),
+      monthlyUsdCents: monthlyRevenueUsdCents(sub),
+      userName: row.userName,
+      username: row.username,
+      spaceName: row.spaceName,
+    }
+  }))
+  const paying = liveRows.filter((row) => row.isPro && row.monthlyUsdCents !== null && row.monthlyUsdCents > 0)
+  const sum = (rows: typeof paying) => rows.reduce((total, row) => total + (row.monthlyUsdCents ?? 0), 0)
+  const mrrUsdCents = sum(paying)
+  const mrr = {
+    mrrUsdCents,
+    arrUsdCents: mrrUsdCents * 12,
+    stripeUsdCents: sum(paying.filter((row) => row.funding === "stripe")),
+    creditUsdCents: sum(paying.filter((row) => row.funding === "wallet")),
+    payingPlans: paying.length,
+    compPlans: liveRows.filter((row) => row.isPro && row.funding === "comp").length,
+    /** Live paid plans with no known USD value (custom enterprise without a set value). */
+    unpricedPlans: liveRows.filter((row) => row.isPro && row.funding !== "comp" && row.monthlyUsdCents === null).length,
+    /** Monthly draw from credit in each currency, as charged (not converted). */
+    creditMonthlyByCurrency: liveRows.filter((row) => row.isPro && row.chargeAmount !== null && row.chargeCurrency !== null)
+      .reduce<Record<string, number>>((acc, row) => {
+        const perMonth = row.chargeInterval === "year" ? row.chargeAmount! / 12 : row.chargeAmount!
+        acc[row.chargeCurrency!] = Math.round((acc[row.chargeCurrency!] ?? 0) + perMonth)
+        return acc
+      }, {}),
+  }
   return {
-    live: live.map((row) => ({ ...row.subscription, isPro: grantsAccess(row.subscription), userName: row.userName, username: row.username, spaceName: row.spaceName })),
+    mrr,
+    live: liveRows,
     balances: balances.map((row) => ({ ...row, balance: Number(row.balance) })),
     entries: entries.map((row) => ({ ...row.entry, userName: row.userName, username: row.username, spaceName: row.spaceName })),
     orders: orders.map((row) => ({ ...row.order, userName: row.userName, username: row.username, spaceName: row.spaceName })),
     receivedOffStripe: Object.fromEntries(received.map((row) => [row.currency, Number(row.total)])),
   }
 }
+
+/**
+ * Monthly revenue a live plan represents, in USD cents. Stripe plans use catalog list prices
+ * (per seat where it applies); credit plans use their recorded USD value per charge. Comps and
+ * one-time prepaid plans count as zero; null means paid but no known USD value.
+ */
+export const monthlyRevenueUsdCents = (sub: DbBillingSubscription): number | null => {
+  if (sub.funding === "comp" || sub.funding === "prepaid") return 0
+  if (sub.funding === "stripe") return listMonthlyUsdCents(sub.plan, sub.interval, sub.seats)
+  if (sub.funding === "wallet") {
+    if (sub.chargeUsdCents === null) return sub.chargeAmount === null ? 0 : null
+    return sub.chargeInterval === "year" ? Math.round(sub.chargeUsdCents / 12) : sub.chargeUsdCents
+  }
+  return 0
+}
+

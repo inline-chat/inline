@@ -35,6 +35,9 @@ import {
   resetServerConfigCacheForTests,
 } from "@in/server/modules/serverConfig"
 import {
+  periodEnd,
+} from "@in/server/modules/billing/credit"
+import {
   setupTestLifecycle,
   testUtils,
 } from "../__tests__/setup"
@@ -552,7 +555,7 @@ describe("AdminSessionStoreLive", () => {
     })
   })
 
-  it("records off-Stripe payments and lists them on the financials overview", async () => {
+  it("records off-Stripe payments, starts credit plans and reports them with MRR on the financials overview", async () => {
     const admin = await testUtils.createUser("effect-admin-financials@example.com")
     const [superadmin] = await db.insert(superadminUsers).values({
       email: admin.email!, userId: admin.id,
@@ -571,6 +574,8 @@ describe("AdminSessionStoreLive", () => {
       .where(eq(users.id, customer.id))
     const space = (await testUtils.createSpace("Fake Payments Space"))!
     const stripeSpace = (await testUtils.createSpace("Fake Stripe Space"))!
+    const enterpriseSpace = (await testUtils.createSpace("Fake Enterprise Space"))!
+    const compUser = await testUtils.createUser("effect-admin-financials-comp@example.com")
     await db.insert(billingSubscriptions).values({
       spaceId: stripeSpace.id, plan: "team", interval: "month", funding: "stripe", status: "active",
       paidThrough: new Date(now.getTime() + 30 * day), stripeSubscriptionId: "sub_fake_financials",
@@ -591,25 +596,58 @@ describe("AdminSessionStoreLive", () => {
       status: 200,
       body: {
         ok: true,
-        live: [expect.objectContaining({ spaceId: stripeSpace.id, funding: "stripe", isPro: true, spaceName: "Fake Stripe Space" })],
+        mrr: {
+          mrrUsdCents: 2_000, arrUsdCents: 24_000, stripeUsdCents: 2_000, creditUsdCents: 0,
+          payingPlans: 1, compPlans: 0, unpricedPlans: 0, creditMonthlyByCurrency: {},
+        },
+        live: [expect.objectContaining({
+          spaceId: stripeSpace.id, funding: "stripe", isPro: true, spaceName: "Fake Stripe Space",
+          chargeAmount: null, creditBalance: null, creditRunsOutAt: null, monthlyUsdCents: 2_000,
+        })],
         balances: [], entries: [], orders: [], receivedOffStripe: {},
       },
     })
 
+    // A BTC payment that starts a monthly plan 45 days back: it charges that period and the next.
     const occurredAt = "2026-10-01T12:00:00.000Z"
-    const paidThrough = new Date(now.getTime() + 365 * day).toISOString()
+    const startAt = new Date(now.getTime() - 45 * day)
+    const secondPeriod = periodEnd(startAt, "month")
+    const userPaidThrough = periodEnd(secondPeriod, "month")
     const paid = await call(`/admin/users/${customer.id}/billing/payment`, {
       currency: "btc", amount: 120_000, reference: " fake-tx-1 ", occurredAt,
-      plan: { plan: "pro", paidThrough, note: " a year paid in BTC " },
+      plan: {
+        plan: "pro", chargeAmount: 10_000, chargeInterval: "month", chargeUsdCents: 1_000,
+        startAt: startAt.toISOString(), note: " paid in BTC ",
+      },
     })
     expect(paid).toMatchObject({
       status: 200,
       body: {
         ok: true,
-        credit: { userId: customer.id, currency: "btc", amount: 120_000, kind: "btc_topup", reference: "fake-tx-1", occurredAt, adminId: superadmin!.id },
-        subscription: { userId: customer.id, plan: "pro", funding: "wallet", status: "active", paidThrough, note: "a year paid in BTC" },
+        credit: {
+          userId: customer.id, currency: "btc", amount: 120_000, kind: "btc_topup", reference: "fake-tx-1",
+          occurredAt, periodStart: null, adminId: superadmin!.id,
+        },
+        subscription: {
+          userId: customer.id, plan: "pro", funding: "wallet", status: "active", note: "paid in BTC",
+          paidThrough: userPaidThrough.toISOString(),
+          chargeAmount: 10_000, chargeCurrency: "btc", chargeInterval: "month", chargeUsdCents: 1_000,
+        },
       },
     })
+    const userDetail = await call(`/admin/users/${customer.id}/billing`)
+    expect(userDetail.body).toMatchObject({
+      ok: true, isPro: true, wallet: { btc: 100_000 },
+      live: { chargeAmount: 10_000, chargeCurrency: "btc", chargeInterval: "month", chargeUsdCents: 1_000 },
+    })
+    const charges = (userDetail.body.walletEntries as Array<{ kind: string; amount: number; periodStart: string | null }>)
+      .filter((entry) => entry.kind === "plan_charge")
+      .map((entry) => [entry.amount, entry.periodStart])
+      .sort()
+    expect(charges).toEqual([
+      [-10_000, startAt.toISOString()],
+      [-10_000, secondPeriod.toISOString()],
+    ])
 
     const credited = await call(`/admin/spaces/${space.id}/billing/payment`, { currency: "usd", amount: 5_000 })
     expect(credited).toMatchObject({
@@ -621,8 +659,11 @@ describe("AdminSessionStoreLive", () => {
       { currency: "usd", amount: 0 },
       { currency: "usd", amount: 1.5 },
       { currency: "usd", amount: 100, occurredAt: "not-a-date" },
-      { currency: "usd", amount: 100, plan: { plan: "team", paidThrough: null } },
-      { currency: "usd", amount: 100, plan: { plan: "pro", paidThrough: "not-a-date" } },
+      { currency: "usd", amount: 100, plan: { plan: "team", chargeAmount: 100, chargeInterval: "month" } },
+      { currency: "usd", amount: 100, plan: { plan: "pro", chargeAmount: 0, chargeInterval: "month" } },
+      { currency: "usd", amount: 100, plan: { plan: "pro", chargeAmount: 1.5, chargeInterval: "month" } },
+      { currency: "usd", amount: 100, plan: { plan: "pro", chargeAmount: 100, chargeInterval: "month", chargeUsdCents: -1 } },
+      { currency: "usd", amount: 100, plan: { plan: "pro", chargeAmount: 100, chargeInterval: "month", startAt: "not-a-date" } },
     ]) {
       expect(await call(`/admin/users/${customer.id}/billing/payment`, invalid)).toEqual({
         status: 400, body: { ok: false, error: "invalid_input" },
@@ -630,7 +671,7 @@ describe("AdminSessionStoreLive", () => {
     }
     expect((await call("/admin/users/999999999/billing/payment", { currency: "usd", amount: 100 })).status).toBe(404)
     expect(await call(`/admin/spaces/${stripeSpace.id}/billing/payment`, {
-      currency: "usd", amount: 2_000, plan: { plan: "business", seats: 4, paidThrough: null },
+      currency: "usd", amount: 2_000, plan: { plan: "business", seats: 4, chargeAmount: 2_000, chargeInterval: "month" },
     })).toEqual({ status: 409, body: { ok: false, error: "stripe_managed" } })
 
     const adjustment = await call(`/admin/spaces/${space.id}/billing/wallet`, {
@@ -641,24 +682,95 @@ describe("AdminSessionStoreLive", () => {
       currency: "usd", amount: 100, kind: "adjustment", occurredAt: "yesterday-ish",
     })).body).toEqual({ ok: false, error: "invalid_input" })
 
+    // A yearly plan paid from the space's existing USD credit: one charge now, a third of the next left.
+    const teamPlan = await call(`/admin/spaces/${space.id}/billing/credit-plan`, {
+      plan: "team", seats: 2, chargeAmount: 3_000, chargeCurrency: "usd", chargeInterval: "year",
+      chargeUsdCents: 36_000, note: " yearly from credit ",
+    })
+    expect(teamPlan).toMatchObject({
+      status: 200,
+      body: {
+        ok: true,
+        subscription: {
+          spaceId: space.id, plan: "team", seats: 2, funding: "wallet", status: "active", note: "yearly from credit",
+          chargeAmount: 3_000, chargeCurrency: "usd", chargeInterval: "year", chargeUsdCents: 36_000,
+        },
+      },
+    })
+    const teamPaidThrough = new Date(teamPlan.body.subscription.paidThrough)
+    expect(teamPaidThrough.getTime()).toBeGreaterThan(now.getTime() + 364 * day)
+    expect(teamPaidThrough.getTime()).toBeLessThan(now.getTime() + 367 * day)
+
+    // Enterprise has no list price, so a plan without a USD value counts as unpriced.
+    await call(`/admin/spaces/${enterpriseSpace.id}/billing/wallet`, { currency: "btc", amount: 100_000, kind: "btc_topup" })
+    const enterprisePlan = await call(`/admin/spaces/${enterpriseSpace.id}/billing/credit-plan`, {
+      plan: "enterprise", seats: 10, chargeAmount: 50_000, chargeCurrency: "btc", chargeInterval: "month",
+    })
+    expect(enterprisePlan).toMatchObject({
+      status: 200, body: { ok: true, subscription: { plan: "enterprise", chargeUsdCents: null } },
+    })
+
+    for (const [path, invalid] of [
+      [`/admin/spaces/${space.id}/billing/credit-plan`, { plan: "pro", chargeAmount: 100, chargeCurrency: "usd", chargeInterval: "month" }],
+      [`/admin/spaces/${space.id}/billing/credit-plan`, { plan: "team", chargeAmount: 0, chargeCurrency: "usd", chargeInterval: "month" }],
+      [`/admin/spaces/${space.id}/billing/credit-plan`, { plan: "team", seats: 0, chargeAmount: 100, chargeCurrency: "usd", chargeInterval: "month" }],
+      [`/admin/users/${customer.id}/billing/credit-plan`, { plan: "pro", chargeAmount: 100, chargeCurrency: "btc", chargeInterval: "month", startAt: "soon" }],
+    ] as const) {
+      expect(await call(path, invalid)).toEqual({ status: 400, body: { ok: false, error: "invalid_input" } })
+    }
+    expect((await call("/admin/spaces/999999999/billing/credit-plan", {
+      plan: "team", chargeAmount: 100, chargeCurrency: "usd", chargeInterval: "month",
+    })).status).toBe(404)
+    expect(await call(`/admin/spaces/${stripeSpace.id}/billing/credit-plan`, {
+      plan: "team", chargeAmount: 100, chargeCurrency: "usd", chargeInterval: "month",
+    })).toEqual({ status: 409, body: { ok: false, error: "stripe_managed" } })
+
+    await call(`/admin/users/${compUser.id}/billing/plan`, { plan: "pro", funding: "comp", paidThrough: null })
+
     const overview = await call("/admin/financials")
     expect(overview.status).toBe(200)
-    expect(overview.body.live).toHaveLength(2)
+    // Stripe team (1 seat) $20 + BTC pro $10 + yearly team $360 / 12; comps and unpriced plans add nothing.
+    expect(overview.body.mrr).toEqual({
+      mrrUsdCents: 6_000, arrUsdCents: 72_000, stripeUsdCents: 2_000, creditUsdCents: 4_000,
+      payingPlans: 3, compPlans: 1, unpricedPlans: 1,
+      creditMonthlyByCurrency: { btc: 60_000, usd: 250 },
+    })
+    expect(overview.body.live).toHaveLength(5)
+    let userRunsOut = userPaidThrough
+    for (let month = 0; month < 10; month++) userRunsOut = periodEnd(userRunsOut, "month")
     expect(overview.body.live).toContainEqual(expect.objectContaining({
-      userId: customer.id, plan: "pro", funding: "wallet", paidThrough, isPro: true,
+      userId: customer.id, plan: "pro", funding: "wallet", paidThrough: userPaidThrough.toISOString(), isPro: true,
+      chargeAmount: 10_000, chargeCurrency: "btc", chargeInterval: "month", chargeUsdCents: 1_000,
+      creditBalance: 100_000, creditRunsOutAt: userRunsOut.toISOString(), monthlyUsdCents: 1_000,
       userName: "Fake Customer", username: "fakecustomer", spaceName: null,
     }))
-    // The BTC payment was charged in full to the plan, so only the space's USD credit is left.
-    expect(overview.body.balances).toEqual([{
-      userId: null, spaceId: space.id, currency: "usd", balance: 4_000,
+    expect(overview.body.live).toContainEqual(expect.objectContaining({
+      spaceId: space.id, plan: "team", isPro: true, creditBalance: 1_000,
+      creditRunsOutAt: periodEnd(teamPaidThrough, "year", 1 / 3).toISOString(), monthlyUsdCents: 3_000,
+    }))
+    expect(overview.body.live).toContainEqual(expect.objectContaining({
+      spaceId: enterpriseSpace.id, plan: "enterprise", isPro: true, creditBalance: 50_000, monthlyUsdCents: null,
+    }))
+    expect(overview.body.live).toContainEqual(expect.objectContaining({
+      userId: compUser.id, funding: "comp", isPro: true, creditBalance: null, creditRunsOutAt: null, monthlyUsdCents: 0,
+    }))
+    expect(overview.body.balances).toHaveLength(3)
+    expect(overview.body.balances).toContainEqual({
+      userId: customer.id, spaceId: null, currency: "btc", balance: 100_000,
+      userName: "Fake Customer", username: "fakecustomer", spaceName: null,
+    })
+    expect(overview.body.balances).toContainEqual({
+      userId: null, spaceId: space.id, currency: "usd", balance: 1_000,
       userName: null, username: null, spaceName: "Fake Payments Space",
-    }])
-    expect(overview.body.entries).toHaveLength(4)
+    })
+    // User: payment and two charges; space: credit, adjustment, charge; enterprise: top-up and charge.
+    expect(overview.body.entries).toHaveLength(8)
     expect(overview.body.entries).toContainEqual(expect.objectContaining({
-      userId: customer.id, kind: "plan_charge", currency: "btc", amount: -120_000, occurredAt, userName: "Fake Customer",
+      userId: customer.id, kind: "plan_charge", currency: "btc", amount: -10_000,
+      periodStart: startAt.toISOString(), userName: "Fake Customer",
     }))
     expect(overview.body.orders).toEqual([])
     // The rejected Stripe-space payment rolled back with its plan.
-    expect(overview.body.receivedOffStripe).toEqual({ btc: 120_000, usd: 5_000 })
+    expect(overview.body.receivedOffStripe).toEqual({ btc: 220_000, usd: 5_000 })
   })
 })

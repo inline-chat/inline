@@ -1,5 +1,5 @@
 {
-  "id": "db5f2740-d9ac-443b-bf49-1df386b95893",
+  "id": "74f5c393-528f-4ade-acb7-37a421fffcae",
   "prevId": "099e439b-bcd9-475e-acc8-bcfd752a4b30",
   "version": "7",
   "dialect": "postgresql",
@@ -14925,6 +14925,30 @@
           "notNull": true,
           "default": false
         },
+        "charge_amount": {
+          "name": "charge_amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "charge_currency": {
+          "name": "charge_currency",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "charge_interval": {
+          "name": "charge_interval",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "charge_usd_cents": {
+          "name": "charge_usd_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "note": {
           "name": "note",
           "type": "text",
@@ -15065,6 +15089,10 @@
         "billing_subscriptions_subject_check": {
           "name": "billing_subscriptions_subject_check",
           "value": "(\"billing_subscriptions\".\"user_id\" is null) <> (\"billing_subscriptions\".\"space_id\" is null)"
+        },
+        "billing_subscriptions_charge_check": {
+          "name": "billing_subscriptions_charge_check",
+          "value": "(\"billing_subscriptions\".\"charge_amount\" is null) = (\"billing_subscriptions\".\"charge_currency\" is null) and (\"billing_subscriptions\".\"charge_amount\" is null) = (\"billing_subscriptions\".\"charge_interval\" is null) and (\"billing_subscriptions\".\"charge_amount\" is null or \"billing_subscriptions\".\"charge_amount\" > 0)"
         }
       },
       "isRLSEnabled": false
@@ -15133,6 +15161,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "period_start": {
+          "name": "period_start",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp (3) with time zone",
@@ -15168,6 +15202,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "billing_wallet_entries_period_unique": {
+          "name": "billing_wallet_entries_period_unique",
+          "columns": [
+            {
+              "expression": "subscription_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "period_start",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"billing_wallet_entries\".\"period_start\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -15240,267 +15296,6 @@
           "value": "\"billing_wallet_entries\".\"currency\" in ('usd', 'btc')"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.data_task_items": {
-      "name": "data_task_items",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigserial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "item_key": {
-          "name": "item_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tier": {
-          "name": "tier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan_hash": {
-          "name": "plan_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan": {
-          "name": "plan",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "before": {
-          "name": "before",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "after": {
-          "name": "after",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "reverted_at": {
-          "name": "reverted_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "data_task_items_task_item_unique": {
-          "name": "data_task_items_task_item_unique",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "item_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "data_task_items_task_applied_idx": {
-          "name": "data_task_items_task_applied_idx",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "applied_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.data_task_runs": {
-      "name": "data_task_runs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigserial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "plan_hash": {
-          "name": "plan_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "items": {
-          "name": "items",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "applied": {
-          "name": "applied",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "skipped": {
-          "name": "skipped",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_commit": {
-          "name": "source_commit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "heartbeat_at": {
-          "name": "heartbeat_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "finished_at": {
-          "name": "finished_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "data_task_runs_one_running": {
-          "name": "data_task_runs_one_running",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"data_task_runs\".\"status\" = 'running'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "data_task_runs_one_completed": {
-          "name": "data_task_runs_one_completed",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"data_task_runs\".\"status\" = 'completed'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "data_task_runs_task_started_idx": {
-          "name": "data_task_runs_task_started_idx",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "started_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
