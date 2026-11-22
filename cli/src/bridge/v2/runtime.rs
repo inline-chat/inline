@@ -419,11 +419,43 @@ pub(crate) struct Runtime {
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
     listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
     agent_profiles: Option<(BotAgentResolver, SqliteStore)>,
-    seen_agent_messages: HashSet<(i64, i64)>,
-    agent_message_order: VecDeque<(i64, i64)>,
+    /// Agent messages this agent acted on: their later edits only refresh context.
+    acted_agent_messages: RecentMessages,
+    /// Agent messages addressed to this agent that took a loop hop, acted on or
+    /// not: a refused mention streamed in many edits takes one.
+    counted_agent_messages: RecentMessages,
     /// Tests: sent messages as Inline holds them, read instead of asking.
     #[cfg(test)]
     cards: HashMap<(i64, i64), super::doc::Doc>,
+}
+
+/// Recent (chat, message) IDs, bounded so a long-lived bridge doesn't grow.
+#[derive(Default)]
+struct RecentMessages {
+    ids: HashSet<(i64, i64)>,
+    order: VecDeque<(i64, i64)>,
+}
+
+impl RecentMessages {
+    const CAPACITY: usize = 4096;
+
+    fn contains(&self, id: (i64, i64)) -> bool {
+        self.ids.contains(&id)
+    }
+
+    /// False when `id` is already held.
+    fn insert(&mut self, id: (i64, i64)) -> bool {
+        if !self.ids.insert(id) {
+            return false;
+        }
+        self.order.push_back(id);
+        if self.order.len() > Self::CAPACITY
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.ids.remove(&oldest);
+        }
+        true
+    }
 }
 
 impl Runtime {
@@ -530,8 +562,8 @@ impl Runtime {
             skills: None,
             listed_skills: HashMap::new(),
             agent_profiles: None,
-            seen_agent_messages: HashSet::new(),
-            agent_message_order: VecDeque::new(),
+            acted_agent_messages: RecentMessages::default(),
+            counted_agent_messages: RecentMessages::default(),
             #[cfg(test)]
             cards: HashMap::new(),
         })
@@ -2665,7 +2697,7 @@ impl Runtime {
         // another loop hop or replaying a command/mention.
         let agent_message = (message.chat_id.get(), message.message_id.get());
         let already_handled = || -> Result<bool, Box<dyn std::error::Error>> {
-            if self.seen_agent_messages.contains(&agent_message) {
+            if self.acted_agent_messages.contains(agent_message) {
                 return Ok(true);
             }
             for kind in ["direct", "command"] {
@@ -2774,15 +2806,19 @@ impl Runtime {
             .map_or(WorkPhase::None, |work| *work.phase.borrow());
         let scope = self.loop_scope(chat_id).await;
         // Only agent messages addressed to this agent can start a loop with it;
-        // others talking in the thread never count toward its cap.
-        let loop_verdict = if group.author.kind.is_agent()
-            && !matches!(
-                classify_addressee(&group, self.config.bot_user_id),
-                AddresseeKind::Me { .. }
-            ) {
+        // others talking in the thread never count toward its cap. Each one
+        // counts once, however often it is edited.
+        let loop_verdict = if !group.author.kind.is_agent() {
+            self.loop_guards.record(scope, false)
+        } else if !matches!(
+            classify_addressee(&group, self.config.bot_user_id),
+            AddresseeKind::Me { .. }
+        ) {
             LoopVerdict::Allowed { hops: 0 }
+        } else if self.counted_agent_messages.insert(agent_message) {
+            self.loop_guards.record(scope, true)
         } else {
-            self.loop_guards.record(scope, group.author.kind.is_agent())
+            self.loop_guards.current(scope)
         };
         if let LoopVerdict::CapReached {
             limit,
@@ -2904,17 +2940,8 @@ impl Runtime {
             }
             IntakeDecision::Skip { .. } => Ok(Some(decision)),
         };
-        if result.is_ok()
-            && acted
-            && group.author.kind.is_agent()
-            && self.seen_agent_messages.insert(agent_message)
-        {
-            self.agent_message_order.push_back(agent_message);
-            if self.agent_message_order.len() > 4096
-                && let Some(oldest) = self.agent_message_order.pop_front()
-            {
-                self.seen_agent_messages.remove(&oldest);
-            }
+        if result.is_ok() && acted && group.author.kind.is_agent() {
+            self.acted_agent_messages.insert(agent_message);
         }
         result
     }

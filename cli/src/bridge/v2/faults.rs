@@ -462,6 +462,73 @@ async fn replayed_agent_progress_does_not_invoke_or_exhaust_the_loop_guard() {
 }
 
 #[tokio::test]
+async fn a_refused_agent_mention_streamed_in_many_edits_takes_one_loop_hop() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    runtime
+        .agent
+        .names
+        .remember(1, "Allowed agent".into())
+        .await;
+    runtime.agent.names.remember(3, "Other agent".into()).await;
+    runtime.loop_roots.insert(9, 9);
+    let mention = inline_client::MessageEntityRecord {
+        kind: "TYPE_MENTION".into(),
+        offset: 0,
+        length: 6,
+        user_id: Some(InlineId::new(2)),
+        agent_id: None,
+        group_id: None,
+        chat_id: None,
+        value: None,
+    };
+    let mut refused = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(40),
+        sender_id: InlineId::new(3),
+        timestamp: 1,
+        is_outgoing: false,
+        reply_to_message_id: None,
+        transaction: None,
+        content: inline_client::MessageContent::Text {
+            text: "@Fault working".into(),
+        },
+        metadata: inline_client::MessageMetadata {
+            sender_is_bot: Some(true),
+            entities: vec![mention.clone()],
+            ..Default::default()
+        },
+    };
+    // An agent without access mentions this one in progress it streams in
+    // more edits than the loop cap allows hops.
+    for revision in 1..=90 {
+        refused.metadata.revision = Some(revision);
+        runtime.on_message(&refused).await.unwrap();
+    }
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        runtime.loop_guards.guard(9).map(|guard| guard.hops()),
+        Some(1)
+    );
+    // A later handoff from an agent with access still runs.
+    let handoff = MessageRecord {
+        message_id: InlineId::new(41),
+        sender_id: InlineId::new(1),
+        content: inline_client::MessageContent::Text {
+            text: "@Fault handle this".into(),
+        },
+        metadata: inline_client::MessageMetadata {
+            sender_is_bot: Some(true),
+            entities: vec![mention],
+            ..Default::default()
+        },
+        ..refused.clone()
+    };
+    runtime.on_message(&handoff).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
 async fn agent_messages_not_addressed_to_this_agent_never_reach_the_loop_cap() {
     let (mut runtime, harness, _cleanup) = fixture(false);
     runtime.agent.names.remember(3, "Other agent".into()).await;
