@@ -114,8 +114,7 @@ public enum ChatListDatabaseQuery {
         "anchorDocument"."fileName" AS "anchorDocumentFileName",
         "anchorMessage"."contentPayload" AS "anchorMessageContentPayload"
       FROM "dialog"
-      JOIN "chat"
-        ON "chat"."id" = COALESCE("dialog"."chatId", "dialog"."peerThreadId")
+      \(Dialog.chatListChatJoinSQL)
       LEFT JOIN "space"
         ON "space"."id" = COALESCE("dialog"."spaceId", "chat"."spaceId")
       LEFT JOIN "chat" AS "parentChat"

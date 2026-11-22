@@ -288,6 +288,9 @@ public struct GetChatsTransaction: Transaction2 {
     )
 
     var pendingChats: [PendingChat] = []
+    // Chats whose snapshot is at exactly the local cursor: their dialog counts cover the same
+    // messages this device applied, so they replace the local count (see `saveFull`).
+    var countOrderedChatIDs = Set<Int64>()
     for (index, protocolChat) in chats.enumerated() {
       guard let admission = chatAdmissions[index] else {
         failures.record(.chats)
@@ -298,6 +301,9 @@ public struct GetChatsTransaction: Transaction2 {
       guard sequence.map({ $0 >= 0 }) ?? true else {
         failures.record(.chatCursors)
         continue
+      }
+      if admission.modelExists, let sequence, sequence == admission.cursorSequence {
+        countOrderedChatIDs.insert(protocolChat.id)
       }
       if admission.isPristine && !allowsPristineChildren {
         continue
@@ -432,7 +438,8 @@ public struct GetChatsTransaction: Transaction2 {
         _ = try attempt(.dialogs, in: db, failures: &failures) {
           try dialog.saveFull(
             db,
-            preservingExistingReadState: replacesActiveCatalog
+            preservingExistingReadState: replacesActiveCatalog,
+            unreadCountIsOrdered: dialog.hasChatID && countOrderedChatIDs.contains(dialog.chatID)
           )
           try DialogCatalogStore.include(
             dialogID: Dialog.getDialogId(peerId: dialog.peer.toPeer()),

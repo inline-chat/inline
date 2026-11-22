@@ -951,6 +951,43 @@ struct GetChatsSnapshotTests {
     }
   }
 
+  @Test("catalog replacement takes the server unread count only at the local chat cursor and read max")
+  func catalogReplacementAppliesOrderedUnreadCount() throws {
+    let queue = try makeInMemoryDB()
+    try queue.write { (db: Database) throws in
+      _ = try User.save(db, user: makeUser(id: 1))
+      // 10: same cursor and read max. 20: same cursor, another read max. 30: chat cursor behind.
+      for (id, localReadMax, snapshotReadMax, snapshotSeq): (Int64, Int64, Int64, Int32) in [
+        (10, 4, 4, 5), (20, 4, 3, 5), (30, 4, 4, 6),
+      ] {
+        try Chat(from: makeChat(id: id, seq: 5)).saveFull(db)
+        _ = try GRDBSyncStorage.seedSnapshotBucketState(for: .chat(peer: makeChatPeer(id: id)), seq: 5, in: db)
+        var local = makeDialog(chatID: id)
+        local.readMaxID = localReadMax
+        local.unreadCount = 1
+        try local.saveFull(db)
+
+        var result = InlineProtocol.GetChatsResult()
+        result.chats = [makeChat(id: id, seq: snapshotSeq)]
+        var snapshot = makeDialog(chatID: id)
+        snapshot.readMaxID = snapshotReadMax
+        snapshot.unreadCount = 0
+        result.dialogs = [snapshot]
+        _ = try GetChatsTransaction.applySnapshot(
+          result,
+          userProjectionAdmission: .alreadyValidated,
+          replacesActiveCatalog: true,
+          in: db
+        )
+      }
+
+      #expect(try Dialog.fetchOne(db, key: 10)?.unreadCount == 0)
+      #expect(try Dialog.fetchOne(db, key: 20)?.unreadCount == 1)
+      #expect(try Dialog.fetchOne(db, key: 20)?.readInboxMaxId == 4)
+      #expect(try Dialog.fetchOne(db, key: 30)?.unreadCount == 1)
+    }
+  }
+
   @Test("a rejected snapshot space never reactivates its excluded cached row")
   func rejectedSpaceRemainsExcluded() throws {
     let queue = try makeInMemoryDB()

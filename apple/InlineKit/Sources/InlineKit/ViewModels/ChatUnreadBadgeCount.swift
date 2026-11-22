@@ -31,9 +31,7 @@ public enum ChatUnreadBadgeCount {
       let message = full.message
       guard message.messageId > readMaxID,
             message.messageId <= pendingMaxID,
-            message.out != true,
-            !message.isServiceMessage,
-            message.countsAsUnread
+            message.countsTowardUnread
       else { continue }
       pendingIDs.insert(message.messageId)
     }

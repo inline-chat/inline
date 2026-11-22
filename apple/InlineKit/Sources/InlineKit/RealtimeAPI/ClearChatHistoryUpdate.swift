@@ -82,14 +82,11 @@ extension InlineProtocol.UpdateClearChatHistory {
     try updatedChat.save(db)
 
     if var dialog = try Dialog.get(peerId: peer).fetchOne(db) {
-      let readInboxMaxId = dialog.readInboxMaxId ?? 0
-      let unreadCount = try Message
-        .filter(Message.Columns.chatId == chat.id)
-        .filter(Message.Columns.messageId > readInboxMaxId)
-        .filter(Message.Columns.out == false)
-        .fetchCount(db)
-
-      dialog.unreadCount = unreadCount
+      dialog.unreadCount = try Message.localUnreadCount(
+        db,
+        chatId: chat.id,
+        after: dialog.readInboxMaxId ?? 0
+      )
       try dialog.update(db)
     }
 
@@ -584,20 +581,14 @@ extension InlineProtocol.UpdateClearChatHistory {
   }
 
   private func refreshSpaceUnreadCounts(_ db: Database, spaceId: Int64) throws {
-    try db.execute(
-      sql: """
-      UPDATE dialog
-      SET unreadCount = (
-        SELECT COUNT(*)
-        FROM message m
-        WHERE m.chatId = dialog.chatId
-          AND m.messageId > COALESCE(dialog.readInboxMaxId, 0)
-          AND m.out = 0
-      )
-      WHERE chatId IN (SELECT id FROM chat WHERE spaceId = ?)
-      """,
-      arguments: [spaceId]
-    )
+    let dialogs = try Dialog
+      .filter(sql: #""chatId" IN (SELECT "id" FROM "chat" WHERE "spaceId" = ?)"#, arguments: [spaceId])
+      .fetchAll(db)
+    for var dialog in dialogs {
+      guard let chatId = dialog.chatId else { continue }
+      dialog.unreadCount = try Message.localUnreadCount(db, chatId: chatId, after: dialog.readInboxMaxId ?? 0)
+      try dialog.update(db)
+    }
   }
 
   private func uniqueIds(_ ids: [Int64]) -> [Int64] {

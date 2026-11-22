@@ -55,6 +55,7 @@ public enum Api {
           guard importTask == nil else { continue }
           importTask = Task(priority: .utility) {
             await DialogTranslationMigration.importPending(realtime: realtime)
+            await UnreadCountValidation.validateServiceCounts(realtime: realtime)
           }
         case .updating:
           break

@@ -62,4 +62,17 @@ struct AppBadgeCountTests {
     let count = try database.dbWriter.read { db in try Dialog.fetchAppBadgeCount(db) }
     #expect(count == cases.filter(\.counted).count)
   }
+
+  @Test("A dialog the chat list cannot draw, with no chat row, is not counted")
+  func skipsDialogsWithoutChatRow() throws {
+    let database = AppDatabase.empty()
+    try database.dbWriter.write { db in
+      try User(id: 950, email: nil, firstName: "User 950").insert(db)
+      var dialog = Dialog(optimisticForUserId: 950)
+      dialog.unreadCount = 2
+      dialog.open = true
+      try dialog.insert(db)
+    }
+    #expect(try database.dbWriter.read { db in try Dialog.fetchAppBadgeCount(db) } == 0)
+  }
 }
