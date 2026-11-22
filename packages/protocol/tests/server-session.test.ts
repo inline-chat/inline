@@ -13,6 +13,7 @@ import {
   decodeInlineApplicationObject,
   decodeGzipPacked,
   decodeMsgsAck,
+  decodeBadMessageNotification,
   decodeRpcError,
   decodeRpcResult,
   decodeRpcDropAnswerResult,
@@ -1483,6 +1484,55 @@ describe("carrier-independent Inline Protocol server session", () => {
     expect(dispatches).toBe(1)
     expect(server.destroyed).toBeTrue()
     expect(() => server.sendApplicationUpdate(Uint8Array.of(1))).toThrow()
+  }, 30_000)
+
+  test("creates a key for a device whose clock is a day off, then answers 16 and 17 for encrypted IDs", async () => {
+    const rsa = rsaFixture()
+    const server = new InlineProtocolServerSession({
+      rsaKeys: [rsa.server], authorizationKeys: new MemoryAuthorizationKeys(), replay: new MemoryReplay(),
+      application: { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(7) }) },
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+      nowMilliseconds: () => nowMilliseconds,
+      gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    })
+    const client = new InlineHandshakeClient({
+      rsaKeys: [rsa.profile],
+      randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+    })
+    // Handshake IDs come from a device clock one day behind; nonces, not times, guard the handshake.
+    const deviceIds = new MessageIdGenerator()
+    let request = client.begin(false)
+    let established: EstablishedAuthorizationKey | undefined
+    let serverTime: number | undefined
+    for (let step = 0; step < 3 && !established; step += 1) {
+      const [responseRecord] = await server.receive(encodeUnencryptedRecord(
+        deviceIds.next(nowMilliseconds - 86_400_000, step + 1, 0), request,
+      ))
+      const response = client.receive(decodeUnencryptedRecord(responseRecord!).body)
+      if ("request" in response) request = response.request
+      else ({ established, serverTime } = response)
+    }
+    expect(established).toBeDefined()
+    expect(serverTime).toBe(Math.floor(nowMilliseconds / 1_000))
+
+    const sessionId = 97531n
+    const ping = encodePing(1n)
+    const rejection = async (deviceMilliseconds: number, sequenceNumber: number) => {
+      const messageId = new MessageIdGenerator().next(deviceMilliseconds, sequenceNumber, 0)
+      const [record] = await server.receive(encryptRecord(established!.key, "client-to-server", {
+        serverSalt: established!.serverSalt, sessionId, messageId, sequenceNumber, body: ping,
+      }, randomBytes(paddingFor(ping.length))))
+      const fields = decryptRecord(record!, established!.key, {
+        direction: "server-to-client", sessionId, validServerSalts: new Set([established!.serverSalt]), nowSeconds: 0,
+      })
+      return { messageId, fields, notification: decodeBadMessageNotification(fields.body) }
+    }
+    const tooOld = await rejection(nowMilliseconds - 301_000, 1)
+    expect(tooOld.notification).toMatchObject({ badMessageId: tooOld.messageId, errorCode: 16 })
+    // The notification's own server message ID carries the time the client resyncs to.
+    expect(Number(tooOld.fields.messageId >> 32n)).toBe(Math.floor(nowMilliseconds / 1_000))
+    const tooNew = await rejection(nowMilliseconds + 31_000, 1)
+    expect(tooNew.notification).toMatchObject({ badMessageId: tooNew.messageId, errorCode: 17 })
   }, 30_000)
 })
 

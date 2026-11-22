@@ -60,6 +60,19 @@ export class MessageIdGenerator {
     this.#last = candidate
     return candidate
   }
+
+  /**
+   * After a 17 (client clock too far ahead) carried in the server message `serverMessageId`:
+   * if the last ID is past the server window (server time + 30 s), fall back to the start of the
+   * window's last second. The server stored none of the IDs it rejected, so new IDs then stay
+   * inside the window and above everything it could have accepted, except IDs taken within that
+   * same second. IDs already inside the window, such as earlier resends, are kept. Without this
+   * a clock that ran ahead would keep every later ID in the future and loop on 17 forever.
+   */
+  recoverFromTooHigh(serverMessageId: bigint): void {
+    const edge = ((serverMessageId >> 32n) + 30n) << 32n
+    if (this.#last >= edge + (1n << 32n)) this.#last = edge
+  }
 }
 
 export class SequenceNumberGenerator {
@@ -121,9 +134,14 @@ export const validateInboundMessageId = (
     ? (messageId & 3n) === 0n && (messageId & 0xffffffffn) !== 0n
     : (messageId & 1n) === 1n
   if (!validDirection) return { kind: "bad", errorCode: 18 }
+  // Like MTProto, only the server holds client message IDs to its clock: 16 and 17 tell the
+  // client to resync from the notification's own server message ID and resend. A client never
+  // drops server messages for their time, because that would drop the very notification that
+  // corrects a wrong device clock. 20 is left for IDs the receive window can no longer judge.
+  if (direction === "server") return { kind: "valid" }
   const seconds = Number(messageId >> 32n)
   if (seconds > nowSeconds + 30) return { kind: "bad", errorCode: 17 }
-  if (seconds < nowSeconds - 300) return { kind: "bad", errorCode: 20 }
+  if (seconds < nowSeconds - 300) return { kind: "bad", errorCode: 16 }
   return { kind: "valid" }
 }
 

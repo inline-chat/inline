@@ -83,6 +83,7 @@ import {
   validateDhPublicValue,
   verifyTemporaryKeyBindingProof,
   validateInboundMessageId,
+  RecoverableEncryptedRecordError,
 } from "../src/secure/index.js"
 import { handshakeCoreV1Vector, portableCoreV1Vector } from "../src/vectors.js"
 
@@ -429,6 +430,31 @@ describe("encrypted records", () => {
     })).toThrow(InvalidEncryptedRecord)
   })
 
+  test("holds only client records to the server clock, answering 16 too low and 17 too high", () => {
+    const validation = (direction: "client-to-server" | "server-to-client", nowSeconds: number) => ({
+      direction, sessionId: fields.sessionId, validServerSalts: new Set([fields.serverSalt]), nowSeconds,
+    })
+    const client = encryptRecord(authKey, "client-to-server", fields, padding)
+    const recoverable = (nowSeconds: number) => {
+      try {
+        decryptRecord(client, authKey, validation("client-to-server", nowSeconds))
+      } catch (error) {
+        return error instanceof RecoverableEncryptedRecordError ? error.errorCode : error
+      }
+      return undefined
+    }
+    expect(recoverable(1_700_000_000 + 301)).toBe(16)
+    expect(recoverable(1_700_000_000 - 31)).toBe(17)
+    expect(recoverable(1_700_000_000 + 300)).toBeUndefined()
+
+    // A client accepts a server record whatever its time, so a correction always gets through.
+    const server = encryptRecord(authKey, "server-to-client", { ...fields, messageId: (1700000000n << 32n) | 1n }, padding)
+    for (const nowSeconds of [1_700_000_000 - 86_400, 1_700_000_000 + 86_400]) {
+      expect(decryptRecord(server, authKey, validation("server-to-client", nowSeconds)).messageId)
+        .toBe((1700000000n << 32n) | 1n)
+    }
+  })
+
   test("rejects a body whose complete encrypted record exceeds the carrier limit", () => {
     expect(() => encryptRecord(authKey, "client-to-server", {
       ...fields,
@@ -438,6 +464,31 @@ describe("encrypted records", () => {
 })
 
 describe("session counters", () => {
+  test("judges only client message IDs by time, with 16 for too old", () => {
+    const id = (seconds: number, low: bigint) => (BigInt(seconds) << 32n) | low
+    expect(validateInboundMessageId(id(1_700_000_000 - 301, 4n), "client", 1_700_000_000)).toEqual({ kind: "bad", errorCode: 16 })
+    expect(validateInboundMessageId(id(1_700_000_000 + 31, 4n), "client", 1_700_000_000)).toEqual({ kind: "bad", errorCode: 17 })
+    expect(validateInboundMessageId(id(1_700_000_000 - 86_400, 1n), "server", 1_700_000_000)).toEqual({ kind: "valid" })
+    expect(validateInboundMessageId(id(1_700_000_000, 4n), "server", 1_700_000_000)).toEqual({ kind: "bad", errorCode: 18 })
+  })
+
+  test("falls back after a 17 to the edge of the server window, keeping IDs already inside it", () => {
+    const serverMessageId = (1_700_000_000n << 32n) | 1n
+    const ids = new MessageIdGenerator()
+    const accepted = ids.next(1_700_000_029_000, 1, 0)
+    const ahead = ids.next(1_700_000_600_000, 1, 0)
+    ids.recoverFromTooHigh(serverMessageId)
+    const resent = ids.next(1_700_000_000_500, 1, 0)
+    expect(resent).toBeGreaterThan(accepted)
+    expect(resent).toBeLessThan(ahead)
+    expect(validateInboundMessageId(resent, "client", 1_700_000_000)).toEqual({ kind: "valid" })
+    // A second 17 for another message sent before the correction keeps the first resend's place.
+    ids.recoverFromTooHigh(serverMessageId)
+    const second = ids.next(1_700_000_000_500, 1, 0)
+    expect(second).toBeGreaterThan(resent)
+    expect(validateInboundMessageId(second, "client", 1_700_000_000)).toEqual({ kind: "valid" })
+  })
+
   test("keeps client IDs valid at an exact second and after lower-word rollover", () => {
     const exact = new MessageIdGenerator().next(1_700_000_000_000, 0, 0)
     const ids = new MessageIdGenerator()

@@ -38,7 +38,7 @@ export class InvalidEncryptedRecord extends Error {
 
 export class RecoverableEncryptedRecordError extends Error {
   constructor(
-    readonly errorCode: 16 | 17 | 18 | 20 | 48,
+    readonly errorCode: 16 | 17 | 18 | 48,
     readonly fields: EncryptedRecordFields,
   ) {
     super("Recoverable Inline Protocol record error")
@@ -97,8 +97,12 @@ export const decryptRecordWithMetadata = (
         messageId === 0n || sequenceNumber < 0) throw new InvalidEncryptedRecord()
     const fields = { serverSalt, sessionId, messageId, sequenceNumber, body: plaintext.slice(32, 32 + bodyLength) }
     if (!validDirection) throw new RecoverableEncryptedRecordError(18, fields)
-    if (messageSeconds > validation.nowSeconds + 30) throw new RecoverableEncryptedRecordError(17, fields)
-    if (messageSeconds < validation.nowSeconds - 300) throw new RecoverableEncryptedRecordError(20, fields)
+    // Only server-side reads enforce the time window (16 too low, 17 too high); a client never
+    // drops a server record for its time, as in MTProto, so a clock correction always arrives.
+    if (validation.direction === "client-to-server") {
+      if (messageSeconds > validation.nowSeconds + 30) throw new RecoverableEncryptedRecordError(17, fields)
+      if (messageSeconds < validation.nowSeconds - 300) throw new RecoverableEncryptedRecordError(16, fields)
+    }
     if (!validation.validServerSalts.has(serverSalt)) throw new RecoverableEncryptedRecordError(48, fields)
     return {
       fields,

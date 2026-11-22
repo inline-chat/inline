@@ -409,12 +409,12 @@ export class InlineProtocolServerSession {
   async #receiveHandshake(payload: Uint8Array): Promise<Uint8Array> {
     if (this.#authorization !== undefined) throw new InvalidEncryptedRecord()
     const request = decodeUnencryptedRecord(payload)
-    const validation = validateInboundMessageId(
-      request.messageId,
-      "client",
-      Math.floor(this.options.nowMilliseconds() / 1000),
-    )
-    if (validation.kind === "bad") throw new InvalidEncryptedRecord()
+    // A handshake ID is not held to the server clock: a device with a wrong clock must still be
+    // able to create a key, then learn server time from the handshake and resync on 16/17.
+    // Nonces, not message IDs, protect the handshake from replay.
+    if (request.messageId === 0n || (request.messageId & 3n) !== 0n || (request.messageId & 0xffffffffn) === 0n) {
+      throw new InvalidEncryptedRecord()
+    }
     const result = await this.#handshake.receive(request.body)
     if (result.established) {
       this.#authorization = {
