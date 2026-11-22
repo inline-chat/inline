@@ -50,7 +50,7 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case command(QuickSearchCommand)
   case registeredCommand(CommandBarItem)
   case createThread(title: String, spaceId: Int64, spaceName: String?)
-  case message(LocalMessageSearchResult)
+  case message(InlineSearchMessageResult)
 
   var id: String {
     switch self {
@@ -339,6 +339,9 @@ final class QuickSearchViewModel {
   @ObservationIgnored private var localSections: [QuickSearchLocalSection] = []
   @ObservationIgnored private var localResults: [QuickSearchLocalItem] = []
   @ObservationIgnored private var messageResults: [QuickSearchLocalItem] = []
+  @ObservationIgnored private var localMessages: [LocalMessageSearchResult] = []
+  /// Nil until the account-wide search answers this query.
+  @ObservationIgnored private var cloudMessagePage: CloudMessageSearchPage?
   @ObservationIgnored private var renderedGlobalResults: [GlobalSearchResult] = []
 
   @ObservationIgnored private let catalogService: CommandBarCatalogService
@@ -354,6 +357,7 @@ final class QuickSearchViewModel {
   @ObservationIgnored private var searchGeneration: UInt64 = 0
   @ObservationIgnored private var localProjectionTask: Task<Void, Never>?
   @ObservationIgnored private var messageSearchTask: Task<Void, Never>?
+  @ObservationIgnored private var cloudMessageSearchTask: Task<Void, Never>?
   @ObservationIgnored private var globalSearchTask: Task<Void, Never>?
   @ObservationIgnored private var localProjectionToken: UInt64 = 0
   @ObservationIgnored private var catalogPrewarmTask: Task<Void, Never>?
@@ -366,6 +370,7 @@ final class QuickSearchViewModel {
   @ObservationIgnored private var activeLocalProjectionSignpost: OSSignpostID?
   private var isLocalSearchPending = false
   private var isMessageSearching = false
+  private var isCloudMessageSearching = false
   private var isGlobalSearching = false
   private var searchError: Error?
 
@@ -382,6 +387,7 @@ final class QuickSearchViewModel {
   deinit {
     localProjectionTask?.cancel()
     messageSearchTask?.cancel()
+    cloudMessageSearchTask?.cancel()
     globalSearchTask?.cancel()
     catalogPrewarmTask?.cancel()
     catalogInvalidationTask?.cancel()
@@ -407,6 +413,7 @@ final class QuickSearchViewModel {
   var isLoading: Bool {
     isLocalSearchPending ||
       isMessageSearching ||
+      isCloudMessageSearching ||
       isGlobalSearching
   }
 
@@ -441,6 +448,8 @@ final class QuickSearchViewModel {
     catalogProjection = .empty
     spaceResults = []
     messageResults = []
+    localMessages = []
+    cloudMessagePage = nil
     rawGlobalResults = []
     renderedGlobalResults = []
     searchError = nil
@@ -448,6 +457,7 @@ final class QuickSearchViewModel {
 
     guard InlineSearchMatcher.prepare(searchQuery) != nil else { return }
     searchMessages(query: searchQuery, generation: generation)
+    searchCloudMessages(query: searchQuery, generation: generation)
     searchGlobalUsers(query: searchQuery, generation: generation)
   }
 
@@ -733,6 +743,7 @@ final class QuickSearchViewModel {
   private var isSearchComplete: Bool {
     isLocalSearchPending == false &&
       isMessageSearching == false &&
+      isCloudMessageSearching == false &&
       isGlobalSearching == false &&
       error == nil
   }
@@ -751,9 +762,18 @@ final class QuickSearchViewModel {
     )
   }
 
-  private func openMessageResult(_ result: LocalMessageSearchResult) {
+  private func openMessageResult(_ result: InlineSearchMessageResult) {
     let peer = result.peer
     let messageId = result.messageId
+
+    // A hit in a chat this Mac never stored, such as a thread never opened:
+    // the chat-ID path fetches the chat before opening it at the message.
+    guard result.isChatStored else {
+      Task { @MainActor in
+        await dependencies.requestOpenChat(chatId: result.chatId, targetMessageId: messageId)
+      }
+      return
+    }
 
     Task { @MainActor in
       if let nav2 = dependencies.nav2 {
@@ -788,9 +808,9 @@ final class QuickSearchViewModel {
       do {
         let results = try await LocalMessageSearch.search(db: database, query: query, options: options)
         guard Task.isCancelled == false, let self, self.searchGeneration == generation else { return }
-        self.messageResults = results.map { .message($0) }
+        self.localMessages = results
         self.isMessageSearching = false
-        self.rebuildLocalResults()
+        self.publishMessageResults()
       } catch {
         Log.shared.error("Failed local command-bar message search", error: error)
         guard Task.isCancelled == false, let self, self.searchGeneration == generation else { return }
@@ -799,6 +819,41 @@ final class QuickSearchViewModel {
         self.rebuildLocalResults()
       }
     }
+  }
+
+  /// Account-wide whole-word hits, newest first, ahead of this Mac's own hits.
+  /// Offline or on failure, the section keeps the local hits.
+  private func searchCloudMessages(query: String, generation: UInt64) {
+    guard LocalMessageSearch.isSearchable(query) else { return }
+    isCloudMessageSearching = true
+    let scope = CloudMessageSearchScope(spaceId: commandContext.selectedSpaceId, includeArchived: true)
+    cloudMessageSearchTask = Task { [weak self, database = dependencies.database] in
+      try? await Task.sleep(for: .milliseconds(250))
+      guard Task.isCancelled == false else { return }
+      let page: CloudMessageSearchPage?
+      do {
+        page = try await CloudMessageSearch.search(query: query, scope: scope, db: database)
+      } catch {
+        Log.shared.error("Account-wide command-bar message search failed", error: error)
+        page = nil
+      }
+      guard Task.isCancelled == false, let self, self.searchGeneration == generation else { return }
+      self.cloudMessagePage = page
+      self.isCloudMessageSearching = false
+      self.publishMessageResults()
+    }
+  }
+
+  private func publishMessageResults() {
+    messageResults = InlineSearchMessageResult
+      .merge(
+        cloud: cloudMessagePage?.results,
+        local: localMessages,
+        cloudHasMore: cloudMessagePage?.nextCursor != nil,
+        indexIncomplete: cloudMessagePage?.indexIncomplete ?? false
+      )
+      .map { .message($0) }
+    rebuildLocalResults()
   }
 
   private func searchGlobalUsers(query: String, generation: UInt64) {
@@ -828,11 +883,13 @@ final class QuickSearchViewModel {
   private func cancelEnrichmentTasks() {
     localProjectionTask?.cancel()
     messageSearchTask?.cancel()
+    cloudMessageSearchTask?.cancel()
     globalSearchTask?.cancel()
     endLocalProjectionSignpost(reason: "cancelled")
     localProjectionToken &+= 1
     isLocalSearchPending = false
     isMessageSearching = false
+    isCloudMessageSearching = false
     isGlobalSearching = false
   }
 
@@ -1789,12 +1846,12 @@ private struct QuickSearchRow: View {
                 Text(result.title)
                   .lineLimit(1)
                 if result.snippet.isEmpty == false {
-                  Text(result.snippet)
+                  Text(result.highlightedSnippet)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Text("Message")
+                Text(result.dateLabel())
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
@@ -1905,7 +1962,7 @@ private struct QuickSearchRow: View {
   }
 
   @ViewBuilder
-  private func messageIcon(for result: LocalMessageSearchResult) -> some View {
+  private func messageIcon(for result: InlineSearchMessageResult) -> some View {
     switch result.peer {
       case .thread:
         if let chat = result.chat {
