@@ -1,0 +1,3 @@
+ALTER TABLE "billing_subscriptions" DROP CONSTRAINT "billing_subscriptions_charge_check";--> statement-breakpoint
+ALTER TABLE "billing_wallet_entries" ADD COLUMN "usd_cents" integer;--> statement-breakpoint
+ALTER TABLE "billing_subscriptions" ADD CONSTRAINT "billing_subscriptions_charge_check" CHECK (("billing_subscriptions"."charge_currency" is null) = ("billing_subscriptions"."charge_interval" is null) and ("billing_subscriptions"."charge_amount" is null or ("billing_subscriptions"."charge_amount" > 0 and "billing_subscriptions"."charge_currency" is not null)) and ("billing_subscriptions"."charge_currency" is null or "billing_subscriptions"."charge_amount" is not null or "billing_subscriptions"."charge_usd_cents" > 0));

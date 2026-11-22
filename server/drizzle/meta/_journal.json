@@ -1268,6 +1268,13 @@
       "when": 1795363563167,
       "tag": "0180_billing-credit-plans",
       "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "7",
+      "when": 1795367153142,
+      "tag": "0181_billing-credit-usd-pricing",
+      "breakpoints": true
     }
   ]
 }

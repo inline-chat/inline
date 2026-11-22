@@ -231,50 +231,81 @@ describe("billing credit plans", () => {
     expect(half.toISOString()).toBe("2026-11-16T00:00:00.000Z")
   })
 
-  test("BTC credit is kept as a balance and drawn per month until it runs out", async () => {
+  test("BTC credit is kept as a balance and each month draws its USD price at that month's rate", async () => {
     const { adminRecordPayment, adminFinancialsOverview } = await import("../../modules/billing/admin")
-    const { sweepBilling } = await import("../../modules/billing/service")
+    const { setBtcUsdForTests } = await import("../../modules/billing/btcPrice")
     const space = (await testUtils.createSpace("Credit Space"))!
     const subject = { spaceId: space.id }
-    const balance = async () => Number((await db.select().from(billingWalletEntries).where(eq(billingWalletEntries.spaceId, space.id)))
-      .reduce((total, e) => total + e.amount, 0))
+    const entries = async () => db.select().from(billingWalletEntries).where(eq(billingWalletEntries.spaceId, space.id))
+    const charges = async () => (await entries()).filter((e) => e.kind === "plan_charge").sort((a, b) => a.periodStart!.getTime() - b.periodStart!.getTime())
+    const balance = async () => (await entries()).reduce((total, e) => total + e.amount, 0)
     const live = async () => (await db.select().from(billingSubscriptions)
       .where(and(eq(billingSubscriptions.spaceId, space.id), isNull(billingSubscriptions.endedAt))))[0]
 
-    // 0.02 BTC paid Nov 1; Business for 11 seats at 0.0044 BTC a month, worth $330.
-    await adminRecordPayment(subject, {
-      currency: "btc", amount: 2_000_000, reference: "fake-tx", occurredAt: day(2026, 11, 1),
-      plan: { plan: "business", seats: 11, chargeAmount: 440_000, chargeInterval: "month", chargeUsdCents: 33_000, startAt: day(2026, 11, 1) },
-    }, null)
-    // Recording uses the real clock, so it charges the periods due as of today; count what was written.
-    const charges = (await db.select().from(billingWalletEntries).where(and(eq(billingWalletEntries.spaceId, space.id), eq(billingWalletEntries.kind, "plan_charge"))))
-    expect(charges.length).toBeGreaterThanOrEqual(1)
-    expect(charges.every((c) => c.periodStart !== null && c.currency === "btc")).toBe(true)
-    expect(await balance()).toBe(2_000_000 - charges.reduce((t, c) => t - c.amount, 0))
-    let sub = await live()
-    expect(sub).toMatchObject({ plan: "business", funding: "wallet", seats: 11, chargeAmount: 440_000, chargeCurrency: "btc", chargeInterval: "month", chargeUsdCents: 33_000 })
+    // BTC falls month by month; the current price is $60k.
+    const byMonth: Record<string, number> = { "2026-11": 75_000, "2026-12": 70_000, "2027-01": 60_000, "2027-02": 50_000 }
+    setBtcUsdForTests((date) => (date ? byMonth[date.toISOString().slice(0, 7)] ?? null : 60_000))
+    try {
+      // 0.02 BTC paid Nov 1; Business for 11 seats at $330 a month, priced in USD.
+      await adminRecordPayment(subject, {
+        currency: "btc", amount: 2_000_000, reference: "fake-tx", occurredAt: day(2026, 11, 1), usdCents: 150_000,
+        plan: { plan: "business", seats: 11, chargeInterval: "month", chargeUsdCents: 33_000, startAt: day(2026, 11, 1) },
+      }, null)
+      let sub = await live()
+      expect(sub).toMatchObject({ plan: "business", funding: "wallet", seats: 11, chargeAmount: null, chargeCurrency: "btc", chargeUsdCents: 33_000 })
+      const first = (await charges())[0]!
+      expect(first.amount).toBe(-440_000) // $330 at $75k on Nov 1
+      expect(first.usdCents).toBe(-33_000)
+      expect(first.periodStart!.toISOString()).toBe("2026-11-01T00:00:00.000Z")
+      expect(await balance()).toBe(2_000_000 - (await charges()).reduce((t, c) => t - c.amount, 0))
 
-    // Run the sweep far ahead: credit covers 4 full months and a partial fifth (2,000,000 / 440,000 = 4.545).
-    await sweepBilling(day(2027, 3, 10))
-    sub = await live()
-    expect(await balance()).toBe(0)
-    const all = (await db.select().from(billingWalletEntries).where(and(eq(billingWalletEntries.spaceId, space.id), eq(billingWalletEntries.kind, "plan_charge"))))
-    expect(all).toHaveLength(5)
-    expect(sub!.paidThrough!.toISOString().slice(0, 10)).toBe("2027-03-17")
-    let [row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
-    expect(row!.isPro).toBe(true)
+      // Catch up to mid-February: Dec at $70k, Jan at $60k, then Feb at $50k only partly covered.
+      await sweepBilling(day(2027, 2, 10))
+      const all = await charges()
+      expect(all.map((c) => -c.amount)).toEqual([440_000, 471_429, 550_000, 538_571])
+      expect(all.at(-1)!.usdCents).toBe(-Math.round(33_000 * (538_571 / 660_000)))
+      expect(await balance()).toBe(0)
+      sub = await live()
+      expect(sub!.paidThrough!.toISOString().slice(0, 10)).toBe("2027-02-23")
+      let [row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+      expect(row!.isPro).toBe(true)
 
-    // Re-running the sweep never double-charges.
-    await sweepBilling(day(2027, 3, 10))
-    expect(await db.select().from(billingWalletEntries).where(and(eq(billingWalletEntries.spaceId, space.id), eq(billingWalletEntries.kind, "plan_charge")))).toHaveLength(5)
+      // Re-running never double-charges; once the paid period passes with no credit, the plan lapses.
+      await sweepBilling(day(2027, 2, 10))
+      expect(await charges()).toHaveLength(4)
+      await sweepBilling(day(2027, 2, 25))
+      ;[row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+      expect(row!.isPro).toBe(false)
+      expect((await adminFinancialsOverview()).live.find((l) => l.spaceId === space.id)).toBeUndefined()
+    } finally {
+      setBtcUsdForTests(null)
+    }
+  })
 
-    // Once the paid period passes with no credit, the plan lapses.
-    await sweepBilling(day(2027, 3, 18))
-    ;[row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
-    expect(row!.isPro).toBe(false)
-
-    const overview = await adminFinancialsOverview()
-    expect(overview.live.find((l) => l.spaceId === space.id)).toBeUndefined()
+  test("without a BTC rate, a USD-priced period waits instead of charging", async () => {
+    const { adminAddWalletEntry, adminStartCreditPlan } = await import("../../modules/billing/admin")
+    const { setBtcUsdForTests } = await import("../../modules/billing/btcPrice")
+    const space = (await testUtils.createSpace("No Rate Space"))!
+    await adminAddWalletEntry({ spaceId: space.id }, { currency: "btc", amount: 1_000_000, kind: "btc_topup", reference: "fake" }, null)
+    setBtcUsdForTests(() => null)
+    try {
+      // Starting needs the first period's rate.
+      await expect(adminStartCreditPlan({ spaceId: space.id }, { plan: "team", seats: 2, chargeCurrency: "btc", chargeInterval: "month" }, null))
+        .rejects.toThrow("rate_unavailable")
+      setBtcUsdForTests(() => 50_000)
+      const sub = await adminStartCreditPlan({ spaceId: space.id }, { plan: "team", seats: 2, chargeCurrency: "btc", chargeInterval: "month" }, null)
+      expect(sub.chargeUsdCents).toBe(4_000)
+      const firstEnd = sub.paidThrough!.getTime()
+      // A renewal with no rate waits: paid-through stays, nothing is charged.
+      setBtcUsdForTests(() => null)
+      await sweepBilling(new Date(firstEnd - 60_000))
+      const [live] = await db.select().from(billingSubscriptions).where(eq(billingSubscriptions.id, sub.id))
+      expect(live!.paidThrough!.getTime()).toBe(firstEnd)
+      const after = await db.select().from(billingWalletEntries).where(eq(billingWalletEntries.spaceId, space.id))
+      expect(after.filter((e) => e.kind === "plan_charge").map((e) => e.amount)).toEqual([-80_000])
+    } finally {
+      setBtcUsdForTests(null)
+    }
   })
 
   test("a top-up lets a live credit plan keep renewing, and MRR counts Stripe and credit plans", async () => {

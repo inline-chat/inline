@@ -1514,6 +1514,7 @@ const billingErrorStatus = {
   not_found: 404,
   invalid_input: 400,
   stripe_managed: 409,
+  rate_unavailable: 503,
 } as const satisfies Record<BillingAdminError["code"], number>
 
 /** Runs a billing admin call, surfacing its typed refusals as admin rejections. */
@@ -1574,6 +1575,7 @@ const serializeBillingWalletEntry = (row: BillingWalletEntryRow) => ({
   adminId: row.adminId,
   occurredAt: isoOrNull(row.occurredAt),
   periodStart: isoOrNull(row.periodStart),
+  usdCents: row.usdCents,
   createdAt: row.createdAt.toISOString(),
 })
 
@@ -1622,15 +1624,28 @@ const formatMinorUnits = (currency: "usd" | "btc", amount: number): string =>
     ? `${amount < 0 ? "-" : ""}$${(Math.abs(amount) / 100).toFixed(2)}`
     : `${amount} sats`
 
-/** For example "team (4 seats) at 120000 sats per month". */
+/** For example "team (4 seats) at $40.00 per month from BTC credit" or "pro at 120000 sats per year". */
 const describeCreditPlan = (plan: {
   readonly plan: string
   readonly seats?: number | undefined
-  readonly chargeAmount: number
+  readonly chargeAmount?: number | undefined
   readonly chargeCurrency: "usd" | "btc"
   readonly chargeInterval: "month" | "year"
-}): string =>
-  `${plan.plan}${plan.seats !== undefined ? ` (${plan.seats} seats)` : ""} at ${formatMinorUnits(plan.chargeCurrency, plan.chargeAmount)} per ${plan.chargeInterval}`
+  readonly chargeUsdCents?: number | undefined
+}): string => {
+  const price = plan.chargeAmount !== undefined
+    ? formatMinorUnits(plan.chargeCurrency, plan.chargeAmount)
+    : plan.chargeUsdCents !== undefined
+      ? formatMinorUnits("usd", plan.chargeUsdCents)
+      : "list price"
+  return `${plan.plan}${plan.seats !== undefined ? ` (${plan.seats} seats)` : ""} at ${price} per ${plan.chargeInterval} from ${plan.chargeCurrency.toUpperCase()} credit`
+}
+
+/** Optional reporting USD cents: a safe integer, or a refusal. */
+const billingUsdCents = (value: number | undefined): Effect.Effect<number | undefined, AdminRejected> =>
+  value === undefined || Number.isSafeInteger(value)
+    ? Effect.succeed(value)
+    : reject(400, "invalid_input")
 
 /** Wallet entries record which superadmin made them; an unlinked admin records none. */
 const superadminIdFor = (session: AdminSessionValue) =>
@@ -1661,6 +1676,7 @@ const addBillingWalletEntryOperation: AdminOperationsShape["addBillingWalletEntr
       const occurredAt = input.occurredAt === undefined
         ? undefined
         : yield* billingDate(input.occurredAt)
+      const usdCents = yield* billingUsdCents(input.usdCents)
       const adminId = yield* superadminIdFor(session)
       const entry = yield* attemptBilling(
         "admin.billing.wallet.add",
@@ -1673,6 +1689,7 @@ const addBillingWalletEntryOperation: AdminOperationsShape["addBillingWalletEntr
               kind: input.kind,
               reference: input.reference?.trim() || undefined,
               occurredAt,
+              usdCents,
             },
             adminId,
           ),
@@ -1773,6 +1790,7 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
       const startAt = input.plan?.startAt === undefined
         ? undefined
         : yield* billingDate(input.plan.startAt)
+      const usdCents = yield* billingUsdCents(input.usdCents)
       const adminId = yield* superadminIdFor(session)
       const result = yield* attemptBilling(
         "admin.billing.payment.record",
@@ -1784,6 +1802,7 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
               amount: input.amount,
               reference: input.reference?.trim() || undefined,
               occurredAt,
+              usdCents,
               plan: input.plan
                 ? {
                     plan: input.plan.plan,
@@ -1800,13 +1819,14 @@ const recordBillingPaymentOperation: AdminOperationsShape["recordBillingPayment"
           ),
       )
       const plan = input.plan
-        ? `, starting ${describeCreditPlan({ ...input.plan, chargeCurrency: input.currency })} from credit`
+        ? `, starting ${describeCreditPlan({ ...input.plan, chargeCurrency: input.currency })}`
         : ""
+      const worth = usdCents === undefined ? "" : ` (worth ${formatMinorUnits("usd", usdCents)})`
       yield* attempt(
         "admin.billing.payment.record.notify",
         () =>
           notifyAdminAction({
-            actionTaken: `Recorded a ${formatMinorUnits(input.currency, input.amount)} payment for ${describeBillingSubject(subject)}${plan}`,
+            actionTaken: `Recorded a ${formatMinorUnits(input.currency, input.amount)}${worth} payment for ${describeBillingSubject(subject)}${plan}`,
             actorEmail: session.email,
             request,
           }),
@@ -1847,7 +1867,7 @@ const startBillingCreditPlanOperation: AdminOperationsShape["startBillingCreditP
         "admin.billing.credit-plan.start.notify",
         () =>
           notifyAdminAction({
-            actionTaken: `Started ${describeCreditPlan(input)} from credit for ${describeBillingSubject(subject)}`,
+            actionTaken: `Started ${describeCreditPlan(input)} for ${describeBillingSubject(subject)}`,
             actorEmail: session.email,
             request,
           }),
@@ -1864,6 +1884,7 @@ const financialsOperation: AdminOperationsShape["financials"] =
       Effect.map((overview) =>
         jsonResult({
           ok: true as const,
+          btcUsd: overview.btcUsd,
           mrr: overview.mrr,
           live: overview.live.map((row) => ({
             ...serializeBillingSubscription(row),

@@ -901,12 +901,16 @@ const AdminBillingSubscription = Schema.Struct({
   payerUserId: NullableEntityId,
   stripeSubscriptionId: NullableString,
   livemode: Schema.Boolean,
-  /** Credit plans: what each period draws from credit, in minor units of chargeCurrency. */
+  /**
+   * Credit plans: a fixed amount each period draws, in minor units of chargeCurrency. Null on
+   * plans priced in USD, which draw chargeUsdCents (BTC at each period's rate).
+   */
   chargeAmount: NullableInteger,
+  /** The credit drawn: usd | btc. */
   chargeCurrency: NullableString,
   /** month | year */
   chargeInterval: NullableString,
-  /** USD value of one charge, for MRR reporting only. */
+  /** Price of one period in USD cents; also what MRR counts. */
   chargeUsdCents: NullableInteger,
   note: NullableString,
   createdAt: Schema.String,
@@ -931,6 +935,8 @@ const AdminBillingWalletEntry = Schema.Struct({
   occurredAt: NullableString,
   /** Credit plan charges: the start of the period paid for. */
   periodStart: NullableString,
+  /** USD value when it happened (BTC at that day's rate), for reporting only. */
+  usdCents: NullableInteger,
   createdAt: Schema.String,
 }).annotate({
   identifier: "AdminBillingWalletEntry",
@@ -986,6 +992,8 @@ export const AdminBillingWalletEntryInput = Schema.Struct({
   reference: OptionalString,
   /** ISO 8601 timestamp of when the money moved, if not now. */
   occurredAt: OptionalString,
+  /** Signed USD cents the entry was worth at the time, for reporting only. */
+  usdCents: Schema.optionalKey(Schema.Number),
 }).annotate({
   identifier: "AdminBillingWalletEntryInput",
 })
@@ -1022,14 +1030,17 @@ export const AdminBillingPlanResult = Schema.Struct({
   identifier: "AdminBillingPlanResult",
 })
 
-/** A plan paid from credit: one charge per period, drawn in the credit's own currency. */
+/**
+ * A plan paid from credit, priced in USD per period: BTC credit is drawn at each period's
+ * BTC price, USD credit draws the price itself.
+ */
 const AdminBillingCreditPlanFields = {
   plan: AdminBillingPlanCode,
   seats: Schema.optionalKey(Schema.Number),
-  /** Positive minor units drawn per period: USD cents or BTC sats. */
-  chargeAmount: Schema.Number,
+  /** Advanced: a fixed amount drawn per period instead of the USD price at market rate, in USD cents or BTC sats. */
+  chargeAmount: Schema.optionalKey(Schema.Number),
   chargeInterval: Schema.Literals(["month", "year"]),
-  /** USD cents one charge is worth, for MRR; defaults to the list price where one exists. */
+  /** Price of one period in USD cents; defaults to the list price, required without one (enterprise). */
   chargeUsdCents: Schema.optionalKey(Schema.Number),
   /** ISO 8601 start of the first period (default now); a past date charges the periods since. */
   startAt: OptionalString,
@@ -1044,6 +1055,8 @@ export const AdminBillingRecordPaymentInput = Schema.Struct({
   reference: OptionalString,
   /** ISO 8601 timestamp of when the payment was made, if not now. */
   occurredAt: OptionalString,
+  /** What the payment was worth in USD cents when made, for reporting only; never converts it. */
+  usdCents: Schema.optionalKey(Schema.Number),
   /**
    * Starts a plan paid from credit, charged per period in the payment's currency. Without it
    * the payment only tops up credit and any live credit plan catches up.
@@ -1080,6 +1093,8 @@ const AdminBillingSubjectNames = {
 
 export const AdminFinancialsResult = Schema.Struct({
   ok: Schema.Literal(true),
+  /** Current BTC price in USD used for estimates; null when unavailable or not needed. */
+  btcUsd: Schema.NullOr(Schema.Number),
   /** Recurring revenue of live plans with access, in USD cents per month (ARR is 12x). */
   mrr: Schema.Struct({
     mrrUsdCents: WireSafeInteger,
@@ -1090,7 +1105,7 @@ export const AdminFinancialsResult = Schema.Struct({
     compPlans: WireSafeInteger,
     /** Live paid plans with no known USD value. */
     unpricedPlans: WireSafeInteger,
-    /** Monthly draw from credit per currency, in minor units as charged (never converted). */
+    /** Monthly draw from credit per currency in minor units; USD-priced BTC plans are estimated at btcUsd. */
     creditMonthlyByCurrency: Schema.Struct({
       usd: Schema.optionalKey(WireSafeInteger),
       btc: Schema.optionalKey(WireSafeInteger),
@@ -1102,7 +1117,7 @@ export const AdminFinancialsResult = Schema.Struct({
       isPro: Schema.Boolean,
       /** Credit plans: the balance in chargeCurrency's minor units. */
       creditBalance: NullableInteger,
-      /** Credit plans: when the current credit runs out if nothing is added. */
+      /** Credit plans: when the current credit runs out if nothing is added (USD-priced BTC at btcUsd). */
       creditRunsOutAt: NullableString,
       /** USD cents per month this plan represents; null when paid but unpriced. */
       monthlyUsdCents: NullableInteger,

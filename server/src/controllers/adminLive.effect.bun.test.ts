@@ -38,6 +38,9 @@ import {
   periodEnd,
 } from "@in/server/modules/billing/credit"
 import {
+  setBtcUsdForTests,
+} from "@in/server/modules/billing/btcPrice"
+import {
   setupTestLifecycle,
   testUtils,
 } from "../__tests__/setup"
@@ -115,7 +118,10 @@ const handle = (request: Request) =>
 
 describe("AdminSessionStoreLive", () => {
   setupTestLifecycle()
-  afterEach(resetServerConfigCacheForTests)
+  afterEach(() => {
+    resetServerConfigCacheForTests()
+    setBtcUsdForTests(null)
+  })
 
   it("creates a password and TOTP session and resets failures through the live HTTP route", async () => {
     const user = await testUtils.createUser("admin-password-security@example.test")
@@ -556,6 +562,8 @@ describe("AdminSessionStoreLive", () => {
   })
 
   it("records off-Stripe payments, starts credit plans and reports them with MRR on the financials overview", async () => {
+    // A fake BTC price for every day, so fixed BTC charges get a USD value without the network.
+    setBtcUsdForTests(() => 50_000)
     const admin = await testUtils.createUser("effect-admin-financials@example.com")
     const [superadmin] = await db.insert(superadminUsers).values({
       email: admin.email!, userId: admin.id,
@@ -596,6 +604,7 @@ describe("AdminSessionStoreLive", () => {
       status: 200,
       body: {
         ok: true,
+        btcUsd: null,
         mrr: {
           mrrUsdCents: 2_000, arrUsdCents: 24_000, stripeUsdCents: 2_000, creditUsdCents: 0,
           payingPlans: 1, compPlans: 0, unpricedPlans: 0, creditMonthlyByCurrency: {},
@@ -640,13 +649,14 @@ describe("AdminSessionStoreLive", () => {
       ok: true, isPro: true, wallet: { btc: 100_000 },
       live: { chargeAmount: 10_000, chargeCurrency: "btc", chargeInterval: "month", chargeUsdCents: 1_000 },
     })
-    const charges = (userDetail.body.walletEntries as Array<{ kind: string; amount: number; periodStart: string | null }>)
+    const charges = (userDetail.body.walletEntries as Array<{ kind: string; amount: number; periodStart: string | null; usdCents: number | null }>)
       .filter((entry) => entry.kind === "plan_charge")
-      .map((entry) => [entry.amount, entry.periodStart])
+      .map((entry) => [entry.amount, entry.periodStart, entry.usdCents])
       .sort()
+    // A fixed 10,000 sats at $50,000 per BTC is worth $5 each period.
     expect(charges).toEqual([
-      [-10_000, startAt.toISOString()],
-      [-10_000, secondPeriod.toISOString()],
+      [-10_000, startAt.toISOString(), -500],
+      [-10_000, secondPeriod.toISOString(), -500],
     ])
 
     const credited = await call(`/admin/spaces/${space.id}/billing/payment`, { currency: "usd", amount: 5_000 })
@@ -729,6 +739,7 @@ describe("AdminSessionStoreLive", () => {
 
     const overview = await call("/admin/financials")
     expect(overview.status).toBe(200)
+    expect(overview.body.btcUsd).toBe(50_000)
     // Stripe team (1 seat) $20 + BTC pro $10 + yearly team $360 / 12; comps and unpriced plans add nothing.
     expect(overview.body.mrr).toEqual({
       mrrUsdCents: 6_000, arrUsdCents: 72_000, stripeUsdCents: 2_000, creditUsdCents: 4_000,
@@ -772,5 +783,113 @@ describe("AdminSessionStoreLive", () => {
     expect(overview.body.orders).toEqual([])
     // The rejected Stripe-space payment rolled back with its plan.
     expect(overview.body.receivedOffStripe).toEqual({ btc: 220_000, usd: 5_000 })
+  })
+
+  it("prices credit plans in USD, draws BTC at each period's rate and refuses to start without one", async () => {
+    // Fake prices: $50,000 on any past day, $60,000 now.
+    setBtcUsdForTests((day) => (day === null ? 60_000 : 50_000))
+    const admin = await testUtils.createUser("effect-admin-market@example.com")
+    await db.insert(superadminUsers).values({
+      email: admin.email!, userId: admin.id,
+      passwordHash: "configured", passwordSetAt: new Date(), totpEnabledAt: new Date(),
+    })
+    const { token, tokenHash } = await generateToken(admin.id)
+    const now = new Date()
+    const day = 24 * 60 * 60 * 1_000
+    await db.insert(superadminSessions).values({
+      userId: admin.id, tokenHash, lastSeenAt: now, stepUpAt: now,
+      expiresAt: new Date(now.getTime() + day), idleExpiresAt: new Date(now.getTime() + day),
+      userAgentHash: hashToken("admin-market"),
+    })
+    const btcSpace = (await testUtils.createSpace("Fake Market Space"))!
+    const usdSpace = (await testUtils.createSpace("Fake Dollar Space"))!
+    const lateSpace = (await testUtils.createSpace("Fake Late Space"))!
+    const call = async (path: string, body?: unknown) => {
+      const response = await handle(new Request(`http://inline.test${path}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          cookie: `inline_admin_session=${token}`, origin: "https://admin.inline.chat",
+          "user-agent": "admin-market", "content-type": "application/json",
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }))
+      return { status: response.status, body: await response.json() }
+    }
+
+    // Team for 2 seats at its $40 list price, started 45 days back: two periods at that day's $50,000.
+    const startAt = new Date(now.getTime() - 45 * day)
+    const paidThrough = periodEnd(periodEnd(startAt, "month"), "month")
+    const paid = await call(`/admin/spaces/${btcSpace.id}/billing/payment`, {
+      currency: "btc", amount: 1_000_000, usdCents: 50_000,
+      plan: { plan: "team", seats: 2, chargeInterval: "month", startAt: startAt.toISOString() },
+    })
+    expect(paid).toMatchObject({
+      status: 200,
+      body: {
+        ok: true,
+        credit: { currency: "btc", amount: 1_000_000, usdCents: 50_000 },
+        subscription: {
+          plan: "team", seats: 2, paidThrough: paidThrough.toISOString(),
+          chargeAmount: null, chargeCurrency: "btc", chargeInterval: "month", chargeUsdCents: 4_000,
+        },
+      },
+    })
+    const btcDetail = await call(`/admin/spaces/${btcSpace.id}/billing`)
+    expect(btcDetail.body).toMatchObject({ ok: true, isPro: true, wallet: { btc: 840_000 } })
+    expect((btcDetail.body.walletEntries as Array<{ kind: string; amount: number; usdCents: number | null }>)
+      .filter((entry) => entry.kind === "plan_charge")
+      .map((entry) => [entry.amount, entry.usdCents])).toEqual([[-80_000, -4_000], [-80_000, -4_000]])
+
+    // USD credit draws the yearly list price ($200 for one team seat) directly.
+    const topUp = await call(`/admin/spaces/${usdSpace.id}/billing/wallet`, {
+      currency: "usd", amount: 25_000, kind: "admin_topup", usdCents: 25_000,
+    })
+    expect(topUp).toMatchObject({ status: 200, body: { ok: true, entry: { amount: 25_000, usdCents: 25_000 } } })
+    expect(await call(`/admin/spaces/${usdSpace.id}/billing/wallet`, {
+      currency: "usd", amount: 100, kind: "adjustment", usdCents: 1.5,
+    })).toEqual({ status: 400, body: { ok: false, error: "invalid_input" } })
+    const yearly = await call(`/admin/spaces/${usdSpace.id}/billing/credit-plan`, {
+      plan: "team", chargeCurrency: "usd", chargeInterval: "year",
+    })
+    expect(yearly).toMatchObject({
+      status: 200,
+      body: { ok: true, subscription: { chargeAmount: null, chargeCurrency: "usd", chargeInterval: "year", chargeUsdCents: 20_000 } },
+    })
+    expect((await call(`/admin/spaces/${usdSpace.id}/billing`)).body).toMatchObject({ wallet: { usd: 5_000 } })
+    // Enterprise has no list price, so a USD-priced plan needs one.
+    expect(await call(`/admin/spaces/${usdSpace.id}/billing/credit-plan`, {
+      plan: "enterprise", chargeCurrency: "usd", chargeInterval: "month",
+    })).toEqual({ status: 400, body: { ok: false, error: "invalid_input" } })
+
+    // Estimates use today's $60,000: $40 a month is 66,667 sats.
+    const overview = await call("/admin/financials")
+    expect(overview.body.btcUsd).toBe(60_000)
+    expect(overview.body.mrr).toMatchObject({
+      mrrUsdCents: 5_667, creditUsdCents: 5_667, payingPlans: 2,
+      creditMonthlyByCurrency: { btc: 66_667, usd: 1_667 },
+    })
+    let runsOut = paidThrough
+    for (let remaining = 840_000; remaining > 0; remaining -= Math.min(66_667, remaining)) {
+      runsOut = periodEnd(runsOut, "month", Math.min(66_667, remaining) / 66_667)
+    }
+    expect(overview.body.live).toContainEqual(expect.objectContaining({
+      spaceId: btcSpace.id, chargeAmount: null, chargeUsdCents: 4_000, creditBalance: 840_000,
+      creditRunsOutAt: runsOut.toISOString(), monthlyUsdCents: 4_000,
+    }))
+
+    // Without a BTC price a USD-priced BTC plan can't start, and the payment rolls back with it.
+    setBtcUsdForTests(() => null)
+    expect(await call(`/admin/spaces/${btcSpace.id}/billing/credit-plan`, {
+      plan: "team", seats: 2, chargeCurrency: "btc", chargeInterval: "month",
+    })).toEqual({ status: 503, body: { ok: false, error: "rate_unavailable" } })
+    expect(await call(`/admin/spaces/${lateSpace.id}/billing/payment`, {
+      currency: "btc", amount: 100_000, plan: { plan: "team", chargeInterval: "month" },
+    })).toEqual({ status: 503, body: { ok: false, error: "rate_unavailable" } })
+    expect((await call(`/admin/spaces/${lateSpace.id}/billing`)).body).toMatchObject({ live: null, wallet: {}, walletEntries: [] })
+    // A fixed BTC amount needs no price.
+    expect(await call(`/admin/spaces/${btcSpace.id}/billing/credit-plan`, {
+      plan: "team", seats: 2, chargeAmount: 70_000, chargeCurrency: "btc", chargeInterval: "month",
+    })).toMatchObject({ status: 200, body: { ok: true, subscription: { chargeAmount: 70_000, chargeUsdCents: 4_000 } } })
+    expect((await call("/admin/financials")).body.btcUsd).toBeNull()
   })
 })

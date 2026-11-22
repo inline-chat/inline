@@ -1280,6 +1280,7 @@ describe("AdminRouteGroup", () => {
       adminId: 2,
       occurredAt: "2026-10-01T12:00:00.000Z",
       periodStart: null,
+      usdCents: 30_000,
       createdAt: "2026-11-01T00:00:00.000Z",
     }
     const creditPlan = {
@@ -1296,7 +1297,7 @@ describe("AdminRouteGroup", () => {
       payerUserId: null,
       stripeSubscriptionId: null,
       livemode: false,
-      chargeAmount: 10_000,
+      chargeAmount: null,
       chargeCurrency: "btc",
       chargeInterval: "month",
       chargeUsdCents: 9_000,
@@ -1307,6 +1308,7 @@ describe("AdminRouteGroup", () => {
     }
     const financials = {
       ok: true,
+      btcUsd: 60_000,
       mrr: {
         mrrUsdCents: 9_000,
         arrUsdCents: 108_000,
@@ -1364,10 +1366,10 @@ describe("AdminRouteGroup", () => {
               amount: 50_000,
               reference: "fake-tx",
               occurredAt: "2026-10-01T12:00:00.000Z",
+              usdCents: 30_000,
               plan: {
                 plan: "business",
                 seats: 3,
-                chargeAmount: 10_000,
                 chargeInterval: "month",
                 chargeUsdCents: 9_000,
                 startAt: "2026-10-01T12:00:00.000Z",
@@ -1408,7 +1410,6 @@ describe("AdminRouteGroup", () => {
             },
             body: JSON.stringify({
               plan: "pro",
-              chargeAmount: 1_000,
               chargeCurrency: "usd",
               chargeInterval: "year",
             }),
@@ -1423,7 +1424,7 @@ describe("AdminRouteGroup", () => {
         for (const invalid of [
           { plan: "pro", chargeAmount: 1_000, chargeCurrency: "eur", chargeInterval: "month" },
           { plan: "pro", chargeAmount: 1_000, chargeCurrency: "usd", chargeInterval: "week" },
-          { plan: "pro", chargeCurrency: "usd", chargeInterval: "month" },
+          { plan: "pro", chargeAmount: "100", chargeCurrency: "usd", chargeInterval: "month" },
         ]) {
           const rejected = await handler(
             adminRequest("/admin/spaces/9/billing/credit-plan", {
@@ -1486,10 +1487,10 @@ describe("AdminRouteGroup", () => {
               amount: 50_000,
               reference: "fake-tx",
               occurredAt: "2026-10-01T12:00:00.000Z",
+              usdCents: 30_000,
               plan: {
                 plan: "business",
                 seats: 3,
-                chargeAmount: 10_000,
                 chargeInterval: "month",
                 chargeUsdCents: 9_000,
                 startAt: "2026-10-01T12:00:00.000Z",
@@ -1502,7 +1503,6 @@ describe("AdminRouteGroup", () => {
             { userId: 5 },
             {
               plan: "pro",
-              chargeAmount: 1_000,
               chargeCurrency: "usd",
               chargeInterval: "year",
             },
@@ -1613,6 +1613,7 @@ describe("AdminRouteGroup", () => {
               kind: "json",
               body: {
                 ok: true,
+                btcUsd: null,
                 mrr: {
                   mrrUsdCents: 0,
                   arrUsdCents: 0,

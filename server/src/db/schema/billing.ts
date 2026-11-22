@@ -45,15 +45,16 @@ export const billingSubscriptions = pgTable(
     stripeSubscriptionId: varchar("stripe_subscription_id", { length: 255 }),
     livemode: boolean().default(false).notNull(),
     /**
-     * Credit plans: what each period draws from the subject's credit, in the credit's own
-     * currency (cents or sats). Null means the plan isn't renewed from credit.
+     * Credit plans. `charge_currency` is the credit drawn (usd | btc); null means the plan isn't
+     * renewed from credit. Each period costs `charge_usd_cents`, converted to BTC at that
+     * period's rate when the credit is BTC, unless `charge_amount` fixes the amount drawn
+     * (minor units of the credit currency).
      */
     chargeAmount: bigint("charge_amount", { mode: "number" }),
-    /** usd | btc */
     chargeCurrency: varchar("charge_currency", { length: 8 }),
     /** month | year */
     chargeInterval: varchar("charge_interval", { length: 16 }),
-    /** USD value of one charge, for MRR reporting only; never used to convert credit. */
+    /** Price of one period in USD cents; also what MRR counts. */
     chargeUsdCents: integer("charge_usd_cents"),
     note: text(),
     createdAt: at("created_at").defaultNow().notNull(),
@@ -62,7 +63,7 @@ export const billingSubscriptions = pgTable(
   },
   (table) => [
     check("billing_subscriptions_subject_check", sql`(${table.userId} is null) <> (${table.spaceId} is null)`),
-    check("billing_subscriptions_charge_check", sql`(${table.chargeAmount} is null) = (${table.chargeCurrency} is null) and (${table.chargeAmount} is null) = (${table.chargeInterval} is null) and (${table.chargeAmount} is null or ${table.chargeAmount} > 0)`),
+    check("billing_subscriptions_charge_check", sql`(${table.chargeCurrency} is null) = (${table.chargeInterval} is null) and (${table.chargeAmount} is null or (${table.chargeAmount} > 0 and ${table.chargeCurrency} is not null)) and (${table.chargeCurrency} is null or ${table.chargeAmount} is not null or ${table.chargeUsdCents} > 0)`),
     uniqueIndex("billing_subscriptions_live_user_unique").on(table.userId).where(sql`${table.endedAt} is null and ${table.userId} is not null`),
     uniqueIndex("billing_subscriptions_live_space_unique").on(table.spaceId).where(sql`${table.endedAt} is null and ${table.spaceId} is not null`),
     uniqueIndex("billing_subscriptions_stripe_unique").on(table.stripeSubscriptionId),
@@ -129,6 +130,8 @@ export const billingWalletEntries = pgTable(
     occurredAt: at("occurred_at"),
     /** Credit plan charges: the start of the period paid for. One charge per plan and period. */
     periodStart: at("period_start"),
+    /** USD value of this entry when it happened (for BTC: amount × that day's rate). Reporting only. */
+    usdCents: integer("usd_cents"),
     createdAt: at("created_at").defaultNow().notNull(),
   },
   (table) => [
