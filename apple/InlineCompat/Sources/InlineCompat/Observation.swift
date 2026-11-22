@@ -116,10 +116,14 @@ public final class CompatObservationRegistrar: @unchecked Sendable {
 
   public func access<Subject: AnyObject, Member>(_ subject: Subject, keyPath: KeyPath<Subject, Member>) {
     if mode(for: subject) == .native, #available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *) {
+      // Native subjects are tracked only natively: compat scopes always run inside
+      // `withObservationTracking` when the native registrar exists. Recording them in the
+      // fallback scope too would notify twice per mutation (fallback, then native willSet), and
+      // a handler that re-subscribes from onChange would fire again for the same mutation.
       nativeAccess(subject, keyPath: keyPath)
+    } else {
+      FallbackTracking.recordAccess(registrar: fallback, keyPath: keyPath)
     }
-    // The fallback scope also listens to native subjects so mixed scopes work on new systems.
-    FallbackTracking.recordAccess(registrar: fallback, keyPath: keyPath)
   }
 
   public func withMutation<Subject: AnyObject, Member, T>(
@@ -267,6 +271,16 @@ final class FallbackRegistrar: @unchecked Sendable {
 enum FallbackTracking {
   final class Scope {
     var accesses: [ObjectIdentifier: (registrar: FallbackRegistrar, keyPaths: Set<AnyKeyPath>)] = [:]
+
+    func merge(_ other: Scope) {
+      for (id, access) in other.accesses {
+        if accesses[id] == nil {
+          accesses[id] = access
+        } else {
+          accesses[id]!.keyPaths.formUnion(access.keyPaths)
+        }
+      }
+    }
   }
 
   private static let key: pthread_key_t = {
@@ -283,7 +297,12 @@ enum FallbackTracking {
   static func withScope<T>(_ scope: Scope, _ body: () throws -> T) rethrows -> T {
     let previous = pthread_getspecific(key)
     pthread_setspecific(key, Unmanaged.passUnretained(scope).toOpaque())
-    defer { pthread_setspecific(key, previous) }
+    defer {
+      pthread_setspecific(key, previous)
+      // Like native `withObservationTracking`, a nested scope's reads also count for the
+      // enclosing scope, so both paths behave the same.
+      if let previous { Unmanaged<Scope>.fromOpaque(previous).takeUnretainedValue().merge(scope) }
+    }
     return try withExtendedLifetime(scope) { try body() }
   }
 
@@ -339,7 +358,9 @@ func compatTrack<T>(
   for (_, access) in fallbackScope.accesses {
     let registrar = access.registrar
     let id = registrar.addObserver(keyPaths: access.keyPaths, fire: fireOnce)
-    registrations.add { registrar.removeObserver(id) }
+    // Weak: the observer's handler owns `registrations`, so a strong capture would keep the
+    // registrar (and the handler) alive forever once the subject is gone.
+    registrations.add { [weak registrar] in registrar?.removeObserver(id) }
   }
   if once.isClaimed { registrations.cancelAll() }
   return (result, registrations)

@@ -88,7 +88,7 @@ public struct CompatDuration: Sendable, Hashable, Comparable, Codable, CustomStr
 
   @usableFromInline
   static func saturatingNanoseconds(_ value: Double) -> Int64 {
-    guard value.isFinite else { return value > 0 ? .max : .min }
+    guard value.isFinite else { return value.isNaN ? 0 : (value > 0 ? .max : .min) }
     if value >= Double(Int64.max) { return .max }
     if value <= Double(Int64.min) { return .min }
     return Int64(value.rounded(.towardZero))
@@ -108,7 +108,8 @@ public struct CompatDuration: Sendable, Hashable, Comparable, Codable, CustomStr
     CompatDuration(nanosecondsValue: lhs.nanosecondsValue &- rhs.nanosecondsValue)
   }
 
-  public static prefix func - (duration: CompatDuration) -> CompatDuration {
+  /// Not public: `Swift.Duration` has no prefix minus, so callers must not depend on it.
+  static prefix func - (duration: CompatDuration) -> CompatDuration {
     CompatDuration(nanosecondsValue: 0 &- duration.nanosecondsValue)
   }
 
@@ -117,10 +118,6 @@ public struct CompatDuration: Sendable, Hashable, Comparable, Codable, CustomStr
 
   public static func * <T: BinaryInteger>(lhs: CompatDuration, rhs: T) -> CompatDuration {
     CompatDuration(nanosecondsValue: lhs.nanosecondsValue &* Int64(rhs))
-  }
-
-  public static func * <T: BinaryInteger>(lhs: T, rhs: CompatDuration) -> CompatDuration {
-    rhs * lhs
   }
 
   public static func * (lhs: CompatDuration, rhs: Double) -> CompatDuration {
