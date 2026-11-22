@@ -75,6 +75,8 @@ export const UserSettingsGeneralSchema = z.object({
       timeZone: PrivacyRuleSchema.optional(),
       /** Who sees Focus status. Absent means nobody. */
       focusStatus: PrivacyRuleSchema.optional(),
+      /** IANA time zone the user picked. Absent means automatic, from their Apple devices. */
+      manualTimeZone: z.string().max(64).optional(),
     })
     .optional()
     .default(defaultPrivacySettings),

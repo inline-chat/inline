@@ -14,6 +14,8 @@ export type PrivacyPatch = {
   transcribeVoiceMessages?: boolean
   timeZone?: PrivacyRuleInput
   focusStatus?: PrivacyRuleInput
+  /** A time zone pins it; empty returns to automatic. */
+  manualTimeZone?: string
 }
 
 /** Whether `viewerId` may see what `rule` protects for `ownerId`. */
@@ -83,6 +85,7 @@ export const mergePrivacyPatch = (
   }
 
   const focusStatus = patch?.focusStatus ? normalizePrivacyRule(patch.focusStatus, ownerId) : base.focusStatus
+  const manualTimeZone = patch?.manualTimeZone === undefined ? base.manualTimeZone : patch.manualTimeZone || undefined
 
   return {
     appearInGlobalSearch: patch?.appearInGlobalSearch ?? base.appearInGlobalSearch,
@@ -91,5 +94,6 @@ export const mergePrivacyPatch = (
     // Keep legacy rows rule-free until the rule actually changes.
     ...(base.timeZone || timeZone !== currentRule ? { timeZone } : {}),
     ...(focusStatus ? { focusStatus } : {}),
+    ...(manualTimeZone ? { manualTimeZone } : {}),
   }
 }

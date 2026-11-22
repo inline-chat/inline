@@ -42,6 +42,7 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
         general?.privacy.transcribeVoiceMessages ?? defaultPrivacySettings.transcribeVoiceMessages,
       timeZone: encodePrivacyRule(timeZoneRule),
       focusStatus: encodePrivacyRule(effectiveFocusRule(general?.privacy)),
+      manualTimeZone: general?.privacy.manualTimeZone ?? "",
     },
     composeSettings: {
       replacePastedLinksWithTitles:
