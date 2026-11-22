@@ -10985,6 +10985,15 @@ export interface PrivacySettings {
      * @generated from protobuf field: optional bool transcribe_voice_messages = 5;
      */
     transcribeVoiceMessages?: boolean;
+    /**
+     * An IANA time zone the user picked instead of their device's. Empty means
+     * automatic: the time zone follows the user's Apple devices. Absent leaves
+     * the current choice unchanged on save, and from a server means it does not
+     * support a manual time zone.
+     *
+     * @generated from protobuf field: optional string manual_time_zone = 6;
+     */
+    manualTimeZone?: string;
 }
 /**
  * Who can see one piece of the user's information. The user always sees their own.
@@ -46327,7 +46336,8 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
             { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule },
             { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule },
-            { no: 5, name: "transcribe_voice_messages", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 5, name: "transcribe_voice_messages", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6, name: "manual_time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<PrivacySettings>): PrivacySettings {
@@ -46356,6 +46366,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
                 case /* optional bool transcribe_voice_messages */ 5:
                     message.transcribeVoiceMessages = reader.bool();
                     break;
+                case /* optional string manual_time_zone */ 6:
+                    message.manualTimeZone = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -46383,6 +46396,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
         /* optional bool transcribe_voice_messages = 5; */
         if (message.transcribeVoiceMessages !== undefined)
             writer.tag(5, WireType.Varint).bool(message.transcribeVoiceMessages);
+        /* optional string manual_time_zone = 6; */
+        if (message.manualTimeZone !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.manualTimeZone);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
