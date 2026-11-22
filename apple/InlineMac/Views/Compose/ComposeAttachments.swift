@@ -687,7 +687,7 @@ final class SendAsOriginalOption: NSObject, NSMenuItemValidation {
 
   var onChange: (() -> Void)?
 
-  /// The untouched file is gone (the system cleared temporary files), so there's nothing to switch to.
+  /// No untouched file was kept (a paste) or the system cleared it, so there's nothing to switch to.
   private var isMissingOriginal = false
 
   let menuItem = NSMenuItem(title: "Send as Original", action: #selector(toggle), keyEquivalent: "")
@@ -710,7 +710,7 @@ final class SendAsOriginalOption: NSObject, NSMenuItemValidation {
   /// The original's size and whether it carries a location, or nil when it is gone.
   func setSummary(_ summary: OriginalMediaSummary?) {
     isMissingOriginal = summary == nil
-    menuItem.subtitle = summary?.detailText ?? "The original is no longer available"
+    menuItem.subtitle = summary?.detailText ?? "No original file kept"
   }
 
   @objc private func toggle() {
