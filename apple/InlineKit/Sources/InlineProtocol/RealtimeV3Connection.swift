@@ -348,7 +348,7 @@ public actor InlineProtocolV3Connection {
 
   private struct PendingRequest {
     let requestToken: UUID
-    let sequence: Int32
+    var sequence: Int32
     let body: [UInt8]
     let completion: PreparedCompletion
     let timeoutTask: Task<Void, Never>?
@@ -357,7 +357,7 @@ public actor InlineProtocolV3Connection {
 
   private struct PendingProbe {
     var requestMessageID: Int64
-    let sequence: Int32
+    var sequence: Int32
     let body: [UInt8]
     let continuation: CheckedContinuation<Void, any Error>
     let timeoutTask: Task<Void, Never>?
@@ -389,6 +389,7 @@ public actor InlineProtocolV3Connection {
   private let sessionID: Int64
   private var authorizationValue: InlineProtocolAuthorization
   private var lastMessageID: Int64 = 0
+  private let serverClock: InlineProtocolServerClockOffset
   private var contentCount: Int32 = 0
   private var serverUnixMilliseconds: Int64
   private var monotonicAnchor: TimeInterval
@@ -411,8 +412,8 @@ public actor InlineProtocolV3Connection {
     carrier: InlineObfuscatedClientCarrier,
     sessionID: Int64,
     authorization: InlineProtocolAuthorization,
-    serverTime: Int32,
-    lastMessageID: Int64 = 0
+    serverUnixMilliseconds: Int64,
+    serverClock: InlineProtocolServerClockOffset
   ) {
     self.session = session
     self.task = task
@@ -422,8 +423,8 @@ public actor InlineProtocolV3Connection {
     }
     self.sessionID = sessionID
     authorizationValue = authorization
-    self.lastMessageID = lastMessageID
-    serverUnixMilliseconds = Int64(serverTime) * 1_000
+    self.serverUnixMilliseconds = serverUnixMilliseconds
+    self.serverClock = serverClock
     monotonicAnchor = ProcessInfo.processInfo.systemUptime
   }
 
@@ -448,12 +449,16 @@ public actor InlineProtocolV3Connection {
         task.resume()
         try await task.send(.data(Data(carrier.wireHeader)))
         let sessionID = readInt64(try secureRandom(count: 8), at: 0)
+        let serverClock = InlineProtocolServerClockOffset.shared
 
         if let authorization = options.authorization {
           try Task.checkCancellation()
+          // A seed, not a sample: the first authenticated server message replaces it.
           let connection = InlineProtocolV3Connection(
             session: session, task: task, carrier: carrier, sessionID: sessionID,
-            authorization: authorization, serverTime: Int32(Date().timeIntervalSince1970)
+            authorization: authorization,
+            serverUnixMilliseconds: serverClock.estimatedServerUnixMilliseconds(),
+            serverClock: serverClock
           )
           await connection.startReceiving()
           return connection
@@ -466,7 +471,11 @@ public actor InlineProtocolV3Connection {
         var lastID: Int64 = 0
         while true {
           try Task.checkCancellation()
-          let messageID = try nextSystemMessageID(last: &lastID)
+          // The handshake uses the raw device clock: the server does not judge handshake IDs
+          // by time, and an older server that does must not see a stale learned offset.
+          let messageID = try nextSystemMessageID(
+            last: &lastID, milliseconds: InlineProtocolServerClockOffset.wallClockMilliseconds()
+          )
           try await sendPacket(
             encodeUnencrypted(messageID: messageID, body: request),
             carrier: carrier,
@@ -478,9 +487,13 @@ public actor InlineProtocolV3Connection {
           case let .request(next): request = next
           case let .established(authorization, serverTime):
             try Task.checkCancellation()
+            serverClock.record(serverUnixMilliseconds: Int64(serverTime) * 1_000)
+            // Encrypted IDs start fresh: the handshake IDs came from the device's estimate,
+            // and carrying them over would hold every session ID ahead of a fast clock.
             let connection = InlineProtocolV3Connection(
               session: session, task: task, carrier: carrier, sessionID: sessionID,
-              authorization: authorization, serverTime: serverTime, lastMessageID: lastID
+              authorization: authorization, serverUnixMilliseconds: Int64(serverTime) * 1_000,
+              serverClock: serverClock
             )
             await connection.startReceiving()
             return connection
@@ -1015,6 +1028,8 @@ public actor InlineProtocolV3Connection {
       return
     }
     probe.requestMessageID = try nextMessageID()
+    // A fresh sequence number keeps the resend in order with anything accepted since the original.
+    probe.sequence = nextSequence(content: false)
     pendingProbes[pingID] = probe
     do {
       try await sendEncrypted(
@@ -1029,15 +1044,18 @@ public actor InlineProtocolV3Connection {
   }
 
   private func recoverBadRequest(
-    _ pending: PendingRequest,
+    _ rejected: PendingRequest,
     fields: InlineEncryptedRecordFields,
     constructor: UInt32
   ) async throws {
     guard try recoverBadMessageState(fields, constructor: constructor) else {
-      pending.timeoutTask?.cancel()
-      deliver(pending, .failure(InlineProtocolV3ConnectionError.protocolFailure))
+      rejected.timeoutTask?.cancel()
+      deliver(rejected, .failure(InlineProtocolV3ConnectionError.protocolFailure))
       return
     }
+    var pending = rejected
+    // A fresh sequence number keeps the resend in order with anything accepted since the original.
+    pending.sequence = nextSequence(content: true)
     let replacementID = try nextMessageID()
     pendingRequests[replacementID] = pending
     do {
@@ -1056,6 +1074,15 @@ public actor InlineProtocolV3Connection {
     let code = readInt32(fields.body, at: 16)
     if code == 16 || code == 17 {
       sample(messageID: fields.messageID)
+      // 17: this clock ran ahead, and the server stored none of the IDs it rejected. If the
+      // last ID is past the server window (server time + 30 s), fall back to the start of the
+      // window's last second: new IDs then stay inside it and above anything it could have
+      // accepted. IDs already inside it, such as earlier resends, are kept. Without this a
+      // clock that ran ahead would loop on 17 forever.
+      if code == 17 {
+        let edge = ((fields.messageID >> 32) + 30) << 32
+        if lastMessageID >= edge + (1 << 32) { lastMessageID = edge }
+      }
     } else if code == 48, constructor == Self.badServerSalt, fields.body.count >= 28 {
       authorizationValue.serverSalt = readInt64(fields.body, at: 20)
     } else {
@@ -1426,6 +1453,7 @@ public actor InlineProtocolV3Connection {
   private func sample(messageID: Int64) {
     serverUnixMilliseconds = (messageID >> 32) * 1_000
     monotonicAnchor = ProcessInfo.processInfo.systemUptime
+    serverClock.record(serverUnixMilliseconds: serverUnixMilliseconds)
   }
 
   private static func secureRandom(count: Int) throws -> [UInt8] {
@@ -1436,8 +1464,7 @@ public actor InlineProtocolV3Connection {
     return bytes
   }
 
-  private static func nextSystemMessageID(last: inout Int64) throws -> Int64 {
-    let milliseconds = Int64(Date().timeIntervalSince1970 * 1_000)
+  private static func nextSystemMessageID(last: inout Int64, milliseconds: Int64) throws -> Int64 {
     let low = Int64(try readUInt32(secureRandom(count: 4), at: 0) & 0x3fff_ffff) << 2
     var value = ((milliseconds / 1_000) << 32) | (((milliseconds % 1_000) << 32) / 1_000) | low
     value &= ~3

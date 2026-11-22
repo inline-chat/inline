@@ -491,7 +491,9 @@ public enum InlineSecureTransport {
             validServerSalts.contains(serverSalt),
             messageID != 0,
             validDirection,
-            (nowSeconds - 300...nowSeconds + 30).contains(messageSeconds),
+            // Like MTProto, only the server holds message IDs to its clock. A client never
+            // drops a server record for its time, or it could drop the 16/17 that fixes it.
+            direction == .serverToClient || (nowSeconds - 300...nowSeconds + 30).contains(messageSeconds),
             sequenceNumber >= 0
       else { throw InlineProtocolError.invalidEncryptedRecord }
       return InlineEncryptedRecordFields(
