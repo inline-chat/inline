@@ -129,7 +129,8 @@ struct HomeView: View {
         messageBatchSize: 20,
         globalUserLimit: 20,
         globalDebounceNanoseconds: 220_000_000
-      )
+      ),
+      cloudClient: InlineApiCloudMessageSearchClient()
     )
     searchModel = model
     return model
@@ -177,7 +178,7 @@ struct HomeView: View {
     router.push(.chat(peer: result.peer))
   }
 
-  private func openSearchMessage(_ result: LocalMessageSearchResult) {
+  private func openSearchMessage(_ result: InlineSearchMessageResult) {
     router.push(.chat(peer: result.peer))
   }
 

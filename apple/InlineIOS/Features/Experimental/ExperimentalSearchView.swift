@@ -195,7 +195,8 @@ struct ExperimentalSearchView: View {
         messageBatchSize: 20,
         globalUserLimit: 20,
         globalDebounceNanoseconds: 220_000_000
-      )
+      ),
+      cloudClient: InlineApiCloudMessageSearchClient()
     )
     searchModel = model
     return model
@@ -215,7 +216,7 @@ struct ExperimentalSearchView: View {
     openSearchDestination(result.peer)
   }
 
-  private func openSearchMessage(_ result: LocalMessageSearchResult) {
+  private func openSearchMessage(_ result: InlineSearchMessageResult) {
     openSearchDestination(
       result.peer,
       destination: .chatMessage(peer: result.peer, messageID: result.messageId)

@@ -8,7 +8,7 @@ import SwiftUI
 struct InlineSearchResultsList: View {
   let model: InlineSearchViewModel
   let openChat: (InlineSearchChatResult) -> Void
-  let openMessage: (LocalMessageSearchResult) -> Void
+  let openMessage: (InlineSearchMessageResult) -> Void
   let openGlobalUser: (InlineSearchGlobalUserResult) -> Void
 
   @EnvironmentObject private var dataManager: DataManager
@@ -37,7 +37,7 @@ struct InlineSearchResultsList: View {
 
         ForEach(model.messages) { result in
           InlineSearchMessageRow(result: result) {
-            openMessage(result)
+            open(result)
           }
           .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             addToInboxButton(peer: result.peer)
@@ -56,6 +56,13 @@ struct InlineSearchResultsList: View {
             Spacer()
           }
         }
+
+        if let note = messagesNote {
+          Text(note)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .listRowSeparator(.hidden)
+        }
       }
 
       if model.globalUsers.isEmpty == false {
@@ -70,6 +77,33 @@ struct InlineSearchResultsList: View {
     }
     .listStyle(.plain)
     .contentMargins(.bottom, 32, for: .scrollContent)
+  }
+
+  private var messagesNote: String? {
+    if model.cloudMessagesUnavailable {
+      return "Showing messages on this device."
+    }
+    if model.messagesIndexIncomplete, model.hasMoreMessages == false {
+      return "Older messages are still being indexed."
+    }
+    return nil
+  }
+
+  /// A hit can be in a chat this device never stored, such as a thread never
+  /// opened. Fetch that chat first so the chat screen has it.
+  private func open(_ result: InlineSearchMessageResult) {
+    guard result.isChatStored == false else {
+      openMessage(result)
+      return
+    }
+    Task { @MainActor in
+      do {
+        _ = try await realtimeV2.send(.getChat(peer: result.peer))
+      } catch {
+        Log.shared.error("Search: couldn't fetch the chat of a message hit", error: error)
+      }
+      openMessage(result)
+    }
   }
 
   @ViewBuilder
@@ -343,14 +377,14 @@ private struct InlineSearchChatRow: View {
 }
 
 private struct InlineSearchMessageRow: View {
-  let result: LocalMessageSearchResult
+  let result: InlineSearchMessageResult
   let action: () -> Void
 
   var body: some View {
     Button(action: action) {
       InlineSearchResultRow(
         title: result.title,
-        subtitle: result.snippet,
+        attributedSubtitle: result.highlightedSnippet,
         detail: dateTitle,
         icon: {
           messageIcon
@@ -383,7 +417,7 @@ private struct InlineSearchMessageRow: View {
   }
 
   private var dateTitle: String {
-    result.message.message.date.formatted(date: .abbreviated, time: .omitted)
+    result.dateLabel()
   }
 }
 
@@ -425,13 +459,22 @@ private struct InlineSearchGlobalUserRow: View {
 
 private struct InlineSearchResultRow<Icon: View>: View {
   let title: String
-  let subtitle: String?
+  let subtitle: AttributedString?
   var detail: String?
   @ViewBuilder let icon: () -> Icon
 
   init(
     title: String,
     subtitle: String?,
+    detail: String? = nil,
+    @ViewBuilder icon: @escaping () -> Icon
+  ) {
+    self.init(title: title, attributedSubtitle: subtitle.map(AttributedString.init), detail: detail, icon: icon)
+  }
+
+  init(
+    title: String,
+    attributedSubtitle subtitle: AttributedString?,
     detail: String? = nil,
     @ViewBuilder icon: @escaping () -> Icon
   ) {
@@ -461,7 +504,7 @@ private struct InlineSearchResultRow<Icon: View>: View {
           }
         }
 
-        if let subtitle, subtitle.isEmpty == false {
+        if let subtitle, subtitle.characters.isEmpty == false {
           Text(subtitle)
             .font(.caption)
             .foregroundStyle(.secondary)
