@@ -21,6 +21,8 @@ pub struct IsolatedAcpHarness {
     bridge_version: String,
     tools: Option<HostToolConfiguration>,
     info: RuntimeInfo,
+    /// What the agent advertised at connect; gates work before a launch.
+    session_ops: crate::AcpSessionOps,
     epochs: Mutex<HashMap<String, LiveEpoch>>,
     opening: tokio::sync::Mutex<()>,
     catalog_epoch: tokio::sync::Mutex<Option<(PathBuf, Arc<AcpHarness>)>>,
@@ -47,12 +49,14 @@ impl IsolatedAcpHarness {
         let bridge_version = bridge_version.into();
         let epoch = launch(&descriptor, &bridge_version, None, &[]).await?;
         let info = epoch.describe();
+        let session_ops = epoch.session_ops();
         epoch.shutdown().await?;
         Ok(Self {
             descriptor,
             bridge_version,
             tools,
             info,
+            session_ops,
             epochs: Mutex::new(HashMap::new()),
             opening: tokio::sync::Mutex::new(()),
             catalog_epoch: tokio::sync::Mutex::new(None),
@@ -346,8 +350,42 @@ impl HarnessDriver for IsolatedAcpHarness {
         })
     }
 
-    fn sessions<'a>(&'a self, _query: SessionQuery) -> DriverFuture<'a, SessionPage> {
-        Box::pin(async { Ok(SessionPage::default()) })
+    fn sessions<'a>(&'a self, query: SessionQuery) -> DriverFuture<'a, SessionPage> {
+        Box::pin(async move {
+            if !self.session_ops.list {
+                return Ok(SessionPage::default());
+            }
+            if self.stopped.load(Ordering::SeqCst) {
+                return Err(DriverError::Unavailable("ACP harness stopped".into()));
+            }
+            // Listing reads the agent's store, so the tool-free picker probe
+            // can answer. Without one, a short-lived tool-free process does.
+            let probe = self
+                .catalog_epoch
+                .lock()
+                .await
+                .as_ref()
+                .map(|(_, epoch)| epoch.clone())
+                .filter(|epoch| {
+                    epoch
+                        .process_status()
+                        .is_none_or(|status| !status.is_finished())
+                });
+            let mut page = match probe {
+                Some(epoch) => epoch.sessions(query).await?,
+                None => {
+                    let epoch = launch(&self.descriptor, &self.bridge_version, None, &[]).await?;
+                    let page = epoch.sessions(query).await;
+                    let _ = epoch.shutdown().await;
+                    page?
+                }
+            };
+            // Picker probes are this harness's own sessions, not the person's.
+            let probes = self.catalog_sessions.lock().unwrap();
+            page.sessions
+                .retain(|summary| !probes.values().any(|probe| probe == &summary.key.session));
+            Ok(page)
+        })
     }
 
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
@@ -357,6 +395,12 @@ impl HarnessDriver for IsolatedAcpHarness {
                 return Err(OpenError::Driver(DriverError::Unavailable(
                     "ACP harness stopped".into(),
                 )));
+            }
+            // Refuse an unadvertised fork before launching a process for it.
+            if let OpenMode::Fork { at, .. } = &spec.mode
+                && let Some(unavailable) = crate::harness::fork_unavailable(self.session_ops, at)
+            {
+                return Err(OpenError::Unavailable(unavailable));
             }
             if let OpenMode::Resume { session } = &spec.mode {
                 let held = self

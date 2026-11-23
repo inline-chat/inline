@@ -375,6 +375,7 @@ pub struct AcpDriver {
     capabilities: DriverCapabilities,
     prompt_capabilities: acp::PromptCapabilities,
     resume_mode: ResumeMode,
+    session_ops: AcpSessionOps,
     default_permission_mode: Option<Arc<str>>,
     active_turns: ActiveTurns,
     approvals: PendingApprovals,
@@ -398,6 +399,35 @@ enum ResumeMode {
     Load,
 }
 
+/// Session lifecycle methods the agent advertised in `initialize`
+/// (`agentCapabilities.sessionCapabilities`). A method that is not advertised
+/// is never sent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AcpSessionOps {
+    /// `session/list`.
+    pub list: bool,
+    /// `session/fork` (ACP unstable).
+    pub fork: bool,
+    /// `session/close`.
+    pub close: bool,
+}
+
+/// One page of `session/list`, with unusable entries dropped.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AcpSessionListing {
+    pub(crate) sessions: Vec<AcpListedSession>,
+    pub(crate) next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AcpListedSession {
+    pub(crate) id: ProviderSessionId,
+    pub(crate) cwd: PathBuf,
+    pub(crate) title: Option<String>,
+    /// ISO 8601, as the agent sent it.
+    pub(crate) updated_at: Option<String>,
+}
+
 impl std::fmt::Debug for AcpDriver {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -413,9 +443,17 @@ impl AcpDriver {
         self.agent_version.as_deref()
     }
 
+    /// Which of `session/list`, `session/fork` and `session/close` the agent advertised.
+    pub fn session_ops(&self) -> AcpSessionOps {
+        self.session_ops
+    }
+
     pub(crate) fn disable_durable_session_resume(&mut self) {
         self.resume_mode = ResumeMode::Unsupported;
         self.capabilities.resume_session = false;
+        // A session that cannot be reopened is not worth listing or forking.
+        self.session_ops.list = false;
+        self.session_ops.fork = false;
     }
 
     pub(crate) fn set_stdio_mcp_servers(
@@ -590,6 +628,7 @@ impl AcpDriver {
             )));
         }
         let resume_mode = resume_mode(&response.agent_capabilities);
+        let session_ops = session_ops(&response.agent_capabilities);
         let capabilities = map_capabilities(&response.agent_capabilities);
         let prompt_capabilities = response.agent_capabilities.prompt_capabilities.clone();
         log::trace!(
@@ -610,6 +649,7 @@ impl AcpDriver {
             capabilities,
             prompt_capabilities,
             resume_mode,
+            session_ops,
             default_permission_mode: None,
             active_turns,
             approvals,
@@ -852,6 +892,111 @@ impl AcpDriver {
         {
             modes.current_mode_id = mode_id;
         }
+        Ok(())
+    }
+
+    /// One page of the agent's sessions (`session/list`), newest first as the
+    /// agent orders them. Read-only: a timeout never ends the connection.
+    pub(crate) async fn list_sessions(
+        &self,
+        cwd: Option<PathBuf>,
+        cursor: Option<String>,
+    ) -> DriverResult<AcpSessionListing> {
+        if !self.session_ops.list {
+            return Err(DriverError::Unsupported("ACP session/list"));
+        }
+        let response = request_with_timeout(
+            "session/list",
+            &self.auth_methods,
+            self.connection
+                .send_request(acp::ListSessionsRequest::new().cwd(cwd).cursor(cursor))
+                .block_task(),
+        )
+        .await?;
+        let sessions = response
+            .sessions
+            .into_iter()
+            .filter_map(|info| {
+                let id = info.session_id.to_string();
+                validate_provider_session_id(&id).ok()?;
+                Some(AcpListedSession {
+                    id: ProviderSessionId::new(id).ok()?,
+                    cwd: info.cwd,
+                    title: info.title.filter(|title| !title.trim().is_empty()),
+                    updated_at: info.updated_at,
+                })
+            })
+            .collect();
+        Ok(AcpSessionListing {
+            sessions,
+            next_cursor: response.next_cursor,
+        })
+    }
+
+    /// Copies `source` into a new session (`session/fork`) rooted at `cwd`,
+    /// with this connection's MCP servers, and records it like a new session.
+    pub(crate) async fn fork_session(
+        &self,
+        source: &ProviderSessionId,
+        cwd: PathBuf,
+    ) -> DriverResult<ProviderSessionId> {
+        if !self.session_ops.fork {
+            return Err(DriverError::Unsupported("ACP session/fork"));
+        }
+        validate_provider_session_id(source.as_str())?;
+        let attachment = self.session_mcp_attachment()?;
+        let request = acp::ForkSessionRequest::new(source.to_string(), cwd.clone())
+            .mcp_servers(self.session_servers(attachment.as_ref()));
+        let response = mutating_request_with_timeout(
+            &self.lifecycle,
+            REQUEST_TIMEOUT,
+            "session/fork",
+            self.connection.send_request(request).block_task(),
+            |error| acp_resume_error(error, &self.auth_methods),
+        )
+        .await?;
+        let session_id = response.session_id.to_string();
+        validate_provider_session_id(&session_id)?;
+        if session_id == source.as_str() {
+            return Err(DriverError::Protocol(
+                "ACP agent returned the source session as its fork".to_string(),
+            ));
+        }
+        let forked = ProviderSessionId::new(session_id.clone())
+            .map_err(|error| DriverError::Protocol(error.to_string()))?;
+        if let Some(attachment) = attachment {
+            attachment.bind(forked.clone());
+        }
+        // A fork continues the source's conversation and permission mode.
+        self.record_session(
+            session_id,
+            cwd,
+            response.config_options.unwrap_or_default(),
+            response.modes,
+            false,
+        );
+        Ok(forked)
+    }
+
+    /// Asks the agent to free a session (`session/close`), then forgets it
+    /// here. A failure leaves the session recorded: its state is unknown.
+    pub(crate) async fn close_session(&self, session: &ProviderSessionId) -> DriverResult<()> {
+        if !self.session_ops.close {
+            return Err(DriverError::Unsupported("ACP session/close"));
+        }
+        request_with_timeout(
+            "session/close",
+            &self.auth_methods,
+            self.connection
+                .send_request(acp::CloseSessionRequest::new(session.to_string()))
+                .block_task(),
+        )
+        .await?;
+        cancel_pending_approvals(&self.approvals, Some(session.as_str()));
+        cancel_pending_elicitations(&self.elicitations, Some(session.as_str()));
+        let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        sessions.sessions.remove(session.as_str());
+        sessions.early_commands.remove(session.as_str());
         Ok(())
     }
 
@@ -1469,6 +1614,15 @@ fn map_capabilities(capabilities: &acp::AgentCapabilities) -> DriverCapabilities
         // Stdio MCP is mandatory for stable ACP v1. Inline attaches the same
         // bridge-owned catalog used by native drivers at session setup.
         host_tools: inline_agent_bridge::HostToolTransport::Mcp,
+    }
+}
+
+fn session_ops(capabilities: &acp::AgentCapabilities) -> AcpSessionOps {
+    let session = &capabilities.session_capabilities;
+    AcpSessionOps {
+        list: session.list.is_some(),
+        fork: session.fork.is_some(),
+        close: session.close.is_some(),
     }
 }
 
@@ -2600,6 +2754,43 @@ mod tests {
         ));
         assert!(advertised.resume_session);
         assert!(map_capabilities(&acp::AgentCapabilities::new().load_session(true)).resume_session);
+
+        // Resume and load do not imply any other session method.
+        assert_eq!(
+            session_ops(
+                &acp::AgentCapabilities::new()
+                    .load_session(true)
+                    .session_capabilities(
+                        acp::SessionCapabilities::new()
+                            .resume(acp::SessionResumeCapabilities::new()),
+                    )
+            ),
+            AcpSessionOps::default()
+        );
+        assert_eq!(
+            session_ops(&acp::AgentCapabilities::new().session_capabilities(
+                acp::SessionCapabilities::new().close(acp::SessionCloseCapabilities::new()),
+            )),
+            AcpSessionOps {
+                list: false,
+                fork: false,
+                close: true,
+            }
+        );
+        assert_eq!(
+            session_ops(
+                &acp::AgentCapabilities::new().session_capabilities(
+                    acp::SessionCapabilities::new()
+                        .list(acp::SessionListCapabilities::new())
+                        .fork(acp::SessionForkCapabilities::new())
+                )
+            ),
+            AcpSessionOps {
+                list: true,
+                fork: true,
+                close: false,
+            }
+        );
     }
 
     #[tokio::test]

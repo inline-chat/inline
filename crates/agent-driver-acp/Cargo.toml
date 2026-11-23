@@ -13,8 +13,9 @@ keywords = ["inline", "agent", "acp", "coding-agent"]
 categories = ["development-tools"]
 
 [dependencies]
-agent-client-protocol = { workspace = true, features = ["unstable_elicitation"] }
+agent-client-protocol = { workspace = true, features = ["unstable_elicitation", "unstable_session_fork"] }
 base64 = "0.22.1"
+chrono = "0.4"
 futures-util.workspace = true
 inline-agent-bridge = { version = "0.7.26", path = "../agent-bridge" }
 log.workspace = true
