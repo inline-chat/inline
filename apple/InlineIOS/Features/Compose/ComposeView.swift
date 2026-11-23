@@ -1185,6 +1185,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func sendMessage(sendMode: MessageSendMode? = nil) {
+    commitKeyboardInput()
     textView.resetPastedLinks()
     guard let peerId else { return }
     let state = ChatState.shared.getState(peer: peerId)
@@ -1572,6 +1573,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.showPlaceholder(true)
     updateSendButtonVisibility(syncVoiceAvailability: false)
     updateHeight(animated: false)
+  }
+
+  /// Commits what the keyboard still holds before the text is read: marked text (Chinese or Japanese being
+  /// composed) and a pending autocorrection, which a tap on send otherwise left out. Moving the selection away and
+  /// back makes the keyboard accept its suggestion, as Telegram does before a send.
+  private func commitKeyboardInput() {
+    guard textView.isFirstResponder else { return }
+    let range = textView.selectedRange
+    var nudged = range
+    if nudged.location > 0 { nudged.location -= 1 }
+    textView.unmarkText()
+    textView.selectedRange = nudged
+    textView.selectedRange = range
   }
 
   private func attributedStringForSend() -> NSAttributedString {
