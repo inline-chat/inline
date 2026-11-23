@@ -11,22 +11,14 @@ import UIKit
 import AppKit
 #endif
 
-struct AutomaticReadDemand: Sendable, Equatable {
-  let maxID: Int64
-  let highestVisibleIncomingID: Int64
-  let unreadMark: Bool
-}
-
+/// A read of what was on screen. Like Telegram, everything others sent that is visible is read,
+/// service rows included, and a read may cross history this device has not loaded. The count can
+/// only drop by the messages stored here, so a read across such a gap asks the server for the
+/// chat's count once it is pushed (Telegram's push-then-validate).
 struct AutomaticReadAdmission: Sendable, Equatable {
-  let currentReadMaxID: Int64
-  let certifiedMaxID: Int64
-  let unreadMark: Bool
-
-  init(currentReadMaxID: Int64, certifiedMaxID: Int64, unreadMark: Bool = false) {
-    self.currentReadMaxID = currentReadMaxID
-    self.certifiedMaxID = certifiedMaxID
-    self.unreadMark = unreadMark
-  }
+  let maxID: Int64
+  /// The range read has history not stored here.
+  let crossesGap: Bool
 
   static func resolve(
     _ db: Database,
@@ -41,46 +33,22 @@ struct AutomaticReadAdmission: Sendable, Equatable {
             .filter(Message.Columns.messageId == highestVisibleIncomingID)
             .fetchOne(db),
           Self.matches(candidate: candidate, peerId: peerId),
-          candidate.out != true,
-          !candidate.isServiceMessage
+          candidate.out != true
     else { return nil }
 
     let currentReadMaxID = max(0, dialog.readInboxMaxId ?? 0)
+    guard highestVisibleIncomingID > currentReadMaxID else { return nil }
     let persistedCoverage = MessageHistoryCoverageProjection(
       messages: [],
       holes: try MessageHistoryCoverageStore.holes(db, chatId: chatId),
       olderCandidateMessageID: nil,
       newerCandidateMessageID: nil
     )
-    guard let certifiedMaxID = persistedCoverage.certifiedReadMaxID(
-      after: currentReadMaxID,
-      through: highestVisibleIncomingID
-    ) else { return nil }
-
+    let wholeThrough = persistedCoverage.certifiedReadMaxID(after: currentReadMaxID, through: highestVisibleIncomingID)
     return AutomaticReadAdmission(
-      currentReadMaxID: currentReadMaxID,
-      certifiedMaxID: certifiedMaxID,
-      unreadMark: dialog.unreadMark == true
+      maxID: highestVisibleIncomingID,
+      crossesGap: wholeThrough != highestVisibleIncomingID
     )
-  }
-
-  /// Re-check a retained demand immediately before sending it. Coverage may
-  /// have been invalidated by repair, or an explicit unread intent may have
-  /// superseded the visibility event while the retry slept.
-  static func stillAdmits(
-    _ db: Database,
-    peerId: Peer,
-    chatId: Int64,
-    demand: AutomaticReadDemand
-  ) throws -> Bool {
-    guard let admission = try resolve(
-      db,
-      peerId: peerId,
-      chatId: chatId,
-      highestVisibleIncomingID: demand.highestVisibleIncomingID
-    ) else { return false }
-    return admission.certifiedMaxID >= demand.maxID
-      && admission.unreadMark == demand.unreadMark
   }
 
   private static func matches(candidate: Message, peerId: Peer) -> Bool {
@@ -138,10 +106,9 @@ public final class UnreadManager: Sendable {
     readVisible(peerId: peerId, chatId: chatId, highestVisibleIncomingID: maxId)
   }
 
-  /// Reads the visible incoming history on this device at once, through what persisted history
-  /// certifies: the cursor and count move in the dialog, so the chat, chat list, app icon and
-  /// Dock change together, and `ReadStateSync` pushes the cursor. Like Telegram's
-  /// `applyMaxReadIndexInteractively`.
+  /// Reads what is on screen on this device at once: the cursor and count move in the dialog, so
+  /// the chat, chat list, app icon and Dock change together, and `ReadStateSync` pushes the
+  /// cursor. Like Telegram's `applyMaxReadIndexInteractively`.
   public func readVisible(
     peerId: Peer,
     chatId: Int64,
@@ -155,7 +122,7 @@ public final class UnreadManager: Sendable {
     let dialogId = Dialog.getDialogId(peerId: peerId)
     Task(priority: .userInitiated) {
       do {
-        let change = try await db.dbWriter.write { db -> LocalReadChange in
+        let change = try await db.dbWriter.write { db -> (LocalReadChange, Bool) in
           try Auth.shared.handle.validateAccountMutation(mutationToken)
           // Checked inside the write, which orders it with mark-unread's own write.
           guard !self.isSuperseded(dialogId: dialogId, requestedAt: requestedAt),
@@ -165,10 +132,10 @@ public final class UnreadManager: Sendable {
                   chatId: chatId,
                   highestVisibleIncomingID: highestVisibleIncomingID
                 )
-          else { return .unchanged }
-          return try Dialog.applyLocalRead(db, peerId: peerId, through: admission.certifiedMaxID)
+          else { return (.unchanged, false) }
+          return (try Dialog.applyLocalRead(db, peerId: peerId, through: admission.maxID), admission.crossesGap)
         }
-        afterLocalRead(change, peerId: peerId, chatId: chatId, account: mutationToken)
+        afterLocalRead(change.0, peerId: peerId, chatId: chatId, account: mutationToken, validatesCount: change.1)
       } catch is CancellationError {
         return
       } catch {
@@ -242,13 +209,14 @@ public final class UnreadManager: Sendable {
     _ change: LocalReadChange,
     peerId: Peer,
     chatId: Int64,
-    account: AuthAccountMutationToken
+    account: AuthAccountMutationToken,
+    validatesCount: Bool = false
   ) {
     switch change {
     case .unchanged:
       return
     case let .advanced(throughId):
-      ReadStateSync.shared.schedule(peerId)
+      ReadStateSync.shared.schedule(peerId, validatingCount: validatesCount)
       NotificationCleanup.removeNotifications(
         threadId: "chat_\(chatId)",
         upToMessageId: throughId,

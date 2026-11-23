@@ -919,11 +919,14 @@ public extension Message {
     return contentPayload.countsAsUnread
   }
 
-  /// Whether this message adds to the dialog's unread count. Mirrors the server's count (an
-  /// incoming message that counts as unread and has no system payload), so a local count raised
-  /// by a live message is one the server's count agrees with.
+  /// Whether this message adds to the dialog's unread count, as the server counts it: an incoming
+  /// message that counts as unread. A service message counts only when the server says so
+  /// explicitly (a pin does, a thread backlink does not); one cached before service messages
+  /// counted carries no flag and stays quiet, as the server's backfill left it.
   var countsTowardUnread: Bool {
-    out != true && countsAsUnread && contentPayload?.hasServiceMessage != true
+    guard out != true else { return false }
+    guard let contentPayload, contentPayload.hasServiceMessage else { return countsAsUnread }
+    return contentPayload.hasCountsAsUnread && contentPayload.countsAsUnread
   }
 
   /// Stored messages after `readInboxMaxId` (through `maxId`) that count toward unread, for a

@@ -77,82 +77,41 @@ struct AutomaticReadFrontierTests {
     #expect(!markAllInput.hasMaxID)
   }
 
-  @Test("admission revalidates persisted holes instead of stale UI coverage")
-  func persistedAdmissionCapsAtCurrentHole() throws {
+  @Test("a read of what was on screen crosses unloaded history and flags it for the server's count")
+  func admissionCrossesGaps() throws {
     let queue = try makeDatabase()
     try queue.write { (db: Database) throws in
       try seedThread(db, readMaxID: 10)
       try seedMessage(db, messageID: 50)
-      try MessageHistoryHole(chatId: testChatID, lowerId: 21, upperId: 29).insert(db)
+      let peer = InlineKit.Peer.thread(id: testChatID)
+      #expect(try AutomaticReadAdmission.resolve(db, peerId: peer, chatId: testChatID, highestVisibleIncomingID: 50)
+        == AutomaticReadAdmission(maxID: 50, crossesGap: false))
 
-      let admission = try AutomaticReadAdmission.resolve(
-        db,
-        peerId: .thread(id: testChatID),
-        chatId: testChatID,
-        highestVisibleIncomingID: 50
-      )
-      #expect(admission == AutomaticReadAdmission(currentReadMaxID: 10, certifiedMaxID: 20))
+      try MessageHistoryHole(chatId: testChatID, lowerId: 21, upperId: 29).insert(db)
+      #expect(try AutomaticReadAdmission.resolve(db, peerId: peer, chatId: testChatID, highestVisibleIncomingID: 50)
+        == AutomaticReadAdmission(maxID: 50, crossesGap: true))
     }
   }
 
-  @Test("admission rejects missing, outgoing, service, and wrong-peer candidates")
-  func admissionRejectsUntrustedCandidates() throws {
+  @Test("admission reads service rows and rejects missing, outgoing, already-read and wrong-peer candidates")
+  func admissionCandidates() throws {
     let queue = try makeDatabase()
     try queue.write { (db: Database) throws in
       try seedThread(db, readMaxID: 10)
+      try seedMessage(db, messageID: 5)
       try seedMessage(db, messageID: 20, out: true)
       try seedMessage(db, messageID: 30, service: true)
       try seedMessage(db, messageID: 40)
 
-      let peer = InlineKit.Peer.thread(id: testChatID)
-      #expect(try AutomaticReadAdmission.resolve(
-        db,
-        peerId: peer,
-        chatId: testChatID,
-        highestVisibleIncomingID: 999
-      ) == nil)
-      #expect(try AutomaticReadAdmission.resolve(
-        db,
-        peerId: peer,
-        chatId: testChatID,
-        highestVisibleIncomingID: 20
-      ) == nil)
-      #expect(try AutomaticReadAdmission.resolve(
-        db,
-        peerId: peer,
-        chatId: testChatID,
-        highestVisibleIncomingID: 30
-      ) == nil)
-      #expect(try AutomaticReadAdmission.resolve(
-        db,
-        peerId: .user(id: testSenderID),
-        chatId: testChatID,
-        highestVisibleIncomingID: 40
-      ) == nil)
-      #expect(try AutomaticReadAdmission.resolve(
-        db,
-        peerId: peer,
-        chatId: testChatID,
-        highestVisibleIncomingID: -1
-      ) == nil)
-    }
-  }
-
-  @Test("retained reads lose admission after coverage invalidation or a later unread intent")
-  func retainedAdmissionRechecksCurrentProjection() throws {
-    let queue = try makeDatabase()
-    try queue.write { (db: Database) throws in
-      try seedThread(db, readMaxID: 10)
-      try seedMessage(db, messageID: 50)
-      let demand = AutomaticReadDemand(maxID: 50, highestVisibleIncomingID: 50, unreadMark: false)
-      let peer = InlineKit.Peer.thread(id: testChatID)
-      #expect(try AutomaticReadAdmission.stillAdmits(db, peerId: peer, chatId: testChatID, demand: demand))
-
-      try MessageHistoryHole(chatId: testChatID, lowerId: 21, upperId: 29).insert(db)
-      #expect(try !AutomaticReadAdmission.stillAdmits(db, peerId: peer, chatId: testChatID, demand: demand))
-      try MessageHistoryCoverageStore.subtract(db, chatId: testChatID, lowerId: 21, upperId: 29)
-      try markUnreadUpdate(true).apply(db)
-      #expect(try !AutomaticReadAdmission.stillAdmits(db, peerId: peer, chatId: testChatID, demand: demand))
+      func resolve(_ id: Int64, _ peer: InlineKit.Peer = .thread(id: testChatID)) throws -> AutomaticReadAdmission? {
+        try AutomaticReadAdmission.resolve(db, peerId: peer, chatId: testChatID, highestVisibleIncomingID: id)
+      }
+      #expect(try resolve(999) == nil)
+      #expect(try resolve(20) == nil)
+      #expect(try resolve(5) == nil)
+      #expect(try resolve(-1) == nil)
+      #expect(try resolve(40, .user(id: testSenderID)) == nil)
+      #expect(try resolve(30)?.maxID == 30)
     }
   }
 

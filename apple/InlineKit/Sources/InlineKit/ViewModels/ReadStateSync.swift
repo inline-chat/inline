@@ -22,11 +22,21 @@ actor ReadStateSync {
   private let log = Log.scoped("ReadStateSync")
   private var loops: [Int64: Loop] = [:]
   private var generation = 0
+  /// Chats read across history not stored here: their count is fetched once the read is pushed.
+  private var countValidations = Set<Int64>()
 
   /// Starts pushing a chat's reads, unless that is already running: a running push re-reads the
-  /// cursor after each request.
-  nonisolated func schedule(_ peer: Peer) {
-    Task(priority: .utility) { await self.start(peer) }
+  /// cursor after each request. `validatingCount` asks the server for the chat's count afterwards,
+  /// as Telegram does after a read across a hole.
+  nonisolated func schedule(_ peer: Peer, validatingCount: Bool = false) {
+    Task(priority: .utility) {
+      if validatingCount { await self.requestCountValidation(peer) }
+      await self.start(peer)
+    }
+  }
+
+  private func requestCountValidation(_ peer: Peer) {
+    countValidations.insert(Dialog.getDialogId(peerId: peer))
   }
 
   /// Pushes every read the server has not got, after a relaunch or a reconnect.
@@ -85,7 +95,19 @@ actor ReadStateSync {
         log.error("Failed to read a pending read", error: error)
         return
       }
-      guard let target, !Task.isCancelled else { return }
+      guard !Task.isCancelled else { return }
+      guard let target else {
+        // Pushed. A read across a gap lowered the count only by the messages stored here; the
+        // server's dialog at this same cursor has the real count (`saveFull` takes it).
+        if countValidations.remove(dialogId) != nil {
+          do {
+            _ = try await Api.realtime.send(.getChat(peer: peer), expectedAccount: account)
+          } catch {
+            log.error("Failed to validate a chat's unread count", error: error)
+          }
+        }
+        return
+      }
 
       do {
         _ = try await Api.realtime.send(.readMessages(peerId: peer, maxId: target), expectedAccount: account)

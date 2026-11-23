@@ -31,19 +31,32 @@ struct UnreadReplayGuardTests {
     }
   }
 
-  @Test("an incoming service message does not raise unread, like the server count")
-  func serviceMessageDoesNotIncrementUnread() throws {
+  @Test("an incoming service message raises unread only when the server says it counts")
+  func serviceMessageCountsByServerFlag() throws {
     let dbQueue = try makeInMemoryDB()
     try dbQueue.write { (db: Database) throws in
       try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
-      var update = makeNewMessageUpdate(messageId: 21)
-      update.message.serviceMessage.pinnedMessage = .with { $0.messageID = 1 }
-      try update.apply(db, publishChanges: false, suppressNotifications: true)
+      // No flag: sent before service messages counted, or quiet (a thread backlink).
+      var unflagged = makeNewMessageUpdate(messageId: 21)
+      unflagged.message.serviceMessage.pinnedMessage = .with { $0.messageID = 1 }
+      try unflagged.apply(db, publishChanges: false, suppressNotifications: true)
       #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
       #expect(try Chat.fetchOne(db, key: chatId)?.lastMsgId == 21)
 
-      try makeNewMessageUpdate(messageId: 22).apply(db, publishChanges: false, suppressNotifications: true)
+      var quiet = makeNewMessageUpdate(messageId: 22)
+      quiet.message.serviceMessage.threadBacklink = .init()
+      quiet.message.countsAsUnread = false
+      try quiet.apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
+
+      var pin = makeNewMessageUpdate(messageId: 23)
+      pin.message.serviceMessage.pinnedMessage = .with { $0.messageID = 2 }
+      pin.message.countsAsUnread = true
+      try pin.apply(db, publishChanges: false, suppressNotifications: true)
       #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 1)
+
+      try makeNewMessageUpdate(messageId: 24).apply(db, publishChanges: false, suppressNotifications: true)
+      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 2)
     }
   }
 
