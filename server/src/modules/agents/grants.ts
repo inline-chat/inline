@@ -40,7 +40,8 @@ const MAX_IMPORT_USERS = 256
 const nextRevision = () => sql`nextval('agent_grant_revision')`
 
 /** Serializes every grant write for one bot, so the import's "no rows yet" check never races an edit. */
-async function lockBotGrants(tx: Transaction, botUserId: number): Promise<void> {
+/** Serializes grant writes for one bot until the transaction ends. */
+export async function lockBotGrants(tx: Transaction, botUserId: number): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agent_grants'), ${botUserId})`)
 }
 
@@ -54,6 +55,8 @@ export const grantableOperations = [
 /** Operations a bot may grant on itself, as the bridge's /allowlist does. */
 const botGrantableMask = maskOf([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER])
 const importedMask = maskOf([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER])
+/** What the apps grant when someone shares a bot with a person: message it and steer its work. */
+export const sharedGrantMask = importedMask
 
 function bit(operation: AgentGrantOperation): number {
   return 1 << operation
@@ -239,7 +242,7 @@ export async function grantsRevision(botUserId: number, query: Pick<Transaction,
   return row?.revision ?? 0n
 }
 
-type GrantSubject = { kind: "user" | "space" | "group"; id: number }
+export type GrantSubject = { kind: "user" | "space" | "group"; id: number }
 
 function subjectOf(row: Pick<DbAgentGrant, "subjectUserId" | "subjectSpaceId" | "subjectGroupId">): GrantSubject {
   if (row.subjectUserId !== null) return { kind: "user", id: row.subjectUserId }
@@ -489,6 +492,69 @@ export async function importAgentGrants(
     .where(and(eq(agentGrants.botUserId, editor.bot.id), isNull(agentGrants.revokedAt)))
     .orderBy(agentGrants.id)
   return { grants: rows.map(encodeGrant), revision: await grantsRevision(editor.bot.id) }
+}
+
+// ------------------------------------------------------------
+// System writes (data tasks)
+// ------------------------------------------------------------
+
+/**
+ * Grants a reviewed data task writes inside its own transaction. Nobody chose
+ * them in an app, so `grantedBy` stays null. A subject with any grant row,
+ * revoked ones included, is left alone: the owner's earlier choice wins.
+ * Sends the same updates as `setAgentGrant` once `publish` is called after commit.
+ */
+export async function insertSystemGrants(
+  tx: Transaction,
+  bot: DbUser,
+  ownerUserId: number,
+  subjects: readonly GrantSubject[],
+  operations: number,
+): Promise<{ rows: DbAgentGrant[]; publish: () => void }> {
+  const editor: GrantEditor = { bot, ownerUserId, actorUserId: ownerUserId, actor: "owner" }
+  await lockBotGrants(tx, bot.id)
+  const rows: DbAgentGrant[] = []
+  const live: LiveGrantUpdate[] = []
+  for (const subject of subjects) {
+    if (subject.kind === "user" && (subject.id === ownerUserId || subject.id === bot.id)) continue
+    const [saved] = await tx
+      .insert(agentGrants)
+      .values({ botUserId: bot.id, ...subjectValues(subject), operations, revision: nextRevision(), grantedBy: null })
+      .onConflictDoNothing()
+      .returning()
+    if (!saved) continue
+    rows.push(saved)
+    live.push(...await enqueueGrantUpdates(tx, editor, subject, saved))
+  }
+  return { rows, publish: () => publishGrantUpdates(live) }
+}
+
+/**
+ * Revokes grants a data task wrote, inside its transaction. Only rows still
+ * active and still system-written: one the owner has since edited is theirs.
+ */
+export async function revokeSystemGrants(
+  tx: Transaction,
+  bot: DbUser,
+  ownerUserId: number,
+  grantIds: readonly bigint[],
+): Promise<{ rows: DbAgentGrant[]; publish: () => void }> {
+  if (grantIds.length === 0) return { rows: [], publish: () => {} }
+  const editor: GrantEditor = { bot, ownerUserId, actorUserId: ownerUserId, actor: "owner" }
+  await lockBotGrants(tx, bot.id)
+  const rows = await tx
+    .update(agentGrants)
+    .set({ revokedAt: new Date(), revision: nextRevision(), updatedAt: new Date() })
+    .where(and(
+      eq(agentGrants.botUserId, bot.id),
+      inArray(agentGrants.id, [...grantIds]),
+      isNull(agentGrants.revokedAt),
+      isNull(agentGrants.grantedBy),
+    ))
+    .returning()
+  const live: LiveGrantUpdate[] = []
+  for (const row of rows) live.push(...await enqueueGrantUpdates(tx, editor, subjectOf(row), row))
+  return { rows, publish: () => publishGrantUpdates(live) }
 }
 
 // ------------------------------------------------------------

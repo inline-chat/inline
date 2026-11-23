@@ -161,6 +161,27 @@ export async function updateAgentSettings(
   }
 }
 
+/**
+ * Opens or closes a bot from a reviewed data task, inside its transaction, with
+ * the updates an owner's change sends. `updatedBy` stays null: the task's
+ * ledger records the change, and the owner never chose it. The row must exist.
+ */
+export async function setOpenToEveryoneBySystem(
+  tx: Transaction,
+  botUserId: number,
+  ownerUserId: number,
+  openToEveryone: boolean,
+): Promise<{ row: DbAgentSettings; publish: () => void }> {
+  const [row] = await tx
+    .update(agentSettings)
+    .set({ openToEveryone, updatedBy: null, revision: sql`${agentSettings.revision} + 1`, updatedAt: new Date() })
+    .where(eq(agentSettings.botUserId, botUserId))
+    .returning()
+  if (!row) throw RealtimeRpcError.InternalError()
+  const live = await enqueueSettingsChange(tx, botUserId, ownerUserId, row)
+  return { row, publish: () => { for (const { userId, update } of live) RealtimeUpdates.pushToUser(userId, [update]) } }
+}
+
 /** Durable user-bucket rows for the owner, the bot and its grantees; live pushes after commit. */
 async function enqueueSettingsChange(
   tx: Transaction,
