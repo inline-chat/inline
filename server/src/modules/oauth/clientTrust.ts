@@ -11,6 +11,9 @@ import { GENERIC_VIA_AGENT, VIA_AGENTS, knownViaApp } from "@in/server/modules/m
  */
 const VERIFIED_REDIRECT_URIS = new Set([
   "https://chatgpt.com/connector_platform_oauth_redirect",
+  // Inline's published ChatGPT app. Each ChatGPT connector gets its own id in
+  // this path, so only this exact id is ours; other connector ids stay unverified.
+  "https://chatgpt.com/connector/oauth/88ba_DMdKte-",
   "https://claude.ai/api/mcp/auth_callback",
   "https://claude.com/api/mcp/auth_callback",
 ])

@@ -8,6 +8,9 @@ describe("oauthClientViaApp", () => {
   it("names hosted assistants by their verified callback, not their claimed name", () => {
     expect(oauthClientViaApp({ redirectUris: [CHATGPT], clientName: "Anything" })).toBe("chatgpt")
     expect(oauthClientViaApp({ redirectUris: [CLAUDE], clientName: null })).toBe("claude")
+    // Inline's published ChatGPT app connector sends as ChatGPT; other connectors do not.
+    expect(oauthClientViaApp({ redirectUris: ["https://chatgpt.com/connector/oauth/88ba_DMdKte-"], clientName: "ChatGPT" })).toBe("chatgpt")
+    expect(oauthClientViaApp({ redirectUris: ["https://chatgpt.com/connector/oauth/someone_else"], clientName: "ChatGPT" })).toBe("agent")
   })
 
   it("stays generic when any callback is unverified or they disagree", () => {

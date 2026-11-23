@@ -60,6 +60,8 @@ describe("OAuth consent client trust", () => {
       "https://claude.com/api/mcp/auth_callback",
       "https://ChatGPT.com/connector_platform_oauth_redirect",
       "https://chatgpt.com:443/connector_platform_oauth_redirect",
+      // Inline's published ChatGPT app connector.
+      "https://chatgpt.com/connector/oauth/88ba_DMdKte-",
     ]) {
       expect(oauthClientTrust(uri)).toMatchObject({ verified: true, loopback: false })
     }
@@ -74,6 +76,10 @@ describe("OAuth consent client trust", () => {
       "https://user@chatgpt.com/connector_platform_oauth_redirect",
       "http://chatgpt.com/connector_platform_oauth_redirect",
       "https://claude.ai/API/mcp/auth_callback",
+      // Any other ChatGPT connector belongs to whoever created it.
+      "https://chatgpt.com/connector/oauth/someone_else",
+      "https://chatgpt.com/connector/oauth/88ba_DMdKte-/extra",
+      "https://chatgpt.com/connector/oauth/88BA_DMDKTE-",
     ]) {
       expect(oauthClientTrust(uri)).toMatchObject({ verified: false, loopback: false })
     }
