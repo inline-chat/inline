@@ -83,6 +83,9 @@ struct FakeSession {
     live: Mutex<Option<TurnId>>,
     /// Interactions the session waits on, as `live_work` reports them.
     open: Mutex<Vec<inline_agent_bridge::harness::InteractionId>>,
+    /// Answers that reached the session (interaction, decision), each
+    /// claimed once as a harness does.
+    answers: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeSession {
@@ -173,6 +176,25 @@ impl Session for FakeSession {
     fn control<'a>(&'a self, op: Op) -> HarnessFuture<'a, OpOutcome, OpError> {
         if let Op::Mode { mode } = &op {
             self.modes.lock().unwrap().push(mode.as_str().to_owned());
+        }
+        if let Op::Answer {
+            interaction,
+            response,
+            ..
+        } = &op
+        {
+            let mut answers = self.answers.lock().unwrap();
+            if answers.iter().any(|(id, _)| id == interaction.as_str()) {
+                return Box::pin(async { Err(OpError::InteractionNotPending) });
+            }
+            let decision = match response {
+                inline_agent_bridge::harness::InteractionResponse::Decision {
+                    decision, ..
+                } => decision.as_str().to_owned(),
+                inline_agent_bridge::harness::InteractionResponse::Cancel => "(cancel)".to_owned(),
+                _ => "(answers)".to_owned(),
+            };
+            answers.push((interaction.as_str().to_owned(), decision));
         }
         Box::pin(async { Ok(OpOutcome::accepted()) })
     }
@@ -327,6 +349,7 @@ fn session_fixture(
         steers,
         live: Mutex::new(None),
         open: Mutex::new(Vec::new()),
+        answers: Mutex::new(Vec::new()),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -2324,6 +2347,44 @@ async fn a_dismissed_task_suggestion_never_starts_and_a_next_step_answers_once()
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(harness.session.received.lock().unwrap().len(), 2);
     assert!(state(&runtime, &input_id(2, 9, 42, "widget-81")).is_none());
+}
+
+#[tokio::test]
+async fn codex_mcp_tool_cards_answer_once_and_a_withdrawn_one_reaches_nothing() {
+    let (runtime, harness, _cleanup) = fixture(false);
+    runtime.agent.names.remember(1, "Owner".into()).await;
+    work::recovery_tests::codex_mcp_tool_card_taps(
+        runtime.agent.clone(),
+        harness.session.clone() as Arc<dyn Session>,
+    )
+    .await;
+    // Allow and Cancel each reached Codex once; the second Allow and the
+    // tap on the withdrawn card reached nothing.
+    assert_eq!(
+        *harness.session.answers.lock().unwrap(),
+        [
+            ("51".to_owned(), "accept".to_owned()),
+            ("52".to_owned(), "cancel".to_owned())
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_question_card_can_be_cancelled_and_stop_ends_a_request_with_no_turn() {
+    let (runtime, harness, _cleanup) = fixture(false);
+    runtime.agent.names.remember(1, "Owner".into()).await;
+    work::recovery_tests::question_cancel_and_turnless_stop(
+        runtime.agent.clone(),
+        harness.session.clone() as Arc<dyn Session>,
+    )
+    .await;
+    assert_eq!(
+        *harness.session.answers.lock().unwrap(),
+        [
+            ("61".to_owned(), "(cancel)".to_owned()),
+            ("62".to_owned(), "(cancel)".to_owned())
+        ]
+    );
 }
 
 #[tokio::test]

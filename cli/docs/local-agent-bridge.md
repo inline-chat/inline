@@ -500,6 +500,13 @@ delivery, and restart recovery then use that child identity.
 
 Approvals appear as Inline action buttons in the conversation where the turn
 is running, including its reply thread. Only the owner can resolve them.
+When Codex asks to run an MCP tool, the card names the tool (`server · tool`),
+shows its arguments (bounded, control characters removed) and offers Codex's
+own choices: Allow, the remember options Codex allows, and Cancel, which skips
+that one call while the turn goes on. An unanswered card closes as no longer
+needed when its turn ends or is interrupted. Every question card also ends
+with Cancel, which tells the agent the question went unanswered, and `/stop`
+with no turn running cancels whatever the open cards still wait on.
 Mid-turn owner directions steer when the provider supports steering; `/queue`
 always queues explicitly and provides Undo until work starts. An uncertain
 steering response is never automatically retried as another prompt: Inline

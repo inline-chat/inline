@@ -1,0 +1,78 @@
+[
+  {
+    "label": "open",
+    "text": "Codex wants to use linear · create_issue\n{\n  \"labels\": [\n    \"bug\"\n  ],\n  \"team\": \"ENG\",\n  \"title\": \"Parser drops trailing commas\"\n}",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_TOOL",
+          "title": "Codex wants to use linear · create_issue",
+          "children": [
+            {
+              "code": {
+                "text": "{\n  \"labels\": [\n    \"bug\"\n  ],\n  \"team\": \"ENG\",\n  \"title\": \"Parser drops trailing commas\"\n}",
+                "language": "json"
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_PENDING",
+          "action_ids": [
+            "v2-0",
+            "v2-1",
+            "v2-2",
+            "v2-3"
+          ]
+        }
+      }
+    ],
+    "buttons": [
+      {
+        "id": "v2-0",
+        "label": "Allow",
+        "style": "primary"
+      },
+      {
+        "id": "v2-1",
+        "label": "Allow for this session",
+        "style": "default"
+      },
+      {
+        "id": "v2-2",
+        "label": "Always allow",
+        "style": "default"
+      },
+      {
+        "id": "v2-3",
+        "label": "Cancel",
+        "style": "default"
+      }
+    ]
+  },
+  {
+    "label": "decided",
+    "text": "Codex wants to use linear · create_issue\n{\n  \"labels\": [\n    \"bug\"\n  ],\n  \"team\": \"ENG\",\n  \"title\": \"Parser drops trailing commas\"\n}\nAllow (answered by Dena)",
+    "markdown": false,
+    "blocks": [
+      {
+        "approval": {
+          "subject": "SUBJECT_TOOL",
+          "title": "Codex wants to use linear · create_issue",
+          "children": [
+            {
+              "code": {
+                "text": "{\n  \"labels\": [\n    \"bug\"\n  ],\n  \"team\": \"ENG\",\n  \"title\": \"Parser drops trailing commas\"\n}",
+                "language": "json"
+              }
+            }
+          ],
+          "state": "BLOCK_DECISION_STATE_ACCEPTED",
+          "decided_by_user_id": 7
+        }
+      },
+      {
+        "footer": "Allow (answered by Dena)"
+      }
+    ]
+  }
+]

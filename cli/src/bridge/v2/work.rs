@@ -59,6 +59,7 @@ const PUBLISH_RETRIES: [Duration; 3] = [
 /// The longest a rate-limited answer waits within one publish attempt.
 const MAX_PUBLISH_WAIT: Duration = Duration::from_secs(30);
 const NOT_PENDING: &str = "This request is no longer pending.";
+const NOTHING_RUNNING: &str = "Nothing is running.";
 /// Trusted instructions for the speak gate's side call.
 const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
 Decide whether a reply from you would clearly help the people here right now. Stay quiet \
@@ -247,6 +248,9 @@ pub(crate) enum ActionData {
     /// Option `o` of question `f` on a question card asked with buttons.
     #[serde(rename = "q")]
     Pick { i: String, f: usize, o: usize },
+    /// Cancel a question card: the harness hears it was not answered.
+    #[serde(rename = "qx")]
+    Dismiss { i: String },
     /// A Codex plan card: approve (leave Plan mode and implement) or keep
     /// planning.
     #[serde(rename = "pp")]
@@ -1101,7 +1105,14 @@ impl Actor {
             return Some(NO_ACCESS.to_owned());
         }
         match control {
-            Control::Stop => self.stop(false).await,
+            // A request that waits on no turn (Codex elicitations may name
+            // none) is what a stop then ends.
+            Control::Stop => match self.stop(false).await {
+                Some(text) if text == NOTHING_RUNNING && self.cancel_open_cards(actor).await => {
+                    None
+                }
+                other => other,
+            },
             Control::Pause => self.stop(true).await,
             Control::Resume => self.resume().await,
             Control::Release(cause) => {
@@ -1114,6 +1125,35 @@ impl Actor {
         }
     }
 
+    /// Cancels the requests behind open cards that wait on no turn: a turn's
+    /// own requests end with it (a sub-agent's too), and an asynchronous
+    /// question stays open on purpose. Whether any was.
+    async fn cancel_open_cards(&mut self, actor: i64) -> bool {
+        let Some(session) = self.held_session() else {
+            return false;
+        };
+        let mut open: Vec<InteractionId> = self
+            .cards
+            .values()
+            .map(|card| card.interaction.clone())
+            .filter(|interaction| self.renderer.waits_on_no_turn(interaction))
+            .collect();
+        open.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        open.dedup();
+        let mut cancelled = false;
+        for interaction in open {
+            cancelled |= session
+                .control(Op::Answer {
+                    interaction,
+                    response: InteractionResponse::Cancel,
+                    by: UserId(actor),
+                })
+                .await
+                .is_ok();
+        }
+        cancelled
+    }
+
     /// Stop the running turn. Pause also takes this bridge's queued input out
     /// of the native queue first, so nothing runs until a resume.
     async fn stop(&mut self, pause: bool) -> Option<String> {
@@ -1123,7 +1163,7 @@ impl Actor {
                 self.report().await;
                 return None;
             }
-            return Some("Nothing is running.".to_owned());
+            return Some(NOTHING_RUNNING.to_owned());
         };
         if pause {
             self.paused = true;
@@ -1175,7 +1215,7 @@ impl Actor {
                 return Some(format!("Could not stop: {error}"));
             }
         } else if !pause {
-            return Some("Nothing is running.".to_owned());
+            return Some(NOTHING_RUNNING.to_owned());
         }
         self.report().await;
         None
@@ -1247,6 +1287,20 @@ impl Actor {
                     return Some(NOT_PENDING.to_owned());
                 };
                 self.pick(message_id, actor, &i, f, label).await
+            }
+            ActionData::Dismiss { i } => {
+                if !grants.any() {
+                    return Some(NO_ACCESS.to_owned());
+                }
+                let Some(card) = self.cards.get(&message_id) else {
+                    return Some(NOT_PENDING.to_owned());
+                };
+                if card.form.is_none() || card.interaction.as_str() != i {
+                    return Some(NOT_PENDING.to_owned());
+                }
+                let interaction = card.interaction.clone();
+                self.answer(interaction, InteractionResponse::Cancel, actor)
+                    .await
             }
             ActionData::Decision { i, d } => {
                 let Some(card) = self.cards.get(&message_id).cloned() else {
@@ -1366,7 +1420,10 @@ impl Actor {
             (card.chat, card.interaction.clone(), card.answered.clone());
         if answered.len() < form.fields.len() {
             let doc = render::pick_card(&self.agent.agent_name, &form, answered.len(), &answered);
-            let actions = pick_actions(&interaction, &form, answered.len());
+            let actions = with_dismiss(
+                pick_actions(&interaction, &form, answered.len()),
+                &interaction,
+            );
             if self.edit_in(chat, message_id, &doc, actions).await {
                 return None;
             }
@@ -3567,8 +3624,11 @@ impl Actor {
                     form,
                 } => {
                     let buttons = match &form {
-                        Some(form) if render::pickable(form) => pick_actions(&interaction, form, 0),
-                        _ => card_actions(&interaction, &actions),
+                        Some(form) if render::pickable(form) => {
+                            with_dismiss(pick_actions(&interaction, form, 0), &interaction)
+                        }
+                        Some(_) => with_dismiss(card_actions(&interaction, &actions), &interaction),
+                        None => card_actions(&interaction, &actions),
                     };
                     let long = long_labels(&actions);
                     let doc = if long.is_empty() {
@@ -4464,6 +4524,47 @@ pub(crate) fn pick_actions(
     Some(proto::MessageActions { rows })
 }
 
+/// A question card's last button: Cancel, so a question is never answered
+/// only by `/stop`. Anyone who may answer may cancel.
+pub(crate) fn with_dismiss(
+    actions: Option<proto::MessageActions>,
+    interaction: &InteractionId,
+) -> Option<proto::MessageActions> {
+    let mut actions = actions.unwrap_or_default();
+    let Ok(data) = serde_json::to_vec(&ActionData::Dismiss {
+        i: interaction.to_string(),
+    }) else {
+        return Some(actions);
+    };
+    let cancel = proto::MessageAction {
+        action_id: "v2-qx".to_owned(),
+        text: QUESTION_CANCEL.to_owned(),
+        action: Some(proto::message_action::Action::Callback(
+            proto::MessageActionCallback { data },
+        )),
+        style: proto::message_action::Style::Default as i32,
+        required_grant: proto::AgentGrantRequirement::Access as i32,
+        ..Default::default()
+    };
+    // Inline takes at most eight rows: with eight options, Cancel shares
+    // the last one.
+    let full = actions.rows.len() >= MAX_ACTION_ROWS;
+    match actions.rows.last_mut() {
+        Some(last) if full => last.actions.push(cancel),
+        _ => actions.rows.push(proto::MessageActionRow {
+            actions: vec![cancel],
+        }),
+    }
+    Some(actions)
+}
+
+/// Rows of buttons Inline takes on one message
+/// (`server/src/modules/message/messageActions.ts` `maxRows`).
+const MAX_ACTION_ROWS: usize = 8;
+
+/// The label of a question card's cancel button.
+pub(crate) const QUESTION_CANCEL: &str = "Cancel";
+
 /// Approval buttons with the harness's own labels, one per row.
 pub(crate) fn card_actions(
     interaction: &InteractionId,
@@ -4774,6 +4875,50 @@ mod tests {
         )])
         .expect("buttons");
         assert!(buttons.rows[0].actions[0].text.encode_utf16().count() <= MAX_BUTTON_UTF16);
+    }
+
+    #[test]
+    fn an_eight_option_question_keeps_cancel_within_inlines_eight_rows() {
+        use inline_agent_bridge::harness::{FieldOption, FormField};
+        let interaction = InteractionId::new("q-8").unwrap();
+        let form = QuestionForm {
+            title: None,
+            fields: vec![FormField {
+                id: FieldId::new("pick").unwrap(),
+                header: None,
+                prompt: "Pick one".to_owned(),
+                input: FieldInput::Select {
+                    options: (0..8)
+                        .map(|index| FieldOption {
+                            label: format!("option {index}"),
+                            description: None,
+                            preview: None,
+                        })
+                        .collect(),
+                    multiple: false,
+                    allow_other: false,
+                },
+                required: true,
+            }],
+            asynchronous: false,
+            auto_resolution_ms: None,
+        };
+        assert!(render::pickable(&form));
+        let actions = with_dismiss(pick_actions(&interaction, &form, 0), &interaction).unwrap();
+        assert_eq!(actions.rows.len(), MAX_ACTION_ROWS);
+        let last: Vec<&str> = actions.rows[7]
+            .actions
+            .iter()
+            .map(|action| action.text.as_str())
+            .collect();
+        assert_eq!(last, ["option 7", QUESTION_CANCEL]);
+        // Fewer options: Cancel has a row of its own.
+        let mut short = form.clone();
+        if let FieldInput::Select { options, .. } = &mut short.fields[0].input {
+            options.truncate(3);
+        }
+        let actions = with_dismiss(pick_actions(&interaction, &short, 0), &interaction).unwrap();
+        assert_eq!(actions.rows.len(), 4);
     }
 
     #[test]
@@ -5213,6 +5358,295 @@ pub(crate) mod recovery_tests {
         work.render(vec![RenderOp::PlanProposal { doc: card() }])
             .await;
         assert!(work.outbox.iter().any(|outgoing| outgoing.plan));
+    }
+
+    /// Codex asking to run MCP tools, as its driver reports it: a tool card
+    /// with Codex's choices. Allow is answered once, Cancel answers its own
+    /// card, and a card Codex withdrew (its turn ended) answers nothing.
+    pub(crate) async fn codex_mcp_tool_card_taps(agent: Arc<Agent>, session: Arc<dyn Session>) {
+        use inline_agent_bridge::harness::{
+            ApprovalSubject, ClosedBy, Decision, DecisionKind, Envelope, Interaction,
+            InteractionKind,
+        };
+
+        let decision = |id: &str, label: &str, kind| Decision {
+            id: inline_agent_bridge::harness::DecisionId::new(id).unwrap(),
+            label: label.to_owned(),
+            kind,
+            description: None,
+            accepts_message: false,
+            native: serde_json::Value::Null,
+        };
+        let key = session.key().clone();
+        let mut seq = 0;
+        let mut envelope = |event| {
+            seq += 1;
+            Envelope {
+                session: key.clone(),
+                seq,
+                checkpoint: None,
+                at_ms: 0,
+                event,
+            }
+        };
+        let mut work = actor(agent);
+        work.hold
+            .handle(HoldEvent::AcquireRequested { input: None }, 0);
+        work.hold.handle(HoldEvent::Acquired, 0);
+        work.session = Some(session);
+
+        for (message_id, id, tool) in [
+            (50, "51", "create_issue"),
+            (51, "52", "delete_issue"),
+            (52, "53", "list_issues"),
+        ] {
+            let interaction = InteractionId::new(id).unwrap();
+            work.envelope(envelope(Event::Interaction(Interaction {
+                id: interaction.clone(),
+                turn: Some(TurnId::new("turn-1").unwrap()),
+                item: None,
+                parent: None,
+                kind: InteractionKind::Approval {
+                    subject: ApprovalSubject::Tool {
+                        name: format!("linear · {tool}"),
+                        input: serde_json::json!({"team": "ENG"}),
+                        reason: None,
+                    },
+                    decisions: vec![
+                        decision("accept", "Allow", DecisionKind::Accept),
+                        decision(
+                            "acceptForSession",
+                            "Allow for this session",
+                            DecisionKind::AcceptForSession,
+                        ),
+                        decision("cancel", "Cancel", DecisionKind::Decline),
+                    ],
+                },
+                native: serde_json::Value::Null,
+            })))
+            .await;
+            // The card goes out with Codex's choices as its buttons.
+            let outgoing = work
+                .outbox
+                .iter()
+                .find(|outgoing| {
+                    outgoing
+                        .card
+                        .as_ref()
+                        .is_some_and(|(card, _)| card == &interaction)
+                })
+                .expect("a card");
+            assert!(outgoing.doc.text.contains(&format!("linear · {tool}")));
+            let labels: Vec<&str> = outgoing
+                .actions
+                .iter()
+                .flat_map(|actions| &actions.rows)
+                .flat_map(|row| &row.actions)
+                .map(|action| action.text.as_str())
+                .collect();
+            assert_eq!(labels, ["Allow", "Allow for this session", "Cancel"]);
+            // As if Inline took the post (no server here).
+            work.card_by_interaction
+                .insert(interaction.clone(), message_id);
+            work.cards.insert(
+                message_id,
+                Card {
+                    chat: 9,
+                    interaction,
+                    approval: true,
+                    form: None,
+                    answered: Vec::new(),
+                },
+            );
+        }
+        let tap = |id: &str, decision: &str| ActionData::Decision {
+            i: id.to_owned(),
+            d: decision.to_owned(),
+        };
+
+        // Allow reaches Codex; a second press finds nothing pending.
+        assert_eq!(work.action(50, 1, tap("51", "accept")).await, None);
+        assert_eq!(
+            work.action(50, 1, tap("51", "accept")).await.as_deref(),
+            Some(NOT_PENDING)
+        );
+        // Cancel answers its own card.
+        assert_eq!(work.action(51, 1, tap("52", "cancel")).await, None);
+
+        // Codex withdraws the third when its turn ends: the card closes
+        // with no buttons, and a late tap reaches nothing.
+        work.envelope(envelope(Event::InteractionClosed {
+            id: InteractionId::new("53").unwrap(),
+            by: ClosedBy::Cancelled,
+        }))
+        .await;
+        assert!(!work.cards.contains_key(&52));
+        let closed = work
+            .outbox
+            .iter()
+            .find(|outgoing| outgoing.closed && outgoing.doc.text.contains("list_issues"))
+            .expect("the closed card");
+        assert!(closed.doc.text.contains("No longer needed"));
+        assert!(closed.actions.iter().all(|actions| actions.rows.is_empty()));
+        // A tap on the withdrawn card reaches nothing and says so.
+        assert_eq!(
+            work.action(52, 1, tap("53", "accept")).await.as_deref(),
+            Some(NOT_PENDING)
+        );
+    }
+
+    /// A question card ends with Cancel, which tells the harness it was not
+    /// answered; `/stop` with no turn running cancels what the open cards
+    /// wait on (a Codex elicitation may name no turn).
+    pub(crate) async fn question_cancel_and_turnless_stop(
+        agent: Arc<Agent>,
+        session: Arc<dyn Session>,
+    ) {
+        use inline_agent_bridge::harness::{
+            ApprovalSubject, Envelope, FieldOption, FormField, Interaction, InteractionKind,
+        };
+
+        let key = session.key().clone();
+        let mut work = actor(agent);
+        work.hold
+            .handle(HoldEvent::AcquireRequested { input: None }, 0);
+        work.hold.handle(HoldEvent::Acquired, 0);
+        work.session = Some(session);
+
+        let form = QuestionForm {
+            title: Some("Where should it deploy?".to_owned()),
+            fields: vec![FormField {
+                id: FieldId::new("region").unwrap(),
+                header: None,
+                prompt: "Region".to_owned(),
+                input: FieldInput::Select {
+                    options: ["fra", "iad"]
+                        .into_iter()
+                        .map(|label| FieldOption {
+                            label: label.to_owned(),
+                            description: None,
+                            preview: None,
+                        })
+                        .collect(),
+                    multiple: false,
+                    allow_other: false,
+                },
+                required: true,
+            }],
+            asynchronous: false,
+            auto_resolution_ms: None,
+        };
+        let approval = || InteractionKind::Approval {
+            subject: ApprovalSubject::Other {
+                title: "Share your notes with this server?".to_owned(),
+                detail: None,
+            },
+            decisions: Vec::new(),
+        };
+        let asynchronous = QuestionForm {
+            asynchronous: true,
+            ..form.clone()
+        };
+        let cards = [
+            (
+                "61",
+                60,
+                InteractionKind::Question { form: form.clone() },
+                None,
+            ),
+            ("62", 61, approval(), None),
+            // Left open on purpose, and a running turn's own request: a
+            // stop with nothing running leaves both.
+            (
+                "63",
+                62,
+                InteractionKind::Question { form: asynchronous },
+                None,
+            ),
+            ("64", 63, approval(), Some("sub-agent-turn")),
+        ];
+        for (seq, (id, message_id, kind, turn)) in cards.into_iter().enumerate() {
+            let interaction = InteractionId::new(id).unwrap();
+            let card_form = match &kind {
+                InteractionKind::Question { form } => Some(form.clone()),
+                _ => None,
+            };
+            let question = card_form.is_some();
+            work.envelope(Envelope {
+                session: key.clone(),
+                seq: seq as u64 + 1,
+                checkpoint: None,
+                at_ms: 0,
+                event: Event::Interaction(Interaction {
+                    id: interaction.clone(),
+                    turn: turn.map(|turn| TurnId::new(turn).unwrap()),
+                    item: None,
+                    parent: None,
+                    kind,
+                    native: serde_json::Value::Null,
+                }),
+            })
+            .await;
+            if id == "61" {
+                let outgoing = work
+                    .outbox
+                    .iter()
+                    .find(|outgoing| {
+                        outgoing
+                            .card
+                            .as_ref()
+                            .is_some_and(|(card, _)| card == &interaction)
+                    })
+                    .expect("a card");
+                let labels: Vec<&str> = outgoing
+                    .actions
+                    .iter()
+                    .flat_map(|actions| &actions.rows)
+                    .flat_map(|row| &row.actions)
+                    .map(|action| action.text.as_str())
+                    .collect();
+                assert_eq!(labels, ["fra", "iad", QUESTION_CANCEL]);
+            }
+            work.card_by_interaction
+                .insert(interaction.clone(), message_id);
+            work.cards.insert(
+                message_id,
+                Card {
+                    chat: 9,
+                    interaction,
+                    approval: !question,
+                    form: card_form,
+                    answered: Vec::new(),
+                },
+            );
+        }
+
+        // Cancel on the question; a cancel on an approval card is refused.
+        assert_eq!(
+            work.action(61, 1, ActionData::Dismiss { i: "62".into() })
+                .await
+                .as_deref(),
+            Some(NOT_PENDING)
+        );
+        assert_eq!(
+            work.action(60, 1, ActionData::Dismiss { i: "61".into() })
+                .await,
+            None
+        );
+        // No turn is running: /stop cancels what the open cards wait on.
+        work.cards.remove(&60);
+        assert_eq!(work.control(Control::Stop, 1).await, None);
+        // Again: 62 is answered, and 63 and 64 are not a stop's to end.
+        assert_eq!(
+            work.control(Control::Stop, 1).await.as_deref(),
+            Some(NOTHING_RUNNING)
+        );
+        // With nothing open, it says so.
+        work.cards.clear();
+        assert_eq!(
+            work.control(Control::Stop, 1).await.as_deref(),
+            Some(NOTHING_RUNNING)
+        );
     }
 
     pub(crate) async fn pending_output_survives_restart(agent: Arc<Agent>) {

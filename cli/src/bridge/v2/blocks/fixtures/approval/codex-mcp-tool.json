@@ -1,0 +1,77 @@
+{
+  "source": "Codex app-server v2 mcpServer/elicitation/request for an MCP tool call: a message-only form with codex_approval_kind mcp_tool_call (see crates/agent-bridge/tests/fixtures/harness/codex/mcp-tool-approval.json).",
+  "native": {
+    "method": "mcpServer/elicitation/request",
+    "id": 51,
+    "params": {
+      "_meta": {
+        "codex_approval_kind": "mcp_tool_call",
+        "persist": [
+          "session",
+          "always"
+        ],
+        "tool_name": "create_issue",
+        "tool_params": {
+          "labels": [
+            "bug"
+          ],
+          "team": "ENG",
+          "title": "Parser drops trailing commas"
+        }
+      },
+      "message": "Allow the linear MCP server to run tool \"create_issue\"?",
+      "mode": "form",
+      "requestedSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "serverName": "linear",
+      "threadId": "thr-1",
+      "turnId": "turn-1"
+    }
+  },
+  "input": {
+    "agent": "Codex",
+    "folder": "/work/inline",
+    "interaction": {
+      "id": "51",
+      "turn": "turn-1",
+      "kind": {
+        "decisions": [
+          {
+            "id": "accept",
+            "kind": "accept",
+            "label": "Allow"
+          },
+          {
+            "id": "acceptForSession",
+            "kind": "accept_for_session",
+            "label": "Allow for this session"
+          },
+          {
+            "id": "acceptAlways",
+            "kind": "accept_and_remember",
+            "label": "Always allow"
+          },
+          {
+            "id": "cancel",
+            "kind": "decline",
+            "label": "Cancel"
+          }
+        ],
+        "kind": "approval",
+        "subject": {
+          "input": {
+            "labels": [
+              "bug"
+            ],
+            "team": "ENG",
+            "title": "Parser drops trailing commas"
+          },
+          "kind": "tool",
+          "name": "linear · create_issue"
+        }
+      }
+    }
+  }
+}
