@@ -218,6 +218,20 @@ impl Renderer {
 
     /// The answers being sent to an open question, so its closed card keeps
     /// what was asked and what was answered. Secret answers are dropped here.
+    /// Whether `interaction` is open in this session (its card was rendered
+    /// and it hasn't closed). False for one from before a restart.
+    pub(crate) fn is_open(&self, interaction: &InteractionId) -> bool {
+        self.interactions.contains_key(interaction)
+    }
+
+    /// Drops an interaction whose card Inline never showed, so closing it
+    /// renders nothing (there is no card to update).
+    pub(crate) fn forget(&mut self, interaction: &InteractionId) {
+        self.interactions.remove(interaction);
+        self.card_diffs.remove(interaction);
+        self.card_answers.remove(interaction);
+    }
+
     pub(crate) fn note_answers(&mut self, interaction: &InteractionId, answers: &[FieldAnswer]) {
         let Some(Interaction {
             kind: InteractionKind::Question { form },
