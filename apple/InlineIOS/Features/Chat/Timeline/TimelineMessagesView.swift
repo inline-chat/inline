@@ -413,6 +413,12 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     updateDatePill()
   }
 
+  override func willMove(toWindow newWindow: UIWindow?) {
+    super.willMove(toWindow: newWindow)
+    // Leaving mid-fling: read what is on screen before reading stops, as Telegram does.
+    if newWindow == nil, window != nil { readPass(force: true, leaving: true) }
+  }
+
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
@@ -1850,9 +1856,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   /// Marks what the reader has seen: only for a list on screen in an active, foreground scene, placed,
   /// and not on its way to a focused message. While the list moves only the scroll button's count goes
-  /// down; the read is sent when it stops, as the collection view did (each read rewrites the dialog,
-  /// and every dialog observer re-rendering mid-scroll hitched it).
-  private func readPass(force: Bool) {
+  /// down; the read is written to the dialog when it stops, as the collection view did (each read
+  /// rewrites the dialog, and every dialog observer re-rendering mid-scroll hitched it). The write is
+  /// local, so the chat list and the icon change with it; the read sync tells the server.
+  private func readPass(force: Bool, leaving: Bool = false) {
     let now = CACurrentMediaTime()
     guard force || now - lastReadPass > 0.3 else { return }
     lastReadPass = now
@@ -1869,7 +1876,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let visible = visibleMessages()
     let candidate = visible.filter { $0.message.out != true && !$0.message.isServiceMessage }
       .map(\.message.messageId).max()
-    if list.isTracking || list.isDecelerating {
+    if list.isTracking || list.isDecelerating, !leaving {
       if let candidate, candidate > readFrontier {
         readFrontier = candidate
         updateAffordance(force: true)
