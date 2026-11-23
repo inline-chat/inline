@@ -157,47 +157,64 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   /// Prepares photos off the main thread (resized for their content, no metadata) and adds them
-  /// in the order given.
+  /// in the order given. Each holds a tile from the start, so a send waits for them and they
+  /// land in this draft, not the next one.
   func addPhotos(
     _ sources: [(source: MediaSendPreparation.PhotoSource, fileName: String?)],
     content: MediaSendPreparation.PhotoContent? = nil
   ) {
     guard !sources.isEmpty else { return }
+    let pendingIds = sources.map { entry in
+      let thumbnail: UIImage? = if case let .platformImage(image) = entry.source { image } else { nil }
+      return addPendingVideoAttachment(symbolName: "photo", thumbnailImage: thumbnail)
+    }
     Task { [weak self] in
       let items = await Self.preparePhotos(sources, content: content)
-      guard let self, !items.isEmpty else { return }
-      for item in items {
-        attachmentItems[item.getItemUniqueId()] = item
+      guard let self else {
+        for item in items.compactMap({ $0 }) { await item.discardUnsent() }
+        return
       }
-      handleAttachmentItemsChanged(animated: false)
+      fillPendingAttachments(pendingIds, with: items)
     }
   }
 
+  /// Photos prepared at once: each holds a decode and an encode in memory.
+  nonisolated static let photoPreparationConcurrency = 2
+
+  /// The prepared photos in the order given, nil where one failed.
   nonisolated static func preparePhotos(
     _ sources: [(source: MediaSendPreparation.PhotoSource, fileName: String?)],
     content: MediaSendPreparation.PhotoContent? = nil
-  ) async -> [FileMediaItem] {
+  ) async -> [FileMediaItem?] {
     await withTaskGroup(of: (Int, FileMediaItem?).self) { group in
-      for (index, entry) in sources.enumerated() {
-        group.addTask {
-          do {
-            let item = try await AttachmentMediaMaterializer.photo(
-              entry.source,
-              originalFileName: entry.fileName,
-              content: content
-            )
-            return (index, item)
-          } catch {
-            Log.shared.error("Failed to save photo in attachments", error: error)
-            return (index, nil)
-          }
+      @Sendable func prepare(_ index: Int) async -> (Int, FileMediaItem?) {
+        let entry = sources[index]
+        do {
+          let item = try await AttachmentMediaMaterializer.photo(
+            entry.source,
+            originalFileName: entry.fileName,
+            content: content
+          )
+          return (index, item)
+        } catch {
+          Log.shared.error("Failed to save photo in attachments", error: error)
+          return (index, nil)
         }
       }
-      var prepared: [(Int, FileMediaItem)] = []
-      for await (index, item) in group {
-        if let item { prepared.append((index, item)) }
+      var next = min(photoPreparationConcurrency, sources.count)
+      for index in 0 ..< next {
+        group.addTask { await prepare(index) }
       }
-      return prepared.sorted { $0.0 < $1.0 }.map(\.1)
+      var prepared = [FileMediaItem?](repeating: nil, count: sources.count)
+      for await (index, item) in group {
+        prepared[index] = item
+        if next < sources.count {
+          let index = next
+          group.addTask { await prepare(index) }
+          next += 1
+        }
+      }
+      return prepared
     }
   }
 
@@ -300,6 +317,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       do {
         let videoInfo = try await FileCache.saveAnimatedImageAsVideo(url: url)
         let mediaItem = FileMediaItem.video(videoInfo)
+        // The GIF goes with Send as Original, not the video converted from it.
+        AttachmentMediaMaterializer.retainAnimationOriginal(url, for: mediaItem)
 
         await MainActor.run { [weak self] in
           guard let self else { return }
@@ -360,6 +379,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func openRecentAsset(localIdentifier: String) {
     guard localIdentifier.isEmpty == false else { return }
+    // Held from the start, so a send waits for it and it lands in this draft.
+    let pendingId = addPendingVideoAttachment(symbolName: "photo.on.rectangle")
 
     Task { [weak self] in
       guard let self else { return }
@@ -371,11 +392,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
         switch result {
         case let .success(mediaItem):
-          let uniqueId = mediaItem.getItemUniqueId()
-          attachmentItems[uniqueId] = mediaItem
-          handleAttachmentItemsChanged(animated: false)
+          fillPendingAttachments([pendingId], with: [mediaItem])
           dismissAttachmentPickerIfPresented(animated: true)
         case let .failure(error):
+          fillPendingAttachments([pendingId], with: [nil])
           showRecentAssetError(message: error.message)
         }
       }
@@ -387,11 +407,13 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     guard validIdentifiers.isEmpty == false else { return }
 
     dismissAttachmentPickerIfPresented(animated: true)
+    // Held from the start, so a send waits for them and they land in this draft.
+    let pendingIds = validIdentifiers.map { _ in addPendingVideoAttachment(symbolName: "photo.on.rectangle") }
 
     Task { [weak self] in
       guard let self else { return }
 
-      var orderedMediaItems: [FileMediaItem] = []
+      var orderedMediaItems: [FileMediaItem?] = []
       var firstErrorMessage: String?
 
       for identifier in validIdentifiers {
@@ -400,6 +422,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         case let .success(mediaItem):
           orderedMediaItems.append(mediaItem)
         case let .failure(error):
+          orderedMediaItems.append(nil)
           let message = error.message
           if firstErrorMessage == nil {
             firstErrorMessage = message
@@ -410,13 +433,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       await MainActor.run { [weak self] in
         guard let self else { return }
 
-        if orderedMediaItems.isEmpty == false {
-          for mediaItem in orderedMediaItems {
-            let uniqueId = mediaItem.getItemUniqueId()
-            attachmentItems[uniqueId] = mediaItem
-          }
-          handleAttachmentItemsChanged(animated: false)
-        }
+        fillPendingAttachments(pendingIds, with: orderedMediaItems)
 
         if let firstErrorMessage {
           showRecentAssetError(message: firstErrorMessage)
@@ -564,18 +581,29 @@ extension ComposeView: PHPickerViewControllerDelegate {
 
       var loadedItems: [(index: Int, item: LibraryPickerItem)] = []
 
+      // A few at a time: each photo holds a decode and an encode in memory.
       await withTaskGroup(of: (Int, LibraryPickerItem?).self) { group in
-        for (index, result) in results.enumerated() {
+        var next = 0
+        while next < min(Self.photoPreparationConcurrency, results.count) {
+          let index = next, result = results[index]
           group.addTask { [weak self] in
             guard let self else { return (index, nil) }
-            let item = await self.loadLibraryItem(from: result)
-            return (index, item)
+            return (index, await self.loadLibraryItem(from: result))
           }
+          next += 1
         }
 
         for await (index, item) in group {
           if let item {
             loadedItems.append((index: index, item: item))
+          }
+          if next < results.count {
+            let index = next, result = results[index]
+            group.addTask { [weak self] in
+              guard let self else { return (index, nil) }
+              return (index, await self.loadLibraryItem(from: result))
+            }
+            next += 1
           }
         }
       }
@@ -891,11 +919,14 @@ extension ComposeView: PHPickerViewControllerDelegate {
           return
         }
 
+        let originalName = provider.suggestedName.map { ($0 as NSString).appendingPathExtension("gif") ?? $0 }
         Task {
           defer { try? FileManager.default.removeItem(at: tempUrl) }
           do {
-            let videoInfo = try await FileCache.saveAnimatedImageAsVideo(url: tempUrl)
-            continuation.resume(returning: .video(videoInfo))
+            let media = FileMediaItem.video(try await FileCache.saveAnimatedImageAsVideo(url: tempUrl))
+            // The GIF goes with Send as Original, not the video converted from it.
+            AttachmentMediaMaterializer.retainAnimationOriginal(tempUrl, fileName: originalName, for: media)
+            continuation.resume(returning: media)
           } catch AnimatedImageVideoConversionError.notAnimated {
             continuation.resume(returning: nil)
           } catch {
@@ -936,11 +967,14 @@ extension ComposeView: PHPickerViewControllerDelegate {
           return
         }
 
+        let originalName = provider.suggestedName.map { ($0 as NSString).appendingPathExtension("gif") ?? $0 }
         Task {
           defer { try? FileManager.default.removeItem(at: tempUrl) }
           do {
-            let videoInfo = try await FileCache.saveAnimatedImageAsVideo(url: tempUrl)
-            continuation.resume(returning: .video(videoInfo))
+            let media = FileMediaItem.video(try await FileCache.saveAnimatedImageAsVideo(url: tempUrl))
+            // The GIF goes with Send as Original, not the video converted from it.
+            AttachmentMediaMaterializer.retainAnimationOriginal(tempUrl, fileName: originalName, for: media)
+            continuation.resume(returning: media)
           } catch AnimatedImageVideoConversionError.notAnimated {
             continuation.resume(returning: nil)
           } catch {

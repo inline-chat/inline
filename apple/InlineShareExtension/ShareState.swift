@@ -349,6 +349,44 @@ class ShareState: ObservableObject {
     }
   }
 
+  /// A photo that goes as a file here (too thin to show, or it couldn't be prepared): nobody chose
+  /// to send its original, so it keeps no camera, place or time details. Its own bytes go only
+  /// when it carries none.
+  private nonisolated func photoDocumentFile(
+    from file: TemporarySharedFile,
+    fileName: String,
+    mimeType: MIMEType
+  ) throws -> PreparedSharedFile {
+    guard let copy = try MediaSendPreparation.anonymizedFileCopy(of: .file(file.url)) else {
+      return PreparedSharedFile(
+        url: file.url,
+        fileName: fileName,
+        mimeType: mimeType,
+        fileType: .document,
+        fileSize: fileSize(for: file.url) ?? 0,
+        isAnimatedImage: false,
+        videoMetadata: nil,
+        cleanupURLs: file.cleanupURLs
+      )
+    }
+    let baseName = (fileName as NSString).deletingPathExtension
+    let copyName = (baseName.isEmpty ? "photo" : baseName) + copy.format.toExt()
+    let copyURL = temporaryURL(suggestedName: copyName, typeIdentifier: copy.format == .png
+      ? UTType.png.identifier
+      : UTType.jpeg.identifier)
+    try copy.data.write(to: copyURL, options: .atomic)
+    return PreparedSharedFile(
+      url: copyURL,
+      fileName: copyName,
+      mimeType: MIMEType(text: copy.format.toMimeType()),
+      fileType: .document,
+      fileSize: Int64(copy.data.count),
+      isAnimatedImage: false,
+      videoMetadata: nil,
+      cleanupURLs: file.cleanupURLs + [copyURL]
+    )
+  }
+
   private nonisolated func shouldSendPhotoAsDocument(at url: URL) -> Bool {
     guard let size = MediaSendPreparation.pixelSize(of: .file(url)) else { return false }
     return MediaSendPreparation.shouldSendAsDocument(width: size.width, height: size.height)
@@ -1186,8 +1224,8 @@ class ShareState: ObservableObject {
       } else {
         log.warning(tagged("Couldn't prepare photo; sending as document (\(mimeType.text))"))
         ExtensionHealth.record("app.fallback", ["fallback_kind": "share_photo_as_document"])
-        resolvedFileType = .document
       }
+      return try photoDocumentFile(from: file, fileName: fileName, mimeType: mimeType)
     }
 
     let size = fileSize(for: file.url) ?? 0

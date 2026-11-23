@@ -90,9 +90,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     case videos
   }
 
+  /// A tile held for media still being prepared (a video, or photos from paste, drop or the
+  /// recent strip), so a send waits for it and it lands in this draft.
   struct PendingVideoAttachment {
     let id: String
     var thumbnailImage: UIImage?
+    var symbolName = "video.fill"
   }
 
   var attachmentItems: [String: FileMediaItem] = [:] {
@@ -728,7 +731,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   private func sendQueuedPendingVideoMessageIfReady() {
     guard pendingMediaSendState.consumeSendIfReady(
-      hasPendingMedia: !pendingVideoAttachments.isEmpty
+      hasPendingMedia: !pendingVideoAttachments.isEmpty || !switchingAttachmentIds.isEmpty
     ) else { return }
     let queuedSendMode = queuedPendingVideoSendMode
     queuedPendingVideoSendMode = nil
@@ -1206,8 +1209,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       return
     }
 
+    // Send as Original still switching an item: it goes once that form is ready, never in the
+    // form it's leaving (an original would carry its location).
     if ComposePendingMediaSendBehavior.shouldQueueSendUntilPendingVideosAreReady(
-      hasPendingVideos: hasPendingVideos
+      hasPendingVideos: hasPendingVideos || !switchingAttachmentIds.isEmpty
     ) {
       queueSendUntilPendingVideosAreReady(sendMode: sendMode)
       return
@@ -2373,7 +2378,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     for pending in pendingVideoAttachments {
       let preview = ComposeAttachmentPreviewItemView(
         pendingVideoId: pending.id,
-        thumbnailImage: pending.thumbnailImage
+        thumbnailImage: pending.thumbnailImage,
+        symbolName: pending.symbolName
       ) { [weak self] pendingId in
         self?.removePendingVideoAttachment(pendingId, userInitiated: true)
       }
@@ -2440,13 +2446,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         return
       }
       self.switchingAttachmentIds.remove(attachmentId)
-      // Sent or removed while switching: keep nothing new.
+      // Removed while switching: keep nothing new, and let a send waiting on it go.
       guard self.attachmentItems[attachmentId] != nil else {
+        self.sendQueuedPendingVideoMessageIfReady()
         await switched?.discardUnsent()
         return
       }
       guard let switched else {
         self.previewTile(for: attachmentId)?.setSwitching(false)
+        // A send waiting on the switch would go in the form it was leaving; the person sends again.
+        self.cancelQueuedPendingVideoSend()
         ToastManager.shared.showToast(
           item.isSentAsFile ? "This file can only be sent as a file." : "There's no original file for this item.",
           type: .error,
@@ -2454,8 +2463,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         )
         return
       }
-      UIView.transition(with: self.attachmentStackView, duration: 0.22, options: .transitionCrossDissolve) {
+      if self.pendingMediaSendState.isAwaitingSend {
+        // Replacing releases the waiting send, which shouldn't run inside a transition.
         self.replaceAttachment(attachmentId, with: switched)
+      } else {
+        UIView.transition(with: self.attachmentStackView, duration: 0.22, options: .transitionCrossDissolve) {
+          self.replaceAttachment(attachmentId, with: switched)
+        }
       }
       await item.discardUnsent()
     }
@@ -2501,12 +2515,38 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   @discardableResult
-  func addPendingVideoAttachment() -> String {
+  func addPendingVideoAttachment(symbolName: String = "video.fill", thumbnailImage: UIImage? = nil) -> String {
     let pendingId = "pending_video_\(UUID().uuidString)"
     canceledPendingVideoAttachmentIds.remove(pendingId)
-    pendingVideoAttachments.append(PendingVideoAttachment(id: pendingId, thumbnailImage: nil))
+    pendingVideoAttachments.append(PendingVideoAttachment(id: pendingId, thumbnailImage: thumbnailImage, symbolName: symbolName))
     handleAttachmentItemsChanged(animated: false)
     return pendingId
+  }
+
+  /// Fills tiles held by `addPendingVideoAttachment` with what was prepared for them, in order.
+  /// An item whose tile was removed meanwhile (by the person, or a change of chat) is discarded;
+  /// one that failed cancels a waiting send, which shouldn't go without it.
+  func fillPendingAttachments(_ pendingIds: [String], with items: [FileMediaItem?]) {
+    var unused: [FileMediaItem] = []
+    var failed = false
+    for (pendingId, item) in zip(pendingIds, items) {
+      guard !isPendingVideoAttachmentCanceled(pendingId) else {
+        if let item { unused.append(item) }
+        continue
+      }
+      guard let item else {
+        failed = true
+        continue
+      }
+      attachmentItems[item.getItemUniqueId()] = item
+    }
+    if failed {
+      cancelQueuedPendingVideoSend()
+    }
+    completePendingVideoAttachments(pendingIds)
+    if !unused.isEmpty {
+      Task { for item in unused { await item.discardUnsent() } }
+    }
   }
 
   func updatePendingVideoAttachmentThumbnail(_ pendingId: String, image: UIImage?) {
@@ -2935,6 +2975,7 @@ private final class ComposeAttachmentPreviewItemView: UIView, UIContextMenuInter
   init(
     pendingVideoId: String,
     thumbnailImage: UIImage?,
+    symbolName: String,
     onRemove: @escaping (String) -> Void
   ) {
     attachmentId = pendingVideoId
@@ -2943,7 +2984,7 @@ private final class ComposeAttachmentPreviewItemView: UIView, UIContextMenuInter
     super.init(frame: .zero)
     accessibilityIdentifier = pendingVideoId
     setupViews()
-    configurePendingVideo(thumbnailImage: thumbnailImage)
+    configurePendingVideo(thumbnailImage: thumbnailImage, symbolName: symbolName)
   }
 
   @available(*, unavailable)
@@ -3093,7 +3134,7 @@ private final class ComposeAttachmentPreviewItemView: UIView, UIContextMenuInter
     }
   }
 
-  private func configurePendingVideo(thumbnailImage: UIImage?) {
+  private func configurePendingVideo(thumbnailImage: UIImage?, symbolName: String) {
     setUploadProgress(nil)
     overlayIconView.isHidden = true
     extensionBadge.isHidden = true
@@ -3101,7 +3142,7 @@ private final class ComposeAttachmentPreviewItemView: UIView, UIContextMenuInter
       applyPendingThumbnail(thumbnailImage)
       return
     }
-    applyFallback(iconName: "video.fill", badgeText: nil)
+    applyFallback(iconName: symbolName, badgeText: nil)
   }
 
   func setUploadProgress(_ progress: UploadProgressSnapshot?) {
