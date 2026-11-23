@@ -2087,18 +2087,23 @@ impl Actor {
             self.retained.push(pending);
             return;
         };
-        // A harness that cannot take this mid-turn gets it when the turn
-        // ends, behind anything already waiting, so input runs in order.
+        // Input the harness cannot act on yet (a card waits on an answer, or
+        // a turn runs that it cannot join) goes out once that clears, behind
+        // anything already waiting, so input runs in order.
         let waits = if self.held.contains(&pending.id) {
-            self.held.front() != Some(&pending.id) || waits_for_turn(&session, &input.delivery)
+            self.held.front() != Some(&pending.id) || self.blocked(&session, &input.delivery)
         } else {
-            !self.held.is_empty() || waits_for_turn(&session, &input.delivery)
+            let newly = !self.held.is_empty() || self.blocked(&session, &input.delivery);
+            if newly {
+                self.hold_input(&pending.id, message_id, false).await;
+                // Held only behind others: the oldest may be free to go.
+                Box::pin(self.release_held()).await;
+                return;
+            }
+            false
         };
         if waits {
             self.hold_input(&pending.id, message_id, false).await;
-            if live_turn(&session).is_none() {
-                Box::pin(self.release_held()).await;
-            }
             return;
         }
         self.held.retain(|held| held != &pending.id);
@@ -2311,35 +2316,57 @@ impl Actor {
         } else {
             self.held.push_back(id.clone());
         }
-        self.reply(
-            message_id,
-            &format!(
+        let text = if self.card_waiting() {
+            format!(
+                "Held: {} is waiting on your answer to the request above. This goes to it once you answer.",
+                self.agent.agent_name
+            )
+        } else {
+            format!(
                 "Queued: {} can't take messages mid-turn, so this runs after the current turn.",
                 self.agent.agent_name
-            ),
-        )
-        .await;
+            )
+        };
+        self.reply(message_id, &text).await;
         self.report().await;
     }
 
-    /// Sends the oldest held input once nothing runs. Each starts its own
-    /// turn, so the rest wait for that one to end. Pause keeps them all.
+    /// An approval, plan or question card waits on an answer: the harness
+    /// acts on nothing else until it has one.
+    fn card_waiting(&self) -> bool {
+        matches!(
+            self.waiting,
+            Some((
+                proto::AgentWaitingReason::Approval | proto::AgentWaitingReason::Question,
+                card,
+            )) if self.cards.contains_key(&card)
+        )
+    }
+
+    /// Whether this input has to wait: for a card's answer, or for the
+    /// running turn when the harness cannot take it mid-turn.
+    fn blocked(&self, session: &Arc<dyn Session>, delivery: &Delivery) -> bool {
+        (self.card_waiting() && matches!(delivery, Delivery::Turn | Delivery::Steer { .. }))
+            || waits_for_turn(session, delivery)
+    }
+
+    /// Sends the oldest held input once nothing blocks it. Without mid-turn
+    /// input each starts its own turn, so the rest wait for that one to
+    /// end. Pause keeps them all.
     async fn release_held(&mut self) {
         while !self.paused {
             let Some(id) = self.held.front().cloned() else {
                 return;
             };
-            if self
-                .session
-                .as_ref()
-                .is_some_and(|session| live_turn(session).is_some())
-            {
-                return;
-            }
-            let Some(pending) = self.inputs.get(&id).map(|(_, pending, _)| pending.clone()) else {
+            let Some((input, pending, _)) = self.inputs.get(&id).cloned() else {
                 self.held.pop_front();
                 continue;
             };
+            if let Some(session) = &self.session
+                && self.blocked(session, &input.delivery)
+            {
+                return;
+            }
             self.event(HoldEvent::AcquireRequested {
                 input: Some(pending),
             })
@@ -2929,6 +2956,7 @@ impl Actor {
     // ---------------------------------------------------------------
 
     async fn envelope(&mut self, envelope: inline_agent_bridge::harness::Envelope) {
+        let card_was_waiting = self.card_waiting();
         let turn_ended = matches!(
             &envelope.event,
             Event::Turn {
@@ -3074,9 +3102,9 @@ impl Actor {
         } else {
             self.report().await;
         }
-        // Completed, failed or stopped: held input goes out now, after the
-        // turn's answer.
-        if turn_ended {
+        // The card was answered, or the turn completed, failed or stopped:
+        // held input goes out now, after the turn's answer.
+        if turn_ended || (card_was_waiting && !self.card_waiting()) {
             self.release_held().await;
         }
     }
@@ -4880,6 +4908,131 @@ pub(crate) mod recovery_tests {
             directed_turns: HashSet::new(),
             plan_card: None,
         }
+    }
+
+    /// A message typed while an approval card waits is held with a note
+    /// pointing at the card, and steers the turn once the card is answered:
+    /// after a "No", it is what to do differently.
+    pub(crate) async fn input_waits_for_an_open_card(
+        agent: Arc<Agent>,
+        sent: impl Fn() -> Vec<Input>,
+    ) {
+        use inline_agent_bridge::harness::{
+            ApprovalSubject, ClosedBy, Decision, DecisionId, DecisionKind, Envelope, InputContent,
+            Interaction, InteractionKind,
+        };
+        let input = |message: i64| {
+            let id = format!("card-input-{message}");
+            agent.ledger.begin(&id, 9, message, 1).unwrap();
+            let input = InputId::new(id).unwrap();
+            Command::Input {
+                input: Box::new(Input {
+                    id: input.clone(),
+                    content: InputContent::text("typed meanwhile"),
+                    origin: Origin::Owner { user: UserId(1) },
+                    delivery: Delivery::Turn,
+                }),
+                pending: PendingInput {
+                    id: input,
+                    sender: UserId(1),
+                    required: Operation::StartWork,
+                },
+                message_id: message,
+                answer_reply: false,
+                reply_to: None,
+            }
+        };
+        let state = |id: &str| agent.ledger.get(id).unwrap().map(|record| record.state);
+        let ids = |inputs: Vec<Input>| -> Vec<String> {
+            inputs.iter().map(|input| input.id.to_string()).collect()
+        };
+        let mut work = actor(agent.clone());
+        work.command(input(60)).await;
+        assert_eq!(ids(sent()), ["card-input-60"]);
+        let session = work.session.clone().expect("held");
+        let envelope = |seq: u64, event: Event| Envelope {
+            session: session.key().clone(),
+            seq,
+            checkpoint: None,
+            at_ms: now_ms(),
+            event,
+        };
+        // An approval card is up, as if Inline took it.
+        let deny = DecisionId::new("deny").unwrap();
+        let interaction = InteractionId::new("approval-1").unwrap();
+        work.renderer.apply(&envelope(
+            1,
+            Event::Interaction(Interaction {
+                id: interaction.clone(),
+                turn: None,
+                item: None,
+                parent: None,
+                kind: InteractionKind::Approval {
+                    subject: ApprovalSubject::Command {
+                        command: "rm -rf build".to_owned(),
+                        cwd: None,
+                        reason: None,
+                        network_host: None,
+                        permissions: None,
+                    },
+                    decisions: vec![Decision {
+                        id: deny.clone(),
+                        label: "No, and tell Claude what to do differently".to_owned(),
+                        kind: DecisionKind::Decline,
+                        description: None,
+                        accepts_message: true,
+                        native: serde_json::Value::Null,
+                    }],
+                },
+                native: serde_json::Value::Null,
+            }),
+        ));
+        work.card_by_interaction.insert(interaction.clone(), 70);
+        work.cards.insert(
+            70,
+            Card {
+                chat: 9,
+                interaction: interaction.clone(),
+                approval: true,
+                form: None,
+                answered: Vec::new(),
+            },
+        );
+        work.waiting = Some((proto::AgentWaitingReason::Approval, 70));
+
+        work.command(input(61)).await;
+        assert_eq!(ids(sent()), ["card-input-60"], "held while the card waits");
+        assert_eq!(state("card-input-61"), Some(InputState::Pending));
+
+        // Something else happening in the session leaves it held.
+        work.envelope(envelope(
+            2,
+            Event::Usage {
+                usage: Default::default(),
+            },
+        ))
+        .await;
+        assert_eq!(ids(sent()), ["card-input-60"]);
+
+        work.envelope(envelope(
+            3,
+            Event::InteractionClosed {
+                id: interaction,
+                by: ClosedBy::Inline {
+                    user: UserId(1),
+                    decision: Some(deny),
+                },
+            },
+        ))
+        .await;
+        let delivered = sent();
+        assert_eq!(ids(delivered.clone()), ["card-input-60", "card-input-61"]);
+        assert!(
+            matches!(delivered[1].delivery, Delivery::Steer { .. }),
+            "into the running turn"
+        );
+        assert!(work.held.is_empty());
+        assert_eq!(state("card-input-61"), Some(InputState::Accepted));
     }
 
     pub(crate) async fn plan_cards_supersede_unless_decided(agent: Arc<Agent>) {

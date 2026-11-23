@@ -2652,3 +2652,15 @@ async fn an_edited_held_message_runs_once() {
     );
     cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
 }
+
+/// While an approval card waits, a typed message is held with a note, not
+/// lost in the blocked turn; answering the card lets it in.
+#[tokio::test]
+async fn a_message_typed_while_a_card_waits_goes_in_once_it_is_answered() {
+    let (runtime, harness, _cleanup) = session_fixture(false, true, true);
+    let session = harness.session.clone();
+    work::recovery_tests::input_waits_for_an_open_card(runtime.agent.clone(), move || {
+        session.received.lock().unwrap().clone()
+    })
+    .await;
+}
