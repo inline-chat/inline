@@ -4457,9 +4457,8 @@ class MessageListAppKit: NSViewController {
             tableView.rect(ofRow: row).intersects(visibleRect),
             let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false),
             !cell.isHiddenOrHasHiddenAncestor,
-            // An album on screen is read through its newest item.
+            // An album on screen is read through its newest item; service rows are seen too.
             let message = rowMessages(forRow: row).last,
-            !message.message.isServiceMessage,
             message.message.messageId > 0,
             message.message.out != true
       else { return nil }
