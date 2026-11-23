@@ -271,18 +271,18 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
   }
 
   if (chatId && didAdvanceReadMaxId && effectiveMaxId !== undefined) {
-    try {
-      await Notifications.sendToUser({
-        userId: context.currentUserId,
-        payload: {
-          kind: "messages_read",
-          threadId: `chat_${chatId}`,
-          readUpToMessageId: String(effectiveMaxId),
-        },
-      })
-    } catch {
-      // best-effort only; skip if session lookup fails
-    }
+    // Clears this chat's notifications on the user's other devices. Best effort, and not
+    // awaited: the reader's reply does not wait on push delivery.
+    void Notifications.sendToUser({
+      userId: context.currentUserId,
+      payload: {
+        kind: "messages_read",
+        threadId: `chat_${chatId}`,
+        readUpToMessageId: String(effectiveMaxId),
+      },
+    }).catch(() => {
+      // skip if session lookup or delivery fails
+    })
   }
 
   return { updates }
