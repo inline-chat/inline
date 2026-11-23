@@ -2,6 +2,7 @@ import type { DbBillingSubscription } from "@in/server/db/schema"
 import {
   availablePlans,
   BillingError,
+  billingOpenFor,
   createCheckout,
   createPortal,
   manageableSpaceIds,
@@ -78,7 +79,7 @@ const encodeAccount = async (subject: { userId: number } | { spaceId: number }, 
 
 export async function getBillingHandler(_input: GetBillingInput, context: HandlerContext): Promise<GetBillingResult> {
   limit(context, "get", 60)
-  if (context.isBot) throw RealtimeRpcError.BadRequestWithReason("billing_unavailable")
+  if (context.isBot || !(await billingOpenFor(context.userId))) throw RealtimeRpcError.BadRequestWithReason("billing_unavailable")
   const spaceIds = await manageableSpaceIds(context.userId)
   return {
     me: await encodeAccount({ userId: context.userId }, context.userId),

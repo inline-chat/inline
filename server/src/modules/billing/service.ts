@@ -11,6 +11,7 @@ import {
   type DbBillingSubscription,
 } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
+import { isProd } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm"
 import { findPlan, prepaidEnd, type CatalogPlan } from "./catalog"
@@ -44,6 +45,27 @@ export const checkoutConfig = (): CheckoutConfig | null => {
 /** Tests only. */
 export const setCheckoutConfigForTests = (config: CheckoutConfig | null | undefined) => {
   cachedConfig = config
+}
+
+/**
+ * Who can see and buy plans in the apps. In production, only Inline team accounts
+ * (@inline.chat) until INLINE_BILLING_OPEN=true; any other server (local debug) is open.
+ * Everything else keeps running for everyone: signed webhooks, credit plans, the
+ * sweeper, seat sync for existing plans, and admin.
+ */
+let billingOpenOverride: boolean | undefined
+export const billingOpen = () => billingOpenOverride ?? (process.env["INLINE_BILLING_OPEN"] === "true" || !isProd)
+/** Tests only: true opens billing to everyone, false limits it to the Inline team. */
+export const setBillingOpenForTests = (open: boolean | undefined) => {
+  billingOpenOverride = open
+}
+
+export const isStaffEmail = (email: string | null | undefined) => !!email && email.toLowerCase().endsWith("@inline.chat")
+
+export const billingOpenFor = async (userId: number) => {
+  if (billingOpen()) return true
+  const [user] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1)
+  return isStaffEmail(user?.email)
 }
 
 export class BillingError extends Error {
@@ -304,7 +326,7 @@ const openSessionMs = 24 * 60 * 60 * 1000
 
 export const createCheckout = async (input: { userId: number; planCode: string; spaceId?: number }) => {
   const config = checkoutConfig()
-  if (!config) throw new BillingError("billing_unavailable")
+  if (!config || !(await billingOpenFor(input.userId))) throw new BillingError("billing_unavailable")
   const plan = availablePlans(config).find((candidate) => candidate.code === input.planCode)
   if (!plan) throw new BillingError("unknown_plan")
   if ((plan.subject === "space") !== (input.spaceId !== undefined)) throw new BillingError("unknown_plan")
@@ -375,7 +397,7 @@ export const createCheckout = async (input: { userId: number; planCode: string; 
 
 export const createPortal = async (input: { userId: number; spaceId?: number }) => {
   const config = checkoutConfig()
-  if (!config) throw new BillingError("billing_unavailable")
+  if (!config || !(await billingOpenFor(input.userId))) throw new BillingError("billing_unavailable")
   const subject: Subject = input.spaceId !== undefined ? { spaceId: input.spaceId } : { userId: input.userId }
   const live = await liveSubscription(db, subject)
   if (!live?.stripeSubscriptionId || live.funding !== "stripe") throw new BillingError("no_subscription")

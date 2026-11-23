@@ -3,7 +3,8 @@ import { and, eq, isNull } from "drizzle-orm"
 import { db } from "../../db"
 import { billingEvents, billingOrders, billingSubscriptions, billingWalletEntries, members, spaces, users } from "../../db/schema"
 import { checkoutService, type CheckoutConfig } from "../../modules/billing/checkoutClient"
-import { applyNotification, createCheckout, parseNotification, setCheckoutConfigForTests, sweepBilling } from "../../modules/billing/service"
+import { applyNotification, createCheckout, createPortal, parseNotification, setBillingOpenForTests, setCheckoutConfigForTests, sweepBilling } from "../../modules/billing/service"
+import { getBillingHandler } from "../../realtime/handlers/billing"
 import { setupTestLifecycle, testUtils } from "../setup"
 
 const config: CheckoutConfig = {
@@ -24,6 +25,7 @@ describe("billing notifications", () => {
 
   beforeEach(async () => {
     setCheckoutConfigForTests(config)
+    setBillingOpenForTests(true)
     buyer = await testUtils.createUser("billing-buyer@example.com")
     space = await testUtils.createSpace("Billing Space")
     await db.insert(members).values({ userId: buyer.id, spaceId: space.id, role: "owner" })
@@ -77,6 +79,24 @@ describe("billing notifications", () => {
     expect(await applyNotification(config, event({ ...paid, paymentStatus: "unpaid" }))).toBe("applied")
     const [row] = await db.select().from(spaces).where(eq(spaces.id, space.id))
     expect(row!.isPro).toBe(false)
+  })
+
+  test("closed billing serves only the Inline team but still applies signed events", async () => {
+    const { orderId } = await startCheckout("sandbox-test", space.id)
+    setBillingOpenForTests(false)
+    await expect(createCheckout({ userId: buyer.id, planCode: "pro-monthly" })).rejects.toThrow("billing_unavailable")
+    await expect(createPortal({ userId: buyer.id })).rejects.toThrow("billing_unavailable")
+    await expect(getBillingHandler({} as any, { userId: buyer.id, isBot: false } as any)).rejects.toThrow()
+
+    const staff = (await testUtils.createUser("Someone@Inline.chat"))!
+    const result = await getBillingHandler({} as any, { userId: staff.id, isBot: false } as any)
+    expect(result.plans.length).toBeGreaterThan(0)
+    await expect(createPortal({ userId: staff.id })).rejects.toThrow("no_subscription")
+
+    const paid = event({ type: "checkout.session.completed", orderId, plan: "sandbox-test", checkoutSessionId: `cs_test_${orderId}`, paymentStatus: "paid" })
+    expect(await applyNotification(config, paid)).toBe("applied")
+    const [granted] = await db.select().from(spaces).where(eq(spaces.id, space.id))
+    expect(granted!.isPro).toBe(true)
   })
 
   test("repeated checkout taps reuse the pending order", async () => {
