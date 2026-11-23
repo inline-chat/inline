@@ -1546,6 +1546,7 @@ version = "0.7.26"
 dependencies = [
  "agent-client-protocol",
  "base64 0.22.1",
+ "chrono",
  "futures-util",
  "inline-agent-bridge",
  "log",

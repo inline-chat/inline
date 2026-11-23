@@ -12,7 +12,7 @@ mod process;
 mod support;
 
 pub use descriptor::{AcpDescriptorError, AcpLaunchDescriptor};
-pub use driver::AcpDriver;
+pub use driver::{AcpDriver, AcpSessionOps};
 pub use harness::{AcpHarness, AcpSession, acp_availability};
 pub use host_tools::run_inline_tools_mcp;
 pub use isolated_harness::IsolatedAcpHarness;

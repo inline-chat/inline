@@ -4,7 +4,9 @@
 //! a Claude release breaks the Rust driver. It is turn-scoped underneath, so
 //! this adapter declares the reduced capability set: turns, steering where
 //! the agent supports it, stop, approvals, questions and compaction; no
-//! native queue, passive context, fork or session browser.
+//! native queue or passive context. The session browser, fork and close
+//! follow what the agent advertised in `sessionCapabilities`: an agent that
+//! does not advertise `list`, `fork` or `close` is never sent that method.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -15,22 +17,28 @@ use inline_agent_bridge::harness::{
     ApprovalSubject, Availability, AvailabilityMatrix, CapabilityManifest, Catalog, CatalogScope,
     ClosedBy, CompatTier, DEFAULT_HUB_CAPACITY, Decision, DecisionId, DecisionKind, Delivery,
     DeliveryKind, DeltaStream, Event, EventHub, EventStream, ExecutableInfo, FieldAnswer, FieldId,
-    FieldInput, FieldOption, FileChangeKind, FileDiff, FormField, HarnessDriver, HarnessFuture,
-    Input, InputDisposition, InputId, InputReceipt, Interaction, InteractionId, InteractionKind,
-    InteractionResponse, Item, ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus, ItemUpdate,
-    LiveWork, MessageRole, Notice, NoticeLevel, Op, OpError, OpKind, OpOutcome, OpenError,
-    OpenMode, OpenSpec, QuestionForm, ReleaseOutcome, Released, RunState, RunStateTracker,
-    RuntimeHealth, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
-    SettingsScope, TokenUsage, TurnPhase, UsageUpdate, UserId,
+    FieldInput, FieldOption, FileChangeKind, FileDiff, ForkPoint, FormField, HarnessDriver,
+    HarnessFuture, Input, InputDisposition, InputId, InputReceipt, Interaction, InteractionId,
+    InteractionKind, InteractionResponse, Item, ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus,
+    ItemUpdate, LiveWork, MessageRole, Notice, NoticeLevel, Op, OpError, OpKind, OpOutcome,
+    OpenError, OpenMode, OpenSpec, QuestionForm, ReleaseOutcome, Released, RunState,
+    RunStateTracker, RuntimeHealth, RuntimeInfo, SendError, Session, SessionKey, SessionPage,
+    SessionQuery, SessionSummary, SettingsScope, TokenUsage, TurnPhase, UsageUpdate, UserId,
 };
 use inline_agent_bridge::{
     ActivitySemanticKind, ActivityStatus, ActivityTextStream, AgentDriver, AgentEvent,
     AgentMessageUpdate, ApprovalDecision, ApprovalOption, ApprovalRequest, DriverError,
     DriverFuture, ProviderId, ProviderSessionId, QuestionAnswer, QuestionRequest,
-    ResumeSessionSpec, SessionReplay, SessionSpec, SteeringSupport, TurnId, TurnInput, TurnOptions,
-    TurnOutcome,
+    ResumeSessionSpec, SessionPageCursor, SessionReplay, SessionSpec, SteeringSupport, TurnId,
+    TurnInput, TurnOptions, TurnOutcome,
 };
 use serde_json::{Value, json};
+
+use crate::AcpDriver;
+use crate::driver::AcpSessionListing;
+
+/// Folder to the session the settings catalog reads commands from.
+type CatalogSessions = Arc<tokio::sync::Mutex<HashMap<PathBuf, ProviderSessionId>>>;
 
 /// The reduced capability set ACP can honour for `driver`.
 pub fn acp_availability(driver: &dyn AgentDriver) -> AvailabilityMatrix {
@@ -93,17 +101,17 @@ pub fn acp_availability(driver: &dyn AgentDriver) -> AvailabilityMatrix {
 
 /// An ACP agent behind the session contract.
 pub struct AcpHarness {
-    driver: Arc<dyn AgentDriver>,
+    driver: Arc<AcpDriver>,
     provider: ProviderId,
     executable: ExecutableInfo,
     driver_version: String,
     process_status: Option<crate::AcpProcessStatus>,
-    catalog_sessions: tokio::sync::Mutex<HashMap<PathBuf, ProviderSessionId>>,
+    catalog_sessions: CatalogSessions,
 }
 
 impl AcpHarness {
     pub fn new(
-        driver: Arc<dyn AgentDriver>,
+        driver: Arc<AcpDriver>,
         provider: ProviderId,
         executable: ExecutableInfo,
         driver_version: impl Into<String>,
@@ -114,7 +122,7 @@ impl AcpHarness {
             executable,
             driver_version: driver_version.into(),
             process_status: None,
-            catalog_sessions: tokio::sync::Mutex::new(HashMap::new()),
+            catalog_sessions: Arc::default(),
         }
     }
 
@@ -131,7 +139,7 @@ impl AcpHarness {
             executable,
             driver_version: driver_version.into(),
             process_status: Some(spawned.process_status),
-            catalog_sessions: tokio::sync::Mutex::new(HashMap::new()),
+            catalog_sessions: Arc::default(),
         }
     }
 
@@ -141,6 +149,11 @@ impl AcpHarness {
 
     pub async fn shutdown(&self) -> Result<(), DriverError> {
         self.driver.shutdown().await
+    }
+
+    /// The agent's advertised session lifecycle methods.
+    pub fn session_ops(&self) -> crate::AcpSessionOps {
+        self.driver.session_ops()
     }
 }
 
@@ -224,9 +237,22 @@ impl HarnessDriver for AcpHarness {
         })
     }
 
-    fn sessions<'a>(&'a self, _query: SessionQuery) -> DriverFuture<'a, SessionPage> {
-        // ACP lists no sessions; the native drivers own the session browser.
-        Box::pin(async { Ok(SessionPage::default()) })
+    fn sessions<'a>(&'a self, query: SessionQuery) -> DriverFuture<'a, SessionPage> {
+        Box::pin(async move {
+            // An agent without `session/list` has no browser. ACP has no
+            // archive, so `archived` and the page size have nothing to change.
+            if !self.driver.session_ops().list {
+                return Ok(SessionPage::default());
+            }
+            let listing = self
+                .driver
+                .list_sessions(
+                    query.folder,
+                    query.cursor.map(|cursor| cursor.as_str().to_owned()),
+                )
+                .await?;
+            Ok(session_page(&self.provider, listing))
+        })
     }
 
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
@@ -258,10 +284,17 @@ impl HarnessDriver for AcpHarness {
                         })?;
                     session.clone()
                 }
-                OpenMode::Fork { .. } => {
-                    return Err(OpenError::Unavailable(Availability::unavailable(
-                        "fork is unsupported (reduced mode: ACP)",
-                    )));
+                OpenMode::Fork { session, at } => {
+                    if let Some(unavailable) = fork_unavailable(self.driver.session_ops(), at) {
+                        return Err(OpenError::Unavailable(unavailable));
+                    }
+                    self.driver
+                        .fork_session(session, spec.folder.clone())
+                        .await
+                        .map_err(|error| match error {
+                            DriverError::InvalidSession(_) => OpenError::NotFound,
+                            other => OpenError::Driver(other),
+                        })?
                 }
             };
             let key = SessionKey {
@@ -284,6 +317,7 @@ impl HarnessDriver for AcpHarness {
                 key,
                 session,
                 driver: self.driver.clone(),
+                catalog_sessions: self.catalog_sessions.clone(),
                 instructions: spec.instructions.clone(),
                 mutation: tokio::sync::Mutex::new(()),
             });
@@ -329,7 +363,8 @@ struct AcpState {
 struct AcpSessionInner {
     key: SessionKey,
     session: ProviderSessionId,
-    driver: Arc<dyn AgentDriver>,
+    driver: Arc<AcpDriver>,
+    catalog_sessions: CatalogSessions,
     hub: EventHub,
     tracker: Mutex<RunStateTracker>,
     state: Mutex<AcpState>,
@@ -361,6 +396,61 @@ impl AcpSessionInner {
 /// One ACP session.
 pub struct AcpSession {
     inner: Arc<AcpSessionInner>,
+}
+
+/// Why a fork cannot be opened, if it cannot: the agent must advertise
+/// `session/fork`, which copies the whole session and has no fork point.
+pub(crate) fn fork_unavailable(
+    ops: crate::AcpSessionOps,
+    at: &Option<ForkPoint>,
+) -> Option<Availability> {
+    if !ops.fork {
+        Some(Availability::unavailable(
+            "fork is unsupported (reduced mode: ACP)",
+        ))
+    } else if at.is_some() {
+        Some(Availability::unavailable(
+            "this agent forks only at the end of a session (reduced mode: ACP)",
+        ))
+    } else {
+        None
+    }
+}
+
+/// Maps one `session/list` page onto the session browser's page.
+fn session_page(provider: &ProviderId, listing: AcpSessionListing) -> SessionPage {
+    SessionPage {
+        sessions: listing
+            .sessions
+            .into_iter()
+            .map(|session| SessionSummary {
+                key: SessionKey {
+                    provider: provider.clone(),
+                    session: session.id,
+                },
+                title: session.title,
+                preview: None,
+                folder: Some(session.cwd),
+                updated_at: session.updated_at.as_deref().and_then(unix_seconds),
+                held_by: None,
+                archived: false,
+            })
+            .collect(),
+        next: listing.next_cursor.and_then(|cursor| {
+            SessionPageCursor::new(cursor)
+                .inspect_err(|error| {
+                    log::warn!(target: "inline_agent_driver_acp", "dropping unusable session/list cursor: {error}");
+                })
+                .ok()
+        }),
+    }
+}
+
+/// ACP's `updatedAt` is ISO 8601; the browser wants Unix seconds.
+fn unix_seconds(timestamp: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|time| time.timestamp())
 }
 
 /// The prompt for an input: the author's text, and Inline's note for the
@@ -606,9 +696,29 @@ impl Session for AcpSession {
                 complete_if_active(&self.inner, turn, TurnOutcome::Interrupted);
             }
             self.inner.state().released = true;
+            // `session/close` frees the session in the agent so another client
+            // can take it. Without it, or if it fails, the agent still holds it.
+            let closed = self.inner.driver.session_ops().close
+                && self
+                    .inner
+                    .driver
+                    .close_session(&self.inner.session)
+                    .await
+                    .is_ok();
+            if closed {
+                self.inner
+                    .catalog_sessions
+                    .lock()
+                    .await
+                    .retain(|_, session| session != &self.inner.session);
+            }
             Ok(Released {
                 key: self.inner.key.clone(),
-                outcome: ReleaseOutcome::Unsubscribed,
+                outcome: if closed {
+                    ReleaseOutcome::NativeReleased
+                } else {
+                    ReleaseOutcome::Unsubscribed
+                },
                 cancelled_interactions: cancelled,
                 pending_inputs: Vec::new(),
                 stopped_children: Vec::new(),
