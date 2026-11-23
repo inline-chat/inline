@@ -689,6 +689,14 @@ public actor FileUploader {
           // over from a prepared one under a new identity, which follows the body's hash.
           if !MediaSendPreparation.photoNeedsPreparation(at: staged) {
             uploadUrl = staged
+            // Named and typed like the attempt that staged it, which the server checks against the
+            // same upload: one that had to prepare the photo sent its prepared format.
+            if MediaSendPreparation.photoNeedsPreparation(at: localUrl),
+               let format = MediaSendPreparation.preparedFormat(at: staged)
+            {
+              uploadMimeType = format.toMimeType()
+              uploadFileName = (fileName as NSString).deletingPathExtension + format.toExt()
+            }
             break
           }
           await FileNativeUploadStagingStore.shared.discard(logicalID: logicalID)

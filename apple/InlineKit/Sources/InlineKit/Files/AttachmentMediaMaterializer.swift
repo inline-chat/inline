@@ -5,8 +5,8 @@ import Logger
 /// ever making that representation a requirement for retaining the source.
 public enum AttachmentMediaMaterializer {
   public enum MaterializationError: Error, LocalizedError {
-    /// The video couldn't be prepared, and its file carries a location: it isn't sent as it is
-    /// unless someone chooses Send as Original.
+    /// The video couldn't be prepared, and its file carries (or may carry) camera, place or time
+    /// details: it isn't sent as it is unless someone chooses Send as Original.
     case videoNotPrepared
 
     public var errorDescription: String? {
@@ -137,7 +137,9 @@ public enum AttachmentMediaMaterializer {
     thumbnail: PlatformImage? = nil,
     originalFileName: String? = nil
   ) async throws -> FileMediaItem {
-    try await withBareFileFallback {
+    // Off this thread: drafts nobody sent may have left originals behind.
+    Task.detached(priority: .utility) { OriginalMediaStore.sweep() }
+    return try await withBareFileFallback {
       let video = FileMediaItem.video(try await FileCache.saveVideo(url: url, thumbnail: thumbnail))
       do {
         try OriginalMediaStore.retain(copyOf: url, fileName: originalFileName, for: video)
@@ -146,8 +148,9 @@ public enum AttachmentMediaMaterializer {
       }
       return video
     } fallback: {
-      // Nobody chose Send as Original: a file with a location doesn't go as it is.
-      guard !(await OriginalMediaStore.videoIncludesLocation(url)) else {
+      // Nobody chose Send as Original: a file that may carry camera, place or time details
+      // doesn't go as it is.
+      guard !(await OriginalMediaStore.videoMayCarryIdentifyingMetadata(url)) else {
         throw MaterializationError.videoNotPrepared
       }
       return .document(try await FileCache.saveDocumentWithThumbnail(url: url))

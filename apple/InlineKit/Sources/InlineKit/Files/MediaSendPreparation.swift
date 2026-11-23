@@ -114,6 +114,19 @@ public enum MediaSendPreparation {
     return carriesIdentifyingMetadata(properties)
   }
 
+  /// The format of a prepared photo file, read from its header; nil for anything else.
+  public static func preparedFormat(at url: URL) -> ImageFormat? {
+    guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, sourceOptions),
+          let identifier = CGImageSourceGetType(imageSource) as String?,
+          let type = UTType(identifier)
+    else {
+      return nil
+    }
+    if type.conforms(to: .png) { return .png }
+    if type.conforms(to: .jpeg) { return .jpeg }
+    return nil
+  }
+
   /// Full resolution, for an image that goes as a file: a long screenshot must stay readable.
   public static let fileCopyTarget = PhotoTarget(maxPixelSize: 100_000, jpegQuality: 0.92)
 
