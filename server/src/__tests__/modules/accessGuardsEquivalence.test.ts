@@ -9,6 +9,8 @@ import { getCurrentSpaceMembership } from "@in/server/modules/authorization/spac
 import { hasThreadAccessGrant } from "@in/server/modules/authorization/threadAccess"
 import { countTransferWork } from "@in/server/modules/transfers/trace"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
+import { DeleteMemberInput, Method, RpcCall } from "@inline-chat/protocol/core"
 
 setupTestLifecycle()
 
@@ -126,6 +128,7 @@ async function matrix() {
   const privateThread = await thread(main.id, "private", false)
   const groupThread = await thread(main.id, "group", false)
   const publicWithGrant = await thread(main.id, "public with grant", true)
+  const publicWithGroup = await thread(main.id, "public with group grant", true)
   const deletedSpaceThread = await thread(gone.id, "deleted space", true)
   const otherPublic = await thread(other.id, "other public", true)
   const home = await thread(null, "home", false)
@@ -140,7 +143,12 @@ async function matrix() {
   }
   const [group] = await db.insert(schema.userGroups).values({ spaceId: main.id, name: "Group", createdBy: owner.id }).returning()
   await db.insert(schema.userGroupMembers).values([{ groupId: required(group, "group").id, userId: noPublic.id }, { groupId: group!.id, userId: removed.id }])
-  await db.insert(schema.chatParticipantGroups).values({ chatId: groupThread.id, groupId: group!.id })
+  await db.insert(schema.chatParticipantGroups).values([
+    { chatId: groupThread.id, groupId: group!.id },
+    // Group grants count only on private threads; a member without public
+    // access stays out of a public one.
+    { chatId: publicWithGroup.id, groupId: group!.id },
+  ])
 
   const publicChild = await subthread(publicThread, main.id, "public child")
   await testUtils.addParticipant(publicChild.id, noPublic.id)
@@ -153,11 +161,18 @@ async function matrix() {
   const deletedSpaceChild = await subthread(deletedSpaceThread, gone.id, "deleted-space child")
   await testUtils.addParticipant(deletedSpaceChild.id, member.id)
 
+  // Rows whose parent no longer resolves (the guard takes the row it is
+  // given): the direct grant alone decides.
+  const missingParent = 2_000_000_000
+  const orphanWithGrant: DbChat = { ...publicChild, title: "orphan with grant", parentChatId: missingParent }
+  const orphanUnscoped: DbChat = { ...homeChild, title: "orphan without space", parentChatId: missingParent }
+
   const chats = [
-    publicThread, privateThread, groupThread, publicWithGrant, deletedSpaceThread, otherPublic, home, dm,
+    publicThread, privateThread, groupThread, publicWithGrant, publicWithGroup, deletedSpaceThread, otherPublic, home, dm,
     publicChild, privateChild, grandchild, homeChild, dmChild, crossSpaceChild, unscopedChild, deletedSpaceChild,
+    orphanWithGrant, orphanUnscoped,
   ]
-  return { users, chats, publicThread, member }
+  return { users, chats, publicThread, publicChild, member, owner, main }
 }
 
 describe("chat access guard", () => {
@@ -179,18 +194,26 @@ describe("chat access guard", () => {
     expect(allowed).toBeLessThan(users.length * chats.length)
   })
 
-  test("authorizes a member's read of a public thread with one statement", async () => {
-    const { publicThread, member } = await matrix()
-    const { counters } = await countTransferWork(() => AccessGuards.ensureChatAccess(publicThread, member.id))
-    expect(counters.sqlStatements).toBe(1)
+  test("authorizes a member's read of a public thread with one statement, and of its subthread with two", async () => {
+    const { publicThread, publicChild, member } = await matrix()
+    const top = await countTransferWork(() => AccessGuards.ensureChatAccess(publicThread, member.id))
+    expect(top.counters.sqlStatements).toBe(1)
+    const child = await countTransferWork(() => AccessGuards.ensureChatAccess(publicChild, member.id))
+    expect(child.counters.sqlStatements).toBe(2)
   })
 
-  test("reflects a membership removal on the next check", async () => {
-    const { publicThread, member } = await matrix()
+  test("reflects a removal through the member-removal RPC on the next check", async () => {
+    const { publicThread, publicChild, member, owner, main } = await matrix()
     await AccessGuards.ensureChatAccess(publicThread, member.id)
-    await db.delete(schema.members).where(eq(schema.members.userId, member.id))
-    await expect(AccessGuards.ensureChatAccess(publicThread, member.id)).rejects.toMatchObject({
-      code: RealtimeRpcError.Code.SPACE_ID_INVALID,
-    })
+    await AccessGuards.ensureChatAccess(publicChild, member.id)
+    await handleRpcCall(RpcCall.create({
+      method: Method.DELETE_MEMBER,
+      input: { oneofKind: "deleteMember", deleteMember: DeleteMemberInput.create({ spaceId: BigInt(main.id), userId: BigInt(member.id) }) },
+    }), { userId: owner.id, sessionId: 1, isBot: false, connectionId: "", sendRaw() {}, sendRpcReply() {} })
+    for (const chat of [publicThread, publicChild]) {
+      await expect(AccessGuards.ensureChatAccess(chat, member.id)).rejects.toMatchObject({
+        code: RealtimeRpcError.Code.SPACE_ID_INVALID,
+      })
+    }
   })
 })

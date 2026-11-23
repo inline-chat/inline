@@ -34,12 +34,17 @@ async function ensureChatAccess(chat: DbChat, userId: number, query: AccessQuery
   const owning = await ensureOwningSpaceMembership(chat, userId, query)
 
   // Access is the fence plus (a direct grant or access through the chat or its
-  // root). Both sides are always the same answer; the cheaper one goes first.
-  // A top-level public thread needs only the membership row already read.
+  // root). The order only changes how many reads an answer takes:
+  // - A top-level public thread needs only the membership row already read.
   if (chat.parentChatId == null && chat.spaceId != null && chat.publicThread && owning?.member.canAccessPublicChats !== false) {
     return
   }
 
+  // - A subthread is usually read through its root: under a public thread
+  //   that is one parent read (2 statements with the fence, measured in
+  //   accessGuardsEquivalence.test.ts), where the direct grant first cost two
+  //   lookups that mostly miss before the same parent read (5). Only when
+  //   inherited access fails is the direct grant checked.
   if (chat.parentChatId != null) {
     try {
       const parentChat = await getChatByIdFrom(chat.parentChatId, query)
