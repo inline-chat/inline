@@ -31,23 +31,33 @@ async function ensureChatAccess(chat: DbChat, userId: number, query: AccessQuery
   // A retained participant/group row is cached projection, not independent
   // authority for a Space-scoped chat. Fence it with the current nondeleted
   // Space membership before accepting any direct grant.
-  const validatedSpaceId = await ensureOwningSpaceMembership(chat, userId, query)
+  const owning = await ensureOwningSpaceMembership(chat, userId, query)
+
+  // Access is the fence plus (a direct grant or access through the chat or its
+  // root). Both sides are always the same answer; the cheaper one goes first.
+  // A top-level public thread needs only the membership row already read.
+  if (chat.parentChatId == null && chat.spaceId != null && chat.publicThread && owning?.member.canAccessPublicChats !== false) {
+    return
+  }
+
+  if (chat.parentChatId != null) {
+    try {
+      const parentChat = await getChatByIdFrom(chat.parentChatId, query)
+      if (!parentChat) throw RealtimeRpcError.PeerIdInvalid()
+      await ensureInheritedChatAccess(parentChat, userId, owning, query)
+      return
+    } catch (error) {
+      if (!(error instanceof RealtimeRpcError)) throw error
+      if (await hasThreadAccessGrant(chat.id, userId, query)) return
+      throw error
+    }
+  }
 
   if (await hasThreadAccessGrant(chat.id, userId, query)) {
     return
   }
 
-  if (chat.parentChatId != null) {
-    const parentChat = await getChatByIdFrom(chat.parentChatId, query)
-    if (!parentChat) {
-      throw RealtimeRpcError.PeerIdInvalid()
-    }
-
-    await ensureInheritedChatAccess(parentChat, userId, validatedSpaceId, query)
-    return
-  }
-
-  await ensureTopLevelChatAccess(chat, userId, validatedSpaceId, query)
+  await ensureTopLevelChatAccess(chat, userId, owning, query)
 }
 
 /**
@@ -131,10 +141,14 @@ async function ensureChatInfoEditAccess(chat: DbChat, userId: number, query?: Pi
   }
 }
 
+/** The fenced owning-Space membership: its Space and the current member row. */
+type OwningMembership = { spaceId: number; member: SpaceMember }
+type SpaceMember = NonNullable<Awaited<ReturnType<typeof getCurrentSpaceMembership>>>
+
 async function ensureInheritedChatAccess(
   chat: DbChat,
   userId: number,
-  validatedSpaceId: number | undefined,
+  owning: OwningMembership | undefined,
   query: AccessQuery,
 ) {
   if (chat.parentChatId != null) {
@@ -143,17 +157,17 @@ async function ensureInheritedChatAccess(
       throw RealtimeRpcError.PeerIdInvalid()
     }
 
-    await ensureInheritedChatAccess(parentChat, userId, validatedSpaceId, query)
+    await ensureInheritedChatAccess(parentChat, userId, owning, query)
     return
   }
 
-  await ensureTopLevelChatAccess(chat, userId, validatedSpaceId, query)
+  await ensureTopLevelChatAccess(chat, userId, owning, query)
 }
 
 async function ensureTopLevelChatAccess(
   chat: DbChat,
   userId: number,
-  validatedSpaceId: number | undefined,
+  owning: OwningMembership | undefined,
   query: AccessQuery,
 ) {
   if (chat.type === "private") {
@@ -168,13 +182,12 @@ async function ensureTopLevelChatAccess(
     return
   }
 
-  if (validatedSpaceId !== chat.spaceId) {
-    await ensureSpaceMember(chat.spaceId, userId, query)
-  }
+  // The owning fence already read this Space's current membership in the same
+  // query scope; read it again only for a root in another Space.
+  const member = owning?.spaceId === chat.spaceId ? owning.member : await requireSpaceMember(chat.spaceId, userId, query)
 
   if (chat.publicThread) {
-    const member = await getCurrentSpaceMembership(chat.spaceId, userId, query)
-    if (!member || member.canAccessPublicChats === false) {
+    if (member.canAccessPublicChats === false) {
       throw RealtimeRpcError.PeerIdInvalid()
     }
     return
@@ -187,10 +200,9 @@ async function ensureOwningSpaceMembership(
   chat: DbChat,
   userId: number,
   query: AccessQuery,
-): Promise<number | undefined> {
+): Promise<OwningMembership | undefined> {
   if (chat.spaceId != null) {
-    await ensureSpaceMember(chat.spaceId, userId, query)
-    return chat.spaceId
+    return { spaceId: chat.spaceId, member: await requireSpaceMember(chat.spaceId, userId, query) }
   }
   if (chat.parentChatId == null) return undefined
 
@@ -200,6 +212,10 @@ async function ensureOwningSpaceMembership(
 }
 
 async function ensureSpaceMember(spaceId: number, userId: number, query: AccessQuery = db) {
+  await requireSpaceMember(spaceId, userId, query)
+}
+
+async function requireSpaceMember(spaceId: number, userId: number, query: AccessQuery): Promise<SpaceMember> {
   // Positive process-local caches cannot prove current authority after a
   // removal or soft delete committed on another server process.
   const member = await getCurrentSpaceMembership(spaceId, userId, query)
@@ -211,6 +227,7 @@ async function ensureSpaceMember(spaceId: number, userId: number, query: AccessQ
     AccessGuardsCache.resetSpaceMember(spaceId, userId)
     throw RealtimeRpcError.SpaceIdInvalid()
   }
+  return member
 }
 
 async function ensureThreadAccessGrant(chatId: number, userId: number, query: AccessQuery) {
