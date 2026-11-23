@@ -18,6 +18,7 @@ struct Script {
     fork: bool,
     close: bool,
     fail_close: bool,
+    hang_close: bool,
 }
 
 impl Script {
@@ -27,6 +28,7 @@ impl Script {
             fork: true,
             close: true,
             fail_close: false,
+            hang_close: false,
         }
     }
 }
@@ -136,6 +138,14 @@ async fn fixture(script: Script) -> Fixture {
         .on_receive_request(
             async move |r: acp::CloseSessionRequest, responder, _| {
                 closes.lock().unwrap().closes.push(r.session_id.to_string());
+                if script.hang_close {
+                    // Never answer, without blocking the agent's dispatch.
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                        drop(responder);
+                    });
+                    return Ok(());
+                }
                 if script.fail_close {
                     return responder
                         .respond_with_error(agent_client_protocol::Error::internal_error());
@@ -384,6 +394,32 @@ async fn failed_close_leaves_the_session_held_by_the_agent() {
 }
 
 #[tokio::test]
+async fn a_stalled_close_does_not_hold_the_release() {
+    let f = fixture(Script {
+        hang_close: true,
+        ..Script::all()
+    })
+    .await;
+    let session = f.harness.open(spec(OpenMode::Start)).await.unwrap();
+    let started = std::time::Instant::now();
+    let released = tokio::time::timeout(Duration::from_secs(10), session.release())
+        .await
+        .expect("release waited on the stalled close")
+        .unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(released.outcome, ReleaseOutcome::Unsubscribed);
+    assert_eq!(f.seen.lock().unwrap().closes, ["ses_new"]);
+    // The connection survives: another session still works.
+    let other = f.harness.open(spec(OpenMode::Start)).await.unwrap();
+    turn(other.as_ref(), "after-stalled-close", "still here").await;
+    f.driver.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn unadvertised_methods_are_never_sent() {
     let f = fixture(Script::default()).await;
     assert_eq!(f.harness.session_ops(), AcpSessionOps::default());
@@ -412,6 +448,10 @@ mod isolated {
     use std::os::unix::fs::PermissionsExt;
 
     fn agent(root: &Path, capabilities: &str) -> AcpLaunchDescriptor {
+        agent_with(root, capabilities, false)
+    }
+
+    fn agent_with(root: &Path, capabilities: &str, hang_close: bool) -> AcpLaunchDescriptor {
         let script = root.join("session-ops-fixture");
         let source = r#"#!/usr/bin/env python3
 import json, sys, os
@@ -425,6 +465,7 @@ for line in sys.stdin:
     method, p = r.get('method'), r.get('params', {})
     if method: record(method)
     if 'id' not in r: continue
+    if method == 'session/close' and HANG_CLOSE: continue
     if method == 'initialize':
         value = {'protocolVersion':1, 'agentInfo':{'name':'opencode','version':'2.0.32'}, 'agentCapabilities':{'sessionCapabilities':CAPABILITIES}, 'authMethods':[]}
     elif method in ['session/new', 'session/resume']:
@@ -440,7 +481,8 @@ for line in sys.stdin:
     else: value = {}
     print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':value}), flush=True)
 "#
-        .replace("CAPABILITIES", capabilities);
+        .replace("CAPABILITIES", capabilities)
+        .replace("HANG_CLOSE", if hang_close { "True" } else { "False" });
         std::fs::write(&script, source).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         AcpLaunchDescriptor::opencode(script)
@@ -515,6 +557,39 @@ for line in sys.stdin:
             requests(&root).contains(&(fork_pid, "session/close".to_owned())),
             "the fork's own process is asked to close it"
         );
+        harness.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_stalled_close_still_stops_the_process_promptly() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let harness = IsolatedAcpHarness::connect(
+            agent_with(&root, "{'resume':{},'close':{}}", true),
+            "test",
+            None,
+        )
+        .await
+        .unwrap();
+        let session = harness
+            .open(OpenSpec {
+                folder: root.clone(),
+                ..spec(OpenMode::Start)
+            })
+            .await
+            .unwrap();
+        let started = std::time::Instant::now();
+        let released = tokio::time::timeout(Duration::from_secs(10), session.release())
+            .await
+            .expect("release waited on the stalled close")
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(released.outcome, ReleaseOutcome::NativeReleased);
+        assert_eq!(count(&root, "session/close"), 1);
         harness.shutdown().await.unwrap();
     }
 
