@@ -2481,13 +2481,10 @@ class GlassComposeAppKit: NSView {
       url.pathExtension.lowercased() == "png" ? ImageFormat.png : ImageFormat.jpeg
     } else { nil }
 
-    // Check aspect ratio
-    if shouldSendAsFile(image) {
-      if let url {
-        addFile(url)
-        return
-      }
-
+    // Too thin or tiny to show as a photo. With a file behind it, the draft prepares it like any
+    // image, which sends it as a file without camera, place or time details; pixels alone carry
+    // none, so they go as a file here.
+    if shouldSendAsFile(image), url == nil {
       let tempDir = FileHelpers.getTrueTemporaryDirectory()
       let result = try? image.save(
         to: tempDir,
