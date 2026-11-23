@@ -318,7 +318,7 @@
             "form": {
               "fields": [
                 {
-                  "id": "How should the empty state look?",
+                  "id": "q0",
                   "header": "Empty state",
                   "prompt": "How should the empty state look?",
                   "input": {
