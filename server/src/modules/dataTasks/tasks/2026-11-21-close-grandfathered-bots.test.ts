@@ -138,8 +138,8 @@ describe("2026-11-21-close-grandfathered-bots", () => {
     expect(planViolation(task, plan([item(1, "share-and-close", [])]))).toBe("bot:1 shares with nobody")
     expect(planViolation(task, plan([item(1, "close", [], 1)]))).toBe("bot:1 is used by others but would close")
     expect(planViolation(task, plan([item(1, "keep-open", [], 0)]))).toBe("bot:1 is kept open without being used by others")
-    expect(planViolation(task, plan(Array.from({ length: 21 }, (_, index) => item(index + 1, "keep-open", [], 1)))))
-      .toBe('21 "keep-open" items exceed the limit of 20')
+    expect(planViolation(task, plan(Array.from({ length: 41 }, (_, index) => item(index + 1, "keep-open", [], 1)))))
+      .toBe('41 "keep-open" items exceed the limit of 40')
   })
 
   test("skips a bot someone used or its owner changed after the plan, and reverts the rest", async () => {
@@ -177,7 +177,7 @@ describe("2026-11-21-close-grandfathered-bots", () => {
     expect(await settingsOf(b)).toMatchObject({ openToEveryone: false, updatedBy: owner.id })
   })
 
-  test("applies only the sharing it planned: a bot that left a space, a space made public or a revoked person replans", async () => {
+  test("applies only the sharing it planned: a bot that left a space, a space made public or a revoked person is skipped", async () => {
     const owner = await person("owner3")
     const teammate = await person("teammate3")
     const team = (await testUtils.createSpace("Team 3"))!
@@ -216,7 +216,7 @@ describe("2026-11-21-close-grandfathered-bots", () => {
     expect(await activeGrants(left)).toHaveLength(0)
     expect(await activeGrants(publicSpace)).toHaveLength(0)
 
-    // The next run replans from current data: each closes, and nobody gets a grant the plan no longer gives.
+    // A fresh plan reads current data: each closes, and nobody gets a grant the plan no longer gives.
     const [report] = await runPendingDataTasks({ tasks: [task], sleep: async () => {} })
     expect(report).toMatchObject({ status: "completed", skipped: 0 })
     for (const replanned of [left, publicSpace, revoked]) {
@@ -261,5 +261,51 @@ describe("2026-11-21-close-grandfathered-bots", () => {
     const untouchedGrants = await db.select().from(schema.agentGrants)
       .where(and(eq(schema.agentGrants.botUserId, untouched.id), isNull(schema.agentGrants.revokedAt)))
     expect(untouchedGrants).toHaveLength(0)
+  })
+
+  test("a bridge bot gets no grants, another owner's bot counts as its owner, and a revoked space covers nobody", async () => {
+    const owner = await person("owner5")
+    const teammate = await person("teammate5")
+    const bob = await person("bob5")
+    const team = (await testUtils.createSpace("Team 5"))!
+    await db.insert(schema.members).values([
+      { spaceId: team.id, userId: owner.id, role: "owner" },
+      { spaceId: team.id, userId: teammate.id, role: "member" },
+    ])
+
+    // Once had a bridge: a space grant would let the team start work on the owner's machine.
+    const bridged = await bot("bridged", owner)
+    await db.insert(schema.members).values({ spaceId: team.id, userId: bridged.id, role: "member" })
+    await db.insert(schema.agentRuntimes).values({
+      botUserId: bridged.id, provider: 1, status: 0, lastSeenAt: new Date("2026-08-01T00:00:00Z"),
+    })
+    // Only Bob's bot ever wrote to it: Bob uses it through his bot.
+    const helped = await bot("helped", owner)
+    const bobsBot = await bot("bobs_helper", bob)
+    await dm(helped, bobsBot)
+    // The owner revoked its Team grant; the teammate is also in a thread with it.
+    const revoked = await bot("revoked_team", owner)
+    await db.insert(schema.members).values({ spaceId: team.id, userId: revoked.id, role: "member" })
+    await db.insert(schema.agentGrants).values({
+      botUserId: revoked.id, subjectSpaceId: team.id, operations: 0, revision: sql`nextval('agent_grant_revision')`,
+      grantedBy: owner.id, revokedAt: new Date(),
+    })
+    const quiet = (await testUtils.createChat(team.id, "Quiet 5", "thread", false, owner.id))!
+    await testUtils.addParticipant(quiet.id, revoked.id)
+    await testUtils.addParticipant(quiet.id, teammate.id)
+
+    const plan = await planDataTask(task)
+    const itemOf = (botUser: schema.DbUser) => plan.items.find((item) => item.key === `bot:${botUser.id}`)!
+    expect(itemOf(bridged)).toMatchObject({ tier: "close", plan: { userIds: [], spaceIds: [] } })
+    expect(itemOf(helped)).toMatchObject({ tier: "keep-open", noop: true, plan: { usedByOthers: 1 } })
+    expect(itemOf(revoked)).toMatchObject({ tier: "share-and-close", plan: { userIds: [teammate.id], spaceIds: [] } })
+
+    expect((await runPendingDataTasks({ tasks: [task], sleep: async () => {} }))[0]).toMatchObject({ status: "completed", skipped: 0 })
+    expect(await settingsOf(bridged)).toMatchObject({ openToEveryone: false })
+    expect(await activeGrants(bridged)).toHaveLength(0)
+    expect(await settingsOf(helped)).toMatchObject({ openToEveryone: true, updatedBy: null })
+    expect(await canMessageBot(helped, bobsBot.id)).toBe(true)
+    expect((await activeGrants(revoked)).map((grant) => grant.subjectUserId)).toEqual([teammate.id])
+    expect(await canMessageBot(revoked, teammate.id)).toBe(true)
   })
 })
