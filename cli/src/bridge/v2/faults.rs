@@ -81,6 +81,8 @@ struct FakeSession {
     /// session is scripted like ACP: no steering and no native queue.
     steers: bool,
     live: Mutex<Option<TurnId>>,
+    /// Interactions the session waits on, as `live_work` reports them.
+    open: Mutex<Vec<inline_agent_bridge::harness::InteractionId>>,
 }
 
 impl FakeSession {
@@ -178,6 +180,7 @@ impl Session for FakeSession {
     fn live_work(&self) -> LiveWork {
         LiveWork {
             turn: self.live.lock().unwrap().clone(),
+            interactions: self.open.lock().unwrap().clone(),
             ..LiveWork::default()
         }
     }
@@ -323,6 +326,7 @@ fn session_fixture(
         turns,
         steers,
         live: Mutex::new(None),
+        open: Mutex::new(Vec::new()),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -2653,14 +2657,46 @@ async fn an_edited_held_message_runs_once() {
     cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
 }
 
+fn card_harness(harness: &Arc<FakeHarness>) -> work::recovery_tests::CardHarness {
+    let sent = harness.session.clone();
+    let open = harness.session.clone();
+    let end = harness.session.clone();
+    work::recovery_tests::CardHarness {
+        sent: Box::new(move || sent.received.lock().unwrap().clone()),
+        open: Box::new(move |ids| *open.open.lock().unwrap() = ids),
+        end_turn: Box::new(move || *end.live.lock().unwrap() = None),
+    }
+}
+
 /// While an approval card waits, a typed message is held with a note, not
 /// lost in the blocked turn; answering the card lets it in.
 #[tokio::test]
 async fn a_message_typed_while_a_card_waits_goes_in_once_it_is_answered() {
     let (runtime, harness, _cleanup) = session_fixture(false, true, true);
-    let session = harness.session.clone();
-    work::recovery_tests::input_waits_for_an_open_card(runtime.agent.clone(), move || {
-        session.received.lock().unwrap().clone()
-    })
+    work::recovery_tests::input_waits_for_an_open_card(
+        runtime.agent.clone(),
+        card_harness(&harness),
+    )
     .await;
+}
+
+/// With two cards up, answering the newer one still holds input for the
+/// older one.
+#[tokio::test]
+async fn held_input_waits_for_every_open_card() {
+    let (runtime, harness, _cleanup) = session_fixture(false, true, true);
+    work::recovery_tests::input_waits_for_every_open_card(
+        runtime.agent.clone(),
+        card_harness(&harness),
+    )
+    .await;
+}
+
+/// A card left by a session that ended holds nothing in the next one, and
+/// input it held is offered once.
+#[tokio::test]
+async fn a_card_from_an_ended_session_holds_no_input() {
+    let (runtime, harness, _cleanup) = session_fixture(false, true, true);
+    work::recovery_tests::stale_card_holds_nothing(runtime.agent.clone(), card_harness(&harness))
+        .await;
 }
