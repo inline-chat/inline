@@ -412,6 +412,9 @@ export async function getMessageThreadProjectionsByParent(input: {
     childThreads.map((thread) => thread.chatId),
     {
       userIds: [input.userId],
+      // Its own Insights tag: reply badges on app history and chat reads, not
+      // the access check that admits the read.
+      source: "thread.badges",
       // Callers pass `db` or a read-only history snapshot.
       committed: true,
     },
