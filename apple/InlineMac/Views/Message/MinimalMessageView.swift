@@ -1240,7 +1240,15 @@ class MinimalMessageViewAppKit: NSView {
     label.isHidden = false
     let content = contentView.convert(contentView.bounds, to: self)
     let height: CGFloat = 16
-    let width = min(ceil(label.intrinsicContentSize.width), max(0, content.width))
+    // The footer row runs from the content's leading edge to the row's trailing safe edge,
+    // or to a standalone Ack pill on the same row, not just the content's width: a short
+    // message such as "ok" would otherwise cut "Sent via Claude Code" to "Sent via…".
+    var trailing = bounds.maxX - MessageSizeCalculator.minimalHoverSideInset
+      - MessageSizeCalculator.minimalHoverContentInset
+    if let acknowledgementView, !acknowledgementView.isHidden, reactionsView == nil {
+      trailing = min(trailing, acknowledgementView.frame.minX - 8)
+    }
+    let width = min(ceil(label.intrinsicContentSize.width), max(0, trailing - content.minX))
     // Bottom row of the wrapper, the same row a standalone Ack pill uses.
     let top = props.layout.wrapper.spacing.top + props.layout.wrapper.size.height - height
     let y = isFlipped ? top : bounds.height - top - height
