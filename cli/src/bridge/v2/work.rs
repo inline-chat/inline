@@ -1631,15 +1631,16 @@ impl Actor {
             HoldEffect::PendingNotDelivered { inputs } => {
                 for pending in &inputs {
                     self.mark(&pending.id, InputState::Pending);
+                    self.held.retain(|held| held != &pending.id);
                 }
-                if !inputs.is_empty() {
+                // Held input the release already kept is counted once.
+                let kept = self.keep_pending(inputs);
+                if kept > 0 {
                     self.notice(&format!(
-                        "{} message(s) stay pending in Inline; you'll be offered to run them next time.",
-                        inputs.len()
+                        "{kept} message(s) stay pending in Inline; you'll be offered to run them next time."
                     ))
                     .await;
                 }
-                self.retained.extend(inputs);
                 None
             }
             HoldEffect::Fork { .. } => match self.fork_here().await {
@@ -2084,7 +2085,7 @@ impl Actor {
         }
         let Some(session) = self.session.clone() else {
             self.held.retain(|held| held != &pending.id);
-            self.retained.push(pending);
+            self.keep_pending(vec![pending]);
             return;
         };
         // Input the harness cannot act on yet (a card waits on an answer, or
@@ -2095,7 +2096,7 @@ impl Actor {
         } else {
             let newly = !self.held.is_empty() || self.blocked(&session, &input.delivery);
             if newly {
-                self.hold_input(&pending.id, message_id, false).await;
+                self.hold_input(&pending.id, message_id, false, true).await;
                 // Held only behind others: the oldest may be free to go.
                 Box::pin(self.release_held()).await;
                 return;
@@ -2103,9 +2104,10 @@ impl Actor {
             false
         };
         if waits {
-            self.hold_input(&pending.id, message_id, false).await;
+            self.hold_input(&pending.id, message_id, false, true).await;
             return;
         }
+        let was_held = self.held.contains(&pending.id);
         self.held.retain(|held| held != &pending.id);
         // What the thread said since the agent last took input travels with
         // it as untrusted context, kept apart from the author's words. Every
@@ -2206,7 +2208,8 @@ impl Actor {
                 if let Some((kept, _, _)) = self.inputs.get_mut(&pending.id) {
                     kept.content = input.content.clone();
                 }
-                self.hold_input(&pending.id, message_id, true).await;
+                self.hold_input(&pending.id, message_id, true, !was_held)
+                    .await;
                 return;
             }
             result = session.send(input.clone()).await;
@@ -2289,7 +2292,7 @@ impl Actor {
             }
             Err(SendError::HeldElsewhere(by)) => {
                 self.mark(&pending.id, InputState::Pending);
-                self.retained.push(pending);
+                self.keep_pending(vec![pending]);
                 Box::pin(self.event(HoldEvent::AcquireConflict { by })).await;
             }
             Err(error) => {
@@ -2305,8 +2308,9 @@ impl Actor {
     }
 
     /// Keeps input for after the running turn, in arrival order (`front` for
-    /// one that was next when a turn beat it). The sender hears once.
-    async fn hold_input(&mut self, id: &InputId, message_id: i64, front: bool) {
+    /// one that was next when a turn beat it). The sender hears once: `note`
+    /// is false for input already told.
+    async fn hold_input(&mut self, id: &InputId, message_id: i64, front: bool, note: bool) {
         self.mark(id, InputState::Pending);
         if self.held.contains(id) {
             return;
@@ -2315,6 +2319,10 @@ impl Actor {
             self.held.push_front(id.clone());
         } else {
             self.held.push_back(id.clone());
+        }
+        if !note {
+            self.report().await;
+            return;
         }
         let text = if self.card_waiting() {
             format!(
@@ -2332,15 +2340,20 @@ impl Actor {
     }
 
     /// An approval, plan or question card waits on an answer: the harness
-    /// acts on nothing else until it has one.
+    /// acts on nothing else until it has one. Any open card counts, and only
+    /// while the session holding it still waits on it, so a card left by an
+    /// ended session never holds input.
     fn card_waiting(&self) -> bool {
-        matches!(
-            self.waiting,
-            Some((
-                proto::AgentWaitingReason::Approval | proto::AgentWaitingReason::Question,
-                card,
-            )) if self.cards.contains_key(&card)
-        )
+        let Some(session) = &self.session else {
+            return false;
+        };
+        if self.cards.is_empty() {
+            return false;
+        }
+        let open = session.live_work().interactions;
+        self.cards
+            .values()
+            .any(|card| open.contains(&card.interaction))
     }
 
     /// Whether this input has to wait: for a card's answer, or for the
@@ -2396,12 +2409,30 @@ impl Actor {
         for pending in &held {
             self.mark(&pending.id, InputState::Pending);
         }
-        self.notice(&format!(
-            "{} held message(s) stay pending in Inline; you'll be offered to run them next time.",
-            held.len()
-        ))
-        .await;
-        self.retained.extend(held);
+        let kept = self.keep_pending(held);
+        if kept > 0 {
+            self.notice(&format!(
+                "{kept} held message(s) stay pending in Inline; you'll be offered to run them next time."
+            ))
+            .await;
+        }
+    }
+
+    /// Keeps input to offer at the next acquisition, each once. Returns how
+    /// many were not kept already.
+    fn keep_pending(&mut self, inputs: Vec<PendingInput>) -> usize {
+        let mut kept = 0;
+        for pending in inputs {
+            if !self
+                .retained
+                .iter()
+                .any(|retained| retained.id == pending.id)
+            {
+                self.retained.push(pending);
+                kept += 1;
+            }
+        }
+        kept
     }
 
     async fn offer(&mut self, inputs: Vec<PendingInput>) {
@@ -2956,13 +2987,12 @@ impl Actor {
     // ---------------------------------------------------------------
 
     async fn envelope(&mut self, envelope: inline_agent_bridge::harness::Envelope) {
-        let card_was_waiting = self.card_waiting();
-        let turn_ended = matches!(
+        let unblocks = matches!(
             &envelope.event,
             Event::Turn {
                 phase: TurnPhase::Completed { .. },
                 ..
-            }
+            } | Event::InteractionClosed { .. }
         );
         log::debug!(
             target: "inline::bridge::v2",
@@ -3102,9 +3132,9 @@ impl Actor {
         } else {
             self.report().await;
         }
-        // The card was answered, or the turn completed, failed or stopped:
-        // held input goes out now, after the turn's answer.
-        if turn_ended || (card_was_waiting && !self.card_waiting()) {
+        // A card was answered, or the turn completed, failed or stopped:
+        // held input goes out once nothing blocks it, after the turn's answer.
+        if unblocks && !self.held.is_empty() {
             self.release_held().await;
         }
     }
@@ -4910,86 +4940,101 @@ pub(crate) mod recovery_tests {
         }
     }
 
-    /// A message typed while an approval card waits is held with a note
-    /// pointing at the card, and steers the turn once the card is answered:
-    /// after a "No", it is what to do differently.
-    pub(crate) async fn input_waits_for_an_open_card(
-        agent: Arc<Agent>,
-        sent: impl Fn() -> Vec<Input>,
-    ) {
-        use inline_agent_bridge::harness::{
-            ApprovalSubject, ClosedBy, Decision, DecisionId, DecisionKind, Envelope, InputContent,
-            Interaction, InteractionKind,
-        };
-        let input = |message: i64| {
-            let id = format!("card-input-{message}");
-            agent.ledger.begin(&id, 9, message, 1).unwrap();
-            let input = InputId::new(id).unwrap();
-            Command::Input {
-                input: Box::new(Input {
-                    id: input.clone(),
-                    content: InputContent::text("typed meanwhile"),
-                    origin: Origin::Owner { user: UserId(1) },
-                    delivery: Delivery::Turn,
-                }),
-                pending: PendingInput {
-                    id: input,
-                    sender: UserId(1),
-                    required: Operation::StartWork,
-                },
-                message_id: message,
-                answer_reply: false,
-                reply_to: None,
-            }
-        };
-        let state = |id: &str| agent.ledger.get(id).unwrap().map(|record| record.state);
-        let ids = |inputs: Vec<Input>| -> Vec<String> {
-            inputs.iter().map(|input| input.id.to_string()).collect()
-        };
-        let mut work = actor(agent.clone());
-        work.command(input(60)).await;
-        assert_eq!(ids(sent()), ["card-input-60"]);
-        let session = work.session.clone().expect("held");
-        let envelope = |seq: u64, event: Event| Envelope {
-            session: session.key().clone(),
+    /// The scripted session, seen from the work.
+    pub(crate) struct CardHarness {
+        /// Inputs the session took, in order.
+        pub(crate) sent: Box<dyn Fn() -> Vec<Input>>,
+        /// Sets the interactions the session waits on.
+        pub(crate) open: Box<dyn Fn(Vec<InteractionId>)>,
+        /// Ends the running turn without an event, as a crash does.
+        pub(crate) end_turn: Box<dyn Fn()>,
+    }
+
+    fn card_input(agent: &Agent, message: i64) -> Command {
+        let id = format!("card-input-{message}");
+        agent.ledger.begin(&id, 9, message, 1).unwrap();
+        let input = InputId::new(id).unwrap();
+        Command::Input {
+            input: Box::new(Input {
+                id: input.clone(),
+                content: inline_agent_bridge::harness::InputContent::text("typed meanwhile"),
+                origin: Origin::Owner { user: UserId(1) },
+                delivery: Delivery::Turn,
+            }),
+            pending: PendingInput {
+                id: input,
+                sender: UserId(1),
+                required: Operation::StartWork,
+            },
+            message_id: message,
+            answer_reply: false,
+            reply_to: None,
+        }
+    }
+
+    fn sent_ids(harness: &CardHarness) -> Vec<String> {
+        (harness.sent)()
+            .iter()
+            .map(|input| input.id.to_string())
+            .collect()
+    }
+
+    fn input_state(agent: &Agent, id: &str) -> Option<InputState> {
+        agent.ledger.get(id).unwrap().map(|record| record.state)
+    }
+
+    fn envelope(work: &Actor, seq: u64, event: Event) -> inline_agent_bridge::harness::Envelope {
+        inline_agent_bridge::harness::Envelope {
+            session: work.session.as_ref().expect("held").key().clone(),
             seq,
             checkpoint: None,
             at_ms: now_ms(),
             event,
+        }
+    }
+
+    /// Puts up an approval card as if Inline took it: rendered, posted as
+    /// `message_id`, and pending in the session.
+    fn open_card(
+        work: &mut Actor,
+        harness: &CardHarness,
+        id: &str,
+        message_id: i64,
+    ) -> InteractionId {
+        use inline_agent_bridge::harness::{
+            ApprovalSubject, Decision, DecisionId, DecisionKind, Interaction, InteractionKind,
         };
-        // An approval card is up, as if Inline took it.
-        let deny = DecisionId::new("deny").unwrap();
-        let interaction = InteractionId::new("approval-1").unwrap();
-        work.renderer.apply(&envelope(
-            1,
-            Event::Interaction(Interaction {
-                id: interaction.clone(),
-                turn: None,
-                item: None,
-                parent: None,
-                kind: InteractionKind::Approval {
-                    subject: ApprovalSubject::Command {
-                        command: "rm -rf build".to_owned(),
-                        cwd: None,
-                        reason: None,
-                        network_host: None,
-                        permissions: None,
-                    },
-                    decisions: vec![Decision {
-                        id: deny.clone(),
-                        label: "No, and tell Claude what to do differently".to_owned(),
-                        kind: DecisionKind::Decline,
-                        description: None,
-                        accepts_message: true,
-                        native: serde_json::Value::Null,
-                    }],
+        let interaction = InteractionId::new(id).unwrap();
+        let event = Event::Interaction(Interaction {
+            id: interaction.clone(),
+            turn: None,
+            item: None,
+            parent: None,
+            kind: InteractionKind::Approval {
+                subject: ApprovalSubject::Command {
+                    command: "rm -rf build".to_owned(),
+                    cwd: None,
+                    reason: None,
+                    network_host: None,
+                    permissions: None,
                 },
-                native: serde_json::Value::Null,
-            }),
-        ));
-        work.card_by_interaction.insert(interaction.clone(), 70);
+                decisions: vec![Decision {
+                    id: DecisionId::new("deny").unwrap(),
+                    label: "No, and tell Claude what to do differently".to_owned(),
+                    kind: DecisionKind::Decline,
+                    description: None,
+                    accepts_message: true,
+                    native: serde_json::Value::Null,
+                }],
+            },
+            native: serde_json::Value::Null,
+        });
+        let applied = envelope(work, message_id as u64, event);
+        work.renderer.apply(&applied);
+        work.card_by_interaction
+            .insert(interaction.clone(), message_id);
         work.cards.insert(
-            70,
+            message_id,
             Card {
                 chat: 9,
                 interaction: interaction.clone(),
@@ -4998,41 +5043,144 @@ pub(crate) mod recovery_tests {
                 answered: Vec::new(),
             },
         );
-        work.waiting = Some((proto::AgentWaitingReason::Approval, 70));
+        work.waiting = Some((proto::AgentWaitingReason::Approval, message_id));
+        let mut open = work.session.as_ref().unwrap().live_work().interactions;
+        open.push(interaction.clone());
+        (harness.open)(open);
+        interaction
+    }
 
-        work.command(input(61)).await;
-        assert_eq!(ids(sent()), ["card-input-60"], "held while the card waits");
-        assert_eq!(state("card-input-61"), Some(InputState::Pending));
-
-        // Something else happening in the session leaves it held.
-        work.envelope(envelope(
-            2,
-            Event::Usage {
-                usage: Default::default(),
-            },
-        ))
-        .await;
-        assert_eq!(ids(sent()), ["card-input-60"]);
-
-        work.envelope(envelope(
-            3,
+    /// The session answers a card: it stops waiting on it, then reports it
+    /// closed.
+    async fn close_card(
+        work: &mut Actor,
+        harness: &CardHarness,
+        interaction: InteractionId,
+        seq: u64,
+    ) {
+        use inline_agent_bridge::harness::{ClosedBy, DecisionId};
+        let open = work
+            .session
+            .as_ref()
+            .unwrap()
+            .live_work()
+            .interactions
+            .into_iter()
+            .filter(|open| open != &interaction)
+            .collect();
+        (harness.open)(open);
+        let closed = envelope(
+            work,
+            seq,
             Event::InteractionClosed {
                 id: interaction,
                 by: ClosedBy::Inline {
                     user: UserId(1),
-                    decision: Some(deny),
+                    decision: Some(DecisionId::new("deny").unwrap()),
                 },
             },
-        ))
-        .await;
-        let delivered = sent();
-        assert_eq!(ids(delivered.clone()), ["card-input-60", "card-input-61"]);
+        );
+        work.envelope(closed).await;
+    }
+
+    /// A message typed while an approval card waits is held with a note
+    /// pointing at the card, and steers the turn once the card is answered:
+    /// after a "No", it is what to do differently.
+    pub(crate) async fn input_waits_for_an_open_card(agent: Arc<Agent>, harness: CardHarness) {
+        let mut work = actor(agent.clone());
+        work.command(card_input(&agent, 60)).await;
+        assert_eq!(sent_ids(&harness), ["card-input-60"]);
+        let card = open_card(&mut work, &harness, "approval-1", 70);
+
+        work.command(card_input(&agent, 61)).await;
+        assert_eq!(
+            sent_ids(&harness),
+            ["card-input-60"],
+            "held while the card waits"
+        );
+        assert_eq!(
+            input_state(&agent, "card-input-61"),
+            Some(InputState::Pending)
+        );
+
+        // Something else happening in the session leaves it held.
+        let usage = envelope(
+            &work,
+            100,
+            Event::Usage {
+                usage: Default::default(),
+            },
+        );
+        work.envelope(usage).await;
+        assert_eq!(sent_ids(&harness), ["card-input-60"]);
+
+        close_card(&mut work, &harness, card, 101).await;
+        let delivered = (harness.sent)();
+        assert_eq!(sent_ids(&harness), ["card-input-60", "card-input-61"]);
         assert!(
             matches!(delivered[1].delivery, Delivery::Steer { .. }),
             "into the running turn"
         );
         assert!(work.held.is_empty());
-        assert_eq!(state("card-input-61"), Some(InputState::Accepted));
+        assert_eq!(
+            input_state(&agent, "card-input-61"),
+            Some(InputState::Accepted)
+        );
+    }
+
+    /// Two cards up (parallel permission requests): answering the newer one
+    /// leaves input held until the older one is answered too.
+    pub(crate) async fn input_waits_for_every_open_card(agent: Arc<Agent>, harness: CardHarness) {
+        let mut work = actor(agent.clone());
+        work.command(card_input(&agent, 60)).await;
+        let older = open_card(&mut work, &harness, "approval-a", 70);
+        let newer = open_card(&mut work, &harness, "approval-b", 71);
+        work.command(card_input(&agent, 61)).await;
+        assert_eq!(sent_ids(&harness), ["card-input-60"]);
+
+        close_card(&mut work, &harness, newer, 100).await;
+        assert_eq!(
+            sent_ids(&harness),
+            ["card-input-60"],
+            "the older card still waits"
+        );
+
+        close_card(&mut work, &harness, older, 101).await;
+        assert_eq!(sent_ids(&harness), ["card-input-60", "card-input-61"]);
+    }
+
+    /// A session that ends with a card up (a crash, or a release) leaves the
+    /// card behind; the next session does not wait on it, so new input runs.
+    /// Input it was holding is kept pending, and offered once.
+    pub(crate) async fn stale_card_holds_nothing(agent: Arc<Agent>, harness: CardHarness) {
+        let mut work = actor(agent.clone());
+        work.command(card_input(&agent, 60)).await;
+        open_card(&mut work, &harness, "approval-1", 70);
+        work.command(card_input(&agent, 61)).await;
+        assert_eq!(work.held.len(), 1);
+
+        // The process dies: no close event, no turn end.
+        (harness.open)(Vec::new());
+        (harness.end_turn)();
+        work.event(HoldEvent::Detached).await;
+        assert!(work.session.is_none());
+        assert!(work.held.is_empty());
+        assert_eq!(work.retained.len(), 1);
+        // The hold machine reporting it too keeps one offer.
+        let held = work.retained[0].clone();
+        work.effect(HoldEffect::PendingNotDelivered { inputs: vec![held] })
+            .await;
+        assert_eq!(work.retained.len(), 1, "offered once");
+
+        // The next message opens a fresh session and runs: the old card
+        // waits on nothing there.
+        work.command(card_input(&agent, 62)).await;
+        assert_eq!(sent_ids(&harness), ["card-input-60", "card-input-62"]);
+        assert_eq!(
+            (harness.sent)()[1].delivery,
+            Delivery::Turn,
+            "a turn of its own"
+        );
     }
 
     pub(crate) async fn plan_cards_supersede_unless_decided(agent: Arc<Agent>) {
