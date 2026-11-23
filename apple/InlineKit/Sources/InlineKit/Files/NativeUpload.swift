@@ -183,11 +183,16 @@ public actor FileNativeUploadStagingStore: NativeUploadStaging {
   }
 
   struct PreparedVideo: Codable, Sendable {
+    /// Re-encoded or remuxed without location or device details. Older builds wrote no version
+    /// and could stage the untouched video.
+    static let currentVersion = 2
+
     let fileName: String
     let mimeType: String
     let width: Int
     let height: Int
     let duration: Int
+    var version: Int?
   }
 
   func preparedVideo(logicalID: String) throws -> (URL, PreparedVideo)? {

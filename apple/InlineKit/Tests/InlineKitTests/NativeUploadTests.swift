@@ -1673,3 +1673,23 @@ struct NativeUploadTests {
     #expect(DurableUploadCoordinator.adaptedPartWindow(2, after: .seconds(20)) == 2)
   }
 }
+
+struct PreparedVideoStagingVersionTests {
+  @Test("a video descriptor from an older build has no version, so its staged body isn't reused")
+  func olderDescriptorIsStale() throws {
+    let older = Data(#"{"fileName":"IMG_1.MOV","mimeType":"video/quicktime","width":1920,"height":1080,"duration":12}"#.utf8)
+    let decoded = try JSONDecoder().decode(FileNativeUploadStagingStore.PreparedVideo.self, from: older)
+    #expect(decoded.version == nil)
+    #expect(decoded.version != FileNativeUploadStagingStore.PreparedVideo.currentVersion)
+
+    let current = FileNativeUploadStagingStore.PreparedVideo(
+      fileName: "video_1.mp4", mimeType: "video/mp4", width: 1280, height: 720, duration: 12,
+      version: FileNativeUploadStagingStore.PreparedVideo.currentVersion
+    )
+    let roundTrip = try JSONDecoder().decode(
+      FileNativeUploadStagingStore.PreparedVideo.self,
+      from: JSONEncoder().encode(current)
+    )
+    #expect(roundTrip.version == FileNativeUploadStagingStore.PreparedVideo.currentVersion)
+  }
+}

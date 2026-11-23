@@ -120,7 +120,7 @@ public extension OriginalMediaStore {
     case .photo:
       url = original(for: media)
     case .video:
-      url = original(for: media) ?? media.localFileURL()
+      url = media.originalVideoFile
     case .document:
       // An image or video file that Send as Original switched to (or that was attached as one).
       guard media.canSwitchOriginal else { return nil }
@@ -170,7 +170,7 @@ public extension FileMediaItem {
       true
     case let .document(info):
       Self.switchableFileTypes(mimeType: info.document.mimeType, fileName: info.document.fileName)
-        .contains { $0.conforms(to: .movie) || Self.isCompressibleImage($0) }
+        .contains { $0.conforms(to: .movie) || $0.conforms(to: .gif) || Self.isCompressibleImage($0) }
     case .voice:
       false
     }
@@ -192,9 +192,7 @@ public extension FileMediaItem {
       guard let original = OriginalMediaStore.original(for: self) else { return nil }
       return .document(try await FileCache.saveDocumentWithThumbnail(url: original))
     case .video:
-      // The cached video is an untouched copy too; a kept original adds its real file name.
-      let original = OriginalMediaStore.original(for: self) ?? localFileURL()
-      guard let original, FileManager.default.fileExists(atPath: original.path) else { return nil }
+      guard let original = originalVideoFile, FileManager.default.fileExists(atPath: original.path) else { return nil }
       return .document(try await FileCache.saveDocumentWithThumbnail(url: original))
     case let .document(info):
       guard canSwitchOriginal, let url = localFileURL(), FileManager.default.fileExists(atPath: url.path) else {
@@ -202,6 +200,8 @@ public extension FileMediaItem {
       }
       let media = if isVideoForOriginal {
         try await AttachmentMediaMaterializer.video(url, originalFileName: info.document.fileName)
+      } else if isGIFForOriginal {
+        try await AttachmentMediaMaterializer.animatedImage(url, originalFileName: info.document.fileName)
       } else {
         try await AttachmentMediaMaterializer.photo(.file(url), originalFileName: info.document.fileName)
       }
@@ -232,6 +232,21 @@ public extension FileMediaItem {
     }
   }
 
+  /// The file Send as Original sends for a video. The cached video is an untouched copy too (a
+  /// kept original adds its real file name), but an animation's cached video was converted from
+  /// its GIF, so only the kept GIF will do.
+  internal var originalVideoFile: URL? {
+    guard case let .video(info) = self else { return nil }
+    if let original = OriginalMediaStore.original(for: self) { return original }
+    return info.video.isAnimated ? nil : localFileURL()
+  }
+
+  internal var isGIFForOriginal: Bool {
+    guard case let .document(info) = self else { return false }
+    return Self.switchableFileTypes(mimeType: info.document.mimeType, fileName: info.document.fileName)
+      .contains { $0.conforms(to: .gif) }
+  }
+
   internal var isVideoForOriginal: Bool {
     switch self {
     case .video:
@@ -253,8 +268,8 @@ public extension FileMediaItem {
     return [fromMime, fromName].compactMap { $0 }
   }
 
-  /// A still image the photo preparer can compress. GIFs stay files (they'd lose their motion),
-  /// and so does vector art.
+  /// A still image the photo preparer can compress. GIFs switch to an animation instead (as a
+  /// photo they'd lose their motion), and vector art stays a file.
   internal static func isCompressibleImage(_ type: UTType) -> Bool {
     type.conforms(to: .image) && !type.conforms(to: .gif) && !type.conforms(to: .svg)
   }
