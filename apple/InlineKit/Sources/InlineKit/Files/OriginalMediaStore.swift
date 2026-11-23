@@ -152,6 +152,20 @@ public extension OriginalMediaStore {
     return gps[kCGImagePropertyGPSLatitude] != nil
   }
 
+  /// Whether a video file carries camera, place or time details, or can't be read to tell.
+  internal static func videoMayCarryIdentifyingMetadata(_ url: URL) async -> Bool {
+    guard let items = try? await AVURLAsset(url: url).load(.metadata) else { return true }
+    let keys: Set<AVMetadataKey> = [
+      .commonKeyLocation, .commonKeyMake, .commonKeyModel, .commonKeySoftware, .commonKeyCreationDate,
+    ]
+    let words = ["location", "make", "model", "creationdate", "software"]
+    return items.contains { item in
+      if let key = item.commonKey, keys.contains(key) { return true }
+      let identifier = item.identifier?.rawValue.lowercased() ?? ""
+      return words.contains { identifier.contains($0) }
+    }
+  }
+
   internal static func videoIncludesLocation(_ url: URL) async -> Bool {
     guard let items = try? await AVURLAsset(url: url).load(.metadata) else { return false }
     return items.contains { item in

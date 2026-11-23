@@ -125,6 +125,28 @@ struct MediaSendPreparationTests {
     #expect(try MediaSendPreparation.anonymizedFileCopy(of: .data(Data("not an image".utf8))) == nil)
   }
 
+  @Test("a staged photo's format is read from its header, whatever its name")
+  func preparedFormat() throws {
+    let jpeg = try write(makeJPEG(width: 40, height: 30, orientation: 1, camera: false, gps: false), ext: "png")
+    let png = try write(makePNG(width: 40, height: 30, transparentCorner: true), ext: "body")
+    defer {
+      try? FileManager.default.removeItem(at: jpeg)
+      try? FileManager.default.removeItem(at: png)
+    }
+    #expect(MediaSendPreparation.preparedFormat(at: jpeg) == .jpeg)
+    #expect(MediaSendPreparation.preparedFormat(at: png) == .png)
+    let text = try write(Data("not an image".utf8), ext: "jpg")
+    defer { try? FileManager.default.removeItem(at: text) }
+    #expect(MediaSendPreparation.preparedFormat(at: text) == nil)
+  }
+
+  @Test("a video that can't be read may carry anything, so its untouched file doesn't go")
+  func unreadableVideoMayCarryMetadata() async throws {
+    let notVideo = try write(Data("not a video".utf8), ext: "mov")
+    defer { try? FileManager.default.removeItem(at: notVideo) }
+    #expect(await OriginalMediaStore.videoMayCarryIdentifyingMetadata(notVideo))
+  }
+
   @Test("the source extension is read from the bytes")
   func fileExtension() throws {
     #expect(MediaSendPreparation.fileExtension(of: try makePNG(width: 10, height: 10, transparentCorner: false)) == "png")
