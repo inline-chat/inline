@@ -106,6 +106,25 @@ struct MediaSendPreparationTests {
     #expect(!MediaSendPreparation.shouldSendAsDocument(width: 40, height: 60))
   }
 
+  @Test("a photo that goes as a file without Send as Original loses its location; a clean one goes as it is")
+  func fileCopyWithoutMetadata() throws {
+    // Too thin to show as a photo, so it goes as a file.
+    let located = try write(makeJPEG(width: 2_100, height: 60, orientation: 1, camera: true, gps: true), ext: "jpg")
+    defer { try? FileManager.default.removeItem(at: located) }
+    #expect(MediaSendPreparation.shouldSendAsDocument(width: 2_100, height: 60))
+    let copy = try #require(try MediaSendPreparation.anonymizedFileCopy(of: .file(located)))
+    let sent = try #require(properties(of: copy.data))
+    #expect(sent[kCGImagePropertyGPSDictionary] == nil)
+    #expect((sent[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFModel] == nil)
+    #expect(!MediaSendPreparation.carriesIdentifyingMetadata(sent))
+    #expect(copy.width == 2_100 && copy.height == 60)
+    #expect(try MediaSendPreparation.anonymizedFileCopy(of: .data(Data(contentsOf: located))) != nil)
+
+    let clean = try makePNG(width: 2_100, height: 60, transparentCorner: false)
+    #expect(try MediaSendPreparation.anonymizedFileCopy(of: .data(clean)) == nil)
+    #expect(try MediaSendPreparation.anonymizedFileCopy(of: .data(Data("not an image".utf8))) == nil)
+  }
+
   @Test("the source extension is read from the bytes")
   func fileExtension() throws {
     #expect(MediaSendPreparation.fileExtension(of: try makePNG(width: 10, height: 10, transparentCorner: false)) == "png")
@@ -156,17 +175,37 @@ struct OriginalMediaStoreTests {
   }
 
 
-  @Test("image and video files can switch back to compressed; GIFs, vectors and other files can't")
+  @Test("image, GIF and video files can switch back; vectors and other files can't")
   func fileEligibility() {
     #expect(documentItem("IMG_4821.HEIC", mimeType: "image/heic").canSwitchOriginal)
     #expect(documentItem("photo.jpg", mimeType: "application/octet-stream").canSwitchOriginal)
     #expect(documentItem("IMG_4822.MOV", mimeType: "video/quicktime").isVideoForOriginal)
-    #expect(!documentItem("loop.gif", mimeType: "image/gif").canSwitchOriginal)
+    // A GIF file switches back to an animation, not a photo.
+    #expect(documentItem("loop.gif", mimeType: "image/gif").canSwitchOriginal)
+    #expect(documentItem("loop.gif", mimeType: "image/gif").isGIFForOriginal)
+    #expect(!documentItem("loop.gif", mimeType: "image/gif").isVideoForOriginal)
     #expect(!documentItem("logo.svg", mimeType: "image/svg+xml").canSwitchOriginal)
     #expect(!documentItem("report.pdf", mimeType: "application/pdf").canSwitchOriginal)
     #expect(photoItem(localPath: "a.jpg").canSwitchOriginal)
     #expect(!photoItem(localPath: "a.jpg").isSentAsFile)
     #expect(documentItem("IMG_4821.HEIC", mimeType: "image/heic").isSentAsFile)
+  }
+
+  @Test("an animation sends its kept GIF as original, never the video converted from it")
+  func animationOriginal() throws {
+    let stem = "animation-\(UUID().uuidString)"
+    let animation = videoItem(localPath: "\(stem).mp4", isAnimated: true)
+    #expect(animation.originalVideoFile == nil)
+    let video = videoItem(localPath: "video-\(UUID().uuidString).mp4", isAnimated: false)
+    #expect(video.originalVideoFile == video.localFileURL())
+
+    let gif = try write(Data("GIF89a".utf8), ext: "gif")
+    defer {
+      try? FileManager.default.removeItem(at: gif)
+      OriginalMediaStore.discard(for: animation)
+    }
+    AttachmentMediaMaterializer.retainAnimationOriginal(gif, fileName: "loop.gif", for: animation)
+    #expect(animation.originalVideoFile?.lastPathComponent == "loop.gif")
   }
 
   @Test("a photo whose original is gone can't switch")
@@ -211,6 +250,10 @@ private func photoItem(localPath: String) -> FileMediaItem {
   .photo(PhotoInfo(photo: Photo(photoId: -7, format: .jpeg), sizes: [
     PhotoSize(photoId: -7, type: "f", width: 10, height: 10, localPath: localPath),
   ]))
+}
+
+private func videoItem(localPath: String, isAnimated: Bool) -> FileMediaItem {
+  .video(VideoInfo(video: Video(videoId: -9, date: Date(timeIntervalSince1970: 1), localPath: localPath, isAnimated: isAnimated)))
 }
 
 private func documentItem(_ fileName: String, mimeType: String) -> FileMediaItem {

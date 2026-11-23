@@ -681,11 +681,18 @@ public actor FileUploader {
       // would only burn CPU and battery on output that is thrown away. The staging key is
       // owner-scoped like the coordinator's, and the upload reads the staged (compressed) body,
       // so its size checks measure what is sent, not the original.
-      if let owner = Auth.shared.getCurrentUserId(),
-         let staged = await FileNativeUploadStagingStore.shared.stagedBody(logicalID: "\(owner):\(uploadId)")
-      {
-        uploadUrl = staged
-        break
+      if let owner = Auth.shared.getCurrentUserId() {
+        let logicalID = "\(owner):\(uploadId)"
+        if let staged = await FileNativeUploadStagingStore.shared.stagedBody(logicalID: logicalID) {
+          // An older build could stage the untouched photo when its compression failed. Reuse only
+          // a prepared body; otherwise drop it (staging would hand it back), so this upload starts
+          // over from a prepared one under a new identity, which follows the body's hash.
+          if !MediaSendPreparation.photoNeedsPreparation(at: staged) {
+            uploadUrl = staged
+            break
+          }
+          await FileNativeUploadStagingStore.shared.discard(logicalID: logicalID)
+        }
       }
       // Photos are prepared when attached, so this is normally a header read. Anything still too
       // large or carrying camera, place or time details (a draft from an older build) is prepared
@@ -1162,7 +1169,11 @@ public actor FileUploader {
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
     let owner = try Auth.shared.handle.beginAccountMutation()
     let logicalID = "\(owner.userID):\(uploadId)"
-    if let (stagedURL, prepared) = try await FileNativeUploadStagingStore.shared.preparedVideo(logicalID: logicalID) {
+    // Older builds staged the untouched video when compression wasn't needed or failed. Reuse only
+    // a body this build prepared; drop anything else (staging would hand it back), so the upload
+    // starts over from a prepared one under a new identity, which follows the body's hash.
+    let staged = try? await FileNativeUploadStagingStore.shared.preparedVideo(logicalID: logicalID)
+    if let (stagedURL, prepared) = staged, prepared.version == FileNativeUploadStagingStore.PreparedVideo.currentVersion {
       try Auth.shared.handle.validateAccountMutation(owner)
       return PreparedVideoUploadPayload(
         url: stagedURL, fileName: prepared.fileName, mimeType: prepared.mimeType,
@@ -1173,6 +1184,7 @@ public actor FileUploader {
         ), cleanupAfterUpload: false
       )
     }
+    await FileNativeUploadStagingStore.shared.discard(logicalID: logicalID)
     let prepared = try await prepareVideoForUploadUnstaged(
       uploadId: uploadId, localUrl: localUrl, inputMimeType: inputMimeType, metadata: metadata
     )
@@ -1180,7 +1192,8 @@ public actor FileUploader {
       try Auth.shared.handle.validateAccountMutation(owner)
       try await FileNativeUploadStagingStore.shared.recordPreparedVideo(.init(
         fileName: prepared.fileName, mimeType: prepared.mimeType, width: prepared.metadata.width,
-        height: prepared.metadata.height, duration: prepared.metadata.duration
+        height: prepared.metadata.height, duration: prepared.metadata.duration,
+        version: FileNativeUploadStagingStore.PreparedVideo.currentVersion
       ), logicalID: logicalID)
       return prepared
     } catch {

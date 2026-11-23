@@ -114,6 +114,30 @@ public enum MediaSendPreparation {
     return carriesIdentifyingMetadata(properties)
   }
 
+  /// Full resolution, for an image that goes as a file: a long screenshot must stay readable.
+  public static let fileCopyTarget = PhotoTarget(maxPixelSize: 100_000, jpegQuality: 0.92)
+
+  /// An image that goes as a file without Send as Original (too thin or tiny to show as a photo,
+  /// or it couldn't be prepared) keeps its own bytes only when they carry nothing identifying.
+  /// Otherwise this is a full-resolution copy, upright and without metadata, and it throws rather
+  /// than let such an image go untouched. Nil: the image can go as it is (no metadata, or not an
+  /// image ImageIO reads, so nothing it could find).
+  public static func anonymizedFileCopy(of source: PhotoSource) throws -> PreparedPhoto? {
+    let imageSource: CGImageSource? = switch source {
+    case let .file(url): CGImageSourceCreateWithURL(url as CFURL, sourceOptions)
+    case let .data(data): CGImageSourceCreateWithData(data as CFData, sourceOptions)
+    // Pixels carry no metadata.
+    case .cgImage, .platformImage: nil
+    }
+    guard let imageSource,
+          let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [CFString: Any],
+          carriesIdentifyingMetadata(properties)
+    else {
+      return nil
+    }
+    return try prepare(imageSource: imageSource, content: nil, target: fileCopyTarget)
+  }
+
   /// Images too thin or too tiny to show as a photo are sent as files. The server rejects photos
   /// with an aspect ratio over 20.
   public static func shouldSendAsDocument(width: Int, height: Int) -> Bool {

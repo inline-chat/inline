@@ -4,6 +4,18 @@ import Logger
 /// Turns a selected attachment into its preferred rich representation without
 /// ever making that representation a requirement for retaining the source.
 public enum AttachmentMediaMaterializer {
+  public enum MaterializationError: Error, LocalizedError {
+    /// The video couldn't be prepared, and its file carries a location: it isn't sent as it is
+    /// unless someone chooses Send as Original.
+    case videoNotPrepared
+
+    public var errorDescription: String? {
+      switch self {
+      case .videoNotPrepared: "This video couldn't be prepared for sending."
+      }
+    }
+  }
+
   /// Prepares a picked photo for sending (see `MediaSendPreparation`) and keeps its untouched
   /// source for the item's Send as Original option. Images too thin or too small to show as a photo
   /// go as a file, as before.
@@ -67,11 +79,19 @@ public enum AttachmentMediaMaterializer {
     }
   }
 
-  /// The source as a file and sent as a document, untouched where an encoded source exists.
+  /// The source as a file and sent as a document, for an image too thin or tiny to show as a photo
+  /// or one that couldn't be prepared. Nobody chose Send as Original, so an encoded source goes
+  /// untouched only when it carries no camera, place or time details; otherwise it goes as a
+  /// full-resolution copy without them, or not at all.
   private static func document(
     from source: MediaSendPreparation.PhotoSource,
     fileName: String?
   ) async throws -> FileMediaItem {
+    let stem = { (fallback: String) in fileName.map { ($0 as NSString).deletingPathExtension } ?? fallback }
+    if let copy = try MediaSendPreparation.anonymizedFileCopy(of: source) {
+      let name = stem("image-\(UUID().uuidString)") + copy.format.toExt()
+      return try await documentFromTemporaryFile(named: name) { try copy.data.write(to: $0, options: .atomic) }
+    }
     switch source {
     case let .file(url):
       return .document(try await FileCache.saveDocumentWithThumbnail(url: url))
@@ -79,13 +99,8 @@ public enum AttachmentMediaMaterializer {
       let name = fileName ?? "image-\(UUID().uuidString)." + (MediaSendPreparation.fileExtension(of: data) ?? "png")
       return try await documentFromTemporaryFile(named: name) { try data.write(to: $0, options: .atomic) }
     case .cgImage, .platformImage:
-      // Full resolution: a long screenshot sent as a file must stay readable.
-      let full = try MediaSendPreparation.preparePhoto(
-        source,
-        target: .init(maxPixelSize: 100_000, jpegQuality: 0.92)
-      )
-      let name = (fileName.map { ($0 as NSString).deletingPathExtension } ?? "image-\(UUID().uuidString)")
-        + full.format.toExt()
+      let full = try MediaSendPreparation.preparePhoto(source, target: MediaSendPreparation.fileCopyTarget)
+      let name = stem("image-\(UUID().uuidString)") + full.format.toExt()
       return try await documentFromTemporaryFile(named: name) { try full.data.write(to: $0, options: .atomic) }
     }
   }
@@ -131,15 +146,31 @@ public enum AttachmentMediaMaterializer {
       }
       return video
     } fallback: {
+      // Nobody chose Send as Original: a file with a location doesn't go as it is.
+      guard !(await OriginalMediaStore.videoIncludesLocation(url)) else {
+        throw MaterializationError.videoNotPrepared
+      }
+      return .document(try await FileCache.saveDocumentWithThumbnail(url: url))
+    }
+  }
+
+  public static func animatedImage(_ url: URL, originalFileName: String? = nil) async throws -> FileMediaItem {
+    try await withBareFileFallback {
+      let video = FileMediaItem.video(try await FileCache.saveAnimatedImageAsVideo(url: url))
+      retainAnimationOriginal(url, fileName: originalFileName, for: video)
+      return video
+    } fallback: {
       .document(try await FileCache.saveDocumentWithThumbnail(url: url))
     }
   }
 
-  public static func animatedImage(_ url: URL) async throws -> FileMediaItem {
-    try await withBareFileFallback {
-      .video(try await FileCache.saveAnimatedImageAsVideo(url: url))
-    } fallback: {
-      .document(try await FileCache.saveDocumentWithThumbnail(url: url))
+  /// Keeps the GIF behind an animation converted to video: Send as Original sends the GIF, not
+  /// the converted video. Call before the source file is removed.
+  public static func retainAnimationOriginal(_ url: URL, fileName: String? = nil, for video: FileMediaItem) {
+    do {
+      try OriginalMediaStore.retain(copyOf: url, fileName: fileName ?? url.lastPathComponent, for: video)
+    } catch {
+      Log.shared.warning("Couldn't keep the original animation for sending as a file: \(error.localizedDescription)")
     }
   }
 
