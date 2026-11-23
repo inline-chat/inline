@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { OauthModel } from "@in/server/db/models/oauth"
 import {
+  integrationSpanAttributes,
   normalizeOAuthClientName,
   oauthClientLabel,
   resetOAuthAttributionCacheForTests,
@@ -84,5 +85,19 @@ describe("OAuth grant attribution", () => {
     // Cached for a minute per process; a fresh lookup sees the revocation.
     expect((await resolveOAuthAttribution(grant.id, owner.id))?.label).toBe("chatgpt")
     expect(await resolveOAuthAttribution(grant.id, owner.id, Date.now() + 61_000)).toBeNull()
+  })
+})
+
+describe("integration span attributes", () => {
+  test("never use keys Sentry scrubs by default", () => {
+    const attributes = integrationSpanAttributes({
+      label: { app: "agent", name: "msgvault", label: "other:msgvault" },
+      clientId: "c",
+      grantId: "g",
+    })
+    expect(attributes["integration.client"]).toBe("other:msgvault")
+    for (const key of Object.keys(attributes)) {
+      expect(key).not.toMatch(/auth|token|secret|passw|credential|api_?key|private|session/i)
+    }
   })
 })

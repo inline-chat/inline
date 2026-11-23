@@ -39,6 +39,23 @@ export const oauthClientLabel = (client: { redirectUris: string[]; clientName: s
   return { app, name, label: app === GENERIC_VIA_AGENT ? `other:${name}` : app }
 }
 
+/**
+ * Span attributes for a connection. Keys avoid Sentry's default scrubbing
+ * words ("auth", "token", "secret", ...): `oauth.*` keys arrived as
+ * "[Filtered]", so they use `integration.*` instead.
+ */
+export const integrationSpanAttributes = (input: {
+  label: OAuthClientLabel | null
+  clientId: string
+  grantId: string
+}): Record<string, string> => ({
+  "integration.client": input.label?.label ?? "other:unnamed",
+  "integration.app": input.label?.app ?? GENERIC_VIA_AGENT,
+  "integration.name": input.label?.name ?? "unnamed",
+  "integration.client_id": input.clientId,
+  "integration.grant_id": input.grantId,
+})
+
 /** Grant ids are server-minted UUIDs; anything else is never looked up. */
 const GRANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

@@ -16,7 +16,7 @@ import {
   getUserIdFromToken,
 } from "@in/server/modules/auth/sessionAuthentication"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
-import { resolveOAuthAttribution } from "@in/server/modules/oauth/attribution"
+import { integrationSpanAttributes, resolveOAuthAttribution } from "@in/server/modules/oauth/attribution"
 import { withQueryTags } from "@in/server/db/queryTags"
 import { Log } from "@in/server/utils/log"
 
@@ -271,13 +271,7 @@ export const handleHttpRpcRequest = async (request: Request, options: HttpRpcReq
     span?.setAttribute("inline.client_type", identity.clientType)
     const attribution = await resolveOAuthAttribution(request.headers.get(HTTP_RPC_OAUTH_GRANT_HEADER), identity.userId)
     if (attribution) {
-      span?.setAttributes({
-        "oauth.client": attribution.label,
-        "oauth.client.app": attribution.app,
-        "oauth.client.name": attribution.name,
-        "oauth.client.id": attribution.clientId,
-        "oauth.grant.id": attribution.grantId,
-      })
+      span?.setAttributes(integrationSpanAttributes({ label: attribution, clientId: attribution.clientId, grantId: attribution.grantId }))
     }
 
     const handlerContext: HandlerContext = {
