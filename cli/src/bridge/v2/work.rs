@@ -601,6 +601,14 @@ struct Outgoing {
     plan: bool,
 }
 
+/// What cancelling a request whose card Inline refused came to.
+enum Cancelled {
+    Yes,
+    /// It ended (answered, interrupted) while its card was retried.
+    AlreadyEnded,
+    No,
+}
+
 /// An input the harness may or may not have.
 #[derive(Clone, Copy, Debug)]
 struct Uncertain {
@@ -3044,10 +3052,11 @@ impl Actor {
             return;
         }
         crate::telemetry::report_bridge_output_refused(kind);
-        // Plain text keeps an approval's buttons but not a form, which could
-        // then never be answered.
-        let has_form = matches!(&outgoing.card, Some((_, Some(_))));
-        if !outgoing.fallback && !has_form {
+        // Plain text keeps the buttons (an approval's, a single choice's) but
+        // not a form drawn as fields, which could then never be answered.
+        let unanswerable_as_text =
+            matches!(&outgoing.card, Some((_, Some(form))) if !render::pickable(form));
+        if !outgoing.fallback && !unanswerable_as_text {
             let random_id = outgoing.random_id.wrapping_add(1).max(1);
             self.outbox.push_front(Outgoing {
                 doc: plain_fallback(&outgoing.doc),
@@ -3065,27 +3074,34 @@ impl Actor {
             .await;
             return;
         };
+        // Only a request this session still has open: one from before a
+        // restart, or that ended while the card was retried, needs nothing,
+        // and its ID could name another request of the new session.
+        if !self.renderer.is_open(&interaction) {
+            return;
+        }
+        // Its card was never shown, so closing it must not post one.
+        self.renderer.forget(&interaction);
         // A request nobody can see can't be answered: cancel it, so the agent
         // goes on instead of waiting for an answer that never comes. There is
         // no terminal to answer it in.
-        let cancelled = self.cancel_unshowable(interaction).await;
-        self.notice(&if cancelled {
-            format!(
+        let text = match self.cancel_unshowable(interaction).await {
+            Cancelled::Yes => format!(
                 "{agent} asked for something Inline couldn't show, so it was declined and {agent} goes on. Ask again in a simpler way if you need it."
-            )
-        } else {
-            format!(
+            ),
+            Cancelled::AlreadyEnded => return,
+            Cancelled::No => format!(
                 "{agent} asked for something Inline couldn't show. Stop the turn with /stop to go on."
-            )
-        })
-        .await;
+            ),
+        };
+        self.notice(&text).await;
     }
 
     /// Cancels a request whose card Inline refused, as the owner, the way a
     /// released session cancels its open requests.
-    async fn cancel_unshowable(&mut self, interaction: InteractionId) -> bool {
+    async fn cancel_unshowable(&mut self, interaction: InteractionId) -> Cancelled {
         let Some(session) = self.held_session() else {
-            return false;
+            return Cancelled::No;
         };
         match session
             .control(Op::Answer {
@@ -3095,10 +3111,11 @@ impl Actor {
             })
             .await
         {
-            Ok(_) => true,
+            Ok(_) => Cancelled::Yes,
+            Err(OpError::InteractionNotPending) => Cancelled::AlreadyEnded,
             Err(error) => {
                 log::warn!(target: "inline::bridge::v2", "chat={} cannot cancel a refused request: {error:?}", self.chat_id);
-                false
+                Cancelled::No
             }
         }
     }

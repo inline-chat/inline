@@ -1255,7 +1255,7 @@ fn elicitation_declined_text(raw: &Value) -> String {
         .filter(|name| !name.trim().is_empty());
     let asked = raw["message"]
         .as_str()
-        .map(|message| message.trim().chars().take(300).collect::<String>())
+        .map(|message| message.trim().chars().take(160).collect::<String>())
         .filter(|message| !message.is_empty());
     let from = server.map_or_else(
         || "An MCP server".to_owned(),
