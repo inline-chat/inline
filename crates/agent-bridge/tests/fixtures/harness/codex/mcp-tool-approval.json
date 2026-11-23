@@ -1,0 +1,416 @@
+{
+  "provider": "codex",
+  "harness": "codex app-server (codex-rs main 33b3f80a, 2026-11-07)",
+  "recorded": false,
+  "source": "request shape from codex-rs core/src/mcp_tool_call.rs build_mcp_tool_approval_elicitation_request and app-server-protocol v2 McpServerElicitationRequestParams; choices, labels and responses from tui/src/bottom_pane/mcp_server_elicitation.rs",
+  "description": "Codex asks to run MCP tools through message-only form elicitations: each is a tool approval card with Codex's own choices (remember options only as `_meta.persist` allows), answered with the whole elicitation response. A call app-server could not correlate to a turn belongs to the running one, and an unanswered card closes when the interrupted turn ends.",
+  "steps": [
+    {
+      "name": "turn started",
+      "native": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "thr-1",
+          "turn": {
+            "id": "turn-1",
+            "items": [],
+            "status": "inProgress"
+          }
+        }
+      },
+      "events": [
+        {
+          "phase": {
+            "phase": "started"
+          },
+          "turn": "turn-1",
+          "type": "turn"
+        }
+      ]
+    },
+    {
+      "name": "Codex asks to run an MCP tool, as a message-only form with its choices in _meta",
+      "native": {
+        "id": 51,
+        "method": "mcpServer/elicitation/request",
+        "params": {
+          "_meta": {
+            "codex_approval_kind": "mcp_tool_call",
+            "persist": [
+              "session",
+              "always"
+            ],
+            "tool_name": "create_issue",
+            "tool_params": {
+              "labels": [
+                "bug"
+              ],
+              "team": "ENG",
+              "title": "Parser drops trailing commas"
+            }
+          },
+          "message": "Allow the linear MCP server to run tool \"create_issue\"?",
+          "mode": "form",
+          "requestedSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "serverName": "linear",
+          "threadId": "thr-1",
+          "turnId": "turn-1"
+        }
+      },
+      "events": [
+        {
+          "id": "51",
+          "kind": {
+            "decisions": [
+              {
+                "id": "accept",
+                "kind": "accept",
+                "label": "Allow",
+                "native": {
+                  "action": "accept"
+                }
+              },
+              {
+                "id": "acceptForSession",
+                "kind": "accept_for_session",
+                "label": "Allow for this session",
+                "native": {
+                  "_meta": {
+                    "persist": "session"
+                  },
+                  "action": "accept"
+                }
+              },
+              {
+                "id": "acceptAlways",
+                "kind": "accept_and_remember",
+                "label": "Always allow",
+                "native": {
+                  "_meta": {
+                    "persist": "always"
+                  },
+                  "action": "accept"
+                }
+              },
+              {
+                "id": "cancel",
+                "kind": "decline",
+                "label": "Cancel",
+                "native": {
+                  "_meta": {
+                    "codex_approval_cancellation_reason": "user"
+                  },
+                  "action": "cancel"
+                }
+              }
+            ],
+            "kind": "approval",
+            "subject": {
+              "input": {
+                "labels": [
+                  "bug"
+                ],
+                "team": "ENG",
+                "title": "Parser drops trailing commas"
+              },
+              "kind": "tool",
+              "name": "linear · create_issue"
+            }
+          },
+          "native": {
+            "_meta": {
+              "codex_approval_kind": "mcp_tool_call",
+              "persist": [
+                "session",
+                "always"
+              ],
+              "tool_name": "create_issue",
+              "tool_params": {
+                "labels": [
+                  "bug"
+                ],
+                "team": "ENG",
+                "title": "Parser drops trailing commas"
+              }
+            },
+            "message": "Allow the linear MCP server to run tool \"create_issue\"?",
+            "mode": "form",
+            "requestedSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "serverName": "linear",
+            "threadId": "thr-1",
+            "turnId": "turn-1"
+          },
+          "turn": "turn-1",
+          "type": "interaction"
+        }
+      ]
+    },
+    {
+      "name": "a second call with no correlated turn belongs to the running one",
+      "native": {
+        "id": 52,
+        "method": "mcpServer/elicitation/request",
+        "params": {
+          "_meta": {
+            "codex_approval_kind": "mcp_tool_call",
+            "persist": "session",
+            "tool_name": "delete_issue",
+            "tool_params": {
+              "id": "ENG-12"
+            }
+          },
+          "message": "Allow the linear MCP server to run tool \"delete_issue\"?",
+          "mode": "form",
+          "requestedSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "serverName": "linear",
+          "threadId": "thr-1",
+          "turnId": null
+        }
+      },
+      "events": [
+        {
+          "id": "52",
+          "kind": {
+            "decisions": [
+              {
+                "id": "accept",
+                "kind": "accept",
+                "label": "Allow",
+                "native": {
+                  "action": "accept"
+                }
+              },
+              {
+                "id": "acceptForSession",
+                "kind": "accept_for_session",
+                "label": "Allow for this session",
+                "native": {
+                  "_meta": {
+                    "persist": "session"
+                  },
+                  "action": "accept"
+                }
+              },
+              {
+                "id": "cancel",
+                "kind": "decline",
+                "label": "Cancel",
+                "native": {
+                  "_meta": {
+                    "codex_approval_cancellation_reason": "user"
+                  },
+                  "action": "cancel"
+                }
+              }
+            ],
+            "kind": "approval",
+            "subject": {
+              "input": {
+                "id": "ENG-12"
+              },
+              "kind": "tool",
+              "name": "linear · delete_issue"
+            }
+          },
+          "native": {
+            "_meta": {
+              "codex_approval_kind": "mcp_tool_call",
+              "persist": "session",
+              "tool_name": "delete_issue",
+              "tool_params": {
+                "id": "ENG-12"
+              }
+            },
+            "message": "Allow the linear MCP server to run tool \"delete_issue\"?",
+            "mode": "form",
+            "requestedSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "serverName": "linear",
+            "threadId": "thr-1"
+          },
+          "turn": "turn-1",
+          "type": "interaction"
+        }
+      ]
+    },
+    {
+      "name": "a third call, left unanswered",
+      "native": {
+        "id": 53,
+        "method": "mcpServer/elicitation/request",
+        "params": {
+          "_meta": {
+            "codex_approval_kind": "mcp_tool_call",
+            "tool_name": "list_issues",
+            "tool_params": {}
+          },
+          "message": "Allow the linear MCP server to run tool \"list_issues\"?",
+          "mode": "form",
+          "requestedSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "serverName": "linear",
+          "threadId": "thr-1",
+          "turnId": "turn-1"
+        }
+      },
+      "events": [
+        {
+          "id": "53",
+          "kind": {
+            "decisions": [
+              {
+                "id": "accept",
+                "kind": "accept",
+                "label": "Allow",
+                "native": {
+                  "action": "accept"
+                }
+              },
+              {
+                "id": "cancel",
+                "kind": "decline",
+                "label": "Cancel",
+                "native": {
+                  "_meta": {
+                    "codex_approval_cancellation_reason": "user"
+                  },
+                  "action": "cancel"
+                }
+              }
+            ],
+            "kind": "approval",
+            "subject": {
+              "kind": "tool",
+              "name": "linear · list_issues"
+            }
+          },
+          "native": {
+            "_meta": {
+              "codex_approval_kind": "mcp_tool_call",
+              "tool_name": "list_issues",
+              "tool_params": {}
+            },
+            "message": "Allow the linear MCP server to run tool \"list_issues\"?",
+            "mode": "form",
+            "requestedSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "serverName": "linear",
+            "threadId": "thr-1",
+            "turnId": "turn-1"
+          },
+          "turn": "turn-1",
+          "type": "interaction"
+        }
+      ]
+    },
+    {
+      "name": "the interrupted turn withdraws the unanswered card",
+      "native": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "thr-1",
+          "turn": {
+            "id": "turn-1",
+            "status": "interrupted"
+          }
+        }
+      },
+      "events": [
+        {
+          "by": {
+            "kind": "cancelled"
+          },
+          "id": "53",
+          "type": "interaction_closed"
+        },
+        {
+          "phase": {
+            "outcome": "interrupted",
+            "phase": "completed"
+          },
+          "turn": "turn-1",
+          "type": "turn"
+        }
+      ]
+    }
+  ],
+  "responses": [
+    {
+      "name": "allow for this session",
+      "after_step": "Codex asks to run an MCP tool, as a message-only form with its choices in _meta",
+      "interaction": "51",
+      "by": 101,
+      "response": {
+        "decision": "acceptForSession",
+        "kind": "decision"
+      },
+      "events": [
+        {
+          "by": {
+            "decision": "acceptForSession",
+            "kind": "inline",
+            "user": 101
+          },
+          "id": "51",
+          "type": "interaction_closed"
+        }
+      ],
+      "native": {
+        "id": 51,
+        "result": {
+          "_meta": {
+            "persist": "session"
+          },
+          "action": "accept",
+          "content": null
+        }
+      }
+    },
+    {
+      "name": "cancel only that call, as the person's choice",
+      "after_step": "a second call with no correlated turn belongs to the running one",
+      "interaction": "52",
+      "by": 101,
+      "response": {
+        "decision": "cancel",
+        "kind": "decision"
+      },
+      "events": [
+        {
+          "by": {
+            "decision": "cancel",
+            "kind": "inline",
+            "user": 101
+          },
+          "id": "52",
+          "type": "interaction_closed"
+        }
+      ],
+      "native": {
+        "id": 52,
+        "result": {
+          "_meta": {
+            "codex_approval_cancellation_reason": "user"
+          },
+          "action": "cancel",
+          "content": null
+        }
+      }
+    }
+  ]
+}

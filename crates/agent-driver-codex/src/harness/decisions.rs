@@ -32,11 +32,24 @@ pub(crate) fn command_decisions(params: &Value) -> Vec<Decision> {
             &legacy
         }
     };
-    available
+    let mut decisions: Vec<Decision> = available
         .iter()
         .enumerate()
         .filter_map(|(index, native)| command_decision(index, native, network, extra_permissions))
-        .collect()
+        .collect();
+    // A card must always be answerable: when Codex advertised no way to say
+    // no (or every advertised choice was hidden), offer its cancel, which
+    // every app-server accepts.
+    if !decisions.iter().any(|decision| {
+        matches!(
+            decision.kind,
+            DecisionKind::Decline | DecisionKind::DeclineAndRemember | DecisionKind::Cancel
+        )
+    }) && let Some(cancel) = command_decision(available.len(), &json!("cancel"), network, false)
+    {
+        decisions.push(cancel);
+    }
+    decisions
 }
 
 fn command_decision(
@@ -218,6 +231,89 @@ pub(crate) fn elicitation_decisions() -> Vec<Decision> {
     ]
 }
 
+/// Decisions for a message-only form elicitation (an empty `requestedSchema`),
+/// as the Codex TUI offers them (`tui/src/bottom_pane/mcp_server_elicitation.rs`).
+/// Codex asks to run an MCP tool this way, with `_meta.codex_approval_kind`
+/// `mcp_tool_call` and the remember choices it allows in `_meta.persist`.
+/// The native value is the whole response.
+///
+/// A tool approval offers Cancel, not Deny: Codex skips that one call and
+/// the turn goes on, so it reads as declined. The cancel says the person
+/// chose it, as the TUI's does.
+pub(crate) fn message_only_decisions(params: &Value) -> Vec<Decision> {
+    let meta = params.get("_meta");
+    let mut decisions = vec![decision(
+        "accept",
+        "Allow",
+        DecisionKind::Accept,
+        false,
+        &json!({"action": "accept", "content": null}),
+    )];
+    if allows_persist(meta, "session") {
+        decisions.push(decision(
+            "acceptForSession",
+            "Allow for this session",
+            DecisionKind::AcceptForSession,
+            false,
+            &json!({"action": "accept", "content": null, "_meta": {"persist": "session"}}),
+        ));
+    }
+    if allows_persist(meta, "always") {
+        decisions.push(decision(
+            "acceptAlways",
+            "Always allow",
+            DecisionKind::AcceptAndRemember,
+            false,
+            &json!({"action": "accept", "content": null, "_meta": {"persist": "always"}}),
+        ));
+    }
+    if is_tool_approval(params) {
+        decisions.push(decision(
+            "cancel",
+            "Cancel",
+            DecisionKind::Decline,
+            false,
+            &json!({
+                "action": "cancel",
+                "content": null,
+                "_meta": {"codex_approval_cancellation_reason": "user"},
+            }),
+        ));
+    } else {
+        decisions.push(decision(
+            "decline",
+            "Deny",
+            DecisionKind::Decline,
+            false,
+            &json!({"action": "decline", "content": null}),
+        ));
+        decisions.push(decision(
+            "cancel",
+            "Cancel",
+            DecisionKind::Cancel,
+            false,
+            &json!({"action": "cancel", "content": null}),
+        ));
+    }
+    decisions
+}
+
+/// Whether an elicitation is Codex asking to run an MCP tool.
+pub(crate) fn is_tool_approval(params: &Value) -> bool {
+    params
+        .pointer("/_meta/codex_approval_kind")
+        .and_then(Value::as_str)
+        == Some("mcp_tool_call")
+}
+
+fn allows_persist(meta: Option<&Value>, mode: &str) -> bool {
+    match meta.and_then(|meta| meta.get("persist")) {
+        Some(Value::String(value)) => value == mode,
+        Some(Value::Array(values)) => values.iter().any(|value| value.as_str() == Some(mode)),
+        _ => false,
+    }
+}
+
 fn decision(
     id: &str,
     label: &str,
@@ -279,6 +375,61 @@ fn shell_quote(part: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_tool_approvals_offer_what_codex_allows_and_cancel_only_that_call() {
+        let decisions = message_only_decisions(&json!({
+            "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"]}
+        }));
+        assert_eq!(
+            labels(&decisions),
+            ["Allow", "Allow for this session", "Always allow", "Cancel"]
+        );
+        assert_eq!(
+            decisions[0].native,
+            json!({"action": "accept", "content": null})
+        );
+        assert_eq!(
+            decisions[1].native,
+            json!({"action": "accept", "content": null, "_meta": {"persist": "session"}})
+        );
+        assert_eq!(
+            decisions[2].native,
+            json!({"action": "accept", "content": null, "_meta": {"persist": "always"}})
+        );
+        // Codex skips the call and the turn goes on: declined, and said to
+        // be the person's choice.
+        assert_eq!(decisions[3].kind, DecisionKind::Decline);
+        assert_eq!(
+            decisions[3].native,
+            json!({
+                "action": "cancel",
+                "content": null,
+                "_meta": {"codex_approval_cancellation_reason": "user"},
+            })
+        );
+
+        let session_only = message_only_decisions(&json!({
+            "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": "session"}
+        }));
+        assert_eq!(
+            labels(&session_only),
+            ["Allow", "Allow for this session", "Cancel"]
+        );
+        let plain = message_only_decisions(&json!({
+            "_meta": {"codex_approval_kind": "mcp_tool_call"}
+        }));
+        assert_eq!(labels(&plain), ["Allow", "Cancel"]);
+
+        // Any other message-only request: Deny goes on without it.
+        let other = message_only_decisions(&json!({}));
+        assert_eq!(labels(&other), ["Allow", "Deny", "Cancel"]);
+        assert_eq!(
+            other[1].native,
+            json!({"action": "decline", "content": null})
+        );
+        assert_eq!(other[2].kind, DecisionKind::Cancel);
+    }
 
     fn labels(decisions: &[Decision]) -> Vec<&str> {
         decisions
@@ -350,7 +501,12 @@ mod tests {
         }));
         assert_eq!(
             labels(&decisions),
-            ["Yes, proceed", "acceptAlways", "futureChoice"]
+            [
+                "Yes, proceed",
+                "acceptAlways",
+                "futureChoice",
+                "No, and tell Codex what to do differently"
+            ]
         );
         assert_eq!(decisions[2].native, json!({"futureChoice": {"x": 1}}));
     }
@@ -365,6 +521,28 @@ mod tests {
         }));
         assert_eq!(labels(&decisions), ["No, continue without running it"]);
         assert_eq!(command_decisions(&json!({})).len(), 4);
+    }
+
+    #[test]
+    fn a_command_card_can_always_say_no() {
+        // Every advertised choice hidden, or none advertised: Codex's cancel.
+        for available in [
+            json!([{"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["bash", "-lc", "a\nb"]}}]),
+            json!([]),
+        ] {
+            let decisions = command_decisions(&json!({"availableDecisions": available}));
+            assert_eq!(
+                labels(&decisions),
+                ["No, and tell Codex what to do differently"]
+            );
+            assert_eq!(decisions[0].native, json!("cancel"));
+        }
+        // Only yes: cancel joins it.
+        let decisions = command_decisions(&json!({"availableDecisions": ["accept"]}));
+        assert_eq!(
+            labels(&decisions),
+            ["Yes, proceed", "No, and tell Codex what to do differently"]
+        );
     }
 
     #[test]
