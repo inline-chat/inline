@@ -1380,9 +1380,7 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
         lastDragShown = nil
         input.startTicking(maximumFramesPerSecond: window?.screen.maximumFramesPerSecond ?? 60)
         lastTranslation = pan.translation(in: self).y
-        let shown = -state.layout.restShift
-        let dimension = Double(max(1, state.viewport.usableHeight))
-        pulled = shown == 0 ? 0 : (shown > 0 ? 1 : -1) * CGFloat(physics.rubberBandInverse(Double(abs(shown)), dimension: dimension))
+        pulled = pull(showing: -state.layout.restShift, dimension: Double(max(1, state.viewport.usableHeight)))
         showIndicator()
         onDragBegan?()
       case .changed:
@@ -1406,6 +1404,11 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     let layout = state.layout
     let dimension = Double(max(1, layout.viewport.usableHeight))
     let shown = -layout.restShift
+    // A change applied under the finger can move the end it is pulled past (an older page landing at the top, a
+    // message arriving below the newest): the pull is read again from what is shown, or the next move leaped
+    // by the old overscroll.
+    let pulledShown = pulled == 0 ? 0 : (pulled > 0 ? 1 : -1) * CGFloat(physics.rubberBanded(Double(abs(pulled)), dimension: dimension))
+    if abs(pulledShown - shown) > 0.5 { pulled = pull(showing: shown, dimension: dimension) }
     var rest = delta
     var moved: CGFloat = 0
 
@@ -1428,6 +1431,11 @@ public final class TimelineListView<ID: Hashable & Sendable>: UIView {
     let nowShown = pulled == 0 ? 0 : (pulled > 0 ? 1 : -1) * CGFloat(physics.rubberBanded(Double(abs(pulled)), dimension: dimension))
     scroll(by: moved + (nowShown - shown))
     lastDragShown = nextFrameTime()
+  }
+
+  /// How far a finger pulled past an end to show `shown` of overscroll through the rubber band.
+  private func pull(showing shown: CGFloat, dimension: Double) -> CGFloat {
+    shown == 0 ? 0 : (shown > 0 ? 1 : -1) * CGFloat(physics.rubberBandInverse(Double(abs(shown)), dimension: dimension))
   }
 
   /// When a change made now reaches the screen: the frame being prepared, or a later one.

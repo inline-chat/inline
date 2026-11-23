@@ -32,6 +32,10 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   public var ridingHeight: () -> CGFloat = { 0 }
   /// Whether a touch starting here (window coordinates) may dismiss the keyboard by dragging.
   public var allowsInteractiveDismissal: (CGPoint) -> Bool = { _ in true }
+  /// A recognizer that may hold the same finger while it drags the keyboard (the list's scroll). Any other one
+  /// active on the finger (a message menu's hold, a reply swipe, the back swipe) keeps the keyboard where it is,
+  /// as Telegram cancels its keyboard gesture for each.
+  public var sharesDrag: (UIGestureRecognizer) -> Bool = { _ in false }
   /// What the coordinator decided and why, for probes.
   public var onDebug: ((String) -> Void)?
   /// A floating (undocked or split) keyboard counts up to its top, so what rides on it sits on it, as
@@ -40,6 +44,9 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
 
   public private(set) var height: CGFloat = 0
   public private(set) var isInteractive = false
+  /// The finger's release is taking the keyboard away (until it is gone). The list does not fling then; when the
+  /// keyboard springs back, it does.
+  public private(set) var isDismissingByDrag = false
   public private(set) var isSuspended = false
   /// The keyboard floats above the view's bottom edge (undocked or split, on iPad).
   public private(set) var isFloating = false
@@ -89,7 +96,8 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
     pan.delaysTouchesEnded = false
     pan.delegate = self
     pan.onBegan = { [weak self] point in self?.fingerBegan(point) }
-    pan.onMoved = { [weak self] point in self?.fingerMoved(point) }
+    pan.sharesDrag = { [weak self] other in self?.sharesDrag(other) ?? false }
+    pan.onMoved = { [weak self] point, claimed in self?.fingerMoved(point, claimed: claimed) }
     pan.onEnded = { [weak self] velocity in self?.fingerEnded(velocity: velocity) }
   }
 
@@ -107,6 +115,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   /// Stops following the keyboard (an interactive pop began).
   public func suspend() {
     isSuspended = true
+    isEligible = false
     cancelInteraction(animated: false)
   }
 
@@ -250,8 +259,13 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
     onDebug?("finger began y=\(point.y) composerTop=\(composerTop) eligible=\(isEligible)")
   }
 
-  private func fingerMoved(_ point: CGPoint) {
-    guard isEligible, let view else { return }
+  private func fingerMoved(_ point: CGPoint, claimed: Bool) {
+    guard isEligible, !isSuspended, let view else { return }
+    if claimed {
+      isEligible = false
+      if isInteractive { cancelInteraction(animated: true) }
+      return
+    }
     if !isInteractive {
       let composerTop = view.convert(view.bounds, to: nil).maxY - height - ridingHeight()
       guard point.y > composerTop else { return }
@@ -287,6 +301,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
   }
 
   private func finish(dismissing: Bool) {
+    isDismissingByDrag = dismissing
     let timing = Self.spring(duration: 0.3832)
     let target = dismissing ? restHeight : 0
     host?.setOffset(target, from: offset, timing: timing)
@@ -304,6 +319,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
       self.host?.restore()
       self.host = nil
       self.isInteractive = false
+      self.isDismissingByDrag = false
     }
   }
 
@@ -320,6 +336,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
     host = nil
     offset = 0
     isInteractive = false
+    isDismissingByDrag = false
     if height != restHeight {
       height = restHeight
       onChange?(KeyboardChange(height: height, timing: .none, isInteractive: false))
@@ -341,7 +358,9 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
 /// the list, the composer and every control keep their touches.
 final class KeyboardPanGestureRecognizer: UIGestureRecognizer {
   var onBegan: ((CGPoint) -> Void)?
-  var onMoved: ((CGPoint) -> Void)?
+  /// The point, and whether another recognizer it doesn't share with is active on the finger.
+  var onMoved: ((CGPoint, Bool) -> Void)?
+  var sharesDrag: (UIGestureRecognizer) -> Bool = { _ in false }
   /// The finger's vertical velocity, or nil when the touch was cancelled.
   var onEnded: ((CGFloat?) -> Void)?
   private var points: [(y: CGFloat, time: TimeInterval)] = []
@@ -360,7 +379,10 @@ final class KeyboardPanGestureRecognizer: UIGestureRecognizer {
     let point = touch.location(in: view)
     points.append((point.y, touch.timestamp))
     if points.count > 12 { points.removeFirst() }
-    onMoved?(point)
+    let claimed = touch.gestureRecognizers?.contains { other in
+      other !== self && (other.state == .began || other.state == .changed) && !sharesDrag(other)
+    } ?? false
+    onMoved?(point, claimed)
   }
 
   override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
