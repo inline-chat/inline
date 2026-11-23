@@ -44,14 +44,9 @@ final class UserAvatarView: UIView {
   private func setupViews() {
     backgroundColor = .clear
     isOpaque = false
-    clipsToBounds = true
-  }
-
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    UIView.performWithoutAnimation {
-      layer.cornerRadius = min(bounds.width, bounds.height) / 2
-    }
+    // `UserAvatar` clips itself to its circle. Clipping this view too would cut the agent
+    // badge, which sits on the circle's edge in the square's corner.
+    clipsToBounds = false
   }
 
   // MARK: - Configuration
@@ -87,7 +82,7 @@ final class UserAvatarView: UIView {
   }
 
   private func updateAvatar(with userInfo: UserInfo, viaMark: MessageViaPresentation.Mark?) {
-    let rootView = MessageViaAvatar(avatarSize: size, mark: viaMark, ringColor: Color(uiColor: .systemBackground)) {
+    let rootView = MessageViaAvatar(avatarSize: size, mark: viaMark) {
       UserAvatar(
         userInfo: userInfo,
         size: size
@@ -103,7 +98,7 @@ final class UserAvatarView: UIView {
     controller.safeAreaRegions = []
     controller.view.translatesAutoresizingMaskIntoConstraints = false
     controller.view.backgroundColor = .clear
-    controller.view.clipsToBounds = true
+    controller.view.clipsToBounds = false
     controller.view.isUserInteractionEnabled = false
 
     addSubview(controller.view)
