@@ -17,11 +17,13 @@ import { sessions, users } from "@in/server/db/schema"
 import { makeCandidateHttpApplication } from "@in/server/core/http/candidateApplication"
 import { startCoreHttpServer } from "@in/server/core/http/host"
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
+import { OauthModel } from "@in/server/db/models/oauth"
 import {
   HTTP_RPC_AUTH_FAILURE_LIMIT,
   HTTP_RPC_AUTH_REASON_HEADER,
   HTTP_RPC_CONTENT_TYPE,
   HTTP_RPC_MAX_BODY_BYTES,
+  HTTP_RPC_OAUTH_GRANT_HEADER,
   HTTP_RPC_PATH,
   handleHttpRpcRequest,
   resetHttpRpcLimitsForTests,
@@ -253,6 +255,34 @@ describe("stateless HTTP RPC", () => {
 
     const elsewhere = await handleHttpRpcRequest(rpcRequest(encode(historyCall(chat.id)), { token }), { clientIp: "198.51.100.9" })
     expect(elsewhere.status).toBe(200)
+  })
+
+  test("treats the OAuth grant header as a label only, never as access", async () => {
+    const { member, chat, token } = await fixture()
+    const stranger = await testUtils.createUser(`http-rpc-stranger-${crypto.randomUUID()}@example.com`)
+    const nowMs = Date.now()
+    const client = await OauthModel.createClient({ clientId: crypto.randomUUID(), redirectUris: ["http://127.0.0.1:8089/cb"], clientName: "msgvault", nowMs })
+    const grant = (userId: number) => OauthModel.createGrant({
+      id: crypto.randomUUID(), clientId: client.clientId, inlineUserId: userId, scope: "messages:read",
+      resource: "https://mcp.inline.chat", spaceIds: [], allowDms: true, allowHomeThreads: true, nowMs,
+    })
+    const own = await grant(member.id)
+    const foreign = await grant(stranger.id)
+    const body = encode(historyCall(chat.id))
+
+    for (const grantId of [own.id, foreign.id, "not-a-grant", crypto.randomUUID()]) {
+      const response = await handleHttpRpcRequest(
+        rpcRequest(body, { token, headers: { [HTTP_RPC_OAUTH_GRANT_HEADER]: grantId } }),
+        { clientIp: CLIENT_IP },
+      )
+      expect(response.status).toBe(200)
+    }
+    // A grant never authenticates by itself.
+    const anonymous = await handleHttpRpcRequest(
+      rpcRequest(body, { headers: { [HTTP_RPC_OAUTH_GRANT_HEADER]: own.id } }),
+      { clientIp: CLIENT_IP },
+    )
+    expect(anonymous.status).toBe(401)
   })
 
   test("is mounted on the production application without the per-IP legacy budget", async () => {

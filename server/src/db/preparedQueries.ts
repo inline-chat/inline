@@ -1,5 +1,6 @@
 import type postgres from "postgres"
 import { accessQueryComment } from "./databaseDiagnostics"
+import { tagQuery } from "./queryTags"
 
 // postgres.js retains admitted names until the physical connection closes. Do not
 // pretend that evicting an application entry would deallocate those statements.
@@ -28,28 +29,31 @@ export function prepareQueries(client: postgres.Sql, policy: PreparedQueryPolicy
     installed.add(scope)
     const unsafe = scope.unsafe
     scope.unsafe = (query, parameters, options) => {
+      // Request tags (SQLCommenter) ride only on statements that are parsed per
+      // execution. Prepared statements keep their exact text so one shape stays
+      // one server-side statement regardless of who issued it.
       if (options?.prepare !== undefined || !parameters?.length || parameters.length > MAX_PARAMETERS ||
           query.length > MAX_QUERY_LENGTH || !/^\s*(select|insert|update|delete|with)\b/i.test(query)) {
-        return unsafe(query, parameters, options)
+        return unsafe(options?.prepare === true ? query : tagQuery(query), parameters, options)
       }
       const access = accessComments.some((comment) => query.trimEnd().endsWith(comment))
-      if (!access && policy.mode !== "all-custom") return unsafe(query, parameters, options)
+      if (!access && policy.mode !== "all-custom") return unsafe(tagQuery(query), parameters, options)
       // Match the driver's ordinary scalar/array type categories. Custom typed
       // parameters retain their original execution path rather than admitting
       // unbounded type variants under one SQL-text entry.
       const types = parameters.map(parameterType)
-      if (types.some((type) => type === undefined)) return unsafe(query, parameters, options)
+      if (types.some((type) => type === undefined)) return unsafe(tagQuery(query), parameters, options)
       const signature = `${types.join(",")}\0${query}`
       if (shapes.has(signature)) return unsafe(query, parameters, { ...options, prepare: true })
       // In broad mode leave half the budget for replay access, even when many
       // variable-length IN queries arrive first. Default access mode has all 200.
       const capacity = shapes.size < MAX_PREPARED_QUERY_SHAPES &&
         (access || broadShapes.size < MAX_BROAD_PREPARED_QUERY_SHAPES)
-      if (!capacity) return unsafe(query, parameters, options)
+      if (!capacity) return unsafe(tagQuery(query), parameters, options)
       if (!access && !candidates.has(signature)) {
         candidates.add(signature)
         if (candidates.size > MAX_PREPARED_QUERY_SHAPES) candidates.delete(candidates.values().next().value!)
-        return unsafe(query, parameters, options)
+        return unsafe(tagQuery(query), parameters, options)
       }
       candidates.delete(signature)
       shapes.add(signature)

@@ -38,6 +38,8 @@ import { Value } from "@sinclair/typebox/value"
 import { authPageDocument, authPageHeaders, escapeHtml, type AuthPageContext } from "@in/server/modules/auth/authPage"
 import { describeOAuthScopes, oauthClientTrust, oauthClientViaApp } from "@in/server/modules/oauth/clientTrust"
 import { GENERIC_VIA_AGENT } from "@in/server/modules/message/viaAgents"
+import { oauthClientLabel } from "@in/server/modules/oauth/attribution"
+import { getActiveSpan } from "@sentry/bun"
 import type {
   OAuthIntrospectionResult,
   OAuthMetadata,
@@ -1453,6 +1455,17 @@ export async function handleIntrospect(req: Request, body: unknown): Promise<Res
   }
 
   const client = await OauthModel.getClient(result.grant.clientId)
+  // One introspection per MCP request: these attributes count requests per
+  // connected app and connection (grant) in Sentry.
+  const clientLabel = client ? oauthClientLabel(client) : null
+  getActiveSpan()?.setAttributes({
+    "oauth.client": clientLabel?.label ?? "other:unnamed",
+    "oauth.client.app": clientLabel?.app ?? GENERIC_VIA_AGENT,
+    "oauth.client.name": clientLabel?.name ?? "unnamed",
+    "oauth.client.id": result.grant.clientId,
+    "oauth.grant.id": result.grant.id,
+    "inline.user_id": result.grant.inlineUserId,
+  })
 
   return json(200, {
     active: true,

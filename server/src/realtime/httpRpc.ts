@@ -16,6 +16,8 @@ import {
   getUserIdFromToken,
 } from "@in/server/modules/auth/sessionAuthentication"
 import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
+import { resolveOAuthAttribution } from "@in/server/modules/oauth/attribution"
+import { withQueryTags } from "@in/server/db/queryTags"
 import { Log } from "@in/server/utils/log"
 
 /**
@@ -31,6 +33,11 @@ export const HTTP_RPC_PATH = "/v1/rpc"
 export const HTTP_RPC_CONTENT_TYPE = "application/x-protobuf"
 /** Set on 401s from the bearer gate so callers can tell revocation from invalid credentials. */
 export const HTTP_RPC_AUTH_REASON_HEADER = "x-inline-auth-reason"
+/**
+ * The OAuth grant a caller (the MCP server) is acting for. Telemetry only: it
+ * labels spans and query tags when the grant belongs to the bearer's user.
+ */
+export const HTTP_RPC_OAUTH_GRANT_HEADER = "x-inline-oauth-grant"
 /** Ample for every allowlisted input; uploads stay on the realtime transfer path. */
 export const HTTP_RPC_MAX_BODY_BYTES = 256 * 1024
 /** Mirrors the realtime per-user socket cap: at most this many requests in flight per user. */
@@ -258,7 +265,20 @@ export const handleHttpRpcRequest = async (request: Request, options: HttpRpcReq
       return errorResponse(RealtimeRpcError.UnsupportedRpcMethod(call.method))
     }
 
-    getActiveSpan()?.setAttribute("rpc.method", methodName(call.method))
+    const span = getActiveSpan()
+    span?.setAttribute("rpc.method", methodName(call.method))
+    span?.setAttribute("inline.user_id", identity.userId)
+    span?.setAttribute("inline.client_type", identity.clientType)
+    const attribution = await resolveOAuthAttribution(request.headers.get(HTTP_RPC_OAUTH_GRANT_HEADER), identity.userId)
+    if (attribution) {
+      span?.setAttributes({
+        "oauth.client": attribution.label,
+        "oauth.client.app": attribution.app,
+        "oauth.client.name": attribution.name,
+        "oauth.client.id": attribution.clientId,
+        "oauth.grant.id": attribution.grantId,
+      })
+    }
 
     const handlerContext: HandlerContext = {
       userId: identity.userId,
@@ -272,7 +292,12 @@ export const handleHttpRpcRequest = async (request: Request, options: HttpRpcReq
     }
 
     const { handleRpcCall } = await (rpcHandlerModulePromise ??= import("@in/server/realtime/handlers/_rpc"))
-    const result = await handleRpcCall(call, handlerContext)
+    const rpcCall = call
+    const run = () => handleRpcCall(rpcCall, handlerContext)
+    const result = await withQueryTags(
+      attribution ? { oauth_client: attribution.label, rpc: "http" } : { rpc: "http" },
+      run,
+    )
     return resultResponse(result)
   } catch (error) {
     const rpcError = toRealtimeRpcError(error)

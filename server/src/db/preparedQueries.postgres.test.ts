@@ -6,6 +6,7 @@ import { accessQueryComment } from "./databaseDiagnostics"
 import { setupTestLifecycle } from "../__tests__/database"
 import { createWireProxy } from "../__tests__/performance/wire"
 import { MAX_BROAD_PREPARED_QUERY_SHAPES, MAX_PREPARED_QUERY_SHAPES, prepareQueries, type PreparedQueryPolicy } from "./preparedQueries"
+import { withQueryTags } from "./queryTags"
 
 setupTestLifecycle()
 
@@ -208,4 +209,25 @@ test("one-off shapes do not exhaust broad admission and access keeps reserved ca
     const plans = await client`select count(*)::int as count from pg_prepared_statements where statement like '%as one_off'`
     expect(plans[0]?.["count"]).toBe(0)
   })
+})
+
+test("request tags reach unprepared statements and never prepared ones", async () => {
+  await withClient(async (client) => {
+    const db = drizzle(client)
+    const currentQuery = async () => String((await db.execute(sql`select current_query() as q, ${1}::int as one`))[0]?.["q"])
+
+    // Default "access" mode: ordinary statements stay unprepared and carry the tags.
+    const tagged = await withQueryTags({ oauth_client: "other:msgvault" }, currentQuery)
+    expect(tagged).toEndWith("/*oauth_client='other:msgvault'*/")
+    expect(await currentQuery()).not.toContain("oauth_client")
+
+    // Access-tagged replay reads are prepared: their text and shape stay exact.
+    const replay = `select current_query() as q, $1::int as one ${accessQueryComment("sync.replay")}`
+    await client.unsafe(replay, [1])
+    const prepared = await withQueryTags({ oauth_client: "chatgpt" }, () => client.unsafe(replay, [2]))
+    expect(String(prepared[0]?.["q"])).not.toContain("oauth_client")
+    // The needle is a parameter, so this lookup cannot match its own prepared text.
+    const statements = await client`select count(*)::int as count from pg_prepared_statements where strpos(statement, ${"oauth_client="}) > 0`
+    expect(statements[0]?.["count"]).toBe(0)
+  }, "access")
 })
