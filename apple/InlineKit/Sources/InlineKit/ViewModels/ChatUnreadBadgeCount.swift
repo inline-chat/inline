@@ -3,13 +3,12 @@ import Foundation
 /// The number on the scroll-to-bottom button.
 ///
 /// It is the dialog's unread count, the same number the chat list shows. Reading lowers it in the
-/// local database, but a list writes reads only when it stops moving, so the list's own read
-/// frontier (the highest incoming message on screen) is subtracted until that write lands. Once
-/// `readInboxMaxId` reaches the frontier nothing is pending, so no message is counted twice.
+/// local database a few times a second, so between those writes the list's own read frontier (the
+/// highest incoming message on screen) is subtracted. Once `readInboxMaxId` reaches the frontier
+/// nothing is pending, so no message is counted twice.
 ///
-/// The pending range is capped by certified coverage like `AutomaticReadAdmission`, and only
-/// messages that count toward unread are subtracted, so the number never drops for a read that
-/// will not be written.
+/// The pending range is capped by certified coverage, and only loaded messages that count toward
+/// unread are subtracted: across a gap the button waits for the write and the server's count.
 public enum ChatUnreadBadgeCount {
   public static func resolve(
     unreadCount: Int,
