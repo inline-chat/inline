@@ -1,6 +1,21 @@
 import Foundation
 import InlineProtocol
 
+// MARK: - Availability
+
+/// Plan & Billing in settings. Parked while plans aren't offered publicly: only debug
+/// builds and Inline team accounts (@inline.chat) see it. The server applies the same
+/// rule until INLINE_BILLING_OPEN is set, so hiding it here is not the only gate.
+public enum BillingFeature {
+  public static func isAvailable(email: String?) -> Bool {
+#if DEBUG
+    true
+#else
+    email?.lowercased().hasSuffix("@inline.chat") == true
+#endif
+  }
+}
+
 // MARK: - Formatting
 
 /// Display strings for billing plans, shared by the macOS and iOS settings.
