@@ -630,8 +630,10 @@ final class TimelineRowView: UIView {
         let offset = translation.x - swipeStart
         let velocity = pan.velocity(in: self).x
         let progress = min(abs(offset) / Self.swipeDistance, 1)
+        // A fast flick replies from 40% of the way (32 pt); a stray 10 pt flick replied before. Telegram needs
+        // 45 pt whatever the speed.
         let replies = pan.state == .ended && swipeDirection.accepts(offset)
-          && (progress > 0.7 || (abs(velocity) > 600 && swipeDirection.accepts(velocity)))
+          && (progress > 0.7 || (progress > 0.4 && abs(velocity) > 600 && swipeDirection.accepts(velocity)))
         if replies {
           ChatState.shared.setReplyingMessageId(peer: message.message.peerId, id: message.message.messageId)
         }

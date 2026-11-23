@@ -124,8 +124,9 @@ public class ChatContainerView: UIView {
       if let ids { navigator.noteVisible(messageIds: ids) } else { navigator.clearVisible() }
     }
     timeline.list.releaseVelocityFilter = { [weak self] velocity in
-      // A drag that moved the keyboard ends there; the list does not also fling.
-      self?.keyboardCoordinator?.isInteractive == true ? 0 : velocity
+      // A release that takes the keyboard away ends there; the list does not also fling. One that lets the
+      // keyboard spring back flings, as in Telegram.
+      self?.keyboardCoordinator?.isDismissingByDrag == true ? 0 : velocity
     }
     timeline.translatesAutoresizingMaskIntoConstraints = false
     return timeline
@@ -158,6 +159,9 @@ public class ChatContainerView: UIView {
     coordinator.allowsInteractiveDismissal = { [weak self] point in
       guard let self else { return false }
       return messageList.bounds.contains(messageList.convert(point, from: nil))
+    }
+    coordinator.sharesDrag = { [weak self] other in
+      (self?.messageList as? TimelineMessagesView)?.list.panGestureRecognizer === other
     }
     coordinator.onChange = { [weak self] change in self?.applyKeyboard(change) }
     keyboardCoordinator = coordinator
