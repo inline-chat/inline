@@ -168,13 +168,10 @@ public final class UserAvatarLayerView: NSView {
     guard let shown else {
       badgeHost?.removeFromSuperview()
       badgeHost = nil
+      contentLayer.mask = nil
       return
     }
-    let badge = AnyView(
-      MessageViaBadge(mark: shown, size: MessageViaBadge.diameter(forAvatar: size))
-        .padding(1.5)
-        .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
-    )
+    let badge = AnyView(MessageViaBadge(mark: shown, size: MessageViaBadge.diameter(forAvatar: size)))
     if let badgeHost {
       badgeHost.rootView = badge
     } else {
@@ -268,12 +265,25 @@ public final class UserAvatarLayerView: NSView {
     )
     symbolLayer.frame = bounds
     imageLayer.frame = bounds
-    CATransaction.commit()
     if let badgeHost {
-      // In the avatar's bottom-right corner, inside its square, as `MessageViaAvatar` places it.
-      let side = MessageViaBadge.diameter(forAvatar: min(bounds.width, bounds.height)) + 3
-      badgeHost.frame = CGRect(x: bounds.maxX - side, y: bounds.maxY - side, width: side, height: side)
+      // In the avatar's bottom-right corner, inside its square, cut out of the avatar,
+      // as `MessageViaAvatar` draws it. This view is flipped, so the frame is top-left origin.
+      let side = min(bounds.width, bounds.height)
+      badgeHost.frame = MessageViaBadge.frame(inAvatar: side)
+      let mask = contentLayer.mask as? CAShapeLayer ?? CAShapeLayer()
+      mask.actions = ["path": NSNull(), "bounds": NSNull(), "position": NSNull()]
+      mask.fillRule = .evenOdd
+      mask.frame = contentLayer.bounds
+      var path = MessageViaBadge.avatarMaskPath(inAvatar: side)
+      if !contentLayer.contentsAreFlipped() {
+        // Bottom-left origin layer geometry: mirror the top-left path vertically.
+        var flip = CGAffineTransform(translationX: 0, y: side).scaledBy(x: 1, y: -1)
+        path = path.copy(using: &flip) ?? path
+      }
+      mask.path = path
+      contentLayer.mask = mask
     }
+    CATransaction.commit()
   }
 }
 

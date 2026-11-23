@@ -147,17 +147,16 @@ public final class UserAvatarLayerView: UIView {
     guard let shown else {
       badgeHost?.view.removeFromSuperview()
       badgeHost = nil
+      contentView.layer.mask = nil
       return
     }
-    let badge = AnyView(
-      MessageViaBadge(mark: shown, size: MessageViaBadge.diameter(forAvatar: size))
-        .padding(1.5)
-        .background(Circle().fill(Color(uiColor: .systemBackground)))
-    )
+    let badge = AnyView(MessageViaBadge(mark: shown, size: MessageViaBadge.diameter(forAvatar: size)))
     if let badgeHost {
       badgeHost.rootView = badge
     } else {
       let host = UIHostingController(rootView: badge)
+      // Near the screen's edges a safe area would push the badge off its corner.
+      host.safeAreaRegions = []
       host.view.backgroundColor = .clear
       host.view.isUserInteractionEnabled = false
       addSubview(host.view)
@@ -214,13 +213,19 @@ public final class UserAvatarLayerView: UIView {
     super.layoutSubviews()
     contentView.frame = bounds
     contentView.layer.cornerRadius = min(bounds.width, bounds.height) / 2
-    if let badgeHost {
-      // In the avatar's bottom-right corner, inside its square, as `MessageViaAvatar` places it.
-      let side = MessageViaBadge.diameter(forAvatar: min(bounds.width, bounds.height)) + 3
-      badgeHost.view.frame = CGRect(x: bounds.maxX - side, y: bounds.maxY - side, width: side, height: side)
-    }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
+    if let badgeHost {
+      // In the avatar's bottom-right corner, inside its square, cut out of the avatar,
+      // as `MessageViaAvatar` draws it.
+      let side = min(bounds.width, bounds.height)
+      badgeHost.view.frame = MessageViaBadge.frame(inAvatar: side)
+      let mask = contentView.layer.mask as? CAShapeLayer ?? CAShapeLayer()
+      mask.fillRule = .evenOdd
+      mask.frame = contentView.bounds
+      mask.path = MessageViaBadge.avatarMaskPath(inAvatar: side)
+      contentView.layer.mask = mask
+    }
     gradientLayer.frame = bounds
     borderLayer.frame = bounds
     borderLayer.path = UIBezierPath(ovalIn: bounds).cgPath

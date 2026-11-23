@@ -63,8 +63,28 @@ public struct MessageViaPresentation: Equatable, Sendable {
     }
   }
 
+  /// Names for the agents the server knows (server/src/modules/message/viaAgents.ts), for
+  /// messages that arrive without one.
+  static let knownAgentNames: [String: String] = [
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "cursor-agent": "Cursor",
+    "gemini-cli": "Gemini CLI",
+    "amp": "Amp",
+    "opencode": "OpenCode",
+    "auggie": "Auggie",
+    "crush": "Crush",
+    "copilot": "GitHub Copilot",
+    "qwen-code": "Qwen Code",
+    "pi": "Pi",
+    "warp": "Warp",
+    "chatgpt": "ChatGPT",
+    "claude": "Claude",
+    genericAgentId: "an AI agent",
+  ]
+
   static func fallbackName(for id: String) -> String {
-    id == genericAgentId ? "an AI agent" : id
+    knownAgentNames[id] ?? id
   }
 }
 

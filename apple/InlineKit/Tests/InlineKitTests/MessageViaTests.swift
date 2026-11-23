@@ -54,6 +54,12 @@ struct MessageViaTests {
     #expect(named.mark == .agent("codex"))
     #expect(named.detail(senderName: "Mo") == "Mo sent this using Codex, an AI agent.")
 
+    // Without a name from the server, a known agent still reads by its proper name.
+    let unnamed = try #require(MessageViaPresentation(via: .with { $0.app = "claude-code" }, cachedUser: { _ in nil }))
+    #expect(unnamed.label == "Sent via Claude Code")
+    let unknown = try #require(MessageViaPresentation(via: .with { $0.app = "future-cli" }, cachedUser: { _ in nil }))
+    #expect(unknown.label == "Sent via future-cli")
+
     let generic = try #require(MessageViaPresentation(via: .with { $0.app = "agent"; $0.name = "an AI agent" }, cachedUser: { _ in nil }))
     #expect(generic.label == "Sent via an AI agent")
     #expect(generic.detail(senderName: "Mo") == "Mo sent this using an AI agent.")

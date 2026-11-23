@@ -178,9 +178,11 @@ public final class DebugChatFixture {
       try size.insert(db)
       if index % 2 == 0 { text = nil }
     }
-    // Alice's even messages are sent for her by Codex: the agent badge and "Sent via Codex".
+    // Alice's even messages are sent for her by an agent: the agent badge and "Sent via Codex".
+    // The agents rotate so every badge shows; Claude Code comes without a server name.
     if payload == nil, from == 2, index % 2 == 0, groupedId == nil {
-      payload = .with { $0.via = .with { $0.app = "codex" } }
+      let agents = ["codex", "claude-code", "chatgpt", "opencode"]
+      payload = .with { $0.via = .with { $0.app = agents[(index / 2) % agents.count] } }
     }
     var videoId: Int64?
     if photoId == nil, payload == nil, groupedId == nil, index % 53 == 0 {
