@@ -1149,6 +1149,16 @@ async fn dispatch(
                                 .await
                         }
                         _ => {
+                            // Codex reads the error as a refusal. A request from a
+                            // thread no session knows (a sub-agent Inline has not
+                            // seen yet) says so where the work is, when there is
+                            // one place it can be.
+                            if let [session] = sessions.as_slice()
+                                && let Some(notice) =
+                                    super::mapper::unowned_request_notice(&method, &params)
+                            {
+                                session.emit_all(vec![notice]);
+                            }
                             connection
                                 .peer
                                 .respond_error(id, -32601, "not supported by Inline")

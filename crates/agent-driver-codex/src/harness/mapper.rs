@@ -83,6 +83,9 @@ enum Pending {
     Permissions,
     ElicitationUrl,
     ElicitationForm,
+    /// A message-only form (Codex asking to run an MCP tool): answered with
+    /// the picked decision's native response.
+    ElicitationApproval,
     UserInput,
     AsyncQuestions,
 }
@@ -115,6 +118,8 @@ pub(crate) struct CodexMapper {
     requests: HashMap<String, PendingRequest>,
     answered: HashSet<String>,
     children: HashMap<String, ChildRef>,
+    /// A sub-agent thread's running turn, for its requests that name none.
+    child_turns: HashMap<String, TurnId>,
     /// When the account's exhausted limit window resets, from the latest
     /// `account/rateLimits/updated`.
     limit_resets_at: Option<i64>,
@@ -134,6 +139,7 @@ impl CodexMapper {
             requests: HashMap::new(),
             answered: HashSet::new(),
             children: HashMap::new(),
+            child_turns: HashMap::new(),
             limit_resets_at: None,
             lost: false,
         }
@@ -269,6 +275,8 @@ impl CodexMapper {
                     return mapped;
                 };
                 if let Some(child) = parent {
+                    self.child_turns
+                        .insert(child.id.as_str().to_owned(), turn.clone());
                     events.push(child_update(child, ChildStatus::Running, None, params));
                 } else {
                     self.active_turn = Some(turn.clone());
@@ -435,6 +443,27 @@ impl CodexMapper {
                     });
                 }
             }
+            // A sub-agent's thread can ask for approval before the spawn
+            // item that names it arrives; its start names its parent.
+            "thread/started" => {
+                if let (Some(thread), Some(parent_thread)) = (
+                    string(params.pointer("/thread/id")),
+                    string(params.pointer("/thread/parentThreadId")),
+                ) && thread != self.thread
+                    && self.owns_thread(Some(&parent_thread))
+                    && !self.children.contains_key(&thread)
+                    && let Ok(id) = inline_agent_bridge::harness::ChildId::new(thread.clone())
+                {
+                    self.children.insert(
+                        thread,
+                        ChildRef {
+                            id,
+                            kind: ChildKind::Subagent,
+                        },
+                    );
+                }
+                events.push(notice(NoticeLevel::Info, method, params));
+            }
             "thread/status/changed" if parent.is_none() => {
                 match params.pointer("/status/type").and_then(Value::as_str) {
                     Some("idle") => events.push(Event::State {
@@ -591,17 +620,10 @@ impl CodexMapper {
                 },
             });
         }
-        if let Some(child) = parent {
-            let status = match outcome {
-                TurnOutcome::Completed => ChildStatus::Completed,
-                TurnOutcome::Interrupted => ChildStatus::Stopped,
-                _ => ChildStatus::Failed,
-            };
-            events.push(child_update(child, status, None, params));
-            return;
-        }
-        // Codex withdraws a turn's blocking requests when the turn ends.
-        let closed: Vec<String> = self
+        // Codex withdraws a thread's blocking requests when its turn ends,
+        // a sub-agent's included; closed here they read as no longer needed,
+        // not as answered elsewhere.
+        let mut closed: Vec<String> = self
             .requests
             .iter()
             .filter(|(_, request)| {
@@ -610,6 +632,7 @@ impl CodexMapper {
             })
             .map(|(id, _)| id.clone())
             .collect();
+        closed.sort();
         for id in closed {
             self.requests.remove(&id);
             if let Ok(id) = InteractionId::new(id) {
@@ -618,6 +641,18 @@ impl CodexMapper {
                     by: ClosedBy::Cancelled,
                 });
             }
+        }
+        if let Some(child) = parent {
+            if self.child_turns.get(child.id.as_str()) == Some(&turn) {
+                self.child_turns.remove(child.id.as_str());
+            }
+            let status = match outcome {
+                TurnOutcome::Completed => ChildStatus::Completed,
+                TurnOutcome::Interrupted => ChildStatus::Stopped,
+                _ => ChildStatus::Failed,
+            };
+            events.push(child_update(child, status, None, params));
+            return;
         }
         if self.active_turn.as_ref() == Some(&turn) {
             self.active_turn = None;
@@ -813,9 +848,18 @@ impl CodexMapper {
         let Some(id) = request_id_string(Some(rpc_id)) else {
             return RequestMapped::NotMine;
         };
-        let turn = turn_id(params.get("turnId"));
+        let mut turn = turn_id(params.get("turnId"));
         let item = item_id(params.get("itemId"));
         let parent = self.parent_of(params);
+        // An elicitation's `turnId` is nullable. Codex withdraws a thread's
+        // requests when its turn ends, so one seen during a thread's turn
+        // belongs to it, and its card closes with it.
+        if turn.is_none() && method == "mcpServer/elicitation/request" {
+            turn = match &parent {
+                None => self.active_turn.clone(),
+                Some(child) => self.child_turns.get(child.id.as_str()).cloned(),
+            };
+        }
         let (kind, pending, decisions) = match method {
             "item/commandExecution/requestApproval" => {
                 let decisions = decisions::command_decisions(params);
@@ -878,6 +922,17 @@ impl CodexMapper {
                 None => return self.cancel_dialog(id, method, params),
             },
             "mcpServer/elicitation/request" => match params.get("mode").and_then(Value::as_str) {
+                Some("form") if is_message_only(params) => {
+                    let decisions = decisions::message_only_decisions(params);
+                    (
+                        InteractionKind::Approval {
+                            subject: message_only_subject(params),
+                            decisions: decisions.clone(),
+                        },
+                        Pending::ElicitationApproval,
+                        decisions,
+                    )
+                }
                 Some("form") => match elicitation_form(params) {
                     Some(form) => (
                         InteractionKind::Question { form },
@@ -1025,7 +1080,13 @@ impl CodexMapper {
             (Pending::ElicitationUrl, InteractionResponse::Decision { .. }) => {
                 json!({"action": picked.as_ref().expect("picked").native})
             }
-            (Pending::ElicitationUrl | Pending::ElicitationForm, InteractionResponse::Cancel) => {
+            (Pending::ElicitationApproval, InteractionResponse::Decision { .. }) => {
+                picked.as_ref().expect("picked").native.clone()
+            }
+            (
+                Pending::ElicitationUrl | Pending::ElicitationForm | Pending::ElicitationApproval,
+                InteractionResponse::Cancel,
+            ) => {
                 json!({"action": "cancel"})
             }
             (Pending::ElicitationForm, InteractionResponse::Answers { answers }) => {
@@ -1245,6 +1306,178 @@ fn user_input_form(params: &Value) -> Option<QuestionForm> {
     })
 }
 
+/// A form that asks for nothing but a yes or no: no schema, or an object
+/// schema with no properties. Codex asks to run an MCP tool this way.
+fn is_message_only(params: &Value) -> bool {
+    match params.get("requestedSchema") {
+        None | Some(Value::Null) => true,
+        Some(schema) => schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_some_and(Map::is_empty),
+    }
+}
+
+/// Arguments a tool approval shows, at most.
+const MAX_TOOL_PARAMS: usize = 12;
+/// Characters of one text argument a tool approval shows.
+const MAX_TOOL_PARAM_CHARS: usize = 600;
+/// Items of an array, or entries of an object, inside an argument.
+const MAX_TOOL_PARAM_ITEMS: usize = 8;
+/// Nesting kept inside an argument; deeper values read `…`.
+const MAX_TOOL_PARAM_DEPTH: usize = 3;
+
+/// What a message-only elicitation asks. Codex's tool approval is the tool,
+/// named as other agents' tool cards name it (`server · tool`), with its
+/// arguments; Codex's message is kept when it says more than the generic
+/// question.
+fn message_only_subject(params: &Value) -> ApprovalSubject {
+    let message = string(params.get("message")).map(|message| sanitized(&message, 2_000));
+    let tool = params
+        .pointer("/_meta/tool_title")
+        .or_else(|| params.pointer("/_meta/tool_name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|tool| !tool.is_empty());
+    match tool {
+        Some(tool) if decisions::is_tool_approval(params) => {
+            let tool = sanitized(tool, 120);
+            let name = match string(params.get("serverName")) {
+                Some(server) => format!("{} · {tool}", sanitized(&server, 120)),
+                None => tool.clone(),
+            };
+            // "Allow the x MCP server to run tool "y"?" (by the tool's raw
+            // name) says nothing the card does not; a consequential tool's
+            // own message does.
+            let raw = params
+                .pointer("/_meta/tool_name")
+                .and_then(Value::as_str)
+                .map(|raw| sanitized(raw, 120));
+            let generic = |message: &String| {
+                message.starts_with("Allow ")
+                    && [Some(&tool), raw.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|name| message.ends_with(&format!("run tool \"{name}\"?")))
+            };
+            ApprovalSubject::Tool {
+                name,
+                input: tool_params(params),
+                reason: message.filter(|message| !generic(message)),
+            }
+        }
+        _ => ApprovalSubject::Other {
+            title: message.unwrap_or_else(|| "Allow this request?".to_owned()),
+            detail: None,
+        },
+    }
+}
+
+/// The arguments of an MCP tool Codex asks to run, as the Codex TUI picks
+/// them (`tool_params_display` names, else `tool_params` by name), bounded
+/// and with control and direction-override characters removed. Codex sends
+/// the whole call; a card shows enough to decide on.
+fn tool_params(params: &Value) -> Value {
+    let Some(meta) = params.get("_meta") else {
+        return Value::Null;
+    };
+    let mut rows: Vec<(String, &Value)> = meta
+        .get("tool_params_display")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let name =
+                        string(row.get("display_name")).or_else(|| string(row.get("name")))?;
+                    Some((name, row.get("value")?))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if rows.is_empty() {
+        rows = meta
+            .get("tool_params")
+            .and_then(Value::as_object)
+            .map(|object| {
+                object
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value))
+                    .collect()
+            })
+            .unwrap_or_default();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    if rows.is_empty() {
+        return Value::Null;
+    }
+    let total = rows.len();
+    let mut shown = Map::new();
+    for (name, value) in rows.into_iter().take(MAX_TOOL_PARAMS) {
+        shown.insert(sanitized(&name, 120), bounded(value, 0));
+    }
+    if total > MAX_TOOL_PARAMS {
+        shown.insert(
+            "…".to_owned(),
+            json!(format!("{} more", total - MAX_TOOL_PARAMS)),
+        );
+    }
+    Value::Object(shown)
+}
+
+fn bounded(value: &Value, depth: usize) -> Value {
+    match value {
+        Value::String(text) => Value::String(sanitized(text, MAX_TOOL_PARAM_CHARS)),
+        Value::Array(_) | Value::Object(_) if depth >= MAX_TOOL_PARAM_DEPTH => json!("…"),
+        Value::Array(items) => {
+            let mut shown: Vec<Value> = items
+                .iter()
+                .take(MAX_TOOL_PARAM_ITEMS)
+                .map(|item| bounded(item, depth + 1))
+                .collect();
+            if items.len() > MAX_TOOL_PARAM_ITEMS {
+                shown.push(json!(format!(
+                    "… {} more",
+                    items.len() - MAX_TOOL_PARAM_ITEMS
+                )));
+            }
+            Value::Array(shown)
+        }
+        Value::Object(object) => {
+            let mut shown: Map<String, Value> = object
+                .iter()
+                .take(MAX_TOOL_PARAM_ITEMS)
+                .map(|(key, value)| (sanitized(key, 120), bounded(value, depth + 1)))
+                .collect();
+            if object.len() > MAX_TOOL_PARAM_ITEMS {
+                shown.insert(
+                    "…".to_owned(),
+                    json!(format!("{} more", object.len() - MAX_TOOL_PARAM_ITEMS)),
+                );
+            }
+            Value::Object(shown)
+        }
+        other => other.clone(),
+    }
+}
+
+/// `text` without control characters (newlines and tabs stay) or bidi
+/// overrides that could disguise it, cut to `max` characters.
+fn sanitized(text: &str, max: usize) -> String {
+    let mut clean = text
+        .chars()
+        .filter(|character| {
+            (!character.is_control() || matches!(character, '\n' | '\t'))
+                && !matches!(character, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+        })
+        .take(max + 1)
+        .collect::<String>();
+    if clean.chars().count() > max {
+        clean = clean.chars().take(max).collect();
+        clean.push('…');
+    }
+    clean
+}
+
 fn elicitation_form(params: &Value) -> Option<QuestionForm> {
     let schema = params.get("requestedSchema")?;
     let required: HashSet<&str> = schema
@@ -1319,8 +1552,10 @@ fn enum_options(property: &Value) -> Vec<FieldOption> {
     if !direct.is_empty() {
         return direct;
     }
-    if let Some(one_of) = property.get("oneOf").and_then(Value::as_array) {
-        return one_of
+    // Titled choices: `oneOf` for one, `items.anyOf` for several (MCP
+    // 2025-11-25 `TitledSingleSelectEnumSchema` / `TitledMultiSelectEnumSchema`).
+    let titled = |choices: &Vec<Value>| -> Vec<FieldOption> {
+        choices
             .iter()
             .filter_map(|option| {
                 Some(FieldOption {
@@ -1329,7 +1564,15 @@ fn enum_options(property: &Value) -> Vec<FieldOption> {
                     preview: None,
                 })
             })
-            .collect();
+            .collect()
+    };
+    for pointer in ["/oneOf", "/anyOf", "/items/anyOf", "/items/oneOf"] {
+        if let Some(choices) = property.pointer(pointer).and_then(Value::as_array) {
+            let options = titled(choices);
+            if !options.is_empty() {
+                return options;
+            }
+        }
     }
     from(property.pointer("/items/enum"), None)
 }
@@ -1778,6 +2021,23 @@ fn command_text(value: Option<&Value>) -> Option<String> {
     }
 }
 
+/// The notice for a thread's request no session took: Codex hears it was
+/// refused, and the chat says so (an error notice, so it is shown, titled as
+/// Claude's declined requests are). `None` for connection-level requests,
+/// which name no thread.
+pub(crate) fn unowned_request_notice(method: &str, params: &Value) -> Option<Event> {
+    params.get("threadId").and_then(Value::as_str)?;
+    Some(Event::Notice(Notice {
+        level: NoticeLevel::Error,
+        code: "Request declined".to_owned(),
+        message: Some(format!(
+            "Codex asked for `{}` from a sub-agent Inline hadn't seen yet, so it was declined.",
+            sanitized(method, 80)
+        )),
+        native: params.clone(),
+    }))
+}
+
 fn notice(level: NoticeLevel, code: &str, native: &Value) -> Event {
     Event::Notice(Notice {
         level,
@@ -1873,6 +2133,466 @@ mod tests {
             &json!({"threadId": "thread-1", "requestId": 7}),
         );
         assert!(mapped.events.is_empty());
+    }
+
+    /// Codex asking to run an MCP tool (codex-rs `core/src/mcp_tool_call.rs`
+    /// `build_mcp_tool_approval_elicitation_request`), as app-server sends it.
+    fn mcp_tool_approval(turn: Value, meta: Value) -> Value {
+        let mut meta_object = json!({
+            "codex_approval_kind": "mcp_tool_call",
+            "persist": ["session", "always"],
+            "tool_name": "execute",
+            "tool_params": {"code": "async () => 1", "account": "acme"}
+        });
+        if let (Some(base), Some(extra)) = (meta_object.as_object_mut(), meta.as_object()) {
+            base.extend(extra.clone());
+        }
+        json!({
+            "threadId": "thread-1",
+            "turnId": turn,
+            "serverName": "cloudflare-api",
+            "mode": "form",
+            "message": "Allow the cloudflare-api MCP server to run tool \"execute\"?",
+            "requestedSchema": {"type": "object", "properties": {}},
+            "_meta": meta_object
+        })
+    }
+
+    fn approval_of(mapped: RequestMapped) -> (ApprovalSubject, Vec<Decision>) {
+        let RequestMapped::Interaction(events) = mapped else {
+            panic!("expected an interaction, got {mapped:?}");
+        };
+        match events.into_iter().next() {
+            Some(Event::Interaction(Interaction {
+                kind: InteractionKind::Approval { subject, decisions },
+                ..
+            })) => (subject, decisions),
+            other => panic!("expected an approval, got {other:?}"),
+        }
+    }
+
+    fn respond(mapper: &mut CodexMapper, id: &str, decision: &str) -> Value {
+        match mapper.answer(
+            &InteractionId::new(id).expect("id"),
+            &InteractionResponse::Decision {
+                decision: DecisionId::new(decision).expect("id"),
+                message: None,
+            },
+            UserId(1),
+        ) {
+            Ok(AnswerPlan::Respond { result, events, .. }) => {
+                assert!(matches!(
+                    events.as_slice(),
+                    [Event::InteractionClosed {
+                        by: ClosedBy::Inline { .. },
+                        ..
+                    }]
+                ));
+                result
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// Live repro (Nov 23): Codex asked to run coolify's `manage_notifications`
+    /// and Inline showed only the message, with nothing to press, while
+    /// Codex waited. The message-only form was a question with no fields.
+    #[test]
+    fn the_message_only_tool_approval_form_is_never_a_fieldless_question() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let mapped = mapper.server_request(
+            &json!(0),
+            "mcpServer/elicitation/request",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "serverName": "coolify",
+                "mode": "form",
+                "message": "Allow the coolify MCP server to run tool \"manage_notifications\"?",
+                "requestedSchema": {"type": "object", "properties": {}},
+                "_meta": {
+                    "codex_approval_kind": "mcp_tool_call",
+                    "persist": ["session", "always"],
+                    "tool_name": "manage_notifications",
+                    "tool_params": {"action": "list"}
+                }
+            }),
+        );
+        let (subject, decisions) = approval_of(mapped);
+        assert_eq!(
+            subject,
+            ApprovalSubject::Tool {
+                name: "coolify · manage_notifications".to_owned(),
+                input: json!({"action": "list"}),
+                reason: None,
+            }
+        );
+        let labels: Vec<&str> = decisions.iter().map(|d| d.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["Allow", "Allow for this session", "Always allow", "Cancel"]
+        );
+        // Codex is waiting on this request until Inline answers it.
+        assert_eq!(
+            respond(&mut mapper, "0", "accept"),
+            json!({"action": "accept", "content": null})
+        );
+    }
+
+    #[test]
+    fn an_mcp_tool_approval_is_a_tool_card_and_allow_answers_codex() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let (subject, decisions) = approval_of(mapper.server_request(
+            &json!(9),
+            "mcpServer/elicitation/request",
+            &mcp_tool_approval(json!("turn-1"), json!({})),
+        ));
+        assert_eq!(
+            subject,
+            ApprovalSubject::Tool {
+                name: "cloudflare-api · execute".to_owned(),
+                input: json!({"account": "acme", "code": "async () => 1"}),
+                // Codex's generic question adds nothing to the card.
+                reason: None,
+            }
+        );
+        let ids: Vec<&str> = decisions.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["accept", "acceptForSession", "acceptAlways", "cancel"]
+        );
+
+        assert_eq!(
+            respond(&mut mapper, "9", "accept"),
+            json!({"action": "accept", "content": null})
+        );
+        // Claimed once: a second tap finds nothing pending.
+        assert_eq!(
+            mapper.answer(
+                &InteractionId::new("9").expect("id"),
+                &InteractionResponse::Decision {
+                    decision: DecisionId::new("accept").expect("id"),
+                    message: None,
+                },
+                UserId(1),
+            ),
+            Err(OpError::InteractionNotPending)
+        );
+
+        // Allow for this session asks Codex to remember it.
+        mapper.server_request(
+            &json!(10),
+            "mcpServer/elicitation/request",
+            &mcp_tool_approval(json!("turn-1"), json!({})),
+        );
+        assert_eq!(
+            respond(&mut mapper, "10", "acceptForSession"),
+            json!({"action": "accept", "content": null, "_meta": {"persist": "session"}})
+        );
+
+        // A titled tool is named by its title; the generic question still
+        // names the raw tool and adds nothing.
+        let (subject, _) = approval_of(mapper.server_request(
+            &json!(13),
+            "mcpServer/elicitation/request",
+            &mcp_tool_approval(json!("turn-1"), json!({"tool_title": "Run code"})),
+        ));
+        assert!(matches!(
+            subject,
+            ApprovalSubject::Tool { ref name, reason: None, .. } if name == "cloudflare-api · Run code"
+        ));
+    }
+
+    #[test]
+    fn denying_an_mcp_tool_cancels_that_call_as_the_persons_choice() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let (subject, decisions) = approval_of(
+            mapper.server_request(
+                &json!("e-1"),
+                "mcpServer/elicitation/request",
+                &mcp_tool_approval(
+                    json!("turn-1"),
+                    json!({
+                        "persist": null,
+                        "tool_title": "Send email",
+                        "tool_params_display": [
+                            {"name": "to", "display_name": "To", "value": "pat@example.com"},
+                            {"name": "subject", "display_name": "Subject", "value": "Hi"}
+                        ]
+                    }),
+                )
+                .as_object()
+                .map(|params| {
+                    let mut params = params.clone();
+                    params.insert(
+                        "message".to_owned(),
+                        json!("Allow Gmail to send an email to pat@example.com?"),
+                    );
+                    Value::Object(params)
+                })
+                .expect("object"),
+            ),
+        );
+        // A consequential tool's own message is the reason; the display
+        // names Codex rendered win over the raw arguments.
+        assert_eq!(
+            subject,
+            ApprovalSubject::Tool {
+                name: "cloudflare-api · Send email".to_owned(),
+                input: json!({"To": "pat@example.com", "Subject": "Hi"}),
+                reason: Some("Allow Gmail to send an email to pat@example.com?".to_owned()),
+            }
+        );
+        let labels: Vec<&str> = decisions.iter().map(|d| d.label.as_str()).collect();
+        assert_eq!(labels, ["Allow", "Cancel"]);
+        assert_eq!(
+            respond(&mut mapper, "e-1", "cancel"),
+            json!({
+                "action": "cancel",
+                "content": null,
+                "_meta": {"codex_approval_cancellation_reason": "user"},
+            })
+        );
+    }
+
+    #[test]
+    fn an_unanswered_mcp_tool_card_closes_when_its_turn_ends() {
+        let mut mapper = CodexMapper::new("thread-1");
+        mapper.notification(
+            "turn/started",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1"}}),
+        );
+        // app-server could not correlate the turn: the elicitation still
+        // belongs to the running one.
+        approval_of(mapper.server_request(
+            &json!(11),
+            "mcpServer/elicitation/request",
+            &mcp_tool_approval(Value::Null, json!({})),
+        ));
+        let mapped = mapper.notification(
+            "turn/completed",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1", "status": "interrupted"}}),
+        );
+        assert!(mapped.events.iter().any(|event| matches!(
+            event,
+            Event::InteractionClosed { id, by: ClosedBy::Cancelled } if id.as_str() == "11"
+        )));
+        // A tap on the stale card reaches nothing.
+        assert_eq!(
+            mapper.answer(
+                &InteractionId::new("11").expect("id"),
+                &InteractionResponse::Decision {
+                    decision: DecisionId::new("accept").expect("id"),
+                    message: None,
+                },
+                UserId(1),
+            ),
+            Err(OpError::InteractionNotPending)
+        );
+        // Withdrawn by Codex before anyone answered: no second close.
+        let mapped = mapper.notification(
+            "serverRequest/resolved",
+            &json!({"threadId": "thread-1", "requestId": 11}),
+        );
+        assert!(mapped.events.is_empty());
+    }
+
+    #[test]
+    fn a_sub_agent_asks_before_its_spawn_item_and_its_card_closes_with_its_turn() {
+        let mut mapper = CodexMapper::new("thread-1");
+        mapper.notification(
+            "thread/started",
+            &json!({"thread": {"id": "child-1", "parentThreadId": "thread-1"}}),
+        );
+        mapper.notification(
+            "turn/started",
+            &json!({"threadId": "child-1", "turn": {"id": "child-turn-1"}}),
+        );
+        let mut params = mcp_tool_approval(Value::Null, json!({}));
+        params["threadId"] = json!("child-1");
+        let RequestMapped::Interaction(events) =
+            mapper.server_request(&json!(15), "mcpServer/elicitation/request", &params)
+        else {
+            panic!("the sub-agent's request is this session's");
+        };
+        assert!(matches!(
+            events.first(),
+            Some(Event::Interaction(Interaction { parent: Some(child), .. }))
+                if child.id.as_str() == "child-1"
+        ));
+        let mapped = mapper.notification(
+            "turn/completed",
+            &json!({"threadId": "child-1", "turn": {"id": "child-turn-1", "status": "interrupted"}}),
+        );
+        assert!(mapped.events.iter().any(|event| matches!(
+            event,
+            Event::InteractionClosed { id, by: ClosedBy::Cancelled } if id.as_str() == "15"
+        )));
+        // Codex's later resolved notice is not "answered outside Inline".
+        assert!(
+            mapper
+                .notification(
+                    "serverRequest/resolved",
+                    &json!({"threadId": "child-1", "requestId": 15}),
+                )
+                .events
+                .is_empty()
+        );
+        // Someone else's thread stays someone else's.
+        mapper.notification(
+            "thread/started",
+            &json!({"thread": {"id": "stranger", "parentThreadId": "other"}}),
+        );
+        assert!(!mapper.owns_thread(Some("stranger")));
+    }
+
+    #[test]
+    fn a_refused_request_from_an_unknown_thread_is_said_aloud() {
+        let Some(Event::Notice(notice)) = unowned_request_notice(
+            "mcpServer/elicitation/request",
+            &json!({"threadId": "child-9", "mode": "form"}),
+        ) else {
+            panic!("expected a notice");
+        };
+        // Errors are what the chat shows.
+        assert_eq!(notice.level, NoticeLevel::Error);
+        assert_eq!(notice.code, "Request declined");
+        assert!(
+            notice
+                .message
+                .as_deref()
+                .is_some_and(|text| text.contains("mcpServer/elicitation/request"))
+        );
+        assert!(unowned_request_notice("currentTime/read", &json!({})).is_none());
+    }
+
+    #[test]
+    fn tool_arguments_on_a_card_are_bounded_and_cleaned() {
+        let long = "x".repeat(MAX_TOOL_PARAM_CHARS + 50);
+        let mut many = Map::new();
+        for index in 0..MAX_TOOL_PARAMS + 3 {
+            many.insert(format!("p{index:02}"), json!(index));
+        }
+        many.insert("body".to_owned(), json!(long));
+        many.insert(
+            "evil".to_owned(),
+            json!("safe\u{202E}gpj.exe\u{1b}[2J\nnext"),
+        );
+        many.insert(
+            "deep".to_owned(),
+            json!({"a": {"b": {"c": {"d": 1}}}, "list": (0..20).collect::<Vec<_>>()}),
+        );
+        let input = tool_params(&json!({"_meta": {"tool_params": many}}));
+        let object = input.as_object().expect("object");
+        assert_eq!(object.len(), MAX_TOOL_PARAMS + 1);
+        assert_eq!(object["…"], json!("6 more"));
+        let body = object["body"].as_str().expect("text");
+        assert_eq!(body.chars().count(), MAX_TOOL_PARAM_CHARS + 1);
+        assert!(body.ends_with('…'));
+        assert_eq!(object["evil"], json!("safegpj.exe[2J\nnext"));
+        assert_eq!(object["deep"]["a"]["b"], json!({"c": "…"}));
+        let list = object["deep"]["list"].as_array().expect("list");
+        assert_eq!(list.len(), MAX_TOOL_PARAM_ITEMS + 1);
+        assert_eq!(list[MAX_TOOL_PARAM_ITEMS], json!("… 12 more"));
+        // No arguments: nothing to show.
+        assert_eq!(tool_params(&json!({"_meta": {}})), Value::Null);
+    }
+
+    #[test]
+    fn a_titled_multi_select_is_a_choice_answered_with_its_values() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let mapped = mapper.server_request(
+            &json!(14),
+            "mcpServer/elicitation/request",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "serverName": "deploy",
+                "mode": "form",
+                "message": "Where should it deploy?",
+                "requestedSchema": {"type": "object", "properties": {"regions": {
+                    "type": "array",
+                    "title": "Regions",
+                    "items": {"anyOf": [
+                        {"const": "fra", "title": "Frankfurt"},
+                        {"const": "iad", "title": "Virginia"}
+                    ]}
+                }}}
+            }),
+        );
+        let RequestMapped::Interaction(events) = mapped else {
+            panic!("expected an interaction");
+        };
+        let Some(Event::Interaction(Interaction {
+            kind: InteractionKind::Question { form },
+            ..
+        })) = events.first()
+        else {
+            panic!("expected a question");
+        };
+        let FieldInput::Select {
+            options, multiple, ..
+        } = &form.fields[0].input
+        else {
+            panic!("expected a choice, got {:?}", form.fields[0].input);
+        };
+        assert!(*multiple);
+        let labels: Vec<(&str, Option<&str>)> = options
+            .iter()
+            .map(|option| (option.label.as_str(), option.description.as_deref()))
+            .collect();
+        assert_eq!(
+            labels,
+            [("fra", Some("Frankfurt")), ("iad", Some("Virginia"))]
+        );
+        let plan = mapper
+            .answer(
+                &InteractionId::new("14").expect("id"),
+                &InteractionResponse::Answers {
+                    answers: vec![inline_agent_bridge::harness::FieldAnswer {
+                        field: FieldId::new("regions").expect("id"),
+                        values: vec!["fra".to_owned(), "iad".to_owned()],
+                    }],
+                },
+                UserId(1),
+            )
+            .expect("answer");
+        let AnswerPlan::Respond { result, .. } = plan else {
+            panic!("expected a response");
+        };
+        assert_eq!(
+            result,
+            json!({"action": "accept", "content": {"regions": ["fra", "iad"]}})
+        );
+    }
+
+    #[test]
+    fn a_message_only_request_that_is_not_a_tool_is_an_allow_or_deny_card() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let (subject, decisions) = approval_of(mapper.server_request(
+            &json!(12),
+            "mcpServer/elicitation/request",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "serverName": "notes",
+                "mode": "form",
+                "message": "Share your notes with this server?",
+                "requestedSchema": {"type": "object", "properties": {}}
+            }),
+        ));
+        assert_eq!(
+            subject,
+            ApprovalSubject::Other {
+                title: "Share your notes with this server?".to_owned(),
+                detail: None,
+            }
+        );
+        assert_eq!(decisions.len(), 3);
+        assert_eq!(
+            respond(&mut mapper, "12", "decline"),
+            json!({"action": "decline", "content": null})
+        );
     }
 
     #[test]
