@@ -203,7 +203,13 @@ final class UnreadCountsModel {
   }
 
   private func applyOrDebounce(_ snapshot: UnreadCountsSnapshot, generation observationGeneration: Int) {
-    if immediateSnapshotGeneration == observationGeneration {
+    // Reading lowers counts: show it at once. The wait below is for counts that rise.
+    let lowersOnly = snapshot.unreadChatCount <= unreadChatCount
+      && snapshot.appBadgeChatCount <= appBadgeChatCount
+      && snapshot.scopedUnopenedProminentUnreadCount <= scopedUnopenedProminentUnreadCount
+      && snapshot.scopedUnopenedOtherUnreadCount <= scopedUnopenedOtherUnreadCount
+      && snapshot.prominentUnreadOutsideSelectedSpaceCount <= prominentUnreadOutsideSelectedSpaceCount
+    if immediateSnapshotGeneration == observationGeneration || lowersOnly {
       immediateSnapshotGeneration = nil
       pendingSnapshotTask?.cancel()
       pendingSnapshotTask = nil

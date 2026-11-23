@@ -1380,8 +1380,10 @@ class MessageListAppKit: NSViewController {
   }
 
   private func applyActivityState(_ state: ChatActivityNavigator.State, animate: Bool) {
-    // Marking the chat unread supersedes what this list read before.
-    if state.unreadMark { unreadCountReadFrontier = 0 }
+    // Marking the chat unread supersedes what this list read before. Only a new mark: resetting
+    // on every emission while marked put back counts the reader had scrolled past.
+    if state.unreadMark, !appliedUnreadMark { unreadCountReadFrontier = 0 }
+    appliedUnreadMark = state.unreadMark
     updateScrollToBottomCount()
     guard activityJumpButton.count != state.mentionsCount || reactionJumpButton.count != state.reactionsCount
     else { return }
@@ -2486,7 +2488,22 @@ class MessageListAppKit: NSViewController {
     if isAtBottom != isWithinFollowZone {
       handleBoundsChange(afterUserScroll: true)
     }
-    if unbracketed { scrollWheelEnded() }
+    if unbracketed {
+      scrollWheelEnded()
+    } else {
+      readDuringLiveScroll()
+    }
+  }
+
+  /// A trackpad gesture reads as it goes, a few times a second, so the down button, the sidebar
+  /// and the Dock fall while the reader scrolls instead of all at once when the gesture ends.
+  /// Reading is a local write; the read sync talks to the server. A wheel tick already reads
+  /// through its own begin and end.
+  private func readDuringLiveScroll() {
+    let now = CACurrentMediaTime()
+    guard now - lastLiveScrollReadAt >= 0.3 else { return }
+    lastLiveScrollReadAt = now
+    updateUnreadIfNeeded()
   }
 
   @objc private func scrollWheelBegan() {
@@ -2622,6 +2639,10 @@ class MessageListAppKit: NSViewController {
 
   /// The highest incoming message this list asked to read; see `ChatUnreadBadgeCount`.
   private var unreadCountReadFrontier: Int64 = 0
+  /// The unread mark last applied, so only a new mark resets the frontier.
+  private var appliedUnreadMark = false
+  /// When a live scroll last read, so a trackpad gesture reads a few times a second.
+  private var lastLiveScrollReadAt: CFTimeInterval = 0
 
   // Publications can overlap while AppKit finishes their animations.
   private var tableUpdateCount = 0
@@ -4425,7 +4446,8 @@ class MessageListAppKit: NSViewController {
   }
 
   private func highestVisibleIncomingMessageID() -> Int64? {
-    let visibleRect = tableView.visibleRect
+    // Rows under the header or the compose bar have not been seen.
+    let visibleRect = quoteViewport
     let visibleRange = tableView.rows(in: visibleRect)
     guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return nil }
 
