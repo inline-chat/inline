@@ -523,9 +523,18 @@ for 30 seconds, so a change reaches a running gateway within that time.
   explicit outcome), and later work starts a new message below. A person's new
   message mid-turn also closes it. Detailed uses this path whatever the
   `streaming` settings say, and never edit-streams the answer.
-- **Friendly**: no progress message. Inline shows Working while OpenClaw works;
-  mid-turn replies and the answer arrive as ordinary messages, and the
-  `streaming` settings apply as before.
+- **Friendly**: no progress message. Inline shows Working while OpenClaw works.
+  The agent's own short updates between tool calls post as quiet messages (no
+  notification or unread), then the answer. OpenClaw reports these updates
+  for models that mark commentary, such as OpenAI's. Mid-turn replies and the
+  answer arrive as ordinary messages, and the `streaming` settings apply as
+  before.
+
+In both modes, the `message` tool's sends, replies, reactions and polls in the
+current chat get no progress row, since they show in the chat already. A
+Detailed turn that only reacted or stayed silent leaves no "Worked for" line.
+Other agents' progress messages reach the agent's history as their header only
+("[agent progress] Worked for 1m 4s").
 
 Progress rows use tool names and the agent's explicit descriptions as titles,
 never command output. Tools OpenClaw hides from channel progress stay hidden.

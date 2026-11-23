@@ -119,6 +119,32 @@ function normalizeRawMessageText(raw: string | undefined): string {
   return (raw ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").trim()
 }
 
+// MessageSendMode.MODE_SILENT; the server reports a bot's silent send this way.
+const MESSAGE_SEND_MODE_SILENT = 1
+
+/**
+ * The header of an agent's progress message ("Working", "Worked for 1m 4s"),
+ * or undefined for any other message. Agent plugins and the CLI bridge post
+ * progress as a silent bot message whose block content is one disclosure, or
+ * a lone "Worked for" footer. Its text fallback lists every command and read,
+ * which only crowds another agent's context, so history keeps the header.
+ */
+export function agentProgressHeader(message: Message): string | undefined {
+  if (message.sendMode !== MESSAGE_SEND_MODE_SILENT) return undefined
+  const blocks = message.blockContent?.blocks
+  if (!blocks || blocks.length !== 1) return undefined
+  const kind = blocks[0]!.kind
+  const range = kind.oneofKind === "disclosure"
+    ? kind.disclosure.summary
+    : kind.oneofKind === "footer"
+      ? kind.footer
+      : undefined
+  if (!range) return undefined
+  const start = Number(range.offset)
+  const header = (message.message ?? "").slice(start, start + Number(range.length)).trim()
+  return header || undefined
+}
+
 function bestPhotoSize(photo: {
   sizes?: Array<{ w?: number; h?: number; size?: number; cdnUrl?: string }>
 }): {
@@ -458,7 +484,8 @@ function formatEntitySummary(entity: InlineMessageEntitySummary): string {
 }
 
 export function summarizeInlineMessageContent(message: Message): InlineMessageContent {
-  const rawText = normalizeRawMessageText(message.message)
+  const progressHeader = agentProgressHeader(message)
+  const rawText = progressHeader ? `[agent progress] ${progressHeader}` : normalizeRawMessageText(message.message)
   const media = messageMediaSummary(message)
   const attachments = messageAttachmentSummaries(message)
   const entities = messageEntitySummaries(message)

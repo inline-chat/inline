@@ -67,5 +67,14 @@ export function createInlineProgressTransport(params: {
         }
       }
     },
+    async delete(messageId) {
+      const result = await params.client.invokeRaw(Method.DELETE_MESSAGES, {
+        oneofKind: "deleteMessages",
+        deleteMessages: { peerId, messageIds: [messageId] },
+      })
+      if (result.oneofKind !== "deleteMessages") {
+        throw new Error(`inline progress: expected deleteMessages result, got ${String(result.oneofKind)}`)
+      }
+    },
   }
 }

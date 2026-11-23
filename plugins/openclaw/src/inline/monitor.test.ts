@@ -8906,12 +8906,97 @@ describe("inline/monitor", () => {
       await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Finished." })))
       const options = harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions
       expect(options?.onPreparedAgentRunStart).toBeUndefined()
-      expect(options?.onItemEvent).toBeUndefined()
+      // Friendly listens for the agent's own updates only; tool items post nothing.
+      expect(options?.onItemEvent).toBeDefined()
       expect(options?.suppressDefaultToolProgressMessages).toBeUndefined()
       expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 2 || call[0] === 8)).toBe(false)
       expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
       // Working stays in both modes.
       expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
+    } finally { await handle.stop() }
+  })
+
+  it("posts the agent's complete updates as quiet messages above the answer in Friendly", async () => {
+    const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "find a time with Sara" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+        // Streaming updates and repeats of a finished one post nothing.
+        await replyOptions.onItemEvent?.({ itemId: "msg-1", kind: "preamble", phase: "update", progressText: "You're both" })
+        await replyOptions.onItemEvent?.({ itemId: "msg-1", kind: "preamble", phase: "end", progressText: "You're both free Tuesday 2:00–3:00." })
+        await replyOptions.onItemEvent?.({ itemId: "msg-1", kind: "preamble", phase: "end", progressText: "You're both free Tuesday 2:00–3:00." })
+        await replyOptions.onToolStart({ toolCallId: "cal-1", name: "calendar", args: {} })
+        await replyOptions.onItemEvent?.({ itemId: "tool:cal-1", toolCallId: "cal-1", kind: "tool", name: "calendar", phase: "end", status: "completed" })
+        await dispatcherOptions.deliver({ text: "Invite drafted for Tuesday at 2pm." })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Invite drafted for Tuesday at 2pm." })))
+      const texts = harness.calls.sendMessage.mock.calls.map(([input]) => input.text)
+      expect(texts).toEqual(["You're both free Tuesday 2:00–3:00.", "Invite drafted for Tuesday at 2pm."])
+      expect(harness.calls.sendMessage.mock.calls[0]![0]).toEqual(expect.objectContaining({ chatId: 773n, sendMode: "silent" }))
+      expect(harness.calls.sendMessage.mock.calls[1]![0].sendMode).toBeUndefined()
+      // Still no progress message.
+      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 2 || call[0] === 8)).toBe(false)
+    } finally { await handle.stop() }
+  })
+
+  it("shows no row for a reaction and removes the progress message of a turn that only reacted", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "haha" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ replyOptions }) => {
+        replyOptions.onPreparedAgentRunStart({ runId: "run-1", transcriptStart: null })
+        await replyOptions.onToolStart({ toolCallId: "msg-1", name: "message", args: { action: "react", emoji: "😂", messageId: "5558" } })
+        await replyOptions.onItemEvent({ itemId: "tool:msg-1", toolCallId: "msg-1", kind: "tool", name: "message", phase: "end", status: "completed" })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 4)).toBe(true))
+      const sends = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 2)
+      expect(sends).toHaveLength(1)
+      const shown = [sends[0]![1].sendMessage.message, ...harness.calls.invokeRaw.mock.calls
+        .filter((call) => call[0] === 8)
+        .map((call) => call[1].editMessage.text)]
+      expect(shown.some((text) => /message|react/i.test(text))).toBe(false)
+      const deletion = harness.calls.invokeRaw.mock.calls.find((call) => call[0] === 4)![1].deleteMessages
+      expect(deletion.messageIds).toEqual([1000n])
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally { await handle.stop() }
+  })
+
+  it("keeps the progress message of a turn that worked without replying", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "tidy up" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ replyOptions }) => {
+        replyOptions.onPreparedAgentRunStart({ runId: "run-1", transcriptStart: null })
+        await replyOptions.onToolStart({ toolCallId: "exec-1", name: "exec", args: { command: "rm -rf tmp" } })
+        await replyOptions.onCommandOutput({ itemId: "command:exec-1", toolCallId: "exec-1", name: "exec", phase: "end", exitCode: 0, durationMs: 1_000 })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 8 && /^Worked for/.test(call[1].editMessage.text))).toBe(true))
+      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 4)).toBe(false)
     } finally { await handle.stop() }
   })
 

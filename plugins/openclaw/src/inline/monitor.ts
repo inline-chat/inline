@@ -3150,6 +3150,8 @@ export async function monitorInlineProvider(params: {
     let progressStream = detailedProgress
       ? createProgressStream(deliveryChatId, deliveryReplyThreadContext)
       : undefined
+    // Whether the progress message showed any work: rows or the agent's words.
+    let progressShowedWork = false
     // Progress events, visible replies and the thread handoff run in call
     // order, so a reply always lands below the work before it and above the
     // work after it.
@@ -3173,6 +3175,7 @@ export async function monitorInlineProvider(params: {
       const at = Date.now()
       const pending = events()
       if (pending.length === 0) return
+      if (pending.some((event) => event.type === "item" || event.type === "commentary")) progressShowedWork = true
       void enqueueActivityOperation(async () => {
         for (const event of pending) progressStream?.apply(event, at)
       })
@@ -3183,7 +3186,11 @@ export async function monitorInlineProvider(params: {
      * between lands below "Worked for" and above any later work.
      */
     const holdProgressAt = async (boundary: ActivityEvent, at = Date.now()): Promise<() => void> => {
-      if (!progressStream) return () => {}
+      if (!progressStream) {
+        // Friendly updates still queued land above this reply.
+        await drainActivityOperations()
+        return () => {}
+      }
       let release!: () => void
       const held = new Promise<void>((resolve) => { release = resolve })
       const ready = enqueueActivityOperation(async () => {
@@ -3194,9 +3201,41 @@ export async function monitorInlineProvider(params: {
       await ready
       return release
     }
-    const endProgress = async (outcome: TurnOutcome, at?: number): Promise<void> => {
-      const release = await holdProgressAt({ type: "turn.end", outcome }, at)
+    const endProgress = async (outcome: TurnOutcome, at?: number, discard = false): Promise<void> => {
+      const release = await holdProgressAt({ type: "turn.end", outcome, ...(discard ? { discard: true } : {}) }, at)
       release()
+    }
+    // Friendly: the agent's own complete updates between tool calls post as
+    // quiet messages, then the answer (spec §6; the CLI bridge and Hermes do
+    // the same). OpenClaw reports them as preamble items, from models that
+    // mark commentary (OpenAI's).
+    const friendlyUpdates = outputMode === "friendly" &&
+      !detailedProgress &&
+      !shouldEditCallbackTargetInPlace &&
+      !isInlineOutOfBandCommandText(normalizedCommandBody)
+    const sentFriendlyUpdates = new Set<string>()
+    const queueFriendlyUpdate = (payload: { itemId?: string; kind?: string; phase?: string; progressText?: string }): void => {
+      if (payload.kind !== "preamble" || payload.phase !== "end") return
+      const text = payload.progressText?.trim()
+      if (!text) return
+      const key = payload.itemId ? `item:${payload.itemId}` : `text:${text}`
+      if (sentFriendlyUpdates.has(key)) return
+      sentFriendlyUpdates.add(key)
+      void enqueueActivityOperation(async () => {
+        if (abortSignal.aborted) return
+        const targetChatId = deliveryChatId
+        try {
+          const sent = await client.sendMessage({ chatId: targetChatId, text, parseMarkdown, sendMode: "silent" })
+          rememberSentBotMessage({
+            chatId: targetChatId,
+            messageId: sent.messageId,
+            replyThreadContext: deliveryReplyThreadContext,
+          })
+          publishStatus({ lastOutboundAt: Date.now() })
+        } catch (error) {
+          runtime.error?.(`inline friendly update failed: ${String(error)}`)
+        }
+      })
     }
     let unregisterProgressSplit: (() => void) | undefined
     const registerProgressSplit = (targetChatId: bigint): void => {
@@ -3830,6 +3869,13 @@ export async function monitorInlineProvider(params: {
             allowProgressCallbacksWhenSourceDeliverySuppressed: true,
           }
         : {}),
+      ...(friendlyUpdates
+        ? {
+            onItemEvent: async (payload: { itemId?: string; kind?: string; phase?: string; progressText?: string }) => {
+              queueFriendlyUpdate(payload)
+            },
+          }
+        : {}),
       ...(typeof disableBlockStreaming === "boolean" ? { disableBlockStreaming } : {}),
     }
 
@@ -4295,11 +4341,11 @@ export async function monitorInlineProvider(params: {
       await settleActivityTerminal()
       // Work after the last reply, or a turn that ended without one, closes
       // here: "Stopped after" for /stop, "Failed after" for errors.
-      await endProgress(
-        abortSignal.aborted || activityHostOutcome === "cancelled" ? "cancelled"
-          : dispatchError != null || failedNonSilent || activityHostOutcome === "failure" ? "failure" : "success",
-        activityHostEndedAt,
-      )
+      const finalOutcome: TurnOutcome = abortSignal.aborted || activityHostOutcome === "cancelled" ? "cancelled"
+        : dispatchError != null || failedNonSilent || activityHostOutcome === "failure" ? "failure" : "success"
+      // A turn that sent nothing and showed no work (it only reacted, or stayed
+      // silent) leaves no "Worked for" line behind, as in the Hermes plugin.
+      await endProgress(finalOutcome, activityHostEndedAt, finalOutcome === "success" && !delivered && !progressShowedWork)
       if (
         !delivered &&
         streamViaEditMessage &&

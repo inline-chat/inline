@@ -22,6 +22,17 @@ const SEARCH_TOOLS = new Set(["grep", "rg", "search", "glob", "find"])
 const LIST_TOOLS = new Set(["ls", "list", "list_dir", "list_files"])
 const AGENT_TOOLS = new Set(["sessions_spawn", "subagent", "spawn_agent", "agent", "task"])
 const HIDDEN_COMMAND = "a command"
+// The `message` tool's actions whose result shows in this chat on its own (a
+// reply, a reaction, a poll): a progress row would only repeat it.
+const VISIBLE_MESSAGE_ACTIONS = new Set(["send", "reply", "react", "poll"])
+
+function showsInChat(name: string, args: Record<string, unknown>): boolean {
+  if (name.toLowerCase() !== "message") return false
+  const action = typeof args.action === "string" ? args.action.trim().toLowerCase() : ""
+  if (!VISIBLE_MESSAGE_ACTIONS.has(action)) return false
+  // Addressed to another chat, it doesn't show here: keep its row.
+  return !["to", "target"].some((key) => typeof args[key] === "string" && (args[key] as string).trim() !== "")
+}
 const MAX_OUTPUT_BUFFER = 8_000
 
 export type OpenClawActivityOptions = {
@@ -115,6 +126,11 @@ export class OpenClawActivityMapper {
     if (!name) return []
     const id = this.rowId(payload.toolCallId, payload.itemId, name)
     if (this.hidden.has(id)) return []
+    // An item event that came first already drew the row; leave it to finish.
+    if (!this.rows.has(id) && showsInChat(name, payload.args ?? {})) {
+      this.hidden.add(id)
+      return []
+    }
     this.row(id, name)
     return [{ type: "item", id, body: this.toolBody(id, name, payload.args ?? {}), state: "running" }]
   }

@@ -99,6 +99,17 @@ describe("OpenClaw activity events", () => {
     expect(mapper.item({ kind: "preamble", progressText: " Looking at the logs. " })).toEqual([{ type: "commentary", text: "Looking at the logs." }])
   })
 
+  it("shows no row for a message action whose result shows in the chat", () => {
+    const mapper = new OpenClawActivityMapper()
+    for (const action of ["send", "reply", "react", "poll"]) {
+      expect(mapper.toolStart({ toolCallId: `m-${action}`, name: "message", args: { action } })).toEqual([])
+      expect(mapper.item({ itemId: `tool:m-${action}`, toolCallId: `m-${action}`, kind: "tool", name: "message", phase: "end", status: "completed" })).toEqual([])
+    }
+    // Sent to another chat, or reading, it is work worth a row.
+    expect(mapper.toolStart({ toolCallId: "m-to", name: "message", args: { action: "send", to: "inline:42" } })).toHaveLength(1)
+    expect(mapper.toolStart({ toolCallId: "m-read", name: "message", args: { action: "read" } })).toHaveLength(1)
+  })
+
   it("closes an ID-less end on the latest open row of the same tool", () => {
     const mapper = new OpenClawActivityMapper()
     const [start] = mapper.toolStart({ name: "exec", args: { command: "ls" } })
