@@ -23,11 +23,11 @@ use inline_agent_bridge::group::{
 };
 use inline_agent_bridge::harness::ChatId;
 use inline_agent_bridge::harness::{
-    Acceptance, Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver,
-    HeldBy, Input, InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op,
-    OpError, OpKind, OpenError, OpenMode, OpenSpec, Origin, OutputMode, QuestionForm, QueueOp,
-    RunState, SendError, Session, SettingsChange, SteerPriority, TurnPhase, UsageUpdate, UserId,
-    WaitingOn,
+    Acceptance, Delivery, DeliveryKind, Event, EventStream, FieldAnswer, FieldId, FieldInput,
+    HarnessDriver, HeldBy, Input, InputDisposition, InputFact, InputId, InteractionId,
+    InteractionResponse, Op, OpError, OpKind, OpenError, OpenMode, OpenSpec, Origin, OutputMode,
+    QuestionForm, QueueOp, RunState, SendError, Session, SettingsChange, SteerPriority, TurnPhase,
+    UsageUpdate, UserId, WaitingOn,
 };
 use inline_agent_bridge::{HostToolResult, MAX_SESSION_TITLE_CHARS, ProviderSessionId, TurnId};
 use inline_client::{CreateReplyThreadRequest, FormFieldValue, FormValue, InlineClient, InlineId};
@@ -507,6 +507,7 @@ pub(crate) fn spawn(
         probe: None,
         inputs: HashMap::new(),
         retained: Vec::new(),
+        held: VecDeque::new(),
         removing: HashSet::new(),
         paused: false,
         stopping: false,
@@ -657,6 +658,10 @@ struct Actor {
     inputs: HashMap<InputId, (Input, PendingInput, i64)>,
     /// Inputs kept pending after a release, offered at the next acquisition.
     retained: Vec<PendingInput>,
+    /// Input a harness without mid-turn input (ACP) cannot take while a turn
+    /// runs, oldest first. Each goes out as its own turn when the one before
+    /// ends, however it ended.
+    held: VecDeque<InputId>,
     /// Inputs this bridge is taking out of the native queue.
     removing: HashSet<InputId>,
     paused: bool,
@@ -1646,6 +1651,7 @@ impl Actor {
                 }
             },
             HoldEffect::Lost => {
+                self.keep_held_pending().await;
                 self.session = None;
                 *self
                     .catalog_session
@@ -2077,9 +2083,25 @@ impl Actor {
             return;
         }
         let Some(session) = self.session.clone() else {
+            self.held.retain(|held| held != &pending.id);
             self.retained.push(pending);
             return;
         };
+        // A harness that cannot take this mid-turn gets it when the turn
+        // ends, behind anything already waiting, so input runs in order.
+        let waits = if self.held.contains(&pending.id) {
+            self.held.front() != Some(&pending.id) || waits_for_turn(&session, &input.delivery)
+        } else {
+            !self.held.is_empty() || waits_for_turn(&session, &input.delivery)
+        };
+        if waits {
+            self.hold_input(&pending.id, message_id, false).await;
+            if live_turn(&session).is_none() {
+                Box::pin(self.release_held()).await;
+            }
+            return;
+        }
+        self.held.retain(|held| held != &pending.id);
         // What the thread said since the agent last took input travels with
         // it as untrusted context, kept apart from the author's words. Every
         // harness and version keeps that apart; a separate passive message
@@ -2127,7 +2149,15 @@ impl Actor {
             self.taken_reports
                 .extend(reports.iter().map(|report| report.event_id.clone()));
         }
-        if !matches!(input.delivery, Delivery::Queue | Delivery::Passive) {
+        if !matches!(input.delivery, Delivery::Queue | Delivery::Passive)
+            || (input.delivery == Delivery::Queue
+                && !session
+                    .availability()
+                    .delivery(DeliveryKind::Queue)
+                    .is_supported())
+        {
+            // Without a native queue, queued input reaches here only once
+            // nothing runs, so it starts the next turn.
             input.delivery = match live_turn(&session) {
                 Some(turn) => Delivery::Steer {
                     expected_turn: turn,
@@ -2164,6 +2194,16 @@ impl Actor {
                 expected_turn: active.clone(),
                 priority: SteerPriority::Next,
             };
+            if !takes_mid_turn(&session, &input.delivery) {
+                // A turn started first: this waits for it, ahead of the rest,
+                // and keeps the context it already took.
+                self.return_reports(reports);
+                if let Some((kept, _, _)) = self.inputs.get_mut(&pending.id) {
+                    kept.content = input.content.clone();
+                }
+                self.hold_input(&pending.id, message_id, true).await;
+                return;
+            }
             result = session.send(input.clone()).await;
         } else if let Err(SendError::TurnMismatch { active: None }) = &result {
             input.delivery = Delivery::Turn;
@@ -2257,6 +2297,84 @@ impl Actor {
                 .await;
             }
         }
+    }
+
+    /// Keeps input for after the running turn, in arrival order (`front` for
+    /// one that was next when a turn beat it). The sender hears once.
+    async fn hold_input(&mut self, id: &InputId, message_id: i64, front: bool) {
+        self.mark(id, InputState::Pending);
+        if self.held.contains(id) {
+            return;
+        }
+        if front {
+            self.held.push_front(id.clone());
+        } else {
+            self.held.push_back(id.clone());
+        }
+        self.reply(
+            message_id,
+            &format!(
+                "Queued: {} can't take messages mid-turn, so this runs after the current turn.",
+                self.agent.agent_name
+            ),
+        )
+        .await;
+        self.report().await;
+    }
+
+    /// Sends the oldest held input once nothing runs. Each starts its own
+    /// turn, so the rest wait for that one to end. Pause keeps them all.
+    async fn release_held(&mut self) {
+        while !self.paused {
+            let Some(id) = self.held.front().cloned() else {
+                return;
+            };
+            if self
+                .session
+                .as_ref()
+                .is_some_and(|session| live_turn(session).is_some())
+            {
+                return;
+            }
+            let Some(pending) = self.inputs.get(&id).map(|(_, pending, _)| pending.clone()) else {
+                self.held.pop_front();
+                continue;
+            };
+            self.event(HoldEvent::AcquireRequested {
+                input: Some(pending),
+            })
+            .await;
+            if self.held.front() == Some(&id) {
+                // Waiting on the session, or held again.
+                if self.inputs.contains_key(&id) {
+                    return;
+                }
+                self.held.pop_front();
+            }
+        }
+    }
+
+    /// The session went away with input still held: it stays pending in
+    /// Inline and is offered at the next acquisition, like input a release
+    /// kept.
+    async fn keep_held_pending(&mut self) {
+        let held: Vec<PendingInput> = self
+            .held
+            .drain(..)
+            .filter_map(|id| self.inputs.get(&id).map(|(_, pending, _)| pending.clone()))
+            .collect();
+        if held.is_empty() {
+            return;
+        }
+        for pending in &held {
+            self.mark(&pending.id, InputState::Pending);
+        }
+        self.notice(&format!(
+            "{} held message(s) stay pending in Inline; you'll be offered to run them next time.",
+            held.len()
+        ))
+        .await;
+        self.retained.extend(held);
     }
 
     async fn offer(&mut self, inputs: Vec<PendingInput>) {
@@ -2380,6 +2498,7 @@ impl Actor {
     }
 
     async fn released(&mut self, cause: ReleaseCause, receipts: &[ReleaseReceipt]) {
+        self.keep_held_pending().await;
         self.session = None;
         *self
             .catalog_session
@@ -2810,6 +2929,13 @@ impl Actor {
     // ---------------------------------------------------------------
 
     async fn envelope(&mut self, envelope: inline_agent_bridge::harness::Envelope) {
+        let turn_ended = matches!(
+            &envelope.event,
+            Event::Turn {
+                phase: TurnPhase::Completed { .. },
+                ..
+            }
+        );
         log::debug!(
             target: "inline::bridge::v2",
             "chat={} seq={} event={}",
@@ -2947,6 +3073,11 @@ impl Actor {
             .await;
         } else {
             self.report().await;
+        }
+        // Completed, failed or stopped: held input goes out now, after the
+        // turn's answer.
+        if turn_ended {
+            self.release_held().await;
         }
     }
 
@@ -3804,7 +3935,8 @@ impl Actor {
             _ => proto::AgentRunState::Idle,
         };
         state.run_state = run_state as i32;
-        state.queued_count = self.live.queued.len() as u32;
+        // Input held for a harness without mid-turn input waits as a queue.
+        state.queued_count = (self.live.queued.len() + self.held.len()) as u32;
         let key = proto::AgentSessionState {
             revision: 0,
             updated_at: 0,
@@ -3898,6 +4030,23 @@ async fn sleep_until(due: Option<tokio::time::Instant>) {
 
 fn live_turn(session: &Arc<dyn Session>) -> Option<TurnId> {
     session.live_work().turn
+}
+
+/// Whether the session can take this delivery while a turn runs. A direct
+/// message joins the turn as a steer.
+fn takes_mid_turn(session: &Arc<dyn Session>, delivery: &Delivery) -> bool {
+    let kind = match delivery {
+        Delivery::Passive => return true,
+        Delivery::Queue => DeliveryKind::Queue,
+        Delivery::Turn | Delivery::Steer { .. } => DeliveryKind::SteerNext,
+    };
+    session.availability().delivery(kind).is_supported()
+}
+
+/// A turn runs and this harness cannot take the input into it or its queue
+/// (ACP has neither), so the input waits for the turn to end.
+fn waits_for_turn(session: &Arc<dyn Session>, delivery: &Delivery) -> bool {
+    live_turn(session).is_some() && !takes_mid_turn(session, delivery)
 }
 
 /// The gate's JSON answer; anything unreadable is quiet.
@@ -4688,6 +4837,7 @@ pub(crate) mod recovery_tests {
             probe: None,
             inputs: HashMap::new(),
             retained: Vec::new(),
+            held: VecDeque::new(),
             removing: HashSet::new(),
             paused: false,
             stopping: false,

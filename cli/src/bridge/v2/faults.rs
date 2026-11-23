@@ -75,6 +75,50 @@ struct FakeSession {
     unknown_first: bool,
     /// Modes the work switched the session to, in order.
     modes: Mutex<Vec<String>>,
+    /// A started turn stays live until the test ends it with [`finish`].
+    turns: bool,
+    /// With `turns`: whether input can join a running turn. Without, the
+    /// session is scripted like ACP: no steering and no native queue.
+    steers: bool,
+    live: Mutex<Option<TurnId>>,
+}
+
+impl FakeSession {
+    /// A turn-tracking send, shaped like the ACP harness's.
+    fn send_turns(&self, n: usize, input: Input) -> Result<InputReceipt, SendError> {
+        let mut live = self.live.lock().unwrap();
+        let disposition = match (&input.delivery, live.clone()) {
+            (Delivery::Turn, Some(active)) => return Err(SendError::Busy { active }),
+            (Delivery::Turn, None) => {
+                let turn = TurnId::new(format!("turn-{n}")).unwrap();
+                *live = Some(turn.clone());
+                InputDisposition::Started { turn }
+            }
+            (_, _) if !self.steers => {
+                return Err(SendError::Unavailable(Availability::unavailable(
+                    "this agent cannot be steered mid-turn",
+                )));
+            }
+            (Delivery::Steer { expected_turn, .. }, active)
+                if active.as_ref() != Some(expected_turn) =>
+            {
+                return Err(SendError::TurnMismatch { active });
+            }
+            (Delivery::Steer { expected_turn, .. }, _) => InputDisposition::Steered {
+                turn: expected_turn.clone(),
+            },
+            (Delivery::Queue, _) => InputDisposition::Queued { entry: None },
+            (Delivery::Passive, _) => InputDisposition::Absorbed,
+        };
+        drop(live);
+        self.received.lock().unwrap().push(input.clone());
+        Ok(InputReceipt {
+            input: input.id,
+            disposition,
+            native: serde_json::Value::Null,
+            acceptance: Default::default(),
+        })
+    }
 }
 
 impl Session for FakeSession {
@@ -86,7 +130,16 @@ impl Session for FakeSession {
         DeliveryKind::ALL
             .into_iter()
             .fold(AvailabilityMatrix::default(), |matrix, kind| {
-                matrix.with_delivery(kind, Availability::Supported)
+                let supported =
+                    self.steers || matches!(kind, DeliveryKind::Turn | DeliveryKind::Passive);
+                matrix.with_delivery(
+                    kind,
+                    if supported {
+                        Availability::Supported
+                    } else {
+                        Availability::unavailable("this agent cannot be steered mid-turn")
+                    },
+                )
             })
     }
 
@@ -99,6 +152,9 @@ impl Session for FakeSession {
             let n = self.sends.fetch_add(1, Ordering::SeqCst);
             if self.unknown_first && n == 0 {
                 return Err(SendError::Unknown("the reply was lost".into()));
+            }
+            if self.turns {
+                return self.send_turns(n, input);
             }
             self.received.lock().unwrap().push(input.clone());
             Ok(InputReceipt {
@@ -120,7 +176,10 @@ impl Session for FakeSession {
     }
 
     fn live_work(&self) -> LiveWork {
-        LiveWork::default()
+        LiveWork {
+            turn: self.live.lock().unwrap().clone(),
+            ..LiveWork::default()
+        }
     }
 
     fn release<'a>(&'a self) -> HarnessFuture<'a, Released, OpError> {
@@ -239,6 +298,14 @@ fn runtime(cleanup: &mut Cleanup, harness: Arc<FakeHarness>) -> Runtime {
 }
 
 fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
+    session_fixture(unknown_first, false, true)
+}
+
+fn session_fixture(
+    unknown_first: bool,
+    turns: bool,
+    steers: bool,
+) -> (Runtime, Arc<FakeHarness>, Cleanup) {
     let dir = std::env::temp_dir().join(format!("inline-v2-faults-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&dir).unwrap();
     let mut cleanup = Cleanup { dir, tasks: vec![] };
@@ -253,6 +320,9 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         received: Mutex::new(Vec::new()),
         unknown_first,
         modes: Mutex::new(Vec::new()),
+        turns,
+        steers,
+        live: Mutex::new(None),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -2323,4 +2393,262 @@ fn widget_call_text_is_bounded_and_single_line() {
         widget_call_refusal(None),
         "This widget isn't connected to the agent here."
     );
+}
+
+// ---------------------------------------------------------------
+// Input held for a harness without mid-turn input (ACP)
+// ---------------------------------------------------------------
+
+fn received_ids(harness: &FakeHarness) -> Vec<String> {
+    harness
+        .session
+        .received
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|input| input.id.to_string())
+        .collect()
+}
+
+/// Ends the running turn the way a harness reports it, consuming the input
+/// that started it.
+fn finish(harness: &FakeHarness, outcome: inline_agent_bridge::TurnOutcome) {
+    let turn = harness
+        .session
+        .live
+        .lock()
+        .unwrap()
+        .take()
+        .expect("a turn runs");
+    let started = harness
+        .session
+        .received
+        .lock()
+        .unwrap()
+        .last()
+        .map(|input| input.id.clone())
+        .expect("an input started it");
+    harness.session.hub.emit(Event::Turn {
+        turn,
+        phase: inline_agent_bridge::harness::TurnPhase::Completed {
+            outcome,
+            inputs_consumed: vec![started],
+            error: None,
+            duration_ms: None,
+        },
+    });
+}
+
+fn live(harness: &FakeHarness) -> bool {
+    harness.session.live.lock().unwrap().is_some()
+}
+
+/// Without steering a message sent during a turn neither fails nor steers:
+/// it waits, and starts the next turn once this one ends, however it ended.
+#[tokio::test]
+async fn without_steering_a_message_waits_for_the_turn_whatever_its_end() {
+    use inline_agent_bridge::TurnOutcome;
+    for outcome in [
+        TurnOutcome::Completed,
+        TurnOutcome::Failed,
+        TurnOutcome::Interrupted,
+        TurnOutcome::ConnectionLost,
+    ] {
+        let (runtime, harness, mut cleanup) = session_fixture(false, true, false);
+        let tx = spawn_work(&runtime, &mut cleanup);
+        let (first, command) = input(&runtime, 200);
+        tx.send(command).await.unwrap();
+        until(|| live(&harness)).await;
+        let (second, command) = input(&runtime, 201);
+        tx.send(command).await.unwrap();
+        until(|| state(&runtime, &second) == Some(InputState::Pending)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            received_ids(&harness),
+            std::slice::from_ref(&first),
+            "{outcome:?}: held"
+        );
+        assert_eq!(
+            state(&runtime, &second),
+            Some(InputState::Pending),
+            "{outcome:?}: not failed"
+        );
+
+        finish(&harness, outcome);
+        until(|| received_ids(&harness).len() == 2).await;
+        assert_eq!(
+            received_ids(&harness),
+            [first, second.clone()],
+            "{outcome:?}"
+        );
+        let delivered = harness.session.received.lock().unwrap()[1].clone();
+        assert_eq!(
+            delivered.delivery,
+            Delivery::Turn,
+            "{outcome:?}: a turn of its own"
+        );
+        assert_eq!(state(&runtime, &second), Some(InputState::Accepted));
+    }
+}
+
+/// Held messages go out one per turn, in the order they were sent, each
+/// exactly once.
+#[tokio::test]
+async fn held_messages_run_one_turn_each_in_order() {
+    let (runtime, harness, mut cleanup) = session_fixture(false, true, false);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let mut ids = Vec::new();
+    for message in 210..214 {
+        let (id, command) = input(&runtime, message);
+        tx.send(command).await.unwrap();
+        if message == 210 {
+            until(|| live(&harness)).await;
+        } else {
+            until(|| state(&runtime, &id) == Some(InputState::Pending)).await;
+        }
+        ids.push(id);
+    }
+    assert_eq!(received_ids(&harness), ids[..1]);
+    for turn in 1..ids.len() {
+        finish(&harness, inline_agent_bridge::TurnOutcome::Completed);
+        until(|| received_ids(&harness).len() == turn + 1).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(received_ids(&harness), ids[..=turn], "one turn at a time");
+    }
+    finish(&harness, inline_agent_bridge::TurnOutcome::Completed);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(received_ids(&harness), ids, "nothing runs twice");
+    assert!(!live(&harness));
+}
+
+/// Pause keeps held input; resume runs it, still in order.
+#[tokio::test]
+async fn pause_keeps_held_input_until_resume() {
+    let (runtime, harness, mut cleanup) = session_fixture(false, true, false);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let (first, command) = input(&runtime, 220);
+    tx.send(command).await.unwrap();
+    until(|| live(&harness)).await;
+    let (second, command) = input(&runtime, 221);
+    tx.send(command).await.unwrap();
+    until(|| state(&runtime, &second) == Some(InputState::Pending)).await;
+    let (reply, toast) = oneshot::channel();
+    tx.send(Command::Control {
+        control: Control::Pause,
+        actor: 1,
+        reply,
+    })
+    .await
+    .unwrap();
+    let _ = toast.await;
+    finish(&harness, inline_agent_bridge::TurnOutcome::Interrupted);
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(
+        received_ids(&harness),
+        std::slice::from_ref(&first),
+        "paused"
+    );
+    let (reply, toast) = oneshot::channel();
+    tx.send(Command::Control {
+        control: Control::Resume,
+        actor: 1,
+        reply,
+    })
+    .await
+    .unwrap();
+    let _ = toast.await;
+    until(|| received_ids(&harness).len() == 2).await;
+    assert_eq!(received_ids(&harness), [first, second]);
+}
+
+/// `/queue` without a native queue waits like any other message, and
+/// starts a turn of its own.
+#[tokio::test]
+async fn queue_without_a_native_queue_runs_after_the_turn() {
+    let (runtime, harness, mut cleanup) = session_fixture(false, true, false);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let (first, command) = input(&runtime, 230);
+    tx.send(command).await.unwrap();
+    until(|| live(&harness)).await;
+    let (second, mut command) = input(&runtime, 231);
+    if let Command::Input { input, .. } = &mut command {
+        input.delivery = Delivery::Queue;
+    }
+    tx.send(command).await.unwrap();
+    until(|| state(&runtime, &second) == Some(InputState::Pending)).await;
+    finish(&harness, inline_agent_bridge::TurnOutcome::Completed);
+    until(|| received_ids(&harness).len() == 2).await;
+    assert_eq!(received_ids(&harness), [first, second]);
+    assert_eq!(
+        harness.session.received.lock().unwrap()[1].delivery,
+        Delivery::Turn
+    );
+}
+
+/// A harness that steers still takes a message into the running turn.
+#[tokio::test]
+async fn a_steering_harness_still_steers_the_running_turn() {
+    let (runtime, harness, mut cleanup) = session_fixture(false, true, true);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let (_, command) = input(&runtime, 240);
+    tx.send(command).await.unwrap();
+    until(|| live(&harness)).await;
+    let (second, command) = input(&runtime, 241);
+    tx.send(command).await.unwrap();
+    until(|| received_ids(&harness).len() == 2).await;
+    let steered = harness.session.received.lock().unwrap()[1].clone();
+    assert_eq!(steered.id.as_str(), second);
+    assert!(matches!(steered.delivery, Delivery::Steer { .. }));
+    assert_eq!(state(&runtime, &second), Some(InputState::Accepted));
+}
+
+/// An edited message that is waiting for the turn is still one message:
+/// it runs once, and edits after it ran send nothing.
+#[tokio::test]
+async fn an_edited_held_message_runs_once() {
+    let (mut runtime, harness, mut cleanup) = session_fixture(false, true, false);
+    runtime.agent.names.remember(1, "Owner".into()).await;
+    let message = |message_id: i64, revision: i64, text: &str| MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(message_id),
+        sender_id: InlineId::new(1),
+        timestamp: 1,
+        is_outgoing: false,
+        reply_to_message_id: None,
+        transaction: None,
+        content: inline_client::MessageContent::Text { text: text.into() },
+        metadata: inline_client::MessageMetadata {
+            sender_is_bot: Some(false),
+            revision: Some(revision),
+            ..Default::default()
+        },
+    };
+    runtime.on_message(&message(250, 1, "start")).await.unwrap();
+    until(|| live(&harness)).await;
+    let held = input_id(2, 9, 251, "direct");
+    runtime
+        .on_message(&message(251, 1, "then this"))
+        .await
+        .unwrap();
+    until(|| state(&runtime, &held) == Some(InputState::Pending)).await;
+    for revision in 2..5 {
+        runtime
+            .on_message(&message(251, revision, "then this, edited"))
+            .await
+            .unwrap();
+    }
+    finish(&harness, inline_agent_bridge::TurnOutcome::Completed);
+    until(|| received_ids(&harness).len() == 2).await;
+    runtime
+        .on_message(&message(251, 5, "then this, edited again"))
+        .await
+        .unwrap();
+    finish(&harness, inline_agent_bridge::TurnOutcome::Completed);
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert_eq!(
+        received_ids(&harness),
+        [input_id(2, 9, 250, "direct"), held],
+        "each message runs once"
+    );
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
 }
