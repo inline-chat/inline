@@ -23,7 +23,14 @@ import {
   requeueObsoleteSearchDocuments,
   runCloudSearchIndexBatch,
 } from "@in/server/modules/search/cloudIndex"
-import { CloudSearchWorker, HISTORY_BATCH, historyPauseMs } from "@in/server/modules/search/cloudWorker"
+import {
+  CAPTURE_RECHECK_MS,
+  CloudSearchWorker,
+  HISTORY_BATCH,
+  IDLE_MAX_DELAY_MS,
+  historyPauseMs,
+} from "@in/server/modules/search/cloudWorker"
+import { countTransferWork } from "@in/server/modules/transfers/trace"
 import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { setupTestLifecycle, testUtils } from "../setup"
@@ -655,6 +662,43 @@ describe("global message search RPC", () => {
     expect(historyPauseMs(16, 100)).toBe(1_900)
     expect(historyPauseMs(16, 1_000)).toBe(4_000)
     expect(historyPauseMs(16, 60_000)).toBe(30_000)
+  })
+
+  test("an idle worker backs off and stops re-asking empty questions", async () => {
+    const { chat, user, ctx } = await fixture()
+    await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 1, text: "seed" })
+    await drain()
+    let now = Date.now()
+    const worker = new CloudSearchWorker(() => now)
+    const statements = async () => (await countTransferWork(() => worker.pollOnce())).counters.sqlStatements
+    // Warm up: reads the capture switch, drains, and finishes any backfill scan.
+    for (let poll = 0; poll < 4; poll++) {
+      await worker.pollOnce()
+      now += 1
+    }
+
+    // Idle: only the live lease. Before, every poll read the capture switch and leased history too.
+    expect(await statements()).toBe(1)
+    const delays = [worker.nextPollDelayMs]
+    for (let poll = 0; poll < 3; poll++) {
+      now += 1
+      expect(await statements()).toBe(1)
+      delays.push(worker.nextPollDelayMs)
+    }
+    expect(delays.at(-1)).toBe(IDLE_MAX_DELAY_MS)
+    expect(delays).toEqual([...delays].sort((a, b) => a - b))
+
+    // The capture switch is re-read after the recheck interval, not every poll.
+    now += CAPTURE_RECHECK_MS
+    expect(await statements()).toBe(2)
+
+    // A new live message is indexed on the next poll and resets the backoff.
+    await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 2, text: "prompt" })
+    now += 1
+    await worker.pollOnce()
+    expect((await search(ctx, "prompt")).hits).toHaveLength(1)
+    expect(worker.nextPollDelayMs).toBe(1000)
+    await worker.stop()
   })
 
   test("the reader rollout switch and stored bot identity independently deny retrieval", async () => {

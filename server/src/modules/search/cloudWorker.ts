@@ -19,6 +19,16 @@ const HISTORY_MAX_ROWS_PER_SECOND = 8
 const HISTORY_DUTY = 0.2
 const HISTORY_MAX_PAUSE_MS = 30_000
 
+// An idle worker used to ask the database four questions every second per
+// process (the capture switch twice, an empty live lease, an empty history
+// lease): about 8 queries/s fleet-wide, all day. Live work still runs back to
+// back; an idle worker now backs off to IDLE_MAX_DELAY_MS, re-reads the capture
+// switch at most every CAPTURE_RECHECK_MS, and leaves an empty history queue
+// alone until the next backfill check.
+export const IDLE_MAX_DELAY_MS = 5_000
+export const CAPTURE_RECHECK_MS = 30_000
+export const HISTORY_IDLE_RECHECK_MS = 60_000
+
 /** Milliseconds to wait after a history batch that examined `rows` in `elapsedMs`. */
 export function historyPauseMs(rows: number, elapsedMs: number): number {
   if (rows === 0) return 0
@@ -35,9 +45,19 @@ export class CloudSearchWorker {
   private started = false
   private nextBackfillCheck = 0
   private nextDelayMs = 1000
+  private idleDelayMs = 1000
+  private captureEnabled = false
+  private captureCheckedAt = Number.NEGATIVE_INFINITY
   /** History waits until then; live work never does. */
   historyNotBefore = 0
   private historyPending = false
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  /** The delay the worker's timer uses before its next poll. */
+  get nextPollDelayMs(): number {
+    return this.nextDelayMs
+  }
 
   start(): void {
     if (this.started || this.stopped) return
@@ -70,15 +90,19 @@ export class CloudSearchWorker {
   private async poll(): Promise<void> {
     this.nextDelayMs = 1000
     try {
-      const [capture] = await db.execute<{ enabled: boolean }>(sql`select inline_search_capture_enabled() as enabled`)
-      if (!capture?.enabled) {
+      if (this.now() - this.captureCheckedAt >= CAPTURE_RECHECK_MS) {
+        const [capture] = await db.execute<{ enabled: boolean }>(sql`select inline_search_capture_enabled() as enabled`)
+        this.captureEnabled = capture?.enabled === true
+        this.captureCheckedAt = this.now()
+      }
+      if (!this.captureEnabled) {
         this.nextBackfillCheck = 0
         this.nextDelayMs = 5000
         return
       }
       // Live sends and edits are never paced, and never take historical rows.
       const live = await runCloudSearchIndexBatch({ liveOnly: true, limit: LIVE_BATCH })
-      if (Date.now() >= this.historyNotBefore) {
+      if (this.now() >= this.historyNotBefore) {
         const started = performance.now()
         const history = await runCloudSearchIndexBatch({ historicalOnly: true, limit: HISTORY_BATCH })
         this.historyPending = history.examined === HISTORY_BATCH
@@ -86,19 +110,33 @@ export class CloudSearchWorker {
         if (
           !this.historyPending &&
           process.env["CLOUD_MESSAGE_SEARCH_BACKFILL_ENABLED"] !== "false" &&
-          Date.now() >= this.nextBackfillCheck
+          this.now() >= this.nextBackfillCheck
         ) {
           const complete = await bootstrapSearchDocuments()
           const repaired = complete ? await requeueObsoleteSearchDocuments() : 0
-          if (complete && repaired === 0) this.nextBackfillCheck = Date.now() + 60_000
+          if (complete && repaired === 0) this.nextBackfillCheck = this.now() + HISTORY_IDLE_RECHECK_MS
           // Look again promptly; the next empty history batch clears this.
           this.historyPending = true
         }
-        this.historyNotBefore = Date.now() + historyPauseMs(history.examined, performance.now() - started)
+        this.historyNotBefore = this.now() + historyPauseMs(history.examined, performance.now() - started)
+        // Nothing historical is queued and no scan is due: the queue only refills
+        // from that scan (or an operator reindex), so don't lease it every poll.
+        if (history.examined === 0 && !this.historyPending) {
+          this.historyNotBefore = Math.max(
+            this.historyNotBefore,
+            this.nextBackfillCheck > this.now() ? this.nextBackfillCheck : this.now() + HISTORY_IDLE_RECHECK_MS,
+          )
+        }
       }
-      const historyWait = this.historyNotBefore - Date.now()
+      const historyWait = this.historyNotBefore - this.now()
       if (live.indexed === LIVE_BATCH) this.nextDelayMs = 25
       else if (this.historyPending) this.nextDelayMs = Math.min(1000, Math.max(25, historyWait))
+      if (live.examined > 0 || this.historyPending) {
+        this.idleDelayMs = 1000
+      } else {
+        this.nextDelayMs = this.idleDelayMs
+        this.idleDelayMs = Math.min(IDLE_MAX_DELAY_MS, this.idleDelayMs * 2)
+      }
     } catch (error) {
       log.warn("Search worker poll failed", { failure: searchFailureClass(error) })
     }
