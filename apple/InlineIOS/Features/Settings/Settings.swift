@@ -26,13 +26,15 @@ struct SettingsView: View {
         }
       }
 
-      Section {
-        SettingsNavigationRow(
-          title: "Plan",
-          systemImage: "creditcard.fill",
-          color: .green,
-          destination: PlanSettingsView()
-        )
+      if BillingFeature.isAvailable(email: currentUser?.user.email) {
+        Section {
+          SettingsNavigationRow(
+            title: "Plan",
+            systemImage: "creditcard.fill",
+            color: .green,
+            destination: PlanSettingsView()
+          )
+        }
       }
 
       Section {
