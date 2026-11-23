@@ -33,6 +33,9 @@ use crate::mapping::{
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Release waits on `session/close`; an agent that stalls must not hold the
+/// chat. Past this, release goes on as if close were unsupported.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FINAL_AGENT_TEXT_BYTES: usize = 64 * 1024;
 const TRUNCATED_AGENT_TEXT_MARKER: &str = "\n[additional agent output omitted]";
 const MAX_PENDING_APPROVALS: usize = 32;
@@ -979,19 +982,21 @@ impl AcpDriver {
     }
 
     /// Asks the agent to free a session (`session/close`), then forgets it
-    /// here. A failure leaves the session recorded: its state is unknown.
+    /// here. A failure or a reply slower than [`CLOSE_TIMEOUT`] leaves the
+    /// session recorded: its state is unknown. Never ends the connection.
     pub(crate) async fn close_session(&self, session: &ProviderSessionId) -> DriverResult<()> {
         if !self.session_ops.close {
             return Err(DriverError::Unsupported("ACP session/close"));
         }
-        request_with_timeout(
-            "session/close",
-            &self.auth_methods,
+        tokio::time::timeout(
+            CLOSE_TIMEOUT,
             self.connection
                 .send_request(acp::CloseSessionRequest::new(session.to_string()))
                 .block_task(),
         )
-        .await?;
+        .await
+        .map_err(|_| DriverError::Transient("ACP session/close timed out".to_string()))?
+        .map_err(|error| acp_request_error(error, &self.auth_methods))?;
         cancel_pending_approvals(&self.approvals, Some(session.as_str()));
         cancel_pending_elicitations(&self.elicitations, Some(session.as_str()));
         let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
