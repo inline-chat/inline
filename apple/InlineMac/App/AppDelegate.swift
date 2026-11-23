@@ -469,7 +469,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         await handleChatURL(url)
       case "join":
         handleSpaceJoinURL(url)
-      case "billing":
+      case "billing" where BillingFeature.isAvailable(email: dependencies.rootData?.currentUser?.email):
         // Stripe's return pages link back here; the pane reloads when it appears.
         dependencies.appBridge.openSettings(
           dependencies: dependencies,
