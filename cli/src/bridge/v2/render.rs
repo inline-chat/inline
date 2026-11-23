@@ -252,6 +252,16 @@ impl Renderer {
         self.card_answers.insert(interaction.clone(), kept);
     }
 
+    /// Whether an open interaction blocks on nothing a stop could end: no
+    /// turn, not a sub-agent's, and not a question left open on purpose.
+    pub(crate) fn waits_on_no_turn(&self, id: &InteractionId) -> bool {
+        self.interactions.get(id).is_some_and(|interaction| {
+            interaction.turn.is_none()
+                && interaction.parent.is_none()
+                && !matches!(&interaction.kind, InteractionKind::Question { form } if form.asynchronous)
+        })
+    }
+
     pub(crate) fn apply(&mut self, envelope: &Envelope) -> Vec<RenderOp> {
         let mut ops = Vec::new();
         let now = envelope.at_ms;
