@@ -148,6 +148,8 @@ public enum PerfHarnessFixture {
       dialog.open = true
       dialog.unreadCount = 0
       dialog.readInboxMaxId = Int64(spec.messages)
+      // Seeded as the server's read state, so the read sync has nothing to push.
+      dialog.serverReadInboxMaxId = Int64(spec.messages)
       dialog.readOutboxMaxId = Int64(spec.messages)
       try dialog.save(db)
     }

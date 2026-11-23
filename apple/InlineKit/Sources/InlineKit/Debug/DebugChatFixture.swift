@@ -356,7 +356,11 @@ public final class DebugChatFixture {
     let chatId = chatId
     try await database.dbWriter.write { db in
       try Dialog.filter(Column("chatId") == chatId).updateAll(
-        db, Column("unreadCount").set(to: unreadCount), Column("readInboxMaxId").set(to: boundary)
+        db,
+        Column("unreadCount").set(to: unreadCount),
+        Column("readInboxMaxId").set(to: boundary),
+        // As the server's read state, so the read sync has nothing to push.
+        Column("serverReadInboxMaxId").set(to: boundary)
       )
     }
     return try await MessagesProgressiveViewModel.prepareInitialState(
