@@ -701,8 +701,11 @@ final class SendAsOriginalOption: NSObject, NSMenuItemValidation {
     separator.isHidden = true
   }
 
-  /// Puts the item first in `menu`.
+  /// Puts the item first in `menu`. A row configured again builds a new menu, and an item can
+  /// only be in one, so it leaves the old one first.
   func install(in menu: NSMenu) {
+    separator.menu?.removeItem(separator)
+    menuItem.menu?.removeItem(menuItem)
     menu.insertItem(separator, at: 0)
     menu.insertItem(menuItem, at: 0)
   }
