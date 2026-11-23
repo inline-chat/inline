@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 import { createHttpRpcInvoker, type InlineRpcCallOptions, type InlineRpcInvoker } from "./rpc-invoker"
+import { recordRpc } from "./rpc-accounting"
 import {
   CreateChatInput,
   CreateSubthreadInput,
@@ -407,6 +408,7 @@ export function createInlineApi(params: {
   const lifetime = new AbortController()
   const invoke = async <K extends RpcInputKind>(method: Method, input: RpcInputOf<K>, options?: InlineRpcCallOptions): Promise<RpcResultOf<K>> => {
     const signal = options?.signal ? AbortSignal.any([options.signal, lifetime.signal]) : lifetime.signal
+    recordRpc(Method[method] ?? String(method))
     return await rpc.invoke(method, input, { ...options, signal }) as RpcResultOf<K>
   }
 
@@ -973,6 +975,7 @@ export function createInlineApi(params: {
       for (let index = 0; index < missing.length; index += 50) {
         const ids = missing.slice(index, index + 50)
         try {
+          recordRpc("GET_USERS")
           const result = await rpc.invoke(Method.GET_USERS, { oneofKind: "getUsers", getUsers: GetUsersInput.create({ userIds: ids }) })
           if (result.oneofKind !== "getUsers") throw new Error("missing users")
           for (const user of result.getUsers.users) {
@@ -1768,6 +1771,7 @@ export function createInlineApi(params: {
       if (parent.spaceId == null && !allowHomeThreads) {
         throw new Error("subthread creation outside spaces requires home thread access for this grant")
       }
+      recordRpc("CREATE_SUBTHREAD")
       const result = await rpc.invoke(Method.CREATE_SUBTHREAD, {
         oneofKind: "createSubthread",
         createSubthread: CreateSubthreadInput.create({

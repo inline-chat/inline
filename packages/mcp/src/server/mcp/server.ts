@@ -1,3 +1,4 @@
+import { withRpcAccounting } from "../inline/rpc-accounting"
 import { Buffer } from "node:buffer"
 import { lookup } from "node:dns/promises"
 import { request as httpsRequest } from "node:https"
@@ -142,6 +143,29 @@ function toolExecutionError(error: unknown, resourceMetadataUrl: string): CallTo
 type InlineToolConfig = Record<string, unknown>
 type InlineToolHandler = (args: any, extra: { authInfo?: AuthInfo }) => Promise<CallToolResult>
 
+/** Which connection a server's tool calls act for, for the per-call log line. */
+const toolCallGrants = new WeakMap<McpServer, McpGrant>()
+
+/**
+ * One structured line per tool call: which tool, which argument names (never
+ * values; after schema defaults are applied), which connection, how many
+ * Inline RPCs and how long. It is how we learn what each integration actually
+ * calls. Key names avoid the words Sentry scrubs (auth, token).
+ */
+export function logToolCall(line: {
+  tool: string
+  argKeys: string[]
+  grantId: string
+  clientId: string
+  app: string | null
+  outcome: "ok" | "error"
+  rpcs: Record<string, number>
+  durationMs: number
+}): void {
+  const rpcCount = Object.values(line.rpcs).reduce((sum, count) => sum + count, 0)
+  console.info(JSON.stringify({ event: "mcp.tool_call", ...line, rpcCount }))
+}
+
 function registerInlineTool(
   server: McpServer,
   resourceMetadataUrl: string,
@@ -150,10 +174,31 @@ function registerInlineTool(
   cb: InlineToolHandler,
 ): void {
   ;(server.registerTool as any)(name, config, async (args: any, extra: any) => {
+    const grant = toolCallGrants.get(server)
+    const startedAt = performance.now()
+    // Exactly this call's RPCs, even when calls on one session overlap.
+    const rpcs: Record<string, number> = {}
+    let outcome: "ok" | "error" = "ok"
     try {
-      return await cb(args, extra as { authInfo?: AuthInfo })
+      const result = await withRpcAccounting(rpcs, () => cb(args, extra as { authInfo?: AuthInfo }))
+      if (result.isError) outcome = "error"
+      return result
     } catch (error) {
+      outcome = "error"
       return toolExecutionError(error, resourceMetadataUrl)
+    } finally {
+      if (grant) {
+        logToolCall({
+          tool: name,
+          argKeys: args && typeof args === "object" ? Object.keys(args).sort() : [],
+          grantId: grant.id,
+          clientId: grant.clientId,
+          app: grant.viaApp ?? null,
+          outcome,
+          rpcs,
+          durationMs: Math.round(performance.now() - startedAt),
+        })
+      }
     }
   })
 }
@@ -1843,6 +1888,7 @@ export function createInlineMcpServer(params: {
     },
   )
 
+  toolCallGrants.set(server, params.grant)
   const conversationResources = { grant: params.grant, inline: params.inline, resourceMetadataUrl }
   registerConversationSnapshot(server, conversationResources)
   if (APP_VIEWS_ENABLED) registerConversationMentions(server, conversationResources)

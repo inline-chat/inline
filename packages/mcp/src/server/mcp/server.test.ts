@@ -1,3 +1,4 @@
+import { recordRpc } from "../inline/rpc-accounting"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { readFileSync } from "node:fs"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
@@ -1759,6 +1760,82 @@ describe("mcp tool server", () => {
     expect(payload.messages[0].fromId).toBe("2")
     expect(payload.messages[0].urlPreviews).toEqual([])
     expect(payload.messages[0].externalTasks).toEqual([])
+  })
+
+  describe("tool-call log line", () => {
+    const listResult = (chatId: bigint) => ({
+      chat: {
+        chatId, title: "General", chatTitle: "General", kind: "space_chat" as const, spaceId: 10n, spaceName: "Inline",
+        peerUserId: null, peerDisplayName: null, peerUsername: null, archived: false, pinned: false, unreadCount: 0,
+        readMaxId: null, lastMessageId: null, lastMessageDate: null,
+      },
+      direction: "all" as const, scannedCount: 0, nextOffsetId: null, messages: [], senderDisplayNames: {}, senderAvatarUrls: {},
+    })
+    const connect = async (inline: InlineApi) => {
+      const server = createInlineMcpServer({ grant: { ...grant, viaApp: "agent" }, inline })
+      const { transport, sent } = createFakeTransport()
+      await server.connect(transport as any)
+      const authInfo: AuthInfo = { token: "t", clientId: "c1", scopes: ["messages:read"], expiresAt: Math.floor(Date.now() / 1000) + 3600 }
+      await sendRequest(transport, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "0" } } } as any, { authInfo })
+      await sendRequest(transport, { jsonrpc: "2.0", method: "notifications/initialized", params: {} } as any, { authInfo })
+      const call = (id: number, chatId: string) =>
+        sendRequest(transport, { jsonrpc: "2.0", id, method: "tools/call", params: { name: "messages.list", arguments: { chatId } } } as any, { authInfo })
+      return { call, sent }
+    }
+    const loggedCalls = (log: { mock: { calls: unknown[][] } }) =>
+      log.mock.calls.map(([line]) => JSON.parse(String(line))).filter((line) => line.event === "mcp.tool_call")
+
+    it("logs tool, argument names, connection and the call's RPCs, never argument values", async () => {
+      const inline = createInlineStub({
+        async recentMessages({ chatId }) {
+          recordRpc("GET_CHAT")
+          recordRpc("GET_CHAT_HISTORY")
+          return listResult(chatId ?? 7n)
+        },
+      })
+      const log = vi.spyOn(console, "info").mockImplementation(() => {})
+      try {
+        const { call, sent } = await connect(inline)
+        await call(2, "7123")
+        expect((await waitForResponse(sent, 2)).result.isError).toBeFalsy()
+        const lines = loggedCalls(log)
+        expect(lines).toEqual([{
+          event: "mcp.tool_call", tool: "messages.list", argKeys: ["chatId", "content", "limit"], grantId: grant.id, clientId: grant.clientId,
+          app: "agent", outcome: "ok", rpcs: { GET_CHAT: 1, GET_CHAT_HISTORY: 1 }, rpcCount: 2, durationMs: expect.any(Number),
+        }])
+        expect(JSON.stringify(lines)).not.toContain("7123")
+      } finally {
+        log.mockRestore()
+      }
+    })
+
+    it("counts each call's own RPCs when calls on one session overlap", async () => {
+      let releaseSlow!: () => void
+      const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve })
+      const inline = createInlineStub({
+        async recentMessages({ chatId }) {
+          recordRpc("GET_CHAT")
+          if (chatId === 7n) {
+            await slowGate
+            recordRpc("GET_CHAT_HISTORY")
+          }
+          return listResult(chatId ?? 7n)
+        },
+      })
+      const log = vi.spyOn(console, "info").mockImplementation(() => {})
+      try {
+        const { call, sent } = await connect(inline)
+        const slow = call(2, "7")
+        await call(3, "8")
+        await waitForResponse(sent, 3)
+        releaseSlow()
+        await slow
+        await waitForResponse(sent, 2)
+        expect(loggedCalls(log).map((line) => line.rpcCount)).toEqual([1, 2])
+      } finally {
+        log.mockRestore()
+      }
+    })
   })
 
   it("messages.search searches messages only in the selected chat", async () => {
