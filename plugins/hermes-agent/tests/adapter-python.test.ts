@@ -2876,6 +2876,22 @@ async def assert_inline_reply_context_window():
     assert "message:50 from an unknown sender: Can we ship this?" in context
     assert "message:49 from an unknown sender: Only after QA signs off" in context
     assert "message:51" not in context
+
+    # Another agent's progress message keeps only its header in context.
+    progress_text = "Worked for 1m 4s\nRan bun test · exit 1\n✗ login > refreshes an expired token"
+    progress = {
+        "id": "52", "fromId": "u2", "message": progress_text, "sendMode": 1,
+        "blockContent": {"blocks": [{"kind": {"oneofKind": "disclosure", "disclosure": {
+            "summary": {"offset": "0", "length": str(len("Worked for 1m 4s"))}, "kind": 0, "children": [],
+        }}}]},
+    }
+    assert adapter._inline_message_context_line(progress).endswith(": [agent progress] Worked for 1m 4s")
+    footer = {"id": "53", "fromId": "u2", "message": "Worked for 2s", "sendMode": 1,
+              "blockContent": {"blocks": [{"kind": {"oneofKind": "footer", "footer": {"offset": "0", "length": "13"}}}]}}
+    assert adapter._inline_message_context_line(footer).endswith(": [agent progress] Worked for 2s")
+    # The same shape sent normally, or a plain quiet update, is an ordinary message.
+    assert "Ran bun test" in adapter._inline_message_context_line({**progress, "sendMode": None})
+    assert adapter._inline_message_context_line({"id": "54", "fromId": "u2", "message": "Checking both calendars.", "sendMode": 1}).endswith(": Checking both calendars.")
     assert calls == [("/history", {
         "target": {"chatId": "10"},
         "limit": 4,

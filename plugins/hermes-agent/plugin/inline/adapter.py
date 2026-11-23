@@ -565,6 +565,39 @@ def _limit_inline_text(value: Any, limit: int = _INLINE_ENTITY_TEXT_LIMIT) -> st
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _agent_progress_header(message: Dict[str, Any]) -> Optional[str]:
+    """The header ("Working", "Worked for 1m 4s") of an agent's progress message, else None.
+
+    Agent plugins and the CLI bridge post progress as a silent bot message whose block content
+    is one disclosure, or a lone "Worked for" footer. Its text fallback lists every command and
+    read, which only crowds another agent's context, so context keeps the header."""
+    if str(message.get("sendMode") or "") not in {"1", "MODE_SILENT", "silent"}:
+        return None
+    content = message.get("blockContent")
+    blocks = content.get("blocks") if isinstance(content, dict) else None
+    if not isinstance(blocks, list) or len(blocks) != 1 or not isinstance(blocks[0], dict):
+        return None
+    kind = blocks[0].get("kind")
+    if not isinstance(kind, dict):
+        return None
+    if kind.get("oneofKind") == "disclosure" and isinstance(kind.get("disclosure"), dict):
+        span = kind["disclosure"].get("summary")
+    elif kind.get("oneofKind") == "footer":
+        span = kind.get("footer")
+    else:
+        return None
+    if not isinstance(span, dict):
+        return None
+    try:
+        start, length = int(span.get("offset") or 0), int(span.get("length") or 0)
+    except (TypeError, ValueError):
+        return None
+    # Block ranges count UTF-16 code units.
+    utf16 = str(message.get("message") or "").encode("utf-16-le")
+    header = utf16[2 * start:2 * (start + length)].decode("utf-16-le", errors="ignore").strip()
+    return header or None
+
+
 def _inline_context_text(value: Any, limit: int) -> str:
     return _limit_inline_text(value, limit)
 
@@ -4821,6 +4854,9 @@ class InlineAdapter(BasePlatformAdapter):
         message_id = str(message.get("id") or "").strip()
         from_id = str(message.get("fromId") or "").strip()
         text = str(message.get("message") if message.get("message") is not None else message.get("text") or "").strip()
+        progress_header = _agent_progress_header(message)
+        if progress_header:
+            text = f"[agent progress] {progress_header}"
         if not text and message.get("media"):
             text = "[media]"
         text = _inline_context_text(text, _CONTEXT_MESSAGE_TEXT_LIMIT) or "[no text]"
