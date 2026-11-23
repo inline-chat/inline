@@ -19,6 +19,8 @@ export async function insertThreadBacklinkSystemMessage(
     actorUserId: input.actorUserId,
     date: input.date,
     fallbackText: sourceTitle ? `Linked from ${sourceTitle}` : threadBacklinkFallbackText,
+    // Bookkeeping for the thread graph, not news for the reader: shown, never unread.
+    countsAsUnread: false,
     payload: {
       event: {
         oneofKind: "threadBacklink",
@@ -47,6 +49,8 @@ export async function insertPinnedMessageSystemMessage(
     actorUserId: input.actorUserId,
     date: input.date,
     fallbackText: pinnedMessageFallbackText,
+    // Someone pinned something here: worth the reader's attention, as in Telegram.
+    countsAsUnread: true,
     payload: {
       event: {
         oneofKind: "pinnedMessage",

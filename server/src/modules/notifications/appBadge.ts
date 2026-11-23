@@ -30,7 +30,6 @@ export async function getAppBadgeCount(userId: number): Promise<number> {
                 AND m.message_id > COALESCE(d.read_inbox_max_id, 0)
                 AND m.from_id <> ${userId}
                 AND m.counts_as_unread
-                AND m.system_message_encrypted IS NULL
             )
           )
         )

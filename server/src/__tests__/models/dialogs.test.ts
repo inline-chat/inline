@@ -26,8 +26,16 @@ test("batch unread state preserves recipient marks, zero counts and unread eligi
     { chatId: populated.id, fromId: author.id, messageId: 2 },
     { chatId: populated.id, fromId: viewer.id, messageId: 3 },
     { chatId: populated.id, fromId: author.id, messageId: 4, countsAsUnread: false },
+    // System messages count by their own flag: a pin counts, a thread backlink is quiet.
     { chatId: populated.id, fromId: author.id, messageId: 5, systemMessageEncrypted: Buffer.from("system") },
     { chatId: populated.id, fromId: author.id, messageId: 6 },
+    {
+      chatId: populated.id,
+      fromId: author.id,
+      messageId: 7,
+      systemMessageEncrypted: Buffer.from("quiet system"),
+      countsAsUnread: false,
+    },
     { chatId: read.id, fromId: author.id, messageId: 1 },
     { chatId: missingDialog.id, fromId: author.id, messageId: 1 },
   ])
@@ -37,10 +45,10 @@ test("batch unread state preserves recipient marks, zero counts and unread eligi
     chatIds: [empty.id, populated.id, read.id, missingDialog.id, populated.id],
   })).toEqual([
     { chatId: empty.id, unreadCount: 0, unreadMark: true },
-    { chatId: populated.id, unreadCount: 2, unreadMark: false },
+    { chatId: populated.id, unreadCount: 3, unreadMark: false },
     { chatId: read.id, unreadCount: 0, unreadMark: true },
     { chatId: missingDialog.id, unreadCount: 0, unreadMark: false },
-    { chatId: populated.id, unreadCount: 2, unreadMark: false },
+    { chatId: populated.id, unreadCount: 3, unreadMark: false },
   ])
   expect(await DialogsModel.getBatchUnreadCounts({ userId: author.id, chatIds: [populated.id] }))
     .toEqual([{ chatId: populated.id, unreadCount: 0, unreadMark: true }])
@@ -49,7 +57,7 @@ test("batch unread state preserves recipient marks, zero counts and unread eligi
   // A null read boundary starts at zero, rather than hiding all messages.
   await db.update(dialogs).set({ readInboxMaxId: null }).where(eq(dialogs.chatId, populated.id))
   expect(await DialogsModel.getBatchUnreadCounts({ userId: viewer.id, chatIds: [populated.id] }))
-    .toEqual([{ chatId: populated.id, unreadCount: 3, unreadMark: false }])
+    .toEqual([{ chatId: populated.id, unreadCount: 4, unreadMark: false }])
 })
 
 test("batch unread state uses the caller's transaction for both count and mark", async () => {

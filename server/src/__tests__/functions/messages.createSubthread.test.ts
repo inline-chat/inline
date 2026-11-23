@@ -1108,6 +1108,7 @@ describe("messages.createSubthread", () => {
       chatId: childChatId,
       actorUserId: creator.id,
       fallbackText: "Pinned a message",
+      countsAsUnread: true,
       payload: {
         event: {
           oneofKind: "pinnedMessage",

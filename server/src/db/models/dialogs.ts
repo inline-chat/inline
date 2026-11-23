@@ -1,4 +1,4 @@
-import { eq, sql, and, gt, ne, inArray, isNull } from "drizzle-orm"
+import { eq, sql, and, gt, ne, inArray } from "drizzle-orm"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { dialogs, messages } from "@in/server/db/schema"
@@ -34,7 +34,6 @@ export class DialogsModel {
           gt(messages.messageId, sql`COALESCE(${dialogs.readInboxMaxId}, 0)`),
           ne(messages.fromId, userId),
           eq(messages.countsAsUnread, true),
-          isNull(messages.systemMessageEncrypted),
         ),
       )
       .where(and(eq(dialogs.userId, userId), inArray(dialogs.chatId, chatIds)))
@@ -64,7 +63,6 @@ export class DialogsModel {
           gt(messages.messageId, sql`COALESCE(${dialogs.readInboxMaxId}, 0)`),
           ne(messages.fromId, userId),
           eq(messages.countsAsUnread, true),
-          isNull(messages.systemMessageEncrypted),
         ),
       )
     return result?.count ?? 0

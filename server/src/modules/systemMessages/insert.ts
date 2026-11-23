@@ -22,6 +22,8 @@ type InsertSystemMessageInput = {
   fallbackText: string
   date?: Date
   publish?: boolean
+  /** Whether it raises unread counts (and notifies); false sends it silently. */
+  countsAsUnread: boolean
 }
 
 type InsertSystemMessageOutput = {
@@ -50,6 +52,7 @@ export async function insertSystemMessage(input: InsertSystemMessageInput): Prom
     systemMessageIv: encrypted.iv,
     systemMessageTag: encrypted.authTag,
     hasLink: false,
+    countsAsUnread: input.countsAsUnread,
   })
 
   if (input.publish !== false) {

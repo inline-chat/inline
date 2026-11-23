@@ -202,7 +202,6 @@ function filterSql(userId: number, filter: ChatListRequest["filter"]): SQL[] {
           and m.message_id > coalesce(d.read_inbox_max_id, 0)
           and m.from_id <> ${userId}
           and m.counts_as_unread is true
-          and m.system_message_encrypted is null
       ))
     ), false)`
     conditions.push(filter.unread ? unread : sql`not ${unread}`)

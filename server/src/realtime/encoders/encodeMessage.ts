@@ -246,7 +246,9 @@ export const encodeMessage = ({
     hasLink: hasLink,
     entities: entities,
     sendMode: message.countsAsUnread === false ? MessageSendMode.MODE_SILENT : sendMode ?? undefined,
-    countsAsUnread: message.countsAsUnread === false ? false : undefined,
+    // A system message says whether it counts either way: clients count one only on an explicit
+    // true, so system rows cached before system messages counted stay quiet.
+    countsAsUnread: message.countsAsUnread === false ? false : message.systemMessage ? true : undefined,
     fwdFrom: fwdFrom,
     via: encodeMessageVia(message),
     replies,
@@ -401,7 +403,9 @@ export const encodeFullMessage = ({
       : undefined,
     entities: message.entities ?? undefined,
     sendMode: message.countsAsUnread === false ? MessageSendMode.MODE_SILENT : undefined,
-    countsAsUnread: message.countsAsUnread === false ? false : undefined,
+    // A system message says whether it counts either way: clients count one only on an explicit
+    // true, so system rows cached before system messages counted stay quiet.
+    countsAsUnread: message.countsAsUnread === false ? false : message.systemMessage ? true : undefined,
     fwdFrom: fwdFrom,
     via: encodeMessageVia(message),
     replies,
