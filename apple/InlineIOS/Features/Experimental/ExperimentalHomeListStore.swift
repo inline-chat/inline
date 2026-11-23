@@ -39,9 +39,44 @@ struct ExperimentalHomeListState: Equatable, Sendable {
   let revision: Int
 }
 
+/// What the app root shows from the home list: the Open tab's badge and icon. The root observes
+/// this, not the list store, so a list update (every read, every message) never re-renders the
+/// root and the chat open above it. Telegram's chat list likewise costs the chat nothing.
+@MainActor
+final class ExperimentalHomeListRootModel: ObservableObject {
+  let store: ExperimentalHomeListStore
+  @Published private(set) var inboxUnreadCount = 0
+  @Published private(set) var hasInboxChats = false
+  /// The newest list, shown or held back. Not published: reading it renders nothing.
+  private(set) var presentation: ChatListPresentation = .empty
+  /// Each new list, for work that follows it without rendering (translation detection).
+  let presentations = PassthroughSubject<ChatListPresentation, Never>()
+
+  init(store: ExperimentalHomeListStore) {
+    self.store = store
+    store.onPresentation = { [weak self] presentation in self?.receive(presentation) }
+    receive(store.state.presentation)
+  }
+
+  private func receive(_ presentation: ChatListPresentation) {
+    self.presentation = presentation
+    let unread = presentation.inboxUnreadCount
+    if inboxUnreadCount != unread { inboxUnreadCount = unread }
+    let hasChats = !(presentation.inboxPinned.isEmpty && presentation.inboxUnpinned.isEmpty)
+    if hasInboxChats != hasChats { hasInboxChats = hasChats }
+    presentations.send(presentation)
+  }
+}
+
 @MainActor
 final class ExperimentalHomeListStore: ObservableObject {
   @Published private(set) var state: ExperimentalHomeListState = .loading
+  /// Every new presentation, shown or held back; see `ExperimentalHomeListRootModel`.
+  var onPresentation: ((ChatListPresentation) -> Void)?
+  /// Lists on screen. While none is (a chat covers the list on iPhone), updates wait and only the
+  /// latest is applied when a list appears again, so reading in a chat never commits a list.
+  private var visibleListCount = 0
+  private var heldUpdate: (update: ExperimentalHomeListPreparedUpdate, generation: Int)?
 
   private let database: AppDatabase
   private let workerQueue = DispatchQueue(
@@ -76,6 +111,7 @@ final class ExperimentalHomeListStore: ObservableObject {
     configuration = newConfiguration
     if scopeChanged {
       state = loadLocalState(configuration: newConfiguration)
+      onPresentation?(state.presentation)
     }
     startObservation(configuration: newConfiguration)
   }
@@ -83,6 +119,18 @@ final class ExperimentalHomeListStore: ObservableObject {
   func refresh() {
     guard let configuration else { return }
     startObservation(configuration: configuration)
+  }
+
+  func listDidAppear() {
+    visibleListCount += 1
+    guard let held = heldUpdate else { return }
+    heldUpdate = nil
+    // Applied as it appears, without animation: the rows were not on screen to move.
+    commit(held.update, generation: held.generation, animated: false)
+  }
+
+  func listDidDisappear() {
+    visibleListCount = max(0, visibleListCount - 1)
   }
 
   private func startObservation(configuration: ExperimentalHomeListConfiguration) {
@@ -223,6 +271,20 @@ final class ExperimentalHomeListStore: ObservableObject {
     generation observationGeneration: Int
   ) {
     guard generation == observationGeneration else { return }
+    onPresentation?(update.presentation)
+    guard visibleListCount > 0 else {
+      heldUpdate = (update, observationGeneration)
+      return
+    }
+    commit(update, generation: observationGeneration, animated: update.shouldAnimate)
+  }
+
+  private func commit(
+    _ update: ExperimentalHomeListPreparedUpdate,
+    generation observationGeneration: Int,
+    animated: Bool
+  ) {
+    guard generation == observationGeneration else { return }
 
     let startedAt = Date()
     let span = PerformanceTrace.begin(
@@ -236,7 +298,7 @@ final class ExperimentalHomeListStore: ObservableObject {
       errorDescription: nil,
       revision: state.revision + 1
     )
-    if update.shouldAnimate {
+    if animated {
       withAnimation(.snappy(duration: 0.25, extraBounce: 0)) {
         state = nextState
       }

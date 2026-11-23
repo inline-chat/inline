@@ -167,7 +167,9 @@ private struct ExperimentalAuthedRootView: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
-  @EnvironmentStateObject private var homeListStore: ExperimentalHomeListStore
+  /// Observed for the tab badge and icon only; the list store itself is observed by the lists.
+  @EnvironmentStateObject private var homeList: ExperimentalHomeListRootModel
+  private var homeListStore: ExperimentalHomeListStore { homeList.store }
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
   @EnvironmentObject private var notificationHandler: NotificationHandler
   @EnvironmentObject private var realtimeState: RealtimeState
@@ -201,11 +203,11 @@ private struct ExperimentalAuthedRootView: View {
     _compactSpaceList = EnvironmentStateObject { env in
       CompactSpaceList(db: env.appDatabase)
     }
-    _homeListStore = EnvironmentStateObject { env in
-      ExperimentalHomeListStore(
+    _homeList = EnvironmentStateObject { env in
+      ExperimentalHomeListRootModel(store: ExperimentalHomeListStore(
         database: env.appDatabase,
         initialConfiguration: initialHomeConfiguration
-      )
+      ))
     }
   }
 
@@ -245,9 +247,9 @@ private struct ExperimentalAuthedRootView: View {
         nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
         ensureActiveSpaceExists()
       }
-      .onChange(of: homeListStore.state.revision) { _, _ in
+      .onReceive(homeList.presentations) { presentation in
         translationCoordinator.process(
-          presentation: homeListStore.state.presentation,
+          presentation: presentation,
           currentPeers: currentChatPeers
         )
       }
@@ -256,7 +258,7 @@ private struct ExperimentalAuthedRootView: View {
         translationCoordinator.translationStateChanged(
           peer: peer,
           isEnabled: isEnabled,
-          presentation: homeListStore.state.presentation,
+          presentation: homeList.presentation,
           currentPeers: currentChatPeers
         )
       }
@@ -366,7 +368,7 @@ private struct ExperimentalAuthedRootView: View {
       ExperimentalHomeNavigationPerformance.measureTabSwitch(
         from: previousRootTab.rawValue,
         to: desiredRootTab.rawValue,
-        rows: homeListStore.state.presentation.allChatCount
+        rows: homeList.presentation.allChatCount
       )
     }
     .onChange(of: bindableRouter.selectedTabPath) { oldPath, newPath in
@@ -374,7 +376,7 @@ private struct ExperimentalAuthedRootView: View {
             newPath.contains(where: { $0.chatPeer == previousPeer }) == false
       else { return }
       ExperimentalHomeNavigationPerformance.measureBackToHome(
-        rows: homeListStore.state.presentation.allChatCount
+        rows: homeList.presentation.allChatCount
       )
     }
     .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -607,7 +609,7 @@ private struct ExperimentalAuthedRootView: View {
         chatsRoot(rootTab: .inbox)
           .voicePlaybackRootPill(router: router)
       }
-      .badge(homeListStore.state.presentation.inboxUnreadCount)
+      .badge(homeList.inboxUnreadCount)
 
       // This page owns its input and focus. The system search-tab lifecycle is
       // intended for searchable content and can dismiss our field on tab updates.
@@ -650,10 +652,7 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private var openChatsTabSystemImage: String {
-    let presentation = homeListStore.state.presentation
-    return presentation.inboxPinned.isEmpty && presentation.inboxUnpinned.isEmpty
-      ? "tray"
-      : "tray.full.fill"
+    homeList.hasInboxChats ? "tray.full.fill" : "tray"
   }
 
   private var rootTabSelection: Binding<RootTab> {
@@ -971,7 +970,7 @@ private struct ExperimentalAuthedRootView: View {
   private func homeLoadDiagnosticContext() -> ExperimentalHomeLoadDiagnosticContext {
     ExperimentalHomeLoadDiagnosticContext(
       surface: nav.activeSpaceId == nil ? .home : .space,
-      cachedChatCount: homeListStore.state.presentation.allChatCount,
+      cachedChatCount: homeList.presentation.allChatCount,
       authAvailable: auth.currentUserId != nil,
       realtimeState: realtimeState.connectionState
     )

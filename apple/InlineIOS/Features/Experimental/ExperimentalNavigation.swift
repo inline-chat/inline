@@ -389,6 +389,9 @@ struct ExperimentalHomeView: View {
     .background(selection == nil ? homeCanvas : Color.clear)
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle(initialTab == .archived ? Text("Archived Chats") : Text(""))
+    // Covered by a chat, the list stops taking updates and takes the latest when it is back.
+    .onAppear { homeListStore.listDidAppear() }
+    .onDisappear { homeListStore.listDidDisappear() }
   }
 
   private var homeCanvas: Color {

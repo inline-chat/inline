@@ -1855,10 +1855,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   }
 
   /// Marks what the reader has seen: only for a list on screen in an active, foreground scene, placed,
-  /// and not on its way to a focused message. While the list moves only the scroll button's count goes
-  /// down; the read is written to the dialog when it stops, as the collection view did (each read
-  /// rewrites the dialog, and every dialog observer re-rendering mid-scroll hitched it). The write is
-  /// local, so the chat list and the icon change with it; the read sync tells the server.
+  /// and not on its way to a focused message. Reads as the list moves, a few times a second, like
+  /// Telegram: the write is local, so the scroll button, the chat list and the icon fall together,
+  /// and the read sync tells the server. A list update no longer re-renders the chat (the root
+  /// observes only the tab badge, and a covered list holds its updates), which is what used to make
+  /// mid-scroll reads hitch.
   private func readPass(force: Bool, leaving: Bool = false) {
     let now = CACurrentMediaTime()
     guard force || now - lastReadPass > 0.3 else { return }
@@ -1874,15 +1875,10 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       return
     }
     let visible = visibleMessages()
-    let candidate = visible.filter { $0.message.out != true && !$0.message.isServiceMessage }
+    // Everything others sent that is on screen is seen, service rows included.
+    let candidate = visible.filter { $0.message.out != true }
       .map(\.message.messageId).max()
-    if list.isTracking || list.isDecelerating, !leaving {
-      if let candidate, candidate > readFrontier {
-        readFrontier = candidate
-        updateAffordance(force: true)
-      }
-      return
-    }
+    let isMoving = (list.isTracking || list.isDecelerating) && !leaving
     if distanceFromBottom <= 12, viewModel.historyCoverage.isAtCertifiedLiveEnd {
       // Only the real live end stands for every message; a window's bottom does not.
       #if DEBUG
@@ -1903,6 +1899,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
         }
       }
     }
+    // Mentions and reactions on screen are reported once the list settles, as before.
+    guard !isMoving else { return }
     onVisibleMessagesChanged?(visible.map(\.message.messageId))
   }
 
