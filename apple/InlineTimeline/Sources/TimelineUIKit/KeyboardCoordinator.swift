@@ -152,6 +152,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
       timing = .none
     }
     height = covered
+    onDebug?("keyboard covers \(covered) floating=\(isFloating)")
     onChange?(KeyboardChange(height: covered, timing: timing, isInteractive: false))
   }
 
@@ -166,6 +167,7 @@ public final class KeyboardCoordinator: NSObject, UIGestureRecognizerDelegate {
 
   private func fingerBegan(_ point: CGPoint) {
     isEligible = false
+    onDebug?("finger down y=\(point.y) suspended=\(isSuspended) interactive=\(isInteractive) height=\(height) floating=\(isFloating) window=\(view?.window != nil)")
     // A floating keyboard is not dragged away, as UIKit's interactive dismissal leaves it.
     guard !isSuspended, !isInteractive, height > 0, !isFloating, let view, view.window != nil else { return }
     let composerTop = view.convert(view.bounds, to: nil).maxY - height - ridingHeight()

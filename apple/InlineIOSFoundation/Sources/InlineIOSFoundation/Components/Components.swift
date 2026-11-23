@@ -216,7 +216,10 @@ open class SheetNavigationController: UINavigationController, UIAdaptivePresenta
   public var onDismiss: (@MainActor () -> Void)?
 
   public init(root: UIViewController, showsCancel: Bool = true) {
-    super.init(rootViewController: root)
+    super.init(nibName: nil, bundle: nil)
+    // Before anything touches `presentationController`, or the style is ignored.
+    modalPresentationStyle = .pageSheet
+    setViewControllers([root], animated: false)
     if showsCancel, root.navigationItem.leftBarButtonItem == nil {
       root.navigationItem.leftBarButtonItem = UIBarButtonItem(
         systemItem: .cancel,
@@ -251,7 +254,6 @@ extension UIViewController {
   ) -> SheetNavigationController {
     let navigation = SheetNavigationController(root: controller, showsCancel: showsCancel)
     navigation.onDismiss = onDismiss
-    navigation.modalPresentationStyle = .pageSheet
     navigation.compatConfigureSheet(detents: detents, prefersGrabber: detents.count > 1)
     topmostPresented.present(navigation, animated: true)
     return navigation

@@ -160,6 +160,8 @@ public class ChatContainerView: UIView {
       return messageList.bounds.contains(messageList.convert(point, from: nil))
     }
     coordinator.onChange = { [weak self] change in self?.applyKeyboard(change) }
+    // Temporary: trace interactive dismissal on device (iOS 15 experiment).
+    coordinator.onDebug = { message in NSLog("InlineKeyboard: %@", message) }
     keyboardCoordinator = coordinator
   }
 

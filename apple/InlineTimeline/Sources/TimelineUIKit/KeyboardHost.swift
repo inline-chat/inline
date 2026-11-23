@@ -23,13 +23,38 @@ struct KeyboardHost {
   init?(scene: UIWindowScene?) {
     guard !UserDefaults.standard.bool(forKey: Self.disabledKey), let scene else { return nil }
     // scene.keyboardSceneDelegate.keyboardWindow → …InputSetContainerView → …InputSetHostView
-    guard let delegate = Self.object(scene, ["keyboard", "Scene", "Delegate"]),
-          let window = Self.object(delegate, ["keyboard", "Window"]) as? UIWindow
-    else { return nil }
-    let container = window.subviews.first { NSStringFromClass(type(of: $0)).hasSuffix("InputSetContainerView") }
-    let host = container?.subviews.first { NSStringFromClass(type(of: $0)).hasSuffix("InputSetHostView") }
-    guard let host, host.bounds.height > 0 else { return nil }
-    view = host
+    var windows: [UIWindow] = []
+    if let delegate = Self.object(scene, ["keyboard", "Scene", "Delegate"]),
+       let window = Self.object(delegate, ["keyboard", "Window"]) as? UIWindow
+    {
+      windows.append(window)
+    }
+    // iOS 15–16 have no keyboard scene: the keyboard lives in the scene's remote-keyboard or
+    // text-effects window.
+    // Like Telegram's fallback: every connected window scene's windows, plus the app's.
+    let sceneWindows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+    windows += (scene.windows + sceneWindows + UIApplication.shared.windows).filter { window in
+      let name = NSStringFromClass(type(of: window))
+      return name.hasSuffix("RemoteKeyboardWindow") || name.hasSuffix("TextEffectsWindow")
+    }
+    var found: UIView?
+    for window in windows {
+      // Container/host names vary by release (Telegram checks the same pairs).
+      for container in window.subviews {
+        let containerName = NSStringFromClass(type(of: container))
+        guard containerName.hasSuffix("InputSetContainerView") || containerName.hasSuffix("TrackingWindowView") else { continue }
+        if let host = container.subviews.first(where: {
+          let name = NSStringFromClass(type(of: $0))
+          return name.hasSuffix("InputSetHostView") || name.hasSuffix("KeyboardItemContainerView")
+        }), host.bounds.height > 0 {
+          found = host
+          break
+        }
+      }
+      if found != nil { break }
+    }
+    guard let found else { return nil }
+    view = found
   }
 
   private static func object(_ target: NSObject, _ name: [String]) -> NSObject? {

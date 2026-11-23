@@ -657,9 +657,11 @@ final class MessageMenuActions: NSObject {
   func presentForwardSheet(_ fullMessage: FullMessage) {
     guard let viewController = presenter() else { return }
     guard #available(iOS 17.0, *), CompatRuntime.allows(.iOS17) else {
-      ToastManager.shared.showToast(
-        "Forwarding needs iOS 17 or later for now", type: .info, systemImage: "arrowshape.turn.up.right"
-      )
+      if let shell = viewController.tabBarController as? MainShellController
+        ?? (viewController.view.window?.rootViewController?.children.first as? MainShellController)
+      {
+        viewController.present(ForwardMessagesViewController.makeSheet(messages: [fullMessage], shell: shell), animated: true)
+      }
       return
     }
     let rootView = InlineUI.ForwardMessagesSheet(

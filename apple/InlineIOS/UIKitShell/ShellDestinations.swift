@@ -51,7 +51,7 @@ extension MainShellController {
       if #available(iOS 18.0, *), CompatRuntime.allows(.iOS18) {
         return bridgedController(for: destination)
       }
-      return UnavailableFeatureViewController(title: Self.fallbackTitle(for: destination))
+      return portedController(for: destination) ?? UnavailableFeatureViewController(title: Self.fallbackTitle(for: destination))
     }
   }
 
@@ -59,12 +59,15 @@ extension MainShellController {
     let controller: UIViewController
     if case .settings = sheet, !Self.prefersBridgedSettings {
       let navigation = SheetNavigationController(root: SettingsViewController(shell: self), showsCancel: false)
-      navigation.modalPresentationStyle = .pageSheet
+      navigation.onDismiss = { [weak self, weak navigation] in
+        guard let self, let navigation else { return }
+        sheetDidDismiss(navigation)
+      }
       controller = navigation
     } else if #available(iOS 18.0, *), CompatRuntime.allows(.iOS18) {
       controller = bridgedSheet(for: sheet)
     } else {
-      controller = Self.unavailableSheet(title: Self.fallbackTitle(for: sheet))
+      controller = portedSheet(for: sheet) ?? Self.unavailableSheet(title: Self.fallbackTitle(for: sheet))
     }
     sheetDismissalRelay.shell = self
     controller.presentationController?.delegate = sheetDismissalRelay
@@ -81,7 +84,7 @@ extension MainShellController {
         shell: self
       )
     } else {
-      controller = Self.unavailableSheet(title: String(localized: "Chat Info"))
+      controller = ChatInfoViewController.sheet(chatItem: item, shell: self, editing: editing)
     }
     presenter.topmostPresented.present(controller, animated: true)
   }
@@ -112,11 +115,44 @@ extension MainShellController {
     return false
   }
 
+  // MARK: UIKit ports (iOS 15–17; newer systems keep the bridged SwiftUI screens)
+
+  private func portedController(for destination: Destination) -> UIViewController? {
+    switch destination {
+    case let .chatInfo(chatItem):
+      ChatInfoViewController(chatItem: chatItem, shell: self, editing: false)
+    case let .createThread(spaceId):
+      CreateThreadViewController(spaceId: spaceId, shell: self)
+    case .createSpaceChat:
+      CreateThreadViewController(spaceId: nil, shell: self)
+    case .createSpace:
+      CreateSpaceViewController(shell: self, onCreated: { [weak self] id in self?.selectSpace(id) })
+    default:
+      nil
+    }
+  }
+
+  private func portedSheet(for sheet: Sheet) -> UIViewController? {
+    switch sheet {
+    case .createSpace:
+      CreateSpaceViewController.makeSheet(shell: self) { [weak self] id in self?.selectSpace(id) }
+    case let .addMember(spaceId):
+      InviteViewController.makeSheet(destination: .space(id: spaceId), shell: self)
+    case .inviteToInline:
+      InviteViewController.makeSheet(destination: .inline, shell: self)
+    case let .members(spaceId):
+      SpaceMembersViewController.makeSheet(spaceId: spaceId, shell: self)
+    case let .chatInfo(chatItem):
+      ChatInfoViewController.sheet(chatItem: chatItem, shell: self, editing: false)
+    default:
+      nil
+    }
+  }
+
   // MARK: Fallbacks
 
   private static func unavailableSheet(title: String) -> UIViewController {
     let navigation = SheetNavigationController(root: UnavailableFeatureViewController(title: title))
-    navigation.modalPresentationStyle = .pageSheet
     return navigation
   }
 
