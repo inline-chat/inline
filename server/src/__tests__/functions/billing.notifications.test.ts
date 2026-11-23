@@ -334,12 +334,18 @@ describe("billing credit plans", () => {
 
     // A Stripe Team plan: 4 seats x $20.
     const stripeSpace = (await testUtils.createSpace("Stripe Space"))!
-    await db.insert(billingSubscriptions).values({ spaceId: stripeSpace.id, plan: "team", interval: "month", funding: "stripe", status: "active", seats: 4, paidThrough: new Date(Date.now() + 20 * 86_400_000) })
+    await db.insert(billingSubscriptions).values({ spaceId: stripeSpace.id, plan: "team", interval: "month", funding: "stripe", status: "active", seats: 4, livemode: true, paidThrough: new Date(Date.now() + 20 * 86_400_000) })
+    // A sandbox purchase: shown separately, never counted as revenue.
+    const testSpace = (await testUtils.createSpace("Test Mode Space"))!
+    await db.insert(billingSubscriptions).values({ spaceId: testSpace.id, plan: "business", interval: "month", funding: "stripe", status: "active", seats: 2, livemode: false, paidThrough: new Date(Date.now() + 20 * 86_400_000) })
     const overview = await adminFinancialsOverview()
     const ours = overview.live.filter((l) => l.spaceId === space.id || l.spaceId === stripeSpace.id)
     expect(ours.map((l) => l.monthlyUsdCents).sort()).toEqual([6_000, 8_000])
     expect(overview.mrr.mrrUsdCents).toBeGreaterThanOrEqual(14_000)
     expect(overview.mrr.arrUsdCents).toBe(overview.mrr.mrrUsdCents * 12)
+    expect(overview.mrr.testModeUsdCents).toBeGreaterThanOrEqual(6_000)
+    expect(overview.mrr.testModePlans).toBeGreaterThanOrEqual(1)
+    expect(overview.mrr.mrrUsdCents).toBe(overview.mrr.stripeUsdCents + overview.mrr.creditUsdCents)
     expect(overview.live.find((l) => l.spaceId === space.id)?.creditBalance).toBe(0)
   })
 })

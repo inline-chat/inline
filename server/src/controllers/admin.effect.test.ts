@@ -1317,6 +1317,8 @@ describe("AdminRouteGroup", () => {
         payingPlans: 1,
         compPlans: 0,
         unpricedPlans: 0,
+        testModeUsdCents: 0,
+        testModePlans: 0,
         creditMonthlyByCurrency: { btc: 10_000 },
       },
       live: [
@@ -1622,6 +1624,8 @@ describe("AdminRouteGroup", () => {
                   payingPlans: 0,
                   compPlans: 0,
                   unpricedPlans: 0,
+                  testModeUsdCents: 0,
+                  testModePlans: 0,
                   creditMonthlyByCurrency: {},
                 },
                 live: [],

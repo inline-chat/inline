@@ -377,7 +377,12 @@ export const adminFinancialsOverview = async () => {
       spaceName: row.spaceName,
     }
   }))
-  const paying = liveRows.filter((row) => row.isPro && row.monthlyUsdCents !== null && row.monthlyUsdCents > 0)
+  // Stripe test-mode subscriptions are sandbox purchases, not revenue. Credit plans are real
+  // off-Stripe payments whatever their livemode flag.
+  const isTestStripe = (row: { funding: string; livemode: boolean }) => row.funding === "stripe" && !row.livemode
+  const billable = liveRows.filter((row) => row.isPro && row.monthlyUsdCents !== null && row.monthlyUsdCents > 0)
+  const paying = billable.filter((row) => !isTestStripe(row))
+  const testMode = billable.filter(isTestStripe)
   const sum = (rows: typeof paying) => rows.reduce((total, row) => total + (row.monthlyUsdCents ?? 0), 0)
   const mrrUsdCents = sum(paying)
   const mrr = {
@@ -387,6 +392,9 @@ export const adminFinancialsOverview = async () => {
     creditUsdCents: sum(paying.filter((row) => row.funding === "wallet")),
     payingPlans: paying.length,
     compPlans: liveRows.filter((row) => row.isPro && row.funding === "comp").length,
+    /** Stripe test-mode subscriptions, excluded from MRR. */
+    testModeUsdCents: testMode.reduce((total, row) => total + (row.monthlyUsdCents ?? 0), 0),
+    testModePlans: testMode.length,
     /** Live paid plans with no known USD value (custom enterprise without a set value). */
     unpricedPlans: liveRows.filter((row) => row.isPro && row.funding !== "comp" && row.monthlyUsdCents === null).length,
     /** Monthly draw from credit in each currency, as charged (not converted). */

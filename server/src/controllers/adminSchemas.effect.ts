@@ -1105,6 +1105,9 @@ export const AdminFinancialsResult = Schema.Struct({
     compPlans: WireSafeInteger,
     /** Live paid plans with no known USD value. */
     unpricedPlans: WireSafeInteger,
+    /** Stripe test-mode subscriptions, excluded from MRR. */
+    testModeUsdCents: WireSafeInteger,
+    testModePlans: WireSafeInteger,
     /** Monthly draw from credit per currency in minor units; USD-priced BTC plans are estimated at btcUsd. */
     creditMonthlyByCurrency: Schema.Struct({
       usd: Schema.optionalKey(WireSafeInteger),

@@ -585,7 +585,7 @@ describe("AdminSessionStoreLive", () => {
     const enterpriseSpace = (await testUtils.createSpace("Fake Enterprise Space"))!
     const compUser = await testUtils.createUser("effect-admin-financials-comp@example.com")
     await db.insert(billingSubscriptions).values({
-      spaceId: stripeSpace.id, plan: "team", interval: "month", funding: "stripe", status: "active",
+      spaceId: stripeSpace.id, plan: "team", interval: "month", funding: "stripe", status: "active", livemode: true,
       paidThrough: new Date(now.getTime() + 30 * day), stripeSubscriptionId: "sub_fake_financials",
     })
     const call = async (path: string, body?: unknown) => {
@@ -607,7 +607,7 @@ describe("AdminSessionStoreLive", () => {
         btcUsd: null,
         mrr: {
           mrrUsdCents: 2_000, arrUsdCents: 24_000, stripeUsdCents: 2_000, creditUsdCents: 0,
-          payingPlans: 1, compPlans: 0, unpricedPlans: 0, creditMonthlyByCurrency: {},
+          payingPlans: 1, compPlans: 0, unpricedPlans: 0, testModeUsdCents: 0, testModePlans: 0, creditMonthlyByCurrency: {},
         },
         live: [expect.objectContaining({
           spaceId: stripeSpace.id, funding: "stripe", isPro: true, spaceName: "Fake Stripe Space",
@@ -743,7 +743,7 @@ describe("AdminSessionStoreLive", () => {
     // Stripe team (1 seat) $20 + BTC pro $10 + yearly team $360 / 12; comps and unpriced plans add nothing.
     expect(overview.body.mrr).toEqual({
       mrrUsdCents: 6_000, arrUsdCents: 72_000, stripeUsdCents: 2_000, creditUsdCents: 4_000,
-      payingPlans: 3, compPlans: 1, unpricedPlans: 1,
+      payingPlans: 3, compPlans: 1, unpricedPlans: 1, testModeUsdCents: 0, testModePlans: 0,
       creditMonthlyByCurrency: { btc: 60_000, usd: 250 },
     })
     expect(overview.body.live).toHaveLength(5)
