@@ -310,6 +310,7 @@ export const Mcp = {
                     token: authRes.inlineToken,
                     viaApp: authRes.grant.viaApp,
                     allowUnsigned: authRes.grant.allowUnsigned,
+                    oauthGrantId: authRes.grant.id,
                     allowed: {
                       allowedSpaceIds: authRes.grant.spaceIds,
                       allowDms: authRes.grant.allowDms,
@@ -361,6 +362,7 @@ export const Mcp = {
             token: authRes.inlineToken,
             viaApp: authRes.grant.viaApp,
             allowUnsigned: authRes.grant.allowUnsigned,
+            oauthGrantId: authRes.grant.id,
             allowed: {
               allowedSpaceIds: authRes.grant.spaceIds,
               allowDms: authRes.grant.allowDms,

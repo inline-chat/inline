@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 import { createHttpRpcInvoker, type InlineRpcCallOptions, type InlineRpcInvoker } from "./rpc-invoker"
 import {
@@ -351,6 +352,35 @@ export type InlineApi = {
   }): Promise<{ messageId: bigint | null; spaceId?: bigint | null; signed?: boolean }>
 }
 
+/**
+ * Space names across requests. Stateless MCP builds a new InlineApi per HTTP
+ * request, so its 15 s metadata maps never hit between tool calls, and every
+ * fresh chat read paid a GET_SPACE just for the label (the most frequent RPC an
+ * archive sync made). Names are display labels only: GET_CHAT still authorizes
+ * every chat on every call, and entries are scoped to one Inline credential.
+ */
+// Same freshness bound as per-API label reuse, so a renamed space shows within 15 s.
+export const SPACE_LABEL_TTL_MS = 15_000
+const MAX_SPACE_LABELS = 5_000
+const spaceLabels = new Map<string, { space: Space; expiresAtMs: number }>()
+
+const cachedSpaceLabel = (key: string, nowMs: number): Space | undefined => {
+  const entry = spaceLabels.get(key)
+  if (!entry) return undefined
+  if (entry.expiresAtMs > nowMs) return entry.space
+  spaceLabels.delete(key)
+  return undefined
+}
+
+const rememberSpaceLabel = (key: string, space: Space, nowMs: number): void => {
+  spaceLabels.delete(key)
+  spaceLabels.set(key, { space, expiresAtMs: nowMs + SPACE_LABEL_TTL_MS })
+  if (spaceLabels.size > MAX_SPACE_LABELS) spaceLabels.delete(spaceLabels.keys().next().value!)
+}
+
+/** Test seam. */
+export const resetSpaceLabelsForTests = (): void => spaceLabels.clear()
+
 export function createInlineApi(params: {
   baseUrl: string
   token: string
@@ -361,10 +391,17 @@ export function createInlineApi(params: {
   viaApp?: string
   /** The user let this app send without "Sent via <name>" when they ask. */
   allowUnsigned?: boolean
+  /** The OAuth grant these calls act for; labels server telemetry only. */
+  oauthGrantId?: string
 }): InlineApi {
   // Every supported read and write is one stateless HTTP RPC: no realtime
   // socket, so the server does no connection, presence or sync work for it.
-  const rpc = params.rpc ?? createHttpRpcInvoker({ baseUrl: params.baseUrl, token: params.token })
+  const rpc = params.rpc ?? createHttpRpcInvoker({
+    baseUrl: params.baseUrl,
+    token: params.token,
+    ...(params.oauthGrantId ? { oauthGrantId: params.oauthGrantId } : {}),
+  })
+  const credentialKey = createHash("sha256").update(params.token).digest("hex").slice(0, 32)
   // close() ends this API's lifetime: an interrupted MCP request must not
   // leave its in-flight RPCs running upstream until their own deadline.
   const lifetime = new AbortController()
@@ -996,11 +1033,19 @@ export function createInlineApi(params: {
       const key = rawChat.spaceId.toString()
       spacePromise = readSpaces.get(key)
       if (!spacePromise) {
-        spacePromise = invoke(Method.GET_SPACE, { oneofKind: "getSpace", getSpace: GetSpaceInput.create({ spaceId: rawChat.spaceId }) })
-          .then((response) => response.getSpace.space)
-          // Private-chat access does not imply parent-space membership. Labels
-          // are optional; GET_CHAT above remains the required authority.
-          .catch(() => undefined)
+        const sharedKey = `${credentialKey}:${key}`
+        const shared = cachedSpaceLabel(sharedKey, Date.now())
+        spacePromise = shared
+          ? Promise.resolve(shared)
+          : invoke(Method.GET_SPACE, { oneofKind: "getSpace", getSpace: GetSpaceInput.create({ spaceId: rawChat.spaceId }) })
+            .then((response) => {
+              const space = response.getSpace.space
+              if (space && space.id === rawChat.spaceId) rememberSpaceLabel(sharedKey, space, Date.now())
+              return space
+            })
+            // Private-chat access does not imply parent-space membership. Labels
+            // are optional; GET_CHAT above remains the required authority.
+            .catch(() => undefined)
         readSpaces.set(key, spacePromise)
       }
     }

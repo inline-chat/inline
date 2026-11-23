@@ -21,6 +21,7 @@ export type InlineRpcInvoker = {
 export const INLINE_RPC_PATH = "/v1/rpc"
 export const INLINE_RPC_CONTENT_TYPE = "application/x-protobuf"
 export const INLINE_RPC_AUTH_REASON_HEADER = "x-inline-auth-reason"
+export const INLINE_RPC_OAUTH_GRANT_HEADER = "x-inline-oauth-grant"
 /** Same default deadline as the SDK's realtime RPCs. */
 export const DEFAULT_INLINE_RPC_TIMEOUT_MS = 30_000
 
@@ -65,8 +66,16 @@ export function createHttpRpcInvoker(params: {
   token: string
   fetch?: typeof fetch
   timeoutMs?: number | null
+  /**
+   * The OAuth grant these calls act for. The server uses it only to label
+   * spans and query tags, and only when the grant belongs to the token's user.
+   */
+  oauthGrantId?: string
 }): InlineRpcInvoker {
   const endpoint = `${normalizeBaseUrl(params.baseUrl)}${INLINE_RPC_PATH}`
+  const attributionHeaders: Record<string, string> = params.oauthGrantId
+    ? { [INLINE_RPC_OAUTH_GRANT_HEADER]: params.oauthGrantId }
+    : {}
   const fetchImpl = params.fetch ?? fetch
   const defaultTimeoutMs = params.timeoutMs === undefined ? DEFAULT_INLINE_RPC_TIMEOUT_MS : params.timeoutMs
 
@@ -112,6 +121,7 @@ export function createHttpRpcInvoker(params: {
               authorization: `Bearer ${params.token}`,
               "content-type": INLINE_RPC_CONTENT_TYPE,
               accept: INLINE_RPC_CONTENT_TYPE,
+              ...attributionHeaders,
             },
             body: requestBody,
             signal: controller.signal,

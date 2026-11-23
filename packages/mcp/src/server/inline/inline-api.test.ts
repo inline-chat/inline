@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatListKind, ChatListOrder, ChatListScope, CreateSubthreadResult, ForwardMessagesResult, GetChatParticipantsResult, MessageSendMode, Method, RpcResult, Update } from "@inline-chat/protocol/core"
 import type { Chat, GetChatsResult, GetSpaceMembersResult, Message, Space, User } from "@inline-chat/protocol/core"
-import { createInlineApi } from "./inline-api"
+import { createInlineApi, resetSpaceLabelsForTests } from "./inline-api"
 
 const realtimeSdk = vi.hoisted(() => {
   const client = {
@@ -53,6 +53,7 @@ function message(id: bigint, chatId: bigint, fromId: bigint, text: string): Mess
 
 describe("createInlineApi", () => {
   beforeEach(() => {
+    resetSpaceLabelsForTests()
     realtimeSdk.InlineSdkClient.mockClear()
     realtimeSdk.client.close.mockReset().mockResolvedValue(undefined)
     realtimeSdk.client.connect.mockReset().mockResolvedValue(undefined)
@@ -755,6 +756,28 @@ describe("createInlineApi", () => {
       expect(sendCalls()).toHaveLength(0)
       expect(realtimeSdk.client.invokeRaw.mock.calls.every(([method]) => method === Method.GET_USERS)).toBe(true)
     } finally { await api.close() }
+  })
+
+  it("reuses a space label across requests for one credential, never across credentials", async () => {
+    const getSpaceCalls = () => realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE).length
+    const { api: first } = canonicalReadFixture()
+    await first.recentMessages({ chatId: 7n, freshChatAuthorization: true })
+    await first.close()
+    expect(getSpaceCalls()).toBe(1)
+
+    // A new stateless request with the same credential authorizes the chat
+    // again (GET_CHAT) but takes the label from the shared cache.
+    const second = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: true, allowHomeThreads: false } })
+    const reread = await second.recentMessages({ chatId: 7n, freshChatAuthorization: true })
+    await second.close()
+    expect(reread.chat).toMatchObject({ spaceName: "Engineering" })
+    expect(getSpaceCalls()).toBe(1)
+    expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHAT)).toHaveLength(2)
+
+    const other = createInlineApi({ baseUrl: "https://api.inline.test", token: "other-token", allowed: { allowedSpaceIds: [10n], allowDms: true, allowHomeThreads: false } })
+    await other.recentMessages({ chatId: 7n, freshChatAuthorization: true })
+    await other.close()
+    expect(getSpaceCalls()).toBe(2)
   })
 
   it.each(canonicalReadOperations)("cold canonical DM %s retains counterpart names without DM creation", async (operation) => {

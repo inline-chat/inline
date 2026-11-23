@@ -15,6 +15,7 @@ import { createInlineApi } from "./inline-api"
 import {
   INLINE_RPC_AUTH_REASON_HEADER,
   INLINE_RPC_CONTENT_TYPE,
+  INLINE_RPC_OAUTH_GRANT_HEADER,
   createHttpRpcInvoker,
 } from "./rpc-invoker"
 import { createInlineMcpServer } from "../mcp/server"
@@ -46,6 +47,17 @@ function stubServer(respond: (call: RpcCall, request: Request) => Response | Pro
 const getMe = { oneofKind: "getMe", getMe: {} } as const
 
 describe("createHttpRpcInvoker", () => {
+  it("labels calls with the OAuth grant only when one is given", async () => {
+    const server = stubServer(() => ok({ oneofKind: "getMe", getMe: { user: { id: 42n } } }))
+    const grantId = "0af217b2-ec42-4e97-832a-b607cff6caab"
+    await createHttpRpcInvoker({ baseUrl: "https://api.inline.test", token: "42:secret", fetch: server.fetch, oauthGrantId: grantId })
+      .invoke(Method.GET_ME, getMe)
+    await createHttpRpcInvoker({ baseUrl: "https://api.inline.test", token: "42:secret", fetch: server.fetch })
+      .invoke(Method.GET_ME, getMe)
+    expect(server.calls[0]?.request.headers.get(INLINE_RPC_OAUTH_GRANT_HEADER)).toBe(grantId)
+    expect(server.calls[1]?.request.headers.has(INLINE_RPC_OAUTH_GRANT_HEADER)).toBe(false)
+  })
+
   it("posts a protobuf RpcCall with the bearer and decodes the RpcResult", async () => {
     const server = stubServer(() => ok({ oneofKind: "getMe", getMe: { user: { id: 42n, firstName: "Ada" } } }))
     const rpc = createHttpRpcInvoker({ baseUrl: "https://api.inline.test/", token: "42:secret", fetch: server.fetch })
