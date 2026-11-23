@@ -1083,11 +1083,12 @@ impl ClaudeMapper {
                     "dialog kind {} is not supported",
                     dialog.dialog_kind
                 )),
+                // Shown in the chat: the person should know Claude asked.
                 events: vec![notice(
-                    NoticeLevel::Warning,
-                    "request_user_dialog",
+                    NoticeLevel::Error,
+                    "Request declined",
                     Some(format!(
-                        "Claude asked for a {} dialog Inline cannot show",
+                        "Claude asked for a {} dialog Inline can't show yet, so it was declined.",
                         dialog.dialog_kind
                     )),
                     request,
@@ -1095,10 +1096,12 @@ impl ClaudeMapper {
             },
             IncomingRequest::Elicitation(raw) => RequestMapped::Reply {
                 response: Ok(json!({"action": "decline"})),
+                // Shown in the chat: declining silently left people wondering
+                // why the tool didn't run.
                 events: vec![notice(
-                    NoticeLevel::Warning,
-                    "elicitation",
-                    raw["message"].as_str().map(str::to_string),
+                    NoticeLevel::Error,
+                    "Request declined",
+                    Some(elicitation_declined_text(&raw)),
                     request,
                 )],
             },
@@ -1181,7 +1184,10 @@ impl ClaudeMapper {
                     ));
                 }
                 (
-                    PermissionDecision::answer_questions(input, answers_map(answers)),
+                    PermissionDecision::answer_questions(
+                        input,
+                        answers_map(&pending.request, answers),
+                    ),
                     None,
                 )
             }
@@ -1239,6 +1245,28 @@ impl ClaudeMapper {
 fn item_id(id: &str) -> ItemId {
     ItemId::new(id)
         .unwrap_or_else(|_| ItemId::new(uuid::Uuid::new_v4().to_string()).expect("uuid id"))
+}
+
+/// What a declined MCP elicitation asked, for the chat.
+fn elicitation_declined_text(raw: &Value) -> String {
+    let server = raw["mcp_server_name"]
+        .as_str()
+        .or_else(|| raw["server_name"].as_str())
+        .filter(|name| !name.trim().is_empty());
+    let asked = raw["message"]
+        .as_str()
+        .map(|message| message.trim().chars().take(300).collect::<String>())
+        .filter(|message| !message.is_empty());
+    let from = server.map_or_else(
+        || "An MCP server".to_owned(),
+        |name| format!("The {name} MCP server"),
+    );
+    match asked {
+        Some(asked) => format!(
+            "{from} asked for input Inline can't show yet, so it was declined: \u{201c}{asked}\u{201d}"
+        ),
+        None => format!("{from} asked for input Inline can't show yet, so it was declined."),
+    }
 }
 
 fn notice(level: NoticeLevel, code: &str, message: Option<String>, native: &Value) -> Event {
@@ -1635,15 +1663,24 @@ fn child_status(status: Option<&str>) -> ChildStatus {
     }
 }
 
+/// A question's field ID: its position, since its text may hold newlines or
+/// be longer than an ID may be (such a question used to be dropped, which
+/// could leave nothing to answer). Answers map back to the text Claude keys
+/// them by in `answers_map`.
+fn question_field(index: usize) -> Option<FieldId> {
+    FieldId::new(format!("q{index}")).ok()
+}
+
 fn question_form(permission: &PermissionRequest) -> QuestionForm {
     QuestionForm {
         title: permission.title.clone(),
         fields: permission
             .questions()
             .into_iter()
-            .filter_map(|question| {
+            .enumerate()
+            .filter_map(|(index, question)| {
                 Some(FormField {
-                    id: FieldId::new(question.question.as_str()).ok()?,
+                    id: question_field(index)?,
                     header: question.header.clone(),
                     prompt: question.question.clone(),
                     input: FieldInput::Select {
@@ -1669,14 +1706,23 @@ fn question_form(permission: &PermissionRequest) -> QuestionForm {
     }
 }
 
-fn answers_map(answers: &[FieldAnswer]) -> Map<String, Value> {
+/// Claude keys answers by question text.
+fn answers_map(permission: &PermissionRequest, answers: &[FieldAnswer]) -> Map<String, Value> {
+    let questions = permission.questions();
     answers
         .iter()
         .map(|answer| {
-            (
-                answer.field.as_str().to_string(),
-                json!(answer.values.join(", ")),
-            )
+            let key = answer
+                .field
+                .as_str()
+                .strip_prefix('q')
+                .and_then(|index| index.parse::<usize>().ok())
+                .and_then(|index| questions.get(index))
+                .map_or_else(
+                    || answer.field.as_str().to_string(),
+                    |question| question.question.clone(),
+                );
+            (key, json!(answer.values.join(", ")))
         })
         .collect()
 }
@@ -1730,6 +1776,11 @@ fn approval_decisions(
     }];
     if permission.suppress_always_allow_rule != Some(true) {
         for (index, suggestion) in permission.permission_suggestions.iter().enumerate() {
+            // A deny rule only travels with an allow answer, which would run
+            // the tool the person just refused; "No" covers this one call.
+            if suggestion["behavior"] == "deny" {
+                continue;
+            }
             let Ok(id) = DecisionId::new(format!("{SUGGESTION_PREFIX}{index}")) else {
                 continue;
             };
@@ -2160,6 +2211,117 @@ mod tests {
                     UserId(1)
                 )
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn a_long_or_multiline_question_keeps_its_field_and_its_answer_key() {
+        let mut mapper = ClaudeMapper::new(None);
+        let long = format!("Which plan?\n{}", "detail ".repeat(400));
+        let RequestMapped::Interaction(events) = mapper.request(
+            "q1",
+            &json!({"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "tool_use_id": "t1",
+                "input": {"questions": [
+                    {"question": long, "header": "Plan", "multiSelect": false,
+                        "options": [{"label": "A", "description": ""}, {"label": "B", "description": ""}]},
+                    {"question": "Ship it?", "header": "Ship", "multiSelect": false,
+                        "options": [{"label": "Yes", "description": ""}, {"label": "No", "description": ""}]}
+                ]}}),
+        ) else {
+            panic!("interaction");
+        };
+        let Some(Event::Interaction(interaction)) = events.last() else {
+            panic!("interaction event");
+        };
+        let InteractionKind::Question { form } = &interaction.kind else {
+            panic!("question");
+        };
+        // Both questions are asked, the long one included.
+        assert_eq!(form.fields.len(), 2);
+        let plan = mapper
+            .answer(
+                &InteractionId::new("q1").unwrap(),
+                &InteractionResponse::Answers {
+                    answers: form
+                        .fields
+                        .iter()
+                        .zip(["B", "Yes"])
+                        .map(|(field, value)| FieldAnswer {
+                            field: field.id.clone(),
+                            values: vec![value.into()],
+                        })
+                        .collect(),
+                },
+                UserId(1),
+            )
+            .unwrap();
+        // Claude reads answers keyed by the full question text.
+        assert_eq!(
+            plan.response["updatedInput"]["answers"][long.as_str()],
+            json!("B")
+        );
+        assert_eq!(
+            plan.response["updatedInput"]["answers"]["Ship it?"],
+            json!("Yes")
+        );
+    }
+
+    #[test]
+    fn a_deny_rule_suggestion_is_not_offered_as_an_answer_that_allows() {
+        let mut mapper = ClaudeMapper::new(None);
+        let RequestMapped::Interaction(events) = mapper.request(
+            "r1",
+            &json!({"subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "t1",
+            "input": {"command": "rm -rf build"},
+            "permission_suggestions": [
+                {"type": "addRules", "behavior": "deny", "destination": "localSettings",
+                    "rules": [{"toolName": "Bash", "ruleContent": "rm -rf:*"}]},
+                {"type": "addRules", "behavior": "allow", "destination": "localSettings",
+                    "rules": [{"toolName": "Bash", "ruleContent": "make:*"}]}
+            ]}),
+        ) else {
+            panic!("interaction");
+        };
+        let Some(Event::Interaction(interaction)) = events.last() else {
+            panic!("interaction event");
+        };
+        let InteractionKind::Approval { decisions, .. } = &interaction.kind else {
+            panic!("approval");
+        };
+        let labels: Vec<&str> = decisions
+            .iter()
+            .map(|decision| decision.label.as_str())
+            .collect();
+        assert!(
+            labels.iter().all(|label| !label.contains("always deny")),
+            "{labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label.contains("make:*")),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
+    fn a_declined_mcp_form_is_shown_in_the_chat() {
+        let mut mapper = ClaudeMapper::new(None);
+        let RequestMapped::Reply { response, events } = mapper.request(
+            "e1",
+            &json!({"subtype": "elicitation", "mcp_server_name": "coolify",
+                "message": "Confirm the deploy?", "mode": "form", "requested_schema": {}}),
+        ) else {
+            panic!("reply");
+        };
+        assert_eq!(response.unwrap(), json!({"action": "decline"}));
+        let Some(Event::Notice(notice)) = events.first() else {
+            panic!("notice");
+        };
+        // Only errors reach the chat; this one must.
+        assert_eq!(notice.level, NoticeLevel::Error);
+        let text = notice.message.as_deref().unwrap_or_default();
+        assert!(
+            text.contains("coolify") && text.contains("Confirm the deploy?"),
+            "{text}"
         );
     }
 

@@ -211,7 +211,7 @@
             "form": {
               "fields": [
                 {
-                  "id": "Which package manager should the fix use?",
+                  "id": "q0",
                   "header": "Package manager",
                   "prompt": "Which package manager should the fix use?",
                   "input": {
@@ -357,7 +357,7 @@
     {
       "name": "answer the question form",
       "interaction": "req-ask-1",
-      "response": {"kind": "answers", "answers": [{"field": "Which package manager should the fix use?", "values": ["pnpm"]}]},
+      "response": {"kind": "answers", "answers": [{"field": "q0", "values": ["pnpm"]}]},
       "native": {
         "type": "control_response",
         "response": {
