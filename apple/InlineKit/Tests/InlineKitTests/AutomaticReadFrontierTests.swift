@@ -37,47 +37,6 @@ struct AutomaticReadFrontierTests {
     #expect(spanning.certifiedReadMaxID(after: 10, through: 30) == nil)
   }
 
-  @Test("coalescing keeps one in-flight marker and the highest pending marker")
-  func monotonicCoalescing() {
-    var state = AutomaticReadCoalescingState()
-
-    #expect(state.enqueue(30) == 30)
-    #expect(state.enqueue(20) == nil)
-    #expect(state.enqueue(40) == nil)
-    #expect(state.enqueue(35) == nil)
-    #expect(state.inFlightMaxID == 30)
-    #expect(state.pendingMaxID == 40)
-
-    #expect(state.succeed(30) == 40)
-    #expect(state.inFlightMaxID == 40)
-    #expect(state.succeed(40) == nil)
-    #expect(state.highestSuccessfulMaxID == 40)
-    #expect(state.enqueue(40) == nil)
-  }
-
-  @Test("a failed marker remains owned and a higher pending marker supersedes its retry")
-  func failedMarkerRemainsOwned() {
-    var state = AutomaticReadCoalescingState()
-
-    #expect(state.enqueue(50) == 50)
-    #expect(state.retryTarget(afterFailureOf: 50) == 50)
-    #expect(state.owns(50))
-    #expect(state.enqueue(60) == nil)
-    #expect(state.retryTarget(afterFailureOf: 50) == 60)
-    #expect(state.owns(60))
-    #expect(state.enqueue(59) == nil)
-  }
-
-  @Test("coalescing retains the visible source when a hole caps its concrete marker")
-  func retainedDemandKeepsVisibleCandidate() {
-    var state = AutomaticReadCoalescingState()
-    #expect(state.enqueue(20, highestVisibleIncomingID: 50) == 20)
-    #expect(state.inFlight?.highestVisibleIncomingID == 50)
-    #expect(state.enqueue(60, highestVisibleIncomingID: 80) == nil)
-    #expect(state.retryTarget(afterFailureOf: 20) == 60)
-    #expect(state.inFlight?.highestVisibleIncomingID == 80)
-  }
-
   @Test("automatic retry delay is jittered and capped")
   func boundedRetryDelay() {
     let firstLow = AutomaticReadRetryPolicy.delaySeconds(failureCount: 1, jitterUnit: 0)
@@ -197,33 +156,104 @@ struct AutomaticReadFrontierTests {
     }
   }
 
-  @Test("mark-unread cancels a suspended read submission and rejects pre-cancel visibility work")
-  func explicitUnreadCancelsRetainedTask() async throws {
-    let auth = Auth.mocked(authenticated: true)
-    let owner = try auth.handle.beginAccountMutation()
-    let gate = UnreadManager.VisibleReadGate(auth: auth.handle)
-    let probe = AutomaticReadSuspensionProbe()
-    let requestedAt = ContinuousClock.now
-    let started = try await gate.enqueue(
-      owner: owner, dialogId: 7,
-      admission: .init(currentReadMaxID: 10, certifiedMaxID: 20),
-      highestVisibleIncomingID: 20, requestedAt: requestedAt
-    ) { _, _ in
-      await probe.suspend()
-      await probe.complete(cancelled: Task.isCancelled)
-    }
-    #expect(started)
-    await probe.waitUntilSuspended()
-    try await gate.cancel(owner: owner, dialogId: 7, at: ContinuousClock.now)
-    await probe.release()
-    #expect(await probe.waitUntilCompleted())
+  @Test("reading lowers the count by the stored messages the server counts, and moves the cursor here")
+  func localReadLowersCount() throws {
+    let queue = try makeDatabase()
+    try queue.write { (db: Database) throws in
+      try seedThread(db, readMaxID: 10, unreadCount: 5, unreadMark: true, serverReadMaxID: 10)
+      for id: Int64 in [11, 13, 14, 15, 16] { try seedMessage(db, messageID: id) }
+      try seedMessage(db, messageID: 12, service: true)
+      try Chat.filter(Chat.Columns.id == testChatID).updateAll(db, Chat.Columns.lastMsgId.set(to: 16))
+      let peer = InlineKit.Peer.thread(id: testChatID)
 
-    let staleStarted = try await gate.enqueue(
-      owner: owner, dialogId: 7,
-      admission: .init(currentReadMaxID: 10, certifiedMaxID: 20),
-      highestVisibleIncomingID: 20, requestedAt: requestedAt
-    ) { _, _ in Issue.record("Pre-cancel visibility must not be submitted") }
-    #expect(!staleStarted)
+      #expect(try Dialog.applyLocalRead(db, peerId: peer, through: 13) == .advanced(throughId: 13))
+      var dialog = try #require(try Dialog.get(peerId: peer).fetchOne(db))
+      // 11 and 13; the service row was never counted.
+      #expect(dialog.unreadCount == 3)
+      #expect(dialog.readInboxMaxId == 13)
+      #expect(dialog.unreadMark == false)
+      #expect(try Dialog.pendingReadMaxId(db, dialogId: dialog.id) == 13)
+
+      #expect(try Dialog.applyLocalRead(db, peerId: peer, through: 12) == .unchanged)
+      // Through the chat's last message everything is read.
+      #expect(try Dialog.applyLocalRead(db, peerId: peer, through: 16) == .advanced(throughId: 16))
+      dialog = try #require(try Dialog.get(peerId: peer).fetchOne(db))
+      #expect(dialog.unreadCount == 0)
+
+      try Dialog.confirmServerRead(db, dialogId: dialog.id, through: 16)
+      #expect(try Dialog.pendingReadMaxId(db, dialogId: dialog.id) == nil)
+      #expect(try Dialog.pendingReadPeers(db).isEmpty)
+    }
+  }
+
+  @Test("reading to the end takes the chat's last message, and clears a mark on its own")
+  func localReadToEnd() throws {
+    let queue = try makeDatabase()
+    try queue.write { (db: Database) throws in
+      try seedThread(db, readMaxID: 10, unreadCount: 2, serverReadMaxID: 10)
+      try seedMessage(db, messageID: 30)
+      try Chat.filter(Chat.Columns.id == testChatID).updateAll(db, Chat.Columns.lastMsgId.set(to: 30))
+      let peer = InlineKit.Peer.thread(id: testChatID)
+
+      #expect(try Dialog.applyLocalReadToEnd(db, peerId: peer) == .advanced(throughId: 30))
+      #expect(try Dialog.pendingReadPeers(db) == [peer])
+      #expect(try Dialog.applyLocalReadToEnd(db, peerId: peer) == .unchanged)
+
+      try Dialog.confirmServerRead(db, dialogId: Dialog.getDialogId(peerId: peer), through: 30)
+      try markUnreadUpdate(true).apply(db)
+      #expect(try Dialog.applyLocalReadToEnd(db, peerId: peer) == .clearedMark)
+      #expect(try Dialog.get(peerId: peer).fetchOne(db)?.unreadMark == false)
+    }
+  }
+
+  @Test("a server read behind a read made here confirms it without undoing it")
+  func olderServerReadKeepsLocalRead() throws {
+    let queue = try makeDatabase()
+    try queue.write { (db: Database) throws in
+      try seedThread(db, readMaxID: 40, unreadCount: 8, serverReadMaxID: 40)
+      try seedMessage(db, messageID: 60)
+      try Chat.filter(Chat.Columns.id == testChatID).updateAll(db, Chat.Columns.lastMsgId.set(to: 60))
+      let peer = InlineKit.Peer.thread(id: testChatID)
+      // The reader reached the bottom while an earlier scroll read was still on its way.
+      _ = try Dialog.applyLocalReadToEnd(db, peerId: peer)
+
+      try readUpdate(maxID: 50, unreadCount: 3).apply(db)
+      var dialog = try #require(try Dialog.get(peerId: peer).fetchOne(db))
+      #expect(dialog.readInboxMaxId == 60)
+      #expect(dialog.unreadCount == 0)
+      #expect(dialog.serverReadInboxMaxId == 50)
+      #expect(try Dialog.pendingReadMaxId(db, dialogId: dialog.id) == 60)
+
+      // A server dialog from before the read keeps it too.
+      try InlineProtocol.Dialog.with {
+        $0.peer = .with { $0.chat.chatID = testChatID }
+        $0.chatID = testChatID
+        $0.readMaxID = 50
+        $0.unreadCount = 3
+        $0.unreadMark = true
+      }.saveFull(db)
+      dialog = try #require(try Dialog.get(peerId: peer).fetchOne(db))
+      #expect(dialog.readInboxMaxId == 60)
+      #expect(dialog.unreadCount == 0)
+      #expect(dialog.unreadMark == false)
+
+      try readUpdate(maxID: 60, unreadCount: 0).apply(db)
+      #expect(try Dialog.pendingReadMaxId(db, dialogId: dialog.id) == nil)
+    }
+  }
+
+  @Test("another device reading further moves the cursor and takes its count")
+  func newerServerReadApplies() throws {
+    let queue = try makeDatabase()
+    try queue.write { (db: Database) throws in
+      try seedThread(db, readMaxID: 40, unreadCount: 8, serverReadMaxID: 40)
+      try readUpdate(maxID: 55, unreadCount: 2).apply(db)
+      let dialog = try #require(try Dialog.get(peerId: .thread(id: testChatID)).fetchOne(db))
+      #expect(dialog.readInboxMaxId == 55)
+      #expect(dialog.serverReadInboxMaxId == 55)
+      #expect(dialog.unreadCount == 2)
+      #expect(try Dialog.pendingReadPeers(db).isEmpty)
+    }
   }
 
   @Test("read updates cannot regress the frontier or erase a later mark-unread")
@@ -280,42 +310,6 @@ struct AutomaticReadFrontierTests {
   }
 }
 
-private actor AutomaticReadSuspensionProbe {
-  private var suspended = false
-  private var completion: Bool?
-  private var startedWaiter: CheckedContinuation<Void, Never>?
-  private var suspension: CheckedContinuation<Void, Never>?
-  private var completionWaiter: CheckedContinuation<Bool, Never>?
-
-  func suspend() async {
-    suspended = true
-    startedWaiter?.resume()
-    startedWaiter = nil
-    await withCheckedContinuation { suspension = $0 }
-  }
-
-  func waitUntilSuspended() async {
-    guard !suspended else { return }
-    await withCheckedContinuation { startedWaiter = $0 }
-  }
-
-  func release() {
-    suspension?.resume()
-    suspension = nil
-  }
-
-  func complete(cancelled: Bool) {
-    completion = cancelled
-    completionWaiter?.resume(returning: cancelled)
-    completionWaiter = nil
-  }
-
-  func waitUntilCompleted() async -> Bool {
-    if let completion { return completion }
-    return await withCheckedContinuation { completionWaiter = $0 }
-  }
-}
-
 private func makeCoverage(holes: [ClosedRange<Int64>]) -> MessageHistoryCoverageProjection {
   MessageHistoryCoverageProjection(
     messages: [],
@@ -340,7 +334,8 @@ private func seedThread(
   _ db: Database,
   readMaxID: Int64,
   unreadCount: Int = 5,
-  unreadMark: Bool = false
+  unreadMark: Bool = false,
+  serverReadMaxID: Int64? = nil
 ) throws {
   try User(
     id: testSenderID,
@@ -367,7 +362,8 @@ private func seedThread(
     archived: false,
     chatId: testChatID,
     unreadMark: unreadMark,
-    notificationSettings: nil
+    notificationSettings: nil,
+    serverReadInboxMaxId: serverReadMaxID
   ).insert(db)
   // These fixtures start from a certified history; individual tests add the
   // exact unknown intervals they exercise after the new-chat trigger ran.

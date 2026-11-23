@@ -3,6 +3,7 @@ import Foundation
 import GRDB
 import Logger
 import RealtimeV2
+import Synchronization
 
 #if os(iOS)
 import UIKit
@@ -14,67 +15,6 @@ struct AutomaticReadDemand: Sendable, Equatable {
   let maxID: Int64
   let highestVisibleIncomingID: Int64
   let unreadMark: Bool
-}
-
-struct AutomaticReadCoalescingState: Sendable, Equatable {
-  private(set) var inFlight: AutomaticReadDemand?
-  private(set) var pending: AutomaticReadDemand?
-  var inFlightMaxID: Int64? { inFlight?.maxID }
-  var pendingMaxID: Int64? { pending?.maxID }
-  private(set) var highestSuccessfulMaxID: Int64 = 0
-  private(set) var lastAttemptedMaxID: Int64 = 0
-
-  mutating func enqueue(
-    _ maxID: Int64,
-    highestVisibleIncomingID: Int64? = nil,
-    unreadMark: Bool = false
-  ) -> Int64? {
-    guard maxID > 0 else { return nil }
-    let demand = AutomaticReadDemand(
-      maxID: maxID,
-      highestVisibleIncomingID: highestVisibleIncomingID ?? maxID,
-      unreadMark: unreadMark
-    )
-    if inFlightMaxID == nil {
-      // A failed concrete marker may be retried, but a later visibility pass
-      // must never regress below a marker that may already have committed.
-      guard maxID > highestSuccessfulMaxID, maxID >= lastAttemptedMaxID else { return nil }
-      lastAttemptedMaxID = maxID
-      inFlight = demand
-      return maxID
-    }
-
-    let queuedHighWatermark = max(inFlightMaxID ?? 0, pendingMaxID ?? 0)
-    guard maxID > queuedHighWatermark else { return nil }
-    pending = demand
-    return nil
-  }
-
-  mutating func succeed(_ sentMaxID: Int64) -> Int64? {
-    guard inFlightMaxID == sentMaxID else { return nil }
-    inFlight = nil
-    highestSuccessfulMaxID = max(highestSuccessfulMaxID, sentMaxID)
-
-    guard let pending else { return nil }
-    self.pending = nil
-    guard pending.maxID > highestSuccessfulMaxID else { return nil }
-    lastAttemptedMaxID = pending.maxID
-    inFlight = pending
-    return pending.maxID
-  }
-
-  mutating func retryTarget(afterFailureOf sentMaxID: Int64) -> Int64? {
-    guard inFlightMaxID == sentMaxID else { return nil }
-    guard let pending else { return sentMaxID }
-    self.pending = nil
-    lastAttemptedMaxID = pending.maxID
-    inFlight = pending
-    return pending.maxID
-  }
-
-  func owns(_ maxID: Int64) -> Bool {
-    inFlightMaxID == maxID
-  }
 }
 
 struct AutomaticReadAdmission: Sendable, Equatable {
@@ -182,231 +122,26 @@ enum AutomaticReadRetryPolicy {
   }
 }
 
-private enum ReadSendResult {
-  case applied(authoritativeMaxID: Int64?)
-  case retryableFailure
-  case permanentFailure
-}
-
 public final class UnreadManager: Sendable {
   public static let shared = UnreadManager()
 
   private let log = Log.scoped("UnreadManager", enableTracing: false)
-  private static let readAllLocalCooldown: TimeInterval = 0.15
-  private static let readAllRemoteCooldown: TimeInterval = 0.35
-
-  private actor ReadAllGate {
-    struct State {
-      var lastLocalWriteAt: TimeInterval = 0
-      var lastRemoteSendAt: TimeInterval = 0
-      var remoteInFlight = false
-    }
-
-    private var owner: AuthAccountMutationToken?
-    private var stateByDialogId: [Int64: State] = [:]
-
-    func begin(
-      owner expectedOwner: AuthAccountMutationToken,
-      dialogId: Int64,
-      now: TimeInterval,
-      localCooldown: TimeInterval,
-      remoteCooldown: TimeInterval
-    ) throws -> (shouldWriteLocal: Bool, shouldSendRemote: Bool) {
-      try Auth.shared.handle.validateAccountMutation(expectedOwner)
-      if owner != expectedOwner {
-        owner = expectedOwner
-        stateByDialogId.removeAll(keepingCapacity: true)
-      }
-      var state = stateByDialogId[dialogId] ?? State()
-
-      let shouldWriteLocal = now - state.lastLocalWriteAt >= localCooldown
-      if shouldWriteLocal {
-        state.lastLocalWriteAt = now
-      }
-
-      let shouldSendRemote = state.remoteInFlight == false && now - state.lastRemoteSendAt >= remoteCooldown
-      if shouldSendRemote {
-        state.lastRemoteSendAt = now
-        state.remoteInFlight = true
-      }
-
-      stateByDialogId[dialogId] = state
-      return (shouldWriteLocal, shouldSendRemote)
-    }
-
-    func completeRemote(owner expectedOwner: AuthAccountMutationToken, dialogId: Int64) {
-      guard owner == expectedOwner, var state = stateByDialogId[dialogId] else { return }
-      state.remoteInFlight = false
-      stateByDialogId[dialogId] = state
-    }
-  }
-
-  actor VisibleReadGate {
-    struct Entry {
-      let leaseID = UUID()
-      var state = AutomaticReadCoalescingState()
-      var task: Task<Void, Never>?
-      var cancelledAt: ContinuousClock.Instant?
-    }
-
-    private var owner: AuthAccountMutationToken?
-    private var stateByDialogId: [Int64: Entry] = [:]
-    private let auth: AuthHandle
-
-    init(auth: AuthHandle = Auth.shared.handle) {
-      self.auth = auth
-    }
-
-    @discardableResult
-    func enqueue(
-      owner expectedOwner: AuthAccountMutationToken,
-      dialogId: Int64,
-      admission: AutomaticReadAdmission,
-      highestVisibleIncomingID: Int64,
-      requestedAt: ContinuousClock.Instant,
-      drain: @escaping @Sendable (UUID, Int64) async -> Void
-    ) throws -> Bool {
-      try auth.validateAccountMutation(expectedOwner)
-      resetIfNeeded(for: expectedOwner)
-      var entry = stateByDialogId[dialogId] ?? Entry()
-      if let cancelledAt = entry.cancelledAt, requestedAt <= cancelledAt { return false }
-      let next = entry.state.enqueue(
-        admission.certifiedMaxID,
-        highestVisibleIncomingID: highestVisibleIncomingID,
-        unreadMark: admission.unreadMark
-      )
-      if let next {
-        let leaseID = entry.leaseID
-        entry.task = Task { await drain(leaseID, next) }
-      }
-      stateByDialogId[dialogId] = entry
-      return next != nil
-    }
-
-    func succeed(
-      owner expectedOwner: AuthAccountMutationToken,
-      dialogId: Int64,
-      leaseID: UUID,
-      sentMaxID: Int64
-    ) throws -> Int64? {
-      try auth.validateAccountMutation(expectedOwner)
-      guard owner == expectedOwner, var entry = stateByDialogId[dialogId], entry.leaseID == leaseID else {
-        return nil
-      }
-      let next = entry.state.succeed(sentMaxID)
-      if next == nil { entry.task = nil }
-      stateByDialogId[dialogId] = entry
-      return next
-    }
-
-    func retryTarget(
-      owner expectedOwner: AuthAccountMutationToken,
-      dialogId: Int64,
-      leaseID: UUID,
-      failedMaxID: Int64
-    ) -> Int64? {
-      guard (try? auth.validateAccountMutation(expectedOwner)) != nil,
-            owner == expectedOwner,
-            var entry = stateByDialogId[dialogId],
-            entry.leaseID == leaseID
-      else { return nil }
-      let next = entry.state.retryTarget(afterFailureOf: failedMaxID)
-      stateByDialogId[dialogId] = entry
-      return next
-    }
-
-    func currentDemand(
-      owner expectedOwner: AuthAccountMutationToken,
-      dialogId: Int64,
-      leaseID: UUID,
-      maxID: Int64
-    ) -> AutomaticReadDemand? {
-      guard (try? auth.validateAccountMutation(expectedOwner)) != nil,
-            owner == expectedOwner,
-            let entry = stateByDialogId[dialogId],
-            entry.leaseID == leaseID,
-            entry.state.owns(maxID)
-      else { return nil }
-      return entry.state.inFlight
-    }
-
-    func abandon(owner expectedOwner: AuthAccountMutationToken, dialogId: Int64, leaseID: UUID) {
-      guard owner == expectedOwner, stateByDialogId[dialogId]?.leaseID == leaseID else { return }
-      let previous = stateByDialogId[dialogId]
-      previous?.task?.cancel()
-      stateByDialogId[dialogId] = previous?.cancelledAt.map { Entry(cancelledAt: $0) }
-    }
-
-    func cancel(
-      owner expectedOwner: AuthAccountMutationToken,
-      dialogId: Int64,
-      at cancelledAt: ContinuousClock.Instant
-    ) throws {
-      try auth.validateAccountMutation(expectedOwner)
-      resetIfNeeded(for: expectedOwner)
-      stateByDialogId[dialogId]?.task?.cancel()
-      // Keep the event boundary so an older visibility task still awaiting
-      // its database admission cannot create a fresh lease after cancellation.
-      let boundary = stateByDialogId[dialogId]?.cancelledAt.map { max($0, cancelledAt) } ?? cancelledAt
-      stateByDialogId[dialogId] = Entry(cancelledAt: boundary)
-    }
-
-    private func resetIfNeeded(for expectedOwner: AuthAccountMutationToken) {
-      guard owner != expectedOwner else { return }
-      for entry in stateByDialogId.values { entry.task?.cancel() }
-      owner = expectedOwner
-      stateByDialogId.removeAll(keepingCapacity: true)
-    }
-  }
-
-  private let readAllGate = ReadAllGate()
-  private let visibleReadGate = VisibleReadGate()
+  private let db = AppDatabase.shared
+  /// When each chat was last marked unread: a visibility pass measured before then must not read
+  /// it again.
+  private let unreadIntents = Mutex<[Int64: ContinuousClock.Instant]>([:])
 
   private init() {}
-
-  private let db = AppDatabase.shared
-
-  @discardableResult
-  private func sendReadMessagesToServer(
-    peerId: Peer,
-    maxId: Int64?,
-    expectedAccount: AuthAccountMutationToken
-  ) async -> ReadSendResult {
-    do {
-      let rpcResult = try await Api.realtime.send(
-        .readMessages(peerId: peerId, maxId: maxId),
-        expectedAccount: expectedAccount
-      )
-      let authoritativeMaxID: Int64?
-      if case let .readMessages(result) = rpcResult {
-        authoritativeMaxID = result.updates.compactMap { update -> Int64? in
-          guard case let .updateReadMaxID(read) = update.update,
-                read.peerID.toPeer() == peerId else { return nil }
-          return read.readMaxID
-        }.max()
-      } else {
-        authoritativeMaxID = nil
-      }
-      return .applied(authoritativeMaxID: authoritativeMaxID)
-    } catch is CancellationError {
-      return .retryableFailure
-    } catch {
-      log.error("Realtime readMessages failed", error: error)
-      return AutomaticReadRetryPolicy.shouldRetry(error) ? .retryableFailure : .permanentFailure
-    }
-  }
 
   // This is called when chat opens initially
   public func readMessages(_ maxId: Int64, in peerId: Peer, chatId: Int64) {
     readVisible(peerId: peerId, chatId: chatId, highestVisibleIncomingID: maxId)
   }
 
-  /// Advances automatic read state only through visible incoming history whose
-  /// continuity is certified by persisted history state.
-  ///
-  /// The local dialog is deliberately not changed here. The authoritative
-  /// `UpdateReadMaxId` returned by the server owns `readInboxMaxId`, unread
-  /// count, and unread-mark projection.
+  /// Reads the visible incoming history on this device at once, through what persisted history
+  /// certifies: the cursor and count move in the dialog, so the chat, chat list, app icon and
+  /// Dock change together, and `ReadStateSync` pushes the cursor. Like Telegram's
+  /// `applyMaxReadIndexInteractively`.
   public func readVisible(
     peerId: Peer,
     chatId: Int64,
@@ -420,168 +155,37 @@ public final class UnreadManager: Sendable {
     let dialogId = Dialog.getDialogId(peerId: peerId)
     Task(priority: .userInitiated) {
       do {
-        let admission = try await db.dbWriter.write { db -> AutomaticReadAdmission? in
+        let change = try await db.dbWriter.write { db -> LocalReadChange in
           try Auth.shared.handle.validateAccountMutation(mutationToken)
-          return try AutomaticReadAdmission.resolve(
-            db,
-            peerId: peerId,
-            chatId: chatId,
-            highestVisibleIncomingID: highestVisibleIncomingID
-          )
+          // Checked inside the write, which orders it with mark-unread's own write.
+          guard !self.isSuperseded(dialogId: dialogId, requestedAt: requestedAt),
+                let admission = try AutomaticReadAdmission.resolve(
+                  db,
+                  peerId: peerId,
+                  chatId: chatId,
+                  highestVisibleIncomingID: highestVisibleIncomingID
+                )
+          else { return .unchanged }
+          return try Dialog.applyLocalRead(db, peerId: peerId, through: admission.certifiedMaxID)
         }
-        guard let admission else { return }
-        try await visibleReadGate.enqueue(
-          owner: mutationToken,
-          dialogId: dialogId,
-          admission: admission,
-          highestVisibleIncomingID: highestVisibleIncomingID,
-          requestedAt: requestedAt
-        ) { [self] leaseID, maxID in
-          await drainVisibleReads(
-            owner: mutationToken,
-            peerId: peerId,
-            chatId: chatId,
-            dialogId: dialogId,
-            leaseID: leaseID,
-            firstMaxID: maxID
-          )
-        }
+        afterLocalRead(change, peerId: peerId, chatId: chatId, account: mutationToken)
       } catch is CancellationError {
         return
       } catch {
-        log.error("Failed to resolve automatic read frontier", error: error)
+        log.error("Failed to read visible messages", error: error)
       }
     }
   }
 
-  /// An explicit unread intent supersedes any retained visibility event. The
-  /// per-peer transaction lane orders an already-sent read before this intent;
-  /// cancelling its lease prevents a later retry from undoing it.
+  /// An explicit unread intent supersedes earlier visibility work and any read not sent yet.
   func cancelAutomaticReads(in peerId: Peer) async {
-    let cancelledAt = ContinuousClock.now
-    guard let owner = try? Auth.shared.handle.beginAccountMutation() else { return }
-    try? await visibleReadGate.cancel(
-      owner: owner, dialogId: Dialog.getDialogId(peerId: peerId), at: cancelledAt
-    )
+    let dialogId = Dialog.getDialogId(peerId: peerId)
+    unreadIntents.withLock { $0[dialogId] = ContinuousClock.now }
+    await ReadStateSync.shared.dropPending(peerId)
   }
 
-  private func drainVisibleReads(
-    owner: AuthAccountMutationToken,
-    peerId: Peer,
-    chatId: Int64,
-    dialogId: Int64,
-    leaseID: UUID,
-    firstMaxID: Int64
-  ) async {
-    var nextMaxID: Int64? = firstMaxID
-    var failureCount = 0
-    while let maxID = nextMaxID {
-      guard let demand = await visibleReadGate.currentDemand(
-        owner: owner,
-        dialogId: dialogId,
-        leaseID: leaseID,
-        maxID: maxID
-      ) else { return }
-
-      let result: ReadSendResult
-      do {
-        let admission = try await db.dbWriter.write { db in
-          try Auth.shared.handle.validateAccountMutation(owner)
-          let currentMaxID = try Dialog.get(peerId: peerId).fetchOne(db)?.readInboxMaxId ?? 0
-          return (
-            alreadyApplied: currentMaxID >= maxID,
-            maySend: try AutomaticReadAdmission.stillAdmits(db, peerId: peerId, chatId: chatId, demand: demand)
-          )
-        }
-        if admission.alreadyApplied {
-          result = .applied(authoritativeMaxID: maxID)
-        } else if admission.maySend {
-          guard await visibleReadGate.currentDemand(
-            owner: owner, dialogId: dialogId, leaseID: leaseID, maxID: maxID
-          ) != nil else { return }
-          result = await sendReadMessagesToServer(peerId: peerId, maxId: maxID, expectedAccount: owner)
-        } else {
-          await visibleReadGate.abandon(owner: owner, dialogId: dialogId, leaseID: leaseID)
-          return
-        }
-      } catch {
-        result = .retryableFailure
-      }
-
-      var shouldRetry = false
-      switch result {
-      case let .applied(authoritativeMaxID):
-        do {
-          try Auth.shared.handle.validateAccountMutation(owner)
-          let requiredMaxID = min(maxID, authoritativeMaxID ?? maxID)
-          let durableMaxID = try await db.dbWriter.write { db in
-            try Auth.shared.handle.validateAccountMutation(owner)
-            return try Dialog.get(peerId: peerId).fetchOne(db)?.readInboxMaxId ?? 0
-          }
-          guard await visibleReadGate.currentDemand(
-            owner: owner, dialogId: dialogId, leaseID: leaseID, maxID: maxID
-          ) != nil else { return }
-          guard durableMaxID >= requiredMaxID else {
-            // The response may be buffered behind user-bucket catch-up. Keep
-            // ownership until its projection actually commits.
-            shouldRetry = true
-            break
-          }
-          if requiredMaxID < maxID {
-            // A definitive server clamp retires this stale demand; never spin
-            // forever waiting for a marker the server did not acknowledge.
-            await visibleReadGate.abandon(owner: owner, dialogId: dialogId, leaseID: leaseID)
-            nextMaxID = nil
-          } else {
-            nextMaxID = try await visibleReadGate.succeed(
-              owner: owner,
-              dialogId: dialogId,
-              leaseID: leaseID,
-              sentMaxID: maxID
-            )
-          }
-          NotificationCleanup.removeNotifications(
-            threadId: "chat_\(chatId)",
-            upToMessageId: requiredMaxID,
-            expectedAccount: owner
-          )
-          failureCount = 0
-        } catch {
-          shouldRetry = true
-        }
-
-      case .retryableFailure:
-        shouldRetry = true
-
-      case .permanentFailure:
-        await visibleReadGate.abandon(owner: owner, dialogId: dialogId, leaseID: leaseID)
-        return
-      }
-
-      if shouldRetry {
-        failureCount += 1
-        guard let retryMaxID = await visibleReadGate.retryTarget(
-          owner: owner,
-          dialogId: dialogId,
-          leaseID: leaseID,
-          failedMaxID: maxID
-        ) else {
-          await visibleReadGate.abandon(owner: owner, dialogId: dialogId, leaseID: leaseID)
-          return
-        }
-        nextMaxID = retryMaxID
-        let delaySeconds = AutomaticReadRetryPolicy.delaySeconds(
-          failureCount: failureCount,
-          jitterUnit: Double.random(in: 0 ... 1)
-        )
-        do {
-          try await Task.sleep(for: .seconds(delaySeconds))
-        } catch {
-          await visibleReadGate.abandon(owner: owner, dialogId: dialogId, leaseID: leaseID)
-          return
-        }
-      }
-    }
+  private func isSuperseded(dialogId: Int64, requestedAt: ContinuousClock.Instant) -> Bool {
+    unreadIntents.withLock { intents in intents[dialogId].map { requestedAt <= $0 } ?? false }
   }
 
   /// Explicit "Mark as Read" from a chat list or menu: moves the read cursor and also reads
@@ -600,85 +204,65 @@ public final class UnreadManager: Sendable {
     }
   }
 
-  // Useful in context menu to mark all messages as read
+  /// Reads the whole chat on this device: through its last message, count zero, no mark. Used
+  /// at the live end of a chat and from a chat list or menu.
   public func readAll(_ peerId: Peer, chatId: Int64) {
     log.trace("readAll")
+    let requestedAt = ContinuousClock.now
     guard let mutationToken = try? Auth.shared.handle.beginAccountMutation() else { return }
-    let localDialogId = Dialog.getDialogId(peerId: peerId)
+    let dialogId = Dialog.getDialogId(peerId: peerId)
 
     Task(priority: .userInitiated) {
-      let now = Date().timeIntervalSinceReferenceDate
-      let gateDecision: (shouldWriteLocal: Bool, shouldSendRemote: Bool)
       do {
-        gateDecision = try await readAllGate.begin(
-          owner: mutationToken,
-          dialogId: localDialogId,
-          now: now,
-          localCooldown: Self.readAllLocalCooldown,
-          remoteCooldown: Self.readAllRemoteCooldown
-        )
-      } catch {
-        return
-      }
-      let (shouldWriteLocal, shouldSendRemote) = gateDecision
-
-      if shouldWriteLocal {
-        do {
-          try await db.dbWriter.write { db in
-            try Auth.shared.handle.validateAccountMutation(mutationToken)
-            let before = try Dialog.fetchOne(db, id: localDialogId)
-            let hasUnread = (Column("unreadCount") > 0) || (Column("unreadMark") == true)
-            try Dialog
-              .filter(id: localDialogId)
-              .filter(hasUnread)
-              .updateAll(db, [
-                Column("unreadCount").set(to: 0),
-                Column("unreadMark").set(to: false)
-              ])
-            let after = try Dialog.fetchOne(db, id: localDialogId)
-            let beforeUnread = before?.unreadCount ?? 0
-            let afterUnread = after?.unreadCount ?? 0
-            if beforeUnread != afterUnread || before?.unreadMark != after?.unreadMark {
-              let beforeMark = before?.unreadMark.map(String.init) ?? "nil"
-              let afterMark = after?.unreadMark.map(String.init) ?? "nil"
-              log.info(
-                "[UnreadDiag] read_all_local peer=\(peerId) chatId=\(chatId) dialogId=\(localDialogId) unread=\(beforeUnread)->\(afterUnread) mark=\(beforeMark)->\(afterMark) remote=\(shouldSendRemote)"
-              )
-            }
-          }
-        } catch {
-          log.error("Failed to update local DB with unread count", error: error)
+        let change = try await db.dbWriter.write { db -> LocalReadChange in
+          try Auth.shared.handle.validateAccountMutation(mutationToken)
+          guard !self.isSuperseded(dialogId: dialogId, requestedAt: requestedAt) else { return .unchanged }
+          return try Dialog.applyLocalReadToEnd(db, peerId: peerId)
         }
-
-        #if os(macOS)
-        // Message-list visibility can request read-all repeatedly. Reuse the
-        // existing local-write gate so notification-center enumeration is bounded.
-        NotificationCleanup.removeNotifications(
-          threadId: "chat_\(chatId)",
-          upToMessageId: nil,
-          expectedAccount: mutationToken
-        )
-        #endif
-      }
-
-      if shouldSendRemote {
-        if (try? Auth.shared.handle.validateAccountMutation(mutationToken)) != nil {
-          await sendReadMessagesToServer(
-            peerId: peerId,
-            maxId: nil,
+        afterLocalRead(change, peerId: peerId, chatId: chatId, account: mutationToken)
+        #if os(iOS)
+        // A notification can land for a message already read here; reading the chat clears it.
+        if change == .unchanged || change == .clearedMark {
+          NotificationCleanup.removeNotifications(
+            threadId: "chat_\(chatId)",
+            upToMessageId: nil,
             expectedAccount: mutationToken
           )
         }
-        await readAllGate.completeRemote(owner: mutationToken, dialogId: localDialogId)
+        #endif
+      } catch is CancellationError {
+        return
+      } catch {
+        log.error("Failed to read chat", error: error)
       }
     }
+  }
 
-    #if os(iOS)
-    NotificationCleanup.removeNotifications(
-      threadId: "chat_\(chatId)",
-      upToMessageId: nil,
-      expectedAccount: mutationToken
-    )
-    #endif
+  private func afterLocalRead(
+    _ change: LocalReadChange,
+    peerId: Peer,
+    chatId: Int64,
+    account: AuthAccountMutationToken
+  ) {
+    switch change {
+    case .unchanged:
+      return
+    case let .advanced(throughId):
+      ReadStateSync.shared.schedule(peerId)
+      NotificationCleanup.removeNotifications(
+        threadId: "chat_\(chatId)",
+        upToMessageId: throughId,
+        expectedAccount: account
+      )
+    case .clearedMark:
+      // Nothing for the cursor sync to carry: clear the server's mark with a read of its own.
+      Task(priority: .utility) { [log] in
+        do {
+          _ = try await Api.realtime.send(.readMessages(peerId: peerId, maxId: nil), expectedAccount: account)
+        } catch {
+          log.error("Failed to clear the unread mark", error: error)
+        }
+      }
+    }
   }
 }

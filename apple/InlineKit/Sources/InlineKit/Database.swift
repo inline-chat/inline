@@ -1561,6 +1561,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("dialog server read cursor") { db in
+      // Reading moves `readInboxMaxId` on this device first; this is the cursor the server has
+      // confirmed, so a read it has not got survives a relaunch and is pushed later. Every stored
+      // cursor came from the server, so nothing starts pending.
+      try db.alter(table: "dialog") { table in
+        table.add(column: "serverReadInboxMaxId", .integer)
+      }
+      try db.execute(sql: #"UPDATE "dialog" SET "serverReadInboxMaxId" = "readInboxMaxId""#)
+    }
+
     return migrator
   }
 }

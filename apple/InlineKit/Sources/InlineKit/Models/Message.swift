@@ -926,12 +926,18 @@ public extension Message {
     out != true && countsAsUnread && contentPayload?.hasServiceMessage != true
   }
 
-  /// Stored messages after `readInboxMaxId` that count toward unread, for a recount over history
-  /// this device holds in full.
-  internal static func localUnreadCount(_ db: Database, chatId: Int64, after readInboxMaxId: Int64) throws -> Int {
+  /// Stored messages after `readInboxMaxId` (through `maxId`) that count toward unread, for a
+  /// count over history this device holds in full.
+  internal static func localUnreadCount(
+    _ db: Database,
+    chatId: Int64,
+    after readInboxMaxId: Int64,
+    through maxId: Int64 = .max
+  ) throws -> Int {
     try Message
       .filter(Message.Columns.chatId == chatId)
       .filter(Message.Columns.messageId > readInboxMaxId)
+      .filter(Message.Columns.messageId <= maxId)
       .filter(Message.Columns.out == false)
       .fetchAll(db)
       .count(where: \.countsTowardUnread)

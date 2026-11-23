@@ -104,35 +104,6 @@ struct UnreadReplayGuardTests {
     }
   }
 
-  @Test("while this device's read is in flight, a server dialog from before it keeps the chat read")
-  func readInFlightKeepsLocalCount() throws {
-    let dbQueue = try makeInMemoryDB()
-    let dialogID = Dialog.getDialogId(peerId: .thread(id: chatId))
-    let intent = UUID().uuidString
-    try dbQueue.write { (db: Database) throws in
-      // Opening the chat cleared it locally; the read cursor moves when the server confirms.
-      try seedDialog(db, readInboxMaxId: 20, unreadCount: 0)
-      LocalReadsInFlight.begin(dialogID: dialogID, intentID: intent)
-      defer { LocalReadsInFlight.end(dialogID: dialogID, intentID: intent) }
-
-      try makeProtocolDialog(readMaxId: 20, unreadCount: 3).saveFull(db)
-      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
-      try makeProtocolDialog(readMaxId: 20, unreadCount: 3)
-        .saveFull(db, preservingExistingReadState: true, unreadCountIsOrdered: true)
-      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 0)
-
-      // A dialog the server computed after the read is taken.
-      try makeProtocolDialog(readMaxId: 24, unreadCount: 0).saveFull(db)
-      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.readInboxMaxId == 24)
-    }
-    LocalReadsInFlight.end(dialogID: dialogID, intentID: intent)
-    #expect(!LocalReadsInFlight.contains(dialogID: dialogID))
-    try dbQueue.write { (db: Database) throws in
-      try makeProtocolDialog(readMaxId: 24, unreadCount: 1).saveFull(db)
-      #expect(try Dialog.get(peerId: .thread(id: chatId)).fetchOne(db)?.unreadCount == 1)
-    }
-  }
-
   private func makeProtocolDialog(readMaxId: Int64, unreadCount: Int32) -> InlineProtocol.Dialog {
     .with {
       $0.peer = .with { $0.chat.chatID = chatId }

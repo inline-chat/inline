@@ -34,6 +34,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var peerThreadId: Int64?
   public var spaceId: Int64?
   public var unreadCount: Int?
+  /// The read cursor on this device. Reading moves it at once; `ReadStateSync` pushes it.
   public var readInboxMaxId: Int64?
   public var readOutboxMaxId: Int64?
   public var pinned: Bool?
@@ -64,6 +65,9 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var unreadMentionsCount: Int? = nil
   /// The viewer's messages with unseen reactions, kept the same way as `unreadMentionsCount`.
   public var unreadReactionsCount: Int? = nil
+  /// The read cursor the server has confirmed. While `readInboxMaxId` is ahead of it, this
+  /// device has a read the server has not got yet (see `ReadStateSync`).
+  public var serverReadInboxMaxId: Int64? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id
@@ -91,6 +95,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     case collapsedMaxId
     case unreadMentionsCount
     case unreadReactionsCount
+    case serverReadInboxMaxId
   }
 
   public enum Columns {
@@ -118,6 +123,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let collapsedMaxId = Column(CodingKeys.collapsedMaxId)
     public static let unreadMentionsCount = Column(CodingKeys.unreadMentionsCount)
     public static let unreadReactionsCount = Column(CodingKeys.unreadReactionsCount)
+    public static let serverReadInboxMaxId = Column(CodingKeys.serverReadInboxMaxId)
   }
 
   public static let space = belongsTo(Space.self)
@@ -175,6 +181,7 @@ public extension Dialog {
     chatId = from.chatId
     unreadCount = from.unreadCount
     readInboxMaxId = from.readInboxMaxId
+    serverReadInboxMaxId = from.readInboxMaxId
     readOutboxMaxId = from.readOutboxMaxId
     pinned = from.pinned
     archived = from.archived
@@ -265,6 +272,7 @@ public extension Dialog {
     spaceId = from.hasSpaceID ? from.spaceID : nil
     unreadCount = Int(from.unreadCount)
     readInboxMaxId = from.hasReadMaxID ? from.readMaxID : nil
+    serverReadInboxMaxId = readInboxMaxId
     readOutboxMaxId = nil
     pinned = from.pinned
     archived = from.archived
@@ -417,6 +425,7 @@ public extension ApiDialog {
       dialog.translationEnabled = existing.translationEnabled
       dialog.translationLegacyImportPending = existing.translationLegacyImportPending
       dialog.copyActivityCounts(from: existing)
+      dialog.keepReadState(of: existing, serverReadMaxId: readInboxMaxId)
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -478,16 +487,14 @@ public extension InlineProtocol.Dialog {
       if activityCounts == nil || preservingExistingReadState {
         newDialog.copyActivityCounts(from: existing)
       }
-      // The server owns read state, but this dialog can be older than what is applied here.
-      // Like `UpdateReadMaxId`, the read cursor never moves back, and the count and mark that go
-      // with it stay too (Telegram's `localReadMarkIsAheadOfServer`).
       let localReadMaxId = max(0, existing.readInboxMaxId ?? 0)
       let serverReadMaxId = hasReadMaxID ? max(0, readMaxID) : 0
-      if preservingExistingReadState || serverReadMaxId < localReadMaxId {
+      if preservingExistingReadState {
         newDialog.unreadMark = existing.unreadMark
         newDialog.readInboxMaxId = existing.readInboxMaxId
         newDialog.unreadCount = existing.unreadCount
       }
+      newDialog.keepReadState(of: existing, serverReadMaxId: hasReadMaxID ? readMaxID : nil)
       if preservingExistingReadState {
         newDialog.readOutboxMaxId = existing.readOutboxMaxId
         // A kept count is replaced only by one ordered with it: the same read cursor and a chat
@@ -499,12 +506,6 @@ public extension InlineProtocol.Dialog {
         {
           newDialog.unreadCount = Int(unreadCount)
         }
-      }
-      // This device's own read has not reached the server's cursor yet: the server's count and
-      // mark predate it (see `LocalReadsInFlight`).
-      if serverReadMaxId <= localReadMaxId, LocalReadsInFlight.contains(dialogID: existing.id) {
-        newDialog.unreadMark = existing.unreadMark
-        newDialog.unreadCount = existing.unreadCount
       }
       if let activityCounts, !preservingExistingReadState {
         try newDialog.applySnapshotActivityCounts(db, activityCounts, existing: existing)

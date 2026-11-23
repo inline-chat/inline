@@ -1732,11 +1732,10 @@ public actor UpdatesEngine: Sendable {
       // count is usable only for the same read frontier and exact Chat
       // sequence covered by this page. A future count would include messages
       // that are still buffered and would be counted again on live delivery.
-      // Nor take a count from before this device's own read that is still in flight.
+      // A read made here and not pushed yet puts the local cursor ahead, so its count stays.
       guard dialog.hasUnreadCount, dialog.unreadCount >= 0,
             dialog.hasReadMaxID, dialog.readMaxID >= 0,
             dialog.readMaxID == max(0, existing.readInboxMaxId ?? 0),
-            !LocalReadsInFlight.contains(dialogID: existing.id),
             dialog.hasChatID, existing.chatId == dialog.chatID,
             let snapshot = chatSnapshots[dialog.chatID],
             validatedPeer(snapshot.peerID) == peer,
@@ -1750,6 +1749,7 @@ public actor UpdatesEngine: Sendable {
             ),
             Int64(snapshot.seq) == coveredSequence else { continue }
       existing.unreadCount = Int(dialog.unreadCount)
+      existing.serverReadInboxMaxId = max(existing.serverReadInboxMaxId ?? 0, dialog.readMaxID)
       try existing.update(db)
     }
   }
@@ -3686,7 +3686,13 @@ extension InlineProtocol.UpdateReadMaxId {
 
     if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
       let currentReadMaxID = max(0, dialog.readInboxMaxId ?? 0)
+      // The server has reads through here, whatever this device has read since.
+      let confirmed = readMaxID > max(0, dialog.serverReadInboxMaxId ?? 0)
+      if confirmed { dialog.serverReadInboxMaxId = readMaxID }
       guard readMaxID > currentReadMaxID else {
+        // Behind a read made here, its count predates that read (Telegram keeps a local read
+        // mark that is ahead of the server's the same way).
+        if confirmed { try dialog.update(db) }
         // Direct transaction results and sequenced User-bucket replay can
         // deliver the same read projection through different paths. Treat an
         // equal marker as already applied so it cannot erase a later explicit

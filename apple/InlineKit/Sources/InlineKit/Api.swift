@@ -52,6 +52,8 @@ public enum Api {
           Task(priority: .utility) { await DurableUploadCoordinator.shared.retryPendingCancellations() }
           // Once per process: resume media sends a terminated launch left in `.sending`.
           Task(priority: .userInitiated) { @MainActor in await PendingSendRecovery.recoverAfterLaunch() }
+          // Reads made offline or before a relaunch.
+          Task(priority: .utility) { await ReadStateSync.shared.resumePending() }
           guard importTask == nil else { continue }
           importTask = Task(priority: .utility) {
             await DialogTranslationMigration.importPending(realtime: realtime)

@@ -684,6 +684,7 @@ extension Dialog {
   var withReadProgressAsUnreadFlags: Dialog {
     var dialog = self
     dialog.readInboxMaxId = nil
+    dialog.serverReadInboxMaxId = nil
     dialog.readOutboxMaxId = nil
     dialog.unreadCount = (unreadCount ?? 0) > 0 ? 1 : 0
     dialog.unreadMentionsCount = (unreadMentionsCount ?? 0) > 0 ? 1 : 0
