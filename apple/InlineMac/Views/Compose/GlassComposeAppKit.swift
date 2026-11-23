@@ -100,10 +100,12 @@ class GlassComposeAppKit: NSView {
   private var canSend: Bool {
     switch usage {
       case .chat:
-        !drafts2.hasPendingAttachments(peer: peerId) &&
+        switchingAttachmentIds.isEmpty &&
+          !drafts2.hasPendingAttachments(peer: peerId) &&
           (!isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil)
       case let .newThread(context):
-        !context.attachmentStore.hasPendingAttachments &&
+        switchingAttachmentIds.isEmpty &&
+          !context.attachmentStore.hasPendingAttachments &&
           (!isEmptyTrimmed || !context.attachmentStore.attachments.isEmpty) &&
           !isSubmittingNewThread
     }
@@ -175,8 +177,11 @@ class GlassComposeAppKit: NSView {
   private var voiceSpaceKeyUnsubscribe: (() -> Void)?
 
   // [uniqueId: FileMediaItem]
-  /// Attachments being switched between photo and file by Send as Original.
-  private var switchingAttachmentIds: Set<String> = []
+  /// Attachments being switched between photo and file by Send as Original. Send waits for them:
+  /// it would go in the form being left, and an original carries its location.
+  private var switchingAttachmentIds: Set<String> = [] {
+    didSet { updateSendButtonIfNeeded() }
+  }
   private var attachmentItems: [String: FileMediaItem] = [:] {
     didSet {
       updateSendButtonIfNeeded()
