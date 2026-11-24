@@ -133,11 +133,21 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   private var unreadState: ChatActivityNavigator.State = .empty
   private var affordance = ChatScrollAffordanceState()
   private var lastReadPass: CFTimeInterval = 0
+  /// The newest message the last read of the whole chat ran for (0 for none loaded). At the live end a
+  /// pass reads the chat again only for a newer message, or once the chat may be unread again (a mark,
+  /// a count, the app or the list coming back): each read is a write and a notification-center query,
+  /// and passes run a few times a second while the list moves and after every row update.
+  private var readAllThrough: Int64?
+  /// Scroll-end work that waits for the list to rest a moment, so a reader who stops and goes on does
+  /// not trim, warm media and save the place at every stop (`listSettled`).
+  private var settleWork: DispatchWorkItem?
 
   // Media warm-up
   /// Rows whose images were asked for ahead of time, so they can be let go when they move away.
   private var prefetched: [ChatRowID: [FullMessage]] = [:]
   private var prefetchKey: (first: Int, last: Int, revision: UInt64)?
+  /// What the last warm-up was asked for: the rows on screen and the snapshot.
+  private var warmedKey: (first: Int, last: Int, revision: UInt64)?
   private var warmupTask: Task<Void, Never>?
   private var warmups: [InlineTinyThumbnailWarmup] = []
 
@@ -392,6 +402,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     jumpTask?.cancel()
     returnToLatestTask?.cancel()
     warmupTask?.cancel()
+    settleWork?.cancel()
     unreadFetchTask?.cancel()
     unreadFetchSpinner?.removeFromSuperview()
     let warmups = warmups
@@ -427,6 +438,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       returnToLatestTask?.cancel()
       // The menu's overlay belongs to the window and would outlive the chat.
       menu.dismissImmediately()
+      // A settle still waiting is done now: the place is saved as the chat is left.
+      settleWork?.cancel()
+      settleWork = nil
       saveReadingPlace()
       onVisibleMessagesChanged?(nil)
       #if DEBUG
@@ -436,6 +450,7 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     } else {
       // Back on screen: what it shows is read again, as the collection view's did.
       lastReadCandidate = 0
+      readAllThrough = nil
       setNeedsLayout()
       #if DEBUG
       if TimelineProbe.isRequested, probe == nil { probe = TimelineProbe(list: list, host: self) }
@@ -913,7 +928,16 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
 
   /// After an update and when scrolling stops, as the collection view does: the stripped thumbnails
   /// of the rows on screen first, then of the two newer rows and the lookahead's older ones.
-  private func warmMedia() {
+  /// `unlessWarmed`: a scroll that stopped where the last warm-up was asked for (a tap that caught a
+  /// fling, a pause between drags) leaves that one running instead of cancelling and asking again.
+  private func warmMedia(unlessWarmed: Bool = false) {
+    let shown = list.layout.visible
+    if let snapshot, let first = shown.first?.index, let last = shown.last?.index {
+      if unlessWarmed, let key = warmedKey, key.first == first, key.last == last, key.revision == snapshot.revision {
+        return
+      }
+      warmedKey = (first, last, snapshot.revision)
+    }
     warmupTask?.cancel()
     warmupTask = Task { @MainActor [weak self] in
       guard let self else { return }
@@ -1291,6 +1315,8 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     setNeedsLayout()
     layoutIfNeeded()
     UIView.animate(withDuration: 0.15) { self.alpha = 1 }
+    // The open's read ran while the list was still hidden; read what the fade reveals.
+    readPass(force: true)
   }
 
   // MARK: - History
@@ -1524,6 +1550,9 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
   /// A finger on the list: a focus still waiting for its message to sync no longer moves the list,
   /// and a return to latest still fetching stops moving it, as the collection view's drag did.
   private func dragBegan() {
+    // The reader goes on: the last stop's settle work waits for the next one.
+    settleWork?.cancel()
+    settleWork = nil
     holdsOpeningPlace = false
     blockedEdges.removeAll()
     if pendingFocus?.awaitsArrival == true, jumpTask == nil { pendingFocus = nil }
@@ -1820,6 +1849,11 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
       readFrontier = 0
       lastReadCandidate = 0
     }
+    // The chat may be unread again (a mark, a count from the server, a cursor short of the last read):
+    // the next pass at the live end reads it whole again.
+    if state.unreadMark || state.unreadCount > 0 || state.readInboxMaxId < (readAllThrough ?? 0) {
+      readAllThrough = nil
+    }
     unreadState = state
     updateAffordance(force: true)
   }
@@ -1828,22 +1862,38 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     reportPlace()
     prefetchMedia()
     updateReplyReturns()
+    // The count follows every frame; the read itself is written a few times a second at most.
+    advanceReadFrontier()
     updateAffordance(force: false)
     updateDatePill()
-    // While the list moves, read marking runs a few times a second at most.
     readPass(force: false)
   }
 
   private func scrollEnded() {
-    if let edge = pendingTrimEdge, loadingEdges.isEmpty { trimWindow(keeping: edge) }
-    warmMedia()
     scheduleDatePillHide()
-    saveReadingPlace()
+    // What the list stopped on is read at once.
     readPass(force: true)
+    settleWork?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.listSettled() }
+    settleWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+  }
+
+  /// The list rested after a scroll: a trim that waited for it, the stripped thumbnails around the rows on
+  /// screen, and the reading place. A drag in the meantime cancels it (`dragBegan`); leaving the chat
+  /// saves the place itself.
+  private func listSettled() {
+    settleWork = nil
+    guard !list.isTracking, !list.isDecelerating else { return }
+    if let edge = pendingTrimEdge, loadingEdges.isEmpty { trimWindow(keeping: edge) }
+    warmMedia(unlessWarmed: true)
+    saveReadingPlace()
   }
 
   @objc private func applicationDidBecomeActive() {
     lastReadCandidate = 0
+    // Notifications may have landed for messages already read here; reading the chat clears them.
+    readAllThrough = nil
     readPass(force: true)
   }
 
@@ -1852,6 +1902,58 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     // Every item of an album on screen is seen.
     return list.layout.visible.flatMap { Self.chatMessages(snapshot.row(for: $0.id)) }
       .filter { $0.message.messageId > 0 }
+  }
+
+  /// What is on screen counts as seen: a list on screen in an active, foreground scene, placed, and not on
+  /// its way to a focused message. A focus waiting for its message to sync keeps the list at the live end,
+  /// whose rows are read as usual: the message may never arrive (deleted, or the push ran ahead of a
+  /// failed sync).
+  private var readsWhatIsShown: Bool {
+    guard !isPreview, hasOpened, chatId != nil, let window, !isHidden, alpha > 0.01,
+          window.windowScene?.activationState == .foregroundActive,
+          UIApplication.shared.applicationState == .active,
+          unreadFetchBoundary == nil, pendingFocus == nil || pendingFocus?.awaitsArrival == true
+    else { return false }
+    return true
+  }
+
+  /// The newest message others sent among the rows on screen, service rows and every item of an album
+  /// included. Runs on every layout of a scroll, so it builds no arrays.
+  private func newestVisibleIncomingId() -> Int64? {
+    guard let snapshot else { return nil }
+    var newest: Int64 = 0
+    func see(_ message: FullMessage) {
+      let id = message.message.messageId
+      if id > newest, message.message.out != true { newest = id }
+    }
+    for placement in list.layout.visible {
+      switch snapshot.row(for: placement.id)?.content {
+        case let .message(message, _)?: see(message)
+        case let .album(album, _)?: for item in album.items { see(item) }
+        default: break
+      }
+    }
+    return newest > 0 ? newest : nil
+  }
+
+  /// The newest stored message the window holds, yours included, or 0: what a read of the whole chat
+  /// reads through.
+  private func newestLoadedMessageId() -> Int64 {
+    guard let rows = snapshot?.rows else { return 0 }
+    for row in rows.reversed() {
+      let ids = Self.chatMessages(row).map(\.message.messageId).filter { $0 > 0 }
+      if let newest = ids.max() { return newest }
+    }
+    return 0
+  }
+
+  /// Lowers the scroll button's count as incoming messages come into view, on every layout, as the
+  /// collection view's count followed the scroll: only the list's own frontier moves, which
+  /// `ChatUnreadBadgeCount` subtracts until the read written by `readPass` lands.
+  private func advanceReadFrontier() {
+    guard readsWhatIsShown, let candidate = newestVisibleIncomingId(), candidate > readFrontier else { return }
+    readFrontier = candidate
+    updateAffordance(force: true)
   }
 
   /// Marks what the reader has seen: only for a list on screen in an active, foreground scene, placed,
@@ -1864,44 +1966,49 @@ final class TimelineMessagesView: UIView, ChatMessageListHosting, SendMessageAni
     let now = CACurrentMediaTime()
     guard force || now - lastReadPass > 0.3 else { return }
     lastReadPass = now
-    guard !isPreview, hasOpened, let window, !isHidden, alpha > 0.01,
-          window.windowScene?.activationState == .foregroundActive,
-          UIApplication.shared.applicationState == .active,
-          // A focus waiting for its message to sync keeps the list at the live end, whose rows are read
-          // as usual: the message may never arrive (deleted, or the push ran ahead of a failed sync).
-          unreadFetchBoundary == nil, pendingFocus == nil || pendingFocus?.awaitsArrival == true, let chatId
-    else {
+    guard readsWhatIsShown, let chatId else {
       if window == nil || UIApplication.shared.applicationState != .active { onVisibleMessagesChanged?(nil) }
       return
     }
-    let visible = visibleMessages()
     // Everything others sent that is on screen is seen, service rows included.
-    let candidate = visible.filter { $0.message.out != true }
-      .map(\.message.messageId).max()
+    let candidate = newestVisibleIncomingId()
     let isMoving = (list.isTracking || list.isDecelerating) && !leaving
+    // The count falls with what is seen, before the write lands; at the live end too.
+    if let candidate, candidate > readFrontier {
+      readFrontier = candidate
+      updateAffordance(force: true)
+    }
     if distanceFromBottom <= 12, viewModel.historyCoverage.isAtCertifiedLiveEnd {
-      // Only the real live end stands for every message; a window's bottom does not.
-      #if DEBUG
-      if pendingFocus != nil { debugLog("TIMELINE_DEBUG read all while a focus awaits its message") }
-      #endif
-      UnreadManager.shared.readAll(peer, chatId: chatId)
+      // Only the real live end stands for every message; a window's bottom does not. Once per newest
+      // message: a drag resting at the bottom, or a reply streaming in, reads nothing new.
+      let newest = newestLoadedMessageId()
+      if readAllThrough != newest {
+        readAllThrough = newest
+        #if DEBUG
+        if pendingFocus != nil { debugLog("TIMELINE_DEBUG read all while a focus awaits its message") }
+        debugLog("TIMELINE_DEBUG read all through \(newest)")
+        #endif
+        UnreadManager.shared.readAll(peer, chatId: chatId)
+      }
     } else {
       if viewModel.historyCoverage != lastReadCoverage {
         lastReadCoverage = viewModel.historyCoverage
         lastReadCandidate = 0
       }
-      if let candidate, candidate > lastReadCandidate {
-        lastReadCandidate = candidate
-        UnreadManager.shared.readVisible(peerId: peer, chatId: chatId, highestVisibleIncomingID: candidate)
-        if candidate > readFrontier {
-          readFrontier = candidate
-          updateAffordance(force: true)
-        }
+      // What is on screen, then a newer row seen since the last write that has left the screen again
+      // (`advanceReadFrontier`), as the count already shows. Both, so a read is never held up by a message
+      // deleted after it was seen.
+      for seen in [candidate ?? 0, readFrontier] where seen > lastReadCandidate {
+        lastReadCandidate = seen
+        #if DEBUG
+        debugLog("TIMELINE_DEBUG read visible through \(seen)")
+        #endif
+        UnreadManager.shared.readVisible(peerId: peer, chatId: chatId, highestVisibleIncomingID: seen)
       }
     }
     // Mentions and reactions on screen are reported once the list settles, as before.
     guard !isMoving else { return }
-    onVisibleMessagesChanged?(visible.map(\.message.messageId))
+    onVisibleMessagesChanged?(visibleMessages().map(\.message.messageId))
   }
 
   /// Saves where the reader is when the newest message is off screen, and clears it otherwise. A window

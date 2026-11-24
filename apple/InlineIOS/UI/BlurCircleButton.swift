@@ -285,8 +285,9 @@ final class BlurCircleButton: UIView {
   }
 }
 
-/// Count capsule for a floating button. Digits cross-fade as the count changes; it scales in
-/// and out when the count reaches or leaves zero.
+/// Count capsule for a floating button. Changed digits roll as the count changes, and the capsule
+/// follows a count that gains or loses a digit; it scales in and out when the count reaches or
+/// leaves zero.
 private final class FloatingButtonCountBadge: UIView {
   private enum Metrics {
     static let height: CGFloat = 18
@@ -294,11 +295,17 @@ private final class FloatingButtonCountBadge: UIView {
     static let hiddenScale: CGFloat = 0.5
   }
 
-  private static let textFadeDuration: CFTimeInterval = 0.15
-
-  private let label = UILabel()
+  private let label = RollingCountLabel(
+    font: .monospacedDigitSystemFont(ofSize: 11, weight: .semibold), textColor: .white
+  )
+  /// The count shown.
   private var count = 0
-  private var lastTextChangeAt: CFTimeInterval = 0
+  /// Rolls start at most this often: a fast scroll through unread lowers the count every frame, and each
+  /// roll makes a label or two. A number that comes sooner waits for the next slot; the last one always shows.
+  private static let minimumRollInterval: CFTimeInterval = 0.08
+  private var lastRollAt: CFTimeInterval = 0
+  /// Bumped by every change, so a roll waiting for its slot is dropped once a newer number comes.
+  private var changeGeneration = 0
 
   init(tint: UIColor) {
     super.init(frame: .zero)
@@ -307,19 +314,23 @@ private final class FloatingButtonCountBadge: UIView {
     backgroundColor = tint
     layer.cornerRadius = Metrics.height / 2
     layer.cornerCurve = .continuous
+    // Digits roll inside the capsule, not over the glass around it.
+    clipsToBounds = true
 
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-    label.textColor = .white
-    label.textAlignment = .center
-    label.adjustsFontForContentSizeCategory = false
+    // The digits keep their own width, centered: a single digit sits in the middle of the round capsule.
+    label.setContentHuggingPriority(.required, for: .horizontal)
+    label.setContentCompressionResistancePriority(.required, for: .horizontal)
     addSubview(label)
+    let hugsLabel = widthAnchor.constraint(equalTo: label.widthAnchor, constant: 2 * Metrics.horizontalPadding)
+    hugsLabel.priority = .defaultHigh
     NSLayoutConstraint.activate([
       heightAnchor.constraint(equalToConstant: Metrics.height),
       widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.height),
+      widthAnchor.constraint(greaterThanOrEqualTo: label.widthAnchor, constant: 2 * Metrics.horizontalPadding),
+      hugsLabel,
       label.centerYAnchor.constraint(equalTo: centerYAnchor),
-      label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-      label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+      label.centerXAnchor.constraint(equalTo: centerXAnchor),
     ])
 
     alpha = 0
@@ -333,39 +344,59 @@ private final class FloatingButtonCountBadge: UIView {
 
   func setCount(_ newCount: Int, animated: Bool) {
     let newCount = max(0, newCount)
+    changeGeneration &+= 1
     guard newCount != count else { return }
     let wasVisible = count > 0
     let isVisible = newCount > 0
+    if animated, wasVisible, isVisible {
+      let now = CACurrentMediaTime()
+      let wait = lastRollAt + Self.minimumRollInterval - now
+      if wait > 0 {
+        let generation = changeGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+          guard let self, changeGeneration == generation else { return }
+          setCount(newCount, animated: animated)
+        }
+        return
+      }
+      lastRollAt = now
+    }
+    let falls = newCount < count
     count = newCount
 
-    let animated = animated && !UIAccessibility.isReduceMotionEnabled
+    let reduceMotion = UIAccessibility.isReduceMotionEnabled
     if isVisible {
-      let text = ChatUnreadBadgeCount.format(newCount)
-      // Scrolling through unread lowers the count every few frames; a cross-fade each time
-      // stacks transitions, so changes that come faster than the fade simply swap the digits.
-      let now = CACurrentMediaTime()
-      let fades = now - lastTextChangeAt >= Self.textFadeDuration
-      lastTextChangeAt = now
-      if animated, wasVisible, fades, label.text != text {
-        UIView.transition(
-          with: label,
-          duration: Self.textFadeDuration,
-          options: [.transitionCrossDissolve, .beginFromCurrentState]
+      // A capsule coming in shows its number at once; one already showing rolls the digits that
+      // changed (cross-fades them with Reduce Motion), taking a digit still rolling from where it is.
+      let rolls = animated && wasVisible
+      let resized = label.setText(ChatUnreadBadgeCount.format(newCount), falling: falls, animated: rolls)
+      if rolls, resized, !reduceMotion, let superview {
+        UIView.animate(
+          withDuration: RollingCountLabel.duration,
+          delay: 0,
+          options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]
         ) {
-          self.label.text = text
+          superview.layoutIfNeeded()
         }
-      } else {
-        label.text = text
       }
     }
     guard wasVisible != isVisible else { return }
 
     let apply = {
       self.alpha = isVisible ? 1 : 0
-      self.transform = isVisible ? .identity : CGAffineTransform(scaleX: Metrics.hiddenScale, y: Metrics.hiddenScale)
+      self.transform = isVisible || reduceMotion
+        ? .identity : CGAffineTransform(scaleX: Metrics.hiddenScale, y: Metrics.hiddenScale)
     }
     guard animated else {
       UIView.performWithoutAnimation(apply)
+      return
+    }
+    guard !reduceMotion else {
+      // Reduce Motion: the capsule fades, without the scale.
+      transform = .identity
+      UIView.animate(
+        withDuration: 0.15, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: apply
+      )
       return
     }
     UIView.animate(
@@ -376,5 +407,156 @@ private final class FloatingButtonCountBadge: UIView {
       options: [.beginFromCurrentState, .allowUserInteraction],
       animations: apply
     )
+  }
+}
+
+/// A count whose characters are each their own label, laid out from the right so the units digit
+/// keeps its place as the count gains or loses digits. A changed character rolls as Telegram's
+/// count does: as the count falls the old one leaves upward and the new one rises in from below
+/// (the other way as it grows), both shrinking and fading over 0.2 s; a character that comes or
+/// goes scales in or out. With Reduce Motion they cross-fade in place.
+private final class RollingCountLabel: UIView {
+  static let duration: TimeInterval = 0.2
+  /// Labels still fading out. A fast scroll through unread changes the count every frame, so the
+  /// oldest go at once beyond this.
+  private static let maxLeaving = 8
+
+  private let font: UIFont
+  private let textColor: UIColor
+  /// Right to left: the last character first.
+  private var glyphs: [(character: Character, label: UILabel)] = []
+  private var leaving: [UILabel] = []
+  private var widths: [Character: CGFloat] = [:]
+  private var contentWidth: CGFloat = 0
+  private var text = ""
+
+  init(font: UIFont, textColor: UIColor) {
+    self.font = font
+    self.textColor = textColor
+    super.init(frame: .zero)
+    isUserInteractionEnabled = false
+    // The button carries the count as its accessibility value.
+    accessibilityElementsHidden = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override var intrinsicContentSize: CGSize {
+    CGSize(width: contentWidth, height: lineHeight)
+  }
+
+  private var lineHeight: CGFloat { ceil(font.lineHeight) }
+
+  /// Shows `newText`; true when its width changed, so the caller can move the capsule with the digits.
+  @discardableResult
+  func setText(_ newText: String, falling: Bool, animated: Bool) -> Bool {
+    guard newText != text else { return false }
+    text = newText
+    let characters = Array(newText.reversed())
+    let width = ceil(characters.reduce(0) { $0 + glyphWidth($1) })
+    let resized = width != contentWidth
+    if resized {
+      contentWidth = width
+      invalidateIntrinsicContentSize()
+    }
+    let reduceMotion = UIAccessibility.isReduceMotionEnabled
+    let height = lineHeight
+    // How far a leaving character travels; its replacement comes from as far the other way.
+    let shift = floor(height * 0.6) * (falling ? -1 : 1)
+    if !animated {
+      for label in leaving { label.removeFromSuperview() }
+      leaving.removeAll()
+    }
+
+    var next: [(character: Character, label: UILabel)] = []
+    var right = width
+    for index in 0 ..< max(characters.count, glyphs.count) {
+      let old = index < glyphs.count ? glyphs[index] : nil
+      guard index < characters.count else {
+        // The count lost a digit.
+        if let old {
+          retire(old.label, to: CGAffineTransform(scaleX: 0.1, y: 0.1), animated: animated, reduceMotion: reduceMotion)
+        }
+        continue
+      }
+      let character = characters[index]
+      let characterWidth = glyphWidth(character)
+      right -= characterWidth
+      let center = CGPoint(x: right + characterWidth / 2, y: height / 2)
+      if let old, old.character == character {
+        if animated, !reduceMotion {
+          UIView.animate(withDuration: Self.duration, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
+            old.label.center = center
+          }
+        } else {
+          old.label.layer.removeAllAnimations()
+          old.label.transform = .identity
+          old.label.alpha = 1
+          old.label.center = center
+        }
+        next.append(old)
+        continue
+      }
+      let label = UILabel()
+      label.font = font
+      label.textColor = textColor
+      label.textAlignment = .center
+      label.text = String(character)
+      label.isAccessibilityElement = false
+      label.bounds = CGRect(x: 0, y: 0, width: characterWidth, height: height)
+      label.center = center
+      addSubview(label)
+      next.append((character, label))
+      if let old {
+        retire(
+          old.label, to: CGAffineTransform(translationX: 0, y: shift).scaledBy(x: 0.3, y: 0.3), animated: animated,
+          reduceMotion: reduceMotion
+        )
+      }
+      guard animated else { continue }
+      label.alpha = 0
+      if !reduceMotion {
+        label.transform = old == nil
+          ? CGAffineTransform(scaleX: 0.1, y: 0.1)
+          : CGAffineTransform(translationX: 0, y: -shift).scaledBy(x: 0.3, y: 0.3)
+      }
+      UIView.animate(withDuration: Self.duration, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
+        label.alpha = 1
+        label.transform = .identity
+      }
+    }
+    glyphs = next
+    return resized
+  }
+
+  private func retire(_ label: UILabel, to transform: CGAffineTransform, animated: Bool, reduceMotion: Bool) {
+    guard animated else {
+      label.removeFromSuperview()
+      return
+    }
+    leaving.append(label)
+    if leaving.count > Self.maxLeaving { leaving.removeFirst().removeFromSuperview() }
+    UIView.animate(
+      withDuration: Self.duration, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut],
+      animations: {
+        label.alpha = 0
+        if !reduceMotion { label.transform = transform }
+      },
+      completion: { [weak self, weak label] _ in
+        guard let label else { return }
+        label.removeFromSuperview()
+        self?.leaving.removeAll { $0 === label }
+      }
+    )
+  }
+
+  private func glyphWidth(_ character: Character) -> CGFloat {
+    if let width = widths[character] { return width }
+    let width = (String(character) as NSString).size(withAttributes: [.font: font]).width
+    widths[character] = width
+    return width
   }
 }
