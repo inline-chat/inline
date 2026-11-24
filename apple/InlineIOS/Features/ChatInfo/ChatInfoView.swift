@@ -25,7 +25,7 @@ struct ChatInfoView: View {
   @State var participantSearchGeneration: UInt64 = 0
   @EnvironmentObject var nav: Navigation
   @Environment(Router.self) var router
-  @Environment(\.dismiss) private var dismiss
+  @Environment(\.dismiss) var dismiss
   @State var selectedTab: PeerInfoTab
   @State var showMakePublicAlert = false
   @State var showMakePrivateSheet = false
@@ -792,12 +792,10 @@ struct ChatInfoView: View {
   private func openChat(_ peer: Peer) {
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     if isPresentedAsSheet { dismiss() }
-    if router.tracksHistory {
-      router.resetTransientPresentation()
-      router.openPrimaryDestination(.chat(peer: peer))
-    } else {
-      nav.push(.chat(peer: peer))
-    }
+    // The router draws both layouts; the legacy `nav` path is not shown, so a push there
+    // only closed the sheet.
+    router.resetTransientPresentation()
+    router.openPrimaryDestination(.chat(peer: peer))
   }
 
   /// Opens another peer's info on top of this one, without leaving the sheet.

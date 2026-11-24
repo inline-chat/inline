@@ -25,8 +25,10 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   private var paths: [Tab: [Destination]] = [:] {
     didSet {
-      // Any navigation supersedes one still waiting for its destination's preparation.
-      cancelPendingNavigation()
+      // Any navigation supersedes one still waiting for its destination's preparation. A
+      // write-back of the same path (a stack settling as a sheet closes) is not one: it
+      // dropped the chat a sheet had just asked to open.
+      if paths != oldValue { cancelPendingNavigation() }
       recordNavigation(from: HistoryEntry(tab: selectedTab, path: oldValue[selectedTab] ?? []))
       navigationStateDidChange()
     }
@@ -47,7 +49,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   public var selectedTab: Tab {
     didSet {
-      cancelPendingNavigation()
+      if selectedTab != oldValue { cancelPendingNavigation() }
       recordNavigation(from: HistoryEntry(tab: oldValue, path: paths[oldValue] ?? []))
       navigationStateDidChange()
     }

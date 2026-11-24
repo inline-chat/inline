@@ -166,32 +166,13 @@ extension ChatInfoView {
   }
 
   func showMessageInChat(_ message: Message) {
-    if router.tracksHistory {
-      router.resetTransientPresentation()
-      router.openPrimaryDestination(
-        .chatMessage(peer: chatItem.peerId, messageID: message.messageId)
-      )
-      return
-    }
-
-    let targetTab = router.selectedTab.currentChatsTab
-    router.selectedTab = targetTab
-    router.pop(for: targetTab)
-
-    if !nav.pathComponents.isEmpty {
-      nav.pop()
-    }
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-      NotificationCenter.default.post(
-        name: Notification.Name("ScrollToRepliedMessage"),
-        object: nil,
-        userInfo: [
-          "repliedToMessageId": message.messageId,
-          "chatId": message.chatId,
-        ]
-      )
-    }
+    if isPresentedAsSheet { dismiss() }
+    // Through the router on both layouts: popping the chat and posting a scroll notice left
+    // the phone on the chat list, and the message list no longer listens for it.
+    router.resetTransientPresentation()
+    router.openPrimaryDestination(
+      .chatMessage(peer: chatItem.peerId, messageID: message.messageId)
+    )
   }
 
   var chatInfoHeader: some View {
