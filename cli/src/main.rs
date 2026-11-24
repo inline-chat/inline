@@ -4193,20 +4193,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
+                    // Opening the user peer creates the private chat. createChat with one
+                    // participant made an untitled home thread instead of a DM.
                     let payload = realtime
-                        .call(proto::CreateChatInput {
-                            title: None,
-                            space_id: None,
-                            description: None,
-                            emoji: None,
-                            is_public: false,
-                            participants: vec![proto::InputChatParticipant {
-                                user_id: Some(user_id),
-                                group_id: None,
-                            }],
-                            reserved_chat_id: None,
-                            placeholder_title: None,
-                            agent_context: None,
+                        .call(proto::GetChatInput {
+                            peer_id: Some(input_peer_from_args(None, Some(user_id))?),
+                            include_recent_messages: false,
                         })
                         .await?;
                     if cli.json {
