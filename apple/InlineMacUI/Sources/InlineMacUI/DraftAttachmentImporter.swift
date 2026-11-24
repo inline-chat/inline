@@ -198,7 +198,7 @@ public enum DraftAttachmentImporter {
       }
       return await outcome(
         from: result,
-        fallbackURL: url,
+        fallbackURL: nil,
         peer: peer,
         writer: writer,
         mutationToken: mutationToken
@@ -222,7 +222,7 @@ public enum DraftAttachmentImporter {
       }
       return await outcome(
         from: result,
-        fallbackURL: url,
+        fallbackURL: nil,
         peer: peer,
         writer: writer,
         mutationToken: mutationToken
@@ -260,7 +260,7 @@ public enum DraftAttachmentImporter {
       }
       return await outcome(
         from: result,
-        fallbackURL: sourceURL,
+        fallbackURL: nil,
         peer: peer,
         writer: writer,
         mutationToken: mutationToken
@@ -293,7 +293,7 @@ public enum DraftAttachmentImporter {
       }
       return await outcome(
         from: result,
-        fallbackURL: url,
+        fallbackURL: nil,
         peer: peer,
         writer: writer,
         mutationToken: mutationToken
@@ -312,6 +312,9 @@ public enum DraftAttachmentImporter {
     }
   }
 
+  /// `fallbackURL` re-adds the source as a plain file when preparation fails. Only animations use
+  /// it: photo and video preparation own their fallbacks (a copy without camera, place or time
+  /// details, or a refusal), and re-adding the source would send those details untouched.
   private static func outcome(
     from result: Drafts2AttachmentResult,
     fallbackURL: URL?,

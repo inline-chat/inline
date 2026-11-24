@@ -85,6 +85,22 @@ struct DraftAttachmentImporterTests {
     #expect(writer.calls.map(\.kind) == [.animatedImage, .file])
   }
 
+  @Test("a photo or video that fails preparation is not re-sent as its untouched file")
+  func failedMediaDoesNotFallBackToFile() async {
+    let writer = FakeDraftAttachmentWriter(failingKinds: [.image, .video])
+    let url = URL(fileURLWithPath: "/tmp/trip.mov")
+
+    let summary = await DraftAttachmentImporter.importAttachments(
+      [.video(url, thumbnail: nil), .image(NSImage(size: NSSize(width: 10, height: 10)), url)],
+      into: .user(id: 8),
+      writer: writer
+    )
+
+    #expect(summary.importedCount == 0)
+    #expect(summary.failedCount == 2)
+    #expect(writer.calls.map(\.kind) == [.video, .image])
+  }
+
   @Test("ignores text payloads")
   func ignoresText() async {
     let writer = FakeDraftAttachmentWriter()
