@@ -4720,6 +4720,29 @@ export async function monitorInlineProvider(params: {
     string,
     Promise<OpenClawBotSettingsModelCatalog>
   >()
+  // User-facing deadline for each host lookup behind the settings panel. The
+  // lookups run concurrently, so the whole answer stays inside one deadline.
+  const botSettingsHostLookupDeadlineMs = 5_000
+  class BotSettingsHostLookupTimeoutError extends Error {}
+  const withBotSettingsHostLookupDeadline = async <T>(
+    work: Promise<T>,
+    label: string,
+  ): Promise<T> => {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        work,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new BotSettingsHostLookupTimeoutError(`${label} timed out`)),
+            botSettingsHostLookupDeadlineMs,
+          )
+        }),
+      ])
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+  }
 
   const loadOpenClawBotSettingsModelCatalog = async (params: {
     cfg: OpenClawConfig
@@ -4745,19 +4768,11 @@ export async function monitorInlineProvider(params: {
       return { options: [...options.values()], didLoad: true }
     }
 
-    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      return await Promise.race([
-        loadCatalog(),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => reject(new Error("model list timed out")), 5_000)
-        }),
-      ])
+      return await withBotSettingsHostLookupDeadline(loadCatalog(), "model list")
     } catch (error) {
       log?.warn(`inline agent settings model list unavailable: ${String(error)}`)
       return { options: [], didLoad: false }
-    } finally {
-      if (timeout) clearTimeout(timeout)
     }
   }
 
@@ -4825,14 +4840,25 @@ export async function monitorInlineProvider(params: {
     currentLevel: string
   }): Promise<OpenClawBotChatSettingsOption[]> => {
     const command = findInlineNativeCommandFromBody("/think")
-    const menu = command
-      ? await resolveCommandArgMenuAsync({
-          command,
-          cfg: params.cfg,
-          provider: params.provider,
-          model: params.model,
-        })
-      : null
+    let menu: Awaited<ReturnType<typeof resolveCommandArgMenuAsync>> = null
+    if (command) {
+      try {
+        // OpenClaw 2026.11.8+ loads the published model catalog from disk here
+        // when no catalog is passed; keep that inside the settings deadline.
+        menu = await withBotSettingsHostLookupDeadline(
+          resolveCommandArgMenuAsync({
+            command,
+            cfg: params.cfg,
+            provider: params.provider,
+            model: params.model,
+          }),
+          "reasoning levels",
+        )
+      } catch (error) {
+        if (!(error instanceof BotSettingsHostLookupTimeoutError)) throw error
+        log?.warn(`inline agent settings reasoning levels unavailable: ${String(error)}`)
+      }
+    }
     const options = new Map<string, OpenClawBotChatSettingsOption>()
     options.set(params.currentLevel, { value: params.currentLevel, label: params.currentLevel })
     for (const choice of menu?.choices ?? []) {
@@ -4900,11 +4926,21 @@ export async function monitorInlineProvider(params: {
       model,
       ...(modelContext.thinkingLevel ? { thinkingLevel: modelContext.thinkingLevel } : {}),
     })
-    const modelOptions = params.modelOptions ?? await resolveOpenClawBotSettingsModelOptions({
-      cfg: currentConfig,
-      agentId: ingress.agentId,
-      currentModel,
-    })
+    // Independent host lookups: run them together so the settings answer is
+    // bounded by one lookup deadline rather than the sum of them.
+    const [modelOptions, reasoningOptions] = await Promise.all([
+      params.modelOptions ?? resolveOpenClawBotSettingsModelOptions({
+        cfg: currentConfig,
+        agentId: ingress.agentId,
+        currentModel,
+      }),
+      resolveOpenClawBotSettingsReasoningOptions({
+        cfg: currentConfig,
+        provider,
+        model,
+        currentLevel: reasoningLevel,
+      }),
+    ])
     const replyMode = params.replyThreads == null
       ? resolveInlineThreadReplyMode({
           cfg: currentConfig,
@@ -4923,12 +4959,7 @@ export async function monitorInlineProvider(params: {
         defaultModel: defaultModelValue,
         modelOptions,
         reasoningLevel,
-        reasoningOptions: await resolveOpenClawBotSettingsReasoningOptions({
-          cfg: currentConfig,
-          provider,
-          model,
-          currentLevel: reasoningLevel,
-        }),
+        reasoningOptions,
         ...(ingress.conversationKind === "direct"
           ? {}
           : { following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode) }),
