@@ -121,9 +121,6 @@ struct DocumentRow: View {
     .onDisappear {
       cleanup()
     }
-    .sheet(isPresented: $showingQuickLook) {
-      quickLookPreview
-    }
     .alert("Cannot Open Document", isPresented: $showingAlert) {
       Button("OK") {}
     } message: {

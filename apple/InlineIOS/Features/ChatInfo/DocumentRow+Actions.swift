@@ -85,7 +85,9 @@ extension DocumentRow {
       return
     }
 
-    guard let fileURL = documentURL else {
+    // The row's document can predate the download that just finished: read the stored path
+    // again before deciding the file is gone.
+    guard let fileURL = documentURL ?? storedDocumentURL() else {
       Log.shared.error("📄 Cannot open document: No valid file URL")
       documentState = .needsDownload
       return
@@ -103,11 +105,25 @@ extension DocumentRow {
 
     if QLPreviewController.canPreview(fileURL as QLPreviewItem) {
       Log.shared.debug("📄 Using QuickLook for preview")
-      showingQuickLook = true
+      // Presented from UIKit, not from this row's state: a row rebuilt after the download
+      // (or one inside the chat info sheet) would drop or misdismiss a SwiftUI sheet.
+      if !DocumentQuickLook.present(url: fileURL, title: document.fileName) {
+        showShareMenu(for: fileURL)
+      }
     } else {
       Log.shared.debug("📄 QuickLook can't preview - showing share options")
       showShareMenu(for: fileURL)
     }
+  }
+
+  /// The document's file as stored now, for a row whose copy of the document is older.
+  private func storedDocumentURL() -> URL? {
+    guard let rowId = document.id,
+          let stored = try? AppDatabase.shared.reader.read({ db in try InlineKit.Document.fetchOne(db, id: rowId) }),
+          let localPath = stored.localPath
+    else { return nil }
+    let fileURL = ChatInfoResourceFiles.documents.appendingPathComponent(localPath)
+    return FileManager.default.fileExists(atPath: fileURL.path) ? fileURL : nil
   }
 
   private func showShareMenu(for url: URL) {
