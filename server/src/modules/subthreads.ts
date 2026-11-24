@@ -769,6 +769,18 @@ export function queueSubthreadParentUpdate(input: { chatId: number; currentUserI
 
 export const emitReplyThreadParentRepliesUpdateIfNeeded = emitMessageSubthreadUpdateIfNeeded
 
+async function encodedPeerUsers(dialogList: DbDialog[]) {
+  const peerUserIds = Array.from(
+    new Set(dialogList.flatMap((dialog) => (dialog.peerUserId ? [dialog.peerUserId] : []))),
+  )
+  const encoded = new Map<number, ReturnType<typeof Encoders.user>>()
+  for (const peerUserId of peerUserIds) {
+    const user = await UsersModel.getUserById(peerUserId)
+    if (user) encoded.set(peerUserId, Encoders.user({ user, min: true }))
+  }
+  return encoded
+}
+
 export async function emitChatListOpenUpdates(input: {
   chat: DbChat
   dialogs: DbDialog[]
@@ -785,6 +797,9 @@ export async function emitChatListOpenUpdates(input: {
   // Permission encoding may query related data, so keep it outside the row
   // lock. The dialog itself is always reread and encoded inside the owner tx.
   const chatsByUserId = await Encoders.chatForUsers(input.chat, userIds)
+  // A DM's peer travels with the open so a recipient who has never seen the
+  // sender can name the chat; clients save it before the dialog.
+  const peerUsersById = await encodedPeerUsers(input.dialogs)
   const projection = await db.transaction(async (tx) => {
     // All callers use this users -> dialogs order. Lock each user explicitly
     // so multi-user batches acquire owners deterministically.
@@ -804,6 +819,7 @@ export async function emitChatListOpenUpdates(input: {
           dialog,
           chat: chatsByUserId.get(dialog.userId),
           encodedDialog: Encoders.dialog(dialog, { unreadCount }),
+          user: dialog.peerUserId ? peerUsersById.get(dialog.peerUserId) : undefined,
         }
       }),
     )
@@ -816,6 +832,7 @@ export async function emitChatListOpenUpdates(input: {
           userChatOpen: {
             chat: prepared.chat,
             dialog: prepared.encodedDialog,
+            ...(prepared.user ? { user: prepared.user } : {}),
           },
         },
       })),
@@ -844,6 +861,7 @@ export async function emitChatListOpenUpdates(input: {
             chatOpen: {
               chat: prepared.chat,
               dialog: prepared.encodedDialog,
+              ...(prepared.user ? { user: prepared.user } : {}),
             },
           },
         },

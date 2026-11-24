@@ -225,10 +225,12 @@ describe("getChat", () => {
     const recipientUpdates = await db.query.updates.findMany({
       where: { bucket: schema.UpdateBucket.User, entityId: recipient.id },
     })
-    expect(recipientUpdates.map((update) => UpdatesModel.decrypt(update)).some((update) =>
-      update.payload.update.oneofKind === "userChatOpen"
-      && Number(update.payload.update.userChatOpen.chat?.id) === chatId,
-    )).toBe(true)
+    const chatOpens = recipientUpdates.map((update) => UpdatesModel.decrypt(update).payload.update)
+      .flatMap((update) => update.oneofKind === "userChatOpen" ? [update.userChatOpen] : [])
+      .filter((open) => Number(open.chat?.id) === chatId)
+    expect(chatOpens).toHaveLength(1)
+    // The recipient may never have seen the sender; the open carries them so the chat has a name.
+    expect(Number(chatOpens[0]?.user?.id)).toBe(sender.id)
   })
 
   test("passes the DM peer profile photo to the user encoder", async () => {
