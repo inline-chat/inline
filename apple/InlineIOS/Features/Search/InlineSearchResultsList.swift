@@ -19,12 +19,27 @@ struct InlineSearchResultsList: View {
   @Environment(\.appDatabase) private var appDatabase
   @Environment(\.realtimeV2) private var realtimeV2
 
-  var body: some View {
-    List {
-      if model.chats.isEmpty == false {
-        InlineSearchSectionHeader(title: "Chats")
+  /// Chats past this count wait behind Show More so message hits stay on screen.
+  private static let collapsedChatCount = 3
 
-        ForEach(model.chats) { result in
+  @State private var chatNameFilter = InlineSearchChatNameFilter()
+  @State private var showsAllChats = false
+
+  var body: some View {
+    let chats = visibleChats
+
+    List {
+      if chats.isEmpty == false {
+        InlineSearchSectionHeader(
+          title: "Chats",
+          actionTitle: chatsHeaderActionTitle(chatCount: chats.count)
+        ) {
+          withAnimation {
+            showsAllChats.toggle()
+          }
+        }
+
+        ForEach(showsAllChats ? chats : Array(chats.prefix(Self.collapsedChatCount))) { result in
           searchChatRow(for: result)
             // Match the polished Home rows: spacing belongs inside the
             // interactive source so hold highlighting lifts the whole cell.
@@ -77,6 +92,27 @@ struct InlineSearchResultsList: View {
     }
     .listStyle(.plain)
     .contentMargins(.bottom, 32, for: .scrollContent)
+    .onChange(of: model.query) {
+      showsAllChats = false
+    }
+  }
+
+  /// Chats whose own name matches. The looser matches (space name, last
+  /// message preview, a shared email domain, scattered letters) only show
+  /// once search settles with no messages or people, so the screen isn't
+  /// blank and they never sit above message hits.
+  private var visibleChats: [InlineSearchChatResult] {
+    let nameMatches = chatNameFilter.nameMatches(in: model.chats, query: model.query)
+    guard nameMatches.isEmpty else { return nameMatches }
+    guard model.isSearching == false, model.messages.isEmpty, model.globalUsers.isEmpty else {
+      return []
+    }
+    return model.chats
+  }
+
+  private func chatsHeaderActionTitle(chatCount: Int) -> LocalizedStringKey? {
+    guard chatCount > Self.collapsedChatCount else { return nil }
+    return showsAllChats ? "Show Less" : "Show More"
   }
 
   private var messagesNote: String? {
@@ -313,22 +349,97 @@ struct InlineSearchResultsList: View {
   }
 }
 
+/// The shared search engine also matches a chat by its space's name, its last
+/// message preview, its user's email (every coworker shares the domain) and
+/// letters scattered through the title. This keeps chats whose own title or
+/// username matches at a word start, or as a substring once the query has
+/// three characters. It caches by query and result identity so re-renders
+/// while messages page in don't re-match every chat. Used from the view only.
+private final class InlineSearchChatNameFilter {
+  private var cachedQuery: String?
+  private var cachedChats: [InlineSearchChatResult] = []
+  private var cachedMatches: [InlineSearchChatResult] = []
+
+  func nameMatches(in chats: [InlineSearchChatResult], query: String) -> [InlineSearchChatResult] {
+    if query == cachedQuery, chats == cachedChats {
+      return cachedMatches
+    }
+
+    let matches = Self.filter(chats, query: query)
+    cachedQuery = query
+    cachedChats = chats
+    cachedMatches = matches
+    return matches
+  }
+
+  private static func filter(_ chats: [InlineSearchChatResult], query: String) -> [InlineSearchChatResult] {
+    guard chats.isEmpty == false, let prepared = InlineSearchMatcher.prepare(query) else { return [] }
+    let includeEmail = query.contains("@")
+
+    // Stable within a tier, so the engine's unread, pinned and activity order holds.
+    return chats.enumerated()
+      .compactMap { index, chat -> (tier: InlineSearchMatchTier, index: Int, chat: InlineSearchChatResult)? in
+        guard let tier = nameMatchTier(chat, query: prepared, includeEmail: includeEmail) else { return nil }
+        return (tier, index, chat)
+      }
+      .sorted { lhs, rhs in
+        lhs.tier != rhs.tier ? lhs.tier > rhs.tier : lhs.index < rhs.index
+      }
+      .map(\.chat)
+  }
+
+  private static func nameMatchTier(
+    _ chat: InlineSearchChatResult,
+    query: InlineSearchPreparedQuery,
+    includeEmail: Bool
+  ) -> InlineSearchMatchTier? {
+    let user = chat.userInfo?.user
+    let fields = [
+      InlineSearchField(chat.title, priority: 2),
+      InlineSearchField(user?.username, priority: 2),
+      InlineSearchField(includeEmail ? user?.email : nil, priority: 1),
+    ]
+    guard let match = InlineSearchMatcher.match(query: query, fields: fields) else { return nil }
+
+    switch match.tier {
+      case .exact, .fieldPrefix, .tokenPrefix:
+        return match.tier
+      case .substring, .compact:
+        return query.compact.count >= 3 ? match.tier : nil
+      case .fuzzy:
+        return nil
+    }
+  }
+}
+
 private struct InlineSearchSectionHeader: View {
   let title: LocalizedStringKey
+  var actionTitle: LocalizedStringKey?
+  var action: () -> Void = {}
 
   var body: some View {
-    Text(title)
-      .font(.subheadline.weight(.semibold))
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .accessibilityAddTraits(.isHeader)
-      .listRowInsets(.init(
-        top: 12,
-        leading: Theme.Layout.screenEdgeOpticalInset,
-        bottom: 4,
-        trailing: Theme.Layout.screenEdgeOpticalInset
-      ))
-      .listRowSeparator(.hidden)
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(title)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .accessibilityAddTraits(.isHeader)
+
+      Spacer(minLength: 0)
+
+      if let actionTitle {
+        Button(actionTitle, action: action)
+          .font(.subheadline)
+          .buttonStyle(.borderless)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .listRowInsets(.init(
+      top: 12,
+      leading: Theme.Layout.screenEdgeOpticalInset,
+      bottom: 4,
+      trailing: Theme.Layout.screenEdgeOpticalInset
+    ))
+    .listRowSeparator(.hidden)
   }
 }
 

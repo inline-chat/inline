@@ -191,7 +191,9 @@ struct ExperimentalSearchView: View {
       db: database,
       scope: searchScope,
       limits: InlineSearchLimits(
-        chatLimit: 24,
+        // The results list keeps only name matches, so take enough engine
+        // hits that a space-name or preview match can't crowd them out.
+        chatLimit: 200,
         messageBatchSize: 20,
         globalUserLimit: 20,
         globalDebounceNanoseconds: 220_000_000
