@@ -87,6 +87,12 @@ public actor UpdatesEngine: Sendable {
           ))
           if !newMessageUpdate.message.out, case .user = newMessageUpdate.message.peerID.toPeer() {
             deferredEffects.append(.incomingDirectMessage(fromUserID: newMessageUpdate.message.fromID))
+            // A DM someone else opened can reach us before (or without) its dialog: older servers
+            // never sent the recipient a chatOpen. Without a dialog the chat list can't show it.
+            let peer = newMessageUpdate.message.peerID.toPeer()
+            if try Dialog.get(peerId: peer).fetchOne(db) == nil {
+              deferredEffects.append(.fetchMissingDialog(peer: peer))
+            }
           }
 
         case let .updateMessageID(updateMessageId):
@@ -2216,6 +2222,7 @@ enum DeferredUpdateEffect: Sendable {
   case agentGrant(InlineProtocol.UpdateAgentGrant)
   case agentSettings(InlineProtocol.AgentSettings)
   case incomingDirectMessage(fromUserID: Int64)
+  case fetchMissingDialog(peer: Peer)
 
   nonisolated func perform() {
     switch self {
@@ -2240,6 +2247,8 @@ enum DeferredUpdateEffect: Sendable {
         Task { @MainActor in AgentGrantStore.shared.apply(settings: settings) }
       case let .incomingDirectMessage(fromUserID):
         Task { @MainActor in AgentGrantStore.shared.noteIncomingDirectMessage(fromUserID: fromUserID) }
+      case let .fetchMissingDialog(peer):
+        Task { await MissingDialogFetcher.shared.fetch(peer) }
     }
   }
 }
@@ -3698,6 +3707,22 @@ extension InlineProtocol.UpdateReadMaxId {
       }
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update read state")
+    }
+  }
+}
+
+/// Fetches the chat and dialog for a peer that had messages but no dialog, once per peer at a time.
+actor MissingDialogFetcher {
+  static let shared = MissingDialogFetcher()
+  private var inFlight = Set<Peer>()
+
+  func fetch(_ peer: Peer) async {
+    guard inFlight.insert(peer).inserted else { return }
+    defer { inFlight.remove(peer) }
+    do {
+      _ = try await Api.realtime.send(.getChat(peer: peer))
+    } catch {
+      Log.shared.warning("Couldn't fetch the missing dialog for \(peer): \(error.localizedDescription)")
     }
   }
 }
