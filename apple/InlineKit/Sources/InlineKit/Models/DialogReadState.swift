@@ -7,8 +7,8 @@ enum LocalReadChange: Equatable {
   case unchanged
   /// The read cursor moved: `ReadStateSync` pushes it.
   case advanced(throughId: Int64)
-  /// Only the unread mark was cleared (the cursor was already at the end): the server still has
-  /// the mark and needs its own read to clear it.
+  /// The mark or count was cleared without moving the cursor (it was already at the end, or the
+  /// chat's last message isn't stored here): the server needs its own read to the end.
   case clearedMark
 }
 
@@ -58,7 +58,9 @@ extension Dialog {
     dialog.unreadCount = 0
     dialog.unreadMark = false
     try dialog.update(db)
-    return wasMarked ? .clearedMark : .unchanged
+    // A count cleared without a known last message still needs the server to read: otherwise
+    // the server keeps it unread and the next sync brings the count back.
+    return .clearedMark
   }
 
   /// The cursor to push for this dialog, or nil when the server has it.

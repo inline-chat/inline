@@ -73,10 +73,17 @@ actor ReadStateSync {
     generation &+= 1
     let generation = generation
     let task = Task(priority: .utility) { [weak self] in
-      await self?.push(peer, dialogId: dialogId)
-      await self?.finish(dialogId: dialogId, generation: generation)
+      guard let self else { return }
+      await self.run(peer, dialogId: dialogId, generation: generation)
     }
     loops[dialogId] = Loop(generation: generation, task: task)
+  }
+
+  /// Push and release the slot without leaving the actor in between: a read scheduled while
+  /// this loop is still registered is picked up by the loop, never dropped by `start`.
+  private func run(_ peer: Peer, dialogId: Int64, generation: Int) async {
+    await push(peer, dialogId: dialogId)
+    finish(dialogId: dialogId, generation: generation)
   }
 
   private func finish(dialogId: Int64, generation: Int) {
@@ -105,6 +112,8 @@ actor ReadStateSync {
           } catch {
             log.error("Failed to validate a chat's unread count", error: error)
           }
+          // A read may have been scheduled while that ran; `start` left it to this loop.
+          continue
         }
         return
       }

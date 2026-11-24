@@ -165,6 +165,19 @@ struct AutomaticReadFrontierTests {
     }
   }
 
+  @Test("reading to the end without the last message stored still asks the server to read")
+  func localReadToEndWithoutLastMessage() throws {
+    let queue = try makeDatabase()
+    try queue.write { (db: Database) throws in
+      // A chat known only from the chat list: a count, but none of its messages here.
+      try seedThread(db, readMaxID: 10, unreadCount: 3, serverReadMaxID: 10)
+      let peer = InlineKit.Peer.thread(id: testChatID)
+
+      #expect(try Dialog.applyLocalReadToEnd(db, peerId: peer) == .clearedMark)
+      #expect(try Dialog.get(peerId: peer).fetchOne(db)?.unreadCount == 0)
+    }
+  }
+
   @Test("a server read behind a read made here confirms it without undoing it")
   func olderServerReadKeepsLocalRead() throws {
     let queue = try makeDatabase()
