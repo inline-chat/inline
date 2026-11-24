@@ -148,7 +148,7 @@ extension DocumentRow {
   }
 
   func shareDocument() {
-    guard let fileURL = documentURL else {
+    guard let fileURL = documentURL ?? storedDocumentURL() else {
       Log.shared.error("📄 Cannot share document: No valid file URL")
       showDocumentError("File is not available for sharing")
       return

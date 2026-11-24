@@ -21,7 +21,6 @@ struct DocumentRow: View {
   @State var isBeingRemoved = false
   @State var documentState: DocumentState = .needsDownload
   @State var progressSubscription: AnyCancellable?
-  @State var showingQuickLook = false
   @State var showingAlert = false
   @State var alertMessage = ""
   @State var docInteractionController: UIDocumentInteractionController? = nil
