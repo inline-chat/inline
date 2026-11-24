@@ -989,11 +989,10 @@ private struct ExperimentalAuthedRootView: View {
     }
   }
 
-  /// New Thread opens the thread composer sheet, so the thread starts from its first
-  /// message (and gets its title from it). Before iOS 26 there is no composer: create an
-  /// empty thread and open it, as before.
+  /// New Thread creates an empty thread and opens it. The first-message composer sheet
+  /// (iOS 26) is behind the experimental New Thread Composer flag until it is reliable.
   private func startNewThread(spaceId: Int64?) {
-    if #available(iOS 26.0, *) {
+    if #available(iOS 26.0, *), ExperimentalFeatureFlags.newThreadComposerEnabled {
       newThreadSheet = NewThreadSheetRequest(spaceID: spaceId)
     } else {
       createThreadInstantly(spaceId: spaceId)

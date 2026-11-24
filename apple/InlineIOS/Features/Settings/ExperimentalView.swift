@@ -9,6 +9,9 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
+  @AppStorage(ExperimentalFeatureFlags.newThreadComposerKey)
+  private var newThreadComposerEnabled = false
+
   @AppStorage(MessageContextMenuFeature.preferenceKey)
   private var customContextMenuEnabled = true
 
@@ -37,6 +40,17 @@ struct ExperimentalView: View {
         } else {
           Text("Sign in to use native file downloads.")
         }
+      }
+
+      Section {
+        SettingsItem(icon: "square.and.pencil", iconColor: .orange, title: "New Thread Composer") {
+          Toggle("New Thread Composer", isOn: $newThreadComposerEnabled)
+            .labelsHidden()
+        }
+      } header: {
+        Text("Threads")
+      } footer: {
+        Text("New Thread opens a composer so the thread starts from its first message. Off: New Thread creates an empty thread and opens it.")
       }
 
       Section {

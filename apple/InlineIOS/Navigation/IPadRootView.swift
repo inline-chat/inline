@@ -108,6 +108,7 @@ private struct IPadDetailView: View {
 @available(iOS 26.0, *)
 private struct IPadDetailPage: View {
   @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @AppStorage(ExperimentalFeatureFlags.newThreadComposerKey) private var newThreadComposerEnabled = false
   let destination: Destination?
   let isNested: Bool
   let router: Router
@@ -125,10 +126,13 @@ private struct IPadDetailPage: View {
           onSelectSpace: onSelectSpace,
           onMigrateLegacySpaceDestination: onMigrateLegacySpaceDestination
         )
-      } else {
+      } else if newThreadComposerEnabled {
         IPadEmptyDetailView(spaceID: nav.activeSpaceId) { peer in
           router[IPadNavigationLane.canonicalTab] = [.chat(peer: peer)]
         }
+      } else {
+        // The composer here is experimental; New Thread creates and opens a thread.
+        ContentUnavailableView("Select a Chat", systemImage: "bubble.left.and.bubble.right")
       }
     }
     .voicePlaybackRootPill(router: router, destination: destination)
