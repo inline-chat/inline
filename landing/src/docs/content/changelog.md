@@ -7,6 +7,83 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## November 24, 2026
+
+[CLI 0.7.26](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.26) · [Hermes adapter 1.2.6](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.6) · [OpenClaw plugin 1.0.0-alpha.3](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.3)
+
+This is the first iOS TestFlight build since October 30, so on iOS it also brings everything in the [November 13](#november-13-2026) notes, including quote replies, unread mention and reaction badges, focus status, hold-to-record, the swipeable media gallery, and the new iPad layout.
+
+### New
+
+- 🔎 **Search all your messages.** Search now finds messages from every chat you're in, even ones this device never loaded, with the sender, a highlighted excerpt and the date. On macOS it's in Quick Search, next to Command-F for the chat you're in.
+- 📱 **A new message list on iOS.** Chats scroll more smoothly and open faster. Sent messages grow out of the composer, new messages rise in, and reactions animate without bouncing. The list and composer turn with the device and keep your place. Tap the day badge to jump to that day, or tap the status bar to go to the newest message.
+- 🖼️ **Albums.** Photos, videos and files you send together arrive as one album, with files listed under the grid. You can forward or delete the album as a whole.
+- 🔒 **Photos and videos without hidden details.** Media is resized for its content and sent without location, camera or time details. To send the untouched file instead, turn on **Original** in the composer, or choose **Send as Original** from an attachment's menu.
+- 🤖 **Agents you can act on.** Agents bridged through the [CLI](/docs/cli) show plans to approve, approval requests, review findings, task suggestions and next-step buttons as native cards. Their forms show recommended options and keep your sent answers. An agent's suggested next message appears as your composer's placeholder; press Tab to use it.
+- ✍️ **Sent via.** Messages an agent sends for you through the CLI or Inline's MCP connector carry an agent badge on the avatar and a "Sent via Claude Code" (or ChatGPT, Codex, and so on) line.
+- 📋 **Copy with formatting.** Copying a message keeps its headings, lists, tables and code when you paste it into other apps. On macOS you can drag to select text across several messages and blocks. On iOS you can select part of a formatted message right in the message menu.
+- 🔠 **Text size and fonts on macOS.** Use **View › Make Text Bigger**, **Make Text Smaller** and **Make Text Normal Size**. **Settings › Appearance** has text size with a preview, and **Customize** sets fonts and line spacing. The spacing in messages, compose and code blocks is retuned.
+- ℹ️ **New Chat Info.** It has an action row (Message, Search, Mute, Follow, Output, Share, Add), cards for people, bots and threads, tabs for Members and the **Threads** you share with someone, and a faster media grid.
+- 💾 **Data and Storage.** See what uses space by chat and file type and clear downloads per chat. You can also keep media for a week, a month or forever, set a size limit, and skip auto-download on cellular or in Low Data Mode.
+- 🔐 **Choose who can message a bot.** Share a bot with people, spaces or groups, open it to everyone, and add admins who can manage bots they don't own. If you can't message a bot, its chat tells you who to ask. Change output and sharing for several bots at once from **Settings › Bots**.
+
+### Quality of life improvements
+
+- Reading is instant: a chat, the chat list, the app icon and the Dock update together, and unread counts no longer bounce back after you reach the bottom. Leaving a chat marks what was on screen as read.
+- The iOS app icon shows how many chats have unread messages, including chats with only an unread mention. The macOS Dock badge and Dock menu count mention-only chats too, and muted chats no longer count.
+- **Privacy › Time Zone** has **Set Automatically** and a time zone picker, so a time zone you choose stays put when you travel.
+- On iOS, tap a photo in the composer to mark it up before sending.
+- Deleting a message asks first. The message stays until the server confirms the delete.
+- Opening a thread goes to its parent message in the parent chat. On iPad, reply threads open as the main chat.
+- A new **Transcribe Voice Messages** switch in Privacy settings lets you keep your voice messages from being transcribed.
+- Mention one of your bots in a space thread and Inline offers to add it to the space.
+- On iOS, New Thread compose supports @ mentions of people, groups and agents, "Start with" suggestions, and agent folder, model and reasoning options. It also keeps your draft.
+- Chats show "sending photo", "sending video" or "sending file" while someone uploads, including in the sidebar and title bar on macOS.
+- The message time sits in the bubble's bottom corner next to reactions. Reaction chips keep their order when someone reacts. iOS reaction pills have tinted backgrounds, and the unread line is a subtle band.
+- The iOS media gallery opens, closes and pages more smoothly, shows "N of M", deletes where the chat allows it, and adds video controls: mute, speed, hold for 2x, double-tap to skip 15 seconds, and pinch to zoom. It also supports hardware keyboard shortcuts.
+- Media sends survive a relaunch and keep their order. On iOS they also keep going in the background. A failed send retries without sending twice.
+- On macOS, the sidebar's hover controls no longer push badges aside, and long names fade out instead of showing an ellipsis. Message selection checkboxes moved to the trailing side, so avatars and text stay in place.
+- Agent replies in Persian and other right-to-left languages read right to left even when they start with a Latin word.
+- The macOS getting started screen is simpler. Agent setup on macOS starts on this Mac and lists other machines as a row. It also finds a ChatGPT Dot.
+- When the CLI sits in an admin-owned folder, the macOS app updates it through the system password prompt.
+- iOS: the send button has the same larger touch target as the mic button, the message menu scales with text size, and VoiceOver reads sender avatars as buttons with their names.
+
+### Better tools and APIs for agents and hackers
+
+- [CLI](/docs/cli) **0.7.26**:
+  - **ChatGPT Dots**: `inline setup dots` bridges your ChatGPT Dot into Inline as a personal bot. You can share it with `/share` and bring it into threads. See [ChatGPT Dots](/docs/chatgpt-dots).
+  - `inline listen` streams new messages and reactions as JSON lines, so an agent can wake up when something happens instead of polling.
+  - Messages that coding agents send through the CLI are signed "Sent via …". Use `--as-me` to send without the signature, or `--via` / `--via-bot` to name the agent.
+  - `inline bots settings` lists every bot's output mode and sharing. You can change many bots at once with `--all`, `--filter` or a comma-separated list, and preview with `--dry-run`.
+  - Share at creation with `bots create --share-user`, `--share-space`, `--admin` and `--open`. `/share` and `/unshare` in bridge chats manage who can talk to your agent.
+  - Bridged agents send plans, approvals, review findings, next steps and prompt suggestions as native blocks. Claude sub-agents show as agents, and prose keeps its Markdown styles.
+  - Claude asks you to sign in again when its session expires, a recoverable connection error no longer logs the CLI out, and exports fetch long histories in pages.
+- [Hermes](/docs/hermes) **1.2.1 → 1.2.6**:
+  - Progress and heartbeats post quietly, so they skip unread counts and notifications, and Friendly answers always notify.
+  - Output mode changes apply within seconds.
+  - Stalled inbound messages recover.
+  - The system prompt stays stable across turns, so Hermes reuses its cached agent.
+  - Reactions are now opt-in through `reaction_triggers`.
+- [OpenClaw](/docs/openclaw) **1.0.0-alpha.3** delivers chat updates in isolation per chat. `0.0.72` stays the default.
+- The [Bot API](/docs/bot-api) `getFile` accepts the documented `chat_id` and `message_id`, and a malformed query id gets the documented JSON error. Silent bot sends are now quiet: they skip unread counts and notifications.
+- Apps, the CLI and the SDK keep connecting when the device clock is wrong, by learning the server's clock instead of retrying forever.
+
+### Fixes
+
+- The first message from someone new now shows their DM on iOS, and DMs that went missing this way come back.
+- Fixed the iOS media gallery losing its place on rotation, starting videos while you scrub, and flashing the thumbnail.
+- Expired photo and file links refresh on their own, and failed photos no longer retry endlessly.
+- Fixed Return, Tab and Escape while typing with an input method on macOS, and on iOS a pending autocorrection is applied before sending. Unfinished input is never sent.
+- Fixed hold actions firing while you select text on macOS. Force click shows Look Up.
+- Fixed the composer staying behind the keyboard after rotating an iPhone or iPad.
+- Notifications for an account that isn't signed in on a device stay silent. Each install keeps its own notification identity, and signing out reaches the server reliably.
+- Opening and switching chats on macOS is faster.
+- Space admins can no longer remove owners, only a current owner can delete a space, the last owner deletes the space instead of leaving it, and removing a member also removes their bots.
+- Translation keeps the parts that succeed, and voice transcription is more reliable under load.
+- Improved connection reliability, upload speed and server performance.
+
+---
+
 ## November 13, 2026
 
 [CLI 0.7.24](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.24) · [Hermes adapter 1.2.0](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.0) · [OpenClaw plugin 1.0.0-alpha.2](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.2)
