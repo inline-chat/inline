@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
-import { APP, GROUP, WORKFLOW, appleClient, ensureSourceTag, makeToken, publicationReceipt, publish, reusableRun } from "./ios-early-testers.mjs"
+import { APP, GROUP, RESYNC_AFTER_MS, WORKFLOW, appleClient, ensureSourceTag, makeToken, publicationReceipt, publish, reusableRun } from "./ios-early-testers.mjs"
 
 const sha = "a".repeat(40)
 const run = { id: "run", attributes: { sourceCommit: { commitSha: sha }, executionProgress: "COMPLETE", completionStatus: "SUCCEEDED" } }
@@ -141,6 +141,26 @@ describe("internal iOS release boundary", () => {
       sourceBranchOrTag: { data: { type: "scmGitReferences", id: "tag-ref" } },
     } } }])
     expect(f.mutations.length).toBe(1)
+  })
+  it("pushes a resync tag when Apple never syncs the source tag, and builds from it", async () => {
+    const f = fixture({ [`/v1/ciWorkflows/${WORKFLOW}/buildRuns?sort=-number&limit=100`]: [] })
+    const tags: string[] = []
+    const started: unknown[] = []
+    let clock = 0
+    const api = async (path: string, data?: unknown) => {
+      if (path.includes("/gitReferences?")) return { data: tags.filter((tag) => tag.includes("-resync-")).map((tag) => ({ id: "resync-ref", attributes: { canonicalName: tag } })) }
+      if (path === "/v1/ciBuildRuns" && data) { started.push(data); return { data: run } }
+      return f.api(path, data)
+    }
+    const sourceTag = async (commit: string, suffix = "") => { tags.push(`refs/tags/ios-early-testers/${commit}${suffix}`); return tags.at(-1)! }
+    await publish({ api, sha, qualify: () => {}, sourceTag, now: () => clock, pause: async (ms: number) => { clock += ms }, log: () => {} })
+    expect(tags).toEqual([`refs/tags/ios-early-testers/${sha}`, `refs/tags/ios-early-testers/${sha}-resync-${RESYNC_AFTER_MS / 1000}`])
+    expect(started).toHaveLength(1)
+    expect(JSON.stringify(started[0])).toContain("resync-ref")
+  })
+  it("only accepts resync suffixes for source tags", async () => {
+    const env = { GITHUB_REPOSITORY: "inline-chat/inline", GH_TOKEN: "test-token" }
+    await expect(ensureSourceTag(sha, env, async () => new Response("", { status: 404 }), "/../main")).rejects.toThrow("Unexpected source tag suffix")
   })
   it("waits for a pending run's source to resolve and rejects unresolved completed runs", async () => {
     const f = fixture()

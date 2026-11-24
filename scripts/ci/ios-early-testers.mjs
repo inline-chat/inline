@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url"
 export const APP = "6736995294"
 export const GROUP = "6b986a51-e0b9-437f-b0e5-208b05caee18"
 export const WORKFLOW = "4f8a5391-2131-4b3f-9306-49d04390d5c8"
+export const RESYNC_AFTER_MS = 10 * 60_000
+export const MAX_RESYNCS = 3
 const REPOSITORY = "e8a64afc-f77d-488f-b7fb-1aadbe4a092f"
 const ROOT = "https://api.appstoreconnect.apple.com"
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -126,11 +128,12 @@ export function reusableRun(runs, sha, now = Date.now()) {
 }
 
 /** @param {(url: string, options: { body?: string }) => Promise<Response>} fetcher */
-export async function ensureSourceTag(sha, env = process.env, fetcher = fetch) {
+export async function ensureSourceTag(sha, env = process.env, fetcher = fetch, suffix = "") {
   if (env.GITHUB_REPOSITORY !== "inline-chat/inline" || !env.GH_TOKEN || !/^[0-9a-f]{40}$/.test(sha)) {
     throw new Error("Source tags require the trusted Inline repository and qualified SHA")
   }
-  const tag = `ios-early-testers/${sha}`
+  if (!/^(-resync-\d+)?$/.test(suffix)) throw new Error("Unexpected source tag suffix")
+  const tag = `ios-early-testers/${sha}${suffix}`
   const root = "https://api.github.com/repos/inline-chat/inline"
   const request = (path, data) => fetcher(`${root}/${path}`, {
     method: data ? "POST" : "GET", redirect: "error", signal: AbortSignal.timeout(30_000),
@@ -188,7 +191,7 @@ async function uploadSymbols(api, runId) {
 
 // Selection lives in nightly-tip-gate.py select-ios; qualify re-checks that the
 // selected commit is still green and on main, so later pushes do not cancel it.
-export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, symbols = async () => {}, isPublished = async () => false, markPublished = async () => {}, pause = sleep, now = Date.now, log = console.log }) {
+export async function publish({ api, sha, qualify, sourceTag = (sha, suffix) => ensureSourceTag(sha, process.env, fetch, suffix), symbols = async () => {}, isPublished = async () => false, markPublished = async () => {}, pause = sleep, now = Date.now, log = console.log }) {
   if (!/^[0-9a-f]{40}$/.test(sha || "")) throw new Error("Expected a full qualified main SHA")
   const deadline = now() + 75 * 60_000
   const wait = async () => {
@@ -203,11 +206,22 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   let run = reusableRun(runs, sha, now())
   if (!run) {
     const canonicalName = await sourceTag(sha)
+    // Apple occasionally never syncs a pushed tag. A fresh tag on the same
+    // commit resends the webhook; validateRun still requires the exact SHA.
+    const isSource = (name) => name === canonicalName || name.startsWith(`${canonicalName}-resync-`)
     let source
-    while (!source) {
+    let resyncAt = now() + RESYNC_AFTER_MS
+    for (let resyncs = 0; !source;) {
       const refs = await list(api, `/v1/scmRepositories/${REPOSITORY}/gitReferences?limit=200`)
-      source = refs.find((ref) => ref.attributes.canonicalName === canonicalName && !ref.attributes.isDeleted)
-      if (!source) await wait()
+      source = refs.find((ref) => isSource(ref.attributes.canonicalName) && !ref.attributes.isDeleted)
+      if (source) break
+      if (now() >= resyncAt && resyncs < MAX_RESYNCS) {
+        resyncs++
+        const resync = await sourceTag(sha, `-resync-${Math.floor(now() / 1000)}`)
+        log(`Apple has not synced ${canonicalName}; pushed ${resync}`)
+        resyncAt = now() + RESYNC_AFTER_MS
+      }
+      await wait()
     }
     await qualify()
     // Pin an immutable tag: main may advance before Apple clones the source.
