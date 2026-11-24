@@ -312,87 +312,91 @@ public extension AppDatabase {
   // Update a photo with the server-provided ID
   static func updatePhotoWithServerId(_ db: Database, localPhoto: Photo, serverId: Int64) throws {
     Log.shared.debug("Updating photo with server ID \(localPhoto) \(serverId)")
-    // Get the old photoId
-    let oldPhotoId = localPhoto.photoId
-
-    // Nil first to avoid constraint violation
-    var msg = try Message.filter(
-      Column("photoId") == oldPhotoId
-    ).fetchOne(db)
-    msg?.photoId = nil
-    try msg?.save(db)
-
-    // Update the photo with the server ID
-    var updatedPhoto = localPhoto
-    updatedPhoto.photoId = serverId
-    try updatedPhoto.update(db)
-
-    // Update any messages that reference the old temporary ID
-//    try db.execute(sql: """
-//        UPDATE message
-//        SET photoId = ?
-//        WHERE photoId = ?
-//    """, arguments: [serverId, oldPhotoId])
-    msg?.photoId = serverId
-    try msg?.save(db)
+    let storedPhotoId = try localPhoto.id.flatMap { try Photo.fetchOne(db, key: $0) }?.photoId
+    try remapMediaId(
+      db,
+      table: "photo",
+      column: "photoId",
+      localRowId: localPhoto.id,
+      oldId: storedPhotoId ?? localPhoto.photoId,
+      serverId: serverId,
+      references: [("message", "photoId"), ("urlPreview", "photoId")]
+    )
   }
 
   // Update a video with the server-provided ID
   static func updateVideoWithServerId(_ db: Database, localVideo: Video, serverId: Int64) throws {
-    // Get the old videoId
-    let oldVideoId = localVideo.videoId
-
-    // Nil first to avoid constraint violation
-    var msg = try Message.filter(
-      Column("videoId") == oldVideoId
-    ).fetchOne(db)
-    msg?.videoId = nil
-    try msg?.save(db)
-
-    // Update the video with the server ID
-    var updatedVideo = localVideo
-    updatedVideo.videoId = serverId
-    try updatedVideo.update(db)
-
-    // Update any messages that reference the old temporary ID
-//    try db.execute(sql: """
-//        UPDATE message
-//        SET videoId = ?
-//        WHERE videoId = ?
-//    """, arguments: [serverId, oldVideoId])
-
-    msg?.videoId = serverId
-    try msg?.save(db)
+    let storedVideoId = try localVideo.id.flatMap { try Video.fetchOne(db, key: $0) }?.videoId
+    try remapMediaId(
+      db,
+      table: "video",
+      column: "videoId",
+      localRowId: localVideo.id,
+      oldId: storedVideoId ?? localVideo.videoId,
+      serverId: serverId,
+      references: [("message", "videoId")]
+    )
   }
 
   // Update a document with the server-provided ID
   static func updateDocumentWithServerId(_ db: Database, localDocument: Document, serverId: Int64) throws {
-    // Get the old documentId
-    let oldDocumentId = localDocument.documentId
+    let storedDocumentId = try localDocument.id.flatMap { try Document.fetchOne(db, key: $0) }?.documentId
+    try remapMediaId(
+      db,
+      table: "document",
+      column: "documentId",
+      localRowId: localDocument.id,
+      oldId: storedDocumentId ?? localDocument.documentId,
+      serverId: serverId,
+      references: [("message", "documentId")]
+    )
+    Log.shared.debug("Updated document with server ID \(serverId)")
+  }
 
-    // Nil first to avoid constraint violation
-    var msg = try Message.filter(
-      Column("documentId") == oldDocumentId
-    ).fetchOne(db)
-    msg?.documentId = nil
-    try msg?.save(db)
+  /// Moves a media row from its temporary ID to the server ID together with every row that
+  /// references it. The old version cleared one referencing message and read the old ID from the
+  /// caller's possibly stale copy, so a second message, a URL preview or a repeated completion
+  /// tripped the foreign key and the send failed after the upload had finished.
+  private static func remapMediaId(
+    _ db: Database,
+    table: String,
+    column: String,
+    localRowId: Int64?,
+    oldId: Int64,
+    serverId: Int64,
+    references: [(table: String, column: String)]
+  ) throws {
+    // Already moved (a repeated completion): nothing to do.
+    guard oldId != serverId else { return }
 
-    // Update the document with the server ID
-    var updatedDocument = localDocument
-    updatedDocument.documentId = serverId
-    try updatedDocument.update(db)
+    let serverRowExists = try Bool.fetchOne(
+      db,
+      sql: "SELECT EXISTS(SELECT 1 FROM \"\(table)\" WHERE \"\(column)\" = ?)",
+      arguments: [serverId]
+    ) ?? false
 
-    // Update any messages that reference the old temporary ID
-//    try db.execute(sql: """
-//        UPDATE message
-//        SET documentId = ?
-//        WHERE documentId = ?
-//    """, arguments: [serverId, oldDocumentId])
-
-    msg?.documentId = serverId
-    try msg?.save(db)
-
-    Log.shared.debug("Updated document with server ID \(serverId) \(updatedDocument)")
+    // The references move with the media row; check the foreign keys once, at commit.
+    try db.execute(sql: "PRAGMA defer_foreign_keys = ON")
+    if !serverRowExists {
+      if let localRowId {
+        try db.execute(
+          sql: "UPDATE \"\(table)\" SET \"\(column)\" = ? WHERE id = ?",
+          arguments: [serverId, localRowId]
+        )
+      } else {
+        try db.execute(
+          sql: "UPDATE \"\(table)\" SET \"\(column)\" = ? WHERE \"\(column)\" = ?",
+          arguments: [serverId, oldId]
+        )
+      }
+    }
+    // When the server's copy is already stored (its echo arrived first), point at that row.
+    for reference in references {
+      try db.execute(
+        sql: "UPDATE \"\(reference.table)\" SET \"\(reference.column)\" = ? WHERE \"\(reference.column)\" = ?",
+        arguments: [serverId, oldId]
+      )
+    }
   }
 
   // Find a photo by its server ID
