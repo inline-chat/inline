@@ -769,14 +769,15 @@ export function queueSubthreadParentUpdate(input: { chatId: number; currentUserI
 
 export const emitReplyThreadParentRepliesUpdateIfNeeded = emitMessageSubthreadUpdateIfNeeded
 
+/** The DM peers of these dialogs, with profile photos, in one query. */
 async function encodedPeerUsers(dialogList: DbDialog[]) {
   const peerUserIds = Array.from(
     new Set(dialogList.flatMap((dialog) => (dialog.peerUserId ? [dialog.peerUserId] : []))),
   )
   const encoded = new Map<number, ReturnType<typeof Encoders.user>>()
-  for (const peerUserId of peerUserIds) {
-    const user = await UsersModel.getUserById(peerUserId)
-    if (user) encoded.set(peerUserId, Encoders.user({ user, min: true }))
+  if (peerUserIds.length === 0) return encoded
+  for (const row of await UsersModel.getUsersWithPhotos(peerUserIds)) {
+    encoded.set(row.user.id, Encoders.user({ user: row.user, photoFile: row.photoFile, min: true }))
   }
   return encoded
 }

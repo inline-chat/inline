@@ -23,9 +23,12 @@ const unreadActivityCommands = 1
 // DM writes check whether the sender is a bot before retry recovery, enforcing
 // the same bot contact policy on retries as on first sends.
 const dmSenderIdentityCommands = 1
+// Reopening a DM sends its peer (with photo, one query) on the chat open, so a recipient who
+// never saw the sender can name the chat before any history arrives.
+const dmOpenPeerCommands = 1
 export const scenarios: readonly ScenarioSpec[] = [
   { id: "send.dm.open", kind: "sendDm", size: 1, maxCommands: 25 },
-  { id: "send.dm.closed", kind: "sendDm", size: 1, variant: "closed", maxCommands: 42 },
+  { id: "send.dm.closed", kind: "sendDm", size: 1, variant: "closed", maxCommands: 42 + dmOpenPeerCommands },
   { id: "send.dm.retry", kind: "sendDm", size: 1, variant: "retry", maxCommands: 7 + dmSenderIdentityCommands },
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.public.${size}`, kind: "sendThread", size, maxCommands: 32 })),
   ...[1, 10, 100].map((size): ScenarioSpec => ({ id: `send.reply.${size}`, kind: "sendThread", size, variant: "reply", maxCommands: 66 + 7 * size })),
