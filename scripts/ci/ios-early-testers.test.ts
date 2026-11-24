@@ -181,6 +181,16 @@ describe("internal iOS release boundary", () => {
     await expect(publish({ api: unresolved.api, sha, qualify: () => {}, log: () => {} })).rejects.toThrow("source differs")
     expect(unresolved.mutations).toEqual([])
   })
+  it("reports Apple's error code and detail without the raw body", async () => {
+    const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+    const env = { ASC_KEY_ID: "id", ASC_ISSUER_ID: "issuer", ASC_PRIVATE_KEY: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString() }
+    const forbidden = appleClient(env, async () => Response.json({ errors: [{ status: "403", code: "FORBIDDEN_ERROR",
+      detail: "The API key in use does not allow this request\n<script>", meta: { token: "secret" } }] }, { status: 403 }))
+    await expect(forbidden("/v1/betaGroups/g/relationships/builds", { data: [] })).rejects.toThrow(
+      "Apple API 403: /v1/betaGroups/g/relationships/builds (FORBIDDEN_ERROR: The API key in use does not allow this requestscript)")
+    const opaque = appleClient(env, async () => new Response("<html>", { status: 500 }))
+    await expect(opaque("/v1/apps")).rejects.toThrow(/^Apple API 500: \/v1\/apps$/)
+  })
   it("signs short lived Apple JWTs without disclosing credentials to pagination hosts", async () => {
     const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
     const env = { ASC_KEY_ID: "id", ASC_ISSUER_ID: "issuer", ASC_PRIVATE_KEY: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString() }

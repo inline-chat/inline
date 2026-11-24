@@ -29,6 +29,16 @@ export function makeToken(env, now = Math.floor(Date.now() / 1000)) {
   return `${body}.${sign("sha256", Buffer.from(body), { key, dsaEncoding: "ieee-p1363" }).toString("base64url")}`
 }
 
+/** Apple's error codes and details, e.g. why a 403 was refused, safe for public CI logs. */
+export async function appleErrorSummary(response) {
+  let body
+  try { body = await response.json() } catch { return "" }
+  const clean = (value, max) => String(value ?? "").replace(/[^A-Za-z0-9 .,'()_:/-]/g, "").trim().slice(0, max)
+  return (Array.isArray(body?.errors) ? body.errors : []).slice(0, 3)
+    .map((error) => [clean(error?.code, 80), clean(error?.detail, 200)].filter(Boolean).join(": "))
+    .filter(Boolean).join("; ")
+}
+
 /** @param {(url: URL, options: { method: string, body?: string }) => Promise<Response>} fetcher */
 export function appleClient(env, fetcher = fetch) {
   return async (path, data, method = data ? "POST" : "GET") => {
@@ -37,13 +47,17 @@ export function appleClient(env, fetcher = fetch) {
     if (!["GET", "POST", "PATCH"].includes(method) || (method === "GET" && data) || (method !== "GET" && !data)) {
       throw new Error("Unexpected Apple API method or body")
     }
-    // Do not log JWTs, private keys, request headers, or provider error bodies.
+    // Do not log JWTs, private keys, request headers, or raw provider bodies; failures
+    // carry only Apple's structured error code and detail, filtered and truncated.
     const response = await fetcher(url, {
       method, redirect: "error", signal: AbortSignal.timeout(60_000),
       headers: { Authorization: `Bearer ${makeToken(env)}`, "Content-Type": "application/json" },
       ...(data ? { body: JSON.stringify(data) } : {}),
     })
-    if (!response.ok) throw new Error(`Apple API ${response.status}: ${url.pathname}`)
+    if (!response.ok) {
+      const reason = await appleErrorSummary(response)
+      throw new Error(`Apple API ${response.status}: ${url.pathname}${reason ? ` (${reason})` : ""}`)
+    }
     return response.status === 204 ? {} : response.json()
   }
 }
