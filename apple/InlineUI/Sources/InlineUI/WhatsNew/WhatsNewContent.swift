@@ -2,13 +2,25 @@ extension WhatsNewAnnouncement {
   /// Shown once after updating to a build that carries it. Set to nil for releases
   /// that don't need one, and give each new announcement a new id.
   public static let current: WhatsNewAnnouncement? = WhatsNewAnnouncement(
-    id: "2026-11-13-highlights",
+    id: "2026-11-24-highlights",
     items: [
       WhatsNewItem(
+        systemImage: "list.bullet.rectangle",
+        title: "A Faster Message List",
+        detail: "Chats scroll more smoothly and open faster, with new animations for sending, reactions and new messages.",
+        platforms: .iOS
+      ),
+      WhatsNewItem(
         systemImage: "magnifyingglass",
-        title: "Search Inside a Chat",
-        detail: "Press Command-F to find messages in the chat you're in and jump straight to them.",
+        title: "Search All Your Messages",
+        detail: "Quick Search finds messages from every chat, and Command-F searches the one you're in.",
         platforms: .macOS
+      ),
+      WhatsNewItem(
+        systemImage: "magnifyingglass",
+        title: "Search All Your Messages",
+        detail: "Search finds messages from every chat, even ones this device never loaded.",
+        platforms: .iOS
       ),
       WhatsNewItem(
         systemImage: "text.quote",
@@ -21,20 +33,26 @@ extension WhatsNewAnnouncement {
         detail: "Badges and jump buttons take you to them, and chats open at your first unread message."
       ),
       WhatsNewItem(
-        systemImage: "checkmark.circle",
-        title: "Select Several Messages",
-        detail: "Choose Select from the message menu, then forward, delete, or copy them together.",
+        systemImage: "photo.stack",
+        title: "Albums",
+        detail: "Photos, videos and files you send together arrive as one album."
+      ),
+      WhatsNewItem(
+        systemImage: "character.cursor.ibeam",
+        title: "Select and Copy Across Messages",
+        detail: "Drag to select text across messages, and paste it elsewhere with its formatting intact.",
         platforms: .macOS
       ),
       WhatsNewItem(
-        systemImage: "moon",
-        title: "Focus Status",
-        detail: "When a Focus is on, people you choose see that your notifications are silenced."
+        systemImage: "textformat.size",
+        title: "Text Size and Fonts",
+        detail: "Use View › Make Text Bigger or Smaller, and pick fonts and line spacing in Appearance settings.",
+        platforms: .macOS
       ),
       WhatsNewItem(
-        systemImage: "text.bubble",
-        title: "Friendly or Detailed Agents",
-        detail: "Choose per bot from Chat Info whether it shows each step of its work or short updates."
+        systemImage: "checklist",
+        title: "Agents You Can Act On",
+        detail: "Approve plans and answer agents from cards, and choose per bot how much of their work you see."
       ),
       WhatsNewItem(
         systemImage: "mic",
@@ -43,10 +61,9 @@ extension WhatsNewAnnouncement {
         platforms: .iOS
       ),
       WhatsNewItem(
-        systemImage: "photo.on.rectangle",
-        title: "Swipe Through Media",
-        detail: "Photos and videos open in a gallery you can swipe through.",
-        platforms: .iOS
+        systemImage: "location.slash",
+        title: "Photos Without Hidden Details",
+        detail: "Photos and videos are sent without location or camera details. Turn on Original to send the untouched file."
       ),
     ]
   )
