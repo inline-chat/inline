@@ -12,7 +12,7 @@ import { and, eq, isNull, not } from "drizzle-orm"
 setupTestLifecycle()
 
 describe("messages.pinMessage", () => {
-  test("inserts one silent pinned system message on first pin", async () => {
+  test("inserts one pinned system message on first pin that counts as unread for the others", async () => {
     const owner = await testUtils.createUser("pin-owner@example.com")
     const viewer = await testUtils.createUser("pin-viewer@example.com")
     const chat = await testUtils.createChat(null, "Pinned Thread", "thread", false, owner.id)
@@ -115,6 +115,7 @@ describe("messages.pinMessage", () => {
     expect(history.messages).toHaveLength(1)
     expect(history.messages[0]?.message).toBe("Pinned a message")
 
-    await expect(DialogsModel.getUnreadCount(chat.id, viewer.id)).resolves.toBe(0)
+    // Pins count toward unread, as in Telegram (system messages with quiet kinds).
+    await expect(DialogsModel.getUnreadCount(chat.id, viewer.id)).resolves.toBe(1)
   })
 })
