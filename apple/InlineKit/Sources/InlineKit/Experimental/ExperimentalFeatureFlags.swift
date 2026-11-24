@@ -20,6 +20,14 @@ public enum ExperimentalFeatureFlags {
     UserDefaults.standard.bool(forKey: quickForwardKey)
   }
 
+  public static let newThreadComposerKey = "experimental.newThreadComposer"
+
+  /// iOS and iPadOS: New Thread opens the first-message composer instead of creating an empty
+  /// thread. Off until the composer is reliable; an unset preference defaults to false.
+  public static var newThreadComposerEnabled: Bool {
+    UserDefaults.standard.bool(forKey: newThreadComposerKey)
+  }
+
   public static let fileBrowserKey = "experimental.fileBrowser"
 
   public static var fileBrowserEnabled: Bool {
