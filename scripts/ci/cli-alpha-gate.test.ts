@@ -10,7 +10,7 @@ const sha = (char: string) => char.repeat(40)
 const REPO = { full_name: "inline-chat/inline" }
 const HOUR = 60 * 60 * 1000
 const NOW = Date.parse("2026-11-11T12:00:00Z")
-const CI_JOBS = ["Rust workspace all targets", "Workflow and release contracts"]
+const CI_JOBS = ["Rust workspace all targets", "Workflow and release contracts", "OpenClaw source, tests, and bundle", "Hermes source catalog and npm bundle parity"]
 const UPDATE_JOBS = ["Update, drain, rollback and telemetry (ubuntu-24.04)", "Update, drain, rollback and telemetry (macos-26)"]
 
 type Run = { id: number; status: string; conclusion?: string; jobs?: string[] }

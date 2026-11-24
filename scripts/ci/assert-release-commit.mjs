@@ -8,7 +8,9 @@ import { parseReleaseTag } from "./release-tag.mjs"
 const REPOSITORY = "inline-chat/inline"
 const SHA = /^[0-9a-f]{40}$/
 export const REQUIRED_JOBS = {
-  cli: ["Rust workspace all targets", "Workflow and release contracts"],
+  // CLI Release also validates the agent setup group (the OpenClaw and Hermes checks), so a
+  // commit red there must not be tagged: the tag would fail validation on every retry.
+  cli: ["Rust workspace all targets", "Workflow and release contracts", "OpenClaw source, tests, and bundle", "Hermes source catalog and npm bundle parity"],
   npm: ["Shared TypeScript packages", "Workflow and release contracts", "Pack seven candidate npm packages", "Packed consumer (Node 20)", "Packed consumer (Node 26)"],
 }
 export const CLI_UPDATE_JOBS = [
