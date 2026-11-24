@@ -15,6 +15,8 @@ const SHA = /^[0-9a-f]{40}$/
 const ALPHA = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-alpha\.(0|[1-9]\d*)$/
 const STABLE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 export const MIN_ALPHA_INTERVAL_MS = 3 * 60 * 60 * 1000
+/** An unpublished alpha older than this is abandoned: a newer green change gets the next alpha. */
+export const MAX_ALPHA_RESUME_MS = 12 * 60 * 60 * 1000
 const MAIN_COMMIT_WINDOW = 50
 const CI_WORKFLOW = "integrations.yml"
 // Path-filtered to CLI inputs on main pushes, so its run marks a CLI change.
@@ -100,7 +102,12 @@ export function selectCliAlpha({ api = github, event = "workflow_dispatch", now 
   // alpha after a failed dispatch/build instead of treating its tag as published.
   if (published && ALPHA.test(latest.version)) {
     const release = api(`releases/tags/${latest.tag}`, { missingOk: true })
-    if (!release || release.draft) {
+    // A tag whose source keeps failing release validation would otherwise be resumed forever and
+    // block every later alpha (cli-v0.7.27-alpha.2), so a stale one is left behind.
+    const stale = published.taggedAt && now - published.taggedAt >= MAX_ALPHA_RESUME_MS
+    if ((!release || release.draft) && stale) {
+      console.log(`Not resuming ${latest.tag}: tagged ${new Date(published.taggedAt).toISOString()} and still unpublished`)
+    } else if (!release || release.draft) {
       if (!["ahead", "identical"].includes(api(`compare/${published.sha}...main`).status)) {
         throw new ReleaseGateError(`${latest.tag} is not on main`)
       }

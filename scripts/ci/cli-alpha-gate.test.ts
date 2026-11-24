@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { parse } from "yaml"
-import { CURRENT, DEFERRED, MIN_ALPHA_INTERVAL_MS, RELEASE, committedVersion, nextAlphaVersion, publishCliAlpha, selectCliAlpha } from "./cli-alpha-gate.mjs"
+import { CURRENT, DEFERRED, MIN_ALPHA_INTERVAL_MS,
+  MAX_ALPHA_RESUME_MS, RELEASE, committedVersion, nextAlphaVersion, publishCliAlpha, selectCliAlpha } from "./cli-alpha-gate.mjs"
 
 const root = path.resolve(import.meta.dir, "../..")
 const sha = (char: string) => char.repeat(40)
@@ -154,11 +155,20 @@ describe("CLI alpha selection", () => {
   })
 
   test("an unpublished alpha must still be on main with passing release jobs before retrying", () => {
-    const options = { tags: tagged(), main: [sha("1")], releases: { "cli-v0.7.22-alpha.4": null },
+    const options = { tags: tagged(1), main: [sha("1")], releases: { "cli-v0.7.22-alpha.4": null },
       ci: { [sha("1")]: green(2) }, cli: { [sha("1")]: green(12) } }
-    expect(() => selectCliAlpha({ api: fakeApi({ ...options, compare: { [`${sha("1")}...main`]: "diverged" } }).api })).toThrow("not on main")
-    expect(selectCliAlpha({ api: fakeApi({ ...options, ci: { [sha("1")]: { id: 2, status: "completed", conclusion: "failure" } } }).api })).toMatchObject({ outcome: "blocked" })
-    expect(selectCliAlpha({ api: fakeApi({ ...options, cli: { [sha("1")]: { id: 12, status: "in_progress" } } }).api })).toMatchObject({ outcome: DEFERRED })
+    expect(() => selectCliAlpha({ api: fakeApi({ ...options, compare: { [`${sha("1")}...main`]: "diverged" } }).api, now: NOW })).toThrow("not on main")
+    expect(selectCliAlpha({ api: fakeApi({ ...options, ci: { [sha("1")]: { id: 2, status: "completed", conclusion: "failure" } } }).api, now: NOW })).toMatchObject({ outcome: "blocked" })
+    expect(selectCliAlpha({ api: fakeApi({ ...options, cli: { [sha("1")]: { id: 12, status: "in_progress" } } }).api, now: NOW })).toMatchObject({ outcome: DEFERRED })
+  })
+
+  test("leaves a stale unpublished alpha behind so a newer green change gets the next alpha", () => {
+    const { api } = fakeApi({ tags: tagged(MAX_ALPHA_RESUME_MS / HOUR), main: [sha("b"), sha("1")],
+      ci: { [sha("b")]: green(2) }, cli: { [sha("b")]: green(12) },
+      releases: { "cli-v0.7.22-alpha.4": null } })
+    expect(selectCliAlpha({ api, event: "workflow_run", now: NOW })).toMatchObject({
+      outcome: RELEASE, sha: sha("b"), tag: "cli-v0.7.22-alpha.5",
+    })
   })
 })
 
