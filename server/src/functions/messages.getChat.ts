@@ -114,22 +114,19 @@ async function getChatAndDialogForDM(
   // An existing DM stays readable; a new one with a bot needs access to it.
   await ensureCanMessageBot(user, currentUserId)
 
-  log.info("Auto-creating private chat and dialogs for both users", {
+  log.info("Auto-creating private chat and the caller's dialog", {
     currentUserId,
     peerUserId,
   })
 
-  const { chat, dialog } = await ChatModel.createUserChatAndDialog({
+  // Only the caller's dialog. The peer's dialog is created by the first send
+  // (setDialogOpenForUsers), which also tells the peer about the new chat; a
+  // pre-created open dialog made that send look like a no-op, so the peer got
+  // the message but never the chat.
+  return ChatModel.createUserChatAndDialog({
     peerUserId,
     currentUserId,
   })
-
-  await ChatModel.createUserChatAndDialog({
-    peerUserId: currentUserId,
-    currentUserId: peerUserId,
-  })
-
-  return { chat, dialog }
 }
 
 async function getChatAndDialogForThread(

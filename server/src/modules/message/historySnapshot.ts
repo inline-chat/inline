@@ -72,8 +72,8 @@ export async function withHistorySnapshot<T>(
       const user = await UsersModel.getUserById(peerUserId)
       if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
       await ensureCanMessageBot(user, currentUserId)
+      // Only the caller's dialog; the peer's comes with the first send, which also tells them.
       await ChatModel.createUserChatAndDialog({ peerUserId, currentUserId })
-      await ChatModel.createUserChatAndDialog({ peerUserId: currentUserId, currentUserId: peerUserId })
       chat = await ChatModel.getChatFromInputPeerUnchecked(peer, { currentUserId })
     }
     chatId = chat.id

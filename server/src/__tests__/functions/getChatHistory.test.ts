@@ -52,7 +52,7 @@ describe("getChatHistory", () => {
     expect(result.messages[0]?.id).toBe(BigInt(message.messageId))
   })
 
-  test("auto-creates chat and dialogs when chat doesn't exist for valid user", async () => {
+  test("auto-creates the chat and the caller's dialog when chat doesn't exist for valid user", async () => {
     const userA = (await testUtils.createUser("userA2@example.com"))!
     const userB = (await testUtils.createUser("userB2@example.com"))!
 
@@ -98,9 +98,8 @@ describe("getChatHistory", () => {
     const dialogsUserB = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.userId, userB.id), eq(schema.dialogs.peerUserId, userA.id)),
     })
-    expect(dialogsUserB.length).toBe(1)
-    expect(dialogsUserB[0]?.open).toBe(true)
-    expect(dialogsUserB[0]?.order).toBeTruthy()
+    // The peer's dialog comes with the first send, which also tells them about the chat.
+    expect(dialogsUserB.length).toBe(0)
   })
 
   test("throws error when trying to get chat history for non-existent user", async () => {

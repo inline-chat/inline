@@ -10,6 +10,7 @@ import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { UpdatesModel } from "@in/server/db/models/updates"
 import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 
 const makeHandlerContext = (userId: number): any => ({
@@ -197,6 +198,37 @@ describe("getChat", () => {
       .where(eq(schema.dialogs.chatId, storedChat.id))
     expect(storedDialogs).toHaveLength(2)
     expect(new Set(storedDialogs.map((dialog) => dialog.userId))).toEqual(new Set([userA.id, userB.id]))
+  })
+
+  test("opening a new DM leaves the peer's dialog to the first send, which tells the peer", async () => {
+    const sender = await testUtils.createUser("lazy-dm-sender@example.com")
+    const recipient = await testUtils.createUser("lazy-dm-recipient@example.com")
+    if (!sender || !recipient) throw new Error("Users not created")
+
+    const opened = await getChat({ peerId: makeInputPeerUser(recipient.id) }, makeHandlerContext(sender.id))
+    const chatId = Number(opened.chat.id)
+    const dialogsBefore = await db.select().from(schema.dialogs).where(eq(schema.dialogs.chatId, chatId))
+    expect(dialogsBefore.map((dialog) => dialog.userId)).toEqual([sender.id])
+
+    await sendMessage(
+      { peerId: makeInputPeerUser(recipient.id), message: "first DM" },
+      testUtils.functionContext({ userId: sender.id, sessionId: 1 }),
+    )
+
+    const [recipientDialog] = await db
+      .select()
+      .from(schema.dialogs)
+      .where(and(eq(schema.dialogs.chatId, chatId), eq(schema.dialogs.userId, recipient.id)))
+    expect(recipientDialog?.open).toBe(true)
+    expect(recipientDialog?.peerUserId).toBe(sender.id)
+
+    const recipientUpdates = await db.query.updates.findMany({
+      where: { bucket: schema.UpdateBucket.User, entityId: recipient.id },
+    })
+    expect(recipientUpdates.map((update) => UpdatesModel.decrypt(update)).some((update) =>
+      update.payload.update.oneofKind === "userChatOpen"
+      && Number(update.payload.update.userChatOpen.chat?.id) === chatId,
+    )).toBe(true)
   })
 
   test("passes the DM peer profile photo to the user encoder", async () => {
