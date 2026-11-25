@@ -436,6 +436,10 @@ pub enum ItemBody {
         /// Prompt or description.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prompt: Option<String>,
+        /// What the child reported back when it finished (a Claude sub-agent's
+        /// final report), when the harness gives it on this item.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
     },
     /// Context usage marker (compaction).
     Usage {
@@ -981,6 +985,11 @@ pub struct Notice {
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub native: Value,
 }
+
+/// A notice with this code is the session's live status ("Retrying (3/10)",
+/// "Compacting context"), shown as the progress header until the next item;
+/// one without a message clears it.
+pub const LIVE_STATUS_NOTICE: &str = "inline/live_status";
 
 /// Notice severity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

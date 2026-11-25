@@ -38,8 +38,8 @@ pub use event::{
     ApprovalSubject, ChildStatus, ChildUpdate, ClosedBy, CommandAction, Decision, DecisionKind,
     DeltaStream, EffectiveSettings, Envelope, Event, FieldInput, FieldOption, FileChangeKind,
     FileDiff, FormField, HeldBy, HeldSurface, InputFact, Interaction, InteractionKind, Item,
-    ItemBody, ItemDelta, ItemKind, ItemStatus, ItemUpdate, MessageRole, Notice, NoticeLevel,
-    QuestionForm, QueuedInput, TokenUsage, TurnPhase, UsageUpdate,
+    ItemBody, ItemDelta, ItemKind, ItemStatus, ItemUpdate, LIVE_STATUS_NOTICE, MessageRole, Notice,
+    NoticeLevel, QuestionForm, QueuedInput, TokenUsage, TurnPhase, UsageUpdate,
 };
 pub use ids::{
     ChatId, ChildId, ChildKind, ChildRef, DecisionId, FieldId, InputId, InteractionId,

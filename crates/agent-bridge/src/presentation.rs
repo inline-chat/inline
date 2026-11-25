@@ -589,29 +589,45 @@ pub fn sanitize_visible_command(value: &str) -> Option<String> {
 /// transcript. This preserves Markdown whitespace while applying the same
 /// credential, signed-URL, and local-path redaction used for visible commands.
 pub fn sanitize_visible_transcript(value: &str) -> Option<String> {
-    sanitize_multiline_text(value, true)
+    sanitize_multiline_text(value, true, false)
 }
 
 /// Sanitizes diagnostic prose. Unlike command transcripts, a bare word such
 /// as `token` is not an assignment: `No token found` must remain actionable.
 /// Explicit assignments, headers, flags, URLs, and paths use the same scrubber.
 pub fn sanitize_diagnostic_text(value: &str) -> Option<String> {
-    sanitize_multiline_text(value, false)
+    sanitize_multiline_text(value, false, false)
 }
 
-fn sanitize_multiline_text(value: &str, redact_bare_values: bool) -> Option<String> {
+/// Agent work shown in a chat: secrets are redacted (credential assignments,
+/// auth headers, secret flags, URL passwords and secret-named query values),
+/// while paths and ordinary URLs stay as written, as Claude Code, Codex,
+/// OpenCode and t3code show them.
+pub fn sanitize_shared_output(value: &str) -> Option<String> {
+    sanitize_multiline_text(value, false, true)
+}
+
+fn sanitize_multiline_text(
+    value: &str,
+    redact_bare_values: bool,
+    keep_locations: bool,
+) -> Option<String> {
     let sanitized = sanitize_visible_text(value);
     let redacted = sanitized
         .split('\n')
-        .map(|line| redact_sensitive_transcript_line(line, redact_bare_values))
+        .map(|line| redact_sensitive_transcript_line(line, redact_bare_values, keep_locations))
         .collect::<Vec<_>>()
         .join("\n");
     let redacted = redacted.trim_matches('\n');
     (!redacted.trim().is_empty()).then(|| redacted.to_string())
 }
 
-fn redact_sensitive_transcript_line(line: &str, redact_bare_values: bool) -> String {
-    let line = redact_command_arguments(line, redact_bare_values);
+fn redact_sensitive_transcript_line(
+    line: &str,
+    redact_bare_values: bool,
+    keep_locations: bool,
+) -> String {
+    let line = redact_command_arguments(line, redact_bare_values, keep_locations);
     for (separator_index, separator) in line
         .char_indices()
         .filter(|(_, character)| matches!(character, ':' | '='))
@@ -627,6 +643,19 @@ fn redact_sensitive_transcript_line(line: &str, redact_bare_values: bool) -> Str
             .unwrap_or(0);
         let name = line[name_start..name_end].trim_matches(['\'', '"', '`']);
         if standalone_sensitive_assignment_name(name) {
+            // A shell word `KEY=value` the word pass already redacted whole:
+            // the rest of the line (a command's other arguments) stays. A
+            // `name: value` line hides everything after the name, as a
+            // passphrase can hold spaces.
+            let value = &line[separator_index + separator.len_utf8()..];
+            if separator == '='
+                && name_end == separator_index
+                && value
+                    .trim_start_matches(['\'', '"', '`'])
+                    .starts_with("[redacted")
+            {
+                continue;
+            }
             return format!("{}{} [redacted]", &line[..separator_index], separator);
         }
     }
@@ -634,10 +663,14 @@ fn redact_sensitive_transcript_line(line: &str, redact_bare_values: bool) -> Str
 }
 
 fn redact_sensitive_command_arguments(command: &str) -> String {
-    redact_command_arguments(command, true)
+    redact_command_arguments(command, true, false)
 }
 
-fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
+fn redact_command_arguments(
+    command: &str,
+    redact_bare_values: bool,
+    keep_locations: bool,
+) -> String {
     const SECRET_FLAGS: &[&str] = &[
         "--access-token",
         "--api-key",
@@ -722,7 +755,7 @@ fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
             output.push(format!("{}[redacted]", &token[..2]));
             continue;
         }
-        let redacted_url = redact_url_credentials(&token);
+        let redacted_url = redact_url(&token, keep_locations);
         if redacted_url != token {
             output.push(redacted_url);
             continue;
@@ -733,9 +766,19 @@ fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
                 || sensitive_assignment_name(flag)
                 || (normalized_flag == "--header" && sensitive_header_value(value).is_some())
             {
-                output.push(format!("{flag}=[redacted]"));
+                // `KEY= value`: the value is the next word.
                 if value.trim_matches(['\'', '"', '`']).is_empty() {
+                    output.push(token);
                     redact_next = true;
+                } else {
+                    // `'KEY=value'` keeps its closing quote.
+                    let quote = flag
+                        .chars()
+                        .next()
+                        .filter(|quote| matches!(quote, '\'' | '"') && value.ends_with(*quote))
+                        .map(String::from)
+                        .unwrap_or_default();
+                    output.push(format!("{flag}=[redacted]{quote}"));
                 }
                 continue;
             }
@@ -754,8 +797,12 @@ fn redact_command_arguments(command: &str, redact_bare_values: bool) -> String {
             });
             continue;
         }
-        let token = redact_url_credentials(&token);
-        output.push(redact_absolute_local_path(&token));
+        let token = redact_url(&token, keep_locations);
+        output.push(if keep_locations {
+            token
+        } else {
+            redact_absolute_local_path(&token)
+        });
     }
     // Each word has exactly one replacement. Keep the original separators so
     // prose, nested lists, indented code, and Markdown hard breaks survive.
@@ -963,6 +1010,61 @@ fn standalone_sensitive_assignment_name(name: &str) -> bool {
         && sensitive_assignment_name(name)
 }
 
+fn redact_url(token: &str, keep_locations: bool) -> String {
+    if keep_locations {
+        redact_url_secrets(token)
+    } else {
+        redact_url_credentials(token)
+    }
+}
+
+/// A URL with only its secrets removed: the password, and the values of
+/// query parameters named like secrets (`token`, `api_key`, signatures).
+fn redact_url_secrets(token: &str) -> String {
+    let Some((start, url_end, mut parsed)) = parse_url_span(token) else {
+        return token.to_string();
+    };
+    let mut changed = false;
+    if parsed.password().is_some() {
+        let _ = parsed.set_password(None);
+        changed = true;
+    }
+    if parsed.query().is_some() {
+        let pairs: Vec<(String, String)> = parsed
+            .query_pairs()
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect();
+        let secret = |name: &str| {
+            let lower = name.to_ascii_lowercase();
+            sensitive_assignment_name(name)
+                || matches!(
+                    lower.as_str(),
+                    "key"
+                        | "sig"
+                        | "signature"
+                        | "code"
+                        | "auth"
+                        | "x-amz-signature"
+                        | "x-amz-credential"
+                        | "x-amz-security-token"
+                )
+        };
+        if pairs.iter().any(|(name, _)| secret(name)) {
+            let mut query = parsed.query_pairs_mut();
+            query.clear();
+            for (name, value) in &pairs {
+                query.append_pair(name, if secret(name) { "[redacted]" } else { value });
+            }
+            drop(query);
+            changed = true;
+        }
+    }
+    if !changed {
+        return token.to_string();
+    }
+    format!("{}{}{}", &token[..start], parsed, &token[url_end..])
+}
+
 fn redact_url_credentials(token: &str) -> String {
     let Some((start, url_end, mut parsed)) = parse_url_span(token) else {
         return token.to_string();
@@ -1100,6 +1202,16 @@ pub fn sanitize_visible_text(value: &str) -> String {
                             break;
                         }
                         previous_escape = control == '\u{1b}';
+                    }
+                }
+                // nF escapes (`ESC ( B` from `tput sgr0`, charset and
+                // line-attribute selections): intermediates, then one final
+                // byte, all invisible.
+                Some(intermediate) if ('\u{20}'..='\u{2f}').contains(&intermediate) => {
+                    for control in chars.by_ref() {
+                        if !('\u{20}'..='\u{2f}').contains(&control) {
+                            break;
+                        }
                     }
                 }
                 Some(_) | None => {}
@@ -1379,7 +1491,7 @@ mod tests {
         assert!(transcript.contains("\"api_key\" : [redacted]"));
         assert!(transcript.contains("ANTHROPIC_API_KEY= [redacted]"));
         assert!(transcript.contains("AWS_SECRET_ACCESS_KEY = [redacted]"));
-        assert!(transcript.contains("Fix [local-path] TOKEN= [redacted]"));
+        assert!(transcript.contains("Fix [local-path] TOKEN=[redacted]"));
         assert!(transcript.contains("cwd:[local-path]"));
         assert!(transcript.contains("file=@[local-path]"));
         assert!(transcript.contains("UNC: [local-path]"));
@@ -1581,6 +1693,56 @@ mod tests {
                 &ValidationSummary::Passed("focused tests passed".to_string()),
             ),
             "Implemented presentation polish.\n\nChanged:\n- crates/agent-bridge/src/presentation.rs — safe streaming output\n\nChecks: focused tests passed."
+        );
+    }
+
+    #[test]
+    fn a_redacted_assignment_keeps_the_rest_of_the_command() {
+        // Seen live: `printf 'API_KEY=sk-…\nlog written to %s/…' "$PWD"`
+        // lost everything after the key.
+        let command = "printf 'API_KEY=sk-live-4f9a8b7c6d5e4f3a2b1c0d9e8f7a\\nlog written to %s/src/parser.py\\n' \"$PWD\"";
+        let shown = sanitize_shared_output(command).unwrap();
+        assert!(!shown.contains("sk-live"), "{shown}");
+        assert_eq!(shown, "printf 'API_KEY=[redacted]' \"$PWD\"");
+        // A value on its own line still goes to the line's end.
+        assert_eq!(
+            sanitize_shared_output("API_KEY=sk-live-4f9a8b7c6d5e4f3a2b1c0d9e8f7a").unwrap(),
+            "API_KEY=[redacted]"
+        );
+        assert_eq!(
+            sanitize_shared_output("password: correct horse battery staple").unwrap(),
+            "password: [redacted]"
+        );
+    }
+
+    #[test]
+    fn shared_output_keeps_paths_and_urls_and_hides_secrets() {
+        let keep = [
+            "app.get('/health', handler)",
+            "/Users/mo/dev/app/src/main.rs:12",
+            "see https://github.com/o/r/blob/main/a.rs#L12 and https://example.com/search?q=rust",
+            "/bin/zsh -lc 'cargo test'",
+        ];
+        for text in keep {
+            assert_eq!(
+                sanitize_shared_output(text).as_deref(),
+                Some(text),
+                "{text}"
+            );
+        }
+        let hidden = sanitize_shared_output(
+            "curl -H 'Authorization: Bearer abc123' https://u:pw@api.example.com/v1?token=xyz&page=2\nAPI_KEY=sk-live-1\npassword: hunter2",
+        )
+        .expect("text");
+        for secret in ["abc123", "pw@", "xyz", "sk-live-1", "hunter2"] {
+            assert!(!hidden.contains(secret), "{secret} leaked: {hidden}");
+        }
+        assert!(hidden.contains("page=2"), "{hidden}");
+        assert!(hidden.contains("api.example.com/v1"), "{hidden}");
+        // Diagnostics keep redacting paths.
+        assert_eq!(
+            sanitize_diagnostic_text("/Users/mo/dev/app/src/main.rs").as_deref(),
+            Some("[local-path]")
         );
     }
 }
