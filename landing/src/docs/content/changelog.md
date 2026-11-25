@@ -11,7 +11,7 @@ Release notes for Inline apps, developer tools, and integrations.
 
 [macOS 0.2 beta, build 7475](https://public-assets.inline.chat/mac/beta/7475/Inline.dmg) · [CLI 0.7.26](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.26) · [Hermes adapter 1.2.6](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.6) · [OpenClaw plugin 1.0.0-alpha.3](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.3)
 
-The iOS TestFlight build follows soon. It is the first since October 30, so on iOS it also brings everything in the [November 13](#november-13-2026) notes, including quote replies, unread mention and reaction badges, focus status, hold-to-record, the swipeable media gallery, and the new iPad layout.
+The iOS TestFlight build follows soon. It is the first since October 30, so on iOS it also brings everything in the [November 13](#november-13-2026) notes, including quote replies, unread mention and reaction badges, focus status, the swipeable media gallery, and the new iPad layout.
 
 ### New
 
