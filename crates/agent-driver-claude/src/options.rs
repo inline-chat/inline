@@ -325,6 +325,9 @@ impl LaunchOptions {
             // Ask for session_state_changed frames: they say when the CLI owes
             // no further turn (background agents still running keep it busy).
             ("CLAUDE_CODE_SDK_READS_SESSION_STATE".into(), "1".into()),
+            // The task list tools Claude Code has interactively; headless
+            // they're off, and the pinned plan in Inline comes from them.
+            ("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "1".into()),
             ("PWD".into(), self.cwd.clone().into_os_string()),
         ];
         if let Some(client_app) = &self.client_app {

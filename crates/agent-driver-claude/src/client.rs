@@ -70,7 +70,8 @@ impl ControlHandler for RefuseAll {
                     crate::control::PermissionDecision::deny("No approver is attached")
                         .to_value(&permission.input),
                 ),
-                IncomingRequest::Elicitation(_) => Ok(json!({"action": "decline"})),
+                // Nobody was asked: dismissed, not a person's "no".
+                IncomingRequest::Elicitation(_) => Ok(json!({"action": "cancel"})),
                 IncomingRequest::HookCallback(hook) => Err(format!(
                     "No hook callback found for ID: {}",
                     hook.callback_id

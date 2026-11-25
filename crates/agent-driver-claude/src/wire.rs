@@ -290,8 +290,13 @@ pub struct ResultMessage {
     pub uuid: Option<String>,
 }
 
+/// How much of a result's `errors[]` a failure shows: the first error in
+/// full in practice, not the CLI's whole in-memory error log.
+const MAX_ERROR_TEXT_CHARS: usize = 1_000;
+
 impl ResultMessage {
     /// The most informative text of an error result, as the SDKs pick it.
+    /// The CLI's own `[ede_diagnostic]` lines are telemetry, not errors.
     pub fn error_text(&self) -> String {
         let errors: Vec<String> = self
             .errors
@@ -306,9 +311,14 @@ impl ResultMessage {
                 _ => None,
             })
             .filter(|text| !text.trim().is_empty())
+            .filter(|text| !text.trim_start().starts_with("[ede_diagnostic]"))
             .collect();
         if !errors.is_empty() {
-            return errors.join("; ");
+            let joined = errors.join("; ");
+            return match joined.char_indices().nth(MAX_ERROR_TEXT_CHARS) {
+                Some((end, _)) => format!("{}\u{2026}", joined[..end].trim_end()),
+                None => joined,
+            };
         }
         if let Some(result) = self.result.as_deref().map(str::trim)
             && !result.is_empty()
@@ -687,6 +697,52 @@ mod tests {
             ..ResultMessage::default()
         };
         assert_eq!(result.error_text(), "first; second");
+    }
+
+    #[test]
+    fn error_text_drops_cli_diagnostics_and_stays_short() {
+        let result = ResultMessage {
+            subtype: "error_during_execution".into(),
+            is_error: true,
+            errors: Some(vec![
+                json!("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"),
+                json!("API Error: 500 Internal server error"),
+            ]),
+            ..ResultMessage::default()
+        };
+        assert_eq!(result.error_text(), "API Error: 500 Internal server error");
+
+        // Only diagnostics: the subtype says what happened.
+        let result = ResultMessage {
+            subtype: "error_during_execution".into(),
+            is_error: true,
+            errors: Some(vec![json!("[ede_diagnostic] stop_reason=null")]),
+            ..ResultMessage::default()
+        };
+        assert_eq!(result.error_text(), "error_during_execution");
+
+        // A long in-memory error log keeps the first error, then is cut.
+        let result = ResultMessage {
+            subtype: "error_during_execution".into(),
+            is_error: true,
+            errors: Some(
+                std::iter::once(json!("Connection error."))
+                    .chain((0..200).map(|n| json!(format!("retry {n} failed: socket hang up"))))
+                    .collect(),
+            ),
+            ..ResultMessage::default()
+        };
+        let text = result.error_text();
+        assert!(
+            text.starts_with("Connection error.; retry 0 failed"),
+            "{text}"
+        );
+        assert!(
+            text.chars().count() <= MAX_ERROR_TEXT_CHARS + 1,
+            "{}",
+            text.len()
+        );
+        assert!(text.ends_with('\u{2026}'));
     }
 
     #[test]

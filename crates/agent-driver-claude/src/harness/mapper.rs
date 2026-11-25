@@ -14,8 +14,9 @@ use inline_agent_bridge::harness::{
     DecisionId, DecisionKind, DeltaStream, EffectiveSettings, Event, FieldAnswer, FieldId,
     FieldInput, FieldOption, FileChangeKind, FileDiff, FormField, InputFact, InputId, Interaction,
     InteractionId, InteractionKind, InteractionResponse, Item, ItemBody, ItemDelta, ItemId,
-    ItemStatus, ItemUpdate, MessageRole, Notice, NoticeLevel, OpError, QuestionForm, QueueEntryId,
-    QueuedInput, RunState, TokenUsage, TurnPhase, UsageUpdate, UserId, WaitingOn,
+    ItemStatus, ItemUpdate, LIVE_STATUS_NOTICE, MessageRole, Notice, NoticeLevel, OpError,
+    QuestionForm, QueueEntryId, QueuedInput, RunState, TokenUsage, TurnPhase, UsageUpdate, UserId,
+    WaitingOn,
 };
 use inline_agent_bridge::{
     AgentMessagePhase, DriverSettingOption, DriverUsageWindow, PlanStep, PlanStepStatus, TurnId,
@@ -69,6 +70,22 @@ struct ToolItem {
     started: tokio::time::Instant,
 }
 
+/// One entry of Claude's task list (TaskCreate, TaskUpdate, TaskList).
+#[derive(Clone, Debug, PartialEq)]
+struct ClaudeTask {
+    id: String,
+    text: String,
+    status: PlanStepStatus,
+}
+
+/// Claude Code's task tools: the default task list since 2.1.3xx, which
+/// TodoWrite only replaces when the todo tools are turned on.
+const TASK_TOOLS: [&str; 3] = ["TaskCreate", "TaskUpdate", "TaskList"];
+
+/// Text kept from a server-side tool's result (web search hits, an
+/// advisor's note), as much as a row's detail shows.
+const MAX_SERVER_RESULT_CHARS: usize = 2_000;
+
 /// Folds one session's frames into contract events.
 #[derive(Clone, Debug, Default)]
 pub struct ClaudeMapper {
@@ -91,8 +108,17 @@ pub struct ClaudeMapper {
     /// The API message being streamed, per parent tool use (`""` = main).
     streaming: HashMap<String, String>,
     children: HashMap<String, ChildRef>,
-    /// Task tool_use id → child.
+    /// Agent/Task tool_use id → the child its nested frames belong to. The
+    /// first one wins, so a sub-agent's rows keep the parent they started
+    /// under when `task_started` later names the task.
     child_by_tool_use: HashMap<String, ChildRef>,
+    /// Task id → the tool_use id that started it, for frames that carry
+    /// only an `agent_id`.
+    task_tool_use: HashMap<String, String>,
+    /// Claude's task list, shared by the session and its sub-agents.
+    tasks: Vec<ClaudeTask>,
+    /// TaskCreate calls without a result yet, in order: (tool_use id, subject).
+    pending_task_creates: Vec<(String, String)>,
     pending: HashMap<String, PendingAsk>,
     denied_tool_uses: HashSet<String>,
     /// `priority: later` inputs the CLI has not started yet.
@@ -302,10 +328,20 @@ impl ClaudeMapper {
                     });
                 }
                 self.compacting = status.status.as_deref() == Some("compacting");
-                if status.status.is_some() || status.compact_result.is_some() {
+                if status.compact_result.as_deref() == Some("failed") {
+                    // Only errors reach the chat; a failed /compact must.
+                    events.push(notice(
+                        NoticeLevel::Error,
+                        "Compaction failed",
+                        Some(compaction_failed_text(status.compact_error.as_deref())),
+                        &message.raw,
+                    ));
+                } else if status.status.is_some() || status.compact_result.is_some() {
+                    // "Compacting context" heads the progress while it runs;
+                    // its end clears it.
                     events.push(notice(
                         NoticeLevel::Info,
-                        "status",
+                        LIVE_STATUS_NOTICE,
                         status_text(status),
                         &message.raw,
                     ));
@@ -313,6 +349,17 @@ impl ClaudeMapper {
                 events
             }
             MessageKind::CompactBoundary => {
+                // The context's size after compaction: what the turn's
+                // result reports as the fill, not the call before it.
+                if let Some(tokens) = message.raw["compact_metadata"]["post_tokens"].as_u64() {
+                    self.last_call_usage = Some(TokenUsage {
+                        input: tokens,
+                        cached_input: 0,
+                        output: 0,
+                        reasoning: 0,
+                        total: tokens,
+                    });
+                }
                 let id = message.uuid().unwrap_or("compact");
                 vec![Event::Item(Item::new(
                     item_id(id),
@@ -337,12 +384,7 @@ impl ClaudeMapper {
                     &message.raw,
                 )]
             }
-            MessageKind::System { subtype } => vec![notice(
-                NoticeLevel::Info,
-                &format!("system/{subtype}"),
-                None,
-                &message.raw,
-            )],
+            MessageKind::System { subtype } => vec![system_notice(subtype, &message.raw)],
             MessageKind::PromptSuggestion(suggestion) => {
                 let text = suggestion.suggestion.trim();
                 // It follows the turn that just ended; one arriving after a
@@ -485,19 +527,23 @@ impl ClaudeMapper {
             .collect()
     }
 
+    /// The sub-agent a nested frame belongs to: the Agent/Task tool use that
+    /// started it, so its rows keep one parent before and after
+    /// `task_started` names the task (the Agent row nests them).
     fn parent(&self, parent_tool_use_id: Option<&str>, agent_id: Option<&str>) -> Option<ChildRef> {
-        if let Some(agent) = agent_id
-            && let Some(child) = self.children.get(agent)
-        {
-            return Some(child.clone());
-        }
-        let tool_use = parent_tool_use_id?;
+        let tool_use = parent_tool_use_id.or_else(|| {
+            agent_id
+                .and_then(|agent| self.task_tool_use.get(agent))
+                .map(String::as_str)
+        });
+        let Some(tool_use) = tool_use else {
+            return agent_id.and_then(|agent| self.children.get(agent).cloned());
+        };
         if let Some(child) = self.child_by_tool_use.get(tool_use) {
             return Some(child.clone());
         }
-        let id = agent_id.unwrap_or(tool_use);
         Some(ChildRef {
-            id: ChildId::new(id).ok()?,
+            id: ChildId::new(tool_use).ok()?,
             kind: ChildKind::Subagent,
         })
     }
@@ -598,11 +644,17 @@ impl ClaudeMapper {
                 }
                 "tool_use" | "server_tool_use" | "mcp_tool_use" => {
                     let id = block["id"].as_str().unwrap_or_default().to_string();
-                    let body = tool_body(block);
-                    if matches!(block["name"].as_str(), Some("Task" | "Agent"))
+                    let name = block["name"].as_str().unwrap_or_default();
+                    let body = if TASK_TOOLS.contains(&name) {
+                        self.task_tool_started(&id, name, &block["input"])
+                            .unwrap_or_else(|| tool_body(block))
+                    } else {
+                        tool_body(block)
+                    };
+                    if matches!(name, "Task" | "Agent")
                         && let Ok(child_id) = ChildId::new(id.as_str())
                     {
-                        // Until task_started names the task, the tool use stands in.
+                        // The sub-agent's own frames nest under this tool use.
                         self.child_by_tool_use
                             .entry(id.clone())
                             .or_insert(ChildRef {
@@ -638,6 +690,17 @@ impl ClaudeMapper {
                         },
                     );
                     events.push(Event::Item(item));
+                }
+                // A server-side tool's result (web search, advisor, code
+                // execution, MCP connector) completes its call.
+                kind if kind.ends_with("_tool_result")
+                    && block["tool_use_id"]
+                        .as_str()
+                        .is_some_and(|id| self.tools.contains_key(id)) =>
+                {
+                    let tool_use_id = block["tool_use_id"].as_str().unwrap_or_default();
+                    let (output, is_error) = server_tool_result(block);
+                    events.extend(self.finish_tool(tool_use_id, output, is_error, None, block));
                 }
                 _ => events.push(Event::Item(
                     Item::new(
@@ -737,7 +800,21 @@ impl ClaudeMapper {
     ) -> Vec<Event> {
         let output = result_text(&block["content"]);
         let is_error = block["is_error"].as_bool().unwrap_or(false);
-        let status = if self.denied_tool_uses.remove(tool_use_id) {
+        self.finish_tool(tool_use_id, output, is_error, structured, block)
+    }
+
+    /// Completes a tool call with its result, from a user `tool_result` or a
+    /// server-side `*_tool_result` block.
+    fn finish_tool(
+        &mut self,
+        tool_use_id: &str,
+        output: String,
+        is_error: bool,
+        structured: Option<&Value>,
+        block: &Value,
+    ) -> Vec<Event> {
+        let declined = self.denied_tool_uses.remove(tool_use_id);
+        let status = if declined {
             ItemStatus::Declined
         } else if is_error && output.contains("[Request interrupted by user") {
             ItemStatus::Interrupted
@@ -760,14 +837,28 @@ impl ClaudeMapper {
                 block.clone(),
             ))];
         };
-        let body = complete_body(tool.body, output, is_error, structured);
+        let body = if TASK_TOOLS.contains(&tool.name.as_str()) {
+            // The task list after the call; a failed call shows as the tool.
+            match self.task_tool_finished(
+                tool_use_id,
+                &tool.name,
+                &tool.native["input"],
+                structured,
+                &output,
+                is_error || declined,
+            ) {
+                Some(steps) => plan_body(steps),
+                None => complete_body(tool_body(&tool.native), output, is_error, structured),
+            }
+        } else {
+            complete_body(tool.body, output, is_error, structured)
+        };
         let mut native = block.clone();
         if let Some(structured) = structured
             && let Some(object) = native.as_object_mut()
         {
             object.insert("tool_use_result".into(), structured.clone());
         }
-        let _ = tool.native;
         vec![Event::Item(
             Item::new(
                 item_id(tool_use_id),
@@ -851,9 +942,23 @@ impl ClaudeMapper {
 
     fn result(&mut self, result: &ResultMessage) -> Vec<Event> {
         let mut events = Vec::new();
-        if let Some(mut usage) = result_usage(result) {
-            usage.last = self.last_call_usage.take();
-            events.push(Event::Usage { usage });
+        match result_usage(result) {
+            Some(mut usage) => {
+                usage.last = self.last_call_usage.take();
+                events.push(Event::Usage { usage });
+            }
+            // A native command's result may carry no usage; the fill it
+            // left (a compaction's) still counts.
+            None => {
+                if let Some(last) = self.last_call_usage.take() {
+                    events.push(Event::Usage {
+                        usage: UsageUpdate {
+                            last: Some(last),
+                            ..UsageUpdate::default()
+                        },
+                    });
+                }
+            }
         }
         let consumed: Vec<InputId> = match &result.user_message_uuids {
             Some(uuids) => {
@@ -910,30 +1015,22 @@ impl ClaudeMapper {
         self.compacting = false;
         self.command_turn = false;
         let error = (outcome == TurnOutcome::Failed).then(|| result.error_text());
-        // Tool calls an interrupted or failed turn left open ended with it.
-        let open: Vec<String> = self
-            .tools
-            .iter()
-            .filter(|_| outcome != TurnOutcome::Completed)
-            .filter(|(_, tool)| tool.turn.as_ref() == Some(&turn))
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in open {
-            if let Some(tool) = self.tools.remove(&id) {
-                events.push(Event::Item(
-                    Item::new(
-                        item_id(&id),
-                        tool.turn,
-                        ItemUpdate::Completed {
-                            body: tool.body,
-                            status: ItemStatus::Interrupted,
-                        },
-                        Value::Null,
-                    )
-                    .with_parent(tool.parent),
-                ));
-            }
+        // Tool calls the turn left open ended with it: cut short when the
+        // turn did not complete. A completed turn ends the server-side calls
+        // (web search, advisor, MCP connectors) as done: their results come
+        // as content blocks, which a newer API may shape differently.
+        if outcome == TurnOutcome::Completed {
+            events.extend(self.close_tools(
+                |tool| tool.turn.as_ref() == Some(&turn) && is_server_tool(tool),
+                ItemStatus::Completed,
+            ));
+        } else {
+            events.extend(self.close_tools(
+                |tool| tool.turn.as_ref() == Some(&turn),
+                ItemStatus::Interrupted,
+            ));
         }
+        self.pending_task_creates.clear();
         // Cut for a steer, the turn did not stop: the steer carries on.
         let outcome = if superseded && outcome == TurnOutcome::Interrupted {
             TurnOutcome::Completed
@@ -991,8 +1088,12 @@ impl ClaudeMapper {
             }
         };
         if let Some(tool_use) = &task.tool_use_id {
+            // The Agent tool use, when it was seen, stays the parent.
             self.child_by_tool_use
-                .insert(tool_use.clone(), child.clone());
+                .entry(tool_use.clone())
+                .or_insert_with(|| child.clone());
+            self.task_tool_use
+                .insert(task.task_id.clone(), tool_use.clone());
         }
         let (status, title) = match task.subtype.as_str() {
             "task_started" => (ChildStatus::Started, task.description.clone()),
@@ -1008,6 +1109,7 @@ impl ClaudeMapper {
             ChildStatus::Completed | ChildStatus::Failed | ChildStatus::Stopped
         ) {
             self.children.remove(&task.task_id);
+            self.task_tool_use.remove(&task.task_id);
         }
         vec![Event::Child {
             update: ChildUpdate {
@@ -1034,7 +1136,7 @@ impl ClaudeMapper {
                 let parent = permission
                     .agent_id
                     .as_deref()
-                    .and_then(|agent| self.children.get(agent).cloned());
+                    .and_then(|agent| self.parent(None, Some(agent)));
                 let item = permission
                     .tool_use_id
                     .as_deref()
@@ -1095,13 +1197,15 @@ impl ClaudeMapper {
                 )],
             },
             IncomingRequest::Elicitation(raw) => RequestMapped::Reply {
-                response: Ok(json!({"action": "decline"})),
-                // Shown in the chat: declining silently left people wondering
+                // Nobody was asked, so it is dismissed ("cancel"), never a
+                // person's explicit "no" ("decline").
+                response: Ok(json!({"action": "cancel"})),
+                // Shown in the chat: cancelling silently left people wondering
                 // why the tool didn't run.
                 events: vec![notice(
                     NoticeLevel::Error,
-                    "Request declined",
-                    Some(elicitation_declined_text(&raw)),
+                    "Request cancelled",
+                    Some(elicitation_cancelled_text(&raw)),
                     request,
                 )],
             },
@@ -1226,6 +1330,9 @@ impl ClaudeMapper {
                 by: ClosedBy::Cancelled,
             })
             .collect();
+        // Every call still open died with the process.
+        events.extend(self.close_tools(|_| true, ItemStatus::Interrupted));
+        self.pending_task_creates.clear();
         if let Some(turn) = self.turn.take() {
             events.push(Event::Turn {
                 turn,
@@ -1237,8 +1344,207 @@ impl ClaudeMapper {
                 },
             });
         }
-        self.tools.clear();
         events
+    }
+
+    /// Ends the open tool calls `which` picks, in the order they started.
+    fn close_tools(&mut self, which: impl Fn(&ToolItem) -> bool, status: ItemStatus) -> Vec<Event> {
+        let mut open: Vec<(String, ToolItem)> = self
+            .tools
+            .iter()
+            .filter(|(_, tool)| which(tool))
+            .map(|(id, tool)| (id.clone(), tool.clone()))
+            .collect();
+        open.sort_by_key(|(_, tool)| tool.started);
+        open.into_iter()
+            .map(|(id, tool)| {
+                self.tools.remove(&id);
+                Event::Item(
+                    Item::new(
+                        item_id(&id),
+                        tool.turn,
+                        ItemUpdate::Completed {
+                            body: tool.body,
+                            status,
+                        },
+                        Value::Null,
+                    )
+                    .with_parent(tool.parent),
+                )
+            })
+            .collect()
+    }
+
+    /// The body a task tool starts with: the task list as the call would
+    /// leave it, or `None` to show the call itself.
+    fn task_tool_started(&mut self, id: &str, name: &str, input: &Value) -> Option<ItemBody> {
+        let mut tasks = self.tasks.clone();
+        match name {
+            "TaskCreate" => {
+                let subject = trimmed(&input["subject"])?;
+                self.pending_task_creates
+                    .push((id.to_string(), subject.to_string()));
+            }
+            // An unknown task (one from before this process) shows as the call.
+            "TaskUpdate" if !apply_task_update(&mut tasks, input, None) => return None,
+            _ => {}
+        }
+        let steps = self.task_steps(&tasks);
+        (!steps.is_empty()).then(|| plan_body(steps))
+    }
+
+    /// Applies a finished task tool to the list. The steps to show, or
+    /// `None` when the call failed or left nothing to list.
+    fn task_tool_finished(
+        &mut self,
+        id: &str,
+        name: &str,
+        input: &Value,
+        structured: Option<&Value>,
+        output: &str,
+        failed: bool,
+    ) -> Option<Vec<PlanStep>> {
+        self.pending_task_creates
+            .retain(|(pending, _)| pending != id);
+        if failed {
+            return None;
+        }
+        match name {
+            "TaskCreate" => {
+                let created = structured.map(|value| &value["task"]);
+                let from_text = created_task_from_text(output);
+                let task_id = created
+                    .and_then(|task| trimmed(&task["id"]))
+                    .map(str::to_string)
+                    .or_else(|| from_text.as_ref().map(|(id, _)| id.clone()))?;
+                let text = created
+                    .and_then(|task| trimmed(&task["subject"]))
+                    .map(str::to_string)
+                    .or_else(|| from_text.map(|(_, subject)| subject))
+                    .or_else(|| trimmed(&input["subject"]).map(str::to_string))?;
+                let task = ClaudeTask {
+                    id: task_id,
+                    text,
+                    status: PlanStepStatus::Pending,
+                };
+                match self.tasks.iter_mut().find(|known| known.id == task.id) {
+                    Some(known) => *known = task,
+                    None => self.tasks.push(task),
+                }
+            }
+            "TaskUpdate" => {
+                // A result without structure is the subagent's text.
+                let succeeded = match structured {
+                    Some(result) if result.is_object() => result["success"] != false,
+                    _ => output.starts_with("Updated task #"),
+                };
+                if !succeeded {
+                    return None;
+                }
+                apply_task_update(&mut self.tasks, input, structured);
+            }
+            "TaskList" => {
+                let listed = structured.and_then(|value| value["tasks"].as_array())?;
+                self.tasks = listed
+                    .iter()
+                    .filter_map(|task| {
+                        Some(ClaudeTask {
+                            id: trimmed(&task["id"])?.to_string(),
+                            text: trimmed(&task["subject"])?.to_string(),
+                            status: task_status(&task["status"])?,
+                        })
+                    })
+                    .collect();
+            }
+            _ => return None,
+        }
+        let steps = self.task_steps(&self.tasks);
+        (!steps.is_empty()).then_some(steps)
+    }
+
+    /// The task list as steps, with creations still waiting for their id.
+    fn task_steps(&self, tasks: &[ClaudeTask]) -> Vec<PlanStep> {
+        tasks
+            .iter()
+            .map(|task| PlanStep {
+                text: task.text.clone(),
+                status: task.status,
+            })
+            .chain(
+                self.pending_task_creates
+                    .iter()
+                    .map(|(_, subject)| PlanStep {
+                        text: subject.clone(),
+                        status: PlanStepStatus::Pending,
+                    }),
+            )
+            .collect()
+    }
+}
+
+/// A call the API runs itself, whose result arrives in assistant content.
+fn is_server_tool(tool: &ToolItem) -> bool {
+    matches!(
+        tool.native["type"].as_str(),
+        Some("server_tool_use" | "mcp_tool_use")
+    )
+}
+
+fn trimmed(value: &Value) -> Option<&str> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn task_status(value: &Value) -> Option<PlanStepStatus> {
+    match value.as_str()? {
+        "pending" => Some(PlanStepStatus::Pending),
+        "in_progress" => Some(PlanStepStatus::InProgress),
+        "completed" => Some(PlanStepStatus::Completed),
+        _ => None,
+    }
+}
+
+/// TaskUpdate's effect on a known task: a new subject or status, or its
+/// removal. Whether the task was known.
+fn apply_task_update(tasks: &mut Vec<ClaudeTask>, input: &Value, result: Option<&Value>) -> bool {
+    let Some(id) = trimmed(&input["taskId"]).or_else(|| result.and_then(|r| trimmed(&r["taskId"])))
+    else {
+        return false;
+    };
+    let Some(index) = tasks.iter().position(|task| task.id == id) else {
+        return false;
+    };
+    if input["status"] == "deleted" {
+        tasks.remove(index);
+        return true;
+    }
+    let task = &mut tasks[index];
+    if let Some(text) = trimmed(&input["subject"]) {
+        task.text = text.to_string();
+    }
+    if let Some(status) = task_status(&input["status"]) {
+        task.status = status;
+    }
+    true
+}
+
+/// A subagent's TaskCreate result has only text:
+/// "Task #3 created successfully: <subject>".
+fn created_task_from_text(output: &str) -> Option<(String, String)> {
+    let rest = output.trim().strip_prefix("Task #")?;
+    let (id, subject) = rest.split_once(" created successfully: ")?;
+    let (id, subject) = (id.trim(), subject.trim());
+    (!id.is_empty() && !id.contains(char::is_whitespace) && !subject.is_empty())
+        .then(|| (id.to_string(), subject.to_string()))
+}
+
+fn plan_body(steps: Vec<PlanStep>) -> ItemBody {
+    ItemBody::Plan {
+        explanation: None,
+        steps,
+        text: None,
     }
 }
 
@@ -1247,8 +1553,8 @@ fn item_id(id: &str) -> ItemId {
         .unwrap_or_else(|_| ItemId::new(uuid::Uuid::new_v4().to_string()).expect("uuid id"))
 }
 
-/// What a declined MCP elicitation asked, for the chat.
-fn elicitation_declined_text(raw: &Value) -> String {
+/// What a cancelled MCP elicitation asked, for the chat.
+fn elicitation_cancelled_text(raw: &Value) -> String {
     let server = raw["mcp_server_name"]
         .as_str()
         .or_else(|| raw["server_name"].as_str())
@@ -1263,9 +1569,74 @@ fn elicitation_declined_text(raw: &Value) -> String {
     );
     match asked {
         Some(asked) => format!(
-            "{from} asked for input Inline can't show yet, so it was declined: \u{201c}{asked}\u{201d}"
+            "{from} asked for input Inline can't show yet, so it was cancelled: \u{201c}{asked}\u{201d}"
         ),
-        None => format!("{from} asked for input Inline can't show yet, so it was declined."),
+        None => format!("{from} asked for input Inline can't show yet, so it was cancelled."),
+    }
+}
+
+/// The first `max` characters of a trimmed text, marked when cut.
+fn clip(text: &str, max: usize) -> String {
+    let text = text.trim();
+    match text.char_indices().nth(max) {
+        Some((end, _)) => format!("{}\u{2026}", text[..end].trim_end()),
+        None => text.to_string(),
+    }
+}
+
+fn compaction_failed_text(error: Option<&str>) -> String {
+    match error.map(str::trim).filter(|error| !error.is_empty()) {
+        Some(error) => format!("Claude couldn't compact the context: {}", clip(error, 300)),
+        None => "Claude couldn't compact the context.".to_string(),
+    }
+}
+
+/// A `system` frame without a typed home. Only errors reach the chat, so
+/// the ones that stop Claude are raised to errors with a human title; the
+/// rest stay info notices for the logs.
+fn system_notice(subtype: &str, raw: &Value) -> Event {
+    let content = raw["content"]
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    match subtype {
+        "model_refusal_no_fallback" => notice(
+            NoticeLevel::Error,
+            "Claude declined to respond",
+            Some(
+                content
+                    .or_else(|| trimmed(&raw["api_refusal_explanation"]))
+                    .map_or_else(
+                        || "The model stopped without an answer, and no fallback model could retry it.".to_string(),
+                        |text| clip(text, 300),
+                    ),
+            ),
+            raw,
+        ),
+        // A Stop hook ended the turn.
+        "informational" if raw["prevent_continuation"] == true => notice(
+            NoticeLevel::Error,
+            "Stopped by a hook",
+            Some(content.map_or_else(
+                || "A hook stopped Claude from continuing.".to_string(),
+                |text| clip(text, 300),
+            )),
+            raw,
+        ),
+        // A UserPromptSubmit hook blocked, stopped or dropped the message.
+        "informational" if raw["prompt_submit_outcome"]["kind"].is_string() => notice(
+            NoticeLevel::Error,
+            "Message blocked by a hook",
+            Some(content.map_or_else(
+                || "A hook kept this message from reaching Claude.".to_string(),
+                |text| clip(text, 300),
+            )),
+            raw,
+        ),
+        // Claude Code retries a failed API call (overloaded, rate limited):
+        // the progress says so instead of a silent "Working".
+        "api_retry" => notice(NoticeLevel::Info, LIVE_STATUS_NOTICE, Some(retry_text(raw)), raw),
+        _ => notice(NoticeLevel::Info, &format!("system/{subtype}"), None, raw),
     }
 }
 
@@ -1276,6 +1647,27 @@ fn notice(level: NoticeLevel, code: &str, message: Option<String>, native: &Valu
         message,
         native: native.clone(),
     })
+}
+
+/// "Retrying (3/10) · overloaded", from an `api_retry` frame.
+fn retry_text(raw: &Value) -> String {
+    let attempt = raw["attempt"].as_u64();
+    let max = raw["max_retries"].as_u64();
+    let count = match (attempt, max) {
+        (Some(attempt), Some(max)) => format!(" ({attempt}/{max})"),
+        (Some(attempt), None) => format!(" ({attempt})"),
+        _ => String::new(),
+    };
+    let reason = match raw["error_status"].as_u64() {
+        Some(529) => Some("overloaded".to_owned()),
+        Some(429) => Some("rate limited".to_owned()),
+        Some(status) if status >= 500 => Some("server error".to_owned()),
+        _ => raw["error"].as_str().map(|error| clip(error, 60)),
+    };
+    match reason {
+        Some(reason) => format!("Retrying{count} · {reason}"),
+        None => format!("Retrying{count}"),
+    }
 }
 
 fn status_text(status: &crate::wire::StatusMessage) -> Option<String> {
@@ -1354,6 +1746,22 @@ fn tool_body(block: &Value) -> ItemBody {
             steps: Vec::new(),
             text: input["plan"].as_str().map(str::to_string),
         },
+        // A sub-agent: its own rows nest under this one by its tool use id
+        // (see `ClaudeMapper::parent`).
+        "Agent" | "Task" => match block["id"].as_str().and_then(|id| ChildId::new(id).ok()) {
+            Some(id) => ItemBody::Child {
+                child: ChildRef {
+                    id,
+                    kind: ChildKind::Subagent,
+                },
+                action: trimmed(&input["subagent_type"]).map(str::to_string),
+                prompt: trimmed(&input["description"])
+                    .or_else(|| trimmed(&input["prompt"]))
+                    .map(str::to_string),
+                output: None,
+            },
+            None => generic_tool(name, input),
+        },
         "SendUserMessage" => ItemBody::Message {
             role: MessageRole::Assistant,
             text: input["message"]
@@ -1364,17 +1772,100 @@ fn tool_body(block: &Value) -> ItemBody {
                 .to_string(),
             input: None,
         },
-        _ => {
-            let (name, server) = tool_name(name);
-            ItemBody::Tool {
-                name,
-                server,
-                input: input.clone(),
-                output: None,
-                error: None,
-            }
+        _ => generic_tool(name, input),
+    }
+}
+
+fn generic_tool(name: &str, input: &Value) -> ItemBody {
+    let (name, server) = tool_name(name);
+    ItemBody::Tool {
+        name,
+        server,
+        input: input.clone(),
+        output: None,
+        error: None,
+    }
+}
+
+/// What a sub-agent reported, without the frame Claude Code puts around it
+/// for the model (the hand-back note, tools-used and harness notes, agent id
+/// and usage). A background launch has reported nothing yet.
+fn subagent_report(output: &str, is_error: bool, structured: Option<&Value>) -> Option<String> {
+    let parts: Vec<String> = match structured
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+    {
+        Some("completed") => structured
+            .and_then(|value| value["content"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .map(str::to_owned)
+            .collect(),
+        Some("async_launched" | "remote_launched") => return None,
+        _ if output.trim_start().starts_with("Async agent launched") => return None,
+        _ if is_error => {
+            let text = output.trim();
+            return (!text.is_empty()).then(|| text.to_owned());
+        }
+        _ => vec![output.to_owned()],
+    };
+    // Claude Code can hand the report back twice, once inside its frame.
+    let mut kept: Vec<String> = Vec::new();
+    for part in parts {
+        if let Some(report) = unframed_report(&part)
+            && !kept.contains(&report)
+        {
+            kept.push(report);
         }
     }
+    (!kept.is_empty()).then(|| kept.join("\n\n"))
+}
+
+fn unframed_report(text: &str) -> Option<String> {
+    let is_frame = |line: &str| {
+        let line = line.trim();
+        line.is_empty()
+            || line.starts_with("<tools-used")
+            || line.starts_with("[Harness note")
+            || line.starts_with("agentId:")
+    };
+    let text = text
+        .find("The report follows:")
+        .map_or(text, |index| &text[index + "The report follows:".len()..]);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if let Some(usage) = lines
+        .iter()
+        .rposition(|line| line.trim_start().starts_with("<usage>"))
+    {
+        lines.truncate(usage);
+    }
+    while lines.last().is_some_and(|line| is_frame(line)) {
+        lines.pop();
+    }
+    while lines.first().is_some_and(|line| is_frame(line)) {
+        lines.remove(0);
+    }
+    // Claude Code indents the report; it reads unindented.
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .min()
+        .unwrap_or(0);
+    let text = lines
+        .iter()
+        .map(|line| {
+            if line.len() >= indent && line[..indent].bytes().all(|byte| byte == b' ') {
+                &line[indent..]
+            } else {
+                line.trim_start()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 fn complete_body(
@@ -1390,20 +1881,17 @@ fn complete_body(
             actions,
             duration_ms,
             ..
-        } => ItemBody::Command {
-            command,
-            cwd,
-            actions,
-            output: Some(output),
-            exit_code: structured
-                .and_then(|value| {
-                    value["exitCode"]
-                        .as_i64()
-                        .or_else(|| value["exit_code"].as_i64())
-                })
-                .and_then(|code| i32::try_from(code).ok()),
-            duration_ms,
-        },
+        } => {
+            let (exit_code, output) = command_exit(output, is_error, structured);
+            ItemBody::Command {
+                command,
+                cwd,
+                actions,
+                output: Some(output),
+                exit_code,
+                duration_ms,
+            }
+        }
         ItemBody::Tool {
             name,
             server,
@@ -1416,16 +1904,93 @@ fn complete_body(
             output: (!is_error).then(|| output.clone()),
             error: is_error.then_some(output),
         },
+        // The sub-agent's final report (or why it failed).
+        ItemBody::Child {
+            child,
+            action,
+            prompt,
+            ..
+        } => ItemBody::Child {
+            child,
+            action,
+            prompt,
+            output: subagent_report(&output, is_error, structured),
+        },
         ItemBody::FileChange { mut changes } => {
-            if let Some(patch) = structured.and_then(|value| value["structuredPatch"].as_array())
+            if let Some(structured) = structured
                 && let Some(change) = changes.first_mut()
             {
-                change.diff = Some(render_patch(patch));
+                // Write says whether it created the file or replaced one.
+                match structured["type"].as_str() {
+                    Some("create") => change.change = FileChangeKind::Add,
+                    Some("update") => change.change = FileChangeKind::Update { moved_to: None },
+                    _ => {}
+                }
+                let patch = structured["structuredPatch"]
+                    .as_array()
+                    .filter(|patch| !patch.is_empty());
+                if let Some(patch) = patch {
+                    change.diff = Some(render_patch(patch));
+                } else if structured["type"] == "create"
+                    && let Some(content) = structured["content"].as_str()
+                    && !content.is_empty()
+                {
+                    // A new file has no patch: every line is added, as
+                    // Claude Write approvals show it.
+                    change.diff = Some(added_lines(content));
+                }
             }
             ItemBody::FileChange { changes }
         }
         other => other,
     }
+}
+
+/// A Bash call's exit code and output. Claude reports no code: a failure is
+/// an error result whose text starts `Exit code N`, which is dropped from
+/// the output. A plain success is 0; an interrupted, backgrounded or
+/// reinterpreted run ("No matches found" is grep's 1) has no known code.
+fn command_exit(
+    output: String,
+    is_error: bool,
+    structured: Option<&Value>,
+) -> (Option<i32>, String) {
+    if is_error {
+        let parsed = output.strip_prefix("Exit code ").and_then(|rest| {
+            let (code, rest) = rest.split_once('\n').unwrap_or((rest, ""));
+            Some((code.trim().parse::<i32>().ok()?, rest.to_string()))
+        });
+        return match parsed {
+            Some((code, rest)) => (Some(code), rest),
+            None => (None, output),
+        };
+    }
+    let clean_success = structured.is_some_and(|result| {
+        result.get("stdout").is_some()
+            && result["interrupted"] != true
+            && [
+                "backgroundTaskId",
+                "backgroundedByUser",
+                "timedOutAfterMs",
+                "returnCodeInterpretation",
+            ]
+            .iter()
+            .all(|key| {
+                result
+                    .get(*key)
+                    .is_none_or(|value| value.is_null() || value == false)
+            })
+    });
+    (clean_success.then_some(0), output)
+}
+
+fn added_lines(content: &str) -> String {
+    content.lines().fold(String::new(), |mut diff, line| {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+        diff
+    })
 }
 
 fn render_patch(hunks: &[Value]) -> String {
@@ -1443,6 +2008,58 @@ fn render_patch(hunks: &[Value]) -> String {
         }
     }
     out
+}
+
+/// A server-side tool result block's short text and whether it failed:
+/// the hits of a web search, the page a fetch read, an advisor's note,
+/// code execution output, an MCP connector's text.
+fn server_tool_result(block: &Value) -> (String, bool) {
+    let content = &block["content"];
+    let kind = content["type"].as_str().unwrap_or("");
+    let is_error = block["is_error"] == true || kind.ends_with("_error");
+    let text = if kind.ends_with("_error") {
+        content["error_code"]
+            .as_str()
+            .map(|code| code.replace('_', " "))
+            .unwrap_or_default()
+    } else {
+        match content {
+            Value::Array(items) => items
+                .iter()
+                .filter_map(|item| match item["type"].as_str() {
+                    Some("web_search_result") => {
+                        let url = item["url"].as_str().unwrap_or_default();
+                        Some(match trimmed(&item["title"]) {
+                            Some(title) => format!("{title} ({url})"),
+                            None => url.to_string(),
+                        })
+                    }
+                    _ => item["text"].as_str().map(str::to_string),
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Value::Object(_) => match kind {
+                "advisor_result" => content["text"].as_str().unwrap_or_default().to_string(),
+                "web_fetch_result" => content["url"].as_str().unwrap_or_default().to_string(),
+                "tool_search_tool_search_result" => content["tool_references"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|reference| reference["tool_name"].as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                // Code execution: its streams.
+                _ => [&content["stdout"], &content["stderr"]]
+                    .into_iter()
+                    .filter_map(|stream| trimmed(stream))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            },
+            Value::String(text) => text.clone(),
+            _ => String::new(),
+        }
+    };
+    (clip(&text, MAX_SERVER_RESULT_CHARS), is_error)
 }
 
 fn result_text(content: &Value) -> String {
@@ -1529,7 +2146,14 @@ fn rate_limit(info: &Value) -> Vec<Event> {
             },
         });
     }
-    if info["status"] == "rejected" {
+    // A rejected window blocks only when no extra usage covers it: on
+    // overage Claude keeps working.
+    let overage = matches!(
+        info["overageStatus"].as_str(),
+        Some("allowed" | "allowed_warning")
+    ) || info["isUsingOverage"] == true
+        || info["overageInUse"] == true;
+    if info["status"] == "rejected" && !overage {
         events.push(Event::State {
             state: RunState::Waiting {
                 on: WaitingOn::Limit { resets_at },
@@ -2303,7 +2927,7 @@ mod tests {
     }
 
     #[test]
-    fn a_declined_mcp_form_is_shown_in_the_chat() {
+    fn an_mcp_form_nobody_saw_is_cancelled_and_shown_in_the_chat() {
         let mut mapper = ClaudeMapper::new(None);
         let RequestMapped::Reply { response, events } = mapper.request(
             "e1",
@@ -2312,17 +2936,642 @@ mod tests {
         ) else {
             panic!("reply");
         };
-        assert_eq!(response.unwrap(), json!({"action": "decline"}));
+        // Dismissed, not a person's explicit "no".
+        assert_eq!(response.unwrap(), json!({"action": "cancel"}));
         let Some(Event::Notice(notice)) = events.first() else {
             panic!("notice");
         };
         // Only errors reach the chat; this one must.
         assert_eq!(notice.level, NoticeLevel::Error);
+        assert_eq!(notice.code, "Request cancelled");
         let text = notice.message.as_deref().unwrap_or_default();
         assert!(
-            text.contains("coolify") && text.contains("Confirm the deploy?"),
+            text.contains("coolify")
+                && text.contains("Confirm the deploy?")
+                && text.contains("Inline can't show yet, so it was cancelled"),
             "{text}"
         );
+    }
+
+    fn completed(events: &[Event], id: &str) -> (ItemBody, ItemStatus, Option<ChildRef>) {
+        events
+            .iter()
+            .find_map(|event| match event {
+                Event::Item(item) if item.id.as_str() == id => match &item.update {
+                    ItemUpdate::Completed { body, status } => {
+                        Some((body.clone(), *status, item.parent.clone()))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id} completed in {events:?}"))
+    }
+
+    fn started(events: &[Event], id: &str) -> (ItemBody, Option<ChildRef>) {
+        events
+            .iter()
+            .find_map(|event| match event {
+                Event::Item(item) if item.id.as_str() == id => match &item.update {
+                    ItemUpdate::Started { body } => Some((body.clone(), item.parent.clone())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id} started in {events:?}"))
+    }
+
+    fn tool_use(id: &str, name: &str, input: Value) -> CliMessage {
+        message(json!({"type": "assistant", "uuid": format!("a-{id}"),
+            "message": {"id": format!("msg-{id}"), "role": "assistant",
+                "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}}))
+    }
+
+    fn tool_result(id: &str, content: &str, is_error: bool, structured: Value) -> CliMessage {
+        message(json!({"type": "user", "uuid": format!("u-{id}"),
+            "tool_use_result": structured,
+            "message": {"role": "user", "content": [{"type": "tool_result",
+                "tool_use_id": id, "content": content, "is_error": is_error}]}}))
+    }
+
+    #[test]
+    fn a_failed_bash_carries_its_exit_code_and_a_clean_success_exits_zero() {
+        let mut mapper = running_turn("0d6a7c1e-1111-4a00-8000-000000000001");
+        mapper.message(&tool_use("b1", "Bash", json!({"command": "cargo test"})));
+        let events = mapper.message(&tool_result(
+            "b1",
+            "Exit code 101\nerror[E0308]: mismatched types",
+            true,
+            json!("Error: Exit code 101\nerror[E0308]: mismatched types"),
+        ));
+        let (
+            ItemBody::Command {
+                exit_code, output, ..
+            },
+            status,
+            _,
+        ) = completed(&events, "b1")
+        else {
+            panic!("command");
+        };
+        assert_eq!(status, ItemStatus::Failed);
+        assert_eq!(exit_code, Some(101));
+        assert_eq!(output.as_deref(), Some("error[E0308]: mismatched types"));
+
+        // "Exit code 1" with no output at all.
+        mapper.message(&tool_use("b2", "Bash", json!({"command": "false"})));
+        let events = mapper.message(&tool_result("b2", "Exit code 1", true, Value::Null));
+        let (
+            ItemBody::Command {
+                exit_code, output, ..
+            },
+            ..,
+        ) = completed(&events, "b2")
+        else {
+            panic!("command");
+        };
+        assert_eq!((exit_code, output.as_deref()), (Some(1), Some("")));
+
+        let success = |extra: Value| {
+            let mut structured = json!({"stdout": "ok", "stderr": "", "interrupted": false,
+                "isImage": false, "noOutputExpected": false});
+            structured
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            structured
+        };
+        mapper.message(&tool_use("b3", "Bash", json!({"command": "true"})));
+        let events = mapper.message(&tool_result("b3", "ok", false, success(json!({}))));
+        let (ItemBody::Command { exit_code, .. }, ..) = completed(&events, "b3") else {
+            panic!("command");
+        };
+        assert_eq!(exit_code, Some(0));
+
+        // A search that found nothing exited 1; a backgrounded run has no code yet.
+        for (id, extra) in [
+            (
+                "b4",
+                json!({"returnCodeInterpretation": "No matches found"}),
+            ),
+            ("b5", json!({"backgroundTaskId": "bg1"})),
+            ("b6", json!({"interrupted": true})),
+        ] {
+            mapper.message(&tool_use(id, "Bash", json!({"command": "x"})));
+            let events = mapper.message(&tool_result(id, "", false, success(extra)));
+            let (ItemBody::Command { exit_code, .. }, ..) = completed(&events, id) else {
+                panic!("command");
+            };
+            assert_eq!(exit_code, None, "{id}");
+        }
+
+        // An error without the prefix keeps its text and has no code.
+        mapper.message(&tool_use("b7", "Bash", json!({"command": "x"})));
+        let events = mapper.message(&tool_result("b7", "Denied by the hook.", true, Value::Null));
+        let (
+            ItemBody::Command {
+                exit_code, output, ..
+            },
+            ..,
+        ) = completed(&events, "b7")
+        else {
+            panic!("command");
+        };
+        assert_eq!(
+            (exit_code, output.as_deref()),
+            (None, Some("Denied by the hook."))
+        );
+    }
+
+    #[test]
+    fn write_shows_a_new_file_as_added_lines_and_a_rewrite_as_an_update() {
+        let mut mapper = running_turn("0d6a7c1e-1111-4a00-8000-000000000001");
+        mapper.message(&tool_use(
+            "w1",
+            "Write",
+            json!({"file_path": "/w/new.md", "content": "# Title\n\nBody\n"}),
+        ));
+        let events = mapper.message(&tool_result(
+            "w1",
+            "File created successfully at: /w/new.md",
+            false,
+            json!({"type": "create", "filePath": "/w/new.md", "content": "# Title\n\nBody\n",
+                "structuredPatch": [], "originalFile": null}),
+        ));
+        let (ItemBody::FileChange { changes }, ..) = completed(&events, "w1") else {
+            panic!("file change");
+        };
+        assert_eq!(changes[0].change, FileChangeKind::Add);
+        assert_eq!(changes[0].diff.as_deref(), Some("+# Title\n+\n+Body\n"));
+
+        mapper.message(&tool_use(
+            "w2",
+            "Write",
+            json!({"file_path": "/w/old.md", "content": "new\n"}),
+        ));
+        let events = mapper.message(&tool_result(
+            "w2",
+            "The file /w/old.md has been updated.",
+            false,
+            json!({"type": "update", "filePath": "/w/old.md", "content": "new\n",
+                "originalFile": "old\n", "structuredPatch": [{"oldStart": 1, "oldLines": 1,
+                    "newStart": 1, "newLines": 1, "lines": ["-old", "+new"]}]}),
+        ));
+        let (ItemBody::FileChange { changes }, ..) = completed(&events, "w2") else {
+            panic!("file change");
+        };
+        assert_eq!(changes[0].change, FileChangeKind::Update { moved_to: None });
+        assert_eq!(
+            changes[0].diff.as_deref(),
+            Some("@@ -1,1 +1,1 @@\n-old\n+new\n")
+        );
+    }
+
+    #[test]
+    fn a_rejected_window_covered_by_extra_usage_is_no_limit() {
+        let waits = |info: Value| {
+            rate_limit(&info).iter().any(|event| {
+                matches!(
+                    event,
+                    Event::State {
+                        state: RunState::Waiting {
+                            on: WaitingOn::Limit { .. }
+                        }
+                    }
+                )
+            })
+        };
+        let rejected = |extra: Value| {
+            let mut info = json!({"status": "rejected", "rateLimitType": "five_hour",
+                "resetsAt": 1793369400});
+            info.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            info
+        };
+        assert!(waits(rejected(json!({}))));
+        assert!(waits(rejected(
+            json!({"overageStatus": "rejected", "isUsingOverage": false})
+        )));
+        assert!(!waits(rejected(json!({"overageStatus": "allowed"}))));
+        assert!(!waits(rejected(
+            json!({"overageStatus": "allowed_warning"})
+        )));
+        assert!(!waits(rejected(json!({"isUsingOverage": true}))));
+        assert!(!waits(rejected(json!({"overageInUse": true}))));
+    }
+
+    #[test]
+    fn server_side_tool_results_complete_their_call() {
+        let t1 = "0d6a7c1e-1111-4a00-8000-000000000001";
+        let mut mapper = running_turn(t1);
+        let block = |content: Value| {
+            message(json!({"type": "assistant", "uuid": "a-s",
+                "message": {"id": "msg-s", "role": "assistant", "content": [content]}}))
+        };
+        mapper.message(&block(
+            json!({"type": "server_tool_use", "id": "srvtoolu_1",
+            "name": "web_search", "input": {"query": "rust 2024 edition"}}),
+        ));
+        assert!(!mapper.steer_can_cut(), "a server tool runs");
+        let events = mapper.message(&block(json!({"type": "web_search_tool_result",
+            "tool_use_id": "srvtoolu_1", "content": [
+                {"type": "web_search_result", "title": "Rust 2024", "url": "https://blog.rust-lang.org/2024",
+                    "encrypted_content": "x"},
+                {"type": "web_search_result", "url": "https://doc.rust-lang.org/edition-guide"}
+            ]})));
+        // No unknown row: the call itself completes.
+        assert_eq!(events.len(), 1, "{events:?}");
+        let (ItemBody::Tool { name, output, .. }, status, _) = completed(&events, "srvtoolu_1")
+        else {
+            panic!("tool");
+        };
+        assert_eq!(
+            (name.as_str(), status),
+            ("web_search", ItemStatus::Completed)
+        );
+        assert_eq!(
+            output.as_deref(),
+            Some(
+                "Rust 2024 (https://blog.rust-lang.org/2024)\nhttps://doc.rust-lang.org/edition-guide"
+            )
+        );
+        assert!(mapper.steer_can_cut());
+
+        mapper.message(&block(
+            json!({"type": "server_tool_use", "id": "srvtoolu_2",
+            "name": "advisor", "input": {}}),
+        ));
+        let events = mapper.message(&block(json!({"type": "advisor_tool_result",
+            "tool_use_id": "srvtoolu_2", "content": {"type": "advisor_result", "text": "Check the lock order."}})));
+        let (ItemBody::Tool { output, .. }, ..) = completed(&events, "srvtoolu_2") else {
+            panic!("tool");
+        };
+        assert_eq!(output.as_deref(), Some("Check the lock order."));
+
+        mapper.message(&block(
+            json!({"type": "server_tool_use", "id": "srvtoolu_3",
+            "name": "web_fetch", "input": {"url": "https://example.com"}}),
+        ));
+        let events = mapper.message(&block(json!({"type": "web_fetch_tool_result",
+            "tool_use_id": "srvtoolu_3", "content": {"type": "web_fetch_tool_result_error",
+                "error_code": "url_not_accessible"}})));
+        let (ItemBody::Tool { error, .. }, status, _) = completed(&events, "srvtoolu_3") else {
+            panic!("tool");
+        };
+        assert_eq!(status, ItemStatus::Failed);
+        assert_eq!(error.as_deref(), Some("url not accessible"));
+
+        // One whose result never came is closed when the turn completes.
+        mapper.message(&block(
+            json!({"type": "server_tool_use", "id": "srvtoolu_4",
+            "name": "web_search", "input": {"query": "q"}}),
+        ));
+        let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
+            "is_error": false, "user_message_uuids": [t1]})));
+        let (_, status, _) = completed(&events, "srvtoolu_4");
+        assert_eq!(status, ItemStatus::Completed);
+        assert!(matches!(events.last(), Some(Event::Turn { .. })));
+    }
+
+    #[test]
+    fn calls_open_when_the_process_exits_are_interrupted() {
+        let mut mapper = running_turn("0d6a7c1e-1111-4a00-8000-000000000001");
+        mapper.message(&tool_use("b1", "Bash", json!({"command": "sleep 100"})));
+        let events = mapper.connection_lost();
+        let (_, status, _) = completed(&events, "b1");
+        assert_eq!(status, ItemStatus::Interrupted);
+        assert!(matches!(
+            events.last(),
+            Some(Event::Turn {
+                phase: TurnPhase::Completed {
+                    outcome: TurnOutcome::ConnectionLost,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn failures_that_stop_claude_reach_the_chat_as_errors() {
+        let mut mapper = ClaudeMapper::new(None);
+        let level = |events: &[Event]| match events {
+            [Event::Notice(notice)] => (notice.level, notice.code.clone(), notice.message.clone()),
+            other => panic!("{other:?}"),
+        };
+        let (lvl, code, text) = level(&mapper.message(&message(json!({"type": "system",
+            "subtype": "status", "status": null, "compact_result": "failed",
+            "compact_error": "Not enough messages to compact."}))));
+        assert_eq!(
+            (lvl, code.as_str()),
+            (NoticeLevel::Error, "Compaction failed")
+        );
+        assert_eq!(
+            text.as_deref(),
+            Some("Claude couldn't compact the context: Not enough messages to compact.")
+        );
+
+        let (lvl, code, text) = level(&mapper.message(&message(json!({"type": "system",
+            "subtype": "model_refusal_no_fallback", "original_model": "claude-fable-5",
+            "request_id": null, "content": "", "api_refusal_explanation": "This request was declined."}))));
+        assert_eq!(
+            (lvl, code.as_str()),
+            (NoticeLevel::Error, "Claude declined to respond")
+        );
+        assert_eq!(text.as_deref(), Some("This request was declined."));
+
+        let (lvl, code, text) = level(&mapper.message(&message(json!({"type": "system",
+            "subtype": "informational", "level": "warning", "prevent_continuation": true,
+            "content": "Stop hook: tests must pass before you finish."}))));
+        assert_eq!(
+            (lvl, code.as_str()),
+            (NoticeLevel::Error, "Stopped by a hook")
+        );
+        assert_eq!(
+            text.as_deref(),
+            Some("Stop hook: tests must pass before you finish.")
+        );
+
+        let (lvl, code, _) = level(&mapper.message(&message(json!({"type": "system",
+            "subtype": "informational", "level": "warning", "content": "Blocked: no secrets.",
+            "prompt_submit_outcome": {"kind": "blocked_by_hook", "prompt_kept": true}}))));
+        assert_eq!(
+            (lvl, code.as_str()),
+            (NoticeLevel::Error, "Message blocked by a hook")
+        );
+
+        // Plain banners and the retried refusal stay in the logs.
+        for raw in [
+            json!({"type": "system", "subtype": "informational", "level": "notice", "content": "Saved."}),
+            json!({"type": "system", "subtype": "model_refusal_fallback", "content": "Retrying"}),
+            json!({"type": "system", "subtype": "status", "status": "compacting"}),
+        ] {
+            let (lvl, ..) = level(&mapper.message(&message(raw)));
+            assert_eq!(lvl, NoticeLevel::Info);
+        }
+    }
+
+    #[test]
+    fn compaction_reports_the_context_left_after_it() {
+        let t1 = "0d6a7c1e-1111-4a00-8000-000000000001";
+        let mut mapper = running_turn(t1);
+        mapper.message(&message(json!({"type": "assistant", "uuid": "a1",
+            "message": {"id": "m1", "content": [{"type": "text", "text": "long"}],
+                "usage": {"input_tokens": 10, "cache_read_input_tokens": 179_000, "output_tokens": 990}}})));
+        mapper.message(&message(
+            json!({"type": "system", "subtype": "compact_boundary",
+            "uuid": "c1", "compact_metadata": {"trigger": "manual", "pre_tokens": 180_000,
+                "post_tokens": 22_000}}),
+        ));
+        let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
+            "is_error": false, "user_message_uuids": [t1],
+            "usage": {"input_tokens": 0, "output_tokens": 0}})));
+        let Some(Event::Usage { usage }) = events.first() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(usage.last.map(|last| last.total), Some(22_000));
+
+        // Also when the command's result carries no usage of its own.
+        let mut mapper = running_turn(t1);
+        mapper.message(&message(
+            json!({"type": "system", "subtype": "compact_boundary",
+            "uuid": "c2", "compact_metadata": {"trigger": "manual", "pre_tokens": 90_000,
+                "post_tokens": 9_000}}),
+        ));
+        let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
+            "is_error": false, "user_message_uuids": [t1]})));
+        let Some(Event::Usage { usage }) = events.first() else {
+            panic!("{events:?}");
+        };
+        assert_eq!(usage.last.map(|last| last.total), Some(9_000));
+        assert!(usage.total.is_none());
+    }
+
+    fn pinned_steps(body: &ItemBody) -> Vec<(String, PlanStepStatus)> {
+        match body {
+            ItemBody::Plan { steps, .. } => steps
+                .iter()
+                .map(|step| (step.text.clone(), step.status))
+                .collect(),
+            other => panic!("plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_tools_keep_the_plan_like_todo_write() {
+        let mut mapper = running_turn("0d6a7c1e-1111-4a00-8000-000000000001");
+        // Two creations in one message: ids arrive only with the results.
+        let started_1 = mapper.message(&tool_use(
+            "c1",
+            "TaskCreate",
+            json!({"subject": "Read the parser", "description": "…", "activeForm": "Reading"}),
+        ));
+        let started_2 = mapper.message(&tool_use(
+            "c2",
+            "TaskCreate",
+            json!({"subject": "Fix tokenize()", "description": "…"}),
+        ));
+        assert_eq!(
+            pinned_steps(&started(&started_1, "c1").0),
+            [("Read the parser".into(), PlanStepStatus::Pending)]
+        );
+        assert_eq!(
+            pinned_steps(&started(&started_2, "c2").0),
+            [
+                ("Read the parser".into(), PlanStepStatus::Pending),
+                ("Fix tokenize()".into(), PlanStepStatus::Pending)
+            ]
+        );
+        let events = mapper.message(&tool_result(
+            "c1",
+            "Task #1 created successfully: Read the parser",
+            false,
+            json!({"task": {"id": "1", "subject": "Read the parser"}}),
+        ));
+        assert_eq!(pinned_steps(&completed(&events, "c1").0).len(), 2);
+        // A subagent-style text-only result still names the task.
+        mapper.message(&tool_result(
+            "c2",
+            "Task #2 created successfully: Fix tokenize()",
+            false,
+            Value::Null,
+        ));
+
+        let events = mapper.message(&tool_use(
+            "u1",
+            "TaskUpdate",
+            json!({"taskId": "1", "status": "completed"}),
+        ));
+        assert_eq!(
+            pinned_steps(&started(&events, "u1").0)[0],
+            ("Read the parser".into(), PlanStepStatus::Completed)
+        );
+        mapper.message(&tool_result(
+            "u1",
+            "Updated task #1 status",
+            false,
+            json!({"success": true, "taskId": "1", "updatedFields": ["status"]}),
+        ));
+        mapper.message(&tool_use(
+            "u2",
+            "TaskUpdate",
+            json!({"taskId": "2", "status": "in_progress", "subject": "Fix tokenize() on blank input"}),
+        ));
+        let events = mapper.message(&tool_result(
+            "u2",
+            "Updated task #2 subject, status",
+            false,
+            json!({"success": true, "taskId": "2", "updatedFields": ["subject", "status"]}),
+        ));
+        let (body, status, _) = completed(&events, "u2");
+        assert_eq!(status, ItemStatus::Completed);
+        assert_eq!(
+            pinned_steps(&body),
+            [
+                ("Read the parser".into(), PlanStepStatus::Completed),
+                (
+                    "Fix tokenize() on blank input".into(),
+                    PlanStepStatus::InProgress
+                )
+            ]
+        );
+
+        // A failed update changes nothing and shows as the call itself.
+        mapper.message(&tool_use(
+            "u3",
+            "TaskUpdate",
+            json!({"taskId": "2", "status": "completed"}),
+        ));
+        let events = mapper.message(&tool_result(
+            "u3",
+            "Task not found",
+            false,
+            json!({"success": false, "taskId": "2", "updatedFields": [], "error": "Task not found"}),
+        ));
+        assert!(matches!(completed(&events, "u3").0, ItemBody::Tool { .. }));
+        mapper.message(&tool_use("u4", "TaskUpdate", json!({"taskId": "9"})));
+        let events = mapper.message(&tool_result("u4", "<tool_use_error>…", true, Value::Null));
+        assert!(matches!(completed(&events, "u4").0, ItemBody::Tool { .. }));
+
+        // Deleting drops the step; TaskList replaces the whole list.
+        mapper.message(&tool_use(
+            "u5",
+            "TaskUpdate",
+            json!({"taskId": "1", "status": "deleted"}),
+        ));
+        let events = mapper.message(&tool_result(
+            "u5",
+            "Updated task #1 deleted",
+            false,
+            json!({"success": true, "taskId": "1", "updatedFields": ["deleted"]}),
+        ));
+        assert_eq!(
+            pinned_steps(&completed(&events, "u5").0),
+            [(
+                "Fix tokenize() on blank input".into(),
+                PlanStepStatus::InProgress
+            )]
+        );
+        mapper.message(&tool_use("l1", "TaskList", json!({})));
+        let events = mapper.message(&tool_result(
+            "l1",
+            "#2 [completed] Fix tokenize()\n#3 [pending] Ship",
+            false,
+            json!({"tasks": [
+                {"id": "2", "subject": "Fix tokenize()", "status": "completed", "blockedBy": []},
+                {"id": "3", "subject": "Ship", "status": "pending", "blockedBy": []}
+            ]}),
+        ));
+        assert_eq!(
+            pinned_steps(&completed(&events, "l1").0),
+            [
+                ("Fix tokenize()".into(), PlanStepStatus::Completed),
+                ("Ship".into(), PlanStepStatus::Pending)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_sub_agent_keeps_one_parent_and_its_tool_is_the_row_that_nests_it() {
+        let mut mapper = running_turn("0d6a7c1e-1111-4a00-8000-000000000001");
+        let events = mapper.message(&tool_use(
+            "toolu_agent",
+            "Agent",
+            json!({"description": "Audit the parser tests", "subagent_type": "Explore",
+                "prompt": "Find the tests…"}),
+        ));
+        let (
+            ItemBody::Child {
+                child,
+                action,
+                prompt,
+                ..
+            },
+            parent,
+        ) = started(&events, "toolu_agent")
+        else {
+            panic!("child");
+        };
+        assert!(parent.is_none());
+        assert_eq!(child.id.as_str(), "toolu_agent");
+        assert_eq!(action.as_deref(), Some("Explore"));
+        assert_eq!(prompt.as_deref(), Some("Audit the parser tests"));
+
+        let nested = |id: &str, agent_id: Option<&str>| {
+            message(json!({"type": "assistant", "uuid": format!("a-{id}"),
+                "parent_tool_use_id": "toolu_agent", "agent_id": agent_id,
+                "message": {"id": format!("msg-{id}"), "role": "assistant",
+                    "content": [{"type": "tool_use", "id": id, "name": "Grep", "input": {}}]}}))
+        };
+        // Before task_started names the task, and after it.
+        let before = mapper.message(&nested("toolu_g1", None));
+        mapper.message(&message(
+            json!({"type": "system", "subtype": "task_started",
+            "task_id": "a7f3", "tool_use_id": "toolu_agent", "description": "Audit",
+            "task_type": "local_agent"}),
+        ));
+        let after = mapper.message(&nested("toolu_g2", Some("a7f3")));
+        let parent_of = |events: &[Event], id: &str| {
+            started(events, id)
+                .1
+                .map(|parent| parent.id.as_str().to_string())
+        };
+        assert_eq!(
+            parent_of(&before, "toolu_g1").as_deref(),
+            Some("toolu_agent")
+        );
+        assert_eq!(
+            parent_of(&after, "toolu_g2").as_deref(),
+            Some("toolu_agent")
+        );
+
+        // A permission ask from the sub-agent names the same parent.
+        let RequestMapped::Interaction(events) = mapper.request(
+            "r1",
+            &json!({"subtype": "can_use_tool", "tool_name": "Bash", "agent_id": "a7f3",
+                "input": {"command": "ls"}, "tool_use_id": "toolu_b9"}),
+        ) else {
+            panic!("interaction");
+        };
+        let Some(Event::Interaction(interaction)) = events.first() else {
+            panic!("interaction");
+        };
+        assert_eq!(
+            interaction.parent.as_ref().map(|parent| parent.id.as_str()),
+            Some("toolu_agent")
+        );
+
+        // The tool's result completes the row as a child row.
+        let events = mapper.message(&tool_result(
+            "toolu_agent",
+            "Two tests.",
+            false,
+            Value::Null,
+        ));
+        let (body, status, _) = completed(&events, "toolu_agent");
+        assert!(matches!(body, ItemBody::Child { .. }));
+        assert_eq!(status, ItemStatus::Completed);
     }
 
     fn running_turn(t1: &str) -> ClaudeMapper {
@@ -2434,5 +3683,60 @@ mod tests {
         mapper.sent_steer(&s1, true);
         mapper.stop_requested();
         assert_eq!(aborted_outcome(&mut mapper, t1), TurnOutcome::Interrupted);
+    }
+
+    #[test]
+    fn a_sub_agents_report_drops_the_frame_claude_code_adds_for_the_model() {
+        let framed = "  <tools-used-before-summary>WebFetch</tools-used-before-summary>\n  \n  [Harness note, not part of the agent's report: nothing saved.]\n[Subagent hand-back] The text below is the final report. The report follows:\n  Rust 1.100.0 is the latest.\n  \n  - Announced Nov 12.\nagentId: a82239ca2d80aac4e (use SendMessage to continue)\n<usage>subagent_tokens: 17093\ntool_uses: 2</usage>";
+        assert_eq!(
+            subagent_report(framed, false, None).as_deref(),
+            Some("Rust 1.100.0 is the latest.\n\n- Announced Nov 12.")
+        );
+        // The structured result carries the report alone.
+        let structured = json!({"status": "completed", "agentId": "a1",
+            "content": [{"type": "text", "text": "Found 2 callers."}]});
+        assert_eq!(
+            subagent_report(framed, false, Some(&structured)).as_deref(),
+            Some("Found 2 callers.")
+        );
+        // The report again inside the frame is one report.
+        let twice = json!({"status": "completed", "content": [
+            {"type": "text", "text": "Rust 1.100.0 is the latest."},
+            {"type": "text", "text": "<tools-used-before-summary>WebFetch</tools-used-before-summary>\nRust 1.100.0 is the latest.\n[Harness note, not part of the agent's report: no files.]"}
+        ]});
+        assert_eq!(
+            subagent_report("", false, Some(&twice)).as_deref(),
+            Some("Rust 1.100.0 is the latest.")
+        );
+        // A background launch has nothing to report yet.
+        let launched = json!({"status": "async_launched", "agentId": "a2"});
+        assert_eq!(
+            subagent_report("Async agent launched successfully.", false, Some(&launched)),
+            None
+        );
+        assert_eq!(
+            subagent_report("Async agent launched successfully. (internal)", false, None),
+            None
+        );
+    }
+
+    #[test]
+    fn retries_and_compaction_head_the_progress_while_they_last() {
+        let live = |events: Vec<Event>| match events.as_slice() {
+            [Event::Notice(notice)] if notice.code == LIVE_STATUS_NOTICE => notice.message.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            live(vec![system_notice(
+                "api_retry",
+                &json!({"type": "system", "subtype": "api_retry", "attempt": 3, "max_retries": 10, "error_status": 529})
+            )]),
+            Some("Retrying (3/10) · overloaded".to_owned())
+        );
+        let mut mapper = ClaudeMapper::new(None);
+        let compacting = mapper.message(&message(json!({"type": "system", "subtype": "status", "status": "compacting", "session_id": "s1"})));
+        assert_eq!(live(compacting), Some("Compacting context".to_owned()));
+        let done = mapper.message(&message(json!({"type": "system", "subtype": "status", "status": null, "compact_result": "success", "session_id": "s1"})));
+        assert_eq!(live(done), None);
     }
 }
