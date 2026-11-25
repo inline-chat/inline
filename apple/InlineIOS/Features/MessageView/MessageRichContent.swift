@@ -5,6 +5,7 @@ import struct InlineProtocol.BlockContent
 import struct InlineProtocol.BlockDisclosure
 import struct InlineProtocol.BlockImage
 import struct InlineProtocol.BlockList
+import enum InlineProtocol.BlockStatus
 import struct InlineProtocol.BlockTable
 import struct InlineProtocol.BlockText
 import struct InlineProtocol.MessageAction
@@ -133,6 +134,9 @@ struct MessageRichContent {
     /// For container blocks by path: the text their children may claim, so an unknown kind
     /// first or last inside still shows (`BlockContentSpan.childBounds`).
     var childBounds: [RichPath: Range<Int>] = [:]
+    /// Decided cards' outcome footers by the card's path, drawn where the buttons were
+    /// (`BlockDecisionNote`).
+    var decisionNotes: [RichPath: BlockText] = [:]
 
     init(body: NSAttributedString, style: Style, expanded: [RichPath: Bool], messageDate: Date = .distantPast) {
       self.body = body
@@ -193,16 +197,22 @@ struct MessageRichContent {
     /// formatting. `bounds` is the text an unknown kind at either end of the list may claim.
     mutating func blocks(_ list: [Block], path: RichPath, bounds: Range<Int>? = nil) -> [RichBlock]? {
       var result: [RichBlock] = []
+      var folded: Int?
       for (index, block) in list.enumerated() {
+        // A decided card already shows its outcome footer where the buttons were.
+        if index == folded { continue }
         let blockPath = path.appending(index)
         if let inner = BlockContentSpan.childBounds(at: index, in: list, bounds: bounds) {
           childBounds[blockPath] = inner
         }
+        let note = BlockDecisionNote.footer(after: index, in: list)
+        decisionNotes[blockPath] = note
         // A block that falls back gives back the buttons it claimed.
         let claimed = inlineActionIDs
         let owners = actionOwners
         if let converted = self.block(block, path: blockPath) {
           result.append(converted)
+          if note != nil { folded = index + 1 }
           // Children claimed theirs first; what is left is this block's own.
           for id in inlineActionIDs.subtracting(claimed)
             where actionOwners[id]?.components.starts(with: blockPath.components) != true
@@ -311,14 +321,26 @@ struct MessageRichContent {
         if !isExpanded { inlineActionIDs = claimed }
         record(disclosure.summary, at: path)
         let activity = disclosure.activityKind
+        let symbol = Self.activitySymbol(activity)
+        let meta = disclosure.hasMeta
+          ? slice(
+            disclosure.meta,
+            font: style.baseFont.withSize((style.baseFont.pointSize * 0.86).rounded()),
+            color: style.secondaryColor.withAlphaComponent(0.8),
+            removesLinks: true
+          )
+          : nil
         return .disclosure(RichDisclosure(
           summary: summary,
           children: children,
           isExpanded: isExpanded,
           isInProgress: disclosure.kind == .progress,
-          hasActivityIcon: activity != .unspecified && activity != .agent,
+          hasActivityIcon: symbol != nil,
           isRightToLeft: disclosure.hasIsRtl && disclosure.isRtl,
-          elapsed: elapsed(disclosure)
+          elapsed: elapsed(disclosure),
+          meta: meta,
+          status: Self.status(disclosure.status),
+          activitySymbol: symbol
         ))
       case let .steps(steps)?:
         return self.steps(steps, block: block, path: path)
@@ -406,6 +428,34 @@ struct MessageRichContent {
     mutating func record(_ text: BlockText, at path: RichPath) {
       guard let range = range(text) else { return }
       sources[path] = range.location ..< NSMaxRange(range)
+    }
+
+    /// The row's kind of work as macOS draws it; none for agent-level and unknown rows.
+    static func activitySymbol(_ kind: BlockDisclosure.ActivityKind) -> String? {
+      switch kind {
+      case .reasoning: "brain"
+      case .explore, .search: "magnifyingglass"
+      case .read: "doc.text"
+      case .edit: "square.and.pencil"
+      case .delete: "trash"
+      case .move: "folder"
+      case .command: "terminal"
+      case .web: "globe"
+      case .tool: "wrench.and.screwdriver"
+      case .agent, .unspecified, .UNRECOGNIZED: nil
+      }
+    }
+
+    static func status(_ status: BlockStatus) -> RichStatus? {
+      switch status {
+      case .pending: .pending
+      case .running: .running
+      case .waiting: .waiting
+      case .done: .done
+      case .failed: .failed
+      case .cancelled: .cancelled
+      case .unspecified, .UNRECOGNIZED: nil
+      }
     }
 
     /// The block's text from the body, with its font replaced or its color changed for a role.

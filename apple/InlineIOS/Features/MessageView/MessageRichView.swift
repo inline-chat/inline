@@ -789,9 +789,13 @@ private final class RichAlbumView: UIView, RichScrollResetting {
   }
 }
 
-/// A disclosure's summary row: activity icon, title and chevron. Tapping toggles it.
+/// A disclosure's summary row: activity icon, title, status glyph, meta and chevron. Tapping
+/// toggles it.
 private final class RichDisclosureView: UIControl {
   private let title = MessageTextView()
+  /// The bot's trailing detail: "exit 1 · 12s", "+12 −3", "2 failed".
+  private let meta = MessageTextView()
+  private let status = UIImageView()
   private let chevron = UIImageView(image: UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)))
   private let activity = UIImageView(image: UIImage(systemName: "sparkle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)))
   /// "2m 12s" after a working row's title, ticking once a second.
@@ -805,11 +809,13 @@ private final class RichDisclosureView: UIControl {
     super.init(frame: frame)
     title.isUserInteractionEnabled = false
     title.clipsToBounds = true
+    meta.clipsToBounds = true
     chevron.contentMode = .center
     activity.contentMode = .center
+    status.contentMode = .scaleAspectFit
     elapsedLabel.isHidden = true
     elapsedLabel.lineBreakMode = .byClipping
-    for view in [title, elapsedLabel, chevron, activity] as [UIView] {
+    for view in [title, elapsedLabel, meta, status, chevron, activity] as [UIView] {
       view.isUserInteractionEnabled = false
       addSubview(view)
     }
@@ -826,11 +832,20 @@ private final class RichDisclosureView: UIControl {
   func configure(_ disclosure: RichLayout.Disclosure, palette: MessageRichView.Palette) {
     self.disclosure = disclosure
     title.setLayout(disclosure.summary)
+    meta.isHidden = disclosure.meta == nil
+    if let layout = disclosure.meta { meta.setLayout(layout) }
+    configureStatus(disclosure.status, frame: disclosure.statusFrame)
     chevron.tintColor = palette.secondary
+    chevron.isHidden = disclosure.isEmpty
     activity.tintColor = palette.secondary
     activity.isHidden = disclosure.activityFrame == nil
-    accessibilityValue = disclosure.isExpanded ? "Expanded" : "Collapsed"
-    if disclosure.isInProgress {
+    if let symbol = disclosure.activitySymbol {
+      activity.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium))
+    }
+    // An empty row has nothing to open: it reads as text, not a button.
+    accessibilityTraits = disclosure.isEmpty ? .staticText : .button
+    accessibilityValue = disclosure.isEmpty ? nil : (disclosure.isExpanded ? "Expanded" : "Collapsed")
+    if disclosure.isInProgress || disclosure.status == .running {
       startShimmer()
     } else {
       title.layer.removeAnimation(forKey: "shimmer")
@@ -864,10 +879,29 @@ private final class RichDisclosureView: UIControl {
     }
   }
 
+  private func configureStatus(_ value: RichStatus?, frame: CGRect?) {
+    let glyph: (name: String, tint: UIColor)? = switch value {
+    case .waiting?: ("hand.raised.fill", .systemOrange)
+    case .cancelled?: ("slash.circle", .secondaryLabel)
+    default: nil
+    }
+    status.isHidden = glyph == nil || frame == nil
+    if let glyph {
+      status.image = UIImage(systemName: glyph.name, withConfiguration: UIImage.SymbolConfiguration(weight: .medium))
+      status.tintColor = glyph.tint
+    }
+  }
+
   private func updateElapsed() {
     let text = disclosure?.elapsedStart.flatMap { ProgressElapsed.text(since: $0) }
-    let summary = disclosure?.fullSummary.string ?? ""
-    accessibilityLabel = text.map { "\(summary), \($0)" } ?? summary
+    // The row's outcome reads with its title: "Ran cargo test, failed, exit 1 · 12s".
+    var parts = [disclosure?.fullSummary.string ?? ""]
+    if let state = disclosure?.status, disclosure?.statusFrame != nil {
+      parts.append(RichCardView.name(of: state))
+    }
+    if let detail = disclosure?.fullMeta?.string, !detail.isEmpty { parts.append(detail) }
+    if let text { parts.append(text) }
+    accessibilityLabel = parts.joined(separator: ", ")
     if let text, elapsedLabel.text != text { elapsedLabel.text = text }
     let wasHidden = elapsedLabel.isHidden
     elapsedLabel.isHidden = text == nil
@@ -886,17 +920,22 @@ private final class RichDisclosureView: UIControl {
     title.textFrame = disclosure.titleFrame
     // The plan reserves the widest time; the chevron closes up to the time actually shown.
     var chevronFrame = disclosure.chevronFrame
+    var shift: CGFloat = 0
     if let slot = disclosure.elapsedFrame {
       let isRightToLeft = slot.midX < disclosure.titleFrame.midX
       let gap = isRightToLeft ? disclosure.titleFrame.minX - slot.maxX : slot.minX - disclosure.titleFrame.maxX
       let width = min(elapsedWidth, slot.width)
       let unused = elapsedLabel.isHidden ? slot.width + gap : slot.width - width
       elapsedLabel.frame = CGRect(x: isRightToLeft ? slot.maxX - width : slot.minX, y: slot.minY, width: width, height: slot.height)
-      chevronFrame.origin.x += isRightToLeft ? unused : -unused
+      shift = isRightToLeft ? unused : -unused
+      chevronFrame.origin.x += shift
     }
     chevron.frame = chevronFrame
     chevron.transform = disclosure.isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
     if let frame = disclosure.activityFrame { activity.frame = frame }
+    // Status and meta sit after the time, so they close up with the chevron.
+    if let frame = disclosure.statusFrame { status.frame = frame.offsetBy(dx: shift, dy: 0) }
+    if let frame = disclosure.metaFrame { meta.textFrame = frame.offsetBy(dx: shift, dy: 0) }
   }
 
   private func startShimmer() {
@@ -911,6 +950,7 @@ private final class RichDisclosureView: UIControl {
   }
 
   @objc private func toggle() {
+    guard disclosure?.isEmpty == false else { return }
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     onToggle?()
   }

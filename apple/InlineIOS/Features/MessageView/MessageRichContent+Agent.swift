@@ -145,8 +145,15 @@ extension MessageRichContent.Builder {
     }
   }
 
-  /// "Approved by Mo", "Kept planning": what replaces the buttons once decided.
-  private func decisionLine(_ state: BlockDecisionState, by userID: Int64?, for subject: DecisionSubject) -> RichStatusLine? {
+  /// "Approved by Mo", "Kept planning": what replaces the buttons once decided. The
+  /// bridge's outcome footer, when it wrote one, names the exact choice and who made it
+  /// ("Yes, and don't ask again for git (answered by Mo)"), so it's the line instead.
+  private func decisionLine(
+    _ state: BlockDecisionState,
+    by userID: Int64?,
+    for subject: DecisionSubject,
+    note: BlockText? = nil
+  ) -> RichStatusLine? {
     let name = userID.flatMap(userName)
     let (text, symbol, tone): (String, String, RichTone)
     switch state {
@@ -167,7 +174,9 @@ extension MessageRichContent.Builder {
     case .unspecified, .pending, .UNRECOGNIZED:
       return nil
     }
-    return RichStatusLine(symbol: .named(symbol, tone: tone), text: plain(text, font: secondaryFont, color: style.secondaryColor))
+    let line = note.flatMap { slice($0, font: secondaryFont, color: style.secondaryColor) }
+      ?? plain(text, font: secondaryFont, color: style.secondaryColor)
+    return RichStatusLine(symbol: .named(symbol, tone: tone), text: line)
   }
 
   // MARK: Steps
@@ -326,7 +335,9 @@ extension MessageRichContent.Builder {
         tap: .toggle(path, isExpanded: !isExpanded)
       ),
       buttons: decided ? [] : buttons(plan.actionIds),
-      decision: decided ? decisionLine(plan.state, by: plan.hasDecidedByUserID ? plan.decidedByUserID : nil, for: .plan) : nil,
+      decision: decided
+        ? decisionLine(plan.state, by: plan.hasDecidedByUserID ? plan.decidedByUserID : nil, for: .plan, note: decisionNotes[path])
+        : nil,
       isRightToLeft: plan.hasIsRtl && plan.isRtl
     ))
   }
@@ -353,7 +364,9 @@ extension MessageRichContent.Builder {
     if present(approval.reason, when: approval.hasReason), let reason = slice(approval.reason, font: secondaryFont, color: style.secondaryColor) {
       details.append(reason)
     }
-    let isExpanded = expanded[path] ?? false
+    // Open by default, as macOS, Claude Code, Codex and t3code show what is being approved;
+    // a person can still fold it (Mo, 2026-11-24).
+    let isExpanded = expanded[path] ?? true
     let decided = Self.isDecided(approval.state)
     inlineActionIDs.formUnion(approval.actionIds)
     recordSpan(of: block, at: path)
@@ -370,7 +383,14 @@ extension MessageRichContent.Builder {
         tap: .toggle(path, isExpanded: !isExpanded)
       ),
       buttons: decided ? [] : buttons(approval.actionIds),
-      decision: decided ? decisionLine(approval.state, by: approval.hasDecidedByUserID ? approval.decidedByUserID : nil, for: .approval) : nil,
+      decision: decided
+        ? decisionLine(
+          approval.state,
+          by: approval.hasDecidedByUserID ? approval.decidedByUserID : nil,
+          for: .approval,
+          note: decisionNotes[path]
+        )
+        : nil,
       isRightToLeft: approval.hasIsRtl && approval.isRtl
     ))
   }
