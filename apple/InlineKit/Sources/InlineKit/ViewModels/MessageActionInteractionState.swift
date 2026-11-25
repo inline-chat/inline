@@ -49,6 +49,11 @@ public final class MessageActionInteractionState {
   private var keyByInteraction: [Int64: LoadingKey] = [:]
   private var interactionByKey: [LoadingKey: Int64] = [:]
   private var pendingFinishByInteraction: [Int64: PendingFinish] = [:]
+  /// Oldest first, so the buffer of answers nothing claimed stays bounded.
+  private var pendingFinishOrder: [Int64] = []
+  private static let maximumPendingFinishes = 64
+  /// Answers to agent controls (Stop, Resume), which have no message button to show them.
+  private var controlHandlers: [Int64: @MainActor (String?, MessageActionAlertContent?) -> Void] = [:]
 
   init() {}
 
@@ -83,6 +88,7 @@ public final class MessageActionInteractionState {
     loadingPublisher.send(loading)
 
     if let pendingFinish = pendingFinishByInteraction.removeValue(forKey: interactionId) {
+      pendingFinishOrder.removeAll { $0 == interactionId }
       complete(interactionId: interactionId, key: key, toastText: pendingFinish.toastText, alert: pendingFinish.alert)
     }
   }
@@ -92,13 +98,44 @@ public final class MessageActionInteractionState {
       return
     }
 
+    if let handler = controlHandlers.removeValue(forKey: interactionId) {
+      handler(toastText, alert)
+      return
+    }
     guard let key = keyByInteraction[interactionId] else {
-      pendingFinishByInteraction[interactionId] = PendingFinish(toastText: toastText, alert: alert)
+      bufferFinish(interactionId, PendingFinish(toastText: toastText, alert: alert))
       log.trace("Buffered finish for interaction \(interactionId) before mapping was attached")
       return
     }
 
     complete(interactionId: interactionId, key: key, toastText: toastText, alert: alert)
+  }
+
+  /// Shows the bot's answer to an agent control (Stop, Resume) through `handler`: the reply can
+  /// arrive before or after the control call returns its interaction.
+  public func expectControlAnswer(
+    _ interactionId: Int64,
+    handler: @escaping @MainActor (String?, MessageActionAlertContent?) -> Void
+  ) {
+    guard interactionId > 0 else { return }
+    if let pending = pendingFinishByInteraction.removeValue(forKey: interactionId) {
+      pendingFinishOrder.removeAll { $0 == interactionId }
+      handler(pending.toastText, pending.alert)
+      return
+    }
+    controlHandlers[interactionId] = handler
+    if controlHandlers.count > Self.maximumPendingFinishes, let oldest = controlHandlers.keys.min() {
+      controlHandlers.removeValue(forKey: oldest)
+    }
+  }
+
+  private func bufferFinish(_ interactionId: Int64, _ finish: PendingFinish) {
+    if pendingFinishByInteraction.updateValue(finish, forKey: interactionId) == nil {
+      pendingFinishOrder.append(interactionId)
+    }
+    while pendingFinishOrder.count > Self.maximumPendingFinishes {
+      pendingFinishByInteraction.removeValue(forKey: pendingFinishOrder.removeFirst())
+    }
   }
 
   public func fail(key: LoadingKey) {

@@ -513,24 +513,38 @@ struct RichBuilder {
 
   mutating func layout(disclosure: RichDisclosure, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
     let m = metrics
+    let isEmpty = disclosure.children.isEmpty
     let activity = disclosure.hasActivityIcon ? m.disclosureActivitySide + m.disclosureActivityGap : 0
     let elapsed = disclosure.elapsed.map { m.disclosureElapsedGap + $0.reservedWidth } ?? 0
-    let viewport = max(1, width - m.disclosureChevronSide - m.disclosureChevronGap - activity - elapsed)
+    let chevron = isEmpty ? 0 : m.disclosureChevronSide + m.disclosureChevronGap
+    // A working row counts its time live; its meta only repeats the bot's last value.
+    let metaLayout = disclosure.elapsed == nil
+      ? disclosure.meta.map { singleLine($0, width: max(1, width * 0.4), isRightToLeft: disclosure.isRightToLeft) }
+      : nil
+    let metaWidth = min(metaLayout?.lines.first?.width ?? 0, width * 0.4)
+    let status = disclosure.showsStatusGlyph ? m.disclosureMetaGap + m.disclosureStatusSide : 0
+    let meta = metaWidth > 0 ? m.disclosureMetaGap + metaWidth : 0
+    let viewport = max(1, width - chevron - activity - elapsed - status - meta)
     let summary = singleLine(disclosure.summary, width: viewport, isRightToLeft: disclosure.isRightToLeft)
     let titleWidth = min(summary.lines.first?.width ?? 0, viewport)
     let height = max(summary.lines.first?.frame.height ?? 0, m.disclosureChevronSide)
     let lineHeight = summary.lines.first?.frame.height ?? height
-    let nodeWidth = grid.ceil(activity + titleWidth + elapsed + m.disclosureChevronGap + m.disclosureChevronSide)
+    let nodeWidth = grid.ceil(activity + titleWidth + elapsed + status + meta + chevron)
     let rtl = disclosure.isRightToLeft
-    // Activity icon, title, chevron in reading order; mirrored for right-to-left.
+    // Activity icon, title, time, status glyph, meta, chevron in reading order; mirrored for
+    // right-to-left.
     func place(_ minX: CGFloat, _ itemWidth: CGFloat, _ itemHeight: CGFloat) -> CGRect {
       CGRect(x: rtl ? nodeWidth - minX - itemWidth : minX, y: (height - itemHeight) / 2, width: itemWidth, height: itemHeight)
     }
-    let node = RichLayout.Disclosure(
+    let afterTitle = activity + titleWidth + elapsed
+    var node = RichLayout.Disclosure(
       summary: summary,
       fullSummary: disclosure.summary,
       titleFrame: grid.round(place(activity, titleWidth, lineHeight)),
-      chevronFrame: grid.round(place(activity + titleWidth + elapsed + m.disclosureChevronGap, m.disclosureChevronSide, m.disclosureChevronSide)),
+      // An empty row keeps a zero-width chevron at its end, inside the row.
+      chevronFrame: grid.round(isEmpty
+        ? place(afterTitle + status + meta, 0, m.disclosureChevronSide)
+        : place(afterTitle + status + meta + m.disclosureChevronGap, m.disclosureChevronSide, m.disclosureChevronSide)),
       activityFrame: disclosure.hasActivityIcon ? grid.round(place(0, m.disclosureActivitySide, m.disclosureActivitySide)) : nil,
       isExpanded: disclosure.isExpanded,
       isInProgress: disclosure.isInProgress,
@@ -539,6 +553,17 @@ struct RichBuilder {
       },
       elapsedStart: disclosure.elapsed?.start
     )
+    if status > 0 {
+      node.status = disclosure.status
+      node.statusFrame = grid.round(place(afterTitle + m.disclosureMetaGap, m.disclosureStatusSide, m.disclosureStatusSide))
+    }
+    if metaWidth > 0, let metaLayout {
+      node.meta = metaLayout
+      node.fullMeta = disclosure.meta
+      node.metaFrame = grid.round(place(afterTitle + status + m.disclosureMetaGap, metaWidth, metaLayout.lines.first?.frame.height ?? lineHeight))
+    }
+    node.activitySymbol = disclosure.activitySymbol
+    node.isEmpty = isEmpty
     let frame = CGRect(x: rtl ? x + width - nodeWidth : x, y: y, width: nodeWidth, height: grid.ceil(height))
     guard append(path, frame, .disclosure(node), anchor: rtl ? .trailing : .leading) else { return false }
     record(frame)

@@ -7,6 +7,8 @@ import Observation
 @MainActor
 public enum AgentControlErrors {
   public static var report: @MainActor (String) -> Void = { _ in }
+  /// The bot's reply to a Stop or Resume ("Nothing is running."), as an informational toast.
+  public static var notice: @MainActor (String) -> Void = { _ in }
 }
 
 /// Agent controls for the thread Compose, shared by macOS and iOS.
@@ -576,13 +578,20 @@ public final class ComposeAgentChainModel: ObservableObject {
     Task { @MainActor [weak self] in
       defer { self?.isControlling = false }
       do {
-        _ = try await Api.realtime.callRpcDirect(
+        let result = try await Api.realtime.callRpcDirect(
           method: .controlAgentSession,
           input: .controlAgentSession(.with {
             $0.agentSessionID = work.sessionID
             $0.op = op
           })
         )
+        // The bot answers the control like a button: show what it said.
+        if case let .controlAgentSession(control)? = result {
+          MessageActionInteractionState.shared.expectControlAnswer(control.interactionID) { toast, alert in
+            let text = toast ?? alert.map { [$0.title, $0.text].compactMap { $0 }.joined(separator: " ") }
+            if let text, !text.isEmpty { AgentControlErrors.notice(text) }
+          }
+        }
       } catch {
         AgentControlErrors.report(error.localizedDescription)
       }

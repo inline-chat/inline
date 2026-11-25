@@ -126,6 +126,12 @@ public struct RichDisclosure: Hashable, Sendable {
   public var isRightToLeft: Bool
   /// A working row's live time, right after the summary: "Working 2m 12s".
   public var elapsed: RichElapsed?
+  /// The bot's trailing detail after the summary: "exit 1 · 12s", "+12 −3", "2 failed".
+  public var meta: MessageText?
+  /// The row's state. Running shimmers; waiting and cancelled get a glyph.
+  public var status: RichStatus?
+  /// SF Symbol for the row's kind of work (a terminal for a command), when it has one.
+  public var activitySymbol: String?
 
   public init(
     summary: MessageText,
@@ -134,7 +140,10 @@ public struct RichDisclosure: Hashable, Sendable {
     isInProgress: Bool = false,
     hasActivityIcon: Bool = false,
     isRightToLeft: Bool = false,
-    elapsed: RichElapsed? = nil
+    elapsed: RichElapsed? = nil,
+    meta: MessageText? = nil,
+    status: RichStatus? = nil,
+    activitySymbol: String? = nil
   ) {
     self.summary = summary
     self.children = children
@@ -143,6 +152,19 @@ public struct RichDisclosure: Hashable, Sendable {
     self.hasActivityIcon = hasActivityIcon
     self.isRightToLeft = isRightToLeft
     self.elapsed = elapsed
+    self.meta = meta
+    self.status = status
+    self.activitySymbol = activitySymbol
+  }
+
+  /// Waiting and cancelled are what a reader must notice; running shows as the shimmer and
+  /// done as plain text, as on macOS. A failed command is the agent's working detail, not
+  /// something to worry the reader with, so it gets no glyph either.
+  public var showsStatusGlyph: Bool {
+    switch status {
+    case .waiting?, .cancelled?: true
+    default: false
+    }
   }
 }
 
@@ -210,6 +232,9 @@ public struct RichLayoutMetrics: Hashable, Sendable {
   public var disclosureActivityGap: CGFloat = 5
   /// About a space between a working row's summary and its live time.
   public var disclosureElapsedGap: CGFloat = 5
+  public var disclosureStatusSide: CGFloat = 13
+  /// Between the summary and its status glyph or meta.
+  public var disclosureMetaGap: CGFloat = 6
   // Agent blocks.
   public var cardHorizontalInset: CGFloat = 12
   public var cardVerticalInset: CGFloat = 10
@@ -330,6 +355,16 @@ public struct RichLayout: Sendable {
     /// draws the time at its actual width and closes the gap up to the chevron.
     public var elapsedFrame: CGRect?
     public var elapsedStart: Date?
+    /// The bot's trailing detail ("exit 1 · 12s"), one line, after the summary.
+    public var meta: TextLayout? = nil
+    public var metaFrame: CGRect? = nil
+    public var fullMeta: MessageText? = nil
+    /// A glyph for waiting, failed or cancelled, after the summary.
+    public var status: RichStatus? = nil
+    public var statusFrame: CGRect? = nil
+    public var activitySymbol: String? = nil
+    /// Nothing to disclose: no chevron, and a tap does nothing.
+    public var isEmpty: Bool = false
   }
 
   public struct Placed: Sendable {

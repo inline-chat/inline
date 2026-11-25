@@ -84,17 +84,36 @@ public final class DebugChatFixture {
     seedStep = step
     seedNow = now
     seedRun = run
+    // `--timeline-harness-bridge <file>`: the chat ends with an agent's messages as the CLI bridge
+    // rendered them.
+    let bridge = BridgeManifest.fromArguments(flag: "--timeline-harness-bridge")
     try database.dbWriter.write { db in
       for (id, first, last) in Self.users {
         try User(id: id, email: nil, firstName: first, lastName: last).insert(db)
+      }
+      if let agent = bridge?.agent {
+        try User(id: Self.bridgeAgentId, email: nil, firstName: agent, lastName: nil).insert(db)
       }
       try Chat(id: chatId, date: now.addingTimeInterval(-86_400 * 30), type: .thread, title: "List lab",
                spaceId: nil, lastMsgId: total).insert(db)
       for (id, _, _) in Self.users {
         try ChatParticipant(chatId: chatId, userId: id, date: now).insert(db)
       }
+      // With a bridge manifest, the newest messages are the agent's, as the bridge rendered them.
+      let firstBridge = messageCount - (bridge?.messages.count ?? 0) + 1
       for index in Int(floor) ... messageCount {
-        try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now, run: run)
+        if let bridge, index >= firstBridge {
+          let item = bridge.messages[index - firstBridge]
+          var message = Message(
+            messageId: Int64(index), fromId: Self.bridgeAgentId,
+            date: start.addingTimeInterval(Double(index) * step), text: item.text,
+            peerUserId: nil, peerThreadId: chatId, chatId: chatId, out: false,
+            blockContentPayload: item.blocks, entities: item.entities
+          )
+          try message.saveMessage(db)
+        } else {
+          try Self.seed(db, index: index, chatId: chatId, start: start, step: step, now: now, run: run)
+        }
       }
       try MessageHistoryCoverageStore.subtract(
         db, chatId: chatId, lowerId: floor, upperId: MessageHistoryHole.positiveMessageIDMax
@@ -232,6 +251,8 @@ public final class DebugChatFixture {
       }
     }
   }
+
+  private nonisolated static let bridgeAgentId: Int64 = 6
 
   /// Message text and blocks whose ranges point into it, as an agent sends them.
   private nonisolated static func agentBlocks(variant: Int) -> (text: String, payload: BlockContentPayload?) {

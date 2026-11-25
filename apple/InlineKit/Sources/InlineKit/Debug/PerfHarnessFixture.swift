@@ -153,6 +153,47 @@ public enum PerfHarnessFixture {
       dialog.readOutboxMaxId = Int64(spec.messages)
       try dialog.save(db)
     }
+    try seedBridgeChat(db, now: now)
+  }
+
+  // MARK: - Bridge output
+
+  /// `--perf-harness-bridge <file>`: a DM with an agent whose messages are exactly what the CLI
+  /// bridge rendered (see `BridgeManifest`), opened at launch.
+  public static let bridgeAgentId: Int64 = 9
+  public static var bridgeRequested: Bool { CommandLine.arguments.contains("--perf-harness-bridge") }
+
+  private static func seedBridgeChat(_ db: Database, now: Date) throws {
+    guard let manifest = BridgeManifest.fromArguments(flag: "--perf-harness-bridge") else { return }
+    try User(id: bridgeAgentId, email: nil, firstName: manifest.agent, lastName: nil, username: "agent").save(db)
+    let chatId: Int64 = 901
+    var chat = Chat(
+      id: chatId, date: now, type: .privateChat, title: nil, spaceId: nil, peerUserId: bridgeAgentId, emoji: nil
+    )
+    try chat.save(db)
+    for userId in [me, bridgeAgentId] {
+      try ChatParticipant(chatId: chatId, userId: userId, date: now).save(db)
+    }
+    let count = Int64(manifest.messages.count)
+    for (index, item) in manifest.messages.enumerated() {
+      let messageId = Int64(index + 1)
+      var message = Message(
+        messageId: messageId, fromId: bridgeAgentId,
+        date: now.addingTimeInterval(Double(index - manifest.messages.count) * 30),
+        text: item.text, peerUserId: bridgeAgentId, peerThreadId: nil, chatId: chatId, out: false,
+        blockContentPayload: item.blocks, entities: item.entities
+      )
+      try message.insert(db)
+    }
+    chat.lastMsgId = count
+    try chat.save(db)
+    var dialog = Dialog(optimisticForChat: chat)
+    dialog.open = true
+    dialog.unreadCount = 0
+    dialog.readInboxMaxId = count
+    dialog.serverReadInboxMaxId = count
+    dialog.readOutboxMaxId = count
+    try dialog.save(db)
   }
 
   // MARK: - Text

@@ -169,6 +169,47 @@ struct RichLayoutTests {
     #expect(with.nodes[0].frame.width > without.nodes[0].frame.width)
   }
 
+  @Test("A failed row shows its meta and no glyph, a waiting row its glyph, and an empty row no chevron")
+  func statusAndMeta() throws {
+    let failed = RichDisclosure(
+      summary: Fixtures.text("Ran cargo test"),
+      children: [Self.p("error[E0308]")],
+      isExpanded: false,
+      meta: Fixtures.text("exit 101 · 12s"),
+      status: .failed,
+      activitySymbol: "terminal"
+    )
+    let waiting = RichDisclosure(
+      summary: Fixtures.text("Edit parser.rs"),
+      children: [Self.p("diff")],
+      isExpanded: false,
+      status: .waiting
+    )
+    let plain = RichDisclosure(summary: Fixtures.text("Ran cargo test"), children: [Self.p("ok")], isExpanded: false)
+    let empty = RichDisclosure(summary: Fixtures.text("Working"), children: [], isExpanded: false)
+    let layout = try Self.layout([.disclosure(failed), .disclosure(waiting), .disclosure(plain), .disclosure(empty)])
+    guard case let .disclosure(row) = layout.nodes[0].node,
+          case let .disclosure(asks) = layout.nodes[1].node,
+          case let .disclosure(bare) = layout.nodes[2].node,
+          case let .disclosure(nothing) = layout.nodes[3].node
+    else { Issue.record("not a disclosure"); return }
+    // A failed command is the agent's working detail: its meta, no glyph.
+    let meta = try #require(row.metaFrame)
+    #expect(row.statusFrame == nil)
+    #expect(row.activitySymbol == "terminal")
+    #expect(meta.minX >= row.titleFrame.maxX)
+    #expect(row.chevronFrame.minX >= meta.maxX)
+    // Waiting for the reader keeps its glyph.
+    let glyph = try #require(asks.statusFrame)
+    #expect(asks.status == .waiting)
+    #expect(glyph.minX >= asks.titleFrame.maxX)
+    #expect(bare.statusFrame == nil && bare.metaFrame == nil)
+    #expect(layout.nodes[0].frame.width > layout.nodes[2].frame.width)
+    #expect(!row.isEmpty && !bare.isEmpty)
+    #expect(nothing.isEmpty)
+    #expect(nothing.chevronFrame.width == 0)
+  }
+
   @Test("Images keep their aspect inside the width and the height cap")
   func images() throws {
     let layout = try Self.layout([.image(RichImage(id: "a", size: CGSize(width: 1_200, height: 800))), .image(RichImage(id: "b", size: nil))])
