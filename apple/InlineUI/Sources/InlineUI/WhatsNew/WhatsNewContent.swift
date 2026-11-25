@@ -55,12 +55,6 @@ extension WhatsNewAnnouncement {
         detail: "Approve plans and answer agents from cards, and choose per bot how much of their work you see."
       ),
       WhatsNewItem(
-        systemImage: "mic",
-        title: "Hold to Record",
-        detail: "Hold the mic button to start a voice message right away.",
-        platforms: .iOS
-      ),
-      WhatsNewItem(
         systemImage: "location.slash",
         title: "Photos Without Hidden Details",
         detail: "Photos and videos are sent without location or camera details. Turn on Original to send the untouched file."
