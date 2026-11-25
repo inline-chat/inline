@@ -14,6 +14,7 @@
 //! | `session.renamed` | `Renamed` |
 //! | events of a sub-agent session | `Child` updates and items under that child |
 //! | a sub-agent's report (`synthetic`, `metadata.source = "subagent"`) | `Child` update and a system `Message` under that child |
+//! | a background shell's end (`synthetic`, `metadata.source = "shell"`) | `Child` update and the shell's `Command` with its output |
 //! | anything else | `Notice` (never dropped) |
 //!
 //! A turn is one OpenCode execution. It is named after the inbox entry that
@@ -28,17 +29,28 @@
 //! execution. That run is a turn of its own, named after the report, with no
 //! Inline input: a continuation the agent started, like a turn started from
 //! another client. The report itself is the child's, never a user prompt.
+//!
+//! A shell command moved to the background (asked for, or past its timeout
+//! since 2.3) reports its end the same way: a synthetic inbox entry, never a
+//! `session.synthetic` event. Its notice ends the shell's child and shows as
+//! the command's result.
+//!
+//! Inline's Stop also stops that background work. A child it stopped may
+//! still report (an interrupted sub-agent says it was cancelled); a run woken
+//! only by such reports is not work to do, so the mapper hands it back
+//! ([`Mapper::take_stop_wakes`]) to be interrupted again, like t3code does.
+//! The report stays in the inbox for the next prompt to read.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use inline_agent_bridge::harness::{
-    ApprovalSubject, ChildId, ChildKind, ChildRef, ChildStatus, ChildUpdate, ClosedBy, Decision,
-    DecisionId, DecisionKind, DeltaStream, EffectiveSettings, Event, FieldId, FieldInput,
-    FieldOption, FileChangeKind, FileDiff, FormField, InputFact, InputId, Interaction,
-    InteractionId, InteractionKind, Item, ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus,
-    ItemUpdate, MessageRole, Notice, NoticeLevel, QuestionForm, QueueEntryId, QueuedInput,
-    RunState, TokenUsage, UsageUpdate, UserId, WaitingOn,
+    ApprovalSubject, ChildId, ChildKind, ChildRef, ChildStatus, ChildUpdate, ClosedBy,
+    CommandAction, Decision, DecisionId, DecisionKind, DeltaStream, EffectiveSettings, Event,
+    FieldId, FieldInput, FieldOption, FileChangeKind, FileDiff, FormField, InputFact, InputId,
+    Interaction, InteractionId, InteractionKind, Item, ItemBody, ItemDelta, ItemId, ItemKind,
+    ItemStatus, ItemUpdate, MessageRole, Notice, NoticeLevel, QuestionForm, QueueEntryId,
+    QueuedInput, RunState, TokenUsage, UsageUpdate, UserId, WaitingOn,
 };
 use inline_agent_bridge::{DriverSettingOption, PlanStep, PlanStepStatus, TurnId, TurnOutcome};
 use serde_json::{Value, json};
@@ -68,6 +80,101 @@ struct InboxEntry {
     user: bool,
     /// A sub-agent reporting back to this session.
     report: Option<Report>,
+    /// A background shell reporting its end.
+    shell: Option<ShellNotice>,
+}
+
+/// A background shell's end, told to the session that ran it (`synthetic`
+/// input with `metadata.source = "shell"`).
+#[derive(Clone, Debug)]
+struct ShellNotice {
+    shell: String,
+    /// `completed`, `cancelled` or `error`.
+    state: Option<String>,
+    command: Option<String>,
+    /// What the command printed, without the notices OpenCode adds for the
+    /// model.
+    output: Option<String>,
+    exit: Option<i32>,
+}
+
+impl ShellNotice {
+    /// The notice a synthetic payload (or synthetic message) carries.
+    fn of(payload: &Value) -> Option<Self> {
+        let metadata = payload.get("metadata")?;
+        if metadata.get("source").and_then(Value::as_str) != Some("shell") {
+            return None;
+        }
+        let state = metadata
+            .get("state")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let text = payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        Some(Self {
+            shell: metadata.get("shellID").and_then(Value::as_str)?.to_owned(),
+            output: notice_output(text, state.as_deref(), metadata),
+            exit: metadata
+                .get("exit")
+                .and_then(Value::as_i64)
+                .and_then(|code| i32::try_from(code).ok()),
+            command: payload
+                .get("description")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+                .map(str::to_owned),
+            state,
+        })
+    }
+
+    fn child_status(&self) -> ChildStatus {
+        match self.state.as_deref() {
+            Some("completed") => ChildStatus::Completed,
+            Some("cancelled") => ChildStatus::Stopped,
+            _ => ChildStatus::Failed,
+        }
+    }
+}
+
+/// The command output inside a shell notice: the text between the
+/// `<background-result …>` (2.3+) or `<shell …>` (2.2) tags, without the
+/// trailing notice for the model ("Exit code: 1", a timeout hint, the reason
+/// it was killed, "Cancelled") that follows the output after a blank line.
+fn notice_output(text: &str, state: Option<&str>, metadata: &Value) -> Option<String> {
+    let mut body = text;
+    for (open, close) in [
+        ("<background-result ", "</background-result>"),
+        ("<shell ", "</shell>"),
+    ] {
+        if let Some(start) = text.find(open)
+            && let Some(newline) = text[start..].find('\n')
+            && let Some(end) = text.rfind(close)
+            && start + newline < end
+        {
+            let inner = &text[start + newline + 1..end];
+            body = inner.strip_suffix('\n').unwrap_or(inner);
+            break;
+        }
+    }
+    let flag = |key: &str| metadata.get(key).and_then(Value::as_bool) == Some(true);
+    let noticed = flag("timeout")
+        || flag("killed")
+        || metadata
+            .get("signal")
+            .is_some_and(|signal| !signal.is_null())
+        || metadata
+            .get("exit")
+            .and_then(Value::as_i64)
+            .is_some_and(|code| code != 0)
+        || state == Some("cancelled")
+        || body.ends_with("Exit code: unknown");
+    if noticed {
+        body = body.rsplit_once("\n\n").map_or("", |(output, _)| output);
+    }
+    let body = body.trim_end();
+    (!body.is_empty()).then(|| tail(body, MAX_OUTPUT_CHARS))
 }
 
 /// A sub-agent's report to its parent (`<subagent>` synthetic input).
@@ -178,6 +285,16 @@ pub struct Mapper {
     /// Head of the log when the session was opened: a resync before any
     /// live durable event replays only what came after it.
     floor: Option<u64>,
+    /// The compaction in progress: its item and the turn it started in, so
+    /// its end completes the same row.
+    compaction: Option<(String, Option<TurnId>)>,
+    /// Sub-agent sessions and background shells Inline stopped. A report or
+    /// notice of theirs that wakes a session is not work to run.
+    stopped: HashSet<String>,
+    stopped_order: VecDeque<String>,
+    /// Sessions that started only because of children Inline stopped, to
+    /// interrupt again: the session, and for this one the turn it started.
+    stop_wakes: Vec<(String, Option<TurnId>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -226,7 +343,16 @@ impl Mapper {
             commands: VecDeque::new(),
             child_seq: HashMap::new(),
             floor: None,
+            compaction: None,
+            stopped: HashSet::new(),
+            stopped_order: VecDeque::new(),
+            stop_wakes: Vec::new(),
         }
+    }
+
+    /// The session's folder as last reported.
+    pub fn folder(&self) -> Option<&std::path::Path> {
+        self.folder.as_deref()
     }
 
     /// The native session.
@@ -264,6 +390,111 @@ impl Mapper {
             .filter(|child| child.running)
             .map(|child| child.child.clone())
             .collect()
+    }
+
+    /// Running sub-agent sessions.
+    pub fn running_child_sessions(&self) -> Vec<String> {
+        self.children
+            .iter()
+            .filter(|(_, state)| state.running)
+            .map(|(session, _)| session.clone())
+            .collect()
+    }
+
+    /// Running background shells, by shell id.
+    pub fn running_shells(&self) -> Vec<String> {
+        self.shells
+            .iter()
+            .filter(|(_, state)| state.running)
+            .map(|(shell, _)| shell.clone())
+            .collect()
+    }
+
+    /// Records children Inline is stopping (sub-agent sessions and
+    /// background shells), before it stops them: a report or notice of
+    /// theirs that wakes a session again is stopped too, until it is
+    /// delivered or the parent sends that sub-agent new work.
+    pub fn stopping_children(&mut self, ids: impl IntoIterator<Item = String>) {
+        const MAX_STOPPED: usize = 256;
+        for id in ids {
+            if self.stopped.insert(id.clone()) {
+                self.stopped_order.push_back(id);
+            }
+        }
+        while self.stopped_order.len() > MAX_STOPPED {
+            if let Some(oldest) = self.stopped_order.pop_front() {
+                self.stopped.remove(&oldest);
+            }
+        }
+    }
+
+    /// Whether Inline stopped this sub-agent session or background shell.
+    pub fn was_stopped(&self, id: &str) -> bool {
+        self.stopped.contains(id)
+    }
+
+    fn unstop(&mut self, id: &str) {
+        if self.stopped.remove(id) {
+            self.stopped_order.retain(|stopped| stopped != id);
+        }
+    }
+
+    /// Ends a background shell Inline stopped through a route that sends no
+    /// notice (a cancelled job).
+    pub fn shell_stopped(&mut self, shell: &str) -> Vec<Event> {
+        if !self.shells.get(shell).is_some_and(|state| state.running) {
+            return Vec::new();
+        }
+        self.background_shell(shell, None, ChildStatus::Stopped)
+    }
+
+    /// Sessions that started only because of children Inline stopped: this
+    /// session (with the turn that wake started) or a stopped sub-agent.
+    pub fn take_stop_wakes(&mut self) -> Vec<(String, Option<TurnId>)> {
+        std::mem::take(&mut self.stop_wakes)
+    }
+
+    /// Whether a wake taken by [`Self::take_stop_wakes`] is still only that:
+    /// this session still runs the turn and nobody's prompt joined it, or
+    /// the sub-agent still runs and was not given new work.
+    pub fn stop_wake_holds(&self, session: &str, turn: Option<&TurnId>) -> bool {
+        if session != self.session {
+            return self.stopped.contains(session)
+                && self
+                    .children
+                    .get(session)
+                    .is_some_and(|state| state.running);
+        }
+        self.turn.as_ref().is_some_and(|running| {
+            Some(&running.id) == turn && running.consumed.is_empty() && !self.prompt_waiting()
+        })
+    }
+
+    /// A person's prompt is waiting to be taken by the next step.
+    fn prompt_waiting(&self) -> bool {
+        !self.early.is_empty() || self.inbox.values().any(|entry| entry.user && !entry.queued)
+    }
+
+    /// The pending input that wakes a session is only reports and notices of
+    /// children Inline stopped.
+    fn woken_by_stopped_children(&self) -> bool {
+        if self.stopped.is_empty() || self.prompt_waiting() {
+            return false;
+        }
+        let mut woken = false;
+        for entry in self.inbox.values().filter(|entry| !entry.queued) {
+            let child = entry
+                .report
+                .as_ref()
+                .map(|report| &report.child)
+                .or(entry.shell.as_ref().map(|notice| &notice.shell));
+            match child {
+                Some(child) if self.stopped.contains(child) => woken = true,
+                Some(_) => return false,
+                None => {}
+            }
+        }
+        woken
     }
 
     /// Whether a native session is one of this session's sub-agents.
@@ -328,15 +559,16 @@ impl Mapper {
         }
     }
 
-    /// Pending inbox ids, steers and queued alike. Sub-agent reports are the
-    /// children's results, not Inline's input, and are never withdrawn.
+    /// Pending inbox ids, steers and queued alike. Sub-agent reports and
+    /// shell notices are the children's results, not Inline's input, and are
+    /// never withdrawn.
     pub fn pending_inbox(&self) -> Vec<String> {
         self.inbox_order
             .iter()
             .filter(|id| {
                 self.inbox
                     .get(*id)
-                    .is_none_or(|entry| entry.report.is_none())
+                    .is_none_or(|entry| entry.report.is_none() && entry.shell.is_none())
             })
             .cloned()
             .collect()
@@ -564,21 +796,34 @@ impl Mapper {
             "session.usage.updated" => self.usage_total(&data),
             "session.retry.scheduled" => self.retry(&data, event),
             "session.status" => self.status(&data),
-            "session.compaction.started" => vec![Event::Item(Item::new(
-                item_id(&format!("compaction:{}", event_id(event))),
-                self.turn().cloned(),
-                ItemUpdate::Started {
-                    body: ItemBody::Usage {
-                        label: "Compacting context".to_owned(),
+            "session.compaction.started" => {
+                let id = format!("compaction:{}", event_id(event));
+                let turn = self.turn().cloned();
+                self.compaction = Some((id.clone(), turn.clone()));
+                vec![Event::Item(Item::new(
+                    item_id(&id),
+                    turn,
+                    ItemUpdate::Started {
+                        body: ItemBody::Usage {
+                            label: "Compacting context".to_owned(),
+                        },
                     },
-                },
-                event.clone(),
-            ))],
+                    event.clone(),
+                ))]
+            }
             "session.compaction.ended" | "session.compaction.failed" => {
                 let failed = kind.ends_with("failed");
+                // The end completes the row its start opened; an end seen
+                // without its start (opened mid-compaction) is a row of its own.
+                let (id, turn) = self.compaction.take().unwrap_or_else(|| {
+                    (
+                        format!("compaction:{}", event_id(event)),
+                        self.turn().cloned(),
+                    )
+                });
                 vec![Event::Item(Item::new(
-                    item_id(&format!("compaction:{}", event_id(event))),
-                    self.turn().cloned(),
+                    item_id(&id),
+                    turn,
                     ItemUpdate::Completed {
                         body: if failed {
                             ItemBody::Error {
@@ -602,56 +847,9 @@ impl Mapper {
                 ))]
             }
             "session.shell.started" | "session.shell.ended" => self.shell(&data, event),
-            "session.synthetic"
-                if data.pointer("/metadata/source").and_then(Value::as_str) == Some("shell") =>
-            {
-                let shell = data
-                    .pointer("/metadata/shellID")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                let status = match data.pointer("/metadata/state").and_then(Value::as_str) {
-                    Some("completed") => ChildStatus::Completed,
-                    Some("cancelled") => ChildStatus::Stopped,
-                    _ => ChildStatus::Failed,
-                };
-                let mut events = if self.shells.contains_key(&shell) {
-                    self.background_shell(&shell, None, status)
-                } else {
-                    Vec::new()
-                };
-                events.push(Event::Item(Item::new(
-                    item_id(&format!("synthetic:{}", event_id(event))),
-                    self.turn().cloned(),
-                    ItemUpdate::Completed {
-                        body: ItemBody::Command {
-                            command: data
-                                .get("description")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_owned(),
-                            cwd: None,
-                            actions: Vec::new(),
-                            output: data
-                                .pointer("/metadata/output")
-                                .and_then(Value::as_str)
-                                .map(|text| tail(text, MAX_OUTPUT_CHARS)),
-                            exit_code: data
-                                .pointer("/metadata/exit")
-                                .and_then(Value::as_i64)
-                                .and_then(|code| i32::try_from(code).ok()),
-                            duration_ms: None,
-                        },
-                        status: match status {
-                            ChildStatus::Completed => ItemStatus::Completed,
-                            ChildStatus::Stopped => ItemStatus::Interrupted,
-                            _ => ItemStatus::Failed,
-                        },
-                    },
-                    event.clone(),
-                )));
-                events
-            }
+            // Live, `session.synthetic` only carries instruction loads,
+            // restart notices and the output-limit continuation: reports and
+            // shell notices arrive as inbox entries.
             "session.synthetic"
                 if data
                     .get("metadata")
@@ -774,7 +972,7 @@ impl Mapper {
         }
         // Named after the oldest person's prompt waiting to run (synthetic
         // context and compactions do not start turns), then a sub-agent
-        // report that woke the session; otherwise the event.
+        // report or shell notice that woke the session; otherwise the event.
         let first = self
             .inbox_order
             .iter()
@@ -787,7 +985,7 @@ impl Mapper {
                 self.inbox_order.iter().find(|id| {
                     self.inbox
                         .get(*id)
-                        .is_some_and(|entry| entry.report.is_some())
+                        .is_some_and(|entry| entry.report.is_some() || entry.shell.is_some())
                 })
             })
             .or_else(|| {
@@ -801,6 +999,9 @@ impl Mapper {
             .or_else(|| TurnId::new(event_id(event)).ok())
             .unwrap_or_else(|| TurnId::new("turn").expect("static turn id"));
         let started_ms = event.get("created").and_then(Value::as_u64);
+        // Woken only by what children Inline stopped report: not work to
+        // run, so it is stopped again as soon as it starts.
+        let stopped_wake = self.woken_by_stopped_children();
         let inputs = std::mem::take(&mut self.early);
         events.push(Event::Turn {
             turn: id.clone(),
@@ -808,7 +1009,11 @@ impl Mapper {
                 inputs: inputs.clone(),
             },
         });
-        self.stopping = false;
+        self.stopping = stopped_wake;
+        if stopped_wake {
+            self.stop_wakes
+                .push((self.session.clone(), Some(id.clone())));
+        }
         self.turn = Some(RunningTurn {
             id,
             started_ms,
@@ -855,6 +1060,13 @@ impl Mapper {
     // MARK: inbox
 
     fn inbox_enqueued(&mut self, data: &Value) -> Vec<Event> {
+        self.enqueue(data, false)
+    }
+
+    /// One inbox entry. A queued prompt enqueued while the session is idle
+    /// starts at once; one still listed as queued (`listed`) is parked,
+    /// whether or not anything runs.
+    fn enqueue(&mut self, data: &Value, listed: bool) -> Vec<Event> {
         let Some(id) = data.get("inboxID").and_then(Value::as_str) else {
             return Vec::new();
         };
@@ -892,8 +1104,10 @@ impl Mapper {
                 MAX_PREVIEW_CHARS,
             ),
         };
-        let queued =
-            item.get("delivery").and_then(Value::as_str) == Some("queue") && self.turn.is_some();
+        let queued = item.get("delivery").and_then(Value::as_str) == Some("queue")
+            && (listed || self.turn.is_some());
+        let payload = item.get("payload").filter(|_| kind == "synthetic");
+        let shell = payload.and_then(ShellNotice::of);
         self.inbox.insert(
             id.to_owned(),
             InboxEntry {
@@ -902,19 +1116,25 @@ impl Mapper {
                 text,
                 queued,
                 user: kind == "user",
-                report: (kind == "synthetic")
-                    .then(|| item.get("payload").and_then(Report::of))
-                    .flatten(),
+                report: payload.and_then(Report::of),
+                shell: shell.clone(),
             },
         );
         self.inbox_order.push_back(id.to_owned());
-        if queued {
-            vec![Event::Queue {
-                entries: self.queue(),
-            }]
-        } else {
-            Vec::new()
+        let mut events = Vec::new();
+        // The notice is sent when the command ends: its child is done now,
+        // whenever the session reads the notice.
+        if let Some(notice) = &shell
+            && self.shells.contains_key(&notice.shell)
+        {
+            events.extend(self.background_shell(&notice.shell, None, notice.child_status()));
         }
+        if queued {
+            events.push(Event::Queue {
+                entries: self.queue(),
+            });
+        }
+        events
     }
 
     fn inbox_delivered(&mut self, data: &Value, event: &Value) -> Vec<Event> {
@@ -931,10 +1151,18 @@ impl Mapper {
             .and_then(|entry| entry.input.clone())
             .or_else(|| self.sent.remove(id));
         if let Some(report) = entry.as_ref().and_then(|entry| entry.report.clone()) {
+            // A stopped child's report, read now: it wakes nothing again.
+            self.unstop(&report.child);
             events.extend(self.report(&report, id, event));
+        } else if let Some(notice) = entry.as_ref().and_then(|entry| entry.shell.clone()) {
+            self.unstop(&notice.shell);
+            events.extend(self.shell_notice(&notice, id, event));
         } else if let Some(entry) = &entry
+            && entry.user
             && !entry.text.is_empty()
         {
+            // Only a person's prompt: synthetic context (Inline's notes,
+            // passive input, other tools' notices) is the model's to read.
             events.push(Event::Item(Item::new(
                 item_id(id),
                 self.turn().cloned(),
@@ -977,6 +1205,15 @@ impl Mapper {
         };
         let entry = self.inbox.remove(id);
         self.inbox_order.retain(|entry| entry != id);
+        if let Some(child) = entry.as_ref().and_then(|entry| {
+            entry
+                .report
+                .as_ref()
+                .map(|report| report.child.clone())
+                .or(entry.shell.as_ref().map(|notice| notice.shell.clone()))
+        }) {
+            self.unstop(&child);
+        }
         let mut events = Vec::new();
         if let Some(input) = entry
             .as_ref()
@@ -1162,6 +1399,19 @@ impl Mapper {
                 child.clone(),
             ));
         }
+        // New work for a sub-agent Inline stopped: its reports count again.
+        if let Some(session) = data
+            .pointer("/input/sessionID")
+            .and_then(Value::as_str)
+            .filter(|_| {
+                self.tools.get(&id).is_some_and(|call| {
+                    matches!(call.name.to_ascii_lowercase().as_str(), "subagent" | "task")
+                })
+            })
+            .map(str::to_owned)
+        {
+            self.unstop(&session);
+        }
         let Some(call) = self.tools.get_mut(&id) else {
             return events;
         };
@@ -1250,8 +1500,12 @@ impl Mapper {
             turn: self.turn().cloned(),
         });
         self.complete(&id);
-        let output = content_text(data.get("content"));
         let metadata = data.get("metadata").cloned();
+        let output = if is_shell(&call.name) {
+            shell_output(data.get("content"), metadata.as_ref(), data.get("error"))
+        } else {
+            content_text(data.get("content"))
+        };
         let error = data.get("error").map(error_text);
         let mut events = Vec::new();
         let body = tool_body(
@@ -1272,9 +1526,9 @@ impl Mapper {
             .with_parent(child.clone()),
         ));
         // A shell moved to the background keeps running after its call
-        // returns; it reports back through a synthetic notification.
+        // returns; it reports back through a synthetic inbox notice.
         if child.is_none()
-            && matches!(call.name.as_str(), "shell" | "bash")
+            && is_shell(&call.name)
             && let Some(metadata) = &metadata
             && metadata.get("status").and_then(Value::as_str) == Some("running")
             && let Some(shell) = metadata.get("shellID").and_then(Value::as_str)
@@ -1326,6 +1580,38 @@ impl Mapper {
             self.shells.remove(shell);
         }
         vec![Event::Child { update }]
+    }
+
+    /// A background shell's notice reaching this session: the command's
+    /// result, as a command of the turn that reads it. Its child ended when
+    /// the notice was sent; one still open (the send was missed) ends here.
+    fn shell_notice(&mut self, notice: &ShellNotice, id: &str, event: &Value) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self.shells.contains_key(&notice.shell) {
+            events.extend(self.background_shell(&notice.shell, None, notice.child_status()));
+        }
+        let status = match notice.child_status() {
+            ChildStatus::Completed => ItemStatus::Completed,
+            ChildStatus::Stopped => ItemStatus::Interrupted,
+            _ => ItemStatus::Failed,
+        };
+        events.push(Event::Item(Item::new(
+            item_id(id),
+            self.turn().cloned(),
+            ItemUpdate::Completed {
+                body: ItemBody::Command {
+                    command: notice.command.clone().unwrap_or_default(),
+                    cwd: None,
+                    actions: Vec::new(),
+                    output: notice.output.clone(),
+                    exit_code: notice.exit,
+                    duration_ms: None,
+                },
+                status,
+            },
+            event.clone(),
+        )));
+        events
     }
 
     /// Completes, as interrupted, the tools still open for the main agent
@@ -1559,21 +1845,52 @@ impl Mapper {
                 answering: None,
             },
         );
-        let item = data
-            .pointer("/source/id")
-            .and_then(Value::as_str)
-            .and_then(|id| ItemId::new(id).ok());
-        vec![Event::Interaction(Interaction {
+        let source = data.pointer("/source/id").and_then(Value::as_str);
+        let item = source.and_then(|id| ItemId::new(id).ok());
+        // The call asking: its input says what the request is about (the
+        // full command line, the URL), which the request's resources only
+        // approximate.
+        let call = source.and_then(|id| self.tools.get(id)).cloned();
+        let mut events = Vec::new();
+        // An edit's preview diff goes on its call, where the approval card
+        // shows the diffs of the item it is about.
+        if let (Some(source), Some(call)) = (source, &call)
+            && is_file_tool(&call.name)
+            && let Some(metadata) = data.get("metadata").filter(|metadata| {
+                metadata.get("files").is_some_and(Value::is_array)
+                    || metadata.get("diff").is_some_and(Value::is_string)
+            })
+            && let body @ ItemBody::FileChange { .. } = tool_body(
+                &call.name,
+                &call.input,
+                None,
+                Some(metadata),
+                None,
+                self.folder.as_ref(),
+            )
+        {
+            events.push(Event::Item(
+                Item::new(
+                    item_id(source),
+                    call.turn.clone(),
+                    ItemUpdate::Updated { body },
+                    event.clone(),
+                )
+                .with_parent(call.child.clone()),
+            ));
+        }
+        events.push(Event::Interaction(Interaction {
             id: interaction,
             turn: self.turn().cloned(),
             item,
             parent: child,
             kind: InteractionKind::Approval {
-                subject: permission_subject(data, self.folder.as_ref()),
+                subject: permission_subject(data, call.as_ref(), self.folder.as_ref()),
                 decisions: permission_decisions(data),
             },
             native: event.clone(),
-        })]
+        }));
+        events
     }
 
     fn form_created(&mut self, data: &Value, event: &Value, child: Option<ChildRef>) -> Vec<Event> {
@@ -1589,6 +1906,12 @@ impl Mapper {
         let Ok(interaction) = InteractionId::new(id) else {
             return Vec::new();
         };
+        // The question tool names its call; other forms (MCP elicitation)
+        // belong to no item.
+        let item = form
+            .pointer("/metadata/tool/id")
+            .and_then(Value::as_str)
+            .and_then(|id| ItemId::new(id).ok());
         let fields = form.get("fields").cloned().unwrap_or_default();
         let session = form
             .get("sessionID")
@@ -1609,7 +1932,7 @@ impl Mapper {
             return vec![Event::Interaction(Interaction {
                 id: interaction,
                 turn: self.turn().cloned(),
-                item: None,
+                item,
                 parent: child,
                 kind: InteractionKind::Dialog {
                     dialog: "form".to_owned(),
@@ -1628,7 +1951,7 @@ impl Mapper {
         vec![Event::Interaction(Interaction {
             id: interaction,
             turn: self.turn().cloned(),
-            item: None,
+            item,
             parent: child,
             kind: InteractionKind::Question { form: question },
             native: event.clone(),
@@ -1785,7 +2108,14 @@ impl Mapper {
                 };
                 update(self, status, title)
             }
-            "session.execution.started" => update(self, ChildStatus::Running, None),
+            "session.execution.started" => {
+                // A sub-agent Inline stopped is woken again by its own
+                // work's notices; the parent gave it nothing new.
+                if self.stopped.contains(session) {
+                    self.stop_wakes.push((session.to_owned(), None));
+                }
+                update(self, ChildStatus::Running, None)
+            }
             "session.execution.succeeded"
             | "session.execution.failed"
             | "session.execution.interrupted" => {
@@ -2057,9 +2387,11 @@ impl Mapper {
                     }
                     events.extend(self.apply(&synthetic(kind, data)));
                 }
-                // A sub-agent report: it woke the session into a run of its
-                // own when no turn was running.
-                "synthetic" if Report::of(message).is_some() => {
+                // A sub-agent report or a background shell's notice: it woke
+                // the session into a run of its own when no turn was running.
+                "synthetic"
+                    if Report::of(message).is_some() || ShellNotice::of(message).is_some() =>
+                {
                     if !self.inbox.contains_key(&id) {
                         events.extend(self.apply(&synthetic(
                             "session.inbox.enqueued",
@@ -2077,24 +2409,6 @@ impl Mapper {
                     events.extend(self.apply(&synthetic(
                         "session.inbox.delivered",
                         json!({"inboxID": id}),
-                    )));
-                }
-                // A background shell that finished while the stream was down.
-                "synthetic"
-                    if message.pointer("/metadata/source").and_then(Value::as_str)
-                        == Some("shell")
-                        && message
-                            .pointer("/metadata/shellID")
-                            .and_then(Value::as_str)
-                            .is_some_and(|shell| self.shells.contains_key(shell)) =>
-                {
-                    events.extend(self.apply(&synthetic(
-                        "session.synthetic",
-                        json!({
-                            "text": message.get("text").cloned().unwrap_or_default(),
-                            "description": message.get("description").cloned().unwrap_or_default(),
-                            "metadata": message.get("metadata").cloned().unwrap_or_default(),
-                        }),
                     )));
                 }
                 _ => {}
@@ -2161,14 +2475,17 @@ impl Mapper {
             if self.inbox.contains_key(id) {
                 continue;
             }
-            self.inbox_enqueued(&json!({
+            self.enqueue(
+                &json!({
                 "inboxID": id,
                 "item": {
                     "type": entry.get("type").cloned().unwrap_or(json!("user")),
                     "payload": entry.get("payload").cloned().unwrap_or_default(),
                     "delivery": entry.get("delivery").cloned().unwrap_or(json!("steer")),
                 }
-            }));
+                }),
+                true,
+            );
         }
         vec![Event::Queue {
             entries: self.queue(),
@@ -2310,6 +2627,53 @@ fn content_text(content: Option<&Value>) -> Option<String> {
     (!parts.is_empty()).then(|| tail(&parts.join("\n"), MAX_OUTPUT_CHARS))
 }
 
+fn is_shell(name: &str) -> bool {
+    matches!(name.to_ascii_lowercase().as_str(), "shell" | "bash" | "sh")
+}
+
+fn is_file_tool(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "edit" | "write" | "patch" | "apply_patch" | "multiedit" | "multi_edit"
+    )
+}
+
+/// What a shell call printed. Its content is `[output, notice]`, where the
+/// notice is for the model only (the exit code, the background instruction,
+/// a timeout hint), so only the output shows, as OpenCode's own apps show it.
+/// A stopped call's error is the output so far followed by its
+/// `metadata.notice`.
+fn shell_output(
+    content: Option<&Value>,
+    metadata: Option<&Value>,
+    error: Option<&Value>,
+) -> Option<String> {
+    let first = content
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+        .find_map(|part| part.get("text").and_then(Value::as_str));
+    let text = match first {
+        Some(text) => text,
+        None => {
+            let message = error
+                .and_then(|error| error.get("message").or(Some(error)))
+                .and_then(Value::as_str)?;
+            let notice = metadata
+                .and_then(|metadata| metadata.get("notice"))
+                .and_then(Value::as_str)
+                .filter(|notice| !notice.is_empty());
+            match notice.and_then(|notice| message.strip_suffix(notice)) {
+                Some(output) => output,
+                None => message,
+            }
+        }
+    };
+    let text = text.trim_end();
+    (!text.is_empty()).then(|| tail(text, MAX_OUTPUT_CHARS))
+}
+
 fn tail(text: &str, max: usize) -> String {
     let count = text.chars().count();
     if count <= max {
@@ -2392,7 +2756,11 @@ pub fn tool_body(
             {
                 changes.push(FileDiff {
                     path: relative(path, folder),
-                    change: if lower == "write" {
+                    // A write's result says whether the file was there
+                    // ("Wrote file successfully" / "Created file successfully").
+                    change: if lower == "write"
+                        && !output.is_some_and(|output| output.starts_with("Wrote"))
+                    {
                         FileChangeKind::Add
                     } else {
                         FileChangeKind::Update { moved_to: None }
@@ -2456,10 +2824,46 @@ pub fn tool_body(
                     action: string(input, &["agent", "subagent_type"]).map(str::to_owned),
                     prompt: string(input, &["description", "prompt"])
                         .map(|text| bounded(text, 300)),
+                    output: output.or(error).map(str::to_owned),
                 },
                 None => generic_tool(name, input, output, error),
             }
         }
+        // Reads, searches and listings as Codex reports them (commands with
+        // parsed actions), so they fold into one "Explored" row.
+        "read" | "grep" | "glob" | "list" => {
+            let path = string(input, &["path", "filePath", "file_path"])
+                .map(|path| relative(path, folder).display().to_string());
+            let pattern = string(input, &["pattern"]).map(str::to_owned);
+            let action = match lower.as_str() {
+                "read" => CommandAction::Read {
+                    path: path.clone().unwrap_or_default(),
+                },
+                "list" => CommandAction::ListFiles { path: path.clone() },
+                _ => CommandAction::Search {
+                    query: pattern.clone(),
+                    path: path.clone(),
+                },
+            };
+            let command = [Some(lower.clone()), pattern, path]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            ItemBody::Command {
+                command,
+                cwd: None,
+                actions: vec![action],
+                output: output
+                    .map(str::to_owned)
+                    .or_else(|| error.map(str::to_owned)),
+                exit_code: None,
+                duration_ms: None,
+            }
+        }
+        // Named as the renderer knows web tools.
+        "webfetch" => generic_tool("WebFetch", input, output, error),
+        "websearch" => generic_tool("WebSearch", input, output, error),
         _ => generic_tool(name, input, output, error),
     }
 }
@@ -2481,11 +2885,26 @@ fn generic_tool(name: &str, input: &Value, output: Option<&str>, error: Option<&
     }
 }
 
-fn permission_subject(data: &Value, folder: Option<&PathBuf>) -> ApprovalSubject {
+/// What a permission request asks. `call` is the tool call asking, when
+/// known: OpenCode's own apps show its input (the shell command line as
+/// typed, an MCP tool's arguments) rather than the request's resources.
+fn permission_subject(
+    data: &Value,
+    call: Option<&ToolCall>,
+    folder: Option<&PathBuf>,
+) -> ApprovalSubject {
     let action = data
         .get("action")
         .and_then(Value::as_str)
         .unwrap_or("permission");
+    // The input of the call itself, not of a Code Mode program asking for a
+    // call it makes.
+    let input = call
+        .filter(|call| {
+            call.name.eq_ignore_ascii_case(action) || (is_shell(action) && is_shell(&call.name))
+        })
+        .map(|call| &call.input)
+        .filter(|input| input.is_object());
     let resources: Vec<&str> = data
         .get("resources")
         .and_then(Value::as_array)
@@ -2499,11 +2918,19 @@ fn permission_subject(data: &Value, folder: Option<&PathBuf>) -> ApprovalSubject
         .map(|text| bounded(text, 500));
     let metadata = data.get("metadata").cloned().unwrap_or_default();
     match action {
+        // The scanner's resources are one per subcommand, without the pipes
+        // and redirects between them: listed one per line when the call's
+        // own command line is unknown.
         "shell" | "bash" => ApprovalSubject::Command {
-            command: string(&metadata, &["command"])
+            command: input
+                .and_then(|input| string(input, &["command"]))
+                .or_else(|| string(&metadata, &["command"]))
                 .map(str::to_owned)
-                .unwrap_or_else(|| resources.join(" && ")),
-            cwd: string(&metadata, &["cwd", "workdir"]).map(PathBuf::from),
+                .unwrap_or_else(|| resources.join("\n")),
+            cwd: input
+                .and_then(|input| string(input, &["workdir", "cwd"]))
+                .or_else(|| string(&metadata, &["cwd", "workdir"]))
+                .map(PathBuf::from),
             reason,
             network_host: None,
             permissions: None,
@@ -2534,12 +2961,15 @@ fn permission_subject(data: &Value, folder: Option<&PathBuf>) -> ApprovalSubject
             summary: format!("Access {}", resources.join(", ")),
             reason,
         },
+        // MCP tools ask with `resources: ["*"]` and their arguments in
+        // `metadata.input`; built-in tools' calls carry theirs.
         _ => ApprovalSubject::Tool {
             name: action.to_owned(),
-            input: if resources.is_empty() {
-                metadata
-            } else {
-                json!({"resources": resources})
+            input: match (metadata.get("input"), input) {
+                (Some(arguments), _) => arguments.clone(),
+                (None, Some(input)) => input.clone(),
+                (None, None) if resources.is_empty() || resources == ["*"] => metadata,
+                (None, None) => json!({"resources": resources}),
             },
             reason,
         },
@@ -2573,13 +3003,17 @@ fn permission_decisions(data: &Value) -> Vec<Decision> {
         None,
         false,
     )];
-    decisions.push(decision(
-        "always",
-        "Always allow".to_owned(),
-        DecisionKind::AcceptAndRemember,
-        (!save.is_empty()).then(|| format!("Saves: {}", bounded(&save.join(", "), 200))),
-        false,
-    ));
+    // With nothing to save OpenCode remembers nothing: "always" would act as
+    // "once", so it is not offered (as in OpenCode's own apps).
+    if !save.is_empty() {
+        decisions.push(decision(
+            "always",
+            "Always allow".to_owned(),
+            DecisionKind::AcceptAndRemember,
+            Some(format!("Saves: {}", bounded(&save.join(", "), 200))),
+            false,
+        ));
+    }
     decisions.push(decision(
         "reject",
         "Reject".to_owned(),

@@ -27,6 +27,10 @@ use crate::link::Link;
 
 const RECONNECT_MIN: Duration = Duration::from_millis(250);
 const RECONNECT_MAX: Duration = Duration::from_secs(10);
+/// OpenCode sends a heartbeat every 15 s: a stream silent for three of them
+/// is a dead connection (a half-open socket after sleep, a lost remote), so
+/// the bus reconnects and every session resyncs.
+const STREAM_IDLE: Duration = Duration::from_secs(45);
 /// Child links kept for sub-agent sessions, oldest dropped first.
 const MAX_CHILDREN: usize = 4096;
 
@@ -46,8 +50,12 @@ pub enum BusMessage {
 pub enum ServiceSignal {
     /// Models, agents, commands, skills or config changed.
     CatalogChanged,
-    /// The service is shutting down a location or itself.
-    Shutdown,
+    /// The service is shutting down a location (`folder`) or itself. What
+    /// was added to a location at runtime (MCP servers) goes with it.
+    Shutdown { folder: Option<std::path::PathBuf> },
+    /// The link found the service again at a new endpoint: it restarted, and
+    /// nothing added at runtime survived.
+    Relinked,
 }
 
 /// The routed event connection.
@@ -191,7 +199,11 @@ impl EventBus {
                 return;
             }
             "location.shutdown" => {
-                let _ = self.signals.send(ServiceSignal::Shutdown);
+                let folder = event
+                    .pointer("/location/directory")
+                    .and_then(Value::as_str)
+                    .map(std::path::PathBuf::from);
+                let _ = self.signals.send(ServiceSignal::Shutdown { folder });
                 return;
             }
             _ => {}
@@ -261,7 +273,10 @@ async fn run(bus: Weak<EventBus>, link: Arc<Link>, mut stopped: watch::Receiver<
             failures = 0;
             match link.rediscover().await {
                 Ok(true) => {
-                    log::info!(target: "inline::opencode", "OpenCode service moved; reconnecting")
+                    log::info!(target: "inline::opencode", "OpenCode service moved; reconnecting");
+                    if let Some(bus) = bus.upgrade() {
+                        let _ = bus.signals.send(ServiceSignal::Relinked);
+                    }
                 }
                 Ok(false) => {}
                 Err(error) => {
@@ -269,7 +284,10 @@ async fn run(bus: Weak<EventBus>, link: Arc<Link>, mut stopped: watch::Receiver<
                 }
             }
         }
-        let connection = link.api().sse("api/event", Query::new()).await;
+        let connection = link
+            .api()
+            .sse_with_idle("api/event", Query::new(), Some(STREAM_IDLE))
+            .await;
         match connection {
             Ok(stream) => {
                 let mut stream = Box::pin(stream);

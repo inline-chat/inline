@@ -7,6 +7,18 @@
 //! | `Queue` | `POST /prompt {delivery: "queue"}`: taken when the model finishes, in the same execution |
 //! | `Passive` | `POST /synthetic {resume: false}`: context the agent reads with its next step |
 //!
+//! | Operation | OpenCode |
+//! | --- | --- |
+//! | `Interrupt` (Stop) | background jobs cancelled (`POST /api/experimental/job/{id}/cancel`, 2.4+; else background shells through `DELETE /api/shell/{id}`), then `POST /interrupt?resume=true`, then running sub-agents interrupted |
+//! | `Queue` `Start` | `PATCH /inbox/{first queued} {delivery: "steer"}`, which wakes the session |
+//!
+//! Stop is the TUI's Esc Esc (`resume=true`: steers already sent still run,
+//! queued prompts stay parked) plus t3code's rule that a user's Stop also
+//! ends background children: since 2.3 sub-agents always run in the
+//! background and long shell commands move there, so the turn alone is
+//! seldom all that runs. A child that still reports after the stop wakes
+//! nothing ([`crate::mapper::Mapper::take_stop_wakes`]).
+//!
 //! Inline's note on an input (who sent it, its instructions and the thread
 //! around it) goes just before the prompt as a `/synthetic {resume: false}`
 //! with no description, which OpenCode's TUI, desktop and web apps hide; the
@@ -64,6 +76,8 @@ pub(crate) struct SessionInner {
     harness: Weak<Shared>,
     /// This handle's event-bus registration.
     generation: std::sync::atomic::AtomicU64,
+    /// Itself, for work it starts in the background.
+    this: Weak<SessionInner>,
 }
 
 pub(crate) struct SessionState {
@@ -93,7 +107,8 @@ impl SessionInner {
         harness: Weak<Shared>,
     ) -> Arc<Self> {
         let id = key.session.as_str().to_owned();
-        Arc::new(Self {
+        Arc::new_cyclic(|this| Self {
+            this: this.clone(),
             hub: EventHub::new(
                 key.clone(),
                 inline_agent_bridge::harness::DEFAULT_HUB_CAPACITY,
@@ -147,6 +162,43 @@ impl SessionInner {
         }
         let events = state.mapper.apply(event);
         self.emit_locked(&mut state, events);
+        let wakes = state.mapper.take_stop_wakes();
+        drop(state);
+        for (session, turn) in wakes {
+            self.stop_wake(session, turn);
+        }
+    }
+
+    /// Interrupts a run that only children Inline stopped woke, if it is
+    /// still only that when the request goes out. Never with `resume`: the
+    /// reports stay parked for the next prompt instead of waking it again.
+    fn stop_wake(&self, session: String, turn: Option<TurnId>) {
+        let (Some(this), Ok(runtime)) =
+            (self.this.upgrade(), tokio::runtime::Handle::try_current())
+        else {
+            return;
+        };
+        runtime.spawn(async move {
+            {
+                let state = this.state();
+                if state.released || !state.mapper.stop_wake_holds(&session, turn.as_ref()) {
+                    return;
+                }
+            }
+            log::info!(target: "inline::opencode", "{session} woke only for children Inline stopped; stopping it");
+            if let Err(error) = this
+                .api()
+                .send(
+                    Method::POST,
+                    &format!("api/session/{session}/interrupt"),
+                    Query::new(),
+                    None,
+                )
+                .await
+            {
+                log::warn!(target: "inline::opencode", "could not stop {session} again: {error}");
+            }
+        });
     }
 
     /// Follows the bus until released.
@@ -683,6 +735,179 @@ impl SessionInner {
         })
     }
 
+    /// Stops a background shell through the shell API, which is per
+    /// location: without one it looks in another location, finds nothing
+    /// and still answers 204.
+    async fn delete_shell(&self, api: &Api, shell: &str) -> Result<(), ApiError> {
+        let folder = {
+            let state = self.state();
+            state
+                .mapper
+                .folder()
+                .map_or_else(|| self.folder.clone(), std::path::Path::to_path_buf)
+        };
+        api.send(
+            Method::DELETE,
+            &format!("api/shell/{shell}"),
+            Query::new().location(Some(&folder)),
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// The running background jobs of the session and its sub-agents.
+    async fn background_jobs(&self, api: &Api) -> Vec<Value> {
+        let query = Query::new()
+            .with("sessionID", &self.id)
+            .with("descendants", true)
+            .with("status", "running");
+        match api.get("api/experimental/job", query).await {
+            Ok(jobs) => data(jobs).as_array().cloned().unwrap_or_default(),
+            Err(error) => {
+                log::warn!(target: "inline::opencode", "could not list the background jobs of {}: {error}", self.id);
+                Vec::new()
+            }
+        }
+    }
+
+    /// One pass of Stop over the background work: the jobs OpenCode lists
+    /// (2.2.6+) and the shells and sub-agents this session saw start.
+    /// Jobs are cancelled where OpenCode can (2.4+), else shells stop
+    /// through the shell API and sub-agents by interrupting their session;
+    /// with `children`, the sub-agents found so far are interrupted.
+    /// Each child is recorded as stopped before anything stops it, so a
+    /// report it still sends wakes nothing.
+    async fn stop_background(&self, api: &Api, stopped: &mut StoppedWork, children: bool) {
+        let version = self.link.info().version;
+        let jobs = if crate::version::at_least(&version, &crate::version::JOB_LIST) {
+            self.background_jobs(api).await
+        } else {
+            Vec::new()
+        };
+        let cancel = crate::version::at_least(&version, &crate::version::JOB_CANCEL);
+        let (mut shells, sessions) = {
+            let state = self.state();
+            (
+                state.mapper.running_shells(),
+                state.mapper.running_child_sessions(),
+            )
+        };
+        stopped.sessions.extend(sessions);
+        let mut cancels: Vec<(String, Option<String>)> = Vec::new();
+        for job in &jobs {
+            let Some(id) = job.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let field = |key: &str| {
+                job.get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or(id)
+                    .to_owned()
+            };
+            let shell = match job.get("kind").and_then(Value::as_str) {
+                Some("shell") => Some(field("shellID")),
+                Some("subagent") => {
+                    stopped.sessions.insert(field("childSessionID"));
+                    None
+                }
+                _ => None,
+            };
+            if cancel {
+                cancels.push((id.to_owned(), shell));
+            } else if let Some(shell) = shell {
+                shells.push(shell);
+            }
+            // Before 2.4 an image or Code Mode job has no stop of its own.
+        }
+        // A shell with a job is cancelled through it.
+        shells.retain(|shell| {
+            !cancels
+                .iter()
+                .any(|(_, cancelled)| cancelled.as_ref() == Some(shell))
+        });
+        shells.sort();
+        shells.dedup();
+        self.state().mapper.stopping_children(
+            shells
+                .iter()
+                .chain(cancels.iter().filter_map(|(_, shell)| shell.as_ref()))
+                .chain(&stopped.sessions)
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
+        for (job, shell) in cancels {
+            if !stopped.seen.insert(format!("job:{job}")) {
+                continue;
+            }
+            match api
+                .send(
+                    Method::POST,
+                    &format!("api/experimental/job/{job}/cancel"),
+                    Query::new(),
+                    None,
+                )
+                .await
+            {
+                Ok(_) => {
+                    // A cancelled job sends no notice: its child ends here.
+                    if let Some(shell) = shell {
+                        self.shell_ended(&shell);
+                    }
+                    stopped.jobs.push(job);
+                }
+                Err(error) => {
+                    log::warn!(target: "inline::opencode", "could not cancel background job {job}: {error}");
+                }
+            }
+        }
+        for shell in shells {
+            if !stopped.seen.insert(format!("shell:{shell}")) {
+                continue;
+            }
+            match self.delete_shell(api, &shell).await {
+                Ok(()) => {
+                    self.shell_ended(&shell);
+                    stopped.shells.push(shell);
+                }
+                Err(error) => {
+                    log::warn!(target: "inline::opencode", "could not stop background shell {shell}: {error}");
+                }
+            }
+        }
+        if !children {
+            return;
+        }
+        let sessions: Vec<String> = stopped.sessions.iter().cloned().collect();
+        for session in sessions {
+            if !stopped.seen.insert(format!("session:{session}")) {
+                continue;
+            }
+            match api
+                .send(
+                    Method::POST,
+                    &format!("api/session/{session}/interrupt"),
+                    Query::new(),
+                    None,
+                )
+                .await
+            {
+                Ok(_) => stopped.children.push(session),
+                Err(error) if error.is_not_found() => {}
+                Err(error) => {
+                    log::warn!(target: "inline::opencode", "could not stop sub-agent {session}: {error}");
+                }
+            }
+        }
+    }
+
+    /// A background shell Inline stopped ends now.
+    fn shell_ended(&self, shell: &str) {
+        let mut state = self.state();
+        let events = state.mapper.shell_stopped(shell);
+        self.emit_locked(&mut state, events);
+    }
+
     async fn control(&self, op: Op) -> Result<OpOutcome, OpError> {
         let availability = availability().op(op.kind());
         if !availability.is_supported() {
@@ -709,11 +934,27 @@ impl SessionInner {
                             .await;
                     }
                 }
-                let native = api
-                    .send(Method::POST, &self.path("/interrupt"), Query::new(), None)
+                // Background work goes first, as in OpenCode's own full stop:
+                // a job cancelled before the interrupt sends no notice to
+                // wake the session again.
+                let mut stopped = StoppedWork::default();
+                self.stop_background(&api, &mut stopped, false).await;
+                // `resume`, like the TUI's Esc Esc: steers already sent run
+                // after the stop instead of waiting for the next prompt.
+                // Queued prompts stay parked.
+                let mut native = api
+                    .send(
+                        Method::POST,
+                        &self.path("/interrupt"),
+                        Query::new().with("resume", true),
+                        None,
+                    )
                     .await
                     .map_err(op_error)?
                     .unwrap_or_default();
+                // Then what the interrupted step started meanwhile, and the
+                // sub-agents still running.
+                self.stop_background(&api, &mut stopped, true).await;
                 // Nothing ran: a turn this bridge still shows was lost.
                 if native.get("interrupted").and_then(Value::as_bool) == Some(false) {
                     let mut state = self.state();
@@ -721,6 +962,9 @@ impl SessionInner {
                         .mapper
                         .abandon_turn(inline_agent_bridge::TurnOutcome::Interrupted);
                     self.emit_locked(&mut state, events);
+                }
+                if let Some(object) = native.as_object_mut() {
+                    object.insert("stopped".to_owned(), stopped.summary());
                 }
                 Ok(OpOutcome::Accepted { native })
             }
@@ -766,9 +1010,40 @@ impl SessionInner {
                     }
                     Ok(OpOutcome::accepted())
                 }
-                QueueOp::Start | QueueOp::Reorder { .. } => {
-                    unreachable!("filtered by availability")
+                QueueOp::Start => {
+                    let (first, running) = {
+                        let state = self.state();
+                        (
+                            state.mapper.queue().into_iter().next(),
+                            state.mapper.turn().is_some(),
+                        )
+                    };
+                    // Nothing parked, or a run that takes the queue when it
+                    // finishes: nothing to start.
+                    let Some(first) = first.filter(|_| !running) else {
+                        return Ok(OpOutcome::accepted());
+                    };
+                    // Steering wakes the session; the rest of the queue runs
+                    // in that same execution when the model finishes.
+                    match api
+                        .send(
+                            Method::PATCH,
+                            &self.path(&format!("/inbox/{}", first.entry.as_str())),
+                            Query::new(),
+                            Some(json!({"delivery": "steer"})),
+                        )
+                        .await
+                    {
+                        Ok(_) => Ok(OpOutcome::accepted()),
+                        // Already taken or withdrawn.
+                        Err(error) if error.is_conflict() => Err(OpError::NotQueued),
+                        Err(error) => Err(op_error(error)),
+                    }
                 }
+                // Availability has one key for every queue edit.
+                QueueOp::Reorder { .. } => Err(OpError::Unavailable(Availability::unavailable(
+                    "OpenCode cannot reorder its queue",
+                ))),
             },
             Op::Settings { change, scope } => {
                 if scope != SettingsScope::Thread {
@@ -934,23 +1209,24 @@ impl SessionInner {
             Op::StopChild { child }
                 if child.kind == inline_agent_bridge::harness::ChildKind::BackgroundTask =>
             {
-                // A background shell stops through the shell API.
-                api.send(
-                    Method::DELETE,
-                    &format!("api/shell/{}", child.id.as_str()),
-                    Query::new(),
-                    None,
-                )
-                .await
-                .map_err(op_error)?;
+                let shell = child.id.as_str();
+                // Its notice, if it still sends one, wakes nothing.
+                self.state().mapper.stopping_children([shell.to_owned()]);
+                self.delete_shell(&api, shell).await.map_err(op_error)?;
+                self.shell_ended(shell);
                 Ok(OpOutcome::accepted())
             }
             Op::StopChild { child } => {
-                let session = self
-                    .state()
-                    .mapper
-                    .child_session(&child)
-                    .unwrap_or_else(|| child.id.as_str().to_owned());
+                let session = {
+                    let mut state = self.state();
+                    let session = state
+                        .mapper
+                        .child_session(&child)
+                        .unwrap_or_else(|| child.id.as_str().to_owned());
+                    // Its report wakes nothing.
+                    state.mapper.stopping_children([session.clone()]);
+                    session
+                };
                 let native = api
                     .send(
                         Method::POST,
@@ -1133,6 +1409,27 @@ async fn post_idempotent(api: &Api, path: &str, body: Value) -> Result<Option<Va
     }
 }
 
+/// What one Stop reached beyond the turn.
+#[derive(Default)]
+struct StoppedWork {
+    /// Background jobs cancelled.
+    jobs: Vec<String>,
+    /// Background shells stopped through the shell API.
+    shells: Vec<String>,
+    /// Sub-agent sessions found running, to interrupt.
+    sessions: std::collections::BTreeSet<String>,
+    /// Sub-agent sessions interrupted.
+    children: Vec<String>,
+    /// Requests already made, so a second pass makes only new ones.
+    seen: std::collections::HashSet<String>,
+}
+
+impl StoppedWork {
+    fn summary(&self) -> Value {
+        json!({"jobs": self.jobs, "shells": self.shells, "children": self.children})
+    }
+}
+
 fn op_error(error: ApiError) -> OpError {
     if error.outcome_unknown() {
         OpError::Unknown(error.to_string())
@@ -1161,10 +1458,8 @@ pub fn availability() -> AvailabilityMatrix {
     matrix
         .with_op(OpKind::Interrupt, Availability::Supported)
         .with_op(OpKind::InterruptCancelQueued, Availability::Supported)
-        .with_op(
-            OpKind::QueueStart,
-            unavailable("OpenCode runs queued messages on its own when the current one finishes"),
-        )
+        // A stop leaves queued prompts parked; this starts them again.
+        .with_op(OpKind::QueueStart, Availability::Supported)
         .with_op(OpKind::QueueEdit, Availability::Supported)
         .with_op(OpKind::SettingsThread, Availability::Supported)
         .with_op(
@@ -1460,5 +1755,6 @@ mod tests {
         }
         assert!(!matrix.op(OpKind::Clear).is_supported());
         assert!(matrix.op(OpKind::Sample).is_supported());
+        assert!(matrix.op(OpKind::QueueStart).is_supported());
     }
 }

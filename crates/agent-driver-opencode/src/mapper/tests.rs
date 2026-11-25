@@ -924,27 +924,438 @@ fn a_background_shell_stays_live_work_until_its_notification() {
     mapper.apply(&durable(5, "session.execution.succeeded", json!({})));
     // The turn ended; the encode is still live work.
     assert_eq!(mapper.running_children().len(), 1);
-    let done = mapper.apply(&durable(
+    // OpenCode 2.4.0: the command's end is a synthetic inbox entry, sent
+    // when the job settles; it ends the child at once.
+    let ended = mapper.apply(&shell_notice(
         6,
-        "session.synthetic",
-        json!({"text": "<shell ...>", "description": "ffmpeg -i in.mov out.mp4",
-        "metadata": {"source": "shell", "shellID": "sh_1", "state": "completed", "exit": 0}}),
+        "msg_shell",
+        "<background-result kind=\"shell\" id=\"sh_1\" state=\"completed\" command=\"ffmpeg -i in.mov out.mp4\">\nframe=120\nvideo:2MB\n\nExit code: 1\n</background-result>",
+        json!({"source": "shell", "shellID": "sh_1", "jobID": "sh_1", "state": "completed", "truncated": false, "exit": 1}),
     ));
-    assert!(matches!(&done[0], Event::Child { update } if update.status == ChildStatus::Completed));
+    assert!(
+        matches!(&ended[..], [Event::Child { update }] if update.status == ChildStatus::Completed && update.child.kind == ChildKind::BackgroundTask)
+    );
+    assert!(mapper.running_children().is_empty());
+    // The notice is the child's result, never Inline's input to withdraw.
+    assert!(mapper.pending_inbox().is_empty());
+    // It wakes the session into a run named after it.
+    let woke = mapper.apply(&durable(7, "session.execution.started", json!({})));
+    assert!(matches!(&woke[0], Event::Turn { turn, .. } if turn.as_str() == "msg_shell"));
+    let delivered = mapper.apply(&durable(
+        8,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_shell"}),
+    ));
+    assert_eq!(user_messages(&delivered), 0);
+    match &delivered[..] {
+        [
+            Event::Item(Item {
+                id,
+                turn: Some(turn),
+                update:
+                    ItemUpdate::Completed {
+                        body:
+                            ItemBody::Command {
+                                command,
+                                output,
+                                exit_code,
+                                ..
+                            },
+                        status: ItemStatus::Completed,
+                    },
+                ..
+            }),
+        ] => {
+            assert_eq!(id.as_str(), "msg_shell");
+            assert_eq!(turn.as_str(), "msg_shell");
+            assert_eq!(command, "ffmpeg -i in.mov out.mp4");
+            // The wrapper and the notice for the model are gone.
+            assert_eq!(output.as_deref(), Some("frame=120\nvideo:2MB"));
+            assert_eq!(*exit_code, Some(1));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+fn shell_notice(seq: u64, inbox: &str, text: &str, metadata: Value) -> Value {
+    durable(
+        seq,
+        "session.inbox.enqueued",
+        json!({"inboxID": inbox, "item": {"type": "synthetic", "delivery": "steer", "payload": {
+            "text": text, "description": "ffmpeg -i in.mov out.mp4", "metadata": metadata}}}),
+    )
+}
+
+/// Moves `shell` to the background in a turn that then ends.
+fn backgrounded(mapper: &mut Mapper, shell: &str) {
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        2,
+        "session.tool.called",
+        json!({"assistantMessageID": "m", "id": "call_bg", "name": "shell",
+        "input": {"command": "ffmpeg -i in.mov out.mp4"}, "executed": true}),
+    ));
+    let moved = mapper.apply(&durable(3, "session.tool.success", json!({"assistantMessageID": "m", "id": "call_bg",
+        "content": [{"type": "text", "text": format!("Command moved to the background (shell ID: {shell}).\nOutput is streaming to: /tmp/{shell}.log")},
+                    {"type": "text", "text": "You will be notified automatically when the command finishes. DO NOT poll for completion."}],
+        "metadata": {"status": "running", "shellID": shell, "truncated": false}, "executed": true})));
+    // The call shows what it printed, not the instruction for the model.
+    assert!(moved.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Command { output: Some(output), .. }, .. }, .. })
+        if output.starts_with("Command moved to the background") && !output.contains("DO NOT poll"))));
+    mapper.apply(&durable(4, "session.execution.succeeded", json!({})));
+    assert_eq!(mapper.running_children().len(), 1);
+}
+
+#[test]
+fn shell_notices_of_2_2_and_cancelled_shells_read_as_their_command() {
+    // 2.2.5 wraps the result in `<shell …>` and words its notice differently.
+    let mut mapper = mapper();
+    backgrounded(&mut mapper, "sh_2");
+    let ended = mapper.apply(&shell_notice(
+        5,
+        "msg_old",
+        "<shell id=\"sh_2\" state=\"completed\" command=\"make\">\nbuild failed\n\nExited with code 2\n</shell>",
+        json!({"source": "shell", "shellID": "sh_2", "state": "completed", "truncated": false, "exit": 2}),
+    ));
+    assert!(
+        matches!(&ended[0], Event::Child { update } if update.status == ChildStatus::Completed)
+    );
+    mapper.apply(&durable(6, "session.execution.started", json!({})));
+    let delivered = mapper.apply(&durable(
+        7,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_old"}),
+    ));
+    assert!(
+        matches!(&delivered[..], [Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Command { output: Some(output), exit_code: Some(2), .. }, .. }, .. })] if output == "build failed")
+    );
+
+    // A stopped command: the child is stopped, the row interrupted, and
+    // "Cancelled" is no output.
+    let mut mapper = self::mapper();
+    backgrounded(&mut mapper, "sh_3");
+    let ended = mapper.apply(&shell_notice(
+        5,
+        "msg_cancel",
+        "<background-result kind=\"shell\" id=\"sh_3\" state=\"cancelled\" command=\"make\">\nCancelled\n</background-result>",
+        json!({"source": "shell", "shellID": "sh_3", "state": "cancelled"}),
+    ));
+    assert!(matches!(&ended[0], Event::Child { update } if update.status == ChildStatus::Stopped));
+    mapper.apply(&durable(6, "session.execution.started", json!({})));
+    let delivered = mapper.apply(&durable(
+        7,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_cancel"}),
+    ));
     assert!(matches!(
-        &done[1],
-        Event::Item(Item {
+        &delivered[..],
+        [Event::Item(Item {
             update: ItemUpdate::Completed {
-                body: ItemBody::Command {
-                    exit_code: Some(0),
-                    ..
-                },
-                status: ItemStatus::Completed
+                body: ItemBody::Command { output: None, .. },
+                status: ItemStatus::Interrupted
             },
             ..
-        })
+        })]
     ));
+}
+
+#[test]
+fn a_shell_notice_missed_while_disconnected_ends_its_child_in_a_run_of_its_own() {
+    let at = now();
+    let mut mapper = mapper().with_opened_ms(at - 10_000);
+    backgrounded(&mut mapper, "sh_4");
+    let messages = vec![
+        json!({"id": "msg_idle", "type": "idle", "outcome": "succeeded", "time": {"created": at + 3}}),
+        json!({"id": "msg_shell", "type": "synthetic", "description": "ffmpeg -i in.mov out.mp4",
+               "text": "<background-result kind=\"shell\" id=\"sh_4\" state=\"completed\" command=\"ffmpeg\">\ndone\n</background-result>",
+               "metadata": {"source": "shell", "shellID": "sh_4", "state": "completed", "truncated": false, "exit": 0},
+               "time": {"created": at + 1}}),
+    ];
+    let events = mapper.reconcile(&messages, false);
+    // The child ends with the notice, then the notice's run starts.
+    assert!(
+        matches!(&events[..2], [Event::Child { update }, Event::Turn { turn, phase: TurnPhase::Started { .. } }]
+        if update.status == ChildStatus::Completed && turn.as_str() == "msg_shell"),
+        "{events:?}"
+    );
+    assert!(events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Command { output: Some(output), exit_code: Some(0), .. }, .. }, .. }) if output == "done")));
+    assert_eq!(user_messages(&events), 0);
     assert!(mapper.running_children().is_empty());
+    assert!(mapper.reconcile(&messages, false).is_empty());
+}
+
+#[test]
+fn synthetic_context_is_never_shown_as_a_user_prompt() {
+    let mut mapper = mapper();
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        2,
+        "session.inbox.enqueued",
+        json!({"inboxID": "msg_note", "item": {"type": "synthetic", "delivery": "steer",
+            "payload": {"text": "<inline-message from=\"Mo\">context</inline-message>", "metadata": {"inline.input": "in-p"}}}}),
+    ));
+    let delivered = mapper.apply(&durable(
+        3,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_note"}),
+    ));
+    assert_eq!(user_messages(&delivered), 0);
+    // Inline's passive input is still consumed by the turn.
+    assert!(matches!(&delivered[..], [Event::Input { id, .. }] if id.as_str() == "in-p"));
+}
+
+#[test]
+fn a_compaction_completes_the_row_it_started() {
+    let mut mapper = mapper();
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    let started = mapper.apply(&durable(
+        2,
+        "session.compaction.started",
+        json!({"reason": "auto"}),
+    ));
+    let Event::Item(Item { id: opened, .. }) = &started[0] else {
+        panic!("{started:?}");
+    };
+    // Background compaction may end after the turn that saw it start.
+    mapper.apply(&durable(3, "session.execution.succeeded", json!({})));
+    let ended = mapper.apply(&durable(
+        4,
+        "session.compaction.ended",
+        json!({"reason": "auto", "text": "summary"}),
+    ));
+    assert!(
+        matches!(&ended[..], [Event::Item(Item { id, turn: Some(turn), update: ItemUpdate::Completed { status: ItemStatus::Completed, .. }, .. })]
+        if id == opened && turn.as_str() == "evt_1")
+    );
+    mapper.apply(&durable(
+        5,
+        "session.compaction.started",
+        json!({"reason": "manual"}),
+    ));
+    let failed = mapper.apply(&durable(
+        6,
+        "session.compaction.failed",
+        json!({"reason": "manual", "error": {"type": "unknown", "message": "too long"}}),
+    ));
+    assert!(
+        matches!(&failed[..], [Event::Item(Item { id, update: ItemUpdate::Completed { status: ItemStatus::Failed, .. }, .. })] if id.as_str() == "compaction:evt_5")
+    );
+}
+
+#[test]
+fn shell_output_leaves_out_the_notices_for_the_model() {
+    let mut mapper = mapper();
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        2,
+        "session.tool.called",
+        json!({"assistantMessageID": "m", "id": "call_t", "name": "shell",
+        "input": {"command": "cargo test"}, "executed": true}),
+    ));
+    let done = mapper.apply(&durable(3, "session.tool.success", json!({"assistantMessageID": "m", "id": "call_t",
+        "content": [{"type": "text", "text": "test result: FAILED"}, {"type": "text", "text": "Exit code: 101"}],
+        "metadata": {"status": "completed", "exit": 101, "truncated": false}, "executed": true})));
+    assert!(
+        matches!(&done[..], [Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Command { output: Some(output), exit_code: Some(101), .. }, .. }, .. })] if output == "test result: FAILED")
+    );
+    // A call the user stopped: its error is the output so far, then its notice.
+    mapper.apply(&durable(
+        4,
+        "session.tool.called",
+        json!({"assistantMessageID": "m", "id": "call_s", "name": "shell",
+        "input": {"command": "sleep 100"}, "executed": true}),
+    ));
+    let notice =
+        "[full output saved to /tmp/sh.log]\n\nCommand interrupted by the user (shell ID: sh_9).";
+    let stopped = mapper.apply(&durable(5, "session.tool.failed", json!({"assistantMessageID": "m", "id": "call_s",
+        "error": {"type": "unknown", "message": format!("tick 1\ntick 2\n\n{notice}")},
+        "metadata": {"interrupted": true, "truncated": false, "shellID": "sh_9", "notice": notice}, "executed": true})));
+    assert!(
+        matches!(&stopped[..], [Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Command { output: Some(output), .. }, .. }, .. })] if output == "tick 1\ntick 2")
+    );
+}
+
+#[test]
+fn approvals_show_the_call_s_command_diff_and_arguments() {
+    let mut mapper = mapper();
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    // Shell: the command line as the model wrote it, not its subcommands.
+    mapper.apply(&durable(2, "session.tool.called", json!({"assistantMessageID": "m", "id": "call_sh", "name": "shell",
+        "input": {"command": "cargo test 2>&1 | tail -5", "workdir": "/work/app/crates"}, "executed": true})));
+    let asked = mapper.apply(&volatile(
+        "permission.asked",
+        json!({"id": "per_sh", "action": "shell", "resources": ["cargo test", "tail -5"],
+               "source": {"type": "tool", "messageID": "m", "id": "call_sh"}}),
+    ));
+    match &asked[..] {
+        [
+            Event::Interaction(Interaction {
+                kind:
+                    InteractionKind::Approval {
+                        subject: ApprovalSubject::Command { command, cwd, .. },
+                        decisions,
+                    },
+                ..
+            }),
+        ] => {
+            assert_eq!(command, "cargo test 2>&1 | tail -5");
+            assert_eq!(
+                cwd.as_deref(),
+                Some(std::path::Path::new("/work/app/crates"))
+            );
+            // Nothing to save: "always" would only allow once.
+            let ids: Vec<&str> = decisions
+                .iter()
+                .map(|decision| decision.id.as_str())
+                .collect();
+            assert_eq!(ids, vec!["once", "reject", "stop"]);
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // Edit: the preview diff goes on the call the card is about.
+    mapper.apply(&durable(
+        3,
+        "session.tool.called",
+        json!({"assistantMessageID": "m", "id": "call_ed", "name": "edit",
+        "input": {"path": "src/main.rs", "oldString": "a", "newString": "b"}, "executed": true}),
+    ));
+    let asked = mapper.apply(&volatile(
+        "permission.asked",
+        json!({"id": "per_ed", "action": "edit", "resources": ["src/main.rs"], "save": ["src/main.rs"],
+               "metadata": {"files": [{"file": "src/main.rs", "patch": "@@ -1 +1 @@\n-a\n+b", "status": "modified", "additions": 1, "deletions": 1}]},
+               "source": {"type": "tool", "messageID": "m", "id": "call_ed"}}),
+    ));
+    match &asked[..] {
+        [
+            Event::Item(Item {
+                id,
+                update:
+                    ItemUpdate::Updated {
+                        body: ItemBody::FileChange { changes },
+                    },
+                ..
+            }),
+            Event::Interaction(Interaction {
+                item: Some(item),
+                kind:
+                    InteractionKind::Approval {
+                        subject: ApprovalSubject::FileChange { paths, .. },
+                        ..
+                    },
+                ..
+            }),
+        ] => {
+            assert_eq!(id, item);
+            assert_eq!(paths, &vec![PathBuf::from("src/main.rs")]);
+            assert_eq!(changes[0].path, PathBuf::from("src/main.rs"));
+            assert!(changes[0].diff.as_deref().unwrap().contains("+b"));
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // MCP: the tool's arguments, not its `*` resource.
+    let asked = mapper.apply(&volatile(
+        "permission.asked",
+        json!({"id": "per_mcp", "action": "github_create_issue", "resources": ["*"], "save": ["*"],
+               "metadata": {"input": {"title": "Flaky test"}}}),
+    ));
+    assert!(
+        matches!(&asked[..], [Event::Interaction(Interaction { kind: InteractionKind::Approval { subject: ApprovalSubject::Tool { name, input, .. }, decisions }, .. })]
+        if name == "github_create_issue" && input == &json!({"title": "Flaky test"}) && decisions.len() == 4)
+    );
+}
+
+#[test]
+fn reads_and_searches_are_commands_with_parsed_actions() {
+    let folder = PathBuf::from("/work/app");
+    let read = tool_body(
+        "read",
+        &json!({"path": "/work/app/src/main.rs", "offset": 10}),
+        Some("10: fn main() {}"),
+        None,
+        None,
+        Some(&folder),
+    );
+    assert!(
+        matches!(&read, ItemBody::Command { actions, .. } if actions == &vec![CommandAction::Read { path: "src/main.rs".into() }])
+    );
+    let grep = tool_body(
+        "grep",
+        &json!({"pattern": "try_lock", "path": "src"}),
+        None,
+        None,
+        None,
+        Some(&folder),
+    );
+    assert!(
+        matches!(&grep, ItemBody::Command { actions, command, .. } if command == "grep try_lock src"
+        && actions == &vec![CommandAction::Search { query: Some("try_lock".into()), path: Some("src".into()) }])
+    );
+    let glob = tool_body(
+        "glob",
+        &json!({"pattern": "**/*.rs"}),
+        None,
+        None,
+        None,
+        Some(&folder),
+    );
+    assert!(
+        matches!(&glob, ItemBody::Command { actions, .. } if actions == &vec![CommandAction::Search { query: Some("**/*.rs".into()), path: None }])
+    );
+    // Before its input streams in, a read is still a read.
+    assert!(matches!(
+        tool_body("read", &Value::Null, None, None, None, None),
+        ItemBody::Command { actions, .. } if matches!(actions[..], [CommandAction::Read { .. }])
+    ));
+    assert!(matches!(
+        tool_body("webfetch", &json!({"url": "https://example.com"}), None, None, None, None),
+        ItemBody::Tool { name, .. } if name == "WebFetch"
+    ));
+    assert!(matches!(
+        tool_body("websearch", &json!({"query": "rust"}), None, None, None, None),
+        ItemBody::Tool { name, .. } if name == "WebSearch"
+    ));
+}
+
+#[test]
+fn a_write_over_an_existing_file_is_an_edit() {
+    let folder = PathBuf::from("/work/app");
+    let input = json!({"path": "README.md", "content": "hi"});
+    let change = |output: Option<&str>| match tool_body(
+        "write",
+        &input,
+        output,
+        None,
+        None,
+        Some(&folder),
+    ) {
+        ItemBody::FileChange { changes } => changes[0].change.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        change(Some("Wrote file successfully: README.md")),
+        FileChangeKind::Update { moved_to: None }
+    );
+    assert_eq!(
+        change(Some("Created file successfully: README.md")),
+        FileChangeKind::Add
+    );
+}
+
+#[test]
+fn questions_name_the_call_that_asked() {
+    let mut mapper = mapper();
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    let asked = mapper.apply(&volatile(
+        "form.created",
+        json!({"form": {"id": "frm_1", "sessionID": SESSION, "title": "Questions",
+            "metadata": {"kind": "question", "tool": {"messageID": "m", "id": "call_q"}},
+            "fields": [{"key": "q0", "type": "string", "title": "Branch?"}]}}),
+    ));
+    assert!(
+        matches!(&asked[..], [Event::Interaction(Interaction { item: Some(item), kind: InteractionKind::Question { .. }, .. })] if item.as_str() == "call_q")
+    );
 }
 
 fn now() -> u64 {
@@ -1322,4 +1733,164 @@ fn a_report_run_missed_while_disconnected_is_rebuilt_as_its_own_turn() {
     );
     // Seen once: a second reconciliation adds nothing.
     assert!(mapper.reconcile(&messages, false).is_empty());
+}
+
+/// A sub-agent of this session, running, that Inline then stopped: OpenCode
+/// interrupted it.
+fn stopped_child(mapper: &mut Mapper) {
+    assert!(mapper.adopt_child("ses_child", Some("List files".into()), true));
+    mapper.stopping_children(["ses_child".to_owned()]);
+    let ended = mapper.apply(&child_event(1, "session.execution.interrupted", json!({})));
+    assert!(
+        matches!(ended.last(), Some(Event::Child { update }) if update.status == ChildStatus::Stopped)
+    );
+    assert!(mapper.running_children().is_empty());
+}
+
+#[test]
+fn a_run_woken_only_by_a_stopped_child_is_handed_back_to_stop() {
+    let mut mapper = mapper();
+    stopped_child(&mut mapper);
+    // The interrupted child still reports, and the report wakes the idle
+    // parent.
+    mapper.apply(&report(1, "msg_report", "cancelled"));
+    let woke = mapper.apply(&durable(2, "session.execution.started", json!({})));
+    let turn = TurnId::new("msg_report").unwrap();
+    assert!(matches!(&woke[0], Event::Turn { turn: started, .. } if *started == turn));
+    assert_eq!(
+        mapper.take_stop_wakes(),
+        vec![(SESSION.to_owned(), Some(turn.clone()))]
+    );
+    assert!(mapper.take_stop_wakes().is_empty(), "handed back once");
+    assert!(mapper.stop_wake_holds(SESSION, Some(&turn)));
+    // Stopped on purpose: the turn ends without an error.
+    let ended = mapper.apply(&durable(
+        3,
+        "session.execution.interrupted",
+        json!({"reason": "user"}),
+    ));
+    assert!(matches!(
+        ended.last(),
+        Some(Event::Turn {
+            phase: TurnPhase::Completed {
+                outcome: TurnOutcome::Interrupted,
+                error: None,
+                ..
+            },
+            ..
+        })
+    ));
+    // The report stays parked, and the next prompt's run reads it.
+    assert!(mapper.was_stopped("ses_child"));
+    mapper.apply(&enqueue(4, "msg_b", "what next?", "steer"));
+    mapper.apply(&durable(5, "session.execution.started", json!({})));
+    assert!(mapper.take_stop_wakes().is_empty());
+    mapper.apply(&durable(
+        6,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_report"}),
+    ));
+    assert!(
+        !mapper.was_stopped("ses_child"),
+        "read: it wakes nothing again"
+    );
+}
+
+#[test]
+fn a_wake_with_a_prompt_or_a_live_childs_report_runs() {
+    let mut mapper = mapper();
+    stopped_child(&mut mapper);
+    // A prompt waiting next to the stopped child's report.
+    mapper.apply(&report(1, "msg_report", "cancelled"));
+    mapper.apply(&enqueue(2, "msg_b", "go on", "steer"));
+    mapper.apply(&durable(3, "session.execution.started", json!({})));
+    assert!(mapper.take_stop_wakes().is_empty());
+    mapper.apply(&durable(
+        4,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_b"}),
+    ));
+    mapper.apply(&durable(5, "session.execution.succeeded", json!({})));
+
+    // Another sub-agent, never stopped, reports next to it.
+    let mut mapper = self::mapper();
+    stopped_child(&mut mapper);
+    mapper.apply(&report(1, "msg_report", "cancelled"));
+    mapper.apply(&durable(2, "session.inbox.enqueued", json!({"inboxID": "msg_other", "item": {"type": "synthetic", "delivery": "steer", "payload": {
+        "text": "<subagent sessionID=\"ses_other\" state=\"completed\">\ndone\n</subagent>",
+        "metadata": {"source": "subagent", "childID": "ses_other", "state": "completed"}}}})));
+    mapper.apply(&durable(3, "session.execution.started", json!({})));
+    assert!(mapper.take_stop_wakes().is_empty());
+}
+
+#[test]
+fn a_prompt_that_joins_a_stopped_wake_keeps_it_running() {
+    let mut mapper = mapper();
+    stopped_child(&mut mapper);
+    mapper.apply(&report(1, "msg_report", "cancelled"));
+    mapper.apply(&durable(2, "session.execution.started", json!({})));
+    let wakes = mapper.take_stop_wakes();
+    let turn = wakes[0].1.clone();
+    // Someone steers into it before Inline's interrupt goes out.
+    mapper.apply(&enqueue(3, "msg_b", "and also", "steer"));
+    assert!(!mapper.stop_wake_holds(SESSION, turn.as_ref()));
+}
+
+#[test]
+fn a_stopped_sub_agent_woken_again_is_handed_back_unless_given_new_work() {
+    let mut mapper = mapper();
+    stopped_child(&mut mapper);
+    // Its own background shell's notice wakes it again.
+    mapper.apply(&child_event(2, "session.execution.started", json!({})));
+    assert_eq!(
+        mapper.take_stop_wakes(),
+        vec![("ses_child".to_owned(), None)]
+    );
+    assert!(mapper.stop_wake_holds("ses_child", None));
+    mapper.apply(&child_event(3, "session.execution.interrupted", json!({})));
+    assert!(!mapper.stop_wake_holds("ses_child", None), "it stopped");
+
+    // The parent sends it a follow-up: its work and reports count again.
+    mapper.apply(&enqueue(4, "msg_b", "ask it again", "steer"));
+    mapper.apply(&durable(5, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        6,
+        "session.tool.input.started",
+        json!({"assistantMessageID": "msg_s3", "id": "call_again", "name": "subagent"}),
+    ));
+    mapper.apply(&durable(7, "session.tool.called", json!({"assistantMessageID": "msg_s3", "id": "call_again",
+        "input": {"agent": "explore", "description": "List files", "prompt": "And the tests?", "sessionID": "ses_child"}, "executed": true})));
+    assert!(!mapper.was_stopped("ses_child"));
+    mapper.apply(&child_event(4, "session.execution.started", json!({})));
+    assert!(mapper.take_stop_wakes().is_empty());
+}
+
+#[test]
+fn a_shell_stopped_without_a_notice_ends_its_child() {
+    let mut mapper = mapper();
+    backgrounded(&mut mapper, "sh_1");
+    assert_eq!(mapper.running_shells(), vec!["sh_1".to_owned()]);
+    let ended = mapper.shell_stopped("sh_1");
+    assert!(
+        matches!(&ended[..], [Event::Child { update }] if update.status == ChildStatus::Stopped && update.child.kind == ChildKind::BackgroundTask)
+    );
+    assert!(mapper.running_children().is_empty());
+    assert!(mapper.shell_stopped("sh_1").is_empty());
+}
+
+#[test]
+fn queued_prompts_still_parked_in_an_idle_session_are_its_queue() {
+    // After a stop, queued prompts wait for the next start.
+    let mut mapper = mapper();
+    let events = mapper.seed_inbox(&json!([
+        {"id": "msg_q", "type": "user", "delivery": "queue", "payload": {"text": "after this"}},
+        {"id": "msg_s", "type": "synthetic", "delivery": "steer", "payload": {"text": "context"}}
+    ]));
+    assert!(
+        matches!(&events[0], Event::Queue { entries } if entries.len() == 1 && entries[0].entry.as_str() == "msg_q")
+    );
+    // A queued prompt sent to an idle session starts it instead.
+    let mut mapper = self::mapper();
+    mapper.apply(&enqueue(1, "msg_q", "now", "queue"));
+    assert!(mapper.queue().is_empty());
 }

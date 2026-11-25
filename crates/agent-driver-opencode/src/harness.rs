@@ -35,6 +35,11 @@ use crate::version;
 
 const CATALOG_TTL: Duration = Duration::from_secs(120);
 const SESSION_PAGE_SIZE: u32 = 50;
+/// Messages per page while finding a fork point (OpenCode's maximum).
+const FORK_PAGE_SIZE: usize = 200;
+/// How long a shut-down location is given to close before Inline adds its
+/// MCP servers to the location that replaces it.
+const LOCATION_SETTLE: Duration = Duration::from_millis(500);
 /// Instruction entry key for Inline's guide (`<context key="inline">`).
 const GUIDE_KEY: &str = "inline";
 
@@ -114,9 +119,10 @@ struct HarnessState {
     mcp_folders: std::collections::HashSet<PathBuf>,
 }
 
-/// Adds the configured stdio MCP servers to `folder` once per harness, in
-/// the background: a server OpenCode cannot start never holds up a session.
-fn add_stdio_mcp_servers(shared: &Shared, link: &Arc<Link>, folder: &Path) {
+/// Adds the configured stdio MCP servers to `folder` once, in the
+/// background: a server OpenCode cannot start never holds up a session. A
+/// folder whose servers could not be added is tried again on its next open.
+fn add_stdio_mcp_servers(shared: &Arc<Shared>, link: &Arc<Link>, folder: &Path) {
     let servers = &shared.config.stdio_mcp_servers;
     if servers.is_empty() || !shared.state().mcp_folders.insert(folder.to_path_buf()) {
         return;
@@ -124,6 +130,7 @@ fn add_stdio_mcp_servers(shared: &Shared, link: &Arc<Link>, folder: &Path) {
     let requests: Vec<(String, Value)> = servers.iter().map(local_mcp_config).collect();
     let api = link.api();
     let folder = folder.to_path_buf();
+    let weak = Arc::downgrade(shared);
     tokio::spawn(async move {
         for (name, config) in requests {
             let path = format!("/api/experimental/mcp/{name}");
@@ -133,9 +140,44 @@ fn add_stdio_mcp_servers(shared: &Shared, link: &Arc<Link>, folder: &Path) {
                 .await
             {
                 log::debug!(target: "inline::opencode", "could not add MCP server {name}: {error}");
+                if let Some(shared) = weak.upgrade() {
+                    shared.state().mcp_folders.remove(&folder);
+                }
             }
         }
     });
+}
+
+/// OpenCode keeps runtime-added MCP servers in memory, per location: a
+/// location shutdown (`folder`) or a restarted service (`None`) forgets
+/// them. The folders forgotten are added again now when a session Inline
+/// holds lives there, else on their next open.
+fn readd_stdio_mcp_servers(shared: &Arc<Shared>, link: &Arc<Link>, folder: Option<&Path>) {
+    if shared.config.stdio_mcp_servers.is_empty() {
+        return;
+    }
+    let live: Vec<PathBuf> = {
+        let mut state = shared.state();
+        match folder {
+            Some(folder) => {
+                state.mcp_folders.remove(folder);
+            }
+            None => state.mcp_folders.clear(),
+        }
+        let mut live: Vec<PathBuf> = state
+            .sessions
+            .values()
+            .filter_map(Weak::upgrade)
+            .map(|inner| inner.folder.clone())
+            .filter(|live| folder.is_none_or(|folder| folder == live))
+            .collect();
+        live.sort();
+        live.dedup();
+        live
+    };
+    for folder in live {
+        add_stdio_mcp_servers(shared, link, &folder);
+    }
 }
 
 /// An OpenCode `local` MCP server entry for a stdio server.
@@ -286,16 +328,38 @@ impl Shared {
             });
             Arc::new(ToolHost::new(link.clone(), tools, resolver))
         });
-        // Catalog changes (new models, agents, commands) refresh pickers.
+        // Catalog changes (new models, agents, commands) refresh pickers;
+        // a location or service that went away loses the MCP servers added
+        // to it.
         let mut signals = bus.signals();
         let weak = Arc::downgrade(self);
+        let signal_link = link.clone();
         tokio::spawn(async move {
-            while let Ok(signal) = signals.recv().await {
+            loop {
+                let signal = match signals.recv().await {
+                    Ok(signal) => signal,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                };
                 let Some(shared) = weak.upgrade() else { return };
-                if signal == ServiceSignal::CatalogChanged {
-                    let mut state = shared.state();
-                    state.catalogs.clear();
-                    state.models.clear();
+                match signal {
+                    ServiceSignal::CatalogChanged => {
+                        let mut state = shared.state();
+                        state.catalogs.clear();
+                        state.models.clear();
+                    }
+                    ServiceSignal::Shutdown { folder } => {
+                        // The location's replacement boots on the next
+                        // request; give the closing one a moment to go.
+                        let link = signal_link.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(LOCATION_SETTLE).await;
+                            readd_stdio_mcp_servers(&shared, &link, folder.as_deref());
+                        });
+                    }
+                    ServiceSignal::Relinked => {
+                        readd_stdio_mcp_servers(&shared, &signal_link, None);
+                    }
                 }
             }
         });
@@ -887,22 +951,22 @@ async fn fork_boundary(
     let mut cursor: Option<String> = None;
     let mut found = false;
     for _ in 0..100 {
+        // The first page sets the order; later pages pass only the cursor,
+        // which carries it (OpenCode refuses a cursor with an order).
+        let query = match &cursor {
+            None => Query::new().with("order", "asc"),
+            Some(cursor) => Query::new().with("cursor", cursor),
+        };
         let page = api
-            .get(
-                &path,
-                Query::new()
-                    .with("order", "asc")
-                    .with("limit", 200)
-                    .maybe("cursor", cursor.clone()),
-            )
+            .get(&path, query.with("limit", FORK_PAGE_SIZE))
             .await
             .map_err(api_open_error)?;
-        for message in page
+        let messages = page
             .get("data")
             .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
+            .cloned()
+            .unwrap_or_default();
+        for message in &messages {
             let id = message
                 .get("id")
                 .and_then(Value::as_str)
@@ -924,11 +988,12 @@ async fn fork_boundary(
                 found = true;
             }
         }
+        // Every non-empty page names a next one; a short page is the last.
         cursor = page
             .pointer("/cursor/next")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        if cursor.is_none() {
+        if cursor.is_none() || messages.len() < FORK_PAGE_SIZE {
             break;
         }
     }

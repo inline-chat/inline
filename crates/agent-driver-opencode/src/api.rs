@@ -228,6 +228,19 @@ impl Api {
         path: &str,
         query: Query,
     ) -> Result<impl Stream<Item = Result<Value, ApiError>> + Send + 'static, ApiError> {
+        self.sse_with_idle(path, query, None).await
+    }
+
+    /// [`Self::sse`] for a stream the server keeps alive: when nothing at all
+    /// (an event or a heartbeat comment) arrives for `idle`, the connection
+    /// is taken as dead (a half-open socket after sleep, a lost remote) and
+    /// the stream ends with an `Err`.
+    pub async fn sse_with_idle(
+        &self,
+        path: &str,
+        query: Query,
+        idle: Option<Duration>,
+    ) -> Result<impl Stream<Item = Result<Value, ApiError>> + Send + 'static, ApiError> {
         let response = self
             .request(&self.streaming, Method::GET, path, &query)
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -238,8 +251,30 @@ impl Api {
             return Err(status_error(response).await);
         }
         let mut decoder = SseDecoder::default();
-        let bytes = response.bytes_stream();
-        Ok(bytes
+        let chunks = futures_util::stream::unfold(
+            Some(Box::pin(response.bytes_stream())),
+            move |bytes| async move {
+                let mut bytes = bytes?;
+                let next = match idle {
+                    Some(idle) => match tokio::time::timeout(idle, bytes.next()).await {
+                        Ok(next) => next,
+                        Err(_) => {
+                            let error = ApiError::Transport(format!(
+                                "the event stream was silent for {}s",
+                                idle.as_secs_f32()
+                            ));
+                            return Some((Err(error), None));
+                        }
+                    },
+                    None => bytes.next().await,
+                };
+                match next? {
+                    Ok(chunk) => Some((Ok(chunk), Some(bytes))),
+                    Err(error) => Some((Err(transport(error)), None)),
+                }
+            },
+        );
+        Ok(chunks
             .map(Some)
             .chain(futures_util::stream::once(async { None }))
             .flat_map(move |chunk| {
@@ -248,7 +283,7 @@ impl Api {
                         Ok(events) => events.into_iter().map(Ok).collect(),
                         Err(error) => vec![Err(ApiError::Decode(error.to_string()))],
                     },
-                    Some(Err(error)) => vec![Err(transport(error))],
+                    Some(Err(error)) => vec![Err(error)],
                     None => match decoder.finish() {
                         Ok(events) => events.into_iter().map(Ok).collect(),
                         Err(error) => vec![Err(ApiError::Decode(error.to_string()))],
