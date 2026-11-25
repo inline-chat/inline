@@ -156,6 +156,58 @@ public enum PerfHarnessFixture {
     try seedBridgeChat(db, now: now)
   }
 
+  // MARK: - Read journey
+
+  /// What the chat list, the app icon and the Dock show for a chat.
+  public struct ReadState: Sendable, Equatable {
+    public let unreadCount: Int
+    public let readInboxMaxId: Int64
+    public let unreadMark: Bool
+  }
+
+  /// Certifies a chat's whole history, as a latest page from the server would, so the list's
+  /// bottom is the chat's live end and reads the chat whole. The seed leaves every chat unknown.
+  public static func certifyHistory(peer: Peer, database: AppDatabase = .shared) throws {
+    try database.dbWriter.write { db in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return }
+      try MessageHistoryCoverageStore.subtractAll(
+        db, chatId: chat.id, lowerId: 1, upperId: MessageHistoryHole.positiveMessageIDMax
+      )
+    }
+  }
+
+  /// A message from `fromId` landing as `UpdateNewMessage` lands one: the row, the chat's last
+  /// message and one more unread in one write, published once it commits. Nil without the chat.
+  public static func receiveMessage(peer: Peer, from fromId: Int64, database: AppDatabase = .shared) throws -> Int64? {
+    try database.dbWriter.write { db -> Int64? in
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return nil }
+      let messageId = (chat.lastMsgId ?? 0) + 1
+      var message = Message(
+        messageId: messageId, fromId: fromId, date: Date(), text: "Arrived during the read journey",
+        peerUserId: peer.asUserId(), peerThreadId: peer.asThreadId(), chatId: chat.id, out: false
+      )
+      try message.saveMessage(db, publishChanges: true)
+      try Chat.updateLastMsgId(db, chatId: chat.id, lastMsgId: messageId, date: message.date)
+      if var dialog = try Dialog.get(peerId: peer).fetchOne(db) {
+        dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
+        try dialog.update(db)
+      }
+      return messageId
+    }
+  }
+
+  public static func readState(peer: Peer, database: AppDatabase = .shared) throws -> ReadState? {
+    try database.reader.read { db in
+      try Dialog.get(peerId: peer).fetchOne(db).map {
+        ReadState(
+          unreadCount: $0.unreadCount ?? 0,
+          readInboxMaxId: $0.readInboxMaxId ?? 0,
+          unreadMark: $0.unreadMark == true
+        )
+      }
+    }
+  }
+
   // MARK: - Bridge output
 
   /// `--perf-harness-bridge <file>`: a DM with an agent whose messages are exactly what the CLI
