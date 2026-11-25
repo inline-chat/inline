@@ -133,6 +133,8 @@ private struct ExperimentalAuthedRootView: View {
   @State private var searchInteractionRevision = 0
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
+  /// Set while a tab pick that focuses Search waits for the tab change it made.
+  @State private var searchFocusOnEntryRequested = false
   @State private var isCreatingThread = false
   @State private var newThreadSheet: NewThreadSheetRequest?
   @State private var isCleaningOpenChats = false
@@ -360,7 +362,11 @@ private struct ExperimentalAuthedRootView: View {
           lastContentRootTab = previousRootTab
         }
         pendingSearchExit = nil
-        searchPresentation.focusRequested = false
+        // Picking the tab already asked for focus; any other way in arrives without it.
+        if previousRootTab == .search || !searchFocusOnEntryRequested {
+          searchPresentation.focusRequested = false
+        }
+        searchFocusOnEntryRequested = false
       } else if desiredRootTab != .newChat {
         lastContentRootTab = desiredRootTab
       }
@@ -692,7 +698,11 @@ private struct ExperimentalAuthedRootView: View {
         lastContentRootTab = previousRootTab
       }
       pendingSearchExit = nil
-      searchPresentation.focusRequested = false
+      // Opening Search focuses its field, as a system search tab does. Not over a result
+      // still open in the tab, whose field is out of sight.
+      let focusesField = router[.search].isEmpty
+      searchPresentation.focusRequested = focusesField
+      searchFocusOnEntryRequested = focusesField
     } else {
       lastContentRootTab = newRootTab
     }
