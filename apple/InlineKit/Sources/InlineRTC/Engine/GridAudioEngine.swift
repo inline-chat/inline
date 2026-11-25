@@ -127,6 +127,9 @@ actor GridAudioEngine {
   private let permissionDriver: any GridMicrophonePermissionDriver
   private let configuration: InlineRTCConfiguration
   private let captureCooldown: Duration
+  /// Waits out the capture grace. Tests replace it to end the grace on cue
+  /// instead of racing a short wall-clock cooldown on a loaded machine.
+  private let captureCooldownWait: @Sendable (Duration) async -> Void
   private let deviceChangeSettleDelay: Duration
   private let engineRecoveryDelay: Duration
   private let engineHealthCheckDelay: Duration
@@ -207,6 +210,7 @@ actor GridAudioEngine {
     permissionDriver: any GridMicrophonePermissionDriver = SystemGridMicrophonePermissionDriver(),
     configuration: InlineRTCConfiguration = .voice,
     captureCooldown: Duration = .seconds(2),
+    captureCooldownWait: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) },
     deviceChangeSettleDelay: Duration = .milliseconds(350),
     engineRecoveryDelay: Duration = .milliseconds(500),
     engineHealthCheckDelay: Duration = .milliseconds(150),
@@ -218,6 +222,7 @@ actor GridAudioEngine {
     self.permissionDriver = permissionDriver
     self.configuration = configuration
     self.captureCooldown = captureCooldown
+    self.captureCooldownWait = captureCooldownWait
     self.deviceChangeSettleDelay = deviceChangeSettleDelay
     self.engineRecoveryDelay = engineRecoveryDelay
     self.engineHealthCheckDelay = engineHealthCheckDelay
@@ -336,8 +341,8 @@ actor GridAudioEngine {
     let generation = cooldownGeneration
     state = .coolingDown
     emitSnapshot()
-    Task { [weak self, captureCooldown] in
-      try? await Task.sleep(for: captureCooldown)
+    Task { [weak self, captureCooldown, captureCooldownWait] in
+      await captureCooldownWait(captureCooldown)
       await self?.captureCooldownFinished(generation: generation)
     }
   }

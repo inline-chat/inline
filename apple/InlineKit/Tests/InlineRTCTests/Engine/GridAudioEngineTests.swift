@@ -128,10 +128,14 @@ struct GridAudioEngineTests {
   @Test("capture remains warm through grace and then stops")
   func captureCooldown() async throws {
     let driver = FakeGridAudioDriver()
+    let grace = CaptureGraceGate()
+    // The grace ends on the test's cue. A short wall-clock cooldown ran out
+    // before the warm check on a loaded CI runner.
     let engine = GridAudioEngine(
       driver: driver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
-      captureCooldown: .milliseconds(60)
+      captureCooldown: .seconds(2),
+      captureCooldownWait: { await grace.wait($0) }
     )
     let target = InlineRTCSessionID("grid-test:1:2:3")
     let lease = GridAudioLease.connectionDemand(target)
@@ -149,9 +153,14 @@ struct GridAudioEngineTests {
     #expect(coolingSnapshot.state == .coolingDown)
     #expect(coolingSnapshot.isPrepared)
 
-    try await Task.sleep(for: .milliseconds(25))
-    #expect(await engine.currentSnapshot().isPrepared)
+    try await eventually { await grace.pendingCount() == 1 }
+    #expect(await grace.requestedDurations() == [.seconds(2)])
+    let graceSnapshot = await engine.currentSnapshot()
+    #expect(graceSnapshot.state == .coolingDown)
+    #expect(graceSnapshot.isPrepared)
+    #expect(!(await driver.operations().contains("prepared:false")))
 
+    await grace.end()
     try await eventually {
       let snapshot = await engine.currentSnapshot()
       return snapshot.state == .cold && snapshot.isPrepared == false
@@ -2566,6 +2575,26 @@ private struct ReconnectedOutputWaitError: Error, CustomStringConvertible {
 
   var description: String {
     "Preferred output wait failed: \(phase); state=\(snapshot.state) mutation=\(snapshot.currentMutationKind ?? "none") output=\(String(describing: snapshot.output)) route=\(String(describing: snapshot.route)) catalog=\(catalog?.devices.map(\.id) ?? []) operations=\(operations)"
+  }
+}
+
+/// Holds capture grace periods until the test ends them.
+private actor CaptureGraceGate {
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+  private var requested: [Duration] = []
+
+  func wait(_ duration: Duration) async {
+    requested.append(duration)
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func pendingCount() -> Int { waiters.count }
+  func requestedDurations() -> [Duration] { requested }
+
+  func end() {
+    let ending = waiters
+    waiters.removeAll()
+    ending.forEach { $0.resume() }
   }
 }
 
