@@ -245,16 +245,18 @@ pub(crate) struct TurnFacts<'a> {
     pub last_finished: Option<&'a TurnId>,
 }
 
-/// The request for one operation, given the thread, its turns and its
-/// effective model (Codex collaboration modes carry the model).
 /// Why Codex offers no file undo.
 pub(crate) const CODEX_NO_FILE_UNDO: &str =
     "Codex can revert conversation history but not files; undo file changes is not available";
 
+/// The request for one operation, given the thread, its turns and its
+/// effective model and reasoning effort (Codex collaboration modes carry
+/// both).
 pub(crate) fn op_request(
     thread: &str,
     turns: TurnFacts<'_>,
     model: Option<&str>,
+    effort: Option<&str>,
     op: &Op,
 ) -> Result<Request, OpError> {
     let active_turn = turns.active;
@@ -359,15 +361,22 @@ pub(crate) fn op_request(
                 inline_agent_bridge::harness::Availability::unavailable(CODEX_NO_FILE_UNDO),
             ));
         }
+        // A collaboration mode replaces the thread's model and effort
+        // wholesale, so both go with it: without the effort, switching
+        // modes would reset it to the model's default.
         Op::Mode { mode } => {
             let model = model.ok_or_else(|| {
                 OpError::Rejected("the session's model is not known yet".to_owned())
             })?;
+            let mut settings = json!({"model": model});
+            if let Some(effort) = effort {
+                settings["reasoning_effort"] = json!(effort);
+            }
             Request {
                 method: "thread/settings/update",
                 params: json!({
                     "threadId": thread,
-                    "collaborationMode": {"mode": mode.as_str(), "settings": {"model": model}},
+                    "collaborationMode": {"mode": mode.as_str(), "settings": settings},
                 }),
             }
         }
@@ -569,6 +578,7 @@ mod tests {
                 last_finished: None,
             },
             None,
+            None,
             &Op::Interrupt {
                 cancel_queued: false,
             },
@@ -584,6 +594,7 @@ mod tests {
                     last_finished: None
                 },
                 None,
+                None,
                 &Op::Interrupt {
                     cancel_queued: false
                 }
@@ -597,6 +608,7 @@ mod tests {
                     active: None,
                     last_finished: None
                 },
+                None,
                 None,
                 &Op::Queue {
                     action: QueueOp::Start
@@ -614,6 +626,7 @@ mod tests {
                     last_finished: None
                 },
                 None,
+                None,
                 &Op::Clear
             ),
             Err(OpError::Unavailable(_))
@@ -625,6 +638,7 @@ mod tests {
                 last_finished: None,
             },
             None,
+            None,
             &Op::Review {
                 target: ReviewTarget::BaseBranch {
                     branch: "main".to_owned(),
@@ -635,6 +649,33 @@ mod tests {
         assert_eq!(
             review.params["target"],
             json!({"type": "baseBranch", "branch": "main"})
+        );
+    }
+
+    #[test]
+    fn a_mode_switch_keeps_the_threads_effort() {
+        let plan = Op::Mode {
+            mode: inline_agent_bridge::harness::ModeId::new("plan").expect("mode"),
+        };
+        let request = op_request(
+            "t1",
+            TurnFacts::default(),
+            Some("gpt-5"),
+            Some("xhigh"),
+            &plan,
+        )
+        .expect("mode");
+        assert_eq!(request.method, "thread/settings/update");
+        assert_eq!(
+            request.params["collaborationMode"],
+            json!({"mode": "plan", "settings": {"model": "gpt-5", "reasoning_effort": "xhigh"}})
+        );
+        // The model's default effort stays the default.
+        let request =
+            op_request("t1", TurnFacts::default(), Some("gpt-5"), None, &plan).expect("mode");
+        assert_eq!(
+            request.params["collaborationMode"]["settings"],
+            json!({"model": "gpt-5"})
         );
     }
 
@@ -651,12 +692,13 @@ mod tests {
                 last_finished: Some(&finished),
             },
             None,
+            None,
             &sample,
         )
         .expect("sample");
         assert_eq!(request.params["expectedTurnId"], "turn-9");
         assert!(matches!(
-            op_request("t1", TurnFacts::default(), None, &sample),
+            op_request("t1", TurnFacts::default(), None, None, &sample),
             Err(OpError::Rejected(_))
         ));
         assert!(matches!(
@@ -666,6 +708,7 @@ mod tests {
                     active: Some(&finished),
                     last_finished: Some(&finished),
                 },
+                None,
                 None,
                 &sample
             ),
@@ -677,7 +720,7 @@ mod tests {
             },
         };
         assert!(matches!(
-            op_request("t1", TurnFacts::default(), None, &rewind),
+            op_request("t1", TurnFacts::default(), None, None, &rewind),
             Err(OpError::Unavailable(_))
         ));
         let child = |kind| Op::StopChild {
@@ -691,6 +734,7 @@ mod tests {
                 "t1",
                 TurnFacts::default(),
                 None,
+                None,
                 &child(ChildKind::BackgroundTask)
             )
             .expect("terminal")
@@ -701,6 +745,7 @@ mod tests {
             op_request(
                 "t1",
                 TurnFacts::default(),
+                None,
                 None,
                 &child(ChildKind::Subagent)
             ),
@@ -882,7 +927,9 @@ mod tests {
             ),
         ];
         for (turns, op) in &ops {
-            requests.push(op_request("thread-1", *turns, Some("gpt-5"), op).expect("request"));
+            requests.push(
+                op_request("thread-1", *turns, Some("gpt-5"), Some("high"), op).expect("request"),
+            );
         }
 
         // Optional fields newer than the floor, which the floor ignores

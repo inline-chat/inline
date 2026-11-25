@@ -2,8 +2,9 @@
 //!
 //! Built on every connection from the app-server version and the protocol
 //! schema the binary generates (`codex app-server generate-json-schema
-//! --experimental`), cached by the binary's SHA-256. The core has a floor;
-//! everything else degrades per operation with a reason.
+//! --experimental`), cached by the binary's SHA-256 and reported version.
+//! The core has a floor; everything else degrades per operation with a
+//! reason.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -169,15 +170,38 @@ fn decision_names(decision: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// SHA-256 of the executable, the schema cache key.
+/// SHA-256 of the executable, read in chunks (the ChatGPT app's Codex is
+/// hundreds of megabytes). Blocking: callers run it off the async workers.
 pub(crate) fn binary_sha256(path: &Path) -> std::io::Result<String> {
-    let bytes = std::fs::read(path)?;
-    Ok(hex(&Sha256::digest(&bytes)))
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    Ok(hex(&hasher.finalize()))
 }
 
-/// Cache folder for one binary hash under `cache_root`.
-pub(crate) fn schema_cache_dir(cache_root: &Path, binary_sha256: &str) -> PathBuf {
-    cache_root.join("codex-schema").join(binary_sha256)
+/// Cache folder for one binary under `cache_root`, keyed by its hash and the
+/// version it reports: an npm install's executable is a launcher script
+/// whose bytes stay the same across Codex versions.
+pub(crate) fn schema_cache_dir(
+    cache_root: &Path,
+    binary_sha256: &str,
+    version: Option<&Version>,
+) -> PathBuf {
+    let version = version.map_or_else(|| "unknown".to_owned(), Version::to_string);
+    // A version is semver text; anything that could leave the folder is not.
+    let version: String = version
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '+') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    cache_root
+        .join("codex-schema")
+        .join(format!("{binary_sha256}-{version}"))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -392,6 +416,33 @@ mod tests {
                 .contains("acceptWithExecpolicyAmendment")
         );
         assert_eq!(surface.sha256.len(), 64);
+    }
+
+    #[test]
+    fn the_binary_hash_streams_and_the_cache_is_keyed_by_version_too() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("codex");
+        // Larger than one copy buffer, so the hash spans reads.
+        let bytes: Vec<u8> = (0..200_000u32).map(|index| (index % 251) as u8).collect();
+        std::fs::write(&path, &bytes).expect("write");
+        assert_eq!(
+            binary_sha256(&path).expect("hash"),
+            hex(&Sha256::digest(&bytes))
+        );
+        // The same launcher script under two Codex versions: two caches.
+        let root = Path::new("/cache");
+        let older = schema_cache_dir(root, "abc", Some(&Version::new(0, 171, 0)));
+        let newer = schema_cache_dir(
+            root,
+            "abc",
+            Some(&Version::parse("0.173.0-alpha.2").unwrap()),
+        );
+        assert_ne!(older, newer);
+        assert_eq!(newer, root.join("codex-schema").join("abc-0.173.0-alpha.2"));
+        assert_eq!(
+            schema_cache_dir(root, "abc", None),
+            root.join("codex-schema").join("abc-unknown")
+        );
     }
 
     #[test]

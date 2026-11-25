@@ -27,7 +27,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use super::delivery::{Request, TurnFacts, input_request, op_request};
 use super::manifest::{self, SchemaSurface};
 use super::mapper::{AnswerPlan, CodexMapper, RequestMapped};
-use crate::peer::{CodexPeer, IncomingMessage, PeerError};
+use crate::peer::{CodexPeer, IncomingMessage, PeerError, RoutedError};
 use crate::process::{
     CodexDriverWriter, CodexLaunchConfig, ProcessControl, StdioProcess,
     app_server_version_from_user_agent, spawn_stdio_process,
@@ -53,7 +53,7 @@ pub struct CodexHarnessConfig {
     pub pinned_sha256: Option<String>,
     /// Inline CLI version sent in `initialize`.
     pub bridge_version: String,
-    /// Folder for the schema cache (`<root>/codex-schema/<sha256>/`).
+    /// Folder for the schema cache (`<root>/codex-schema/<sha256>-<version>/`).
     pub cache_root: PathBuf,
 }
 
@@ -70,6 +70,10 @@ struct Connection {
     control: ProcessControl,
     sessions: StdMutex<HashMap<String, Weak<SessionInner>>>,
     availability: AvailabilityMatrix,
+    /// Random per app-server process. Codex numbers its requests from 0 in
+    /// each process; interaction ids carry this so a resumed thread's new
+    /// requests never reuse an earlier process's ids (and cards).
+    epoch: String,
 }
 
 impl Connection {
@@ -81,6 +85,13 @@ impl Connection {
     async fn request(&self, request: Request) -> Result<Value, PeerError> {
         self.peer
             .request_with_timeout(request.method, request.params, REQUEST_TIMEOUT)
+            .await
+    }
+
+    /// A request whose refusal is read from its `codexErrorInfo`.
+    async fn request_with_error_data(&self, request: Request) -> Result<Value, RoutedError> {
+        self.peer
+            .request_with_error_data(request.method, request.params, REQUEST_TIMEOUT)
             .await
     }
 
@@ -199,6 +210,7 @@ impl CodexHarness {
         };
         *inner.model.lock().expect("model poisoned") =
             settings.model.as_ref().map(|model| model.value.clone());
+        *inner.effort.lock().expect("effort poisoned") = settings.effort.clone();
         inner.hub.emit(Event::Settings {
             effective: settings,
         });
@@ -237,7 +249,15 @@ impl CodexHarness {
             });
             return Err(OpenError::NeedsSetup(reason));
         }
-        let sha256 = manifest::binary_sha256(&executable).ok();
+        // Hashed in chunks off the async workers: the ChatGPT app's Codex is
+        // hundreds of megabytes.
+        let sha256 = {
+            let executable = executable.clone();
+            tokio::task::spawn_blocking(move || manifest::binary_sha256(&executable))
+                .await
+                .ok()
+                .and_then(Result::ok)
+        };
         if let (Some(pinned), Some(found)) = (&self.config.pinned_sha256, &sha256)
             && pinned != found
         {
@@ -250,10 +270,6 @@ impl CodexHarness {
             });
             return Err(OpenError::NeedsSetup(reason));
         }
-        let surface = match &sha256 {
-            Some(sha256) => self.schema_surface(sha256).await,
-            None => None,
-        };
 
         let StdioProcess { peer, control, .. } =
             spawn_stdio_process(&self.config.launch, vec!["app-server".into()])
@@ -283,6 +299,18 @@ impl CodexHarness {
             .await
             .map_err(driver_error)?;
 
+        // The schema is keyed by the binary and the version it reports; a
+        // version below the floor is refused without one.
+        let surface = match &sha256 {
+            Some(sha256)
+                if version
+                    .as_ref()
+                    .is_none_or(|version| version >= &manifest::CORE_FLOOR) =>
+            {
+                self.schema_surface(sha256, version.as_ref()).await
+            }
+            _ => None,
+        };
         let manifest = manifest::build_manifest(version.as_ref(), sha256.clone(), surface.as_ref());
         let health = match &manifest.tier {
             CompatTier::Supported => RuntimeHealth::Ready,
@@ -315,6 +343,7 @@ impl CodexHarness {
             control,
             sessions: StdMutex::new(HashMap::new()),
             availability: manifest.availability,
+            epoch: connection_epoch(),
         });
         tokio::spawn(dispatch(
             Arc::downgrade(&connection),
@@ -324,9 +353,13 @@ impl CodexHarness {
         Ok(connection)
     }
 
-    /// Generates (or reads cached) protocol schema for this binary.
-    async fn schema_surface(&self, sha256: &str) -> Option<SchemaSurface> {
-        let dir = manifest::schema_cache_dir(&self.config.cache_root, sha256);
+    /// Generates (or reads cached) protocol schema for this binary and version.
+    async fn schema_surface(
+        &self,
+        sha256: &str,
+        version: Option<&Version>,
+    ) -> Option<SchemaSurface> {
+        let dir = manifest::schema_cache_dir(&self.config.cache_root, sha256, version);
         if let Ok(surface) = manifest::read_schema_dir(&dir) {
             return Some(surface);
         }
@@ -712,6 +745,9 @@ struct SessionInner {
     turn_sequence: AtomicU64,
     open_boundary: StdMutex<OpenBoundary>,
     model: StdMutex<Option<String>>,
+    /// The thread's reasoning effort, from its latest settings (`None`: the
+    /// model's default).
+    effort: StdMutex<Option<String>>,
     queue: StdMutex<Vec<QueuedInput>>,
     /// Background terminals still running, from `thread/backgroundTerminals/list`.
     terminals: StdMutex<Vec<inline_agent_bridge::harness::ChildRef>>,
@@ -734,11 +770,15 @@ impl SessionInner {
         Ok(Arc::new(Self {
             hub: EventHub::new(key.clone(), DEFAULT_HUB_CAPACITY),
             key,
-            mapper: StdMutex::new(CodexMapper::new(thread.clone())),
+            mapper: StdMutex::new(CodexMapper::for_connection(
+                thread.clone(),
+                connection.epoch.clone(),
+            )),
             turn_sequence: AtomicU64::new(0),
             open_boundary: StdMutex::new(OpenBoundary::default()),
             thread,
             model: StdMutex::new(None),
+            effort: StdMutex::new(None),
             queue: StdMutex::new(Vec::new()),
             terminals: StdMutex::new(Vec::new()),
             connection: Arc::downgrade(connection),
@@ -792,10 +832,13 @@ impl SessionInner {
 
     fn emit_all(&self, events: Vec<Event>) {
         for event in events {
-            if let Event::Settings { effective } = &event
-                && let Some(model) = &effective.model
-            {
-                *self.model.lock().expect("model poisoned") = Some(model.value.clone());
+            if let Event::Settings { effective } = &event {
+                if let Some(model) = &effective.model {
+                    *self.model.lock().expect("model poisoned") = Some(model.value.clone());
+                }
+                // Each settings event is the whole thread's: no effort is
+                // the model's default.
+                *self.effort.lock().expect("effort poisoned") = effective.effort.clone();
             }
             if let Event::Queue { entries } = &event {
                 *self.queue.lock().expect("queue poisoned") = entries.clone();
@@ -1255,7 +1298,10 @@ impl Session for CodexSession {
             if let Some(note) = note {
                 self.connection.request(note).await.map_err(send_error)?;
             }
-            let response = self.connection.request(request).await.map_err(send_error)?;
+            let response = match self.connection.request_with_error_data(request).await {
+                Ok(response) => response,
+                Err(refused) => return self.refused(input, active, refused).await,
+            };
             let disposition = match &input.delivery {
                 Delivery::Turn => {
                     let turn = response
@@ -1359,6 +1405,7 @@ impl Session for CodexSession {
                 )
             };
             let model = self.inner.model.lock().expect("model poisoned").clone();
+            let effort = self.inner.effort.lock().expect("effort poisoned").clone();
             let request = op_request(
                 &self.inner.thread,
                 TurnFacts {
@@ -1366,6 +1413,7 @@ impl Session for CodexSession {
                     last_finished: last_finished.as_ref(),
                 },
                 model.as_deref(),
+                effort.as_deref(),
                 &op,
             )?;
             let response = self.connection.request(request).await.map_err(op_error)?;
@@ -1459,6 +1507,87 @@ impl Session for CodexSession {
 }
 
 impl CodexSession {
+    /// A refused delivery. Codex's answer to a steer is newer than the
+    /// notifications still being mapped, so the running turn follows it, and
+    /// the bridge retries: a new turn when none runs, a steer into the one
+    /// that does. A review or compaction takes no steering: the input waits
+    /// in Codex's queue and runs when it ends, as the Codex TUI queues it.
+    async fn refused(
+        &self,
+        input: Input,
+        active: Option<TurnId>,
+        refused: RoutedError,
+    ) -> Result<InputReceipt, SendError> {
+        let refusal = steer_refusal(&refused);
+        match (refusal, &input.delivery) {
+            (Some(SteerRefusal::NotSteerable), Delivery::Turn | Delivery::Steer { .. }) => {
+                let active = match &input.delivery {
+                    Delivery::Steer { expected_turn, .. } => Some(expected_turn.clone()),
+                    _ => active,
+                };
+                self.queue_behind_turn(input, active, refused.error).await
+            }
+            (Some(SteerRefusal::NoActiveTurn), Delivery::Steer { expected_turn, .. }) => {
+                self.inner
+                    .mapper
+                    .lock()
+                    .expect("mapper poisoned")
+                    .steer_refused(expected_turn, None);
+                Err(SendError::TurnMismatch { active: None })
+            }
+            (Some(SteerRefusal::OtherTurn(running)), Delivery::Steer { expected_turn, .. }) => {
+                self.inner
+                    .mapper
+                    .lock()
+                    .expect("mapper poisoned")
+                    .steer_refused(expected_turn, running.clone());
+                Err(SendError::TurnMismatch { active: running })
+            }
+            _ => Err(send_error(refused.error)),
+        }
+    }
+
+    /// Puts input Codex could not take into the running turn in its native
+    /// queue. Without one, the input is refused as busy behind that turn.
+    async fn queue_behind_turn(
+        &self,
+        input: Input,
+        active: Option<TurnId>,
+        error: PeerError,
+    ) -> Result<InputReceipt, SendError> {
+        if !self
+            .connection
+            .availability
+            .delivery(inline_agent_bridge::harness::DeliveryKind::Queue)
+            .is_supported()
+        {
+            return Err(match active {
+                Some(active) => SendError::Busy { active },
+                None => send_error(error),
+            });
+        }
+        let queued = Input {
+            delivery: Delivery::Queue,
+            ..input
+        };
+        let (note, request) = input_request(&self.inner.thread, &queued);
+        if let Some(note) = note {
+            self.connection.request(note).await.map_err(send_error)?;
+        }
+        let response = self.connection.request(request).await.map_err(send_error)?;
+        Ok(InputReceipt {
+            input: queued.id,
+            disposition: InputDisposition::Queued {
+                entry: response
+                    .pointer("/queuedSubmission/id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| QueueEntryId::new(id).ok()),
+            },
+            native: response,
+            acceptance: inline_agent_bridge::harness::Acceptance::Accepted,
+        })
+    }
+
     async fn edit_queue(&self, action: &QueueOp) -> Result<OpOutcome, OpError> {
         let entries = self.inner.refresh_queue().await.map_err(op_error)?;
         match action {
@@ -1547,6 +1676,62 @@ fn open_error(error: PeerError) -> OpenError {
         }
     }
     OpenError::Driver(peer_to_driver(error))
+}
+
+/// A random id for one app-server process (see [`Connection::epoch`]).
+fn connection_epoch() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..8].to_owned()
+}
+
+/// Why Codex refused a steer (or the steer half of `turn/start`), when the
+/// bridge can do better than report it.
+#[derive(Debug, PartialEq)]
+enum SteerRefusal {
+    /// The turn ended, or is ending, before the steer reached it.
+    NoActiveTurn,
+    /// Another turn runs (the one Codex named, when it did).
+    OtherTurn(Option<TurnId>),
+    /// A review or compaction runs; it takes no steering.
+    NotSteerable,
+}
+
+/// Reads a refusal: `codexErrorInfo` in the error's data first, then Codex's
+/// messages (`turn_processor.rs`), which older versions send alone.
+fn steer_refusal(refused: &RoutedError) -> Option<SteerRefusal> {
+    let PeerError::Remote(remote) = &refused.error else {
+        return None;
+    };
+    let info = refused
+        .data
+        .as_ref()
+        .and_then(|data| data.get("codexErrorInfo"))
+        .and_then(|info| {
+            info.as_str()
+                .or_else(|| info.as_object()?.keys().next().map(String::as_str))
+        });
+    if info == Some("activeTurnNotSteerable") {
+        return Some(SteerRefusal::NotSteerable);
+    }
+    let message = remote.message.to_ascii_lowercase();
+    // "cannot steer a review turn" / "cannot steer a compact turn"; a
+    // refused `turn/start` reports `ActiveTurnNotSteerable { .. }` in text.
+    if message.starts_with("cannot steer a ") || message.contains("activeturnnotsteerable") {
+        return Some(SteerRefusal::NotSteerable);
+    }
+    if message.contains("no active turn to steer") {
+        return Some(SteerRefusal::NoActiveTurn);
+    }
+    // "expected active turn id `x` but found `y`"
+    if message.contains("expected") && message.contains("turn") {
+        let running = remote
+            .message
+            .split("but found `")
+            .nth(1)
+            .and_then(|rest| rest.split('`').next())
+            .and_then(|turn| TurnId::new(turn).ok());
+        return Some(SteerRefusal::OtherTurn(running));
+    }
+    None
 }
 
 /// A request lost in flight may or may not have been applied: never retried.
@@ -1959,6 +2144,323 @@ done
             run_one_turn(&harness, dir.path()).await,
             TurnOutcome::Completed
         );
+    }
+
+    /// A scripted app-server with a schema (so the native queue and modes
+    /// are available) and a thread whose effort is `high`. `turn/steer`
+    /// refuses: during a review for input "review-steer", otherwise with
+    /// "no active turn to steer". `after` runs once a turn starts.
+    #[cfg(unix)]
+    fn steering_app_server(dir: &std::path::Path, after: &str) -> CodexHarness {
+        use std::os::unix::fs::PermissionsExt;
+        let methods = [
+            "thread/start",
+            "thread/resume",
+            "turn/start",
+            "turn/steer",
+            "turn/interrupt",
+            "thread/queue/add",
+            "thread/inject_items",
+            "thread/settings/update",
+            "collaborationMode/list",
+        ];
+        let client_requests = json!({"oneOf": methods
+            .iter()
+            .map(|method| json!({"properties": {"method": {"enum": [method]}}}))
+            .collect::<Vec<_>>()});
+        let script = r#"#!/bin/sh
+if [ "$1" = "app-server" ] && [ "$2" = "generate-json-schema" ]; then
+  printf '%s' 'CLIENT_REQUESTS' > "$5/ClientRequest.json"
+  printf '%s' '{"oneOf":[]}' > "$5/ServerRequest.json"
+  printf '%s' '{"oneOf":[]}' > "$5/ServerNotification.json"
+  exit 0
+fi
+[ "$1" = "app-server" ] && [ -z "$2" ] || exit 1
+while IFS= read -r line; do
+  case "$line" in *'"id":'*) printf '%s\n' "$line" >> "$0.requests" ;; esac
+  id=$(printf '%s\n' "$line" | grep -o '"id":[0-9]*' | head -n 1 | cut -d: -f2)
+  case "$line" in
+    *'"result":'*) ;;
+    *'"method":"initialize"'*)
+      printf '{"id":%s,"result":{}}\n' "$id" ;;
+    *'"method":"thread/start"'*)
+      printf '{"id":%s,"result":{"thread":{"id":"thr-1","turns":[]},"model":"gpt-5","reasoningEffort":"high"}}\n' "$id" ;;
+    *'"method":"turn/start"'*)
+      printf '{"id":%s,"result":{"turn":{"id":"turn-1","status":"inProgress"}}}\n' "$id"
+      printf '{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"turn-1","status":"inProgress"}}}\n'
+      AFTER ;;
+    *'"method":"turn/steer"'*'review-steer'*)
+      printf '{"id":%s,"error":{"code":-32600,"message":"cannot steer a review turn","data":{"message":"cannot steer a review turn","codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}},"additionalDetails":null}}}\n' "$id" ;;
+    *'"method":"turn/steer"'*)
+      printf '{"id":%s,"error":{"code":-32600,"message":"no active turn to steer"}}\n' "$id" ;;
+    *'"method":"thread/queue/add"'*)
+      printf '{"id":%s,"result":{"queuedSubmission":{"id":"q-1"}}}\n' "$id" ;;
+    *)
+      [ -n "$id" ] && printf '{"id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#
+        .replace("CLIENT_REQUESTS", &client_requests.to_string())
+        .replace("AFTER", if after.is_empty() { ":" } else { after });
+        let executable = dir.join("codex");
+        std::fs::write(&executable, script).expect("write fake app-server");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("make fake app-server executable");
+        CodexHarness::new(CodexHarnessConfig {
+            launch: CodexLaunchConfig {
+                executable,
+                version_policy: crate::CodexVersionPolicy::Any,
+                ..CodexLaunchConfig::default()
+            },
+            source: ExecutableSource::Path,
+            pinned_sha256: None,
+            bridge_version: "0.0.0-test".to_owned(),
+            cache_root: dir.join("cache"),
+        })
+    }
+
+    #[cfg(unix)]
+    fn start_spec(folder: &std::path::Path) -> OpenSpec {
+        OpenSpec {
+            mode: OpenMode::Start,
+            folder: folder.to_owned(),
+            settings: Default::default(),
+            instructions: None,
+            title: None,
+            after: None,
+            output_mode: Default::default(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn owner_input(id: &str, text: &str, delivery: Delivery) -> Input {
+        use inline_agent_bridge::harness::{InputContent, InputId, Origin, UserId};
+        Input {
+            id: InputId::new(id).expect("input id"),
+            content: InputContent::text(text),
+            origin: Origin::Owner { user: UserId(1) },
+            delivery,
+        }
+    }
+
+    /// Waits for the fake app-server to have logged a line containing `needle`.
+    #[cfg(unix)]
+    async fn logged(dir: &std::path::Path, needle: &str) -> String {
+        let path = dir.join("codex.requests");
+        for _ in 0..100 {
+            let log = std::fs::read_to_string(&path).unwrap_or_default();
+            if log.contains(needle) {
+                return log;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!(
+            "`{needle}` never reached the app-server:\n{}",
+            std::fs::read_to_string(&path).unwrap_or_default()
+        );
+    }
+
+    /// Live repro (audit B1): Codex numbers requests from 0 in every
+    /// process, so after a restart a thread's first approval had the same
+    /// interaction id, and the same card, as an old closed one.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_new_app_server_process_never_reuses_an_interaction_id() {
+        use futures_util::StreamExt;
+        use inline_agent_bridge::harness::{DecisionId, InteractionResponse, UserId};
+        let approval = r#"printf '%s\n' '{"id":0,"method":"item/commandExecution/requestApproval","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"c1","command":"ls","availableDecisions":["accept","cancel"]}}'"#;
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let dir = tempfile::tempdir().expect("temporary directory");
+            let harness = steering_app_server(dir.path(), approval);
+            let session = harness.open(start_spec(dir.path())).await.expect("open");
+            let mut events = session.events();
+            session
+                .send(owner_input("in-1", "hello", Delivery::Turn))
+                .await
+                .expect("send");
+            let interaction = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(envelope) = events.next().await {
+                    if let Event::Interaction(interaction) = envelope.event {
+                        return interaction.id;
+                    }
+                }
+                panic!("the event stream ended before the approval");
+            })
+            .await
+            .expect("the approval must reach the session");
+            assert!(interaction.as_str().ends_with(":0"), "{interaction}");
+            assert_eq!(
+                session.live_work().interactions,
+                std::slice::from_ref(&interaction)
+            );
+            // The answer goes back to Codex's own request id.
+            session
+                .control(Op::Answer {
+                    interaction: interaction.clone(),
+                    response: InteractionResponse::Decision {
+                        decision: DecisionId::new("accept").expect("decision"),
+                        message: None,
+                    },
+                    by: UserId(1),
+                })
+                .await
+                .expect("answer");
+            logged(dir.path(), r#"{"id":0,"result":{"decision":"accept"}}"#).await;
+            ids.push(interaction);
+            harness
+                .connection()
+                .await
+                .expect("connection")
+                .control
+                .shutdown()
+                .await
+                .expect("shutdown");
+        }
+        assert_ne!(ids[0], ids[1]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_steer_codex_cannot_take_now_waits_in_its_queue_or_starts_the_next_turn() {
+        use inline_agent_bridge::harness::{ModeId, SteerPriority};
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let harness = steering_app_server(dir.path(), "");
+        let session = harness.open(start_spec(dir.path())).await.expect("open");
+        let turn = TurnId::new("turn-1").expect("turn");
+        let steer = || Delivery::Steer {
+            expected_turn: turn.clone(),
+            priority: SteerPriority::Next,
+        };
+        let started = session
+            .send(owner_input("in-1", "hello", Delivery::Turn))
+            .await
+            .expect("send");
+        assert_eq!(
+            started.disposition,
+            InputDisposition::Started { turn: turn.clone() }
+        );
+
+        // A review runs: Codex takes no steering, so the input waits in its
+        // queue and runs when the review ends, as the Codex TUI queues it.
+        let queued = session
+            .send(owner_input("in-2", "review-steer", steer()))
+            .await
+            .expect("queued instead of refused");
+        assert_eq!(
+            queued.disposition,
+            InputDisposition::Queued {
+                entry: Some(QueueEntryId::new("q-1").expect("entry"))
+            }
+        );
+        let log = logged(dir.path(), "thread/queue/add").await;
+        let queue_add = log
+            .lines()
+            .find(|line| line.contains("thread/queue/add"))
+            .expect("queue add");
+        assert!(queue_add.contains("inline-agent-bridge:v2:in-2"));
+        assert!(log.contains("thread/inject_items"));
+
+        // The turn ended before the steer reached it: the bridge's retry as
+        // a new turn is not refused against the turn Inline saw last.
+        let late = session
+            .send(owner_input("in-3", "late-steer", steer()))
+            .await
+            .expect_err("no turn to steer");
+        assert!(matches!(late, SendError::TurnMismatch { active: None }));
+        assert!(session.live_work().turn.is_none());
+        let retried = session
+            .send(owner_input("in-3", "late-steer", Delivery::Turn))
+            .await
+            .expect("a new turn");
+        assert!(matches!(
+            retried.disposition,
+            InputDisposition::Started { .. }
+        ));
+
+        // Switching modes keeps the thread's effort.
+        session
+            .control(Op::Mode {
+                mode: ModeId::new("plan").expect("mode"),
+            })
+            .await
+            .expect("mode");
+        let log = logged(dir.path(), "collaborationMode").await;
+        let update = log
+            .lines()
+            .find(|line| line.contains("thread/settings/update"))
+            .expect("settings update");
+        assert!(
+            update.contains(r#""settings":{"model":"gpt-5","reasoning_effort":"high"}"#),
+            "{update}"
+        );
+        harness
+            .connection()
+            .await
+            .expect("connection")
+            .control
+            .shutdown()
+            .await
+            .expect("shutdown");
+    }
+
+    #[test]
+    fn steer_refusals_read_codex_error_info_first() {
+        let refused = |message: &str, data: Option<Value>| RoutedError {
+            error: PeerError::Remote(crate::peer::RemoteError {
+                code: Some(-32600),
+                message: message.to_owned(),
+            }),
+            data,
+        };
+        // The structured reason wins over any wording.
+        assert_eq!(
+            steer_refusal(&refused(
+                "something new",
+                Some(
+                    json!({"codexErrorInfo": {"activeTurnNotSteerable": {"turnKind": "compact"}}})
+                )
+            )),
+            Some(SteerRefusal::NotSteerable)
+        );
+        assert_eq!(
+            steer_refusal(&refused("cannot steer a compact turn", None)),
+            Some(SteerRefusal::NotSteerable)
+        );
+        // `turn/start` steers into a running turn and says so in text.
+        assert_eq!(
+            steer_refusal(&refused(
+                "failed to submit turn input: ActiveTurnNotSteerable { turn_kind: Review }",
+                None
+            )),
+            Some(SteerRefusal::NotSteerable)
+        );
+        assert_eq!(
+            steer_refusal(&refused("no active turn to steer", None)),
+            Some(SteerRefusal::NoActiveTurn)
+        );
+        assert_eq!(
+            steer_refusal(&refused(
+                "expected active turn id `turn-1` but found `turn-2`",
+                None
+            )),
+            Some(SteerRefusal::OtherTurn(Some(
+                TurnId::new("turn-2").unwrap()
+            )))
+        );
+        assert_eq!(
+            steer_refusal(&refused("input must not be empty", None)),
+            None
+        );
+        assert_eq!(steer_refusal(&RoutedError::from(PeerError::Closed)), None);
+    }
+
+    #[test]
+    fn each_connection_has_its_own_epoch() {
+        let first = connection_epoch();
+        assert_eq!(first.len(), 8);
+        assert!(first.chars().all(|character| character.is_ascii_hexdigit()));
+        assert_ne!(first, connection_epoch());
     }
 
     #[test]

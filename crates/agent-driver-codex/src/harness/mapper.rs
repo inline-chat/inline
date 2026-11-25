@@ -14,8 +14,8 @@ use inline_agent_bridge::harness::{
     Decision, DeltaStream, EffectiveSettings, Event, FieldId, FieldInput, FieldOption,
     FileChangeKind, FileDiff, FormField, InputFact, InputId, Interaction, InteractionId,
     InteractionKind, InteractionResponse, Item, ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus,
-    ItemUpdate, MessageRole, Notice, NoticeLevel, OpError, QuestionForm, RunState, TokenUsage,
-    TurnPhase, UsageUpdate, UserId, WaitingOn,
+    ItemUpdate, LIVE_STATUS_NOTICE, MessageRole, Notice, NoticeLevel, OpError, QuestionForm,
+    RunState, TokenUsage, TurnPhase, UsageUpdate, UserId, WaitingOn,
 };
 use inline_agent_bridge::{
     AgentMessagePhase, DriverSettingOption, PlanStep, PlanStepStatus, TurnId, TurnOutcome,
@@ -108,6 +108,11 @@ struct ItemMemo {
 #[derive(Debug)]
 pub(crate) struct CodexMapper {
     thread: String,
+    /// Prefix that makes this connection's interaction ids unique. Codex
+    /// numbers its requests from 0 in every app-server process, and the
+    /// bridge derives a card's message id from the interaction id, so a
+    /// resumed thread must never reuse an earlier process's ids.
+    epoch: String,
     active_turn: Option<TurnId>,
     /// The main thread's latest completed, failed or interrupted turn
     /// (`thread/sample` names it as `expectedTurnId`).
@@ -128,9 +133,19 @@ pub(crate) struct CodexMapper {
 }
 
 impl CodexMapper {
+    /// A mapper whose interaction ids are the bare JSON-RPC request ids, as
+    /// the contract fixtures write them.
+    #[cfg(test)]
     pub(crate) fn new(thread: impl Into<String>) -> Self {
+        Self::for_connection(thread, "")
+    }
+
+    /// A mapper for one app-server connection: its interaction ids are
+    /// `"{epoch}:{request id}"`. An empty epoch keeps the bare request id.
+    pub(crate) fn for_connection(thread: impl Into<String>, epoch: impl Into<String>) -> Self {
         Self {
             thread: thread.into(),
+            epoch: epoch.into(),
             active_turn: None,
             last_finished_turn: None,
             consumed: HashMap::new(),
@@ -225,6 +240,21 @@ impl CodexMapper {
         Vec::new()
     }
 
+    /// Codex refused a steer for `expected` because `running` is the turn
+    /// it runs (`None`: none). Its reply is newer than notifications not yet
+    /// mapped, so the running turn follows it and the bridge's retry is not
+    /// refused against a stale turn; the old turn's own completion still
+    /// arrives and is reported as usual.
+    pub(crate) fn steer_refused(&mut self, expected: &TurnId, running: Option<TurnId>) {
+        match running {
+            None if self.active_turn.as_ref() == Some(expected) => self.active_turn = None,
+            Some(turn) if self.last_finished_turn.as_ref() != Some(&turn) && !self.lost => {
+                self.active_turn = Some(turn);
+            }
+            _ => {}
+        }
+    }
+
     /// Pending interactions, for `live_work`.
     pub(crate) fn pending_interactions(&self) -> Vec<InteractionId> {
         let mut ids: Vec<_> = self
@@ -249,6 +279,16 @@ impl CodexMapper {
             None => true,
             Some(thread) => thread == self.thread || self.children.contains_key(thread),
         }
+    }
+
+    /// The interaction id of the server request `rpc_id` on this connection.
+    fn interaction_key(&self, rpc_id: Option<&Value>) -> Option<String> {
+        let id = request_id_string(rpc_id)?;
+        Some(if self.epoch.is_empty() {
+            id
+        } else {
+            format!("{}:{id}", self.epoch)
+        })
     }
 
     fn parent_of(&self, params: &Value) -> Option<ChildRef> {
@@ -416,6 +456,9 @@ impl CodexMapper {
                     .with_parent(parent),
                 ));
             }
+            // The chat's usage and context gauge are the main thread's; a
+            // sub-agent's thread counts its own context.
+            "thread/tokenUsage/updated" if parent.is_some() => {}
             "thread/tokenUsage/updated" => {
                 let usage = params.get("tokenUsage").unwrap_or(&Value::Null);
                 events.push(Event::Usage {
@@ -488,20 +531,24 @@ impl CodexMapper {
                         };
                         events.push(Event::State { state });
                     }
+                    // Codex marks the thread after any error event: nothing
+                    // runs and nothing waits. The error itself arrives as
+                    // `error` and with the failed turn, so this is state, not
+                    // another callout. A turn Inline still sees running ends
+                    // with its own completion.
                     Some("systemError") => {
-                        let mut event = notice(NoticeLevel::Error, method, params);
-                        if let Event::Notice(notice) = &mut event {
-                            notice.message = string(params.pointer("/status/message"))
-                                .or_else(|| string(params.pointer("/status/error/message")))
-                                .or_else(|| Some("Codex reported a system error".to_owned()));
+                        if self.active_turn.is_none() {
+                            events.push(Event::State {
+                                state: RunState::Idle,
+                            });
                         }
-                        events.push(event);
+                        events.push(notice(NoticeLevel::Info, method, params));
                     }
                     _ => events.push(notice(NoticeLevel::Info, method, params)),
                 }
             }
             "serverRequest/resolved" => {
-                let Some(id) = request_id_string(params.get("requestId")) else {
+                let Some(id) = self.interaction_key(params.get("requestId")) else {
                     return mapped;
                 };
                 if self.answered.remove(&id) {
@@ -557,13 +604,18 @@ impl CodexMapper {
                     .with_parent(parent),
                 ));
             }
+            // A retried error heads the progress ("Reconnecting… 2/5")
+            // instead of a silent "Working"; a final one is a callout.
+            "error" if params.get("willRetry").and_then(Value::as_bool) == Some(true) => {
+                let mut event = notice(NoticeLevel::Info, LIVE_STATUS_NOTICE, params);
+                if let Event::Notice(notice) = &mut event {
+                    notice.message = string(params.pointer("/error/message"))
+                        .map(|message| retry_status(&message));
+                }
+                events.push(event);
+            }
             "error" => {
-                let level = if params.get("willRetry").and_then(Value::as_bool) == Some(true) {
-                    NoticeLevel::Warning
-                } else {
-                    NoticeLevel::Error
-                };
-                let mut event = notice(level, method, params);
+                let mut event = notice(NoticeLevel::Error, method, params);
                 if let Event::Notice(notice) = &mut event {
                     notice.message = string(params.pointer("/error/message"));
                 }
@@ -845,7 +897,7 @@ impl CodexMapper {
         if !self.owns_thread(params.get("threadId").and_then(Value::as_str)) {
             return RequestMapped::NotMine;
         }
-        let Some(id) = request_id_string(Some(rpc_id)) else {
+        let Some(id) = self.interaction_key(Some(rpc_id)) else {
             return RequestMapped::NotMine;
         };
         let mut turn = turn_id(params.get("turnId"));
@@ -863,15 +915,20 @@ impl CodexMapper {
         let (kind, pending, decisions) = match method {
             "item/commandExecution/requestApproval" => {
                 let decisions = decisions::command_decisions(params);
+                let subject = if params.get("kind").and_then(Value::as_str) == Some("writeStdin") {
+                    write_stdin_subject(params)
+                } else {
+                    ApprovalSubject::Command {
+                        command: command_text(params.get("command")).unwrap_or_default(),
+                        cwd: string(params.get("cwd")).map(PathBuf::from),
+                        reason: string(params.get("reason")),
+                        network_host: string(params.pointer("/networkApprovalContext/host")),
+                        permissions: permissions_summary(params.get("additionalPermissions")),
+                    }
+                };
                 (
                     InteractionKind::Approval {
-                        subject: ApprovalSubject::Command {
-                            command: command_text(params.get("command")).unwrap_or_default(),
-                            cwd: string(params.get("cwd")).map(PathBuf::from),
-                            reason: string(params.get("reason")),
-                            network_host: string(params.pointer("/networkApprovalContext/host")),
-                            permissions: permissions_summary(params.get("additionalPermissions")),
-                        },
+                        subject,
                         decisions: decisions.clone(),
                     },
                     Pending::Command,
@@ -1237,7 +1294,25 @@ fn typed_answer(kind: &str, values: &[String]) -> Value {
     let first = values.first().cloned().unwrap_or_default();
     match kind {
         "boolean" => Value::Bool(matches!(first.as_str(), "true" | "yes" | "on" | "1")),
-        "number" | "integer" => first
+        // An integer goes out as one (`5`, never `5.0`): servers read the
+        // field into an integer type.
+        "integer" => {
+            let text = first.trim();
+            text.parse::<i64>()
+                .map(serde_json::Number::from)
+                .or_else(|_| text.parse::<u64>().map(serde_json::Number::from))
+                .ok()
+                .or_else(|| {
+                    // "5.0" is still the integer 5; "5.5" is not an integer.
+                    text.parse::<f64>()
+                        .ok()
+                        .filter(|value| value.fract() == 0.0 && value.abs() < 9.0e15)
+                        .map(|value| serde_json::Number::from(value as i64))
+                })
+                .map_or(Value::String(first), Value::Number)
+        }
+        "number" => first
+            .trim()
             .parse::<f64>()
             .ok()
             .and_then(serde_json::Number::from_f64)
@@ -1304,6 +1379,114 @@ fn user_input_form(params: &Value) -> Option<QuestionForm> {
         asynchronous: params.get("isBlocking").and_then(Value::as_bool) == Some(false),
         auto_resolution_ms: params.get("autoResolutionMs").and_then(Value::as_u64),
     })
+}
+
+/// Codex asking to send input to a terminal it already runs (`kind:
+/// "writeStdin"`), named as the Codex TUI names it: "send input to terminal
+/// <pid>", with the input escaped so control keys show. Codex's `command`
+/// is the shell-joined `write_stdin --session-id <pid> <input>`.
+fn write_stdin_subject(params: &Value) -> ApprovalSubject {
+    let words = params
+        .get("command")
+        .and_then(Value::as_str)
+        .map(shell_words)
+        .unwrap_or_default();
+    let process = words
+        .iter()
+        .position(|word| word == "--session-id")
+        .and_then(|at| words.get(at + 1))
+        .map(|pid| sanitized(pid, 40))
+        .filter(|pid| !pid.trim().is_empty());
+    let input = (words.first().map(String::as_str) == Some("write_stdin") && words.len() >= 4)
+        .then(|| words.last())
+        .flatten();
+    let title = match process {
+        Some(pid) => format!("Send input to terminal {pid}?"),
+        None => "Send input to a running terminal?".to_owned(),
+    };
+    let mut detail = Vec::new();
+    if let Some(input) = input {
+        detail.push(format!("Input: {}", escaped_input(input)));
+    }
+    if let Some(reason) = string(params.get("reason")) {
+        detail.push(format!("Reason: {}", sanitized(&reason, 2_000)));
+    }
+    ApprovalSubject::Other {
+        title,
+        detail: (!detail.is_empty()).then(|| detail.join("\n")),
+    }
+}
+
+/// Terminal input as a quoted, escaped string (`"y\n"`, `"\u{3}"`), so
+/// control keys and direction overrides are visible instead of acting.
+fn escaped_input(input: &str) -> String {
+    let mut shown = String::from("\"");
+    for (index, character) in input.chars().enumerate() {
+        if index == MAX_TOOL_PARAM_CHARS {
+            shown.push('…');
+            break;
+        }
+        if matches!(character, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}') {
+            shown.extend(character.escape_unicode());
+        } else {
+            shown.extend(character.escape_debug());
+        }
+    }
+    shown.push('"');
+    shown
+}
+
+/// POSIX shell words: single quotes are literal, double quotes take `\`
+/// escapes of `"`, `\`, `$` and `` ` ``, and a bare `\` escapes the next
+/// character. Enough to read back what Codex shell-joined.
+fn shell_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut chars = text.chars();
+    while let Some(character) = chars.next() {
+        match character {
+            ' ' | '\t' | '\n' => {
+                words.extend(word.take());
+            }
+            '\'' => {
+                let word = word.get_or_insert_with(String::new);
+                for quoted in chars.by_ref() {
+                    if quoted == '\'' {
+                        break;
+                    }
+                    word.push(quoted);
+                }
+            }
+            '"' => {
+                let word = word.get_or_insert_with(String::new);
+                while let Some(quoted) = chars.next() {
+                    match quoted {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some(escaped @ ('"' | '\\' | '$' | '`')) => word.push(escaped),
+                            Some('\n') | None => {}
+                            Some(other) => {
+                                word.push('\\');
+                                word.push(other);
+                            }
+                        },
+                        other => word.push(other),
+                    }
+                }
+            }
+            '\\' => {
+                let word = word.get_or_insert_with(String::new);
+                if let Some(escaped) = chars.next()
+                    && escaped != '\n'
+                {
+                    word.push(escaped);
+                }
+            }
+            other => word.get_or_insert_with(String::new).push(other),
+        }
+    }
+    words.extend(word);
+    words
 }
 
 /// A form that asks for nothing but a yes or no: no schema, or an object
@@ -1679,6 +1862,7 @@ pub(crate) fn item_body(item: &Value) -> (ItemBody, ItemStatus, Option<AgentMess
                 child,
                 action: string(item.get("tool")),
                 prompt: string(item.get("prompt")),
+                output: None,
             }
         }
         "subAgentActivity" => match child_refs(item).into_iter().next() {
@@ -1686,13 +1870,14 @@ pub(crate) fn item_body(item: &Value) -> (ItemBody, ItemStatus, Option<AgentMess
                 child,
                 action: string(item.get("kind")),
                 prompt: string(item.get("agentPath")),
+                output: None,
             },
             None => unknown_body(kind, item),
         },
         "webSearch" => ItemBody::Tool {
             name: "web_search".to_owned(),
             server: None,
-            input: json!({"query": item.get("query").cloned().unwrap_or(Value::Null)}),
+            input: web_search_input(item),
             output: None,
             error: None,
         },
@@ -1710,10 +1895,14 @@ pub(crate) fn item_body(item: &Value) -> (ItemBody, ItemStatus, Option<AgentMess
             output: None,
             error: None,
         },
+        // The saved file goes to the chat as a photo (bridge v1 attached it).
         "imageGeneration" => ItemBody::Tool {
             name: "image_generation".to_owned(),
             server: None,
-            input: Value::Null,
+            input: match string(item.get("savedPath")) {
+                Some(path) => json!({ "saved_path": path }),
+                None => Value::Null,
+            },
             output: string(item.get("revisedPrompt")),
             error: None,
         },
@@ -1733,12 +1922,70 @@ pub(crate) fn item_body(item: &Value) -> (ItemBody, ItemStatus, Option<AgentMess
     let phase = (kind == "agentMessage")
         .then(|| match item.get("phase").and_then(Value::as_str) {
             Some("commentary") => Some(AgentMessagePhase::Commentary),
-            Some("final_answer" | "finalAnswer") => Some(AgentMessagePhase::FinalAnswer),
+            // A partial answer is answer text the turn goes on after; the
+            // renderer joins a turn's answer pieces in order.
+            Some("final_answer" | "finalAnswer" | "partial_answer" | "partialAnswer") => {
+                Some(AgentMessagePhase::FinalAnswer)
+            }
             Some(_) => Some(AgentMessagePhase::Unknown),
             None => None,
         })
         .flatten();
     (body, status, phase)
+}
+
+/// What a web search did, keyed as tool rows read their argument
+/// (`pattern`, then `query`, then `url`): a search's query, the page it
+/// opened, or the pattern it looked for in a page. `action` names which,
+/// for "Searched the web for", "Opened" and "Searched for … in" wording.
+fn web_search_input(item: &Value) -> Value {
+    let action = item.get("action");
+    let query = string(item.get("query"));
+    let mut input = Map::new();
+    match action
+        .and_then(|action| action.get("type"))
+        .and_then(Value::as_str)
+    {
+        Some("search") => {
+            input.insert("action".to_owned(), json!("search"));
+            let queries = strings(action.and_then(|action| action.get("queries")));
+            let query = string(action.and_then(|action| action.get("query")))
+                .or(query)
+                .or_else(|| queries.first().cloned());
+            if let Some(query) = query {
+                input.insert("query".to_owned(), json!(query));
+            }
+            if queries.len() > 1 {
+                input.insert("queries".to_owned(), json!(queries));
+            }
+        }
+        Some("openPage") => {
+            input.insert("action".to_owned(), json!("openPage"));
+            if let Some(url) = string(action.and_then(|action| action.get("url"))).or(query) {
+                input.insert("url".to_owned(), json!(url));
+            }
+        }
+        Some("findInPage") => {
+            input.insert("action".to_owned(), json!("findInPage"));
+            if let Some(pattern) = string(action.and_then(|action| action.get("pattern"))) {
+                input.insert("pattern".to_owned(), json!(pattern));
+            }
+            if let Some(url) = string(action.and_then(|action| action.get("url"))) {
+                input.insert("url".to_owned(), json!(url));
+            }
+            if input.len() == 1
+                && let Some(query) = query
+            {
+                input.insert("query".to_owned(), json!(query));
+            }
+        }
+        _ => {
+            if let Some(query) = query {
+                input.insert("query".to_owned(), json!(query));
+            }
+        }
+    }
+    Value::Object(input)
 }
 
 fn unknown_body(kind: &str, item: &Value) -> ItemBody {
@@ -2010,9 +2257,32 @@ fn permissions_summary(permissions: Option<&Value>) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("; "))
 }
 
+/// A retry's status line: Codex's own words ("Reconnecting... 2/5"), first
+/// line only.
+fn retry_status(message: &str) -> String {
+    let line = message.lines().next().unwrap_or(message).trim();
+    if line.to_ascii_lowercase().starts_with("reconnecting")
+        || line.to_ascii_lowercase().starts_with("retrying")
+    {
+        line.to_owned()
+    } else {
+        format!("Retrying · {line}")
+    }
+}
+
 fn command_text(value: Option<&Value>) -> Option<String> {
     match value? {
-        Value::String(text) => Some(text.clone()),
+        // Codex joins the argv it runs ("/bin/zsh -lc 'cargo test'"); the
+        // command is the script, as the TUI shows it.
+        Value::String(text) => match shell_words(text).as_slice() {
+            [shell, flag, script]
+                if matches!(shell.rsplit('/').next(), Some("bash" | "zsh" | "sh"))
+                    && matches!(flag.as_str(), "-lc" | "-c") =>
+            {
+                Some(script.clone())
+            }
+            _ => Some(text.clone()),
+        },
         Value::Array(parts) => {
             let parts: Vec<String> = parts.iter().filter_map(|part| string(Some(part))).collect();
             Some(decisions::strip_bash_lc_and_escape(&parts))
@@ -2702,6 +2972,414 @@ mod tests {
         // Reported once.
         assert!(mapper.restore_inputs(&response).is_empty());
     }
+
+    fn command_approval(turn: &str) -> Value {
+        json!({
+            "threadId": "thread-1",
+            "turnId": turn,
+            "itemId": "cmd-1",
+            "command": "cargo test",
+            "availableDecisions": ["accept", "cancel"]
+        })
+    }
+
+    fn interaction_id(mapped: &RequestMapped) -> String {
+        match mapped {
+            RequestMapped::Interaction(events) => match events.first() {
+                Some(Event::Interaction(interaction)) => interaction.id.as_str().to_owned(),
+                other => panic!("expected an interaction, got {other:?}"),
+            },
+            other => panic!("expected an interaction, got {other:?}"),
+        }
+    }
+
+    /// Codex numbers requests from 0 in every app-server process, and the
+    /// bridge derives a card's message from the interaction id: after a
+    /// restart, request 0 must not be the old process's request 0.
+    #[test]
+    fn interaction_ids_are_unique_per_connection_and_map_back_to_the_request() {
+        let mut before = CodexMapper::for_connection("thread-1", "aaaa1111");
+        let mut after = CodexMapper::for_connection("thread-1", "bbbb2222");
+        let first = interaction_id(&before.server_request(
+            &json!(0),
+            "item/commandExecution/requestApproval",
+            &command_approval("turn-1"),
+        ));
+        let second = interaction_id(&after.server_request(
+            &json!(0),
+            "item/commandExecution/requestApproval",
+            &command_approval("turn-2"),
+        ));
+        assert_eq!(first, "aaaa1111:0");
+        assert_eq!(second, "bbbb2222:0");
+        assert_eq!(
+            after.pending_interactions(),
+            [InteractionId::new("bbbb2222:0").unwrap()]
+        );
+
+        // The answer goes to the native request id.
+        let plan = after
+            .answer(
+                &InteractionId::new(second).unwrap(),
+                &InteractionResponse::Decision {
+                    decision: DecisionId::new("accept").unwrap(),
+                    message: None,
+                },
+                UserId(1),
+            )
+            .expect("answer");
+        assert!(matches!(plan, AnswerPlan::Respond { ref rpc_id, .. } if rpc_id == &json!(0)));
+        // Codex's resolved notice for request 0 is the answered one: no
+        // second close.
+        assert!(
+            after
+                .notification(
+                    "serverRequest/resolved",
+                    &json!({"threadId": "thread-1", "requestId": 0}),
+                )
+                .events
+                .is_empty()
+        );
+
+        // A request resolved elsewhere closes under the same id.
+        let mapped = before.notification(
+            "serverRequest/resolved",
+            &json!({"threadId": "thread-1", "requestId": 0}),
+        );
+        assert!(matches!(
+            mapped.events.as_slice(),
+            [Event::InteractionClosed { id, by: ClosedBy::External }] if id.as_str() == "aaaa1111:0"
+        ));
+
+        // A request withdrawn by its turn's end closes under the same id.
+        before.server_request(
+            &json!(1),
+            "item/commandExecution/requestApproval",
+            &command_approval("turn-1"),
+        );
+        let mapped = before.notification(
+            "turn/completed",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1", "status": "completed"}}),
+        );
+        assert!(mapped.events.iter().any(|event| matches!(
+            event,
+            Event::InteractionClosed { id, by: ClosedBy::Cancelled } if id.as_str() == "aaaa1111:1"
+        )));
+
+        // So do questions, elicitations and a dialog Inline cannot show.
+        let question = interaction_id(&before.server_request(
+            &json!(2),
+            "item/tool/requestUserInput",
+            &json!({"threadId": "thread-1", "turnId": "turn-3",
+                "questions": [{"id": "q", "question": "Which?"}]}),
+        ));
+        assert_eq!(question, "aaaa1111:2");
+        let elicitation = interaction_id(&before.server_request(
+            &json!(3),
+            "mcpServer/elicitation/request",
+            &mcp_tool_approval(json!("turn-3"), json!({})),
+        ));
+        assert_eq!(elicitation, "aaaa1111:3");
+        match before.server_request(&json!(4), "future/dialog", &json!({"threadId": "thread-1"})) {
+            RequestMapped::Reply { events, .. } => assert!(matches!(
+                &events[0],
+                Event::Interaction(Interaction { id, .. }) if id.as_str() == "aaaa1111:4"
+            )),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_sub_agents_token_usage_leaves_the_chats_gauge_alone() {
+        let mut mapper = CodexMapper::new("thread-1");
+        mapper.notification(
+            "thread/started",
+            &json!({"thread": {"id": "child-1", "parentThreadId": "thread-1"}}),
+        );
+        let usage = |thread: &str| {
+            json!({"threadId": thread, "turnId": "t", "tokenUsage": {
+                "last": {"inputTokens": 10, "totalTokens": 12},
+                "total": {"inputTokens": 900, "totalTokens": 1000},
+                "modelContextWindow": 200_000
+            }})
+        };
+        assert!(
+            mapper
+                .notification("thread/tokenUsage/updated", &usage("child-1"))
+                .events
+                .is_empty()
+        );
+        let mapped = mapper.notification("thread/tokenUsage/updated", &usage("thread-1"));
+        assert!(matches!(
+            mapped.events.as_slice(),
+            [Event::Usage { usage }] if usage.context_window == Some(200_000)
+                && usage.total.as_ref().is_some_and(|total| total.total == 1000)
+        ));
+    }
+
+    #[test]
+    fn integer_answers_are_json_integers() {
+        assert_eq!(typed_answer("integer", &["5".to_owned()]), json!(5));
+        assert_eq!(typed_answer("integer", &["-3".to_owned()]), json!(-3));
+        assert_eq!(
+            typed_answer("integer", &["18446744073709551615".to_owned()]),
+            json!(u64::MAX)
+        );
+        assert_eq!(typed_answer("integer", &[" 7.0 ".to_owned()]), json!(7));
+        // Not an integer: sent as typed, for the server to refuse.
+        assert_eq!(typed_answer("integer", &["5.5".to_owned()]), json!("5.5"));
+        assert_eq!(typed_answer("number", &["2.5".to_owned()]), json!(2.5));
+        assert_eq!(
+            serde_json::to_string(&typed_answer("integer", &["5".to_owned()])).unwrap(),
+            "5"
+        );
+
+        // Through an elicitation form.
+        let mut mapper = CodexMapper::new("thread-1");
+        mapper.server_request(
+            &json!(20),
+            "mcpServer/elicitation/request",
+            &json!({"threadId": "thread-1", "turnId": "turn-1", "serverName": "s", "mode": "form",
+                "message": "How many?",
+                "requestedSchema": {"type": "object", "properties": {
+                    "count": {"type": "integer"}, "ratio": {"type": "number"}}}}),
+        );
+        let plan = mapper
+            .answer(
+                &InteractionId::new("20").unwrap(),
+                &InteractionResponse::Answers {
+                    answers: vec![
+                        inline_agent_bridge::harness::FieldAnswer {
+                            field: FieldId::new("count").unwrap(),
+                            values: vec!["5".to_owned()],
+                        },
+                        inline_agent_bridge::harness::FieldAnswer {
+                            field: FieldId::new("ratio").unwrap(),
+                            values: vec!["0.5".to_owned()],
+                        },
+                    ],
+                },
+                UserId(1),
+            )
+            .expect("answer");
+        let AnswerPlan::Respond { result, .. } = plan else {
+            panic!("expected a response");
+        };
+        assert_eq!(
+            serde_json::to_string(&result["content"]).unwrap(),
+            r#"{"count":5,"ratio":0.5}"#
+        );
+    }
+
+    #[test]
+    fn a_system_error_status_is_state_not_another_error_callout() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let status = json!({"threadId": "thread-1", "status": {"type": "systemError"}});
+        let mapped = mapper.notification("thread/status/changed", &status);
+        assert!(matches!(
+            mapped.events.as_slice(),
+            [
+                Event::State {
+                    state: RunState::Idle
+                },
+                Event::Notice(Notice {
+                    level: NoticeLevel::Info,
+                    ..
+                })
+            ]
+        ));
+        // A turn Inline still sees running ends with its own completion.
+        mapper.notification(
+            "turn/started",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1"}}),
+        );
+        let mapped = mapper.notification("thread/status/changed", &status);
+        assert!(mapped.events.iter().all(|event| matches!(
+            event,
+            Event::Notice(Notice {
+                level: NoticeLevel::Info,
+                ..
+            })
+        )));
+        // The error itself stays an error; a retry heads the progress.
+        let error = mapper.notification(
+            "error",
+            &json!({"threadId": "thread-1", "turnId": "turn-1", "willRetry": false,
+                "error": {"message": "boom"}}),
+        );
+        assert!(matches!(
+            error.events.as_slice(),
+            [Event::Notice(Notice { level: NoticeLevel::Error, message: Some(message), .. })] if message == "boom"
+        ));
+        let retry = mapper.notification(
+            "error",
+            &json!({"threadId": "thread-1", "turnId": "turn-1", "willRetry": true,
+                "error": {"message": "Reconnecting 1/5"}}),
+        );
+        assert!(matches!(
+            retry.events.as_slice(),
+            [Event::Notice(Notice { code, message: Some(message), .. })]
+                if code == LIVE_STATUS_NOTICE && message == "Reconnecting 1/5"
+        ));
+    }
+
+    #[test]
+    fn steering_follows_codexs_answer_about_the_running_turn() {
+        let turn = |id: &str| TurnId::new(id).unwrap();
+        let mut mapper = CodexMapper::new("thread-1");
+        mapper.notification(
+            "turn/started",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1"}}),
+        );
+        // "no active turn to steer": turn-1 ended; its completion is still
+        // on the way.
+        mapper.steer_refused(&turn("turn-1"), None);
+        assert!(mapper.active_turn().is_none());
+        // The retry started turn-2 before turn-1's completion was mapped.
+        mapper.turn_started_by_request(turn("turn-2"));
+        let mapped = mapper.notification(
+            "turn/completed",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1", "status": "completed"}}),
+        );
+        assert!(mapped.events.iter().any(|event| matches!(
+            event,
+            Event::Turn { turn, phase: TurnPhase::Completed { .. } } if turn.as_str() == "turn-1"
+        )));
+        assert_eq!(mapper.active_turn(), Some(&turn("turn-2")));
+
+        // "expected turn-2 but found turn-3": steering follows turn-3.
+        mapper.steer_refused(&turn("turn-2"), Some(turn("turn-3")));
+        assert_eq!(mapper.active_turn(), Some(&turn("turn-3")));
+        // A refusal about a turn already seen finishing changes nothing.
+        mapper.steer_refused(&turn("turn-3"), Some(turn("turn-1")));
+        assert_eq!(mapper.active_turn(), Some(&turn("turn-3")));
+        // Nor does "no turn" about a turn that is not the running one.
+        mapper.steer_refused(&turn("turn-2"), None);
+        assert_eq!(mapper.active_turn(), Some(&turn("turn-3")));
+    }
+
+    #[test]
+    fn a_terminal_input_approval_says_what_it_sends_and_where() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let (subject, decisions) = approval_of(mapper.server_request(
+            &json!(30),
+            "item/commandExecution/requestApproval",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "call-1",
+                "kind": "writeStdin",
+                "approvalId": "a-1",
+                "command": "write_stdin --session-id 4242 'y\n'",
+                "cwd": "/work",
+                "reason": "Confirm the prompt",
+                "availableDecisions": ["accept", "cancel"]
+            }),
+        ));
+        assert_eq!(
+            subject,
+            ApprovalSubject::Other {
+                title: "Send input to terminal 4242?".to_owned(),
+                detail: Some("Input: \"y\\n\"\nReason: Confirm the prompt".to_owned()),
+            }
+        );
+        let ids: Vec<&str> = decisions.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(ids, ["accept", "cancel"]);
+        assert_eq!(
+            respond(&mut mapper, "30", "accept"),
+            json!({"decision": "accept"})
+        );
+
+        // Control keys and direction overrides show instead of acting.
+        let (subject, _) = approval_of(mapper.server_request(
+            &json!(31),
+            "item/commandExecution/requestApproval",
+            &json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "call-2",
+                "kind": "writeStdin",
+                "command": "write_stdin --session-id 7 \"$(printf x)\u{202E}\"'\u{3}'"}),
+        ));
+        assert_eq!(
+            subject,
+            ApprovalSubject::Other {
+                title: "Send input to terminal 7?".to_owned(),
+                detail: Some("Input: \"$(printf x)\\u{202e}\\u{3}\"".to_owned()),
+            }
+        );
+
+        // A command approval is still a command.
+        let (subject, _) = approval_of(mapper.server_request(
+            &json!(32),
+            "item/commandExecution/requestApproval",
+            &json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "call-3",
+                "kind": "command", "command": "ls"}),
+        ));
+        assert!(matches!(subject, ApprovalSubject::Command { ref command, .. } if command == "ls"));
+    }
+
+    #[test]
+    fn shell_words_read_back_what_codex_joined() {
+        assert_eq!(
+            shell_words(r#"write_stdin --session-id 12 'it'"'"'s' "a \"b\" \$c" d\ e"#),
+            [
+                "write_stdin",
+                "--session-id",
+                "12",
+                "it's",
+                "a \"b\" $c",
+                "d e"
+            ]
+        );
+        assert_eq!(shell_words("a ''"), ["a", ""]);
+        assert!(shell_words("   ").is_empty());
+    }
+
+    #[test]
+    fn a_web_search_row_names_the_page_it_opened_or_searched() {
+        let input = |item: Value| match item_body(&item).0 {
+            ItemBody::Tool { name, input, .. } => {
+                assert_eq!(name, "web_search");
+                input
+            }
+            other => panic!("expected a tool, got {other:?}"),
+        };
+        assert_eq!(
+            input(
+                json!({"type": "webSearch", "id": "w1", "query": "rust 2024",
+                "action": {"type": "search", "query": "rust 2024", "queries": null}})
+            ),
+            json!({"action": "search", "query": "rust 2024"})
+        );
+        assert_eq!(
+            input(json!({"type": "webSearch", "id": "w2", "query": "",
+                "action": {"type": "search", "queries": ["a", "b"]}})),
+            json!({"action": "search", "query": "a", "queries": ["a", "b"]})
+        );
+        assert_eq!(
+            input(
+                json!({"type": "webSearch", "id": "w3", "query": "https://inline.chat",
+                "action": {"type": "openPage", "url": "https://inline.chat"}})
+            ),
+            json!({"action": "openPage", "url": "https://inline.chat"})
+        );
+        assert_eq!(
+            input(
+                json!({"type": "webSearch", "id": "w4", "query": "'cargo' in https://doc.rust-lang.org",
+                "action": {"type": "findInPage", "url": "https://doc.rust-lang.org", "pattern": "cargo"}})
+            ),
+            json!({"action": "findInPage", "pattern": "cargo", "url": "https://doc.rust-lang.org"})
+        );
+        // Started without an action yet, or one Inline does not know.
+        assert_eq!(
+            input(json!({"type": "webSearch", "id": "w5", "query": "weather"})),
+            json!({"query": "weather"})
+        );
+        assert_eq!(
+            input(
+                json!({"type": "webSearch", "id": "w6", "query": "", "action": {"type": "other"}})
+            ),
+            json!({})
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2722,6 +3400,26 @@ mod recovery_history_tests {
             !mapper
                 .restore_inputs(&json!({"thread":{"turns":turns}}))
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_command_reads_as_its_script_without_the_shell_wrapper() {
+        assert_eq!(
+            command_text(Some(&json!(
+                "/bin/zsh -lc 'python3 -m unittest discover -s tests'"
+            )))
+            .as_deref(),
+            Some("python3 -m unittest discover -s tests")
+        );
+        assert_eq!(
+            command_text(Some(&json!("bash -c \"set -C\nprintf '%s' x > NOTES.md\""))).as_deref(),
+            Some("set -C\nprintf '%s' x > NOTES.md")
+        );
+        // Anything else stays as Codex wrote it.
+        assert_eq!(
+            command_text(Some(&json!("cargo test -p inline-cli"))).as_deref(),
+            Some("cargo test -p inline-cli")
         );
     }
 }

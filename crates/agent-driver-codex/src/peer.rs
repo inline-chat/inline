@@ -73,7 +73,23 @@ struct SequencedResponse {
     wire_sequence: u64,
 }
 
-type Pending = Arc<StdMutex<HashMap<u64, oneshot::Sender<PeerResult<SequencedResponse>>>>>;
+/// A failed request, with the JSON-RPC error's `data` when Codex sent one
+/// (`codexErrorInfo` rides there). `RemoteError` keeps its public shape.
+#[derive(Debug)]
+pub(crate) struct RoutedError {
+    pub error: PeerError,
+    pub data: Option<Value>,
+}
+
+impl From<PeerError> for RoutedError {
+    fn from(error: PeerError) -> Self {
+        Self { error, data: None }
+    }
+}
+
+type Routed = Result<SequencedResponse, RoutedError>;
+
+type Pending = Arc<StdMutex<HashMap<u64, oneshot::Sender<Routed>>>>;
 
 struct OutgoingFrame {
     payload: Vec<u8>,
@@ -220,6 +236,20 @@ where
         self.request_with_wire_sequence_and_timeout(method, params, request_timeout)
             .await
             .map(|response| response.value)
+            .map_err(|routed| routed.error)
+    }
+
+    /// Like [`Self::request_with_timeout`], keeping the JSON-RPC error's
+    /// `data` (Codex puts `codexErrorInfo` there).
+    pub(crate) async fn request_with_error_data(
+        &self,
+        method: &str,
+        params: Value,
+        request_timeout: Duration,
+    ) -> Result<Value, RoutedError> {
+        self.request_with_wire_sequence_and_timeout(method, params, request_timeout)
+            .await
+            .map(|response| response.value)
     }
 
     pub(crate) async fn request_with_wire_sequence(
@@ -230,6 +260,7 @@ where
         self.request_with_wire_sequence_and_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
             .await
             .map(|response| (response.value, response.wire_sequence))
+            .map_err(|routed| routed.error)
     }
 
     async fn request_with_wire_sequence_and_timeout(
@@ -237,7 +268,7 @@ where
         method: &str,
         params: Value,
         request_timeout: Duration,
-    ) -> PeerResult<SequencedResponse> {
+    ) -> Routed {
         let id = self.next_request_id.fetch_add(1, Ordering::Relaxed);
         let started_at = Instant::now();
         log::trace!(
@@ -283,7 +314,7 @@ where
             ) {
                 pending_guard.disarm();
             }
-            rx.await.map_err(|_| PeerError::Closed)?
+            rx.await.map_err(|_| RoutedError::from(PeerError::Closed))?
         };
         match timeout(request_timeout, exchange).await {
             Ok(result) => {
@@ -292,7 +323,9 @@ where
                     target: "inline_agent_driver_codex::rpc",
                     "phase=request_finished method={:?} rpc_id={id} outcome={} elapsed_ms={}",
                     trace_protocol_method(method),
-                    result.as_ref().map_or_else(peer_error_kind, |_| "ok"),
+                    result
+                        .as_ref()
+                        .map_or_else(|routed| peer_error_kind(&routed.error), |_| "ok"),
                     started_at.elapsed().as_millis()
                 );
                 if result.is_err() {
@@ -316,7 +349,7 @@ where
                     trace_protocol_method(method),
                     started_at.elapsed().as_millis()
                 );
-                Err(PeerError::Timeout(method.to_string()))
+                Err(PeerError::Timeout(method.to_string()).into())
             }
         }
     }
@@ -688,11 +721,12 @@ fn route_response(pending: &Pending, value: &Value, wire_sequence: u64) -> bool 
             wire_sequence,
         })
     } else if let Some(error) = value.get("error") {
-        Err(PeerError::Remote(remote_error(error)))
+        Err(RoutedError {
+            error: PeerError::Remote(remote_error(error)),
+            data: error.get("data").filter(|data| !data.is_null()).cloned(),
+        })
     } else {
-        Err(PeerError::InvalidMessage(format!(
-            "response {id} has neither result nor error"
-        )))
+        Err(PeerError::InvalidMessage(format!("response {id} has neither result nor error")).into())
     };
     let _ = tx.send(response);
     true
@@ -711,7 +745,7 @@ fn remote_error(error: &Value) -> RemoteError {
 fn close_pending(make_error_map: &Pending, make_error: impl Fn() -> PeerError) {
     let pending = std::mem::take(&mut *make_error_map.lock().expect("Codex pending map poisoned"));
     for (_, tx) in pending {
-        let _ = tx.send(Err(make_error()));
+        let _ = tx.send(Err(make_error().into()));
     }
 }
 
@@ -769,6 +803,56 @@ mod tests {
         assert!(matches!(
             incoming.recv().await,
             Some(IncomingMessage::Notification { method, .. }) if method == "thread/started"
+        ));
+        server_task.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn a_refusal_keeps_its_error_data() {
+        let (client, server) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = tokio::io::split(client);
+        let peer = CodexPeer::new(client_reader, client_writer, 8);
+        let _incoming = peer.take_incoming().expect("incoming stream");
+        let server_task = tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(server);
+            let mut lines = BufReader::new(reader).lines();
+            for id in [1, 2] {
+                lines.next_line().await.expect("read").expect("request");
+                let data = if id == 1 {
+                    r#","data":{"codexErrorInfo":{"activeTurnNotSteerable":{"turnKind":"review"}}}"#
+                } else {
+                    ""
+                };
+                writer
+                    .write_all(
+                        format!(
+                            "{{\"id\":{id},\"error\":{{\"code\":-32600,\"message\":\"cannot steer a review turn\"{data}}}}}\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .expect("write response");
+            }
+        });
+        let refused = peer
+            .request_with_error_data("turn/steer", json!({}), Duration::from_secs(5))
+            .await
+            .expect_err("refused");
+        assert!(matches!(
+            &refused.error,
+            PeerError::Remote(RemoteError { message, .. }) if message == "cannot steer a review turn"
+        ));
+        assert_eq!(
+            refused.data,
+            Some(json!({"codexErrorInfo": {"activeTurnNotSteerable": {"turnKind": "review"}}}))
+        );
+        // The plain request reports the same refusal, without data.
+        assert!(matches!(
+            peer.request("turn/steer", json!({})).await,
+            Err(PeerError::Remote(RemoteError {
+                code: Some(-32600),
+                ..
+            }))
         ));
         server_task.await.expect("server task");
     }
