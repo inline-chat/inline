@@ -20,7 +20,7 @@ extension DocumentRow {
           content: thumbnail,
           cornerRadius: ChatInfoResourceMetrics.tileCornerRadius
         )
-        if documentState != .locallyAvailable {
+        if documentState != .locallyAvailable || openingID != nil {
           shape.fill(.black.opacity(0.35))
         }
       } else {
@@ -28,6 +28,11 @@ extension DocumentRow {
       }
 
       switch documentState {
+        case .locallyAvailable where openingID != nil:
+          ProgressView()
+            .progressViewStyle(.circular)
+            .controlSize(.small)
+            .tint(.white)
         case .locallyAvailable:
           if thumbnail == nil {
             Image(systemName: fileTypeIconName)
@@ -115,6 +120,7 @@ extension DocumentRow {
     switch documentState {
       case .needsDownload: String(localized: "Downloads the file")
       case .downloading: String(localized: "Cancels the download")
+      case .locallyAvailable where openingID != nil: String(localized: "Opening the file")
       case .locallyAvailable: String(localized: "Opens the file")
     }
   }

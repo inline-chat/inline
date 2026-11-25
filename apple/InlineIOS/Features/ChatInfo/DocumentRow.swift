@@ -24,6 +24,8 @@ struct DocumentRow: View {
   @State var showingAlert = false
   @State var alertMessage = ""
   @State var docInteractionController: UIDocumentInteractionController? = nil
+  /// Set from the tap until QuickLook shows the file: the tile spins and taps wait.
+  @State var openingID: UUID?
 
   enum DocumentState: Equatable {
     case locallyAvailable
@@ -119,6 +121,7 @@ struct DocumentRow: View {
     }
     .onDisappear {
       cleanup()
+      openingID = nil
     }
     .alert("Cannot Open Document", isPresented: $showingAlert) {
       Button("OK") {}

@@ -5,11 +5,13 @@ import UIKit
 /// name rather than its cache name.
 @MainActor
 enum DocumentQuickLook {
+  /// `onShown` runs once QuickLook is on screen. Its preview loads first, which can take a
+  /// couple of seconds the first time.
   @discardableResult
-  static func present(url: URL, title: String?) -> Bool {
+  static func present(url: URL, title: String?, onShown: (() -> Void)? = nil) -> Bool {
     guard let presenter = activeTopViewController() else { return false }
     let controller = Controller(item: Item(url: url, title: title))
-    presenter.present(controller, animated: true)
+    presenter.present(controller, animated: true, completion: onShown)
     return true
   }
 

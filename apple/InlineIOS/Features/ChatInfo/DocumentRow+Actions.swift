@@ -8,7 +8,7 @@ import UIKit
 
 extension DocumentRow {
   func viewTapped() {
-    guard !isBeingRemoved else { return }
+    guard !isBeingRemoved, openingID == nil else { return }
 
     switch documentState {
       case .locallyAvailable:
@@ -105,15 +105,33 @@ extension DocumentRow {
 
     if QLPreviewController.canPreview(fileURL as QLPreviewItem) {
       Log.shared.debug("📄 Using QuickLook for preview")
+      // QuickLook appears only once its preview has loaded, up to a couple of seconds: the tile
+      // spins in the meantime and further taps wait.
+      let id = UUID()
+      openingID = id
       // Presented from UIKit, not from this row's state: a row rebuilt after the download
       // (or one inside the chat info sheet) would drop or misdismiss a SwiftUI sheet.
-      if !DocumentQuickLook.present(url: fileURL, title: document.fileName) {
+      let presented = DocumentQuickLook.present(url: fileURL, title: document.fileName) {
+        finishOpening(id)
+      }
+      if presented {
+        // UIKit drops a presentation it can't make without calling back.
+        Task { @MainActor in
+          try? await Task.sleep(for: .seconds(20))
+          finishOpening(id)
+        }
+      } else {
+        finishOpening(id)
         showShareMenu(for: fileURL)
       }
     } else {
       Log.shared.debug("📄 QuickLook can't preview - showing share options")
       showShareMenu(for: fileURL)
     }
+  }
+
+  private func finishOpening(_ id: UUID) {
+    if openingID == id { openingID = nil }
   }
 
   /// The document's file as stored now, for a row whose copy of the document is older.
