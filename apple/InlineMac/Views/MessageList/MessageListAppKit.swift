@@ -156,6 +156,11 @@ class MessageListAppKit: NSViewController {
   private var hasDeferredInitialTranslation = false
   private var lastVisibleReadCandidateID: Int64?
   private var lastVisibleReadCoverage: MessageHistoryCoverageProjection?
+  /// The newest message the last read of the whole chat ran for (0 for none loaded). At the live end
+  /// a pass reads the chat again only for a newer message, or once the chat may be unread again (a
+  /// mark, a count, the app or the list coming back): each read is a database write, and passes run
+  /// a few times a second while the list scrolls and after every added or reloaded row.
+  private var readAllThrough: Int64?
   private var appActivityObserverId: UUID?
   private var statusNoticeCancellable: AnyCancellable?
 
@@ -211,6 +216,8 @@ class MessageListAppKit: NSViewController {
         return
       }
       lastVisibleReadCandidateID = nil
+      // Back in front, the chat is read whole again, whatever changed while the app was away.
+      readAllThrough = nil
       updateUnreadIfNeeded()
     }
 
@@ -1384,6 +1391,11 @@ class MessageListAppKit: NSViewController {
     // on every emission while marked put back counts the reader had scrolled past.
     if state.unreadMark, !appliedUnreadMark { unreadCountReadFrontier = 0 }
     appliedUnreadMark = state.unreadMark
+    // The chat may be unread again (a mark, a count from the server, a cursor short of the last
+    // read): the next pass at the live end reads it whole again.
+    if state.unreadMark || state.unreadCount > 0 || state.readInboxMaxId < (readAllThrough ?? 0) {
+      readAllThrough = nil
+    }
     updateScrollToBottomCount()
     guard activityJumpButton.count != state.mentionsCount || reactionJumpButton.count != state.reactionsCount
     else { return }
@@ -3226,6 +3238,7 @@ class MessageListAppKit: NSViewController {
     scheduleAvatarOverlaySync()
     DispatchQueue.main.async { [weak self] in
       self?.lastVisibleReadCandidateID = nil
+      self?.readAllThrough = nil
       self?.updateUnreadIfNeeded()
     }
   }
@@ -4389,8 +4402,13 @@ class MessageListAppKit: NSViewController {
 
     if isWithinFollowZone, chatRows.historyCoverage.isAtCertifiedLiveEnd {
       // The bottom of a partial history window is not the end of the chat.
-      // Clear everything only after the loaded page reaches the certified live end.
-      UnreadManager.shared.readAll(peerId, chatId: chatId)
+      // Clear everything only after the loaded page reaches the certified live end. Once per
+      // newest message: a scroll resting at the bottom, or a reply streaming in, reads nothing new.
+      let newest = highestPositiveMessageId ?? 0
+      if readAllThrough != newest {
+        readAllThrough = newest
+        UnreadManager.shared.readAll(peerId, chatId: chatId)
+      }
     } else {
       // In history the read marker follows what was on screen. A read the coverage
       // cannot certify waits until that history has been loaded.
