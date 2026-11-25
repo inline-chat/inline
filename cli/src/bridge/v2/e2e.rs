@@ -1855,7 +1855,15 @@ async fn codex_round_trip_through_inline() {
 
     // 14. A long turn: dozens of tool calls with long output continue in a
     // new progress message before Inline's size limit, and the answer lands.
+    // A full message ends with only how long it worked, like the last one
+    // (no "continued below", Oct 31 rule 1), so the turn shows two.
     settle(&model).await;
+    let before_long = bot_texts(&owner, chat_id, bot_user_id)
+        .await
+        .iter()
+        .map(|(id, _)| *id)
+        .max()
+        .unwrap_or(0);
     let mut long_turn: Vec<Value> = (0..45)
         .map(|_| inline_tool("get_messages", json!({"limit": 100})))
         .collect();
@@ -1872,11 +1880,13 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("E2E_LONG_DONE")),
     )
     .await;
+    let progress = texts
+        .iter()
+        .filter(|(id, text)| *id > before_long && text.starts_with("Worked for"))
+        .count();
     assert!(
-        texts
-            .iter()
-            .any(|(_, text)| text.contains("continued below")),
-        "the long turn never continued in a new message"
+        progress >= 2,
+        "the long turn never continued in a new message: {texts:#?}"
     );
 
     // 15. Following: a thread whose first message mentions the agent is one

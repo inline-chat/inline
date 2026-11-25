@@ -650,6 +650,28 @@ async fn a_refused_agent_mention_streamed_in_many_edits_takes_one_loop_hop() {
     cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
 }
 
+/// A fetched user without a name is kept as "user N" (one lookup, not one
+/// per message), and a real name seen later replaces only that placeholder.
+#[tokio::test]
+async fn a_user_without_a_name_is_remembered_until_a_name_turns_up() {
+    let (runtime, _harness, _cleanup) = fixture(false);
+    let names = &runtime.agent.names;
+    names
+        .learn(&proto::User {
+            id: 7,
+            bot: Some(true),
+            ..Default::default()
+        })
+        .await;
+    // The fixture answers no lookups: both come from what was learned.
+    assert!(names.is_bot(7).await);
+    assert_eq!(names.of(7).await, "user 7");
+    names.remember(7, "Ada".into()).await;
+    assert_eq!(names.of(7).await, "Ada");
+    names.remember(7, "Someone else".into()).await;
+    assert_eq!(names.of(7).await, "Ada");
+}
+
 #[tokio::test]
 async fn agent_messages_not_addressed_to_this_agent_never_reach_the_loop_cap() {
     let (mut runtime, harness, _cleanup) = fixture(false);

@@ -675,16 +675,26 @@ impl Names {
         Kind::of(&user)
     }
 
-    /// Caches what a fetched user says about itself.
+    /// Caches what a fetched user says about itself, for the run. A user
+    /// without a name is remembered as "user N": otherwise every message
+    /// from them asks Inline again, and past Inline's 60 lookups a minute
+    /// every lookup fails, so another agent reads as a person and resets
+    /// the loop cap.
     pub(crate) async fn learn(&self, user: &proto::User) {
         self.bots.lock().await.insert(user.id, Kind::of(user));
-        if let Some(name) = display_name(user) {
-            self.remember(user.id, name).await;
-        }
+        let name = display_name(user).unwrap_or_else(|| unnamed(user.id));
+        self.remember(user.id, name).await;
     }
 
+    /// Keeps the first name seen; a real name replaces "user N".
     pub(crate) async fn remember(&self, user_id: i64, name: String) {
-        self.cache.lock().await.entry(user_id).or_insert(name);
+        let mut cache = self.cache.lock().await;
+        if cache
+            .get(&user_id)
+            .is_none_or(|known| *known == unnamed(user_id))
+        {
+            cache.insert(user_id, name);
+        }
     }
 
     /// The user's name, or "user N" when Inline does not say.
@@ -695,14 +705,14 @@ impl Names {
         let found = get_users(&self.bot, vec![user_id])
             .await
             .ok()
-            .and_then(|users| users.into_iter().find(|user| user.id == user_id))
-            .and_then(|user| display_name(&user));
+            .and_then(|users| users.into_iter().find(|user| user.id == user_id));
         match found {
-            Some(name) => {
-                self.remember(user_id, name.clone()).await;
-                name
+            Some(user) => {
+                self.learn(&user).await;
+                display_name(&user).unwrap_or_else(|| unnamed(user_id))
             }
-            None => format!("user {user_id}"),
+            // Not cached: the next message asks again.
+            None => unnamed(user_id),
         }
     }
 }
@@ -718,6 +728,11 @@ pub(crate) fn display_name(user: &proto::User) -> Option<String> {
     (!full.is_empty())
         .then_some(full)
         .or_else(|| user.username.clone().filter(|name| !name.trim().is_empty()))
+}
+
+/// What a user without a name is called.
+fn unnamed(user_id: i64) -> String {
+    format!("user {user_id}")
 }
 
 #[cfg(test)]
