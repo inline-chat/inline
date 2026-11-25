@@ -138,9 +138,10 @@ extension RichBlockLayoutPlanner.Builder {
     let status = RichBlockStatus(disclosure.status)
     let meta = disclosure.hasMeta ? validRange(disclosure.meta) : nil
     // Running shows as the summary shimmer and done as plain text; only the
-    // states a reader must notice get a glyph.
+    // states a reader must notice get a glyph. A failed command is the agent's
+    // own working detail, so it gets none: it doesn't need the reader's worry.
     let showsGlyph = switch status {
-    case .waiting?, .failed?, .cancelled?: true
+    case .waiting?, .cancelled?: true
     default: false
     }
     // A working row counts its time live after the summary; meta then only

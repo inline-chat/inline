@@ -206,7 +206,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
 
   private func applyDecoration(context: RichBlockRenderContext) {
     let glyphStatus: RichBlockStatus? = switch decoration?.status {
-    case .waiting?, .failed?, .cancelled?: decoration?.status
+    case .waiting?, .cancelled?: decoration?.status
     default: nil
     }
     if let glyphStatus {

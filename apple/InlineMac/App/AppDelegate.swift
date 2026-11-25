@@ -141,6 +141,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       // The main window normally opens on first activation, which an unattended run never gets.
       Task { @MainActor in
         if MainWindowController.all.isEmpty { MainWindowOpenCoordinator.shared.openDefaultWindow() }
+        // `--perf-harness-bridge`: open the agent's chat, its messages as the bridge rendered them.
+        if PerfHarnessFixture.bridgeRequested {
+          try? await Task.sleep(for: .seconds(1))
+          MainWindowController.all.first?.openChat(peer: .user(id: PerfHarnessFixture.bridgeAgentId), targetMessageId: nil)
+        }
       }
     }
     if PerfJourneyRunner.isRequested {
@@ -153,6 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     defer { launchSpan.end() }
 
     AgentControlErrors.report = { ToastCenter.shared.showError($0) }
+    AgentControlErrors.notice = { ToastCenter.shared.showInfo($0) }
     let servicesSpan = PerformanceTrace.begin("LaunchServicesInit", category: .launch)
     initializeServices()
     servicesSpan.end()

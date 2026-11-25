@@ -393,7 +393,7 @@ extension RichBlockLayoutPlanner.Builder {
         frame: .zero
       ))
     }
-    appendActions(actions, note: decisionNote(state, kind: .planProposal), path: path, card: card, isRTL: isRTL)
+    appendActions(actions, note: decisionNotes[path] ?? decisionNote(state, kind: .planProposal), path: path, card: card, isRTL: isRTL)
     claimedActionIDs.formUnion(plan.actionIds)
     endCard(card)
     return true
@@ -472,7 +472,7 @@ extension RichBlockLayoutPlanner.Builder {
     }
     appendActions(
       state.isOpen ? buttons(for: approval.actionIds) : [],
-      note: decisionNote(state, kind: .approval),
+      note: decisionNotes[path] ?? decisionNote(state, kind: .approval),
       path: path,
       card: card,
       isRTL: isRTL

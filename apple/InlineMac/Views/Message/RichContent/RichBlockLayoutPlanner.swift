@@ -617,6 +617,9 @@ final class RichBlockLayoutPlanner {
     /// For container blocks by path: the text their children may claim (see
     /// `BlockContentSpan.childBounds`), so an unknown kind first or last inside still shows.
     var childBounds: [BlockContentPath: Range<Int>] = [:]
+    /// Decided cards' outcome footers by the card's path, drawn where the buttons were
+    /// (`BlockDecisionNote`).
+    var decisionNotes: [BlockContentPath: String] = [:]
     var nodes: [RichBlockLayoutPlan.Node] = []
     var height: CGFloat = 0
     var trailingTextLine: RichBlockLayoutPlan.TrailingTextLine?
@@ -702,17 +705,24 @@ final class RichBlockLayoutPlanner {
       bounds: Range<Int>? = nil
     ) -> Bool {
       guard depth <= 16, nodes.count + blocks.count <= RichBlockLayoutPlanner.maximumBlocks else { return false }
+      var folded: Int?
       for index in blocks.indices {
+        // A decided card already shows its outcome footer where the buttons were.
+        if index == folded { continue }
+        let path = BlockContentPath(parent.components + [.block(index)])
         if let inner = BlockContentSpan.childBounds(at: index, in: blocks, bounds: bounds) {
-          childBounds[BlockContentPath(parent.components + [.block(index)])] = inner
+          childBounds[path] = inner
         }
+        decisionNotes[path] = BlockDecisionNote.footer(after: index, in: blocks).flatMap(plainText)
         // A block this build can't draw, of a newer kind or malformed, shows the fallback
         // text it covers, so the rest of the message keeps its formatting.
         let saved = checkpoint()
         let claimed = claimedActionIDs
-        if !layout(blockAt: index, of: blocks, parent: parent, x: x, width: width, depth: depth,
-                   inheritedDirection: inheritedDirection, fullBleedContainer: fullBleedContainer)
+        if layout(blockAt: index, of: blocks, parent: parent, x: x, width: width, depth: depth,
+                  inheritedDirection: inheritedDirection, fullBleedContainer: fullBleedContainer)
         {
+          if decisionNotes[path] != nil { folded = index + 1 }
+        } else {
           restore(saved, claimedActionIDs: claimed)
           guard let range = BlockContentSpan.fallbackRange(
             at: index, in: blocks, text: attributedText.string as NSString, bounds: bounds
@@ -736,6 +746,19 @@ final class RichBlockLayoutPlanner {
         }
       }
       return true
+    }
+
+    /// A block range's text, trimmed; nil when it's out of bounds or blank.
+    private func plainText(_ text: InlineProtocol.BlockText) -> String? {
+      let offset = Int(text.offset)
+      let length = Int(text.length)
+      guard offset >= 0, length > 0, offset <= attributedText.length,
+            length <= attributedText.length - offset
+      else { return nil }
+      let string = (attributedText.string as NSString)
+        .substring(with: NSRange(location: offset, length: length))
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      return string.isEmpty ? nil : string
     }
 
     /// Whitespace between two sibling blocks, from the chat spacing scale. Gaps
