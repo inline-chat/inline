@@ -2041,7 +2041,7 @@ export async function getSessionMessages(_sessionId, options) {
             vec![
                 ClaudeSessionSummary {
                     session_id: "newer".to_string(),
-                    title: "Fix [local-path] TOKEN= [redacted]".to_string(),
+                    title: "Fix [local-path] TOKEN=[redacted]".to_string(),
                     updated_at: 20,
                 },
                 ClaudeSessionSummary {

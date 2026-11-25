@@ -86,6 +86,10 @@ struct FakeSession {
     /// Answers that reached the session (interaction, decision), each
     /// claimed once as a harness does.
     answers: Mutex<Vec<(String, String)>>,
+    /// Background work still running, as `live_work` reports it.
+    children: Mutex<Vec<inline_agent_bridge::harness::ChildRef>>,
+    /// Stops that reached the session: `interrupt` or the stopped child.
+    stops: Mutex<Vec<String>>,
 }
 
 impl FakeSession {
@@ -146,6 +150,10 @@ impl Session for FakeSession {
                     },
                 )
             })
+            .with_op(
+                inline_agent_bridge::harness::OpKind::StopChild,
+                Availability::Supported,
+            )
     }
 
     fn events(&self) -> EventStream {
@@ -177,6 +185,20 @@ impl Session for FakeSession {
         if let Op::Mode { mode } = &op {
             self.modes.lock().unwrap().push(mode.as_str().to_owned());
         }
+        match &op {
+            Op::Interrupt { .. } => self.stops.lock().unwrap().push("interrupt".to_owned()),
+            Op::StopChild { child } => {
+                self.stops
+                    .lock()
+                    .unwrap()
+                    .push(child.id.as_str().to_owned());
+                self.children
+                    .lock()
+                    .unwrap()
+                    .retain(|running| running.id != child.id);
+            }
+            _ => {}
+        }
         if let Op::Answer {
             interaction,
             response,
@@ -203,6 +225,7 @@ impl Session for FakeSession {
         LiveWork {
             turn: self.live.lock().unwrap().clone(),
             interactions: self.open.lock().unwrap().clone(),
+            children: self.children.lock().unwrap().clone(),
             ..LiveWork::default()
         }
     }
@@ -350,6 +373,8 @@ fn session_fixture(
         live: Mutex::new(None),
         open: Mutex::new(Vec::new()),
         answers: Mutex::new(Vec::new()),
+        children: Mutex::new(Vec::new()),
+        stops: Mutex::new(Vec::new()),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -2760,4 +2785,93 @@ async fn a_card_from_an_ended_session_holds_no_input() {
     let (runtime, harness, _cleanup) = session_fixture(false, true, true);
     work::recovery_tests::stale_card_holds_nothing(runtime.agent.clone(), card_harness(&harness))
         .await;
+}
+
+#[tokio::test]
+async fn claude_clear_goes_on_in_a_fresh_session_and_waits_for_a_running_turn() {
+    let (runtime, harness, mut cleanup) = fixture(false);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let (first, command) = input(&runtime, 10);
+    tx.send(command).await.unwrap();
+    until(|| state(&runtime, &first) == Some(InputState::Accepted)).await;
+    let clear = |tx: work::CommandSender| async move {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        tx.send(Command::Session {
+            op: SessionOp::Clear,
+            reply,
+        })
+        .await
+        .unwrap();
+        answer.await.unwrap().unwrap_or_default()
+    };
+    // A running turn is not cut short: the person stops it first.
+    *harness.session.live.lock().unwrap() = Some(TurnId::new("turn-0").unwrap());
+    let refused = clear(tx.clone()).await;
+    assert!(refused.contains("Stop it first"), "{refused}");
+    assert!(
+        harness
+            .opened
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|spec| !matches!(spec.mode, OpenMode::Start))
+    );
+    // Idle, /clear starts a fresh session instead of the CLI's own /clear,
+    // whose new session the bridge could not follow.
+    *harness.session.live.lock().unwrap() = None;
+    let cleared = clear(tx.clone()).await;
+    assert_eq!(
+        cleared,
+        "Context cleared. This thread goes on in a fresh session."
+    );
+    let opened = harness.opened.lock().unwrap();
+    assert!(matches!(opened.last().unwrap().mode, OpenMode::Start));
+    assert!(
+        opened[..opened.len() - 1]
+            .iter()
+            .all(|spec| matches!(spec.mode, OpenMode::Resume { .. }))
+    );
+}
+
+#[tokio::test]
+async fn stop_ends_background_work_left_running_after_its_turn() {
+    use inline_agent_bridge::harness::{ChildId, ChildKind, ChildRef};
+    let (runtime, harness, mut cleanup) = fixture(false);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let (first, command) = input(&runtime, 10);
+    tx.send(command).await.unwrap();
+    until(|| state(&runtime, &first) == Some(InputState::Accepted)).await;
+    let stop = |tx: work::CommandSender| async move {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        tx.send(Command::Control {
+            control: Control::Stop,
+            actor: 1,
+            reply,
+        })
+        .await
+        .unwrap();
+        answer.await.unwrap()
+    };
+    // The turn ended, a background shell and a sub-agent it started did not.
+    *harness.session.children.lock().unwrap() = vec![
+        ChildRef {
+            id: ChildId::new("shell-1").unwrap(),
+            kind: ChildKind::BackgroundTask,
+        },
+        ChildRef {
+            id: ChildId::new("agent-1").unwrap(),
+            kind: ChildKind::Subagent,
+        },
+    ];
+    assert_eq!(stop(tx.clone()).await, None);
+    // Claude has no turn to interrupt: each is stopped by itself.
+    assert_eq!(
+        *harness.session.stops.lock().unwrap(),
+        ["shell-1", "agent-1"]
+    );
+    // Nothing is left: it says so.
+    assert_eq!(
+        stop(tx.clone()).await.as_deref(),
+        Some("Nothing is running.")
+    );
 }

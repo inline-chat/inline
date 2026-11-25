@@ -106,6 +106,7 @@
       {
         "disclosure": {
           "summary": "Worked for 48s",
+          "initially_open": true,
           "children": [
             {
               "paragraph": "I'll fix the empty-input crash in the parser."

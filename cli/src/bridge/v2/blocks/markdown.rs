@@ -7,6 +7,7 @@
 //! Inline code, bold, italic, strikethrough and links become message entities
 //! over the plain text, as Inline styles a Markdown message.
 
+use inline_agent_bridge::widget::Fence;
 use inline_protocol::proto;
 
 use crate::bridge::v2::doc::DocBuilder;
@@ -25,12 +26,15 @@ pub(crate) fn write(builder: &mut DocBuilder, markdown: &str) {
     while index < lines.len() {
         let line = lines[index];
         let trimmed = line.trim();
-        if let Some(fence) = fence(trimmed) {
+        if let Some(fence) = Fence::opening(trimmed) {
             flush(builder, &mut paragraph);
-            let language = trimmed[fence.len()..].trim();
+            // The info string: what follows the fence's run of markers.
+            let language = trimmed.trim_start_matches(['`', '~']).trim();
             let mut code = Vec::new();
             index += 1;
-            while index < lines.len() && !lines[index].trim_start().starts_with(fence) {
+            // Only a run at least as long as the opener closes it, so a
+            // longer fence can show a shorter one inside.
+            while index < lines.len() && !fence.closed_by(lines[index].trim_start()) {
                 code.push(lines[index]);
                 index += 1;
             }
@@ -60,22 +64,58 @@ pub(crate) fn write(builder: &mut DocBuilder, markdown: &str) {
             index += 1;
             continue;
         }
+        if let Some(alignments) = lines
+            .get(index + 1)
+            .and_then(|next| table_alignments(line, next))
+        {
+            flush(builder, &mut paragraph);
+            let mut rows = vec![table_cells(line)];
+            index += 2;
+            while index < lines.len() && lines[index].trim_start().starts_with('|') {
+                rows.push(table_cells(lines[index]));
+                index += 1;
+            }
+            write_table(builder, &rows, alignments);
+            continue;
+        }
         if let Some(first) = list_item(line) {
             flush(builder, &mut paragraph);
+            let indent = indent_of(line);
             let mut items = vec![first];
             index += 1;
             while index < lines.len() {
                 let next = lines[index];
                 if let Some(item) = list_item(next) {
-                    items.push(item);
+                    if indent_of(next) > indent
+                        && let Some(last) = items.last_mut()
+                    {
+                        // A nested item stays inside the item above, on its
+                        // own line, so it neither renumbers the list nor
+                        // reads as a sibling.
+                        last.text.push('\n');
+                        last.text.push_str(&nested_marker(&item));
+                        last.text.push_str(&item.text);
+                    } else {
+                        items.push(item);
+                    }
                 } else if !next.trim().is_empty()
                     && next.starts_with([' ', '\t'])
-                    && fence(next.trim()).is_none()
+                    && Fence::opening(next.trim()).is_none()
                     && let Some(last) = items.last_mut()
                 {
                     // A wrapped line of the item above.
                     last.text.push(' ');
                     last.text.push_str(next.trim());
+                } else if next.trim().is_empty()
+                    && lines[index + 1..]
+                        .iter()
+                        .find(|line| !line.trim().is_empty())
+                        .is_some_and(|line| {
+                            list_item(line).is_some_and(|_| indent_of(line) >= indent)
+                        })
+                {
+                    // A loose list: a blank line between its items, as models
+                    // write plans ("1. Step\n\n   - detail").
                 } else {
                     break;
                 }
@@ -141,10 +181,111 @@ fn write_list(builder: &mut DocBuilder, items: &[Item]) {
     }));
 }
 
-fn fence(trimmed: &str) -> Option<&'static str> {
-    ["```", "~~~"]
+/// A GFM table's column alignments, when `header` and `separator` open one
+/// (`| a | b |` over `|---|:--:|`).
+fn table_alignments(header: &str, separator: &str) -> Option<Vec<proto::block_table::Alignment>> {
+    use proto::block_table::Alignment;
+    if !header.contains('|') || !separator.contains('-') {
+        return None;
+    }
+    let columns = table_cells(header).len();
+    let alignments = table_cells(separator)
         .into_iter()
-        .find(|fence| trimmed.starts_with(fence))
+        .map(|cell| {
+            let cell = cell.trim();
+            let dashes = cell.trim_matches(':');
+            (!dashes.is_empty() && dashes.chars().all(|c| c == '-')).then(|| {
+                match (cell.starts_with(':'), cell.ends_with(':')) {
+                    (true, true) => Alignment::Center,
+                    (true, false) => Alignment::Left,
+                    (false, true) => Alignment::Right,
+                    (false, false) => Alignment::Unspecified,
+                }
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (columns > 0 && alignments.len() == columns).then_some(alignments)
+}
+
+/// A table row's cells: split on `|` outside inline code, `\|` kept.
+fn table_cells(line: &str) -> Vec<String> {
+    let line = line.trim();
+    let line = line.strip_prefix('|').unwrap_or(line);
+    let line = line.strip_suffix('|').unwrap_or(line);
+    let mut cells = vec![String::new()];
+    let mut code = false;
+    let mut chars = line.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '\\' if chars.peek() == Some(&'|') => {
+                cells.last_mut().expect("cell").push('|');
+                chars.next();
+            }
+            '`' => {
+                code = !code;
+                cells.last_mut().expect("cell").push(character);
+            }
+            '|' if !code => cells.push(String::new()),
+            _ => cells.last_mut().expect("cell").push(character),
+        }
+    }
+    cells
+        .into_iter()
+        .map(|cell| cell.trim().to_owned())
+        .collect()
+}
+
+/// A table block, each row also a line of text ("a | b") for clients that
+/// draw text only. Every row gets exactly one cell per column.
+fn write_table(
+    builder: &mut DocBuilder,
+    rows: &[Vec<String>],
+    alignments: Vec<proto::block_table::Alignment>,
+) {
+    let columns = alignments.len();
+    let rows = rows
+        .iter()
+        .map(|row| {
+            let cells = (0..columns)
+                .map(|column| {
+                    if column > 0 {
+                        builder.push_raw(" | ");
+                    }
+                    let text = row.get(column).map(String::as_str).unwrap_or("");
+                    builder.markdown_inline_span(if text.is_empty() { " " } else { text })
+                })
+                .collect();
+            builder.newline();
+            proto::BlockTableRow { cells }
+        })
+        .collect();
+    builder.push_block(proto::block::Kind::Table(proto::BlockTable {
+        rows,
+        alignments: alignments
+            .into_iter()
+            .map(|alignment| alignment as i32)
+            .collect(),
+        is_rtl: None,
+    }));
+}
+
+/// Leading width of a line, a tab as four columns.
+fn indent_of(line: &str) -> usize {
+    line.chars()
+        .take_while(|character| matches!(character, ' ' | '\t'))
+        .map(|character| if character == '\t' { 4 } else { 1 })
+        .sum()
+}
+
+/// How a nested item reads inside its parent's line: its own marker,
+/// indented.
+fn nested_marker(item: &Item) -> String {
+    match (item.checked, item.ordered) {
+        (Some(true), _) => "    [x] ".to_owned(),
+        (Some(false), _) => "    [ ] ".to_owned(),
+        (None, Some(number)) => format!("    {number}. "),
+        (None, None) => "    ◦ ".to_owned(),
+    }
 }
 
 fn heading(trimmed: &str) -> Option<(u32, &str)> {
@@ -577,6 +718,118 @@ mod tests {
         assert_eq!(
             slice(&doc.text, span).as_deref(),
             Some("Fix the empty case")
+        );
+    }
+    #[test]
+    fn nested_items_stay_inside_their_item_and_keep_the_numbers() {
+        let mut builder = DocBuilder::new();
+        write(
+            &mut builder,
+            "1. Update the schema\n   - add the column\n   - backfill\n2. Ship the client\n3. Remove the flag",
+        );
+        let doc = builder.finish();
+        assert_eq!(
+            doc.text,
+            "1. Update the schema\n    ◦ add the column\n    ◦ backfill\n2. Ship the client\n3. Remove the flag"
+        );
+        let Some(proto::block::Kind::List(list)) = &doc.blocks[0].kind else {
+            panic!("list");
+        };
+        assert_eq!(list.items.len(), 3);
+    }
+
+    #[test]
+    fn a_longer_fence_shows_a_shorter_one_and_an_info_line_does_not_close() {
+        let mut builder = DocBuilder::new();
+        write(
+            &mut builder,
+            "````markdown\n```rust\nfn main() {}\n```\n````\nAfter.",
+        );
+        let doc = builder.finish();
+        let Some(proto::block::Kind::Code(code)) = &doc.blocks[0].kind else {
+            panic!("code: {:?}", doc.blocks);
+        };
+        assert_eq!(code.language.as_deref(), Some("markdown"));
+        assert_eq!(doc.blocks.len(), 2, "{:?}", doc.blocks);
+        assert!(
+            doc.text.contains("```rust\nfn main() {}\n```"),
+            "{}",
+            doc.text
+        );
+        // An open ``` block is not closed by a "```rust" line.
+        let mut builder = DocBuilder::new();
+        write(&mut builder, "```\na\n```rust\nb\n```\nAfter.");
+        let doc = builder.finish();
+        assert_eq!(doc.blocks.len(), 2, "{:?}", doc.blocks);
+        assert!(doc.text.starts_with("a\n```rust\nb"), "{}", doc.text);
+    }
+
+    #[test]
+    fn a_loose_list_with_blank_lines_stays_one_list() {
+        let mut builder = DocBuilder::new();
+        write(
+            &mut builder,
+            "1. Update `parse` in `src/parser.py`.\n\n   - Return `[]` for empty text.\n   - Keep the error otherwise.\n\n2. Run the tests.\n\nThen ship it.",
+        );
+        let doc = builder.finish();
+        let Some(proto::block::Kind::List(list)) = &doc.blocks[0].kind else {
+            panic!("list: {:?}", doc.blocks);
+        };
+        assert_eq!(list.items.len(), 2, "{}", doc.text);
+        assert!(doc.text.starts_with("1. Update parse in src/parser.py.\n    ◦ Return [] for empty text.\n    ◦ Keep the error otherwise.\n2. Run the tests."), "{}", doc.text);
+        assert!(matches!(
+            doc.blocks[1].kind,
+            Some(proto::block::Kind::Paragraph(_))
+        ));
+    }
+
+    #[test]
+    fn a_table_becomes_a_table_block_with_its_alignments() {
+        let mut builder = DocBuilder::new();
+        write(
+            &mut builder,
+            "Found these:\n\n| File | Line | Kind |\n|---|--:|:---:|\n| `src/parser.py` | 1 | Definition |\n| tests/test_parser.py | 8 | Call `a\\|b` |\n| short |\n\nDone.",
+        );
+        let doc = builder.finish();
+        let kinds: Vec<&str> = doc
+            .blocks
+            .iter()
+            .map(|block| match block.kind.as_ref().expect("kind") {
+                proto::block::Kind::Table(_) => "table",
+                proto::block::Kind::Paragraph(_) => "paragraph",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["paragraph", "table", "paragraph"], "{}", doc.text);
+        let Some(proto::block::Kind::Table(table)) = &doc.blocks[1].kind else {
+            panic!("table");
+        };
+        assert_eq!(table.rows.len(), 4);
+        assert!(table.rows.iter().all(|row| row.cells.len() == 3));
+        use proto::block_table::Alignment;
+        assert_eq!(
+            table.alignments,
+            [
+                Alignment::Unspecified as i32,
+                Alignment::Right as i32,
+                Alignment::Center as i32
+            ]
+        );
+        let cell = |row: usize, column: usize| slice(&doc.text, &table.rows[row].cells[column]);
+        assert_eq!(cell(0, 0).as_deref(), Some("File"));
+        // Inline code stays styled, and an escaped pipe stays in its cell.
+        assert_eq!(cell(1, 0).as_deref(), Some("src/parser.py"));
+        assert_eq!(cell(2, 2).as_deref(), Some("Call a|b"));
+        assert!(doc.text.contains("File | Line | Kind\n"), "{}", doc.text);
+        // A pipe line without a separator under it is not a table.
+        let mut builder = DocBuilder::new();
+        write(&mut builder, "a | b\nplain");
+        assert!(
+            builder
+                .finish()
+                .blocks
+                .iter()
+                .all(|block| !matches!(block.kind, Some(proto::block::Kind::Table(_))))
         );
     }
 }

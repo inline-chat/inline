@@ -118,7 +118,18 @@ pub(super) fn rendered(input: &Value) -> Vec<Message> {
             event,
         };
         for op in renderer.apply(&envelope) {
+            if matches!(op, RenderOp::Image { .. }) {
+                continue;
+            }
+            if let RenderOp::DeleteProgress { slot } = &op {
+                let label = format!("progress {slot}");
+                messages.retain(|message| message.label != label);
+                continue;
+            }
             let (label, doc, buttons) = match op {
+                RenderOp::DeleteProgress { .. } | RenderOp::Image { .. } => {
+                    unreachable!("handled above")
+                }
                 RenderOp::Progress { slot, doc } => (format!("progress {slot}"), doc, Vec::new()),
                 RenderOp::EndProgress { slot, doc } => {
                     (format!("progress {slot}"), doc, Vec::new())

@@ -220,6 +220,24 @@ pub(crate) async fn edit_doc(
     Ok(())
 }
 
+/// Deletes one of the bot's messages (a progress message that turned out
+/// to show nothing).
+pub(crate) async fn delete_message(
+    bot: &InlineClient,
+    chat_id: i64,
+    message_id: i64,
+) -> ApiResult<()> {
+    call!(
+        bot,
+        DeleteMessages,
+        proto::DeleteMessagesInput {
+            message_ids: vec![message_id],
+            peer_id: Some(chat_peer(chat_id)),
+        }
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn report_runtime(
     bot: &InlineClient,
     input: proto::ReportAgentRuntimeInput,

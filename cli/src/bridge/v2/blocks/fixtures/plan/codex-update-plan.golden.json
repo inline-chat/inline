@@ -64,6 +64,7 @@
       {
         "disclosure": {
           "summary": "Worked for 1m 1s",
+          "initially_open": true,
           "children": [
             {
               "disclosure": {

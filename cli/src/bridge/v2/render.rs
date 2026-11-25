@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 use inline_agent_bridge::harness::{
     ApprovalSubject, ChildRef, ClosedBy, CommandAction, Decision, DecisionKind, Envelope, Event,
     FieldAnswer, FieldInput, FileChangeKind, FileDiff, InputFact, InputId, Interaction,
-    InteractionId, InteractionKind, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole,
-    NoticeLevel, OutputMode, QuestionForm, TurnPhase,
+    InteractionId, InteractionKind, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate,
+    LIVE_STATUS_NOTICE, MessageRole, NoticeLevel, OutputMode, QuestionForm, TurnPhase,
 };
 use inline_agent_bridge::{AgentMessagePhase, PlanStep, TurnId, TurnOutcome};
 use serde_json::Value;
@@ -72,6 +72,10 @@ pub(crate) enum RenderOp {
     Progress { slot: u32, doc: Doc },
     /// Last edit of progress message `slot`; it no longer changes.
     EndProgress { slot: u32, doc: Doc },
+    /// Progress message `slot` showed nothing worth keeping: delete it.
+    DeleteProgress { slot: u32 },
+    /// An image the agent made (Codex image generation), posted as a photo.
+    Image { id: String, path: PathBuf },
     /// A short Friendly update message.
     Update { doc: Doc },
     /// The final answer: a separate message that notifies.
@@ -125,6 +129,9 @@ struct Row {
     status: Status,
     delta: String,
     phase: Option<AgentMessagePhase>,
+    /// What the agent said a command does (Claude's Bash `description`),
+    /// its row title (Oct 31 rule 5).
+    description: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +157,11 @@ pub(crate) struct Renderer {
     turn_slots: u32,
     turn_inputs: Vec<InputId>,
     pending_text: Option<(String, String)>,
+    /// The turn's answer so far: the text of each answer item in order, by
+    /// item, since Codex writes an answer in pieces (`partial_answer`, then
+    /// `final_answer`).
     final_answer: Option<String>,
+    answer_pieces: Vec<(String, String)>,
     interactions: HashMap<InteractionId, Interaction>,
     /// The changes an open approval is about, for its card when it closes.
     card_diffs: HashMap<InteractionId, Vec<FileDiff>>,
@@ -166,6 +177,15 @@ pub(crate) struct Renderer {
     proposed_plan: Option<String>,
     /// Codex's review this turn, as it wrote it.
     review: Option<String>,
+    /// A card the turn waits on is open: the live header says so (Oct 31
+    /// rule 7).
+    awaiting_card: bool,
+    /// The harness's live status ("Retrying (3/10)"), until the next item.
+    live_status: Option<String>,
+    /// Error texts already shown as callouts this turn, so the failed turn
+    /// doesn't repeat the same error (Codex sends it as an `error`
+    /// notification and again on `turn/completed`).
+    shown_errors: Vec<String>,
 }
 
 impl Renderer {
@@ -184,6 +204,7 @@ impl Renderer {
             turn_inputs: Vec::new(),
             pending_text: None,
             final_answer: None,
+            answer_pieces: Vec::new(),
             interactions: HashMap::new(),
             card_diffs: HashMap::new(),
             card_answers: HashMap::new(),
@@ -191,6 +212,9 @@ impl Renderer {
             plan: None,
             proposed_plan: None,
             review: None,
+            shown_errors: Vec::new(),
+            awaiting_card: false,
+            live_status: None,
         }
     }
 
@@ -274,10 +298,14 @@ impl Renderer {
                     self.turn_slots = 0;
                     self.turn_inputs = inputs.clone();
                     self.final_answer = None;
+                    self.answer_pieces.clear();
                     self.pending_text = None;
                     self.plan = None;
                     self.proposed_plan = None;
                     self.review = None;
+                    self.shown_errors.clear();
+                    self.awaiting_card = false;
+                    self.live_status = None;
                     // Detailed shows "Working" from the start, as v1 did,
                     // even for a turn that only answers.
                     if self.mode == OutputMode::Detailed {
@@ -304,6 +332,19 @@ impl Renderer {
                     self.flush_pending_update(&mut ops);
                     let elapsed = self.slot_elapsed(now);
                     self.end_slot(elapsed, "Worked for", false, &mut ops);
+                    // An answer written before the steer stays an answer:
+                    // Codex goes on after it and writes another, and only
+                    // the last would otherwise be posted.
+                    self.answer_pieces.clear();
+                    if let Some(answer) = self
+                        .final_answer
+                        .take()
+                        .filter(|text| !text.trim().is_empty() && !is_quiet_marker(text))
+                    {
+                        ops.push(RenderOp::Final {
+                            doc: Doc::markdown(&answer),
+                        });
+                    }
                 }
             }
             Event::Item(item) => self.item(item, now, &mut ops),
@@ -333,20 +374,39 @@ impl Renderer {
                     });
                 }
                 self.mark_rows_waiting(None);
+                if self.awaiting_card && !self.blocking_card_open() {
+                    self.awaiting_card = false;
+                    self.push_progress(&mut ops);
+                }
+            }
+            // The harness's live status: the header until the next item.
+            Event::Notice(notice) if notice.code == LIVE_STATUS_NOTICE => {
+                self.live_status = notice
+                    .message
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|status| !status.is_empty())
+                    .map(str::to_owned);
+                if self.slot.is_some() {
+                    self.push_progress(&mut ops);
+                }
             }
             // Errors are shown in both modes; warnings (config, deprecations)
             // stay in the logs instead of becoming chat messages.
             Event::Notice(notice) if notice.level == NoticeLevel::Error => {
+                let message = notice.message.as_deref().unwrap_or_default();
+                let key = message.trim().to_owned();
+                if !key.is_empty() && self.shown_errors.contains(&key) {
+                    return ops;
+                }
+                if !key.is_empty() {
+                    self.shown_errors.push(key);
+                }
                 let mut builder = DocBuilder::new();
-                let kind = if notice.level == NoticeLevel::Error {
-                    CalloutKind::Error
-                } else {
-                    CalloutKind::Warning
-                };
                 builder.callout(
-                    kind,
-                    &notice.code,
-                    notice.message.as_deref().unwrap_or_default(),
+                    CalloutKind::Error,
+                    &notice_title(&self.agent, &notice.code),
+                    message,
                 );
                 ops.push(RenderOp::Notice {
                     doc: builder.finish(),
@@ -379,6 +439,13 @@ impl Renderer {
             return;
         }
         self.surfaces(item);
+        self.live_status = None;
+        if let Some(path) = generated_image(item) {
+            ops.push(RenderOp::Image {
+                id: id.clone(),
+                path,
+            });
+        }
         let is_message = item.kind == ItemKind::Message;
         if self.mode == OutputMode::Friendly {
             self.friendly_item(item, &id, ops);
@@ -404,6 +471,7 @@ impl Renderer {
                     status: Status::Running,
                     delta: String::new(),
                     phase: None,
+                    description: None,
                 });
                 slot.rows.last_mut().expect("row")
             }
@@ -411,11 +479,23 @@ impl Renderer {
         if item.phase.is_some() {
             row.phase = item.phase;
         }
+        if let Some(description) = item
+            .native
+            .pointer("/input/description")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
+        {
+            row.description = Some(description.to_owned());
+        }
         match &item.update {
             ItemUpdate::Started { body } | ItemUpdate::Updated { body } => {
                 row.body = Some(body.clone());
             }
-            ItemUpdate::Delta { delta } => row.delta.push_str(&delta.text),
+            ItemUpdate::Delta { delta } => {
+                row.delta.push_str(&delta.text);
+                cap_delta(&mut row.delta);
+            }
             ItemUpdate::Completed { body, status } => {
                 row.body = Some(body.clone());
                 row.delta.clear();
@@ -428,12 +508,15 @@ impl Renderer {
             }
         }
         // Final answers leave the progress message for their own message.
+        // A sub-agent's text is its own work, never the turn's answer.
         if row.kind == ItemKind::Message
+            && row.parent.is_none()
             && let Some(ItemBody::Message { text, .. }) = &row.body
             && matches!(item.update, ItemUpdate::Completed { .. })
         {
             if row.phase == Some(AgentMessagePhase::FinalAnswer) {
-                self.final_answer = Some(text.clone());
+                let text = text.clone();
+                self.add_answer_piece(&id, text);
             } else if row.phase.is_none() {
                 self.pending_text = Some((id.clone(), text.clone()));
             }
@@ -556,7 +639,7 @@ impl Renderer {
             return false;
         };
         let elapsed = self.slot_elapsed(self.now_ms);
-        let summary = format!("Worked for {} · continued below", elapsed_text(elapsed));
+        let summary = format!("Worked for {}", elapsed_text(elapsed));
         let tops: Vec<usize> = slot
             .rows
             .iter()
@@ -631,9 +714,14 @@ impl Renderer {
         let ItemUpdate::Completed { body, .. } = &item.update else {
             return;
         };
+        // A sub-agent's messages and reports are its own work: Friendly
+        // shows the main agent's updates and answer only.
+        if item.parent.is_some() {
+            return;
+        }
         match body {
             ItemBody::Message { text, .. } => match item.phase {
-                Some(AgentMessagePhase::FinalAnswer) => self.final_answer = Some(text.clone()),
+                Some(AgentMessagePhase::FinalAnswer) => self.add_answer_piece(id, text.clone()),
                 Some(AgentMessagePhase::Commentary) => ops.push(update(text)),
                 _ => {
                     self.flush_pending_update(ops);
@@ -652,6 +740,23 @@ impl Renderer {
             }
             _ => self.flush_pending_update(ops),
         }
+    }
+
+    /// One answer item's text: a new piece follows the earlier ones; the same
+    /// item again (a replay) replaces its piece.
+    fn add_answer_piece(&mut self, id: &str, text: String) {
+        match self.answer_pieces.iter_mut().find(|(piece, _)| piece == id) {
+            Some(piece) => piece.1 = text,
+            None => self.answer_pieces.push((id.to_owned(), text)),
+        }
+        let joined = self
+            .answer_pieces
+            .iter()
+            .map(|(_, text)| text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        self.final_answer = Some(joined);
     }
 
     /// A held text was not the turn's last, so it was an update.
@@ -688,6 +793,7 @@ impl Renderer {
             }
             InteractionKind::Approval { subject, decisions } => {
                 self.mark_rows_waiting(interaction.item.as_ref().map(ToString::to_string));
+                self.split_at_card(ops);
                 let actions = card_actions(subject, decisions);
                 let diffs = self.item_diffs(interaction.item.as_ref().map(ToString::to_string));
                 let doc = blocks::approval::card(
@@ -709,6 +815,9 @@ impl Renderer {
                     .insert(interaction.id.clone(), interaction.clone());
             }
             InteractionKind::Question { form } => {
+                if !form.asynchronous {
+                    self.split_at_card(ops);
+                }
                 ops.push(RenderOp::Card {
                     interaction: interaction.id.clone(),
                     doc: blocks::question::card(&self.agent, form),
@@ -720,6 +829,72 @@ impl Renderer {
             }
         }
         self.push_progress(ops);
+    }
+
+    /// A card the turn waits on ends the progress message above it (Oct 31
+    /// rule 9): finished work stays there, and what still runs or waits
+    /// moves below the card into a new message whose header says the turn
+    /// waits for an answer (rule 7). With nothing finished, the message
+    /// moves below the card whole.
+    fn split_at_card(&mut self, ops: &mut Vec<RenderOp>) {
+        if self.mode != OutputMode::Detailed || self.turn.is_none() {
+            return;
+        }
+        self.awaiting_card = true;
+        self.flush_pending_update(ops);
+        let Some(slot) = self.slot.take() else {
+            return;
+        };
+        let finished: Vec<usize> = slot
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| {
+                row.parent.is_none() && !matches!(row.status, Status::Running | Status::Waiting)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        let kept = subset(&slot, &finished);
+        let shown = kept
+            .rows
+            .iter()
+            .any(|row| row.parent.is_none() && self.shows(row));
+        let carried: Vec<Row> = slot
+            .rows
+            .iter()
+            .filter(|row| !kept.rows.iter().any(|kept| kept.id == row.id))
+            .cloned()
+            .collect();
+        if shown {
+            let summary = format!(
+                "Worked for {}",
+                elapsed_text(self.now_ms.saturating_sub(slot.started_ms))
+            );
+            ops.push(RenderOp::EndProgress {
+                slot: slot.id,
+                doc: self.ended_doc(&kept, &summary, false),
+            });
+        } else {
+            ops.push(RenderOp::DeleteProgress { slot: slot.id });
+        }
+        self.slot = Some(Slot {
+            id: self.next_slot,
+            started_ms: self.now_ms,
+            rows: carried,
+        });
+        self.next_slot += 1;
+        self.turn_slots += 1;
+    }
+
+    /// Whether a card the turn waits on is still open.
+    fn blocking_card_open(&self) -> bool {
+        self.interactions
+            .values()
+            .any(|interaction| match &interaction.kind {
+                InteractionKind::Approval { .. } => true,
+                InteractionKind::Question { form } => !form.asynchronous,
+                InteractionKind::Dialog { .. } => false,
+            })
     }
 
     /// The changes of the item an approval is about, when the harness
@@ -819,8 +994,32 @@ impl Renderer {
         } else {
             self.slot_elapsed(now)
         };
-        self.end_slot(elapsed, verb, true, ops);
+        // A turn that showed no work leaves no progress behind: a quiet one
+        // posts nothing, as OpenClaw and Hermes do, and an answer stands
+        // alone. A failed or stopped one keeps its line.
+        let quiet = self.mode == OutputMode::Detailed
+            && outcome == TurnOutcome::Completed
+            && self.review.is_none()
+            && self.proposed_plan.is_none()
+            && self.plan.is_none()
+            && self.slot.as_ref().is_some_and(|slot| {
+                !slot
+                    .rows
+                    .iter()
+                    .any(|row| row.parent.is_none() && self.shows(row))
+            });
+        // The answer lands before its progress goes, so the chat never shows
+        // neither.
+        let mut unposted = None;
+        if quiet && let Some(slot) = self.slot.take() {
+            unposted = Some(slot.id);
+        } else {
+            self.end_slot(elapsed, verb, true, ops);
+        }
+        self.awaiting_card = false;
+        self.live_status = None;
         self.turn_slots = 0;
+        self.answer_pieces.clear();
         let answer = self
             .final_answer
             .take()
@@ -845,6 +1044,9 @@ impl Renderer {
                     });
                 }
             }
+        }
+        if let Some(slot) = unposted {
+            ops.push(RenderOp::DeleteProgress { slot });
         }
         if let Some(plan) = self.proposed_plan.take()
             && outcome == TurnOutcome::Completed
@@ -874,12 +1076,17 @@ impl Renderer {
             } else {
                 log::warn!(target: "inline::bridge::v2", "turn failed: {error}");
             }
-            let mut builder = DocBuilder::new();
-            builder.callout(CalloutKind::Error, "The turn failed", error);
-            ops.push(RenderOp::Notice {
-                doc: builder.finish(),
-            });
+            // The same error already shown as a notice this turn isn't
+            // repeated.
+            if !self.shown_errors.iter().any(|shown| shown == error.trim()) {
+                let mut builder = DocBuilder::new();
+                builder.callout(CalloutKind::Error, "The turn failed", error);
+                ops.push(RenderOp::Notice {
+                    doc: builder.finish(),
+                });
+            }
         }
+        self.shown_errors.clear();
         self.turn = None;
         self.turn_inputs.clear();
     }
@@ -1015,6 +1222,7 @@ impl Renderer {
     /// update written for the reader (Claude Code omits its real thinking).
     fn shows(&self, row: &Row) -> bool {
         let held_message = row.kind == ItemKind::Message
+            && row.parent.is_none()
             && (row.phase == Some(AgentMessagePhase::FinalAnswer)
                 || row.phase.is_none() && row.body.is_some());
         let hidden_reasoning = row.kind == ItemKind::Reasoning
@@ -1037,6 +1245,12 @@ impl Renderer {
     /// The live status while working: Codex's latest reasoning header, as
     /// its status line shows it, or "Thinking" while Claude thinks.
     fn status_line(&self) -> String {
+        if self.awaiting_card {
+            return "Waiting for your answer".to_owned();
+        }
+        if let Some(status) = &self.live_status {
+            return first_line(status, 80);
+        }
         let Some(slot) = &self.slot else {
             return "Working".to_owned();
         };
@@ -1106,8 +1320,9 @@ impl Renderer {
 
     fn write_row(&self, builder: &mut DocBuilder, slot: &Slot, row: &Row) {
         if row.kind == ItemKind::Message {
-            if row.phase == Some(AgentMessagePhase::FinalAnswer)
-                || row.phase.is_none() && row.body.is_some()
+            if row.parent.is_none()
+                && (row.phase == Some(AgentMessagePhase::FinalAnswer)
+                    || row.phase.is_none() && row.body.is_some())
             {
                 return;
             }
@@ -1145,30 +1360,88 @@ impl Renderer {
                     if row.kind == ItemKind::Reasoning {
                         inner.paragraph(&tail(&row.delta));
                     } else {
-                        inner.code(&tail(&row.delta), None);
+                        inner.code(&output_tail(&row.delta), None);
                     }
                 },
             );
             return;
         };
         let (title, meta, activity) = row_title(self.vocabulary, self.folder.as_deref(), &body);
+        // Claude's own words for a command are its title (Oct 31 rule 5).
+        let title = match (&body, &row.description) {
+            (ItemBody::Command { .. }, Some(description))
+                if self.vocabulary == Vocabulary::Claude =>
+            {
+                first_line(&scrub(description), 80)
+            }
+            _ => title,
+        };
+        // A sub-agent's work nests under its first row only: Codex reports
+        // spawn, wait and close as separate items for the same agent.
         let children: Vec<&Row> = match &body {
-            ItemBody::Child { child, .. } => slot
-                .rows
-                .iter()
-                .filter(|candidate| {
-                    candidate.parent.as_deref() == Some(child.id.as_str()) && self.shows(candidate)
-                })
-                .collect(),
+            ItemBody::Child { child, .. }
+                if first_child_row(slot, child.id.as_str()) == Some(row.id.as_str()) =>
+            {
+                slot.rows
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.parent.as_deref() == Some(child.id.as_str())
+                            && self.shows(candidate)
+                    })
+                    .collect()
+            }
             _ => Vec::new(),
         };
+        // The sub-agent's last words, when its own messages are shown: its
+        // report is then already there.
+        let last_words = children.iter().rev().find_map(|child| match &child.body {
+            Some(ItemBody::Message { text, .. }) => Some(text.trim().to_owned()),
+            _ => None,
+        });
         builder.disclosure(&title, meta.as_deref(), activity, row.status, |inner| {
             row_detail(inner, &body, &row.delta, self.folder.as_deref());
             for child in children {
                 self.write_row(inner, slot, child);
             }
+            // What the sub-agent reported back, after its own work.
+            if let ItemBody::Child {
+                output: Some(output),
+                ..
+            } = &body
+                && !output.trim().is_empty()
+                && last_words.as_deref() != Some(output.trim())
+            {
+                blocks::markdown::write(inner, &tail(&scrub(output)));
+            }
         });
     }
+}
+
+/// The first row that stands for a child, which its work nests under.
+fn first_child_row<'a>(slot: &'a Slot, child: &str) -> Option<&'a str> {
+    slot.rows
+        .iter()
+        .find(|row| {
+            matches!(&row.body, Some(ItemBody::Child { child: candidate, .. })
+                if candidate.id.as_str() == child)
+        })
+        .map(|row| row.id.as_str())
+}
+
+/// The file of a finished Codex image generation.
+fn generated_image(item: &Item) -> Option<PathBuf> {
+    let ItemUpdate::Completed {
+        body: ItemBody::Tool { name, input, .. },
+        status: ItemStatus::Completed,
+    } = &item.update
+    else {
+        return None;
+    };
+    if name != "image_generation" {
+        return None;
+    }
+    let path = PathBuf::from(input.get("saved_path")?.as_str()?);
+    path.is_absolute().then_some(path)
 }
 
 /// Rows in order, with each run of reads, searches and listings together.
@@ -1390,17 +1663,27 @@ fn reasoning_text(row: &Row) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-/// The header a reasoning summary leads with: its last bold title
-/// ("**Tracing the lock error**"), or its first line.
+/// The header a reasoning summary leads with, as Codex's status line takes
+/// it: the last line that is a bold title ("**Tracing the lock error**"),
+/// else the first bold span, else the first line. A bold word inside the
+/// body ("the call is **Mutex::lock**") is not a header.
 fn reasoning_header(row: &Row) -> Option<String> {
     let text = reasoning_text(row)?;
-    let segments: Vec<&str> = text.split("**").collect();
-    let bold = (1..segments.len().saturating_sub(1))
-        .step_by(2)
-        .rev()
-        .map(|index| segments[index].trim())
-        .find(|segment| !segment.is_empty());
-    let header = match bold {
+    let title_line = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("**"))
+        .filter_map(|line| line[2..].split("**").next())
+        .map(str::trim)
+        .rfind(|title| !title.is_empty());
+    let first_bold = || {
+        text.split("**")
+            .collect::<Vec<_>>()
+            .get(1..)
+            .and_then(|rest| (rest.len() > 1).then(|| rest[0].trim()))
+            .filter(|bold| !bold.is_empty())
+    };
+    let header = match title_line.or_else(first_bold) {
         Some(bold) => first_line(bold, 80),
         None => first_line(&text, 80),
     };
@@ -1698,6 +1981,22 @@ fn elapsed_text(ms: u64) -> String {
     }
 }
 
+/// A command as a one-line title: its first line, and "…" when more
+/// follow, so a script never reads as just its opening `set -e`.
+fn command_title(command: &str) -> String {
+    let title = first_line(command, 80);
+    let more = command
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count()
+        > 1;
+    if more && !title.ends_with('…') {
+        format!("{title} …")
+    } else {
+        title
+    }
+}
+
 fn first_line(text: &str, max: usize) -> String {
     let line = text
         .lines()
@@ -1712,13 +2011,94 @@ fn first_line(text: &str, max: usize) -> String {
     }
 }
 
-/// The end of a long text from a line start, with the hidden line count, as
-/// Codex's output previews show it ("… +120 lines").
-/// Hides credentials (assignments, auth headers, secret flags, URL
-/// passwords) and local paths before agent work is shown in a chat that
-/// people other than the owner may read.
+/// Hides secrets (credential assignments, auth headers, secret flags, URL
+/// passwords and secret query values) before agent work is shown in a chat
+/// that people other than the owner may read. Paths and URLs stay as the
+/// native apps show them.
 fn scrub(text: &str) -> String {
-    inline_agent_bridge::sanitize_diagnostic_text(text).unwrap_or_default()
+    inline_agent_bridge::sanitize_shared_output(text).unwrap_or_default()
+}
+
+/// Tails then scrubs: the scrubber works line by line, so its result near
+/// the end is the same, without re-scrubbing a whole growing output on every
+/// delta.
+fn tail_scrubbed(text: &str) -> String {
+    scrub(&tail(text))
+}
+
+/// Command output as a terminal shows it: a carriage return goes back to
+/// the line's start, so a progress bar's frames collapse to the last one
+/// (Codex's TUI and t3code do the same).
+pub(crate) fn resolve_carriage_returns(text: &str) -> String {
+    if !text.contains('\r') {
+        return text.to_owned();
+    }
+    text.split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            line.rsplit('\r')
+                .find(|frame| !frame.is_empty())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Command or tool output for a row: its end, frames resolved, scrubbed.
+fn output_tail(text: &str) -> String {
+    scrub(&resolve_carriage_returns(&tail(text)))
+}
+
+/// Streamed output a row keeps while it runs: the end of it. The finished
+/// item carries the whole output.
+const MAX_ROW_DELTA_BYTES: usize = 64 * 1024;
+
+fn cap_delta(delta: &mut String) {
+    if delta.len() <= MAX_ROW_DELTA_BYTES {
+        return;
+    }
+    let mut cut = delta.len() - MAX_ROW_DELTA_BYTES;
+    while !delta.is_char_boundary(cut) {
+        cut += 1;
+    }
+    // Start at a line so the shown tail doesn't open mid-line.
+    if let Some(offset) = delta[cut..].find('\n') {
+        cut += offset + 1;
+    }
+    delta.drain(..cut);
+}
+
+/// A notice's title: the harness's own words, or for a bare protocol code
+/// ("error", "thread/status/changed") a plain one.
+fn notice_title(agent: &str, code: &str) -> String {
+    if code.contains(' ') {
+        code.to_owned()
+    } else {
+        format!("{agent} reported an error")
+    }
+}
+
+/// A diff as a diff block shows it. Codex sends an added or deleted file's
+/// whole text with no `+`/`-` markers; without them the block would count
+/// and colour a Markdown "- item" line as removed.
+pub(crate) fn display_diff(change: &FileDiff) -> Option<String> {
+    let diff = change.diff.as_deref()?;
+    let marker = match change.change {
+        FileChangeKind::Add => '+',
+        FileChangeKind::Delete => '-',
+        FileChangeKind::Update { .. } => return Some(diff.to_owned()),
+    };
+    if diff.lines().any(|line| line.starts_with("@@"))
+        || diff.lines().all(|line| line.starts_with(marker))
+    {
+        return Some(diff.to_owned());
+    }
+    Some(
+        diff.lines()
+            .map(|line| format!("{marker}{line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 fn tail(text: &str) -> String {
@@ -1770,12 +2150,12 @@ fn row_title(
                     ActivityKind::Explore,
                 ),
                 Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => (
-                    format!("Ran {}", first_line(&scrub(command), 80)),
+                    format!("Ran {}", command_title(&scrub(command))),
                     meta,
                     ActivityKind::Command,
                 ),
                 Vocabulary::Claude => (
-                    format!("Bash {}", first_line(&scrub(command), 80)),
+                    format!("Bash {}", command_title(&scrub(command))),
                     meta,
                     ActivityKind::Command,
                 ),
@@ -1844,6 +2224,41 @@ fn row_title(
                 None => name.clone(),
             };
             (title, None, ActivityKind::Agent)
+        }
+        ItemBody::Tool {
+            name, server: None, ..
+        } if name == "image_generation" => {
+            ("Generated an image".to_owned(), None, ActivityKind::Tool)
+        }
+        ItemBody::Tool {
+            name,
+            server: None,
+            input,
+            ..
+        } if name == "web_search" => {
+            // Codex's web search in the TUI's words.
+            let text = |key: &str| {
+                input
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(|value| first_line(&scrub(value), 70))
+                    .filter(|value| !value.is_empty())
+            };
+            let title = match (
+                input.get("action").and_then(Value::as_str),
+                text("query"),
+                text("url"),
+                text("pattern"),
+            ) {
+                (Some("openPage"), _, Some(url), _) => format!("Opened {url}"),
+                (Some("findInPage"), _, Some(url), Some(pattern)) => {
+                    format!("Searched for '{pattern}' in {url}")
+                }
+                (Some("findInPage"), _, None, Some(pattern)) => format!("Searched for '{pattern}'"),
+                (_, Some(query), _, _) => format!("Searched the web for {query}"),
+                _ => "Searched the web".to_owned(),
+            };
+            (title, None, ActivityKind::Web)
         }
         ItemBody::Tool {
             name,
@@ -1957,7 +2372,7 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
             }
             builder.code(&format!("$ {}", scrub(command)), Some("sh"));
             let output = output.as_deref().unwrap_or(delta);
-            builder.code(&tail(&scrub(output)), None);
+            builder.code(&output_tail(output), None);
             if let Some(code) = exit_code.filter(|code| *code != 0) {
                 builder.paragraph(&format!("Exit code {code}"));
             }
@@ -1972,11 +2387,9 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
                     FileChangeKind::Update { moved_to: Some(_) } => DiffChange::Renamed,
                     FileChangeKind::Update { moved_to: None } => DiffChange::Modified,
                 };
-                let diff = change
-                    .diff
-                    .as_deref()
+                let diff = display_diff(change)
                     .filter(|_| shown < MAX_ROW_DIFF_CHARS)
-                    .map(|diff| tail(&scrub(diff)));
+                    .map(|diff| tail_scrubbed(&diff));
                 shown += diff.as_deref().map_or(0, str::len);
                 builder.diff(
                     &relative(&change.path.display().to_string(), folder),
@@ -2001,14 +2414,12 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
         } => {
             if !input.is_null() {
                 builder.code(
-                    &tail(&scrub(
-                        &serde_json::to_string_pretty(input).unwrap_or_default(),
-                    )),
+                    &tail_scrubbed(&serde_json::to_string_pretty(input).unwrap_or_default()),
                     Some("json"),
                 );
             }
             if let Some(output) = output.as_deref().or((!delta.is_empty()).then_some(delta)) {
-                builder.code(&tail(&scrub(output)), None);
+                builder.code(&output_tail(output), None);
             }
             if let Some(error) = error {
                 builder.paragraph(&scrub(error));
@@ -2379,7 +2790,8 @@ mod tests {
             done.kind,
             inline_protocol::proto::block_disclosure::Kind::Default as i32
         );
-        assert_eq!(done.initially_open, Some(false));
+        // The turn's work stays open after it (Oct 31 rule 1).
+        assert_eq!(done.initially_open, Some(true));
         assert_eq!(done.children.len(), 1);
     }
 
@@ -2484,7 +2896,7 @@ mod tests {
             }
         }
         assert!(ended.len() > 1, "the turn spans several messages");
-        assert!(ended[0].starts_with("Worked for") && ended[0].contains("continued below"));
+        assert!(ended[0].starts_with("Worked for") && !ended[0].contains("continued below"));
         let all = ended.concat();
         assert_eq!(
             all.matches("Ran cargo test -p crate").count(),
@@ -3531,7 +3943,7 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_that_streamed_into_progress_leaves_its_time_and_the_answer() {
+    fn an_answer_that_streamed_into_progress_leaves_only_the_answer() {
         // Claude names no final phase: the text streams into progress, then
         // turns out to be the answer.
         let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
@@ -3571,14 +3983,21 @@ mod tests {
             ops.first(),
             Some(RenderOp::Progress { slot: 1, .. })
         ));
+        // No work showed, so the progress goes once the answer is out.
+        let [
+            ..,
+            RenderOp::Final { doc },
+            RenderOp::DeleteProgress { slot: 1 },
+        ] = ops.as_slice()
+        else {
+            panic!("{ops:?}");
+        };
+        assert_eq!(doc.text, "Hello");
         assert!(
-            ops.iter().any(|op| matches!(
-                op,
-                RenderOp::EndProgress { slot: 1, doc, .. } if doc.text == "Worked for 1s"
-            )),
+            !ops.iter()
+                .any(|op| matches!(op, RenderOp::EndProgress { .. })),
             "{ops:?}"
         );
-        assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Hello"));
     }
 
     #[test]
@@ -3659,5 +4078,738 @@ mod tests {
         };
         assert!(doc.text.contains("compiling"));
         assert!(doc.text.contains("hologram · hologram"));
+    }
+    fn child_message(id: &str, text: &str, phase: Option<AgentMessagePhase>) -> Event {
+        Event::Item(
+            Item::new(
+                ItemId::new(id).expect("id"),
+                None,
+                ItemUpdate::Completed {
+                    body: message(text),
+                    status: ItemStatus::Completed,
+                },
+                Value::Null,
+            )
+            .with_phase(phase)
+            .with_parent(Some(ChildRef {
+                id: inline_agent_bridge::harness::ChildId::new("agent-1").expect("child"),
+                kind: inline_agent_bridge::harness::ChildKind::Subagent,
+            })),
+        )
+    }
+
+    fn finished(error: Option<&str>, outcome: TurnOutcome) -> Event {
+        turn(TurnPhase::Completed {
+            outcome,
+            inputs_consumed: vec![],
+            error: error.map(str::to_owned),
+            duration_ms: Some(10),
+        })
+    }
+
+    fn finals(ops: &[RenderOp]) -> Vec<String> {
+        ops.iter()
+            .filter_map(|op| match op {
+                RenderOp::Final { doc } => Some(doc.text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sub_agents_text_is_never_the_answer_or_a_friendly_update() {
+        // Friendly: the sub-agent's report stays out of the chat.
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, child_message("s1", "Sub-agent report: 3 files.", None)),
+                (2, completed("m1:0", message("All fixed."), None)),
+                (3, child_message("s2", "Background note.", None)),
+                (4, finished(None, TurnOutcome::Completed)),
+            ],
+        );
+        assert_eq!(
+            ops,
+            vec![RenderOp::Final {
+                doc: Doc::markdown("All fixed."),
+            }]
+        );
+        // Detailed: a child's final answer after the main one leaves the
+        // main answer, and the child's text shows inside the progress.
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1,
+                    completed(
+                        "a1",
+                        message("Main answer."),
+                        Some(AgentMessagePhase::FinalAnswer),
+                    ),
+                ),
+                (
+                    2,
+                    child_message("c1", "Child answer.", Some(AgentMessagePhase::FinalAnswer)),
+                ),
+                (3, finished(None, TurnOutcome::Completed)),
+            ],
+        );
+        assert_eq!(finals(&ops), vec!["Main answer.".to_owned()], "{ops:?}");
+    }
+
+    #[test]
+    fn an_answer_written_before_a_steer_is_still_posted() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (0, consumed("in-1")),
+                (
+                    1_000,
+                    completed(
+                        "a1",
+                        message("First answer."),
+                        Some(AgentMessagePhase::FinalAnswer),
+                    ),
+                ),
+                (2_000, consumed("in-2")),
+                (3_000, command("c1")),
+                (
+                    4_000,
+                    completed(
+                        "a2",
+                        message("Second answer."),
+                        Some(AgentMessagePhase::FinalAnswer),
+                    ),
+                ),
+                (5_000, finished(None, TurnOutcome::Completed)),
+            ],
+        );
+        assert_eq!(
+            finals(&ops),
+            vec!["First answer.".to_owned(), "Second answer.".to_owned()]
+        );
+    }
+
+    #[test]
+    fn one_failure_shows_one_error_with_a_plain_title() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let notice = Event::Notice(inline_agent_bridge::harness::Notice {
+            level: NoticeLevel::Error,
+            code: "error".to_owned(),
+            message: Some("stream disconnected before completion".to_owned()),
+            native: Value::Null,
+        });
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, notice),
+                (
+                    2,
+                    finished(
+                        Some("stream disconnected before completion"),
+                        TurnOutcome::Failed,
+                    ),
+                ),
+            ],
+        );
+        let notices: Vec<&Doc> = ops
+            .iter()
+            .filter_map(|op| match op {
+                RenderOp::Notice { doc } => Some(doc),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notices.len(), 1, "{ops:?}");
+        assert!(
+            notices[0].text.contains("Codex reported an error"),
+            "{}",
+            notices[0].text
+        );
+        assert!(!notices[0].text.starts_with("error"), "{}", notices[0].text);
+    }
+
+    #[test]
+    fn progress_bars_keep_their_last_frame() {
+        assert_eq!(
+            resolve_carriage_returns(
+                "Downloading  10%\r Downloading  55%\rDownloading 100%\ndone\r\n"
+            ),
+            "Downloading 100%\ndone\n"
+        );
+        assert_eq!(resolve_carriage_returns("plain\nlines"), "plain\nlines");
+        // `tput sgr0` leaves no stray letter once published.
+        assert_eq!(
+            inline_agent_bridge::sanitize_visible_text("\u{1b}[1mbold\u{1b}(B\u{1b}[m normal"),
+            "bold normal"
+        );
+    }
+
+    #[test]
+    fn added_and_deleted_files_show_as_additions_and_deletions() {
+        let added = FileDiff {
+            path: "notes.md".into(),
+            change: FileChangeKind::Add,
+            diff: Some("# Notes\n- one\n- two".to_owned()),
+        };
+        assert_eq!(
+            display_diff(&added).as_deref(),
+            Some("+# Notes\n+- one\n+- two")
+        );
+        let deleted = FileDiff {
+            path: "old.md".into(),
+            change: FileChangeKind::Delete,
+            diff: Some("gone".to_owned()),
+        };
+        assert_eq!(display_diff(&deleted).as_deref(), Some("-gone"));
+        // Already a diff: kept.
+        let prefixed = FileDiff {
+            path: "new.rs".into(),
+            change: FileChangeKind::Add,
+            diff: Some("+fn main() {}".to_owned()),
+        };
+        assert_eq!(display_diff(&prefixed).as_deref(), Some("+fn main() {}"));
+        let hunk = FileDiff {
+            path: "new.rs".into(),
+            change: FileChangeKind::Add,
+            diff: Some("@@ -0,0 +1 @@\n+fn main() {}".to_owned()),
+        };
+        assert_eq!(
+            display_diff(&hunk).as_deref(),
+            Some("@@ -0,0 +1 @@\n+fn main() {}")
+        );
+    }
+
+    #[test]
+    fn the_status_header_is_the_summary_title_not_a_bold_word_in_its_body() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1_000,
+                    reasoning(
+                        "r1",
+                        "**Tracing the lock error**\n\nThe failing call is **Mutex::lock** in the pool.",
+                    ),
+                ),
+                (2_000, started("c1", ran("1", None))),
+            ],
+        );
+        assert!(
+            working_title(&ops).starts_with("Tracing the lock error · "),
+            "{}",
+            working_title(&ops)
+        );
+    }
+
+    #[test]
+    fn running_output_keeps_only_its_end() {
+        let mut delta = "line\n".repeat(30_000);
+        cap_delta(&mut delta);
+        assert!(delta.len() <= MAX_ROW_DELTA_BYTES);
+        assert!(delta.starts_with("line\n"));
+    }
+    #[test]
+    fn a_sub_agents_work_shows_once_under_its_first_row() {
+        let agent = ChildRef {
+            id: inline_agent_bridge::harness::ChildId::new("agent-1").expect("child"),
+            kind: inline_agent_bridge::harness::ChildKind::Subagent,
+        };
+        let child_row = |id: &str, action: &str| {
+            completed(
+                id,
+                ItemBody::Child {
+                    child: agent.clone(),
+                    action: Some(action.to_owned()),
+                    prompt: Some("Audit the parser".to_owned()),
+                    output: None,
+                },
+                None,
+            )
+        };
+        let nested = Event::Item(
+            Item::new(
+                ItemId::new("n1").expect("id"),
+                None,
+                ItemUpdate::Completed {
+                    body: ItemBody::Command {
+                        command: "rg unique-marker".to_owned(),
+                        cwd: None,
+                        actions: Vec::new(),
+                        output: Some("zz-output-marker".to_owned()),
+                        exit_code: Some(0),
+                        duration_ms: Some(1000),
+                    },
+                    status: ItemStatus::Completed,
+                },
+                Value::Null,
+            )
+            .with_parent(Some(agent.clone())),
+        );
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, child_row("spawn", "spawnAgent")),
+                (2, nested),
+                (3, child_row("wait", "wait")),
+                (4, child_row("close", "closeAgent")),
+            ],
+        );
+        let doc = match ops.last() {
+            Some(RenderOp::Progress { doc, .. }) => doc,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            doc.text.matches("zz-output-marker").count(),
+            1,
+            "{}",
+            doc.text
+        );
+    }
+    #[test]
+    fn an_answer_written_in_pieces_goes_out_whole() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1,
+                    completed(
+                        "a1",
+                        message("The first result is ready."),
+                        Some(AgentMessagePhase::FinalAnswer),
+                    ),
+                ),
+                (2, command("c1")),
+                (
+                    3,
+                    completed(
+                        "a2",
+                        message("The second result is ready."),
+                        Some(AgentMessagePhase::FinalAnswer),
+                    ),
+                ),
+                // A replay of the first piece replaces it, never repeats it.
+                (
+                    4,
+                    completed(
+                        "a1",
+                        message("The first result is ready."),
+                        Some(AgentMessagePhase::FinalAnswer),
+                    ),
+                ),
+                (5, finished(None, TurnOutcome::Completed)),
+            ],
+        );
+        assert_eq!(
+            finals(&ops),
+            vec!["The first result is ready.\n\nThe second result is ready.".to_owned()]
+        );
+    }
+
+    #[test]
+    fn codex_web_searches_read_as_the_tui_says_them() {
+        let title = |input: Value| {
+            row_title(
+                Vocabulary::Codex,
+                None,
+                &ItemBody::Tool {
+                    name: "web_search".to_owned(),
+                    server: None,
+                    input,
+                    output: None,
+                    error: None,
+                },
+            )
+            .0
+        };
+        assert_eq!(
+            title(serde_json::json!({"action": "search", "query": "rust 1.95 release notes"})),
+            "Searched the web for rust 1.95 release notes"
+        );
+        assert_eq!(
+            title(serde_json::json!({"action": "openPage", "url": "https://example.com/docs"})),
+            "Opened https://example.com/docs"
+        );
+        assert_eq!(
+            title(
+                serde_json::json!({"action": "findInPage", "url": "https://example.com/docs", "pattern": "retry"})
+            ),
+            "Searched for 'retry' in https://example.com/docs"
+        );
+        assert_eq!(title(serde_json::json!({})), "Searched the web");
+    }
+
+    #[test]
+    fn a_sub_agents_report_follows_its_work() {
+        let agent = ChildRef {
+            id: inline_agent_bridge::harness::ChildId::new("toolu_agent").expect("child"),
+            kind: inline_agent_bridge::harness::ChildKind::Subagent,
+        };
+        let nested = Event::Item(
+            Item::new(
+                ItemId::new("n1").expect("id"),
+                None,
+                ItemUpdate::Completed {
+                    body: ItemBody::Command {
+                        command: "rg parse".to_owned(),
+                        cwd: None,
+                        actions: Vec::new(),
+                        output: Some("nested-output-marker".to_owned()),
+                        exit_code: Some(0),
+                        duration_ms: Some(1000),
+                    },
+                    status: ItemStatus::Completed,
+                },
+                Value::Null,
+            )
+            .with_parent(Some(agent.clone())),
+        );
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, nested),
+                (
+                    2,
+                    completed(
+                        "toolu_agent",
+                        ItemBody::Child {
+                            child: agent.clone(),
+                            action: Some("Explore".to_owned()),
+                            prompt: Some("Audit the parser tests".to_owned()),
+                            output: Some("Report: two tests skip the empty case.".to_owned()),
+                        },
+                        None,
+                    ),
+                ),
+            ],
+        );
+        let doc = match ops.last() {
+            Some(RenderOp::Progress { doc, .. }) => doc,
+            other => panic!("{other:?}"),
+        };
+        let work = doc.text.find("nested-output-marker").expect("nested work");
+        let report = doc
+            .text
+            .find("two tests skip the empty case")
+            .expect("report");
+        assert!(work < report, "{}", doc.text);
+        // The sub-agent's own last message is its report: shown once.
+        let last = Event::Item(
+            Item::new(
+                ItemId::new("n2").expect("id"),
+                None,
+                ItemUpdate::Completed {
+                    body: message("Report: two tests skip the empty case."),
+                    status: ItemStatus::Completed,
+                },
+                Value::Null,
+            )
+            .with_parent(Some(agent.clone())),
+        );
+        let ops = run(&mut renderer, vec![(3, last)]);
+        let doc = match ops.last() {
+            Some(RenderOp::Progress { doc, .. }) => doc,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            doc.text.matches("two tests skip the empty case").count(),
+            1,
+            "{}",
+            doc.text
+        );
+    }
+    fn approval(id: &str, item: Option<&str>) -> Event {
+        Event::Interaction(Interaction {
+            id: InteractionId::new(id).expect("id"),
+            turn: Some(TurnId::new("t1").expect("turn")),
+            item: item.map(|item| ItemId::new(item).expect("item")),
+            parent: None,
+            kind: InteractionKind::Approval {
+                subject: ApprovalSubject::Command {
+                    command: "cargo publish".to_owned(),
+                    cwd: None,
+                    reason: None,
+                    network_host: None,
+                    permissions: None,
+                },
+                decisions: vec![Decision {
+                    id: inline_agent_bridge::harness::DecisionId::new("accept").expect("id"),
+                    label: "Yes, proceed".to_owned(),
+                    kind: DecisionKind::Accept,
+                    description: None,
+                    accepts_message: false,
+                    native: Value::Null,
+                }],
+            },
+            native: Value::Null,
+        })
+    }
+
+    fn closed(id: &str) -> Event {
+        Event::InteractionClosed {
+            id: InteractionId::new(id).expect("id"),
+            by: ClosedBy::Inline {
+                user: inline_agent_bridge::harness::UserId(7),
+                decision: Some(
+                    inline_agent_bridge::harness::DecisionId::new("accept").expect("id"),
+                ),
+            },
+        }
+    }
+
+    fn kinds(ops: &[RenderOp]) -> Vec<String> {
+        ops.iter()
+            .map(|op| match op {
+                RenderOp::Progress { slot, doc } => {
+                    format!("progress {slot}: {}", doc.text.lines().next().unwrap_or(""))
+                }
+                RenderOp::EndProgress { slot, doc } => {
+                    format!("end {slot}: {}", doc.text.lines().next().unwrap_or(""))
+                }
+                RenderOp::DeleteProgress { slot } => format!("delete {slot}"),
+                RenderOp::Image { path, .. } => format!("image {}", path.display()),
+                RenderOp::Card { .. } => "card".to_owned(),
+                RenderOp::CardClosed { .. } => "card closed".to_owned(),
+                RenderOp::Final { doc } => format!("final: {}", doc.text),
+                RenderOp::Update { .. } => "update".to_owned(),
+                RenderOp::Notice { .. } => "notice".to_owned(),
+                RenderOp::PlanProposal { .. } => "plan".to_owned(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_card_ends_the_progress_above_it_and_the_wait_shows_below_it() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let publish = ItemBody::Command {
+            command: "cargo publish".to_owned(),
+            cwd: None,
+            actions: Vec::new(),
+            output: None,
+            exit_code: None,
+            duration_ms: None,
+        };
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1_000, command("c1")),
+                (2_000, started("c2", publish.clone())),
+                (2_100, approval("41", Some("c2"))),
+            ],
+        );
+        let kinds = kinds(&ops);
+        let card = kinds.iter().position(|kind| kind == "card").expect("card");
+        // The finished command stays above the card, in its ended message.
+        assert!(
+            kinds[card - 1].starts_with("end 1: Worked for"),
+            "{kinds:?}"
+        );
+        // The waiting command moves below it, under the wait.
+        assert!(
+            kinds[card + 1].starts_with("progress 2: Waiting for your answer"),
+            "{kinds:?}"
+        );
+        let RenderOp::Progress { doc, .. } = &ops[card + 1] else {
+            panic!()
+        };
+        assert!(doc.text.contains("Ran cargo publish"), "{}", doc.text);
+        let RenderOp::EndProgress { doc, .. } = &ops[card - 1] else {
+            panic!()
+        };
+        assert!(
+            doc.text.contains("Ran cargo test") && !doc.text.contains("cargo publish"),
+            "{}",
+            doc.text
+        );
+        // Answered: the same message works on below the card.
+        let ops = run(&mut renderer, vec![(9_000, closed("41"))]);
+        let kinds = super::tests::kinds(&ops);
+        assert!(
+            kinds
+                .iter()
+                .any(|kind| kind.starts_with("progress 2: Working")),
+            "{kinds:?}"
+        );
+        // With nothing finished, the live message moves below the card whole.
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (2_000, started("c2", publish)),
+                (2_100, approval("41", Some("c2"))),
+            ],
+        );
+        let kinds = super::tests::kinds(&ops);
+        let card = kinds.iter().position(|kind| kind == "card").expect("card");
+        assert_eq!(kinds[card - 1], "delete 1", "{kinds:?}");
+        assert!(
+            kinds[card + 1].starts_with("progress 2: Waiting for your answer"),
+            "{kinds:?}"
+        );
+    }
+
+    #[test]
+    fn a_turn_that_shows_no_work_leaves_no_progress() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (500, completed("m1:0", message("(quiet)"), None)),
+                (900, finished(None, TurnOutcome::Completed)),
+            ],
+        );
+        assert_eq!(
+            kinds(&ops).last().map(String::as_str),
+            Some("delete 1"),
+            "{:?}",
+            kinds(&ops)
+        );
+        // An answer with no work before it stands alone; a failure keeps its
+        // line.
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (500, completed("m1:0", message("Done."), None)),
+                (900, finished(None, TurnOutcome::Completed)),
+            ],
+        );
+        let kinds_seen = kinds(&ops);
+        let delete = kinds_seen.iter().position(|kind| kind == "delete 1");
+        let answer = kinds_seen.iter().position(|kind| kind.starts_with("final"));
+        assert!(
+            matches!((delete, answer), (Some(delete), Some(answer)) if answer < delete)
+                && !kinds_seen.iter().any(|kind| kind.starts_with("end 1")),
+            "{kinds_seen:?}"
+        );
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (900, finished(Some("boom"), TurnOutcome::Failed)),
+            ],
+        );
+        assert!(
+            kinds(&ops)
+                .iter()
+                .any(|kind| kind.starts_with("end 1: Failed after")),
+            "{:?}",
+            kinds(&ops)
+        );
+    }
+
+    #[test]
+    fn the_live_status_heads_progress_until_the_next_item() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let status = |text: Option<&str>| {
+            Event::Notice(inline_agent_bridge::harness::Notice {
+                level: NoticeLevel::Info,
+                code: LIVE_STATUS_NOTICE.to_owned(),
+                message: text.map(str::to_owned),
+                native: Value::Null,
+            })
+        };
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (500, status(Some("Retrying (3/10) · overloaded"))),
+            ],
+        );
+        assert!(
+            working_title(&ops).starts_with("Retrying (3/10) · overloaded"),
+            "{}",
+            working_title(&ops)
+        );
+        let ops = run(&mut renderer, vec![(900, command("c1"))]);
+        assert!(
+            working_title(&ops).starts_with("Working"),
+            "{}",
+            working_title(&ops)
+        );
+    }
+
+    #[test]
+    fn claude_commands_are_titled_with_their_description() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let body = ItemBody::Command {
+            command: "python3 -m unittest discover -s tests".to_owned(),
+            cwd: None,
+            actions: Vec::new(),
+            output: Some("OK".to_owned()),
+            exit_code: Some(0),
+            duration_ms: Some(1_000),
+        };
+        let start = Event::Item(Item::new(
+            ItemId::new("toolu_1").expect("id"),
+            None,
+            ItemUpdate::Started { body: body.clone() },
+            serde_json::json!({"type": "tool_use", "name": "Bash",
+                "input": {"command": "python3 -m unittest discover -s tests", "description": "Run the unit tests"}}),
+        ));
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (100, start),
+                (900, completed("toolu_1", body, None)),
+            ],
+        );
+        let RenderOp::Progress { doc, .. } = ops.last().expect("op") else {
+            panic!()
+        };
+        assert!(doc.text.contains("Run the unit tests"), "{}", doc.text);
+        assert!(!doc.text.contains("Bash python3"), "{}", doc.text);
+    }
+
+    #[test]
+    fn a_generated_image_goes_to_the_chat_in_both_modes() {
+        for mode in [OutputMode::Detailed, OutputMode::Friendly] {
+            let mut renderer = Renderer::new(mode, Vocabulary::Codex, "Codex");
+            let ops = run(
+                &mut renderer,
+                vec![
+                    (0, turn(TurnPhase::Started { inputs: vec![] })),
+                    (
+                        1,
+                        completed(
+                            "ig1",
+                            ItemBody::Tool {
+                                name: "image_generation".to_owned(),
+                                server: None,
+                                input: serde_json::json!({"saved_path": "/tmp/codex/ig1.png"}),
+                                output: Some("A red bicycle".to_owned()),
+                                error: None,
+                            },
+                            None,
+                        ),
+                    ),
+                ],
+            );
+            assert!(
+                kinds(&ops).contains(&"image /tmp/codex/ig1.png".to_owned()),
+                "{mode:?}: {:?}",
+                kinds(&ops)
+            );
+        }
     }
 }

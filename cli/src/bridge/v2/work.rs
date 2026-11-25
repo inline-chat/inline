@@ -1201,7 +1201,8 @@ impl Actor {
                 }
             }
         }
-        if live_turn(&session).is_some() {
+        let live = session.live_work();
+        if live.turn.is_some() {
             self.stopping = true;
             self.report().await;
             if let Err(error) = session
@@ -1212,6 +1213,12 @@ impl Actor {
             {
                 self.stopping = false;
                 self.report().await;
+                return Some(format!("Could not stop: {error}"));
+            }
+        } else if !pause && !live.children.is_empty() {
+            // Only background work is left running (a shell or a sub-agent
+            // the turn started): Stop ends that too.
+            if let Err(error) = stop_background(&session, &live.children).await {
                 return Some(format!("Could not stop: {error}"));
             }
         } else if !pause {
@@ -1248,6 +1255,8 @@ impl Actor {
                         action: QueueOp::Start,
                     })
                     .await
+                // Taken already: it runs.
+                && !matches!(error, OpError::NotQueued)
             {
                 return Some(format!("Could not resume the queue: {error}"));
             }
@@ -2727,6 +2736,12 @@ impl Actor {
                 self.sync_settings().await
             }
             SessionOp::Compact => self.native_op(Op::Compact, "Compacting the context.").await,
+            // Claude Code goes on under a new session id after /clear, which
+            // a restart would not follow: the thread starts a fresh session
+            // itself instead (Mo, 2026-11-24).
+            SessionOp::Clear if self.agent.vocabulary == Vocabulary::Claude => {
+                self.clear_into_fresh_session().await
+            }
             SessionOp::Clear => self.native_op(Op::Clear, "Context cleared.").await,
             SessionOp::Mode(mode) => {
                 let Ok(id) = inline_agent_bridge::harness::ModeId::new(mode.clone()) else {
@@ -2761,6 +2776,34 @@ impl Actor {
                 None => Some("Nothing to undo yet.".to_owned()),
             },
         }
+    }
+
+    /// Replaces the held session with a fresh one, recorded as this
+    /// thread's, then lets the old one go.
+    async fn clear_into_fresh_session(&mut self) -> Option<String> {
+        let Some(old) = self.held_session() else {
+            return Some("Nothing is open in this thread yet.".to_owned());
+        };
+        if live_turn(&old).is_some() {
+            return Some(format!(
+                "{} is working. Stop it first, then /clear.",
+                self.agent.agent_name
+            ));
+        }
+        let previous = self.native.clone();
+        let session = match self.open_session(OpenMode::Start).await {
+            Ok(session) => session,
+            Err(error) => return Some(format!("Could not clear: {error}")),
+        };
+        if let Err(error) = self.adopt(session, true).await {
+            self.native = previous;
+            self.attach(old);
+            return Some(format!("Could not clear: {error}"));
+        }
+        if let Err(error) = old.release().await {
+            log::warn!(target: "inline::bridge::v2", "chat={} old session release after /clear: {error}", self.chat_id);
+        }
+        Some("Context cleared. This thread goes on in a fresh session.".to_owned())
     }
 
     async fn native_op(&mut self, op: Op, done: &str) -> Option<String> {
@@ -3505,8 +3548,19 @@ impl Actor {
                                 actions: None,
                                 closing: false,
                             });
-                    } else if let Some(id) = self.send(&doc, None, Notify::Silent).await {
-                        self.slots.insert(slot, id);
+                    } else {
+                        // The turn and slot name the message, so a retry after
+                        // a lost reply finds the one already posted instead of
+                        // leaving it "Working" beside a second one.
+                        let token = self
+                            .turn
+                            .as_ref()
+                            .or(self.rendering_turn.as_ref())
+                            .map(|turn| format!("{turn}:{slot}"));
+                        let random_id = self.output_id("progress", token.as_deref());
+                        if let Some(id) = self.send_silent_as(&doc, random_id).await {
+                            self.slots.insert(slot, id);
+                        }
                     }
                 }
                 RenderOp::EndProgress { slot, doc } => {
@@ -3541,6 +3595,20 @@ impl Actor {
                             self.send(&doc, None, Notify::Silent).await;
                         }
                     }
+                }
+                RenderOp::DeleteProgress { slot } => {
+                    self.edits.remove(&slot);
+                    self.resend.remove(&slot);
+                    if let Some(message_id) = self.slots.remove(&slot)
+                        && let Err(error) =
+                            api::delete_message(&self.agent.bot, self.chat_id, message_id).await
+                    {
+                        log::warn!(target: "inline::bridge::v2", "chat={} delete failed: {error}", self.chat_id);
+                    }
+                }
+                RenderOp::Image { id, path } => {
+                    self.flush_edits(true).await;
+                    self.send_image(&id, &path).await;
                 }
                 RenderOp::Update { doc } => {
                     self.send(&doc, None, Notify::Silent).await;
@@ -3793,6 +3861,120 @@ impl Actor {
         notify: Notify,
     ) -> Option<i64> {
         self.send_in_reply(doc, None, actions, notify).await
+    }
+
+    /// Posts an image the agent made as a photo. The item names it, so a
+    /// retry or a replay finds the photo already posted.
+    async fn send_image(&self, id: &str, path: &std::path::Path) {
+        const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+        let bytes = match tokio::fs::read(path).await {
+            Ok(bytes) if !bytes.is_empty() && bytes.len() <= MAX_IMAGE_BYTES => bytes,
+            Ok(_) => {
+                log::warn!(target: "inline::bridge::v2", "chat={} generated image is empty or too large", self.chat_id);
+                return;
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={} generated image unreadable: {error}", self.chat_id);
+                return;
+            }
+        };
+        let mime = match bytes.as_slice() {
+            [0x89, b'P', b'N', b'G', ..] => "image/png",
+            [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+            [
+                b'R',
+                b'I',
+                b'F',
+                b'F',
+                _,
+                _,
+                _,
+                _,
+                b'W',
+                b'E',
+                b'B',
+                b'P',
+                ..,
+            ] => "image/webp",
+            [b'G', b'I', b'F', b'8', ..] => "image/gif",
+            _ => {
+                log::warn!(target: "inline::bridge::v2", "chat={} generated image is not a known image type", self.chat_id);
+                return;
+            }
+        };
+        let token = format!(
+            "{}:{id}",
+            self.native.as_ref().map_or("", |native| native.as_str())
+        );
+        let external = match inline_client::ExternalId::try_new(
+            "agent-bridge",
+            format!("v2-image-{}", text_digest(&token)),
+        ) {
+            Ok(external) => external,
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={} image id: {error}", self.chat_id);
+                return;
+            }
+        };
+        let request = inline_client::UploadRequest {
+            peer: inline_client::PeerRef::Chat {
+                chat_id: InlineId::new(self.chat_id),
+            },
+            kind: inline_client::MediaKind::Photo,
+            file_name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .or_else(|| Some("generated-image.png".to_owned())),
+            mime_type: Some(mime.to_owned()),
+            size_bytes: Some(bytes.len() as u64),
+            caption: None,
+            entities: Vec::new(),
+            width: None,
+            height: None,
+            duration_ms: None,
+            external_id: Some(external),
+            random_id: Some(crate::bridge::helpers::interaction_random_id(
+                "v2-image", &token,
+            )),
+            reply_to_message_id: None,
+        };
+        match self.agent.bot.send_media(request, bytes).await {
+            Ok(mutation) => {
+                if let Some(id) = mutation.message_id {
+                    self.remember(id.get());
+                }
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={} image send failed: {error}", self.chat_id)
+            }
+        }
+    }
+
+    /// A silent message under a caller-chosen random ID (see `output_id`).
+    async fn send_silent_as(&self, doc: &Doc, random_id: i64) -> Option<i64> {
+        if doc.is_empty() {
+            return None;
+        }
+        match api::send_doc_as(
+            &self.agent.bot,
+            self.chat_id,
+            None,
+            doc,
+            None,
+            Notify::Silent,
+            random_id,
+        )
+        .await
+        {
+            Ok(id) => {
+                self.remember(id);
+                Some(id)
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "send failed: {error}");
+                None
+            }
+        }
     }
 
     async fn send_in_reply(
@@ -4150,6 +4332,42 @@ fn live_turn(session: &Arc<dyn Session>) -> Option<TurnId> {
     session.live_work().turn
 }
 
+/// Ends background work that outlived its turn. OpenCode's own stop ends
+/// its jobs, shells and sub-agents in order; elsewhere each child is
+/// stopped by itself, as an interrupt there needs a running turn.
+async fn stop_background(
+    session: &Arc<dyn Session>,
+    children: &[inline_agent_bridge::harness::ChildRef],
+) -> Result<(), OpError> {
+    if session.key().provider.as_str() == "opencode" {
+        return session
+            .control(Op::Interrupt {
+                cancel_queued: false,
+            })
+            .await
+            .map(|_| ());
+    }
+    if !session.availability().op(OpKind::StopChild).is_supported() {
+        return Err(OpError::Unavailable(
+            inline_agent_bridge::harness::Availability::unavailable(
+                "this agent cannot stop its background work",
+            ),
+        ));
+    }
+    let mut failed = None;
+    for child in children {
+        if let Err(error) = session
+            .control(Op::StopChild {
+                child: child.clone(),
+            })
+            .await
+        {
+            failed = Some(error);
+        }
+    }
+    failed.map_or(Ok(()), Err)
+}
+
 /// Whether the session can take this delivery while a turn runs. A direct
 /// message joins the turn as a steer.
 fn takes_mid_turn(session: &Arc<dyn Session>, delivery: &Delivery) -> bool {
@@ -4208,6 +4426,8 @@ fn render_kind(op: &RenderOp) -> &'static str {
     match op {
         RenderOp::Progress { .. } => "progress",
         RenderOp::EndProgress { .. } => "end_progress",
+        RenderOp::DeleteProgress { .. } => "delete_progress",
+        RenderOp::Image { .. } => "image",
         RenderOp::Update { .. } => "update",
         RenderOp::Final { .. } => "final",
         RenderOp::PlanProposal { .. } => "plan_proposal",

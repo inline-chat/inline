@@ -181,6 +181,14 @@ impl DocBuilder {
     /// bold, italic and links become entities over the plain text, the way
     /// Inline styles a Markdown message. Returns its range like [`span`](Self::span).
     pub(crate) fn markdown_span(&mut self, markdown: &str) -> proto::BlockText {
+        let span = self.markdown_inline_span(markdown);
+        self.newline();
+        span
+    }
+
+    /// [`markdown_span`](Self::markdown_span) on the current line, without
+    /// ending it: one cell of a table row.
+    pub(crate) fn markdown_inline_span(&mut self, markdown: &str) -> proto::BlockText {
         // Sanitize before styling: the entities below are measured on this
         // text, so removing characters later would shift every one of them.
         let markdown = sanitize_visible_text(markdown);
@@ -202,7 +210,7 @@ impl DocBuilder {
                 })
                 .take(room),
         );
-        self.span(text)
+        self.inline_span(text)
     }
 
     /// A paragraph of the agent's Markdown, styled as [`markdown_span`](Self::markdown_span).
@@ -549,7 +557,9 @@ impl DocBuilder {
         self.push_block(proto::block::Kind::Disclosure(proto::BlockDisclosure {
             summary: Some(summary),
             kind: kind as i32,
-            initially_open: Some(working),
+            // Open while working and after: the turn's work stays visible
+            // (Oct 31 rule 1); a person's own collapse is kept by the apps.
+            initially_open: Some(true),
             children,
             meta,
             started_at: elapsed.map(|elapsed| elapsed.started_at),

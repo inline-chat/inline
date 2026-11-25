@@ -15,6 +15,8 @@ pub(crate) mod intake;
 pub(crate) mod lead;
 pub(crate) mod ledger;
 pub(crate) mod limits;
+#[cfg(test)]
+mod live_render;
 pub(crate) mod render;
 pub(crate) mod runtime;
 pub(crate) mod settings;

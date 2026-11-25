@@ -61,7 +61,10 @@ pub(crate) fn card(
                 Subject::Command
             } as i32;
             approval.title = Some(builder.span(&title));
-            approval.command = labelled(&mut builder, "Command", &head(command, MAX_DETAIL_CHARS));
+            // Secrets are hidden, as in the progress row below the card.
+            let command = inline_agent_bridge::sanitize_shared_output(command)
+                .unwrap_or_else(|| command.clone());
+            approval.command = labelled(&mut builder, "Command", &head(&command, MAX_DETAIL_CHARS));
             approval.cwd = labelled(
                 &mut builder,
                 "Folder",
@@ -138,13 +141,10 @@ pub(crate) fn card(
                 approval.reason = labelled(&mut builder, "Reason", reason.as_deref().unwrap_or(""));
                 approval.children = builder.nested(|inner| {
                     if !input.is_null() {
-                        inner.code(
-                            &head(
-                                &serde_json::to_string_pretty(input).unwrap_or_default(),
-                                MAX_DETAIL_CHARS,
-                            ),
-                            Some("json"),
-                        );
+                        let input = serde_json::to_string_pretty(input).unwrap_or_default();
+                        let input =
+                            inline_agent_bridge::sanitize_shared_output(&input).unwrap_or(input);
+                        inner.code(&head(&input, MAX_DETAIL_CHARS), Some("json"));
                     }
                 });
             }
@@ -184,11 +184,9 @@ fn write_diffs(builder: &mut DocBuilder, diffs: &[&FileDiff], folder: Option<&Pa
             FileChangeKind::Update { moved_to: Some(_) } => DiffChange::Renamed,
             FileChangeKind::Update { moved_to: None } => DiffChange::Modified,
         };
-        let diff = change
-            .diff
-            .as_deref()
+        let diff = crate::bridge::v2::render::display_diff(change)
             .filter(|_| shown < MAX_DIFF_CHARS)
-            .map(|diff| head(diff, MAX_DIFF_CHARS));
+            .map(|diff| head(&diff, MAX_DIFF_CHARS));
         shown += diff.as_deref().map_or(0, str::len);
         builder.diff(&relative(&change.path, folder), kind, diff.as_deref());
     }
