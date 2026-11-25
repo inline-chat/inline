@@ -256,7 +256,8 @@ describe("packed artifact", () => {
       expect(dryRunJson.tokenPresent).toBe(false)
       expect(dryRunJson.target?.chatId).toBe("123")
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      // uv can still be writing its cache as the test ends, so retry ENOTEMPTY.
+      await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     }
   }, 120_000)
 })

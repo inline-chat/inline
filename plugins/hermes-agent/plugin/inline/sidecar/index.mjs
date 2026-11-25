@@ -6166,6 +6166,12 @@ var BotPresenceState_Kind;
   BotPresenceState_Kind[BotPresenceState_Kind["RUNNING"] = 8] = "RUNNING";
   BotPresenceState_Kind[BotPresenceState_Kind["REVIEW"] = 9] = "REVIEW";
 })(BotPresenceState_Kind || (BotPresenceState_Kind = {}));
+var UserBadge_Kind;
+(function(UserBadge_Kind) {
+  UserBadge_Kind[UserBadge_Kind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  UserBadge_Kind[UserBadge_Kind["PRO"] = 1] = "PRO";
+  UserBadge_Kind[UserBadge_Kind["BELIEVER"] = 2] = "BELIEVER";
+})(UserBadge_Kind || (UserBadge_Kind = {}));
 var MessageSubthread_Kind;
 (function(MessageSubthread_Kind) {
   MessageSubthread_Kind[MessageSubthread_Kind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -6438,6 +6444,12 @@ var GetChatTranscriptResult_StopReason;
   GetChatTranscriptResult_StopReason[GetChatTranscriptResult_StopReason["MESSAGE_LIMIT"] = 2] = "MESSAGE_LIMIT";
   GetChatTranscriptResult_StopReason[GetChatTranscriptResult_StopReason["OUTPUT_LIMIT"] = 3] = "OUTPUT_LIMIT";
 })(GetChatTranscriptResult_StopReason || (GetChatTranscriptResult_StopReason = {}));
+var GlobalSearchExcerpt_Field;
+(function(GlobalSearchExcerpt_Field) {
+  GlobalSearchExcerpt_Field[GlobalSearchExcerpt_Field["FIELD_UNSPECIFIED"] = 0] = "FIELD_UNSPECIFIED";
+  GlobalSearchExcerpt_Field[GlobalSearchExcerpt_Field["BODY"] = 1] = "BODY";
+  GlobalSearchExcerpt_Field[GlobalSearchExcerpt_Field["DOCUMENT_FILENAME"] = 2] = "DOCUMENT_FILENAME";
+})(GlobalSearchExcerpt_Field || (GlobalSearchExcerpt_Field = {}));
 var UpdateNewMessageNotification_Reason;
 (function(UpdateNewMessageNotification_Reason) {
   UpdateNewMessageNotification_Reason[UpdateNewMessageNotification_Reason["UNSPECIFIED"] = 0] = "UNSPECIFIED";
@@ -6866,6 +6878,11 @@ var Method;
   Method[Method["SET_FOCUS_STATUS"] = 169] = "SET_FOCUS_STATUS";
   Method[Method["GET_SPACES"] = 170] = "GET_SPACES";
   Method[Method["SEND_COMPOSE_SUGGESTION"] = 171] = "SEND_COMPOSE_SUGGESTION";
+  Method[Method["GET_COMMON_CHATS"] = 172] = "GET_COMMON_CHATS";
+  Method[Method["SEARCH_MESSAGES_GLOBAL"] = 173] = "SEARCH_MESSAGES_GLOBAL";
+  Method[Method["GET_BILLING"] = 174] = "GET_BILLING";
+  Method[Method["CREATE_BILLING_CHECKOUT"] = 175] = "CREATE_BILLING_CHECKOUT";
+  Method[Method["CREATE_BILLING_PORTAL"] = 176] = "CREATE_BILLING_PORTAL";
 })(Method || (Method = {}));
 var GridTranscriptionState;
 (function(GridTranscriptionState) {
@@ -8438,7 +8455,9 @@ class User$Type extends import_runtime4.MessageType {
       { no: 13, name: "bot", kind: "scalar", opt: true, T: 8 },
       { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar },
       { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 },
-      { no: 16, name: "bot_info", kind: "message", T: () => BotInfo }
+      { no: 16, name: "bot_info", kind: "message", T: () => BotInfo },
+      { no: 17, name: "is_pro", kind: "scalar", opt: true, T: 8 },
+      { no: 18, name: "badge", kind: "message", T: () => UserBadge }
     ]);
   }
   create(value) {
@@ -8498,6 +8517,12 @@ class User$Type extends import_runtime4.MessageType {
         case 16:
           message.botInfo = BotInfo.internalBinaryRead(reader, reader.uint32(), options, message.botInfo);
           break;
+        case 17:
+          message.isPro = reader.bool();
+          break;
+        case 18:
+          message.badge = UserBadge.internalBinaryRead(reader, reader.uint32(), options, message.badge);
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -8540,6 +8565,10 @@ class User$Type extends import_runtime4.MessageType {
       writer.tag(15, import_runtime.WireType.LengthDelimited).string(message.bio);
     if (message.botInfo)
       BotInfo.internalBinaryWrite(message.botInfo, writer.tag(16, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.isPro !== undefined)
+      writer.tag(17, import_runtime.WireType.Varint).bool(message.isPro);
+    if (message.badge)
+      UserBadge.internalBinaryWrite(message.badge, writer.tag(18, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8547,6 +8576,49 @@ class User$Type extends import_runtime4.MessageType {
   }
 }
 var User = new User$Type;
+
+class UserBadge$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("UserBadge", [
+      { no: 1, name: "kind", kind: "enum", T: () => ["UserBadge.Kind", UserBadge_Kind, "KIND_"] }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.kind = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.kind = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.kind !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.kind);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var UserBadge = new UserBadge$Type;
 
 class BotInfo$Type extends import_runtime4.MessageType {
   constructor() {
@@ -14560,6 +14632,7 @@ class AgentSession$Type extends import_runtime4.MessageType {
   }
 }
 var AgentSession = new AgentSession$Type;
+
 class AgentAttention$Type extends import_runtime4.MessageType {
   constructor() {
     super("AgentAttention", [
@@ -19814,7 +19887,12 @@ class RpcCall$Type extends import_runtime4.MessageType {
       { no: 169, name: "readActivity", kind: "message", oneof: "input", T: () => ReadActivityInput },
       { no: 170, name: "setFocusStatus", kind: "message", oneof: "input", T: () => SetFocusStatusInput },
       { no: 171, name: "getSpaces", kind: "message", oneof: "input", T: () => GetSpacesInput },
-      { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput }
+      { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "input", T: () => SendComposeSuggestionInput },
+      { no: 173, name: "getCommonChats", kind: "message", oneof: "input", T: () => GetCommonChatsInput },
+      { no: 174, name: "searchMessagesGlobal", kind: "message", oneof: "input", T: () => SearchMessagesGlobalInput },
+      { no: 175, name: "getBilling", kind: "message", oneof: "input", T: () => GetBillingInput },
+      { no: 176, name: "createBillingCheckout", kind: "message", oneof: "input", T: () => CreateBillingCheckoutInput },
+      { no: 177, name: "createBillingPortal", kind: "message", oneof: "input", T: () => CreateBillingPortalInput }
     ]);
   }
   create(value) {
@@ -20853,6 +20931,36 @@ class RpcCall$Type extends import_runtime4.MessageType {
             sendComposeSuggestion: SendComposeSuggestionInput.internalBinaryRead(reader, reader.uint32(), options, message.input.sendComposeSuggestion)
           };
           break;
+        case 173:
+          message.input = {
+            oneofKind: "getCommonChats",
+            getCommonChats: GetCommonChatsInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getCommonChats)
+          };
+          break;
+        case 174:
+          message.input = {
+            oneofKind: "searchMessagesGlobal",
+            searchMessagesGlobal: SearchMessagesGlobalInput.internalBinaryRead(reader, reader.uint32(), options, message.input.searchMessagesGlobal)
+          };
+          break;
+        case 175:
+          message.input = {
+            oneofKind: "getBilling",
+            getBilling: GetBillingInput.internalBinaryRead(reader, reader.uint32(), options, message.input.getBilling)
+          };
+          break;
+        case 176:
+          message.input = {
+            oneofKind: "createBillingCheckout",
+            createBillingCheckout: CreateBillingCheckoutInput.internalBinaryRead(reader, reader.uint32(), options, message.input.createBillingCheckout)
+          };
+          break;
+        case 177:
+          message.input = {
+            oneofKind: "createBillingPortal",
+            createBillingPortal: CreateBillingPortalInput.internalBinaryRead(reader, reader.uint32(), options, message.input.createBillingPortal)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -21207,6 +21315,16 @@ class RpcCall$Type extends import_runtime4.MessageType {
       GetSpacesInput.internalBinaryWrite(message.input.getSpaces, writer.tag(171, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.input.oneofKind === "sendComposeSuggestion")
       SendComposeSuggestionInput.internalBinaryWrite(message.input.sendComposeSuggestion, writer.tag(172, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getCommonChats")
+      GetCommonChatsInput.internalBinaryWrite(message.input.getCommonChats, writer.tag(173, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "searchMessagesGlobal")
+      SearchMessagesGlobalInput.internalBinaryWrite(message.input.searchMessagesGlobal, writer.tag(174, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "getBilling")
+      GetBillingInput.internalBinaryWrite(message.input.getBilling, writer.tag(175, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "createBillingCheckout")
+      CreateBillingCheckoutInput.internalBinaryWrite(message.input.createBillingCheckout, writer.tag(176, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.input.oneofKind === "createBillingPortal")
+      CreateBillingPortalInput.internalBinaryWrite(message.input.createBillingPortal, writer.tag(177, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -21388,7 +21506,12 @@ class RpcResult$Type extends import_runtime4.MessageType {
       { no: 169, name: "readActivity", kind: "message", oneof: "result", T: () => ReadActivityResult },
       { no: 170, name: "setFocusStatus", kind: "message", oneof: "result", T: () => SetFocusStatusResult },
       { no: 171, name: "getSpaces", kind: "message", oneof: "result", T: () => GetSpacesResult },
-      { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult }
+      { no: 172, name: "sendComposeSuggestion", kind: "message", oneof: "result", T: () => SendComposeSuggestionResult },
+      { no: 173, name: "getCommonChats", kind: "message", oneof: "result", T: () => GetCommonChatsResult },
+      { no: 174, name: "searchMessagesGlobal", kind: "message", oneof: "result", T: () => SearchMessagesGlobalResult },
+      { no: 175, name: "getBilling", kind: "message", oneof: "result", T: () => GetBillingResult },
+      { no: 176, name: "createBillingCheckout", kind: "message", oneof: "result", T: () => CreateBillingCheckoutResult },
+      { no: 177, name: "createBillingPortal", kind: "message", oneof: "result", T: () => CreateBillingPortalResult }
     ]);
   }
   create(value) {
@@ -22427,6 +22550,36 @@ class RpcResult$Type extends import_runtime4.MessageType {
             sendComposeSuggestion: SendComposeSuggestionResult.internalBinaryRead(reader, reader.uint32(), options, message.result.sendComposeSuggestion)
           };
           break;
+        case 173:
+          message.result = {
+            oneofKind: "getCommonChats",
+            getCommonChats: GetCommonChatsResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getCommonChats)
+          };
+          break;
+        case 174:
+          message.result = {
+            oneofKind: "searchMessagesGlobal",
+            searchMessagesGlobal: SearchMessagesGlobalResult.internalBinaryRead(reader, reader.uint32(), options, message.result.searchMessagesGlobal)
+          };
+          break;
+        case 175:
+          message.result = {
+            oneofKind: "getBilling",
+            getBilling: GetBillingResult.internalBinaryRead(reader, reader.uint32(), options, message.result.getBilling)
+          };
+          break;
+        case 176:
+          message.result = {
+            oneofKind: "createBillingCheckout",
+            createBillingCheckout: CreateBillingCheckoutResult.internalBinaryRead(reader, reader.uint32(), options, message.result.createBillingCheckout)
+          };
+          break;
+        case 177:
+          message.result = {
+            oneofKind: "createBillingPortal",
+            createBillingPortal: CreateBillingPortalResult.internalBinaryRead(reader, reader.uint32(), options, message.result.createBillingPortal)
+          };
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -22781,6 +22934,16 @@ class RpcResult$Type extends import_runtime4.MessageType {
       GetSpacesResult.internalBinaryWrite(message.result.getSpaces, writer.tag(171, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.result.oneofKind === "sendComposeSuggestion")
       SendComposeSuggestionResult.internalBinaryWrite(message.result.sendComposeSuggestion, writer.tag(172, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getCommonChats")
+      GetCommonChatsResult.internalBinaryWrite(message.result.getCommonChats, writer.tag(173, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "searchMessagesGlobal")
+      SearchMessagesGlobalResult.internalBinaryWrite(message.result.searchMessagesGlobal, writer.tag(174, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "getBilling")
+      GetBillingResult.internalBinaryWrite(message.result.getBilling, writer.tag(175, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "createBillingCheckout")
+      CreateBillingCheckoutResult.internalBinaryWrite(message.result.createBillingCheckout, writer.tag(176, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.result.oneofKind === "createBillingPortal")
+      CreateBillingPortalResult.internalBinaryWrite(message.result.createBillingPortal, writer.tag(177, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31221,7 +31384,9 @@ class PrivacySettings$Type extends import_runtime4.MessageType {
       { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 },
       { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 },
       { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule },
-      { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule }
+      { no: 4, name: "focus_status", kind: "message", T: () => PrivacyRule },
+      { no: 5, name: "transcribe_voice_messages", kind: "scalar", opt: true, T: 8 },
+      { no: 6, name: "manual_time_zone", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -31247,6 +31412,12 @@ class PrivacySettings$Type extends import_runtime4.MessageType {
         case 4:
           message.focusStatus = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.focusStatus);
           break;
+        case 5:
+          message.transcribeVoiceMessages = reader.bool();
+          break;
+        case 6:
+          message.manualTimeZone = reader.string();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -31267,6 +31438,10 @@ class PrivacySettings$Type extends import_runtime4.MessageType {
       PrivacyRule.internalBinaryWrite(message.timeZone, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.focusStatus)
       PrivacyRule.internalBinaryWrite(message.focusStatus, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.transcribeVoiceMessages !== undefined)
+      writer.tag(5, import_runtime.WireType.Varint).bool(message.transcribeVoiceMessages);
+    if (message.manualTimeZone !== undefined)
+      writer.tag(6, import_runtime.WireType.LengthDelimited).string(message.manualTimeZone);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -33255,6 +33430,657 @@ class GetSpacesResult$Type extends import_runtime4.MessageType {
 }
 var GetSpacesResult = new GetSpacesResult$Type;
 
+class GetCommonChatsInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetCommonChatsInput", [
+      { no: 1, name: "user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 2, name: "offset", kind: "message", T: () => ChatListOffset },
+      { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.userId = 0n;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.userId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.offset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.offset);
+          break;
+        case 3:
+          message.limit = reader.int32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.userId !== 0n)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.userId);
+    if (message.offset)
+      ChatListOffset.internalBinaryWrite(message.offset, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.limit !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int32(message.limit);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetCommonChatsInput = new GetCommonChatsInput$Type;
+
+class GetCommonChatsResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetCommonChatsResult", [
+      { no: 1, name: "chats", kind: "message", repeat: 1, T: () => Chat },
+      { no: 2, name: "dialogs", kind: "message", repeat: 1, T: () => Dialog },
+      { no: 3, name: "spaces", kind: "message", repeat: 1, T: () => Space },
+      { no: 4, name: "next_offset", kind: "message", T: () => ChatListOffset }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chats = [];
+    message.dialogs = [];
+    message.spaces = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.chats.push(Chat.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.dialogs.push(Dialog.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.spaces.push(Space.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 4:
+          message.nextOffset = ChatListOffset.internalBinaryRead(reader, reader.uint32(), options, message.nextOffset);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.chats.length; i++)
+      Chat.internalBinaryWrite(message.chats[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.dialogs.length; i++)
+      Dialog.internalBinaryWrite(message.dialogs[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.spaces.length; i++)
+      Space.internalBinaryWrite(message.spaces[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.nextOffset)
+      ChatListOffset.internalBinaryWrite(message.nextOffset, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetCommonChatsResult = new GetCommonChatsResult$Type;
+
+class GetBillingInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetBillingInput", []);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    return target ?? this.create();
+  }
+  internalBinaryWrite(message, writer, options) {
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetBillingInput = new GetBillingInput$Type;
+
+class GetBillingResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GetBillingResult", [
+      { no: 1, name: "me", kind: "message", T: () => BillingAccount },
+      { no: 2, name: "spaces", kind: "message", repeat: 1, T: () => BillingAccount },
+      { no: 3, name: "plans", kind: "message", repeat: 1, T: () => BillingPlanOffer }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.spaces = [];
+    message.plans = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.me = BillingAccount.internalBinaryRead(reader, reader.uint32(), options, message.me);
+          break;
+        case 2:
+          message.spaces.push(BillingAccount.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 3:
+          message.plans.push(BillingPlanOffer.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.me)
+      BillingAccount.internalBinaryWrite(message.me, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.spaces.length; i++)
+      BillingAccount.internalBinaryWrite(message.spaces[i], writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    for (let i = 0;i < message.plans.length; i++)
+      BillingPlanOffer.internalBinaryWrite(message.plans[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GetBillingResult = new GetBillingResult$Type;
+
+class BillingAccount$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BillingAccount", [
+      { no: 1, name: "space_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 2, name: "is_pro", kind: "scalar", T: 8 },
+      { no: 3, name: "subscription", kind: "message", T: () => BillingSubscription },
+      { no: 4, name: "wallet", kind: "message", T: () => BillingWallet }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.isPro = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.isPro = reader.bool();
+          break;
+        case 3:
+          message.subscription = BillingSubscription.internalBinaryRead(reader, reader.uint32(), options, message.subscription);
+          break;
+        case 4:
+          message.wallet = BillingWallet.internalBinaryRead(reader, reader.uint32(), options, message.wallet);
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== undefined)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.isPro !== false)
+      writer.tag(2, import_runtime.WireType.Varint).bool(message.isPro);
+    if (message.subscription)
+      BillingSubscription.internalBinaryWrite(message.subscription, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.wallet)
+      BillingWallet.internalBinaryWrite(message.wallet, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BillingAccount = new BillingAccount$Type;
+
+class BillingSubscription$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BillingSubscription", [
+      { no: 1, name: "plan", kind: "scalar", T: 9 },
+      { no: 2, name: "interval", kind: "scalar", T: 9 },
+      { no: 3, name: "funding", kind: "scalar", T: 9 },
+      { no: 4, name: "status", kind: "scalar", T: 9 },
+      { no: 5, name: "seats", kind: "scalar", T: 5 },
+      { no: 6, name: "paid_through", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 7, name: "cancel_at_period_end", kind: "scalar", T: 8 },
+      { no: 8, name: "can_manage", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.plan = "";
+    message.interval = "";
+    message.funding = "";
+    message.status = "";
+    message.seats = 0;
+    message.cancelAtPeriodEnd = false;
+    message.canManage = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.plan = reader.string();
+          break;
+        case 2:
+          message.interval = reader.string();
+          break;
+        case 3:
+          message.funding = reader.string();
+          break;
+        case 4:
+          message.status = reader.string();
+          break;
+        case 5:
+          message.seats = reader.int32();
+          break;
+        case 6:
+          message.paidThrough = reader.int64().toBigInt();
+          break;
+        case 7:
+          message.cancelAtPeriodEnd = reader.bool();
+          break;
+        case 8:
+          message.canManage = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.plan !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.plan);
+    if (message.interval !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.interval);
+    if (message.funding !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.funding);
+    if (message.status !== "")
+      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.status);
+    if (message.seats !== 0)
+      writer.tag(5, import_runtime.WireType.Varint).int32(message.seats);
+    if (message.paidThrough !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).int64(message.paidThrough);
+    if (message.cancelAtPeriodEnd !== false)
+      writer.tag(7, import_runtime.WireType.Varint).bool(message.cancelAtPeriodEnd);
+    if (message.canManage !== false)
+      writer.tag(8, import_runtime.WireType.Varint).bool(message.canManage);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BillingSubscription = new BillingSubscription$Type;
+
+class BillingWallet$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BillingWallet", [
+      { no: 1, name: "usd_cents", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 2, name: "btc_sats", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.usdCents = reader.int64().toBigInt();
+          break;
+        case 2:
+          message.btcSats = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.usdCents !== undefined)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.usdCents);
+    if (message.btcSats !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.btcSats);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BillingWallet = new BillingWallet$Type;
+
+class BillingPlanOffer$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("BillingPlanOffer", [
+      { no: 1, name: "code", kind: "scalar", T: 9 },
+      { no: 2, name: "plan", kind: "scalar", T: 9 },
+      { no: 3, name: "interval", kind: "scalar", T: 9 },
+      { no: 4, name: "for_space", kind: "scalar", T: 8 },
+      { no: 5, name: "usd_cents", kind: "scalar", T: 3, L: 0 },
+      { no: 6, name: "per_seat", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.code = "";
+    message.plan = "";
+    message.interval = "";
+    message.forSpace = false;
+    message.usdCents = 0n;
+    message.perSeat = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.code = reader.string();
+          break;
+        case 2:
+          message.plan = reader.string();
+          break;
+        case 3:
+          message.interval = reader.string();
+          break;
+        case 4:
+          message.forSpace = reader.bool();
+          break;
+        case 5:
+          message.usdCents = reader.int64().toBigInt();
+          break;
+        case 6:
+          message.perSeat = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.code !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.code);
+    if (message.plan !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.plan);
+    if (message.interval !== "")
+      writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.interval);
+    if (message.forSpace !== false)
+      writer.tag(4, import_runtime.WireType.Varint).bool(message.forSpace);
+    if (message.usdCents !== 0n)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.usdCents);
+    if (message.perSeat !== false)
+      writer.tag(6, import_runtime.WireType.Varint).bool(message.perSeat);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var BillingPlanOffer = new BillingPlanOffer$Type;
+
+class CreateBillingCheckoutInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateBillingCheckoutInput", [
+      { no: 1, name: "plan", kind: "scalar", T: 9 },
+      { no: 2, name: "space_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.plan = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.plan = reader.string();
+          break;
+        case 2:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.plan !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.plan);
+    if (message.spaceId !== undefined)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateBillingCheckoutInput = new CreateBillingCheckoutInput$Type;
+
+class CreateBillingCheckoutResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateBillingCheckoutResult", [
+      { no: 1, name: "url", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.url = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.url = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.url !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.url);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateBillingCheckoutResult = new CreateBillingCheckoutResult$Type;
+
+class CreateBillingPortalInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateBillingPortalInput", [
+      { no: 1, name: "space_id", kind: "scalar", opt: true, T: 3, L: 0 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.spaceId !== undefined)
+      writer.tag(1, import_runtime.WireType.Varint).int64(message.spaceId);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateBillingPortalInput = new CreateBillingPortalInput$Type;
+
+class CreateBillingPortalResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("CreateBillingPortalResult", [
+      { no: 1, name: "url", kind: "scalar", T: 9 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.url = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.url = reader.string();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.url !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.url);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var CreateBillingPortalResult = new CreateBillingPortalResult$Type;
+
 class TranslateMessagesInput$Type extends import_runtime4.MessageType {
   constructor() {
     super("TranslateMessagesInput", [
@@ -34225,7 +35051,8 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
       { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
       { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 },
       { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 },
-      { no: 16, name: "via", kind: "message", T: () => InputMessageVia }
+      { no: 16, name: "via", kind: "message", T: () => InputMessageVia },
+      { no: 17, name: "grouped_id", kind: "scalar", opt: true, T: 3, L: 0 }
     ]);
   }
   create(value) {
@@ -34293,6 +35120,9 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
         case 16:
           message.via = InputMessageVia.internalBinaryRead(reader, reader.uint32(), options, message.via);
           break;
+        case 17:
+          message.groupedId = reader.int64().toBigInt();
+          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -34341,6 +35171,8 @@ class SendMessageInput$Type extends import_runtime4.MessageType {
       writer.tag(15, import_runtime.WireType.Varint).bool(message.addMentionedUsers);
     if (message.via)
       InputMessageVia.internalBinaryWrite(message.via, writer.tag(16, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.groupedId !== undefined)
+      writer.tag(17, import_runtime.WireType.Varint).int64(message.groupedId);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -35426,6 +36258,349 @@ class GetThreadSubthreadsResult$Type extends import_runtime4.MessageType {
   }
 }
 var GetThreadSubthreadsResult = new GetThreadSubthreadsResult$Type;
+
+class SearchMessagesGlobalInput$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SearchMessagesGlobalInput", [
+      { no: 1, name: "query", kind: "scalar", T: 9 },
+      { no: 2, name: "peer_id", kind: "message", T: () => InputPeer },
+      { no: 3, name: "space_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 4, name: "limit", kind: "scalar", opt: true, T: 5 },
+      { no: 5, name: "cursor", kind: "scalar", opt: true, T: 9 },
+      { no: 6, name: "filter", kind: "enum", opt: true, T: () => ["SearchMessagesFilter", SearchMessagesFilter] },
+      { no: 7, name: "from_user_id", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 8, name: "min_date", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 9, name: "max_date", kind: "scalar", opt: true, T: 3, L: 0 },
+      { no: 10, name: "include_archived", kind: "scalar", opt: true, T: 8 },
+      { no: 11, name: "home_only", kind: "scalar", opt: true, T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.query = "";
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.query = reader.string();
+          break;
+        case 2:
+          message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+          break;
+        case 3:
+          message.spaceId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.limit = reader.int32();
+          break;
+        case 5:
+          message.cursor = reader.string();
+          break;
+        case 6:
+          message.filter = reader.int32();
+          break;
+        case 7:
+          message.fromUserId = reader.int64().toBigInt();
+          break;
+        case 8:
+          message.minDate = reader.int64().toBigInt();
+          break;
+        case 9:
+          message.maxDate = reader.int64().toBigInt();
+          break;
+        case 10:
+          message.includeArchived = reader.bool();
+          break;
+        case 11:
+          message.homeOnly = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.query !== "")
+      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.query);
+    if (message.peerId)
+      InputPeer.internalBinaryWrite(message.peerId, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.spaceId !== undefined)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.spaceId);
+    if (message.limit !== undefined)
+      writer.tag(4, import_runtime.WireType.Varint).int32(message.limit);
+    if (message.cursor !== undefined)
+      writer.tag(5, import_runtime.WireType.LengthDelimited).string(message.cursor);
+    if (message.filter !== undefined)
+      writer.tag(6, import_runtime.WireType.Varint).int32(message.filter);
+    if (message.fromUserId !== undefined)
+      writer.tag(7, import_runtime.WireType.Varint).int64(message.fromUserId);
+    if (message.minDate !== undefined)
+      writer.tag(8, import_runtime.WireType.Varint).int64(message.minDate);
+    if (message.maxDate !== undefined)
+      writer.tag(9, import_runtime.WireType.Varint).int64(message.maxDate);
+    if (message.includeArchived !== undefined)
+      writer.tag(10, import_runtime.WireType.Varint).bool(message.includeArchived);
+    if (message.homeOnly !== undefined)
+      writer.tag(11, import_runtime.WireType.Varint).bool(message.homeOnly);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SearchMessagesGlobalInput = new SearchMessagesGlobalInput$Type;
+
+class GlobalSearchExcerpt$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GlobalSearchExcerpt", [
+      { no: 1, name: "field", kind: "enum", T: () => ["GlobalSearchExcerpt.Field", GlobalSearchExcerpt_Field] },
+      { no: 2, name: "text", kind: "scalar", T: 9 },
+      { no: 3, name: "highlights", kind: "message", repeat: 1, T: () => GlobalSearchExcerpt_Range }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.field = 0;
+    message.text = "";
+    message.highlights = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.field = reader.int32();
+          break;
+        case 2:
+          message.text = reader.string();
+          break;
+        case 3:
+          message.highlights.push(GlobalSearchExcerpt_Range.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.field !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).int32(message.field);
+    if (message.text !== "")
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.text);
+    for (let i = 0;i < message.highlights.length; i++)
+      GlobalSearchExcerpt_Range.internalBinaryWrite(message.highlights[i], writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GlobalSearchExcerpt = new GlobalSearchExcerpt$Type;
+
+class GlobalSearchExcerpt_Range$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GlobalSearchExcerpt.Range", [
+      { no: 1, name: "offset", kind: "scalar", T: 13 },
+      { no: 2, name: "length", kind: "scalar", T: 13 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.offset = 0;
+    message.length = 0;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.offset = reader.uint32();
+          break;
+        case 2:
+          message.length = reader.uint32();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.offset !== 0)
+      writer.tag(1, import_runtime.WireType.Varint).uint32(message.offset);
+    if (message.length !== 0)
+      writer.tag(2, import_runtime.WireType.Varint).uint32(message.length);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GlobalSearchExcerpt_Range = new GlobalSearchExcerpt_Range$Type;
+
+class GlobalMessageSearchHit$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("GlobalMessageSearchHit", [
+      { no: 1, name: "peer", kind: "message", T: () => Peer },
+      { no: 2, name: "chat_id", kind: "scalar", T: 3, L: 0 },
+      { no: 3, name: "message_id", kind: "scalar", T: 3, L: 0 },
+      { no: 4, name: "date", kind: "scalar", T: 3, L: 0 },
+      { no: 5, name: "from_user_id", kind: "scalar", T: 3, L: 0 },
+      { no: 6, name: "excerpts", kind: "message", repeat: 1, T: () => GlobalSearchExcerpt }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.chatId = 0n;
+    message.messageId = 0n;
+    message.date = 0n;
+    message.fromUserId = 0n;
+    message.excerpts = [];
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.peer = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peer);
+          break;
+        case 2:
+          message.chatId = reader.int64().toBigInt();
+          break;
+        case 3:
+          message.messageId = reader.int64().toBigInt();
+          break;
+        case 4:
+          message.date = reader.int64().toBigInt();
+          break;
+        case 5:
+          message.fromUserId = reader.int64().toBigInt();
+          break;
+        case 6:
+          message.excerpts.push(GlobalSearchExcerpt.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    if (message.peer)
+      Peer.internalBinaryWrite(message.peer, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.chatId !== 0n)
+      writer.tag(2, import_runtime.WireType.Varint).int64(message.chatId);
+    if (message.messageId !== 0n)
+      writer.tag(3, import_runtime.WireType.Varint).int64(message.messageId);
+    if (message.date !== 0n)
+      writer.tag(4, import_runtime.WireType.Varint).int64(message.date);
+    if (message.fromUserId !== 0n)
+      writer.tag(5, import_runtime.WireType.Varint).int64(message.fromUserId);
+    for (let i = 0;i < message.excerpts.length; i++)
+      GlobalSearchExcerpt.internalBinaryWrite(message.excerpts[i], writer.tag(6, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var GlobalMessageSearchHit = new GlobalMessageSearchHit$Type;
+
+class SearchMessagesGlobalResult$Type extends import_runtime4.MessageType {
+  constructor() {
+    super("SearchMessagesGlobalResult", [
+      { no: 1, name: "hits", kind: "message", repeat: 1, T: () => GlobalMessageSearchHit },
+      { no: 2, name: "next_cursor", kind: "scalar", opt: true, T: 9 },
+      { no: 3, name: "index_incomplete", kind: "scalar", T: 8 }
+    ]);
+  }
+  create(value) {
+    const message = globalThis.Object.create(this.messagePrototype);
+    message.hits = [];
+    message.indexIncomplete = false;
+    if (value !== undefined)
+      import_runtime3.reflectionMergePartial(this, message, value);
+    return message;
+  }
+  internalBinaryRead(reader, length, options, target) {
+    let message = target ?? this.create(), end = reader.pos + length;
+    while (reader.pos < end) {
+      let [fieldNo, wireType] = reader.tag();
+      switch (fieldNo) {
+        case 1:
+          message.hits.push(GlobalMessageSearchHit.internalBinaryRead(reader, reader.uint32(), options));
+          break;
+        case 2:
+          message.nextCursor = reader.string();
+          break;
+        case 3:
+          message.indexIncomplete = reader.bool();
+          break;
+        default:
+          let u = options.readUnknownField;
+          if (u === "throw")
+            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+          let d = reader.skip(wireType);
+          if (u !== false)
+            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+      }
+    }
+    return message;
+  }
+  internalBinaryWrite(message, writer, options) {
+    for (let i = 0;i < message.hits.length; i++)
+      GlobalMessageSearchHit.internalBinaryWrite(message.hits[i], writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
+    if (message.nextCursor !== undefined)
+      writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.nextCursor);
+    if (message.indexIncomplete !== false)
+      writer.tag(3, import_runtime.WireType.Varint).bool(message.indexIncomplete);
+    let u = options.writeUnknownFields;
+    if (u !== false)
+      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+    return writer;
+  }
+}
+var SearchMessagesGlobalResult = new SearchMessagesGlobalResult$Type;
 
 class SearchMessagesInput$Type extends import_runtime4.MessageType {
   constructor() {
@@ -47064,7 +48239,6 @@ class GetUploadStateInput$Type extends import_runtime4.MessageType {
   }
 }
 var GetUploadStateInput = new GetUploadStateInput$Type;
-
 class UploadComplete$Type extends import_runtime4.MessageType {
   constructor() {
     super("UploadComplete", [
@@ -48876,11 +50050,13 @@ var READ_ONLY_RPC_METHODS = new Set([
   Method.GET_SPACE_MEMBERS,
   Method.GET_CHAT_PARTICIPANTS,
   Method.GET_CHATS,
+  Method.GET_COMMON_CHATS,
   Method.GET_USER_SETTINGS,
   Method.GET_UPDATES_STATE,
   Method.GET_CHAT,
   Method.GET_UPDATES,
   Method.SEARCH_MESSAGES,
+  Method.SEARCH_MESSAGES_GLOBAL,
   Method.LIST_BOTS,
   Method.REVEAL_BOT_TOKEN,
   Method.GET_MESSAGES,
@@ -52068,10 +53244,12 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
     const fields = { serverSalt, sessionId, messageId, sequenceNumber, body: plaintext.slice(32, 32 + bodyLength) };
     if (!validDirection)
       throw new RecoverableEncryptedRecordError(18, fields);
-    if (messageSeconds > validation.nowSeconds + 30)
-      throw new RecoverableEncryptedRecordError(17, fields);
-    if (messageSeconds < validation.nowSeconds - 300)
-      throw new RecoverableEncryptedRecordError(20, fields);
+    if (validation.direction === "client-to-server") {
+      if (messageSeconds > validation.nowSeconds + 30)
+        throw new RecoverableEncryptedRecordError(17, fields);
+      if (messageSeconds < validation.nowSeconds - 300)
+        throw new RecoverableEncryptedRecordError(16, fields);
+    }
     if (!validation.validServerSalts.has(serverSalt))
       throw new RecoverableEncryptedRecordError(48, fields);
     return {
@@ -52102,6 +53280,11 @@ class MessageIdGenerator {
       candidate += 4n;
     this.#last = candidate;
     return candidate;
+  }
+  recoverFromTooHigh(serverMessageId) {
+    const edge = (serverMessageId >> 32n) + 30n << 32n;
+    if (this.#last >= edge + (1n << 32n))
+      this.#last = edge;
   }
 }
 
@@ -52307,6 +53490,8 @@ var TEMPORARY_KEY_ROTATION_MILLISECONDS = TEMPORARY_KEY_LIFETIME_MILLISECONDS * 
 var ACK_FLUSH_DELAY_MS = 30000;
 var ACK_FLUSH_PENDING = 16;
 var MAXIMUM_GZIP_OUTPUT_BYTES = 16 * 1024 * 1024;
+var serverTimeOffsetMilliseconds;
+var estimatedServerNowMilliseconds = () => Date.now() + (serverTimeOffsetMilliseconds ?? 0);
 var gunzip = (packed, maximumOutputBytes) => Uint8Array.from(gunzipSync(packed, { maxOutputLength: Math.min(maximumOutputBytes, MAXIMUM_GZIP_OUTPUT_BYTES) }));
 var unpackGzip = (body) => serviceConstructor(body) === ServiceConstructor.gzipPacked ? decodeGzipPacked(body, gunzip, MAXIMUM_GZIP_OUTPUT_BYTES) : body;
 var readOnlyRpcMethods = READ_ONLY_RPC_METHODS;
@@ -52448,6 +53633,7 @@ class InlineProtocolV3Connection {
   #maxPendingRequestBytes;
   #inbox = new FrameInbox;
   #messageIds = new MessageIdGenerator;
+  #handshakeMessageIds = new MessageIdGenerator;
   #sequenceNumbers = new SequenceNumberGenerator;
   #clock = new AuthenticatedServerClock({
     nowMilliseconds: () => performance.now()
@@ -52490,7 +53676,8 @@ class InlineProtocolV3Connection {
     try {
       await connection.#open();
       if (options.authorization) {
-        connection.#sampleAuthenticatedServerTime(Math.floor(Date.now() / 1000));
+        connection.#clock.sample(Math.floor(estimatedServerNowMilliseconds() / 1000));
+        connection.#scheduleRotationTimer();
       } else {
         await connection.#handshake(options.temporary ?? false);
       }
@@ -52635,11 +53822,16 @@ class InlineProtocolV3Connection {
   }
   #sampleAuthenticatedServerTime(serverUnixSeconds) {
     this.#clock.sample(serverUnixSeconds);
+    this.#recordServerTimeOffset();
     this.#scheduleRotationTimer();
   }
   #sampleAuthenticatedServerMessage(messageId) {
     this.#clock.sampleMessageId(messageId);
+    this.#recordServerTimeOffset();
     this.#scheduleRotationTimer();
+  }
+  #recordServerTimeOffset() {
+    serverTimeOffsetMilliseconds = this.#clock.nowMilliseconds() - Date.now();
   }
   #scheduleRotationTimer() {
     if (this.#rotationTimer) {
@@ -52767,7 +53959,7 @@ class InlineProtocolV3Connection {
     });
     let request = handshake.begin(temporary);
     for (;; ) {
-      const messageId = this.#messageIds.next(Date.now(), randomLowBits(this.#random), 0);
+      const messageId = this.#handshakeMessageIds.next(Date.now(), randomLowBits(this.#random), 0);
       this.#sendPacket(encodeUnencryptedRecord(messageId, request));
       const response = decodeUnencryptedRecord(await this.#receivePacket(this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS));
       const result = handshake.receive(response.body);
@@ -52926,9 +54118,11 @@ class InlineProtocolV3Connection {
       this.#pendingContent.delete(bad.badMessageId);
     if (probeEntry)
       this.#pendingProbes.delete(probeEntry[0]);
-    if (bad.errorCode === 16 || bad.errorCode === 17)
+    if (bad.errorCode === 16 || bad.errorCode === 17) {
       this.#sampleAuthenticatedServerMessage(serverMessageId);
-    else if (bad.errorCode === 48 && bad.newServerSalt !== undefined)
+      if (bad.errorCode === 17)
+        this.#messageIds.recoverFromTooHigh(serverMessageId);
+    } else if (bad.errorCode === 48 && bad.newServerSalt !== undefined)
       this.#setServerSalt(bad.newServerSalt);
     else {
       const rejected = pending ?? probeEntry[1];
@@ -52941,6 +54135,7 @@ class InlineProtocolV3Connection {
     }
     const retried = pending ?? probeEntry[1];
     retried.messageId = this.#nextClientMessageId();
+    retried.sequenceNumber = this.#sequenceNumbers.next(pending !== undefined);
     if (pending)
       this.#pendingContent.set(retried.messageId, pending);
     else
@@ -53104,8 +54299,9 @@ var pendingUpdateByteCapacity = 8 * 1024 * 1024;
 var transportEventByteCapacity = 8 * 1024 * 1024;
 var rejectedBeforeExecutionRetryLimit = 2;
 var rejectedBeforeExecutionRetryDelayMs = 1000;
-var authorizationRecoveryDelayMs = 1000;
-var authorizationRecoveryAttemptLimit = 3;
+var reconnectBaseDelayMs = 1000;
+var reconnectMaxDelayMs = 60000;
+var startAuthorizationRecoveryAttemptLimit = 3;
 var transferIdleTimeoutMs = 110000;
 var transferCarrierFailed = (error) => error instanceof InlineProtocolV3Error && error.code !== "unauthorized" && error.code !== "session-revoked";
 var transportEventByteLength = (event) => event.type === "message" ? ServerProtocolMessage.toBinary(event.message).byteLength : 32;
@@ -53120,6 +54316,8 @@ var cloneCredentials = (value) => ({
 });
 var isSessionRevoked = (error) => error instanceof InlineProtocolV3Error && error.code === "session-revoked";
 var isAuthorizationInvalidated = (error) => error instanceof InlineProtocolV3Error && error.code === "authorization-invalidated";
+var isTransientNetworkFailure = (error) => error instanceof InlineProtocolV3Error && (error.code === "closed" || error.code === "timeout");
+var asError = (error) => error instanceof Error ? error : new Error(String(error));
 
 class InlineProtocolV3Transport {
   events = new AsyncChannel(256, {
@@ -53132,8 +54330,12 @@ class InlineProtocolV3Transport {
   #connection;
   #state = "idle";
   #reconnectingGeneration;
-  #reconnectAfterOpen = false;
+  #reconnectAfterOpen;
   #generation = 0;
+  #failures = 0;
+  #status = { kind: "stopped" };
+  #sleeps = new Set;
+  #persistenceFailures = new WeakSet;
   #retryTimer;
   #pendingUpdates = [];
   #pendingUpdateBytes = 0;
@@ -53152,28 +54354,33 @@ class InlineProtocolV3Transport {
       return;
     this.#state = "connecting";
     this.#recoveringAuthorization = false;
-    this.#reconnectAfterOpen = false;
+    this.#reconnectAfterOpen = undefined;
     this.#flushingUpdates = false;
     this.#rotationDue = false;
-    const generation = ++this.#generation;
+    this.#failures = 0;
+    const generation = this.#nextGeneration();
     this.#pendingUpdates = [];
     this.#pendingUpdateBytes = 0;
+    this.#publish({ kind: "connecting" });
     await this.events.send({ type: "connecting" });
     try {
-      await this.#open(generation);
+      await this.#open(generation, startAuthorizationRecoveryAttemptLimit);
     } catch (error) {
       if (isSessionRevoked(error)) {
         await this.#authenticationInvalidated(generation, error);
         return;
       }
-      if (this.#generation === generation)
+      if (this.#generation === generation && !this.#isIdle()) {
         this.#state = "idle";
+        this.#publish({ kind: "offline", reason: "connect-failed", error: asError(error) });
+      }
       throw error;
     }
   }
   async stop() {
-    ++this.#generation;
+    this.#nextGeneration();
     this.#reconnectingGeneration = undefined;
+    this.#failures = 0;
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer);
       this.#retryTimer = undefined;
@@ -53181,6 +54388,7 @@ class InlineProtocolV3Transport {
     if (this.#state === "idle" && !this.#connection)
       return;
     this.#state = "idle";
+    this.#publish({ kind: "stopped" });
     this.#flushingUpdates = false;
     this.#pendingUpdates = [];
     this.#pendingUpdateBytes = 0;
@@ -53191,7 +54399,7 @@ class InlineProtocolV3Transport {
     await connection?.close();
   }
   async stopConnection() {
-    ++this.#generation;
+    this.#nextGeneration();
     this.#reconnectingGeneration = undefined;
     const connection = this.#connection;
     this.#connection = undefined;
@@ -53200,18 +54408,28 @@ class InlineProtocolV3Transport {
     this.#closeTransfer();
     await connection?.close();
   }
-  async reconnect(options) {
+  async reconnect(_options) {
+    await this.#reconnect();
+  }
+  async#reconnect(failure) {
     if (this.#state === "idle" || this.#reconnectingGeneration !== undefined)
       return;
-    this.#reconnectAfterOpen = false;
+    this.#reconnectAfterOpen = undefined;
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer);
       this.#retryTimer = undefined;
     }
-    const generation = ++this.#generation;
+    const generation = this.#nextGeneration();
     this.#reconnectingGeneration = generation;
     this.#pendingUpdates = [];
     this.#pendingUpdateBytes = 0;
+    let delayMs = 0;
+    if (failure) {
+      delayMs = this.#recordFailure();
+      this.#publishRecovering(delayMs, failure);
+    } else if (this.#status.kind === "connected") {
+      this.#publish({ kind: "connecting" });
+    }
     try {
       const connection = this.#connection;
       this.#connection = undefined;
@@ -53222,7 +54440,11 @@ class InlineProtocolV3Transport {
       this.#requireCurrent(generation);
       await this.events.send({ type: "connecting" });
       this.#requireCurrent(generation);
-      await this.#open(generation);
+      if (delayMs > 0) {
+        await this.#sleep(generation, delayMs);
+        this.#requireCurrent(generation);
+      }
+      await this.#open(generation, Number.POSITIVE_INFINITY);
     } catch (error) {
       if (this.#generation !== generation || this.#isIdle())
         return;
@@ -53230,24 +54452,34 @@ class InlineProtocolV3Transport {
         await this.#authenticationInvalidated(generation, error);
         return;
       }
-      if (this.#recoveringAuthorization || isAuthorizationInvalidated(error)) {
+      const persistenceFailed = typeof error === "object" && error !== null && this.#persistenceFailures.has(error);
+      if ((this.#recoveringAuthorization || isAuthorizationInvalidated(error)) && (persistenceFailed || !isTransientNetworkFailure(error))) {
         this.#state = "idle";
+        this.#failures = 0;
         this.#log.warn?.("Inline Protocol temporary authorization replacement failed; automatic recovery stopped", error);
+        this.#publish({
+          kind: "offline",
+          reason: persistenceFailed ? "credential-persistence-failed" : "authorization-rejected",
+          error: asError(error)
+        });
         return;
       }
-      this.#log.warn?.("Inline Protocol reconnect failed", error);
+      const retryInMs = this.#recordFailure();
+      this.#log.warn?.(`Inline Protocol reconnect failed; retrying in ${retryInMs}ms`, error);
       this.#retryTimer = setTimeout(() => {
         this.#retryTimer = undefined;
         if (this.#generation !== generation || this.#state === "idle")
           return;
-        this.reconnect({ cause: "v3-retry" });
-      }, options?.skipDelay ? 0 : 1000);
+        this.#reconnect();
+      }, retryInMs);
+      this.#publishRecovering(retryInMs, asError(error));
     } finally {
       if (this.#reconnectingGeneration === generation)
         this.#reconnectingGeneration = undefined;
-      if (this.#generation === generation && this.#reconnectAfterOpen && !this.#isIdle()) {
-        this.#reconnectAfterOpen = false;
-        this.reconnect({ cause: "v3-closed-during-open" });
+      const closedDuringOpen = this.#reconnectAfterOpen;
+      if (this.#generation === generation && closedDuringOpen && !this.#isIdle()) {
+        this.#reconnectAfterOpen = undefined;
+        this.#reconnect(closedDuringOpen);
       }
     }
   }
@@ -53374,15 +54606,22 @@ class InlineProtocolV3Transport {
       state: this.#state,
       connected: this.#connection !== undefined,
       recoveringAuthorization: this.#state === "connecting" && this.#recoveringAuthorization,
-      hasTemporaryAuthorization: this.#credentials.temporary !== undefined
+      hasTemporaryAuthorization: this.#credentials.temporary !== undefined,
+      phase: this.#status.kind,
+      consecutiveFailures: this.#failures,
+      offlineReason: this.#status.kind === "offline" ? this.#status.reason : null
     };
   }
-  async#open(generation) {
+  get transportState() {
+    return this.#status;
+  }
+  async#open(generation, recoveryAttemptLimit) {
     if (this.#generation !== generation || this.#state === "idle") {
       throw new Error("Inline Protocol connection attempt was superseded");
     }
     let connection;
     let openingCloseError;
+    let cachedRejection;
     const temporary = this.#credentials.temporary;
     if (temporary?.expiresAt !== undefined) {
       try {
@@ -53431,13 +54670,16 @@ class InlineProtocolV3Transport {
         this.#requireCurrent(generation);
         this.#credentials.temporary = undefined;
         this.#recoveringAuthorization = true;
-        this.#log.warn?.("Stored Inline Protocol temporary authorization was rejected; starting bounded recovery", error);
+        this.#log.warn?.("Stored Inline Protocol temporary authorization was rejected; starting recovery", error);
         openingCloseError = undefined;
+        cachedRejection = error;
       }
     }
     if (!connection) {
-      if (this.#recoveringAuthorization) {
-        await new Promise((resolve) => setTimeout(resolve, authorizationRecoveryDelayMs));
+      if (cachedRejection) {
+        const retryInMs = this.#recordFailure();
+        this.#publishRecovering(retryInMs, cachedRejection);
+        await this.#sleep(generation, retryInMs);
       }
       if (this.#generation !== generation || this.#isIdle()) {
         throw new Error("Inline Protocol connection attempt was superseded");
@@ -53490,13 +54732,14 @@ class InlineProtocolV3Transport {
           attemptCurrent = false;
           await replacement?.close();
           this.#requireCurrent(generation);
-          const transient = error instanceof InlineProtocolV3Error && (error.code === "closed" || error.code === "timeout");
-          if (!this.#recoveringAuthorization || !transient || attempt + 1 >= authorizationRecoveryAttemptLimit)
+          if (!this.#recoveringAuthorization || !isTransientNetworkFailure(error) || attempt + 1 >= recoveryAttemptLimit)
             throw error;
           this.#pendingUpdates = [];
           this.#pendingUpdateBytes = 0;
-          this.#log.warn?.("Inline Protocol temporary authorization bootstrap interrupted; retrying", error);
-          await new Promise((resolve) => setTimeout(resolve, authorizationRecoveryDelayMs * (attempt + 1)));
+          const retryInMs = this.#recordFailure();
+          this.#log.warn?.(`Inline Protocol temporary authorization bootstrap interrupted; retrying in ${retryInMs}ms`, error);
+          this.#publishRecovering(retryInMs, error);
+          await this.#sleep(generation, retryInMs);
         }
       }
     }
@@ -53504,7 +54747,13 @@ class InlineProtocolV3Transport {
     nextCredentials.temporary = connection.authorization;
     try {
       this.#requireCurrent(generation);
-      await this.#options.onCredentials?.(cloneCredentials(nextCredentials));
+      try {
+        await this.#options.onCredentials?.(cloneCredentials(nextCredentials));
+      } catch (error) {
+        if (typeof error === "object" && error !== null)
+          this.#persistenceFailures.add(error);
+        throw error;
+      }
       if (openingCloseError)
         throw openingCloseError;
       this.#requireCurrent(generation);
@@ -53513,9 +54762,11 @@ class InlineProtocolV3Transport {
       throw error;
     }
     this.#recoveringAuthorization = false;
+    this.#failures = 0;
     this.#credentials = nextCredentials;
     this.#connection = connection;
     this.#state = "connected";
+    this.#publish({ kind: "connected" });
     this.#flushingUpdates = true;
     await this.events.send({ type: "connected" });
     await this.#flushPendingUpdates(generation);
@@ -53639,15 +54890,69 @@ class InlineProtocolV3Transport {
     this.#log.warn?.("Inline Protocol connection closed; reconnecting", error);
     if (this.#reconnectingGeneration === generation) {
       this.#state = "connecting";
-      this.#reconnectAfterOpen = true;
+      this.#reconnectAfterOpen = error;
       return;
     }
-    this.reconnect({ skipDelay: true, cause: "v3-connection-closed" });
+    this.#reconnect(error);
+  }
+  #recordFailure() {
+    this.#failures += 1;
+    const capMs = Math.min(reconnectMaxDelayMs, reconnectBaseDelayMs * 2 ** Math.min(this.#failures - 1, 16));
+    const sample = (this.#options.random ?? Math.random)();
+    const unit = Number.isFinite(sample) ? Math.min(Math.max(sample, 0), 1 - Number.EPSILON) : 0;
+    return Math.floor(unit * (capMs + 1));
+  }
+  #publishRecovering(retryInMs, error) {
+    this.#publish({
+      kind: "recovering",
+      attempt: this.#failures,
+      retryInMs,
+      replacingAuthorization: this.#recoveringAuthorization,
+      error
+    });
+  }
+  #publish(state) {
+    if (state.kind === this.#status.kind && state.kind !== "recovering")
+      return;
+    this.#status = state;
+    const onStateChange = this.#options.onStateChange;
+    if (!onStateChange)
+      return;
+    queueMicrotask(() => {
+      try {
+        onStateChange(state);
+      } catch (error) {
+        this.#log.warn?.("Inline Protocol transport state callback failed", error);
+      }
+    });
+  }
+  #sleep(generation, ms) {
+    if (this.#generation !== generation || this.#isIdle())
+      return Promise.resolve();
+    return new Promise((resolve) => {
+      const sleep = {
+        timer: setTimeout(() => {
+          this.#sleeps.delete(sleep);
+          resolve();
+        }, ms),
+        resolve
+      };
+      this.#sleeps.add(sleep);
+    });
+  }
+  #nextGeneration() {
+    for (const sleep of this.#sleeps) {
+      clearTimeout(sleep.timer);
+      sleep.resolve();
+    }
+    this.#sleeps.clear();
+    return ++this.#generation;
   }
   async#authenticationInvalidated(generation, error) {
     if (this.#generation !== generation || this.#state === "idle")
       return;
-    ++this.#generation;
+    this.#nextGeneration();
+    this.#failures = 0;
     this.#reconnectingGeneration = undefined;
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer);
@@ -53666,6 +54971,7 @@ class InlineProtocolV3Transport {
     if (this.#generation !== terminalGeneration)
       return;
     this.#log.warn?.("Inline Protocol session revocation confirmed; reconnect disabled", error);
+    this.#publish({ kind: "offline", reason: "session-revoked", error });
     await this.events.send({
       type: "message",
       message: ServerProtocolMessage.create({
@@ -53803,7 +55109,8 @@ var rpcInputKindByMethod = {
   127: "getSpace",
   131: "updateBotAgent",
   132: "deleteBotAgent",
-  170: "getSpaces"
+  170: "getSpaces",
+  172: "getCommonChats"
 };
 var rpcResultKindByMethod = {
   0: undefined,
@@ -53873,7 +55180,8 @@ var rpcResultKindByMethod = {
   127: "getSpace",
   131: "updateBotAgent",
   132: "deleteBotAgent",
-  170: "getSpaces"
+  170: "getSpaces",
+  172: "getCommonChats"
 };
 
 // node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
@@ -53958,6 +55266,7 @@ var replaySafeRpcMethods = new Set([
   Method.GET_CHAT_PARTICIPANTS,
   Method.GET_CHATS,
   Method.GET_SPACES,
+  Method.GET_COMMON_CHATS,
   Method.GET_USER_SETTINGS,
   Method.GET_UPDATES_STATE,
   Method.GET_CHAT,
@@ -54123,6 +55432,7 @@ class InlineSdkClient {
       credentials: v3.credentials,
       requestTimeoutMs: options.rpcTimeoutMs ?? undefined,
       logger: options.logger,
+      ...v3.onTransportState ? { onStateChange: v3.onTransportState } : {},
       onCredentials: async (credentials) => {
         if (this.logoutInProgress) {
           throw new Error("credential persistence rejected while logout is in progress");
@@ -55254,6 +56564,8 @@ class InlineSdkClient {
       case "bot.chatSettings.item.invoke":
       case "chat.hasUpdates":
       case "space.hasUpdates":
+      case "reaction.add":
+      case "reaction.delete":
         return;
       default:
         return this.bucketForEvent(event);
@@ -56867,7 +58179,7 @@ async function registerBotCapabilitiesWithRetry(params) {
   }
 }
 // node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 
 // node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
 var serializeStateV1 = (state) => {
@@ -56935,18 +58247,31 @@ class JsonFileStateStore {
     this.path = path;
   }
   async load() {
+    let raw;
     try {
-      const raw = await readFile(this.path, "utf8");
+      raw = await readFile(this.path, "utf8");
+    } catch (error) {
+      if (error?.code === "ENOENT")
+        return null;
+      throw error;
+    }
+    try {
       return deserializeStateV1(raw);
     } catch {
+      await rename(this.path, `${this.path}.invalid-${Date.now()}`).catch(() => {});
       return null;
     }
   }
   async save(next) {
     const tempPath = `${this.path}.tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const payload = serializeStateV1(next);
-    await writeFile(tempPath, payload, "utf8");
-    await rename(tempPath, this.path);
+    try {
+      await writeFile(tempPath, payload, "utf8");
+      await rename(tempPath, this.path);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => {});
+      throw error;
+    }
   }
 }
 // node_modules/@inline-chat/protocol/dist/vectors.js
