@@ -26,9 +26,10 @@ public enum ChatOpenAnchor: Sendable, Equatable {
   case latest
 }
 
-/// Reading places kept while the app runs, per account and chat. The lists save a place when
-/// the newest message is off screen and clear it at the bottom, on send, on return to latest and
-/// on a notification open.
+/// Reading places per account and chat, kept in the local database so they survive a relaunch
+/// (memory in tests). When a chat opens, its saved place wins over the unread line if the cache
+/// can show its row. The lists save a place when the newest message is off screen and clear it
+/// at the bottom, on send, on return to latest and on a notification open.
 @MainActor
 public final class ChatReadingPlaceStore {
   public static let shared = ChatReadingPlaceStore(storage: DatabaseChatReadingPlaceStorage(database: .shared))
