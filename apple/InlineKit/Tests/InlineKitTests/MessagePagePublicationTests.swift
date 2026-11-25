@@ -13,6 +13,7 @@ struct MessagePagePublicationTests {
     defer { fixture.close() }
     let model = try await fixture.model()
     defer { model.dispose() }
+    model.leaveBottomForOlderPages()
     fixture.gate.arm()
     let page = Task { @MainActor in await model.loadBatchAsync(at: .older) }
     defer { fixture.gate.release() }
@@ -27,6 +28,11 @@ struct MessagePagePublicationTests {
     #expect(await page.value)
     #expect(model.messages.contains { $0.message.messageId == 229 })
     #expect(!model.messages.contains { $0.message.messageId == 230 })
+
+    // The delete crossed the page's read, so a reload of the paged window follows. It keeps the page.
+    try await model.waitForReloadToSettle()
+    #expect(model.messages.contains { $0.message.messageId == 229 })
+    #expect(!model.messages.contains { $0.message.messageId == 230 })
   }
 
   @Test @MainActor
@@ -35,6 +41,7 @@ struct MessagePagePublicationTests {
     defer { fixture.close() }
     let model = try await fixture.model()
     defer { model.dispose() }
+    model.leaveBottomForOlderPages()
     fixture.gate.arm()
     let page = Task { @MainActor in await model.loadBatchAsync(at: .older) }
     defer { fixture.gate.release() }
@@ -51,8 +58,33 @@ struct MessagePagePublicationTests {
     #expect(await page.value)
     #expect(model.messages.first { $0.message.messageId == 230 }?.message.text == "Edited while paging")
     #expect(model.messagesByID[edited.id]?.message.text == "Edited while paging")
+
+    // The edit crossed the page's read, so a reload of the paged window follows. It keeps the page.
+    try await model.waitForReloadToSettle()
+    #expect(model.messages.first { $0.message.messageId == 230 }?.message.text == "Edited while paging")
+    #expect(model.messagesByID[edited.id]?.message.text == "Edited while paging")
   }
 }
+
+private extension MessagesProgressiveViewModel {
+  /// A reader pages older after scrolling up, which the list reports before the page loads.
+  /// At the bottom, a reload returns to the latest screenful of rows by design (62 on a 768 pt
+  /// display, more on a taller one), so the reload that follows a page crossed by a publication
+  /// would drop the page and race these expectations.
+  func leaveBottomForOlderPages() {
+    setAtBottom(false)
+  }
+
+  func waitForReloadToSettle() async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while hasPendingReload {
+      guard ContinuousClock.now < deadline else { throw ReloadDidNotSettle() }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+  }
+}
+
+private struct ReloadDidNotSettle: Error {}
 
 private struct PageFixture {
   let directory: URL
