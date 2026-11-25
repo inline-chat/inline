@@ -4400,6 +4400,9 @@ class MessageListAppKit: NSViewController {
     // latest page, hidden or unplaced, and would read past an unread line it is about to open at.
     guard !needsInitialScroll, unreadFetchBoundary == nil else { return }
 
+    #if DEBUG
+    MessageListPerfCounters.noteReadPass(atLiveEnd: isWithinFollowZone && chatRows.historyCoverage.isAtCertifiedLiveEnd)
+    #endif
     if isWithinFollowZone, chatRows.historyCoverage.isAtCertifiedLiveEnd {
       // The bottom of a partial history window is not the end of the chat.
       // Clear everything only after the loaded page reaches the certified live end. Once per
@@ -4407,6 +4410,9 @@ class MessageListAppKit: NSViewController {
       let newest = highestPositiveMessageId ?? 0
       if readAllThrough != newest {
         readAllThrough = newest
+        #if DEBUG
+        MessageListPerfCounters.noteLiveEndRead()
+        #endif
         UnreadManager.shared.readAll(peerId, chatId: chatId)
       }
     } else {

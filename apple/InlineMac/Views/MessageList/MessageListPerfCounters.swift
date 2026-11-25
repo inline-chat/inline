@@ -30,6 +30,19 @@ enum MessageListPerfCounters {
   private static var measures = 0
   private static var measuresByMessage: [Int64: Int] = [:]
   private static var rebuildReasons: [String: Int] = [:]
+  /// Read passes for the read journey, never reset: at the live end (`liveEndPasses`), of which
+  /// `liveEndReads` asked to read the whole chat, and in history (`historyPasses`).
+  private(set) static var liveEndPasses = 0
+  private(set) static var liveEndReads = 0
+  private(set) static var historyPasses = 0
+
+  static func noteReadPass(atLiveEnd: Bool) {
+    if atLiveEnd { liveEndPasses += 1 } else { historyPasses += 1 }
+  }
+
+  static func noteLiveEndRead() {
+    liveEndReads += 1
+  }
 
   static func noteCell(_ path: CellPath) {
     switch path {

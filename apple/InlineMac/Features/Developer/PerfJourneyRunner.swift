@@ -6,7 +6,7 @@ import Logger
 /// Debug builds only: runs the macOS perf journeys inside the app, for runs where HID events can't
 /// reach it (a locked screen, an unattended machine). Use with `--perf-harness`:
 ///
-///     --perf-journey all|switch|scroll|resize --perf-journey-label <label>
+///     --perf-journey all|switch|scroll|resize|read --perf-journey-label <label>
 ///
 /// It waits for the main window plus `--perf-journey-delay` seconds (default 6, room for a profiler
 /// to attach), then runs each journey through the app's real paths:
@@ -17,7 +17,10 @@ import Logger
 ///   moving the clip view and posting the live-scroll notifications as AppKit's threaded scrolling
 ///   does (synthetic scroll events can't be routed to a window on a locked screen);
 /// - resize: a live resize, by posting mouse events to the window's own resize loop, −320 pt and
-///   back three times.
+///   back three times;
+/// - read (not in `all`, run it on its own): the whole-chat reads the list writes at the live end
+///   while it rests there, and that the chat, its count and the Dock badge still clear for a message
+///   arriving at the bottom, and for one that arrived while the app was away once it is back in front.
 ///
 /// It writes the HID driver's marks to `<tmp>/perf-journey/<label>-<scenario>.json` (the app is
 /// sandboxed, so `<tmp>` is the container's temporary folder), which `report.py` reads unchanged,
@@ -36,6 +39,7 @@ enum PerfJourneyRunner {
     (.thread(id: 802), "Release Notes"),
   ]
   static let scrollChat: (peer: Peer, title: String) = (.user(id: 2), "Ava Stone")
+  static let readChat: (peer: Peer, title: String, sender: Int64) = (.user(id: 4), "Cleo Park", 4)
 
   static func start(open: @escaping @MainActor (Peer) -> Void) {
     // Unattended runs must not be napped or throttled while the window is hidden.
@@ -97,6 +101,7 @@ enum PerfJourneyRunner {
         case "scroll": await runScroll(window: window, open: open, into: &result)
         case "resize": await runResize(window: window, into: &result)
         case "snapshot": await runSnapshot(window: window, open: open, outDir: outDir, label: label, into: &result)
+        case "read": await runRead(window: window, open: open, into: &result)
         default: break
       }
       result["tailSettleMs"] = await settle(from: now())
@@ -180,6 +185,129 @@ enum PerfJourneyRunner {
     // Points the list moved per fling (negative is up into history), to check the events landed.
     result["scrolledPoints"] = scrolled
     note("scrolled \(scrolled)")
+  }
+
+  /// Live-end reads. The chat's history is certified first, as a latest page from the server would,
+  /// so the list's bottom is the chat's live end (the seed leaves every chat unknown); that is why
+  /// this journey runs on its own. `AppActivityMonitor.simulate` stands in for the app leaving and
+  /// coming back to the front, which an unattended run can't do without taking the screen.
+  private static func runRead(
+    window: NSWindow,
+    open: @MainActor (Peer) -> Void,
+    into result: inout [String: Any]
+  ) async {
+    let chat = readChat
+    do {
+      try PerfHarnessFixture.certifyHistory(peer: chat.peer)
+    } catch {
+      result["error"] = "certify: \(error)"
+      return
+    }
+    AppActivityMonitor.shared.simulate(.active)
+    open(chat.peer)
+    await waitForChat(chat.peer)
+    await sleep(ms: 1500)
+    _ = await settle(from: now())
+    guard let scrollView = largestVisible(MessageListScrollView.self, in: window.contentView) else {
+      result["error"] = "no message list"
+      return
+    }
+    func reads() -> Int { MessageListPerfCounters.liveEndReads }
+    func passes() -> String {
+      "live=\(MessageListPerfCounters.liveEndPasses) history=\(MessageListPerfCounters.historyPasses)"
+    }
+    func state() -> String {
+      guard let state = try? PerfHarnessFixture.readState(peer: chat.peer) else { return "none" }
+      return "unread=\(state.unreadCount) readMax=\(state.readInboxMaxId) mark=\(state.unreadMark)"
+    }
+    func badge() -> String { NSApp.dockTile.badgeLabel ?? "" }
+    /// Within 3 s.
+    func until(_ condition: () -> Bool) async -> Bool {
+      for _ in 0 ..< 150 {
+        if condition() { return true }
+        await sleep(ms: 20)
+      }
+      return false
+    }
+    func readThrough(_ id: Int64) async -> Bool {
+      await until {
+        guard let state = try? PerfHarnessFixture.readState(peer: chat.peer) else { return false }
+        return state.unreadCount == 0 && state.readInboxMaxId >= id
+      }
+    }
+    /// A gesture that lifts the list 12 pt off where it rests and puts it back, inside the follow
+    /// zone. Relative to the resting origin: `step` clamps to the document's end, which sits a
+    /// bottom inset short of the list's own bottom.
+    func nudge() async {
+      let clipView = scrollView.contentView
+      let resting = clipView.bounds.origin.y
+      NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
+      for lift in [2.0, 4, 6, 8, 10, 12, 10, 8, 6, 4, 2, 0] {
+        clipView.scroll(to: NSPoint(x: clipView.bounds.origin.x, y: resting - lift))
+        scrollView.reflectScrolledClipView(clipView)
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scrollView)
+        await sleep(ms: 8.33)
+      }
+      NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scrollView)
+    }
+    /// Nudges, then row reloads, as a list resting at the bottom gets them.
+    func rest(nudges: Int, reloads: Int) async {
+      for _ in 0 ..< nudges {
+        await nudge()
+        await sleep(ms: 350)
+      }
+      for _ in 0 ..< reloads {
+        MessagesPublisher.shared.messagesReload(peer: chat.peer, animated: false)
+        await sleep(ms: 300)
+      }
+    }
+
+    result["openReads"] = reads()
+    result["openPasses"] = passes()
+    result["openState"] = state()
+    var before = reads()
+    await rest(nudges: 8, reloads: 6)
+    result["restingReads"] = reads() - before
+    result["restingPasses"] = passes()
+
+    // A message arrives at the bottom. It is read before the Dock, which holds increases for
+    // 500 ms, would show it.
+    before = reads()
+    guard let arrived = try? PerfHarnessFixture.receiveMessage(peer: chat.peer, from: chat.sender) else {
+      result["error"] = "no chat to receive in"
+      return
+    }
+    result["arrivalRead"] = await readThrough(arrived)
+    await sleep(ms: 700)
+    result["arrivalReads"] = reads() - before
+    result["arrivalPasses"] = passes()
+    result["arrivalState"] = state()
+    result["arrivalBadge"] = badge()
+
+    // One arrives while the app is away: nothing reads it until the app is back in front.
+    AppActivityMonitor.shared.simulate(.inactive)
+    before = reads()
+    guard let away = try? PerfHarnessFixture.receiveMessage(peer: chat.peer, from: chat.sender) else {
+      result["error"] = "no chat to receive in"
+      return
+    }
+    result["awayBadgeShown"] = await until { badge() == "1" }
+    result["awayState"] = state()
+    result["awayBadge"] = badge()
+    result["awayPasses"] = passes()
+    AppActivityMonitor.shared.simulate(.active)
+    result["frontRead"] = await readThrough(away)
+    result["frontBadgeCleared"] = await until { badge().isEmpty }
+    result["frontReads"] = reads() - before
+    result["frontPasses"] = passes()
+    result["frontState"] = state()
+    result["frontBadge"] = badge()
+
+    before = reads()
+    await rest(nudges: 4, reloads: 3)
+    result["restingAfterReads"] = reads() - before
+    result["restingAfterPasses"] = passes()
+    note("read \(result.filter { $0.key.hasSuffix("Reads") || $0.key.hasSuffix("Read") })")
   }
 
   /// Visual parity for row reuse: recycles cells with flings, then draws the list at fixed offsets

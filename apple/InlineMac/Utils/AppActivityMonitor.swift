@@ -48,6 +48,14 @@ final class AppActivityMonitor {
     observers.values.forEach { $0(newState) }
   }
 
+  #if DEBUG
+  /// The read journey's stand-in for the app leaving and coming back to the front, without
+  /// taking the screen from whoever is using the Mac.
+  func simulate(_ newState: State) {
+    updateState(newState)
+  }
+  #endif
+
   @objc private func didBecomeActive() {
     updateState(.active)
   }
