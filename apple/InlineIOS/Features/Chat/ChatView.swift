@@ -64,6 +64,7 @@ struct ChatView: View {
   @State private var translationPlacement: ChatTranslationPlacement
   @State private var presentedChatInfo: SpaceChatItem?
   @State private var renameRequested = false
+  @State private var shownMessageRequest: ShownMessageRequest?
   @State private var initialMessages: InitialMessages
   @Namespace private var chatInfoTransition
 
@@ -323,12 +324,7 @@ struct ChatView: View {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
     }
     .sheet(item: $presentedChatInfo, onDismiss: { renameRequested = false }) { chatItem in
-      NavigationStack {
-        ChatInfoView(chatItem: chatItem, isPresentedModally: true, initiallyEditingInfo: renameRequested)
-      }
-      .navigationTransition(.zoom(sourceID: TransitionID.chatInfo, in: chatInfoTransition))
-      .presentationDetents([.large])
-      .presentationDragIndicator(.hidden)
+      chatInfoSheet(chatItem)
     }
     .onAppear {
       guard !preview else { return }
@@ -491,6 +487,50 @@ struct ChatView: View {
           case .loaded = pageState
     else { return }
     fullChatViewModel.refetchHistoryOnly()
+  }
+
+  private func chatInfoSheet(_ chatItem: SpaceChatItem) -> some View {
+    NavigationStack {
+      ChatInfoView(
+        chatItem: chatItem,
+        isPresentedModally: true,
+        initiallyEditingInfo: renameRequested,
+        showMessageInPresentingChat: { peer, messageID in
+          showMessageFromOwnInfo(peer: peer, messageID: messageID)
+        }
+      )
+    }
+    .navigationTransition(.zoom(sourceID: TransitionID.chatInfo, in: chatInfoTransition))
+    .presentationDetents([.large])
+    .presentationDragIndicator(.hidden)
+  }
+
+  /// A message this chat's own info asked to show. The revision is the router's at the request,
+  /// so a later presentation reset doesn't scroll back to it.
+  private struct ShownMessageRequest: Equatable {
+    let messageID: Int64
+    let revision: Int
+    /// The route's own message when the request was made.
+    let routeMessageID: Int64?
+  }
+
+  /// A route that brings a different message of its own takes over from a jump asked for here.
+  private var activeShownMessageRequest: ShownMessageRequest? {
+    guard let shownMessageRequest, shownMessageRequest.routeMessageID == focusMessageID else { return nil }
+    return shownMessageRequest
+  }
+
+  /// Show in Chat from this chat's info sheet on the phone: the chat is the screen under the
+  /// sheet, so it jumps to the message here. Pushing it again left Back on the same chat.
+  /// The wide layout keeps routing it, so its history records the visit.
+  private func showMessageFromOwnInfo(peer: Peer, messageID: Int64) -> Bool {
+    guard !preview, !router.tracksHistory, peer == peerId,
+          router.selectedTabPath.last?.chatPeer == peerId
+    else { return false }
+    shownMessageRequest = ShownMessageRequest(
+      messageID: messageID, revision: router.presentationResetRevision, routeMessageID: focusMessageID
+    )
+    return true
   }
 
   private func handlePresentationReset() {
@@ -690,9 +730,9 @@ struct ChatView: View {
         chatId: chat.id,
         spaceId: chat.spaceId,
         draftMessage: fullChatViewModel.chatItem?.dialog.draftMessage,
-        focusMessageID: focusMessageID,
-        focusMessageExactly: focusMessageExactly,
-        focusRequestRevision: router.presentationResetRevision,
+        focusMessageID: activeShownMessageRequest?.messageID ?? focusMessageID,
+        focusMessageExactly: activeShownMessageRequest == nil && focusMessageExactly,
+        focusRequestRevision: activeShownMessageRequest?.revision ?? router.presentationResetRevision,
         collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
         initialMessages: initialState,
         isPreview: preview,

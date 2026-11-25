@@ -170,6 +170,8 @@ extension ChatInfoView {
     // Through the router on both layouts: popping the chat and posting a scroll notice left
     // the phone on the chat list, and the message list no longer listens for it.
     router.resetTransientPresentation()
+    // After the reset, so the jump carries a revision no earlier request used.
+    if showMessageInPresentingChat?(chatItem.peerId, message.messageId) == true { return }
     router.openPrimaryDestination(
       .chatMessage(peer: chatItem.peerId, messageID: message.messageId)
     )

@@ -46,6 +46,9 @@ struct ChatInfoView: View {
   @State private var canChangeVisibility = false
   /// False when opened from a member list or another profile, so Message leads.
   let isOverOwnChat: Bool
+  /// Set by the chat this sheet covers: shows one of its messages in place and returns true,
+  /// or returns false to route to it instead.
+  let showMessageInPresentingChat: ((Peer, Int64) -> Bool)?
   @AppStorage(DeveloperMode.key) private var developerMode = false
   @ObservedObject var globalNotifications = INUserSettings.current.notification
   @ObservedObject private var agentGrants = AgentGrantStore.shared
@@ -211,11 +214,13 @@ struct ChatInfoView: View {
     chatItem: SpaceChatItem,
     isPresentedModally: Bool = false,
     initiallyEditingInfo: Bool = false,
-    isOverOwnChat: Bool = true
+    isOverOwnChat: Bool = true,
+    showMessageInPresentingChat: ((Peer, Int64) -> Bool)? = nil
   ) {
     self.chatItem = chatItem
     self.isPresentedModally = isPresentedModally
     self.isOverOwnChat = isOverOwnChat
+    self.showMessageInPresentingChat = showMessageInPresentingChat
     _currentDialog = State(initialValue: chatItem.dialog)
     _isEditingInfo = State(initialValue: initiallyEditingInfo)
     _draftTitle = State(initialValue: initiallyEditingInfo ? (chatItem.chat?.title ?? "") : "")
