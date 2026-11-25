@@ -472,7 +472,14 @@ impl Mapper {
 
     /// A person's prompt is waiting to be taken by the next step.
     fn prompt_waiting(&self) -> bool {
-        !self.early.is_empty() || self.inbox.values().any(|entry| entry.user && !entry.queued)
+        !self.early.is_empty() || self.steer_waiting()
+    }
+
+    /// A person's message sent as a steer is still in the inbox. Synthetic
+    /// steers (Inline's notes, passive context, OpenCode's own mode
+    /// reminders) and queued prompts are not.
+    pub fn steer_waiting(&self) -> bool {
+        self.inbox.values().any(|entry| entry.user && !entry.queued)
     }
 
     /// The pending input that wakes a session is only reports and notices of

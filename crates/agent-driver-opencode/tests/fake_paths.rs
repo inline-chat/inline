@@ -1613,12 +1613,11 @@ async fn stop_ends_background_work_on_every_release() {
                 .position(|(name, sent)| name == route && *sent == body)
                 .unwrap_or_else(|| panic!("{version}: no {route} {body}: {requests:?}"))
         };
-        // The main session stops like the TUI's Esc Esc, so steers already
-        // sent still run; its sub-agents stop for good, after it.
-        let main = position(
-            "interrupt",
-            json!({"session": SESSION, "query": {"resume": "true"}}),
-        );
+        // The main session stops with nothing a person sent waiting, so
+        // without `resume`: nothing wakes it again
+        // (`stop_resumes_only_for_a_persons_steer`). Its sub-agents stop for
+        // good, after it.
+        let main = position("interrupt", json!({"session": SESSION, "query": {}}));
         let child = position("interrupt", json!({"session": "ses_child", "query": {}}));
         assert!(main < child, "{version}: {requests:?}");
         // Background work stops before the interrupt, so none of it ends in
@@ -1684,6 +1683,73 @@ async fn stop_ends_background_work_on_every_release() {
                 .all(|child| child.id.as_str() != "sh_1"),
             "{version}"
         );
+    }
+}
+
+/// Stop resumes (`resume=true`, the TUI's Esc Esc) only for a message a
+/// person already sent as a steer. OpenCode resumes on any steer it holds,
+/// so anything else parked as one (a mode switch's reminder, passive
+/// context) would start a turn on Stop, also on an idle session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_resumes_only_for_a_persons_steer() {
+    let reminder = json!({"id": "msg_plan", "type": "synthetic", "delivery": "steer",
+        "payload": {"text": "<system-reminder>\nYou are in Plan mode.\n</system-reminder>"}});
+    let passive = json!({"id": "msg_ctx", "type": "synthetic", "delivery": "steer",
+        "payload": {"text": "<inline-context untrusted=\"true\">\nhi\n</inline-context>",
+            "metadata": {"inline.input": "in-ctx"}}});
+    let typed = json!({"id": "msg_typed", "type": "user", "delivery": "steer",
+        "payload": {"text": "also check the tests", "metadata": {"inline.input": "in-typed"}}});
+    for (case, parked, running, resumed) in [
+        ("idle, a mode reminder", reminder, false, false),
+        ("running, passive context", passive, true, false),
+        ("running, a person's steer", typed, true, true),
+    ] {
+        let folder = tempfile::tempdir().unwrap();
+        let (fake, url) = serve(
+            folder.path(),
+            Script {
+                inbox: vec![parked],
+                ..Script::default()
+            },
+        )
+        .await;
+        let harness = harness(&fake, url).await;
+        let session = harness.open(resume(folder.path())).await.unwrap();
+        let mut events = session.events();
+        if running {
+            fake.durable(SESSION, "session.execution.started", json!({}), true);
+            until(&mut events, |event| {
+                matches!(
+                    event,
+                    Event::Turn {
+                        phase: TurnPhase::Started { .. },
+                        ..
+                    }
+                )
+            })
+            .await;
+        } else {
+            assert!(session.live_work().is_idle(), "{case}");
+        }
+        session
+            .control(Op::Interrupt {
+                cancel_queued: false,
+            })
+            .await
+            .unwrap();
+        let query = if resumed {
+            json!({"resume": "true"})
+        } else {
+            json!({})
+        };
+        assert_eq!(
+            fake.requests("interrupt"),
+            vec![json!({"session": SESSION, "query": query})],
+            "{case}"
+        );
+        if !running {
+            assert!(session.live_work().is_idle(), "{case}");
+        }
     }
 }
 

@@ -9,15 +9,17 @@
 //!
 //! | Operation | OpenCode |
 //! | --- | --- |
-//! | `Interrupt` (Stop) | background jobs cancelled (`POST /api/experimental/job/{id}/cancel`, 2.4+; else background shells through `DELETE /api/shell/{id}`), then `POST /interrupt?resume=true`, then running sub-agents interrupted |
+//! | `Interrupt` (Stop) | background jobs cancelled (`POST /api/experimental/job/{id}/cancel`, 2.4+; else background shells through `DELETE /api/shell/{id}`), then `POST /interrupt` (`?resume=true` while a person's steer waits), then running sub-agents interrupted |
 //! | `Queue` `Start` | `PATCH /inbox/{first queued} {delivery: "steer"}`, which wakes the session |
 //!
-//! Stop is the TUI's Esc Esc (`resume=true`: steers already sent still run,
-//! queued prompts stay parked) plus t3code's rule that a user's Stop also
-//! ends background children: since 2.3 sub-agents always run in the
-//! background and long shell commands move there, so the turn alone is
-//! seldom all that runs. A child that still reports after the stop wakes
-//! nothing ([`crate::mapper::Mapper::take_stop_wakes`]).
+//! Stop is the TUI's Esc Esc (`resume=true`: messages a person already sent
+//! as steers still run, queued prompts stay parked) plus t3code's rule that
+//! a user's Stop also ends background children: since 2.3 sub-agents always
+//! run in the background and long shell commands move there, so the turn
+//! alone is seldom all that runs. A child that still reports after the stop
+//! wakes nothing ([`crate::mapper::Mapper::take_stop_wakes`]). Without a
+//! person's steer waiting, Stop does not resume: OpenCode would wake on any
+//! steer it holds, synthetic context included, and start a turn.
 //!
 //! Inline's note on an input (who sent it, its instructions and the thread
 //! around it) goes just before the prompt as a `/synthetic {resume: false}`
@@ -939,16 +941,20 @@ impl SessionInner {
                 // wake the session again.
                 let mut stopped = StoppedWork::default();
                 self.stop_background(&api, &mut stopped, false).await;
-                // `resume`, like the TUI's Esc Esc: steers already sent run
-                // after the stop instead of waiting for the next prompt.
-                // Queued prompts stay parked.
+                // `resume`, like the TUI's Esc Esc: a person's steers already
+                // sent run after the stop instead of waiting for the next
+                // prompt. Queued prompts stay parked. Only when one waits:
+                // OpenCode resumes on any steer it holds, so an idle session
+                // with only synthetic context parked (passive input, Inline's
+                // notes, a mode switch's reminder) would start a turn on Stop.
+                // `cancel_queued` withdrew them above.
+                let query = if !cancel_queued && self.state().mapper.steer_waiting() {
+                    Query::new().with("resume", true)
+                } else {
+                    Query::new()
+                };
                 let mut native = api
-                    .send(
-                        Method::POST,
-                        &self.path("/interrupt"),
-                        Query::new().with("resume", true),
-                        None,
-                    )
+                    .send(Method::POST, &self.path("/interrupt"), query, None)
                     .await
                     .map_err(op_error)?
                     .unwrap_or_default();
