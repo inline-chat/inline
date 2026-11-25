@@ -9,9 +9,9 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ## November 25, 2026
 
-[macOS 0.2 beta, build 7475](https://public-assets.inline.chat/mac/beta/7475/Inline.dmg) · [CLI 0.7.26](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.26) · [Hermes adapter 1.2.6](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.6) · [OpenClaw plugin 1.0.0-alpha.3](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.3)
+[macOS 0.2, build 7475](https://public-assets.inline.chat/mac/stable/7475/Inline.dmg) · iOS TestFlight build 1492 · [CLI 0.7.26](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.26) · [Hermes adapter 1.2.8](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.2.8) · [OpenClaw plugin 1.0.0-alpha.4](https://www.npmjs.com/package/@inline-openclaw/inline/v/1.0.0-alpha.4)
 
-The iOS TestFlight build follows soon. It is the first since October 30, so on iOS it also brings everything in the [November 13](#november-13-2026) notes, including quote replies, unread mention and reaction badges, focus status, the swipeable media gallery, and the new iPad layout.
+iOS TestFlight build 1492 is the first since October 30, so on iOS it also brings everything in the [November 13](#november-13-2026) notes, including quote replies, unread mention and reaction badges, focus status, the swipeable media gallery, and the new iPad layout.
 
 ### New
 
@@ -37,7 +37,6 @@ The iOS TestFlight build follows soon. It is the first since October 30, so on i
 - Opening a thread goes to its parent message in the parent chat. On iPad, reply threads open as the main chat.
 - A new **Transcribe Voice Messages** switch in Privacy settings lets you keep your voice messages from being transcribed.
 - Mention one of your bots in a space thread and Inline offers to add it to the space.
-- On iOS, New Thread compose supports @ mentions of people, groups and agents, "Start with" suggestions, and agent folder, model and reasoning options. It also keeps your draft.
 - Chats show "sending photo", "sending video" or "sending file" while someone uploads, including in the sidebar and title bar on macOS.
 - The message time sits in the bubble's bottom corner next to reactions. Reaction chips keep their order when someone reacts. iOS reaction pills have tinted backgrounds, and the unread line is a subtle band.
 - The iOS media gallery opens, closes and pages more smoothly, shows "N of M", deletes where the chat allows it, and adds video controls: mute, speed, hold for 2x, double-tap to skip 15 seconds, and pinch to zoom. It also supports hardware keyboard shortcuts.
@@ -58,13 +57,15 @@ The iOS TestFlight build follows soon. It is the first since October 30, so on i
   - Share at creation with `bots create --share-user`, `--share-space`, `--admin` and `--open`. `/share` and `/unshare` in bridge chats manage who can talk to your agent.
   - Bridged agents send plans, approvals, review findings, next steps and prompt suggestions as native blocks. Claude sub-agents show as agents, and prose keeps its Markdown styles.
   - Claude asks you to sign in again when its session expires, a recoverable connection error no longer logs the CLI out, and exports fetch long histories in pages.
-- [Hermes](/docs/hermes) **1.2.1 → 1.2.6**:
+- [Hermes](/docs/hermes) **1.2.1 → 1.2.8**:
   - Progress and heartbeats post quietly, so they skip unread counts and notifications, and Friendly answers always notify.
   - Output mode changes apply within seconds.
   - Stalled inbound messages recover.
   - The system prompt stays stable across turns, so Hermes reuses its cached agent.
   - Reactions are now opt-in through `reaction_triggers`.
-- [OpenClaw](/docs/openclaw) **1.0.0-alpha.3** delivers chat updates in isolation per chat. `0.0.72` stays the default.
+  - Hermes reacts to some messages the way a person would, and a reaction alone can answer a message that needs no written reply. Turn it off with `agent_reactions`.
+  - Another agent's progress message reaches Hermes as one line instead of every command it ran.
+- [OpenClaw](/docs/openclaw) **1.0.0-alpha.4** delivers chat updates in isolation per chat, posts Friendly updates as quiet messages above the answer, and keeps other agents' progress out of the agent's context. Agent settings answer in time on OpenClaw 2026.11.8. `0.0.72` stays the default.
 - The [Bot API](/docs/bot-api) `getFile` accepts the documented `chat_id` and `message_id`, and a malformed query id gets the documented JSON error. Silent bot sends are now quiet: they skip unread counts and notifications.
 - Apps, the CLI and the SDK keep connecting when the device clock is wrong, by learning the server's clock instead of retrying forever.
 
