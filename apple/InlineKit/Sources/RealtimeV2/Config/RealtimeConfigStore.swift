@@ -6,6 +6,7 @@ enum RealtimeConfigStore {
   static func initialSyncConfig() -> SyncConfig {
     var config = SyncConfig.default
     config.liveGapGraceMilliseconds = liveGapGraceMilliseconds
+    config.prefetchesCatchUpPages = true
     return config
   }
 }

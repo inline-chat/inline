@@ -131,6 +131,120 @@ final class SyncTests {
     await sync.prepareForTermination()
   }
 
+  @Test("catch-up requests the next page while the current page applies")
+  func prefetchesNextCatchUpPage() async {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
+    let apply = RecordingApplyUpdates()
+    await apply.gateNextApply()
+    let client = FakeProtocolClient(responses: [
+      makeGetUpdatesResult(seq: 6, date: 120, updates: [makeChatInfoUpdate(seq: 6, date: 120)], final: false, resultType: .slice),
+      makeGetUpdatesResult(seq: 7, date: 130, updates: [makeChatInfoUpdate(seq: 7, date: 130)], final: false, resultType: .slice),
+      makeGetUpdatesResult(seq: 8, date: 140, updates: [makeChatInfoUpdate(seq: 8, date: 140)], final: true, resultType: .slice),
+    ])
+    var config = SyncConfig.default
+    config.prefetchesCatchUpPages = true
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 8)])
+    await apply.waitUntilApplyGated()
+    // The first page is still applying; the second was requested from its end sequence.
+    #expect(await waitForCondition(timeout: .seconds(2)) { await client.getUpdatesStartSequences() == [5, 6] })
+    await apply.releaseApply()
+    #expect(await waitForCondition(timeout: .seconds(4)) { await storage.getBucketState(for: key).seq == 8 })
+    #expect(await client.getUpdatesStartSequences() == [5, 6, 7])
+    await sync.prepareForTermination()
+  }
+
+  @Test("a prefetch is dropped with a page that fails to apply, and the page is requested again")
+  func discardsPrefetchWithFailedPage() async {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
+    let apply = RecordingApplyUpdates()
+    await apply.gateNextApply()
+    await apply.setResultSequence([
+      .init(appliedCount: 0, failedCount: 1, failure: .cursorChanged(
+        bucket: key, expected: .init(date: 100, seq: 5), actual: .init(date: 120, seq: 6)
+      )),
+      .success(count: 1),
+    ])
+    let client = FakeProtocolClient(responses: [
+      makeGetUpdatesResult(seq: 6, date: 120, updates: [makeChatInfoUpdate(seq: 6, date: 120)], final: false, resultType: .slice),
+      // Consumed by the prefetch, then discarded with the failed page.
+      makeGetUpdatesResult(seq: 7, date: 130, updates: [makeChatInfoUpdate(seq: 7, date: 130)], final: true, resultType: .slice),
+      makeGetUpdatesResult(seq: 7, date: 130, updates: [makeChatInfoUpdate(seq: 7, date: 130)], final: true, resultType: .slice),
+    ])
+    var config = SyncConfig.default
+    config.prefetchesCatchUpPages = true
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 7)])
+    await apply.waitUntilApplyGated()
+    await storage.setBucketState(for: key, state: .init(date: 120, seq: 6))
+    await apply.releaseApply()
+    #expect(await waitForCondition(timeout: .seconds(6)) { await storage.getBucketState(for: key).seq == 7 })
+    #expect(await client.getUpdatesStartSequences() == [5, 6, 6])
+    await sync.prepareForTermination()
+  }
+
+  @Test("a prefetch that times out while its page applies is requested again directly")
+  func prefetchFailureFallsBackToDirectRequest() async {
+    let storage = InMemorySyncStorage()
+    let key = BucketKey.chat(peer: makeChatPeer(chatId: 1))
+    await storage.setBucketState(for: key, state: .init(date: 100, seq: 5))
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(responses: [
+      makeGetUpdatesResult(seq: 6, date: 120, updates: [makeChatInfoUpdate(seq: 6, date: 120)], final: false, resultType: .slice),
+      makeGetUpdatesResult(seq: 7, date: 130, updates: [makeChatInfoUpdate(seq: 7, date: 130)], final: true, resultType: .slice),
+    ])
+    // The second getUpdates (the prefetch from 6) times out.
+    await client.setError(afterGetUpdatesCalls: 1, error: .timeout)
+    var config = SyncConfig.default
+    config.prefetchesCatchUpPages = true
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    await sync.process(updates: [makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 7)])
+    #expect(await waitForCondition(timeout: .seconds(4)) { await storage.getBucketState(for: key).seq == 7 })
+    #expect(await client.getUpdatesStartSequences() == [5, 6, 6])
+    // Requested again within the same pass, not after a failed fetch and its retry backoff.
+    #expect(await sync.getStats().bucketFetchFailures == 0)
+    #expect(await sync.getStats().bucketApplyFailures == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("prefetches share one fetch slot fairly: two buckets catching up both finish")
+  func prefetchesKeepFetchSlotsBalanced() async {
+    let storage = InMemorySyncStorage()
+    let keys = [Int64(1), 2].map { BucketKey.chat(peer: makeChatPeer(chatId: $0)) }
+    for key in keys {
+      await storage.setBucketState(for: key, state: .init(date: 100, seq: 0))
+    }
+    let target: Int64 = 6
+    let client = FakeProtocolClient(responses: [], responseProvider: { method, input in
+      guard method == .getUpdates, case let .getUpdates(payload)? = input else { return nil }
+      let chatId = payload.bucket.chat.peerID.chat.chatID
+      let seq = payload.startSeq + 1
+      return makeGetUpdatesResult(
+        seq: seq, date: 100 + seq,
+        updates: [makeChatInfoUpdate(seq: seq, date: 100 + seq, chatId: chatId)],
+        final: seq >= target, resultType: .slice
+      )
+    })
+    var config = SyncConfig(lastSyncSafetyGapSeconds: 15, maxConcurrentBucketFetches: 1)
+    config.prefetchesCatchUpPages = true
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: config)
+    await sync.process(updates: [
+      makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: Int32(target)),
+      makeChatHasNewUpdatesSignal(chatId: 2, updateSeq: Int32(target)),
+    ])
+    for key in keys {
+      #expect(await waitForCondition(timeout: .seconds(6)) { await storage.getBucketState(for: key).seq == target })
+    }
+    #expect(await waitForCondition(timeout: .seconds(2)) { await sync.getStats().activeBucketFetches == 0 })
+    // One request per page and bucket: no page was fetched twice.
+    #expect(await client.getUpdatesStartSequences().count == 2 * Int(target))
+    await sync.prepareForTermination()
+  }
+
   @Test("queued child captures removal evidence only after acquiring a fetch slot")
   func queuedChildCapturesCurrentRemovalEvidence() async {
     let storage = InMemorySyncStorage()
