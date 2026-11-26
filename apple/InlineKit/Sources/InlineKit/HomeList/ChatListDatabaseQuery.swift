@@ -170,11 +170,13 @@ public enum ChatListDatabaseQuery {
     let profileCacheDirectory = hasLocalAvatarPath
       ? FileHelpers.getLocalCacheDirectory(for: .photos)
       : nil
+    let titleContext = includeTimestampText
+      ? ChatListDateFormatter.RowTitleContext(now: now, calendar: calendar)
+      : nil
     return rows.compactMap { rawRow in
       makeSnapshot(
         from: ChatListDatabaseRow(rawRow),
-        now: now,
-        calendar: calendar,
+        titleContext: titleContext,
         includePreviewSenderIdentity: includePreviewSenderIdentity,
         includeTimestampText: includeTimestampText,
         profileCacheDirectory: profileCacheDirectory
@@ -184,8 +186,7 @@ public enum ChatListDatabaseQuery {
 
   private static func makeSnapshot(
     from row: ChatListDatabaseRow,
-    now: Date,
-    calendar: Calendar,
+    titleContext: ChatListDateFormatter.RowTitleContext?,
     includePreviewSenderIdentity: Bool,
     includeTimestampText: Bool,
     profileCacheDirectory: URL?
@@ -292,9 +293,7 @@ public enum ChatListDatabaseQuery {
         : nil,
       previewText: draftPreview ?? lastMessagePreview?.text,
       translatedPreviewText: draftPreview == nil ? translatedPreview : nil,
-      timestampText: includeTimestampText
-        ? ChatListDateFormatter.rowTitle(for: lastUpdatedAt, now: now, calendar: calendar)
-        : nil,
+      timestampText: titleContext.flatMap { ChatListDateFormatter.rowTitle(for: lastUpdatedAt, context: $0) },
       identity: identity,
       unreadCount: max(row[.unreadCount] ?? 0, 0),
       unreadMark: row[.unreadMark] ?? false,
