@@ -483,7 +483,7 @@ public class MessagesProgressiveViewModel {
       return nil
     }
 
-    return try FullMessage.queryRequest()
+    return try FullMessageQuery()
       .filter(Column("chatId") == parentChatId)
       .filter(Column("messageId") == parentMessageId)
       .fetchOne(db)
@@ -827,7 +827,7 @@ public class MessagesProgressiveViewModel {
           let parentID = chat.parentChatId,
           let messageID = chat.parentMessageId, messageID > 0 else { return nil }
     let parent = try Chat.fetchOne(db, id: parentID)
-    let anchor = try FullMessage.queryRequest()
+    let anchor = try FullMessageQuery()
       .filter(Column("chatId") == parentID && Column("messageId") == messageID)
       .fetchOne(db)
     return ThreadAnchorSnapshot(
@@ -1813,7 +1813,7 @@ public class MessagesProgressiveViewModel {
     )
   }
 
-  private func buildBaseOrderedQuery() -> QueryInterfaceRequest<FullMessage> {
+  private func buildBaseOrderedQuery() -> FullMessageQuery {
     Self.latestWindowQuery(peer: peer, chatId: chatId, currentUserId: currentUserId)
   }
 
@@ -1822,13 +1822,13 @@ public class MessagesProgressiveViewModel {
     peer: Peer,
     chatId: Int64?,
     currentUserId: Int64?
-  ) -> QueryInterfaceRequest<FullMessage> {
+  ) -> FullMessageQuery {
     baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
       .filter(Column("messageId") > 0)
       .order(Column("messageId").desc)
   }
 
-  private func buildQueryForLoad(loadMode: LoadMode, previousCount: Int) -> QueryInterfaceRequest<FullMessage> {
+  private func buildQueryForLoad(loadMode: LoadMode, previousCount: Int) -> FullMessageQuery {
     var query = buildBaseOrderedQuery()
 
     switch loadMode {
@@ -1950,7 +1950,7 @@ public class MessagesProgressiveViewModel {
     chatId: Int64?,
     request: AdditionalLoadRequest,
     currentUserId: Int64?
-  ) -> QueryInterfaceRequest<FullMessage> {
+  ) -> FullMessageQuery {
     let query = baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
 
     switch request.direction {
@@ -2183,7 +2183,7 @@ public class MessagesProgressiveViewModel {
     }
   }
 
-  private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
+  private func baseQuery() -> FullMessageQuery {
     Self.baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
   }
 
@@ -2191,20 +2191,21 @@ public class MessagesProgressiveViewModel {
     for peer: Peer,
     chatId: Int64? = nil,
     currentUserId: Int64? = Auth.shared.getCurrentUserId()
-  ) -> QueryInterfaceRequest<FullMessage> {
-    var query = FullMessage.queryRequest(currentUserId: currentUserId)
+  ) -> FullMessageQuery {
+    var query = FullMessageQuery(currentUserId: currentUserId)
 
     // Peer columns are indexed by date, so filtering on them alone makes SQLite sort or scan
     // to order by message id. The chat's (chatId, messageId) index serves both directly. With the chat
-    // known, the peer predicate stays as a check but is kept out of index selection (`+ 0`): with the
-    // planner stability guarantee, an analyzed database otherwise picks the peer/date index and sorts.
+    // known, the peer predicate stays as a check but is kept out of index selection (unary `+`):
+    // otherwise SQLite picks the peer/date index and sorts, on the bare message query and, with the
+    // planner stability guarantee, on an analyzed database.
     if let chatId = chatId ?? peer.asThreadId() {
       query = query.filter(Column("chatId") == chatId)
       switch peer {
         case let .thread(id):
-          query = query.filter(Column("peerThreadId") + 0 == id)
+          query = query.filter(sql: #"+"peerThreadId" = ?"#, arguments: [id])
         case let .user(id):
-          query = query.filter(Column("peerUserId") + 0 == id)
+          query = query.filter(sql: #"+"peerUserId" = ?"#, arguments: [id])
       }
     } else {
       switch peer {
@@ -2437,7 +2438,7 @@ public final class MessagesPublisher {
 
     do {
       let fullMessage = try await db.reader.read { db in
-        try FullMessage.queryRequest()
+        try FullMessageQuery()
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
           .fetchOne(db)
@@ -2495,7 +2496,7 @@ public final class MessagesPublisher {
     }
 
     let fullMessage = try? await db.reader.read { db in
-      let query = FullMessage.queryRequest()
+      let query = FullMessageQuery()
       let base =
         if let messageGlobalId = message.globalId {
           query
@@ -2684,7 +2685,7 @@ public final class MessagesPublisher {
     }
 
     let fullMessage = try? db.reader.read { db in
-      let query = FullMessage.queryRequest()
+      let query = FullMessageQuery()
       let base =
         if let messageGlobalId = message.globalId {
           query
@@ -2740,7 +2741,7 @@ public final class MessagesPublisher {
     }
 
     let fullMessage = try? db.reader.read { db in
-      let query = FullMessage.queryRequest()
+      let query = FullMessageQuery()
       return try query
         .filter(Column("messageId") == messageId)
         .filter(Column("chatId") == chatId)

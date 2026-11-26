@@ -57,7 +57,7 @@ public enum PendingSendRecovery {
     do {
       pending = try await database.dbWriter.read { db in
         try auth.validateAccountMutation(account)
-        return try FullMessage.queryRequest(currentUserId: account.userID)
+        return try FullMessageQuery(currentUserId: account.userID)
           .filter(Column("out") == true)
           .filter(Column("fromId") == account.userID)
           .filter(Column("status") == MessageSendingStatus.sending.rawValue)

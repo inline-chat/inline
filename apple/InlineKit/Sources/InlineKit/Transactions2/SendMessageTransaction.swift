@@ -219,7 +219,7 @@ public struct SendMessageTransaction: Transaction2 {
         )
 
         // Fetch full message for update
-        return try FullMessage.queryRequest()
+        return try FullMessageQuery()
           .filter(Column("messageId") == message.messageId)
           .filter(Column("chatId") == message.chatId)
           .fetchOne(db)

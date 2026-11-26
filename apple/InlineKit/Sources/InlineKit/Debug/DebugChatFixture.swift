@@ -395,7 +395,7 @@ public final class DebugChatFixture {
 
   private func fetch(globalId: Int64) throws -> FullMessage? {
     try database.reader.read { db in
-      try FullMessage.queryRequest(currentUserId: currentUserId).filter(id: globalId).fetchOne(db)
+      try FullMessageQuery(currentUserId: currentUserId).filter(id: globalId).fetchOne(db)
     }
   }
 
@@ -430,7 +430,7 @@ public final class DebugChatFixture {
   public func editFromComposer(messageId: Int64, text: String) throws {
     let chatId = chatId
     guard let message = try database.reader.read({ db in
-      try FullMessage.queryRequest(currentUserId: currentUserId)
+      try FullMessageQuery(currentUserId: currentUserId)
         .filter(Column("chatId") == chatId && Column("messageId") == messageId).fetchOne(db)
     }) else { return }
     try setText(text, of: message)
@@ -469,7 +469,7 @@ public final class DebugChatFixture {
 
   private func newest() throws -> FullMessage? {
     try database.reader.read { db in
-      try FullMessage.queryRequest(currentUserId: currentUserId)
+      try FullMessageQuery(currentUserId: currentUserId)
         .filter(Column("chatId") == chatId).order(Column("date").desc).fetchOne(db)
     }
   }
@@ -536,7 +536,7 @@ public final class DebugChatFixture {
     let chatId = chatId
     let currentUserId = currentUserId
     guard let message = try database.reader.read({ db in
-      try FullMessage.queryRequest(currentUserId: currentUserId)
+      try FullMessageQuery(currentUserId: currentUserId)
         .filter(Column("chatId") == chatId && Column("messageId") == messageId).fetchOne(db)
     }) else { return }
     publisher.publisher.send(.update(.init(message: message, animated: true, peer: peer)))

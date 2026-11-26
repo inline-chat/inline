@@ -268,7 +268,7 @@ public enum LocalMessageSearch {
     fullMessages.reserveCapacity(matches.count)
 
     for match in matches {
-      guard let message = try FullMessage.queryRequest()
+      guard let message = try FullMessageQuery()
         .filter(Message.Columns.chatId == match.chatId)
         .filter(Message.Columns.messageId == match.messageId)
         .fetchOne(db)
