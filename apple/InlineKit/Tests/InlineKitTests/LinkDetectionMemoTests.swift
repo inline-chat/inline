@@ -65,6 +65,26 @@ struct LinkDetectionMemoTests {
     }
   }
 
+  @Test("prewarm skips texts too long for the memo and keeps the room for others")
+  func prewarmSkipsLongTexts() {
+    let memo = LinkDetectionMemo(capacity: 8, maxTextLength: 16)
+    for index in 0 ..< 7 {
+      memo.store("earlier \(index)", false)
+    }
+    let long = (0 ..< 4).map { index in String(repeating: "x", count: 17) + "\(index)" }
+    let batch = long.map { text in InlineProtocol.Message.with { $0.message = text } }
+
+    Message.prepareLinkDetection(batch, memo: memo)
+
+    // Nothing was reserved for texts the memo won't keep, so the earlier answers are still there.
+    for index in 0 ..< 7 {
+      #expect(memo.cached("earlier \(index)") == false)
+    }
+    for text in long {
+      #expect(memo.cached(text) == nil)
+    }
+  }
+
   @Test("the memo stays bounded in entries and text length")
   func memoIsBounded() {
     let memo = LinkDetectionMemo(capacity: 4, maxTextLength: 16)
