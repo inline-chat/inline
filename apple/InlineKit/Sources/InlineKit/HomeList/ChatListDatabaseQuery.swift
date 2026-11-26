@@ -13,8 +13,54 @@ public enum ChatListDatabaseQuery {
     includeOpenedDate: Bool = true,
     includeTimestampText: Bool = true,
     now: Date = Date(),
-    calendar: Calendar = .autoupdatingCurrent
+    calendar: Calendar = .autoupdatingCurrent,
+    onlyDialogIDs: [Int64]? = nil
   ) throws -> [ChatListItemSnapshot] {
+    let request = makeRequest(
+      spaceID: spaceID,
+      includeSpaceChatsInHome: includeSpaceChatsInHome,
+      translationLanguage: translationLanguage,
+      includeOpenedDate: includeOpenedDate,
+      onlyDialogIDs: onlyDialogIDs
+    )
+
+    let rows = try request.fetchAll(db)
+    guard rows.isEmpty == false else { return [] }
+    #if DEBUG
+    ChatListDatabaseRow.validateLayout(of: rows[0])
+    #endif
+    let hasLocalAvatarPath = rows.contains { rawRow in
+      let row = ChatListDatabaseRow(rawRow)
+      let peerPath: String? = row[.profileLocalPath]
+      let senderPath: String? = row[.senderProfileLocalPath]
+      return peerPath?.isEmpty == false
+        || (includePreviewSenderIdentity && senderPath?.isEmpty == false)
+    }
+    let profileCacheDirectory = hasLocalAvatarPath
+      ? FileHelpers.getLocalCacheDirectory(for: .photos)
+      : nil
+    let titleContext = includeTimestampText
+      ? ChatListDateFormatter.RowTitleContext(now: now, calendar: calendar)
+      : nil
+    return rows.compactMap { rawRow in
+      makeSnapshot(
+        from: ChatListDatabaseRow(rawRow),
+        titleContext: titleContext,
+        includePreviewSenderIdentity: includePreviewSenderIdentity,
+        includeTimestampText: includeTimestampText,
+        profileCacheDirectory: profileCacheDirectory
+      )
+    }
+  }
+
+  /// The chat list SQL. `onlyDialogIDs` limits it to those rows, for incremental refreshes.
+  static func makeRequest(
+    spaceID: Int64?,
+    includeSpaceChatsInHome: Bool,
+    translationLanguage: String,
+    includeOpenedDate: Bool,
+    onlyDialogIDs: [Int64]?
+  ) -> SQLRequest<Row> {
     // Not reading `openedDate` keeps it out of the tracked region, so callers
     // that ignore it are not invalidated each time a chat is opened.
     let openedDateSQL = includeOpenedDate ? #""dialog"."openedDate""# : "NULL"
@@ -24,7 +70,10 @@ public enum ChatListDatabaseQuery {
     )
     var arguments = StatementArguments([translationLanguage])
     arguments += scope.arguments
-    let request = SQLRequest<Row>(
+    if let onlyDialogIDs {
+      arguments += [ "[" + onlyDialogIDs.map(String.init).joined(separator: ",") + "]" ]
+    }
+    return SQLRequest<Row>(
       sql: """
       SELECT
         "dialog"."id" AS "dialogID",
@@ -150,38 +199,29 @@ public enum ChatListDatabaseQuery {
         ON "anchorDocument"."documentId" = "anchorMessage"."documentId"
       WHERE \(Dialog.chatListVisibilitySQL)
         AND \(scope.sql)
+        \(onlyDialogIDs == nil ? "" : #"AND "dialog"."id" IN (SELECT value FROM json_each(?))"#)
       ORDER BY "dialog"."id"
       """,
-      arguments: arguments
+      arguments: arguments,
+      // A handful of SQL variants (scope, openedDate, incremental), each compiled once per connection.
+      cached: true
     )
+  }
 
-    let rows = try request.fetchAll(db)
-    guard rows.isEmpty == false else { return [] }
-    #if DEBUG
-    ChatListDatabaseRow.validateLayout(of: rows[0])
-    #endif
-    let hasLocalAvatarPath = rows.contains { rawRow in
-      let row = ChatListDatabaseRow(rawRow)
-      let peerPath: String? = row[.profileLocalPath]
-      let senderPath: String? = row[.senderProfileLocalPath]
-      return peerPath?.isEmpty == false
-        || (includePreviewSenderIdentity && senderPath?.isEmpty == false)
-    }
-    let profileCacheDirectory = hasLocalAvatarPath
-      ? FileHelpers.getLocalCacheDirectory(for: .photos)
-      : nil
-    let titleContext = includeTimestampText
-      ? ChatListDateFormatter.RowTitleContext(now: now, calendar: calendar)
-      : nil
-    return rows.compactMap { rawRow in
-      makeSnapshot(
-        from: ChatListDatabaseRow(rawRow),
-        titleContext: titleContext,
-        includePreviewSenderIdentity: includePreviewSenderIdentity,
-        includeTimestampText: includeTimestampText,
-        profileCacheDirectory: profileCacheDirectory
+  /// Every table and column any variant of the chat list SQL reads, for change routing.
+  static func trackedRegion(_ db: Database) throws -> DatabaseRegion {
+    var region = DatabaseRegion()
+    for spaceID in [nil, Int64(0)] as [Int64?] {
+      let request = makeRequest(
+        spaceID: spaceID,
+        includeSpaceChatsInHome: true,
+        translationLanguage: "en",
+        includeOpenedDate: true,
+        onlyDialogIDs: nil
       )
+      region.formUnion(try request.makePreparedRequest(db, forSingleResult: false).statement.databaseRegion)
     }
+    return region
   }
 
   private static func makeSnapshot(
