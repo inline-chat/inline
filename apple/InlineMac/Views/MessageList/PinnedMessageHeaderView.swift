@@ -354,7 +354,7 @@ final class PinnedMessageHeaderView: NSView {
 
     do {
       let message = try AppDatabase.shared.dbWriter.read { db in
-        try FullMessage.queryRequest()
+        try FullMessageQuery()
           .filter(
             Column("messageId") == messageId && Column("chatId") == chatId
           )
@@ -372,7 +372,7 @@ final class PinnedMessageHeaderView: NSView {
     AppDatabase.shared.warnIfInMemoryDatabaseForObservation("PinnedMessageHeaderView.pinnedMessageContent")
     messageObservation = ValueObservation
       .tracking { [chatId] db in
-        try FullMessage.queryRequest()
+        try FullMessageQuery()
           .filter(
             Column("messageId") == messageId && Column("chatId") == chatId
           )
@@ -538,7 +538,7 @@ final class PinnedMessageHeaderView: NSView {
   private func loadPinnedMessages(messageIds: [Int64]) -> [Int64: FullMessage] {
     do {
       let messages = try AppDatabase.shared.dbWriter.read { [chatId] db in
-        try FullMessage.queryRequest()
+        try FullMessageQuery()
           .filter(Column("chatId") == chatId && messageIds.contains(Column("messageId")))
           .fetchAll(db)
       }
