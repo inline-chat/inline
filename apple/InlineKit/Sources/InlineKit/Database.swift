@@ -1582,6 +1582,38 @@ public extension AppDatabase {
       try db.execute(sql: #"UPDATE "dialog" SET "serverReadInboxMaxId" = "readInboxMaxId""#)
     }
 
+    migrator.registerMigration("lookup indexes and fts text trigger") { db in
+      // Chat list: dialogs are joined by chat, so without this SQLite builds an automatic index on
+      // every chat list read. Message bundles look up reply threads by parent message. DM chats are
+      // looked up by peer, and space member lists by space.
+      try db.execute(sql: """
+      CREATE INDEX IF NOT EXISTS dialog_chatId_idx ON dialog(chatId);
+      CREATE INDEX IF NOT EXISTS chat_parent_idx ON chat(parentChatId, parentMessageId)
+        WHERE parentChatId IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS chat_peerUserId_idx ON chat(peerUserId) WHERE peerUserId IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS member_spaceId_idx ON member(spaceId);
+      """)
+      // Each of these has a partial twin over the same column (`... IS NOT NULL`) that serves every
+      // equality and IN lookup, foreign key checks included. Two b-trees per insert is one too many.
+      try db.execute(sql: """
+      DROP INDEX IF EXISTS attachment_messageId_idx;
+      DROP INDEX IF EXISTS file_profileForUserId_idx;
+      """)
+      // The FTS sync trigger re-indexed a message's text on every update. Same trigger body as GRDB's
+      // synchronized table, fired only by updates that set the indexed text or the rowid: targeted
+      // updates (status, revision, resource flags, history pages) no longer touch the index. Full-record
+      // saves set every column and still re-index, as before. Nothing writes the rowid under another
+      // name (`rowid`, `oid`), which would not fire it. Rebuilding `messageTextFts` with GRDB's
+      // `synchronize(withTable:)` would bring back its every-update trigger; recreate this one after.
+      try db.execute(sql: """
+      DROP TRIGGER IF EXISTS "__messageTextFts_au";
+      CREATE TRIGGER "__messageTextFts_au" AFTER UPDATE OF "text", "globalId" ON "message" BEGIN
+        INSERT INTO "messageTextFts"("messageTextFts", "rowid", "text") VALUES('delete', old."globalId", old."text");
+        INSERT INTO "messageTextFts"("rowid", "text") VALUES (new."globalId", new."text");
+      END;
+      """)
+    }
+
     return migrator
   }
 }
