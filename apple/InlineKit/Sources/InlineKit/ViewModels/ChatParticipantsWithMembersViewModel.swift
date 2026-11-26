@@ -14,7 +14,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     case spaceMembers(Int64)
   }
 
-  private struct ParticipantsSnapshot {
+  struct ParticipantsSnapshot: Equatable {
     var participants: [UserInfo]
     var groupParticipants: [UserGroup]
     var effectiveUserIds: Set<Int64>
@@ -42,23 +42,44 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     fetchParticipants()
   }
 
+  // Participants and members are read as user ids first, then the users by key. A join would
+  // track the whole user table, so a presence update from anyone would refetch the list.
   private static func fetchChatParticipants(_ db: Database, chatId: Int64) throws -> [UserInfo] {
-    try ChatParticipant
-      .including(
-        required: ChatParticipant.user
-          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-      )
-      .filter(Column("chatId") == chatId)
-      .asRequest(of: UserInfo.self)
-      .fetchAll(db)
+    let userIds = try Int64?.fetchAll(
+      db,
+      ChatParticipant
+        .filter(Column("chatId") == chatId)
+        .select(Column("userId"))
+        .order(Column("userId"))
+    )
+    return try userInfos(db, ids: userIds.compactMap(\.self))
   }
 
   private static func fetchSpaceMembers(_ db: Database, spaceId: Int64) throws -> [UserInfo] {
-    try Member
-      .fullMemberQuery()
-      .filter(Column("spaceId") == spaceId)
+    let userIds = try Int64?.fetchAll(
+      db,
+      Member
+        .filter(Column("spaceId") == spaceId)
+        .select(Column("userId"))
+        .order(Column("id"))
+    )
+    return try userInfos(db, ids: userIds.compactMap(\.self))
+  }
+
+  /// The users for `ids` with their profile photos, in the order of `ids`. Ids with no user row
+  /// are skipped, as the join they replace did.
+  private static func userInfos(_ db: Database, ids: [Int64]) throws -> [UserInfo] {
+    guard !ids.isEmpty else { return [] }
+    var byId: [Int64: UserInfo] = [:]
+    for info in try User
+      .filter(keys: ids)
+      .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      .asRequest(of: UserInfo.self)
       .fetchAll(db)
-      .map(\.userInfo)
+    {
+      byId[info.id] = info
+    }
+    return ids.compactMap { byId[$0] }
   }
 
   private static func fetchChatParticipantGroups(_ db: Database, chatId: Int64) throws -> [UserGroup] {
@@ -191,6 +212,43 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     return chain
   }
 
+  /// The toolbar's participants of `chatId`, read for its observation.
+  static func participantsSnapshot(_ db: Database, chatId: Int64) throws -> ParticipantsSnapshot {
+    let requestedChat = try Chat.fetchOne(db, id: chatId)
+    let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0) }
+    let sourceChatId = chat?.id ?? chatId
+
+    func snapshot(participants: [UserInfo], groupParticipants: [UserGroup] = []) -> ParticipantsSnapshot {
+      let groupMemberIds = (try? Self.fetchGroupMemberIds(db, groupIds: groupParticipants.map(\.id))) ?? []
+      return ParticipantsSnapshot(
+        participants: participants,
+        groupParticipants: groupParticipants,
+        effectiveUserIds: Set(participants.map(\.id)).union(groupMemberIds)
+      )
+    }
+
+    guard let chat else { return snapshot(participants: []) }
+
+    // DMs list only the peer, not chat_participants.
+    if chat.type == .privateChat, let peerUserId = chat.peerUserId {
+      let peer = try User
+        .filter(Column("id") == peerUserId)
+        .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+        .asRequest(of: UserInfo.self)
+        .fetchOne(db)
+      return snapshot(participants: peer.map { [$0] } ?? [])
+    }
+
+    if let spaceId = chat.spaceId, chat.isPublic == true {
+      return snapshot(participants: try Self.fetchSpaceMembers(db, spaceId: spaceId))
+    }
+
+    return snapshot(
+      participants: try Self.fetchChatParticipants(db, chatId: sourceChatId),
+      groupParticipants: chat.spaceId == nil ? [] : try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
+    )
+  }
+
   private func fetchParticipants() {
     let log = log
 
@@ -201,40 +259,11 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
     participantsCancellable = ValueObservation
       .tracking { db in
-        let requestedChat = try Chat.fetchOne(db, id: chatId)
-        let chat = try requestedChat.flatMap { try Self.participantsSourceChat(db, for: $0) }
-        let sourceChatId = chat?.id ?? chatId
-
-        func snapshot(participants: [UserInfo], groupParticipants: [UserGroup] = []) -> ParticipantsSnapshot {
-          let groupMemberIds = (try? Self.fetchGroupMemberIds(db, groupIds: groupParticipants.map(\.id))) ?? []
-          return ParticipantsSnapshot(
-            participants: participants,
-            groupParticipants: groupParticipants,
-            effectiveUserIds: Set(participants.map(\.id)).union(groupMemberIds)
-          )
-        }
-
-        guard let chat else { return snapshot(participants: []) }
-
-        // DMs list only the peer, not chat_participants.
-        if chat.type == .privateChat, let peerUserId = chat.peerUserId {
-          let peer = try User
-            .filter(Column("id") == peerUserId)
-            .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-            .asRequest(of: UserInfo.self)
-            .fetchOne(db)
-          return snapshot(participants: peer.map { [$0] } ?? [])
-        }
-
-        if let spaceId = chat.spaceId, chat.isPublic == true {
-          return snapshot(participants: try Self.fetchSpaceMembers(db, spaceId: spaceId))
-        }
-
-        return snapshot(
-          participants: try Self.fetchChatParticipants(db, chatId: sourceChatId),
-          groupParticipants: chat.spaceId == nil ? [] : try Self.fetchChatParticipantGroups(db, chatId: sourceChatId)
-        )
+        try Self.participantsSnapshot(db, chatId: chatId)
       }
+      // Unchanged values (a write to a tracked table that left this list as it was) stop here, off
+      // the main thread.
+      .removeDuplicates()
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(
         receiveCompletion: { [weak self] completion in
@@ -243,10 +272,18 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           }
         },
         receiveValue: { [weak self] snapshot in
-          self?.log.trace("Updated participants: \(snapshot.participants.count) users")
-          self?.participants = snapshot.participants
-          self?.groupParticipants = snapshot.groupParticipants
-          self?.effectiveUserIds = snapshot.effectiveUserIds
+          guard let self else { return }
+          log.trace("Updated participants: \(snapshot.participants.count) users")
+          // Each assignment notifies the toolbar, so assign only what changed.
+          if participants != snapshot.participants {
+            participants = snapshot.participants
+          }
+          if groupParticipants != snapshot.groupParticipants {
+            groupParticipants = snapshot.groupParticipants
+          }
+          if effectiveUserIds != snapshot.effectiveUserIds {
+            effectiveUserIds = snapshot.effectiveUserIds
+          }
         }
       )
   }

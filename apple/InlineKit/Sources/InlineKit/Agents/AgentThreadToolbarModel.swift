@@ -13,7 +13,7 @@ public struct AgentThreadToolbarPresentation: Equatable {
 /// toolbar view itself performs no database or network work.
 @MainActor
 public final class AgentThreadToolbarModel: ObservableObject {
-  private struct Snapshot: Sendable {
+  struct Snapshot: Sendable {
     let chat: Chat?
     let bot: User?
   }
@@ -204,13 +204,17 @@ public final class AgentThreadToolbarModel: ObservableObject {
     }
   }
 
-  private func apply(_ snapshot: Snapshot) {
+  func apply(_ snapshot: Snapshot) {
     guard let nextContext = snapshot.chat?.agentThreadContext else {
       resetBoundState()
       return
     }
 
-    context = nextContext
+    // Every message in the thread rewrites its chat row and delivers here; each assignment to a
+    // published property redraws the toolbar and Compose, so assign only what changed.
+    if context != nextContext {
+      context = nextContext
+    }
     let identity = Identity(
       botUserID: nextContext.botUserID,
       agentID: nextContext.hasAgentID ? nextContext.agentID : nil
@@ -224,13 +228,16 @@ public final class AgentThreadToolbarModel: ObservableObject {
       presentation = nil
     }
     if snapshot.bot == nil || loadedIdentity != identity || presentation == nil {
-      presentation = AgentThreadToolbarPresentation(
+      let fallback = AgentThreadToolbarPresentation(
         userInfo: fallbackInfo,
         name: snapshot.bot != nil && identity.agentID == nil
           ? fallbackInfo.user.displayName
           : "Unavailable",
         botName: snapshot.bot == nil ? "Unavailable" : fallbackInfo.user.displayName
       )
+      if presentation != fallback {
+        presentation = fallback
+      }
     }
 
     guard loadedIdentity != identity else { return }
@@ -264,6 +271,8 @@ public final class AgentThreadToolbarModel: ObservableObject {
   }
 
   private func load(identity: Identity, generation: UInt, fallback: UserInfo?) async {
+    // A load cancelled or superseded before it starts sends no requests.
+    guard isCurrent(identity, generation: generation) else { return }
     if let cached = await AgentConfigurationCatalogStore.shared.cached(botUserID: identity.botUserID),
        isCurrent(identity, generation: generation)
     {
