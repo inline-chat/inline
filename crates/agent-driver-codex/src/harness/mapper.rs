@@ -130,6 +130,10 @@ pub(crate) struct CodexMapper {
     limit_resets_at: Option<i64>,
     /// The app-server connection ended; no turn can finish natively anymore.
     lost: bool,
+    /// Each MCP server's latest startup status, by name.
+    mcp_startup: HashMap<String, String>,
+    /// The MCP startup count heads the progress.
+    mcp_status_shown: bool,
 }
 
 impl CodexMapper {
@@ -157,6 +161,8 @@ impl CodexMapper {
             child_turns: HashMap::new(),
             limit_resets_at: None,
             lost: false,
+            mcp_startup: HashMap::new(),
+            mcp_status_shown: false,
         }
     }
 
@@ -603,6 +609,31 @@ impl CodexMapper {
                     )
                     .with_parent(parent),
                 ));
+            }
+            // Codex waits for every MCP server before a thread's first
+            // request: the count heads the progress while they start, and
+            // clears once each is ready or failed.
+            "mcpServer/startupStatus/updated" if parent.is_none() => {
+                if let Some(name) = string(params.get("name")) {
+                    let status = string(params.get("status")).unwrap_or_default();
+                    self.mcp_startup.insert(name, status);
+                }
+                let total = self.mcp_startup.len();
+                let starting = self
+                    .mcp_startup
+                    .values()
+                    .filter(|status| status.as_str() == "starting")
+                    .count();
+                if starting > 0 || self.mcp_status_shown {
+                    self.mcp_status_shown = starting > 0;
+                    let mut event = notice(NoticeLevel::Info, LIVE_STATUS_NOTICE, params);
+                    if let Event::Notice(notice) = &mut event {
+                        notice.message = (starting > 0).then(|| {
+                            format!("Starting MCP servers ({} of {total})", total - starting)
+                        });
+                    }
+                    events.push(event);
+                }
             }
             // A retried error heads the progress ("Reconnecting… 2/5")
             // instead of a silent "Working"; a final one is a callout.
@@ -3221,6 +3252,53 @@ mod tests {
             [Event::Notice(Notice { code, message: Some(message), .. })]
                 if code == LIVE_STATUS_NOTICE && message == "Reconnecting 1/5"
         ));
+    }
+
+    #[test]
+    fn mcp_startup_heads_the_progress_until_every_server_settles() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let mut status = |name: &str, status: &str| {
+            let mapped = mapper.notification(
+                "mcpServer/startupStatus/updated",
+                &json!({"threadId": "thread-1", "name": name, "status": status}),
+            );
+            match mapped.events.as_slice() {
+                [] => None,
+                [Event::Notice(Notice { code, message, .. })] if code == LIVE_STATUS_NOTICE => {
+                    Some(message.clone())
+                }
+                other => panic!("{other:?}"),
+            }
+        };
+        // Already ready when first seen: nothing to show.
+        assert_eq!(status("poo", "ready"), None);
+        assert_eq!(
+            status("fly", "starting"),
+            Some(Some("Starting MCP servers (1 of 2)".to_owned()))
+        );
+        assert_eq!(
+            status("sentry", "starting"),
+            Some(Some("Starting MCP servers (1 of 3)".to_owned()))
+        );
+        // A failure settles a server too.
+        assert_eq!(
+            status("fly", "failed"),
+            Some(Some("Starting MCP servers (2 of 3)".to_owned()))
+        );
+        // The last one clears the status, once.
+        assert_eq!(status("sentry", "ready"), Some(None));
+        assert_eq!(status("sentry", "ready"), None);
+        // Codex tries a failed server again: the count comes back.
+        assert_eq!(
+            status("fly", "starting"),
+            Some(Some("Starting MCP servers (2 of 3)".to_owned()))
+        );
+        // A sub-agent's own thread never heads the main progress.
+        let mapped = mapper.notification(
+            "mcpServer/startupStatus/updated",
+            &json!({"threadId": "thread-2", "name": "x", "status": "starting"}),
+        );
+        assert!(mapped.events.is_empty(), "{:?}", mapped.events);
     }
 
     #[test]
