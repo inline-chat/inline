@@ -3,6 +3,7 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
+import os
 
 public struct ApiMessage: Codable, Hashable, Sendable {
   public var id: Int64
@@ -505,7 +506,11 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
-  static func detectHasLink(text: String?, entities: MessageEntities?) -> Bool {
+  static func detectHasLink(
+    text: String?,
+    entities: MessageEntities?,
+    memo: LinkDetectionMemo = .shared
+  ) -> Bool {
     if let entities,
        entities.entities.contains(where: { $0.type == .url || $0.type == .textURL })
     {
@@ -513,10 +518,42 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
 
     guard let text, !text.isEmpty else { return false }
-    return textContainsLink(text)
+    return textContainsLink(text, memo: memo)
   }
 
-  private static func textContainsLink(_ text: String) -> Bool {
+  /// Runs link detection for messages about to be saved, so the save inside the write transaction finds
+  /// the answer in `LinkDetectionMemo` instead of running NSDataDetector while holding the writer. Only
+  /// texts `init(from:)` will detect, and no more than the memo holds.
+  static func prepareLinkDetection(
+    _ messages: some Sequence<InlineProtocol.Message>,
+    memo: LinkDetectionMemo = .shared
+  ) {
+    let texts = Array(messages.lazy.compactMap(textNeedingLinkDetection).prefix(memo.capacity))
+    guard !texts.isEmpty else { return }
+    memo.reserve(texts.count)
+    for text in texts {
+      _ = textContainsLink(text, memo: memo)
+    }
+  }
+
+  /// The text `init(from:)` runs link detection on: none when the server marked a link or an entity is one.
+  private static func textNeedingLinkDetection(_ message: InlineProtocol.Message) -> String? {
+    guard message.hasMessage, !message.message.isEmpty else { return nil }
+    if message.hasHasLink_p, message.hasLink_p { return nil }
+    if message.hasEntities, message.entities.entities.contains(where: { $0.type == .url || $0.type == .textURL }) {
+      return nil
+    }
+    return message.message
+  }
+
+  private static func textContainsLink(_ text: String, memo: LinkDetectionMemo = .shared) -> Bool {
+    if let known = memo.cached(text) { return known }
+    let hasLink = detectLink(text)
+    memo.store(text, hasLink)
+    return hasLink
+  }
+
+  private static func detectLink(_ text: String) -> Bool {
     guard let detector = linkDetector else { return false }
     let range = NSRange(text.startIndex..., in: text)
     var hasLink = false
@@ -1211,13 +1248,16 @@ public extension Message {
     _ db: Database,
     onConflict: Database.ConflictResolution = .abort,
     publishChanges: Bool = false,
-    preserveExistingBlockContentWhenMissing: Bool = true
+    preserveExistingBlockContentWhenMissing: Bool = true,
+    knownNew: Bool = false
   ) throws -> Message {
     var isExisting = false
 
     // Check if message exists
-    if globalId == nil {
-      if let existing = try? Message.fetchOne(db, key: ["messageId": messageId, "chatId": chatId]) {
+    if knownNew {
+      // The caller read the key in this transaction and found no row.
+    } else if globalId == nil {
+      if let existing = try? Message.fetchOne(db, messageId: messageId, chatId: chatId) {
         globalId = existing.globalId
 
         fileId = fileId ?? existing.fileId
@@ -1338,6 +1378,17 @@ enum ProtocolMessageSaveDisposition: Equatable, Sendable {
   }
 }
 
+extension Message {
+  /// Keyed lookup through a cached statement. `fetchOne(db, key:)` compiles its SQL on every call, and
+  /// update apply runs it for every incoming message.
+  static func fetchOne(_ db: Database, messageId: Int64, chatId: Int64) throws -> Message? {
+    try Message.fetchOne(
+      db.cachedStatement(sql: "SELECT * FROM message WHERE messageId = ? AND chatId = ?"),
+      arguments: [messageId, chatId]
+    )
+  }
+}
+
 struct ProtocolMessageSaveResult: Equatable, Sendable {
   let message: Message
   let disposition: ProtocolMessageSaveDisposition
@@ -1370,10 +1421,11 @@ public extension Message {
   ) throws -> ProtocolMessageSaveResult {
     let id = protocolMessage.id
     let chatId = protocolMessage.chatID
-    let existing = try Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
+    let existing = try Message.fetchOne(db, messageId: id, chatId: chatId)
     let insertsWithinKnownSpan: Bool = if existing == nil, id > 0 {
       try (Int64.fetchOne(
-        db, sql: "SELECT MAX(messageId) FROM message WHERE chatId = ? AND messageId > 0", arguments: [chatId]
+        db.cachedStatement(sql: "SELECT MAX(messageId) FROM message WHERE chatId = ? AND messageId > 0"),
+        arguments: [chatId]
       ) ?? 0) >= id
     } else {
       false
@@ -1542,7 +1594,8 @@ public extension Message {
 
       message.resourceFlags = MessageResourceFlags.classify(message).rawValue
 
-      message = try message.saveMessage(db, publishChanges: false) // publish is below
+      // `existing` was read in this transaction: there is no row to merge with.
+      message = try message.saveMessage(db, publishChanges: false, knownNew: true) // publish is below
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
@@ -1659,9 +1712,14 @@ public extension Message {
     }
   }
 
+  /// Existence checks run for every applied message: a cached statement, no record decode.
+  private static func rowExists(_ db: Database, sql: String, id: Int64) throws -> Bool {
+    try Bool.fetchOne(db.cachedStatement(sql: sql), arguments: [id]) ?? false
+  }
+
   private static func ensureUserExists(_ db: Database, userId: Int64) throws {
     guard userId > 0 else { return }
-    guard try User.fetchOne(db, id: userId) == nil else { return }
+    guard try !rowExists(db, sql: "SELECT EXISTS(SELECT 1 FROM user WHERE id = ?)", id: userId) else { return }
     try User(id: userId, email: nil, firstName: nil).insert(db)
   }
 
@@ -1673,7 +1731,7 @@ public extension Message {
   ) throws {
     guard chatId > 0 else { return }
     guard peerUserId > 0 else { return }
-    guard try Chat.fetchOne(db, id: chatId) == nil else { return }
+    guard try !rowExists(db, sql: "SELECT EXISTS(SELECT 1 FROM chat WHERE id = ?)", id: chatId) else { return }
     try Chat(
       id: chatId,
       date: date,
@@ -1690,7 +1748,7 @@ public extension Message {
     date: Date
   ) throws {
     guard chatId > 0 else { return }
-    guard try Chat.fetchOne(db, id: chatId) == nil else { return }
+    guard try !rowExists(db, sql: "SELECT EXISTS(SELECT 1 FROM chat WHERE id = ?)", id: chatId) else { return }
     try Chat(
       id: chatId,
       date: date,
@@ -2052,5 +2110,121 @@ public extension Message {
       if !message.isGridTranscript { return message }
     }
     return nil
+  }
+}
+
+// MARK: - Row coding
+
+// Hand-written row coding for the hottest record. The synthesized Codable path costs a keyed lookup,
+// `contains` and `decodeNil` per optional column plus a dynamic cast per value: ~45% of a 100-message
+// bundle page and of each applied insert. Same columns, NULL for nil, and the same conversions as GRDB's
+// Codable decoding of DatabaseValueConvertible values (a value that fails to convert throws).
+// `MessageRowCodingTests` pins this to `CodingKeys`.
+extension Message {
+  public init(row: Row) throws {
+    globalId = try row.decode(Int64?.self, forColumn: "globalId")
+    randomId = try row.decode(Int64?.self, forColumn: "randomId")
+    messageId = try row.decode(Int64.self, forColumn: "messageId")
+    date = try row.decode(Date.self, forColumn: "date")
+    text = try row.decode(String?.self, forColumn: "text")
+    peerUserId = try row.decode(Int64?.self, forColumn: "peerUserId")
+    peerThreadId = try row.decode(Int64?.self, forColumn: "peerThreadId")
+    chatId = try row.decode(Int64.self, forColumn: "chatId")
+    storedFromId = try row.decode(Int64?.self, forColumn: "fromId")
+    mentioned = try row.decode(Bool?.self, forColumn: "mentioned")
+    out = try row.decode(Bool?.self, forColumn: "out")
+    pinned = try row.decode(Bool?.self, forColumn: "pinned")
+    editDate = try row.decode(Date?.self, forColumn: "editDate")
+    rev = try row.decode(Int64.self, forColumn: "rev")
+    fileId = try row.decode(String?.self, forColumn: "fileId")
+    status = try row.decode(MessageSendingStatus?.self, forColumn: "status")
+    repliedToMessageId = try row.decode(Int64?.self, forColumn: "repliedToMessageId")
+    forwardFromPeerUserId = try row.decode(Int64?.self, forColumn: "forwardFromPeerUserId")
+    forwardFromPeerThreadId = try row.decode(Int64?.self, forColumn: "forwardFromPeerThreadId")
+    forwardFromMessageId = try row.decode(Int64?.self, forColumn: "forwardFromMessageId")
+    forwardFromUserId = try row.decode(Int64?.self, forColumn: "forwardFromUserId")
+    photoId = try row.decode(Int64?.self, forColumn: "photoId")
+    videoId = try row.decode(Int64?.self, forColumn: "videoId")
+    documentId = try row.decode(Int64?.self, forColumn: "documentId")
+    contentPayload = try row.decode(Client_MessageContentPayload?.self, forColumn: "contentPayload")
+    blockContentPayload = try row.decode(BlockContentPayload?.self, forColumn: "blockContentPayload")
+    transactionId = try row.decode(String?.self, forColumn: "transactionId")
+    isSticker = try row.decode(Bool?.self, forColumn: "isSticker")
+    hasLink = try row.decode(Bool?.self, forColumn: "hasLink")
+    entities = try row.decode(MessageEntities?.self, forColumn: "entities")
+    resourceFlags = try row.decode(Int64.self, forColumn: "resourceFlags")
+    groupedId = try row.decode(Int64?.self, forColumn: "groupedId")
+  }
+
+  public func encode(to container: inout PersistenceContainer) throws {
+    container["globalId"] = globalId
+    container["randomId"] = randomId
+    container["messageId"] = messageId
+    container["date"] = date
+    container["text"] = text
+    container["peerUserId"] = peerUserId
+    container["peerThreadId"] = peerThreadId
+    container["chatId"] = chatId
+    container["fromId"] = storedFromId
+    container["mentioned"] = mentioned
+    container["out"] = out
+    container["pinned"] = pinned
+    container["editDate"] = editDate
+    container["rev"] = rev
+    container["fileId"] = fileId
+    container["status"] = status
+    container["repliedToMessageId"] = repliedToMessageId
+    container["forwardFromPeerUserId"] = forwardFromPeerUserId
+    container["forwardFromPeerThreadId"] = forwardFromPeerThreadId
+    container["forwardFromMessageId"] = forwardFromMessageId
+    container["forwardFromUserId"] = forwardFromUserId
+    container["photoId"] = photoId
+    container["videoId"] = videoId
+    container["documentId"] = documentId
+    container["contentPayload"] = contentPayload
+    container["blockContentPayload"] = blockContentPayload
+    container["transactionId"] = transactionId
+    container["isSticker"] = isSticker
+    container["hasLink"] = hasLink
+    container["entities"] = entities
+    container["resourceFlags"] = resourceFlags
+    container["groupedId"] = groupedId
+  }
+}
+
+/// Link detection answers for recently seen texts. NSDataDetector is the costliest step of saving a
+/// message, and one save asks twice (building the record, then saving it). Batch applies also detect
+/// before taking the writer, so the lookups inside the transaction are hits. Bounded by entry count and
+/// text length; cleared when full.
+final class LinkDetectionMemo: Sendable {
+  static let shared = LinkDetectionMemo()
+
+  let capacity: Int
+  /// Longer texts are detected every time instead of being kept.
+  let maxTextLength: Int
+  private let memo = OSAllocatedUnfairLock(initialState: [String: Bool]())
+
+  init(capacity: Int = 512, maxTextLength: Int = 4096) {
+    self.capacity = capacity
+    self.maxTextLength = maxTextLength
+  }
+
+  func cached(_ text: String) -> Bool? {
+    memo.withLock { $0[text] }
+  }
+
+  func store(_ text: String, _ hasLink: Bool) {
+    guard text.utf16.count <= maxTextLength else { return }
+    memo.withLock { memo in
+      if memo.count >= capacity { memo.removeAll(keepingCapacity: true) }
+      memo[text] = hasLink
+    }
+  }
+
+  /// Makes room for `count` new entries now, so a batch prewarmed before a write isn't cleared halfway.
+  func reserve(_ count: Int) {
+    memo.withLock { memo in
+      if memo.count + count > capacity { memo.removeAll(keepingCapacity: true) }
+    }
   }
 }

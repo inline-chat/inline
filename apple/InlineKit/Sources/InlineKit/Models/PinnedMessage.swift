@@ -40,9 +40,10 @@ public struct PinnedMessage: Codable, FetchableRecord, PersistableRecord, TableR
 
 public extension PinnedMessage {
   static func isPinned(_ db: Database, chatId: Int64, messageId: Int64) throws -> Bool {
-    try filter(Columns.chatId == chatId)
-      .filter(Columns.messageId == messageId)
-      .fetchCount(db) > 0
+    try Bool.fetchOne(
+      db.cachedStatement(sql: "SELECT EXISTS(SELECT 1 FROM \(databaseTableName) WHERE chatId = ? AND messageId = ?)"),
+      arguments: [chatId, messageId]
+    ) ?? false
   }
 
   static func replaceAll(_ db: Database, chatId: Int64, messageIds: [Int64]) throws {
