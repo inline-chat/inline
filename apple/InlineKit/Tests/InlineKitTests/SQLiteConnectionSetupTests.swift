@@ -90,6 +90,32 @@ struct SQLiteConnectionSetupTests {
     #expect(SQLCipherRawKey.derivedKey(passphrase: "key", salt: Data(count: 3)) == nil)
   }
 
+  @Test(
+    "reading the salt keeps the locks the open pool holds on the file",
+    .enabled(if: FileManager.default.isExecutableFile(atPath: lockProbe))
+  )
+  func saltReadKeepsPoolLocks() throws {
+    let directory = try Self.makeDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("db.sqlite").path
+
+    // Creating the file reads the new salt with the pool open; the rekey reads it again inside the barrier.
+    let database = try AppDatabase(path: path, passphrase: "locks-\(UUID().uuidString)")
+    try Self.insertSpace(1, into: database)
+    // A WAL connection holds a shared lock on the database file while it is open, so another process
+    // can't lock it for writing.
+    #expect(Self.otherProcessCanLockForWriting(path) == false)
+    #expect(SQLCipherRawKey.salt(forDatabaseAt: path) != nil)
+    #expect(Self.otherProcessCanLockForWriting(path) == false)
+    try database.changePassphrase("locks-rekeyed-\(UUID().uuidString)")
+    #expect(Self.spaceCount(database.dbWriter) == 1)
+    #expect(Self.otherProcessCanLockForWriting(path) == false)
+
+    try database.closePersistentStorage()
+    // The probe itself can lock the file once no connection holds it.
+    #expect(Self.otherProcessCanLockForWriting(path) == true)
+  }
+
   @Test("connections keep readers, size their page cache and keep cached plans")
   func connectionOptions() throws {
     let directory = try Self.makeDirectory()
@@ -120,6 +146,35 @@ struct SQLiteConnectionSetupTests {
   }
 
   // MARK: - Helpers
+
+  static let lockProbe = "/usr/bin/python3"
+
+  /// Asks a separate process to take a write lock on SQLite's shared-lock range of the file without waiting.
+  /// POSIX locks only conflict across processes, so this is how another app process would see the file.
+  private static func otherProcessCanLockForWriting(_ path: String) -> Bool? {
+    let script = """
+    import fcntl, os, sys
+    fd = os.open(sys.argv[1], os.O_RDWR)
+    try:
+        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB, 510, 0x40000002, os.SEEK_SET)
+        print("locked")
+    except OSError:
+        print("busy")
+    """
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: lockProbe)
+    process.arguments = ["-c", script, path]
+    let output = Pipe()
+    process.standardOutput = output
+    do { try process.run() } catch { return nil }
+    process.waitUntilExit()
+    let text = String(bytes: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+    switch text?.trimmingCharacters(in: .whitespacesAndNewlines) {
+      case "locked": return true
+      case "busy": return false
+      default: return nil
+    }
+  }
 
   private static func makeDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sqlite-setup-\(UUID().uuidString)")
