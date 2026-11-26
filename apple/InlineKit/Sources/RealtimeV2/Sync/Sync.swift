@@ -14,15 +14,22 @@ public struct SyncConfig: Sendable {
   /// out-of-order updates before it asks the server (Telegram waits ~0.5s).
   /// Zero disables it; the app turns it on through `RealtimeConfigStore`.
   public var liveGapGraceMilliseconds: Int
+  /// Requests a bucket's next catch-up page while the current one applies. A page request depends only on
+  /// the previous page's end sequence, so this overlaps the round trip with the local apply. A prefetch
+  /// whose start no longer matches the committed cursor is discarded. The app turns it on through
+  /// `RealtimeConfigStore`.
+  public var prefetchesCatchUpPages: Bool
 
   public init(
     lastSyncSafetyGapSeconds: Int64,
     maxConcurrentBucketFetches: Int = 4,
-    liveGapGraceMilliseconds: Int = 0
+    liveGapGraceMilliseconds: Int = 0,
+    prefetchesCatchUpPages: Bool = false
   ) {
     self.lastSyncSafetyGapSeconds = lastSyncSafetyGapSeconds
     self.maxConcurrentBucketFetches = max(1, maxConcurrentBucketFetches)
     self.liveGapGraceMilliseconds = max(0, liveGapGraceMilliseconds)
+    self.prefetchesCatchUpPages = prefetchesCatchUpPages
   }
 
   public static let `default` = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -1922,7 +1929,8 @@ actor Sync {
       sync: self,
       fetchLimiter: bucketFetchLimiter,
       accountMutationToken: accountMutationToken,
-      liveGapGrace: .milliseconds(config.liveGapGraceMilliseconds)
+      liveGapGrace: .milliseconds(config.liveGapGraceMilliseconds),
+      prefetchesCatchUpPages: config.prefetchesCatchUpPages
     )
     buckets[key] = bucketActor
     // A queued finite target may have been satisfied by an earlier direct
@@ -3367,6 +3375,10 @@ actor BucketActor {
   /// doesn't fetch a page the socket was about to deliver.
   private static let liveGapGraceMaxSequences: Int64 = 3
   private let liveGapGrace: Duration
+  private let prefetchesCatchUpPages: Bool
+  /// The catch-up page request issued ahead of the cursor, if any. Invalidation cancels it, so a request
+  /// still waiting for a fetch slot is never sent for a bucket that was retired or reset.
+  private var inFlightPrefetch: Task<PrefetchOutcome, any Error>?
   private var liveGapGraceTask: Task<Void, Never>?
   private var liveGapGraceGeneration: UInt64 = 0
   private var reportedInvalidEnvelopeFingerprints: Set<String> = []
@@ -3404,9 +3416,11 @@ actor BucketActor {
     fetchLimiter: FetchLimiter,
     accountMutationToken: AuthAccountMutationToken?,
     liveGapGrace: Duration = .zero,
+    prefetchesCatchUpPages: Bool = false,
     sleepBeforeRetry: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
   ) {
     self.liveGapGrace = liveGapGrace
+    self.prefetchesCatchUpPages = prefetchesCatchUpPages
     self.key = key
     self.seq = seq
     self.date = date
@@ -4091,6 +4105,55 @@ actor BucketActor {
     }
   }
 
+  private enum PrefetchOutcome: Sendable {
+    /// The limiter refused the slot (cancellation or shutdown); no request was sent.
+    case refused
+    case response(InlineProtocol.RpcResult.OneOf_Result?)
+  }
+
+  private struct PrefetchedUpdatesPage {
+    let startSeq: Int64
+    let task: Task<PrefetchOutcome, any Error>
+  }
+
+  private static func isTransportFailure(_ error: any Error) -> Bool {
+    switch error as? ProtocolSessionError {
+      case .timeout?, .notConnected?: true
+      default: false
+    }
+  }
+
+  /// Requests the page starting at `startSeq` under its own limiter slot.
+  private func makeUpdatesPagePrefetch(
+    client: ProtocolClientType,
+    startSeq: Int64,
+    seqEnd: Int64
+  ) -> PrefetchedUpdatesPage {
+    let limiter = fetchLimiter
+    let bucket = key.toProtocolBucket()
+    inFlightPrefetch?.cancel()
+    let task = Task<PrefetchOutcome, any Error> {
+      guard await limiter.acquire() else { return .refused }
+      do {
+        try Task.checkCancellation()
+        let result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
+          $0.bucket = bucket
+          $0.startSeq = startSeq
+          $0.totalLimit = Int32(Self.maxTotalUpdates)
+          $0.limit = Self.updatesPageLimit
+          $0.seqEnd = seqEnd
+        }), timeout: Self.getUpdatesTimeout)
+        await limiter.release()
+        return .response(result)
+      } catch {
+        await limiter.release()
+        throw error
+      }
+    }
+    inFlightPrefetch = task
+    return PrefetchedUpdatesPage(startSeq: startSeq, task: task)
+  }
+
   /// Fetches one frozen target and commits each validated page independently.
   /// The page start state is part of the apply-owner CAS, so a same-bucket live
   /// update cannot race a page between its read and cursor commit.
@@ -4185,17 +4248,32 @@ actor BucketActor {
         resultLabel = "target_already_durable"
         return true
       }
+      // The next page's request depends only on this page's end sequence, so it is issued as soon as a
+      // page validates and runs while this page applies. A prefetch whose start no longer matches the
+      // committed cursor is cancelled and the page is requested again.
+      var prefetchedPage: PrefetchedUpdatesPage?
+      defer {
+        prefetchedPage?.task.cancel()
+        inFlightPrefetch = nil
+      }
       while true {
         let pageStartState = BucketState(date: date, seq: currentSeq)
+        let usesPrefetch = prefetchedPage?.startSeq == currentSeq
+        if !usesPrefetch {
+          prefetchedPage?.task.cancel()
+          prefetchedPage = nil
+        }
         let queueStartedAt = Date()
         let queueSpan = PerformanceTrace.begin(
           "SyncBucketQueueWait",
           category: .sync,
           "bucket=\(key.traceKind)"
         )
-        guard await fetchLimiter.acquire() else {
-          resultLabel = "cancelled"
-          return true
+        if !usesPrefetch {
+          guard await fetchLimiter.acquire() else {
+            resultLabel = "cancelled"
+            return true
+          }
         }
         queueSpan.end(
           "bucket=\(key.traceKind) duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: queueStartedAt))"
@@ -4204,12 +4282,12 @@ actor BucketActor {
         // Limiter suspension can outlive this bucket or its captured cursor.
         // Do not spend an RPC (or hold shutdown) on work already superseded.
         guard !isInvalidated, !Task.isCancelled else {
-          await fetchLimiter.release()
+          if !usesPrefetch { await fetchLimiter.release() }
           resultLabel = "cancelled"
           return true
         }
         guard seq == pageStartState.seq, date == pageStartState.date else {
-          await fetchLimiter.release()
+          if !usesPrefetch { await fetchLimiter.release() }
           if seq >= hardEndSeq {
             completeLatestDemand(passLatestGeneration)
             await sync.bucketDidAdvance(
@@ -4229,27 +4307,66 @@ actor BucketActor {
         )
         let result: InlineProtocol.RpcResult.OneOf_Result?
         let expectedRemovalRevision: Int64?
-        do {
-          expectedRemovalRevision = key != .user && currentSeq == 0
-            ? try await sync.removalRevisionForChildAdmission() : nil
-          result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
-            $0.bucket = key.toProtocolBucket()
-            $0.startSeq = currentSeq
-            $0.totalLimit = Int32(Self.maxTotalUpdates)
-            $0.limit = Self.updatesPageLimit
-            $0.seqEnd = hardEndSeq
-          }), timeout: Self.getUpdatesTimeout)
-          rpcSpan.end(
-            "bucket=\(key.traceKind) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
-          )
-        } catch {
-          rpcSpan.end(
-            "bucket=\(key.traceKind) success=false duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
-          )
+        if usesPrefetch, let prefetch = prefetchedPage {
+          // Prefetches start past sequence 0, so no removal revision applies. The prefetch task holds and
+          // releases its own limiter slot.
+          prefetchedPage = nil
+          expectedRemovalRevision = nil
+          let outcome: PrefetchOutcome
+          do {
+            // The prefetch is an unstructured task: forward this fetch's cancellation (logout,
+            // termination) so it stops waiting on the reply like a direct request would.
+            outcome = try await withTaskCancellationHandler {
+              try await prefetch.task.value
+            } onCancel: {
+              prefetch.task.cancel()
+            }
+            inFlightPrefetch = nil
+            rpcSpan.end(
+              "bucket=\(key.traceKind) success=true prefetched=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+            )
+          } catch {
+            rpcSpan.end(
+              "bucket=\(key.traceKind) success=false prefetched=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+            )
+            inFlightPrefetch = nil
+            // The prefetch timed out or lost its connection while the previous page applied: request this
+            // page directly, as it would have been without prefetching. Other errors fail as a direct
+            // request's would.
+            guard !isInvalidated, !Task.isCancelled, Self.isTransportFailure(error) else { throw error }
+            continue
+          }
+          switch outcome {
+            case .refused:
+              resultLabel = "cancelled"
+              return true
+            case let .response(response):
+              // A nil response takes the same parse-failure path as a direct request.
+              result = response
+          }
+        } else {
+          do {
+            expectedRemovalRevision = key != .user && currentSeq == 0
+              ? try await sync.removalRevisionForChildAdmission() : nil
+            result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
+              $0.bucket = key.toProtocolBucket()
+              $0.startSeq = currentSeq
+              $0.totalLimit = Int32(Self.maxTotalUpdates)
+              $0.limit = Self.updatesPageLimit
+              $0.seqEnd = hardEndSeq
+            }), timeout: Self.getUpdatesTimeout)
+            rpcSpan.end(
+              "bucket=\(key.traceKind) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+            )
+          } catch {
+            rpcSpan.end(
+              "bucket=\(key.traceKind) success=false duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+            )
+            await fetchLimiter.release()
+            throw error
+          }
           await fetchLimiter.release()
-          throw error
         }
-        await fetchLimiter.release()
         guard !isInvalidated, !Task.isCancelled else {
           resultLabel = "cancelled"
           return true
@@ -4399,6 +4516,9 @@ actor BucketActor {
           expectedStartState: pageStartState,
           expectedRemovalRevision: expectedRemovalRevision
         )
+        if prefetchesCatchUpPages, !payload.final, payload.seq > currentSeq, payload.seq < hardEndSeq {
+          prefetchedPage = makeUpdatesPagePrefetch(client: client, startSeq: payload.seq, seqEnd: hardEndSeq)
+        }
         let applyStartedAt = Date()
         let applySpan = PerformanceTrace.begin(
           "SyncBucketApply",
@@ -4678,6 +4798,8 @@ actor BucketActor {
     retryTask = nil
     scheduledRetry?.cancel()
     await scheduledRetry?.value
+    inFlightPrefetch?.cancel()
+    inFlightPrefetch = nil
     needsFetch = false
     fetchSeqEnd = nil
     capturedLatestTarget = nil

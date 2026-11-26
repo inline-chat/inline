@@ -4,6 +4,7 @@ import GRDB
 import InlineNotificationFence
 import InlineProtocol
 import Logger
+import os
 import RealtimeV2
 
 public actor UpdatesEngine: Sendable {
@@ -807,14 +808,10 @@ public actor UpdatesEngine: Sendable {
         category: .updates,
         "peers=\(reloadPeers.count)"
       )
-      await MainActor.run {
-        for peer in reloadPeers {
-          MessagesPublisher.shared.messagesReload(
-            peer: peer,
-            animated: false
-          )
-        }
-      }
+      // Enqueue the reload without waiting for the main actor: the next page can apply while the UI is
+      // busy. Pages that land before the main actor runs merge into one pending reload per peer, and
+      // each reload reads the latest committed rows when it runs.
+      CatchUpReloadCoalescer.shared.enqueue(reloadPeers)
       let durationMs = PerformanceTrace.elapsedMilliseconds(since: reloadStartedAt)
       reloadSpan.end("peers=\(reloadPeers.count) duration_ms=\(durationMs)")
       PerformanceTrace.slowBreadcrumb(
@@ -3731,6 +3728,43 @@ actor MissingDialogFetcher {
       _ = try await Api.realtime.send(.getChat(peer: peer))
     } catch {
       Log.shared.warning("Couldn't fetch the missing dialog for \(peer): \(error.localizedDescription)")
+    }
+  }
+}
+
+/// Collects catch-up reload requests between main-actor turns so a fast run of pages schedules one
+/// reload per peer instead of one main-actor task per page.
+final class CatchUpReloadCoalescer: @unchecked Sendable {
+  static let shared = CatchUpReloadCoalescer { peer in
+    MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
+  }
+
+  private let state = OSAllocatedUnfairLock<(peers: Set<Peer>, scheduled: Bool)>(initialState: ([], false))
+  private let reload: @MainActor @Sendable (Peer) -> Void
+
+  init(reload: @escaping @MainActor @Sendable (Peer) -> Void) {
+    self.reload = reload
+  }
+
+  func enqueue(_ peers: Set<Peer>) {
+    guard !peers.isEmpty else { return }
+    let shouldSchedule = state.withLock { state in
+      state.peers.formUnion(peers)
+      guard !state.scheduled else { return false }
+      state.scheduled = true
+      return true
+    }
+    guard shouldSchedule else { return }
+    Task { @MainActor in
+      let peers = self.state.withLock { state in
+        let peers = state.peers
+        state.peers = []
+        state.scheduled = false
+        return peers
+      }
+      for peer in peers {
+        self.reload(peer)
+      }
     }
   }
 }
