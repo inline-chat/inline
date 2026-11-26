@@ -333,7 +333,11 @@ private final class ChatToolbarNotificationModel: ObservableObject {
       .sink(
         receiveCompletion: { _ in },
         receiveValue: { [weak self] dialog in
-          self?.selection = dialog?.notificationSelection ?? .global
+          // Any write to this chat's dialog (each incoming message) delivers here.
+          let selection = dialog?.notificationSelection ?? .global
+          if self?.selection != selection {
+            self?.selection = selection
+          }
         }
       )
   }
