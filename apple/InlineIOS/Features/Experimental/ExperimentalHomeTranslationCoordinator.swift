@@ -93,7 +93,7 @@ final class ExperimentalHomeTranslationCoordinator {
         let messageIDs = Set(candidates.map(\.messageID))
         let chatIDs = Set(candidates.map(\.chatID))
         let messages = try await AppDatabase.shared.reader.read { db in
-          try FullMessage.queryRequest()
+          try FullMessageQuery()
             .filter(messageIDs.contains(Column("messageId")))
             .filter(chatIDs.contains(Column("chatId")))
             .fetchAll(db)
