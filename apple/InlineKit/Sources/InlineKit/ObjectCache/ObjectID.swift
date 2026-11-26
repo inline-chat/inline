@@ -11,10 +11,11 @@ public enum ObjectID: Hashable, Sendable {
 
 /// Tunable bounds for `ObjectCache`. Adjust here; nothing else encodes these numbers.
 enum ObjectCacheLimits {
-  /// Records per kind that are re-read after every write to that kind's tables,
-  /// most recently used first. Higher keeps more records fresh without being
-  /// asked, at the cost of a larger batch read per write. Records past this limit
-  /// are marked stale and re-read when next requested.
+  /// Records per kind re-read after one commit, most recently used first: of the
+  /// records the commit wrote, or of all the kind's records when it can't tell
+  /// which. Higher keeps more records fresh without being asked, at the cost of a
+  /// larger batch read per write. Records past this limit are marked stale and
+  /// re-read when next requested.
   ///
   /// Messages get a small number because the message table is written constantly.
   static func tracked(_ kind: ObjectKind) -> Int {
@@ -40,10 +41,10 @@ enum ObjectKind: CaseIterable, Sendable {
   case space
   case message
 
-  /// Tables whose writes can change a record of this kind.
+  /// Tables whose writes can change a record of this kind (`ObjectChangeTracker` maps their rows).
   var tables: [String] {
     switch self {
-      case .user: [User.databaseTableName, File.databaseTableName]
+      case .user: [User.databaseTableName, File.databaseTableName, UserFocus.databaseTableName]
       case .chat: [Chat.databaseTableName]
       case .space: [Space.databaseTableName]
       case .message: [Message.databaseTableName]

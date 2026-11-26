@@ -15,8 +15,8 @@ import Logger
 /// does not have, through `remoteLoader`.
 ///
 /// The cache itself is `ObjectStore` from `InlineObjectCache`; this type binds it
-/// to the app database: it reads records, and runs one tracker per kind that
-/// tells the store when that kind's tables were written.
+/// to the app database: it reads records, and an `ObjectChangeTracker` on the
+/// writer tells the store which records each commit wrote.
 @MainActor
 public final class ObjectCache {
   public static let shared: ObjectCache = {
@@ -36,7 +36,14 @@ public final class ObjectCache {
   private let database: AppDatabase
   let store: ObjectStore<DatabaseObjectSource>
 
-  private var trackers: [AnyDatabaseCancellable] = []
+  private var tracker: ObjectChangeTracker?
+  /// Rowid of each cached message, so a deleted or renumbered message row reaches the key it is cached under.
+  private var messageIDsByRowID: [Int64: ObjectID] = [:]
+  private var messageRowIDsByID: [ObjectID: Int64] = [:]
+  /// Users holding each profile photo file, so a photo that moves to another user refreshes both.
+  private var photoOwners: [String: Set<Int64>] = [:]
+  private var photoIDsByUser: [Int64: Set<String>] = [:]
+  private let memoryLimit: Int
   private var trackedWriter: (any DatabaseWriter)?
   /// Identifies the current tracker start; a start that finishes after `stopTracking` is discarded.
   private var trackingAttempt: UInt64 = 0
@@ -52,6 +59,7 @@ public final class ObjectCache {
     memoryLimit: Int = ObjectCacheLimits.memory
   ) {
     self.database = database
+    self.memoryLimit = memoryLimit
     store = ObjectStore(
       source: DatabaseObjectSource(database: database),
       limits: ObjectStoreLimits(
@@ -116,6 +124,10 @@ public final class ObjectCache {
     chatPublishers.values.forEach { $0.send(nil) }
     userPublishers.removeAll()
     chatPublishers.removeAll()
+    messageIDsByRowID.removeAll()
+    messageRowIDsByID.removeAll()
+    photoOwners.removeAll()
+    photoIDsByUser.removeAll()
   }
 
   /// A record is incomplete when the database has no row, or has only the
@@ -130,22 +142,68 @@ public final class ObjectCache {
     for id in changed {
       switch id {
         case let .user(userID):
+          trackPhotoIDs(of: userID)
           guard let publisher = userPublishers[userID] else { continue }
           if case let .user(value) = store.peek(id) { publisher.send(value) } else { publisher.send(nil) }
         case let .chat(chatID):
           guard let publisher = chatPublishers[chatID] else { continue }
           if case let .chat(value) = store.peek(id) { publisher.send(value) } else { publisher.send(nil) }
-        case .space, .message:
+        case .message:
+          trackMessageRowID(id)
+        case .space:
           break
+      }
+    }
+  }
+
+  private func trackMessageRowID(_ id: ObjectID) {
+    let rowID: Int64? = if case let .message(value) = store.peek(id) { value.globalId } else { nil }
+    // A renumbered row can already map to another key; only drop this key's own mapping.
+    if let old = messageRowIDsByID[id], old != rowID, messageIDsByRowID[old] == id {
+      messageIDsByRowID.removeValue(forKey: old)
+    }
+    messageRowIDsByID[id] = rowID
+    if let rowID { messageIDsByRowID[rowID] = id }
+    // Evictions aren't announced; drop entries for records no longer in memory now and then.
+    if messageRowIDsByID.count > 2 * memoryLimit {
+      for (id, rowID) in messageRowIDsByID where store.peek(id) == nil {
+        messageRowIDsByID.removeValue(forKey: id)
+        if messageIDsByRowID[rowID] == id { messageIDsByRowID.removeValue(forKey: rowID) }
+      }
+    }
+  }
+
+  private func trackPhotoIDs(of userID: Int64) {
+    let photos: Set<String> = if case let .user(value) = store.peek(.user(userID)) {
+      Set(value.profilePhoto?.map(\.id) ?? [])
+    } else {
+      []
+    }
+    let old = photoIDsByUser[userID] ?? []
+    for fileID in old.subtracting(photos) {
+      photoOwners[fileID]?.remove(userID)
+      if photoOwners[fileID]?.isEmpty == true { photoOwners.removeValue(forKey: fileID) }
+    }
+    for fileID in photos.subtracting(old) {
+      photoOwners[fileID, default: []].insert(userID)
+    }
+    photoIDsByUser[userID] = photos.isEmpty ? nil : photos
+    if photoIDsByUser.count > 2 * memoryLimit {
+      for (userID, fileIDs) in photoIDsByUser where store.peek(.user(userID)) == nil {
+        photoIDsByUser.removeValue(forKey: userID)
+        for fileID in fileIDs {
+          photoOwners[fileID]?.remove(userID)
+          if photoOwners[fileID]?.isEmpty == true { photoOwners.removeValue(forKey: fileID) }
+        }
       }
     }
   }
 
   // MARK: - Tracking
 
-  /// Number of live database observations; constant however many records are cached.
+  /// Number of live database observers; constant however many records are cached.
   var trackerCount: Int {
-    trackers.count
+    tracker == nil ? 0 : 1
   }
 
   private func ensureTracking() {
@@ -158,39 +216,43 @@ public final class ObjectCache {
     trackedWriter = writer
     trackingAttempt &+= 1
     let attempt = trackingAttempt
-    // Starting an observation waits for the writer, so it never runs on the main thread.
+    // Adding an observer waits for the writer, so it never runs on the main thread.
     trackerStart = Task.detached { [weak self] in
-      let started = ObjectKind.allCases.map { kind in
-        DatabaseRegionObservation(tracking: kind.tables.map { Table($0) })
-          .start(in: writer, onError: { error in
-            Log.shared.error("Object tracker failed", error: error)
-          }, onChange: { _ in
-            Task { @MainActor in self?.tablesDidChange(kind, attempt: attempt) }
-          })
+      let tracker = ObjectChangeTracker { changes in
+        Task { @MainActor in self?.writesDidCommit(changes, attempt: attempt) }
       }
-      await self?.didStartTrackers(started, attempt: attempt)
+      // The writer holds observers weakly with this extent; the cache keeps it alive while tracking.
+      writer.add(transactionObserver: tracker, extent: .observerLifetime)
+      await self?.didStartTracker(tracker, attempt: attempt)
     }
   }
 
-  private func didStartTrackers(_ started: [AnyDatabaseCancellable], attempt: UInt64) {
-    guard attempt == trackingAttempt else {
-      started.forEach { $0.cancel() }
-      return
-    }
-    trackers = started
-    // Writes made before the trackers attached went unseen.
+  private func didStartTracker(_ started: ObjectChangeTracker, attempt: UInt64) {
+    guard attempt == trackingAttempt else { return }
+    tracker = started
+    // Writes made before the tracker attached went unseen.
     store.noteUnseenWrites()
   }
 
-  private func tablesDidChange(_ kind: ObjectKind, attempt: UInt64) {
+  private func writesDidCommit(_ changes: ObjectChanges, attempt: UInt64) {
     guard attempt == trackingAttempt else { return }
-    store.noteWrite(kind)
+    var ids = changes.ids
+    for rowID in changes.messageRowIDs {
+      if let id = messageIDsByRowID[rowID] { ids.insert(id) }
+    }
+    for fileID in changes.fileIDs {
+      for userID in photoOwners[fileID] ?? [] { ids.insert(.user(userID)) }
+    }
+    store.noteWrites(ids, touching: Array(changes.writtenKinds))
+    for kind in changes.kinds {
+      store.noteWrite(kind)
+    }
   }
 
   private func stopTracking() {
     trackingAttempt &+= 1
-    trackers.forEach { $0.cancel() }
-    trackers.removeAll()
+    // Released, the observer stops: the writer holds it weakly.
+    tracker = nil
     trackedWriter = nil
   }
 }

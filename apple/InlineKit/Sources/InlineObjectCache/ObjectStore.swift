@@ -7,9 +7,11 @@ import Combine
 /// - `load` reads unloaded and stale IDs without blocking. For everything else.
 /// - `warm` starts a `load` and returns; a later `cached` or `get` then hits memory.
 ///
-/// The host calls `noteWrite` when a kind's backing data changed. The most
-/// recently used `limits.tracked(kind)` records of that kind are then re-read in
-/// one batch and stay fresh; the rest are marked stale and revalidate when next requested.
+/// The host calls `noteWrites` with the IDs whose backing data changed. Those in
+/// memory are marked stale; up to `limits.tracked(kind)` of them per kind, most
+/// recently used first, are re-read in one batch, and the rest revalidate when next
+/// requested. When it can't tell which records changed, it calls `noteWrite` with
+/// the kind, which does the same for the kind's most recently used records.
 @MainActor
 public final class ObjectStore<Source: ObjectSource> {
   public typealias ID = Source.ID
@@ -115,7 +117,37 @@ public final class ObjectStore<Source: ObjectSource> {
 
   // MARK: - Host notifications
 
-  /// The backing data of `kind` changed.
+  /// The backing data of these records changed. `touching` names kinds whose data
+  /// was written even if no ID is known (a deleted row no cached record names yet),
+  /// so a read of that kind in flight comes back stale. Costs the number of IDs, not
+  /// the number of records in memory.
+  public func noteWrites(_ ids: some Sequence<ID>, touching writtenKinds: [Source.Kind] = []) {
+    var changedByKind: [Source.Kind: [ID]] = [:]
+    var kinds = Set(writtenKinds)
+    for id in ids {
+      let kind = source.kind(of: id)
+      kinds.insert(kind)
+      guard entries[id] != nil else { continue }
+      entries[id]?.isFresh = false
+      changedByKind[kind, default: []].append(id)
+    }
+    // A read of these kinds in flight may have read the old rows; it is stored stale and read again.
+    for kind in kinds {
+      writeEpochs[kind, default: 0] &+= 1
+    }
+    for (kind, changed) in changedByKind {
+      let limit = limits.tracked(kind)
+      let tracked = changed.count <= limit
+        ? changed
+        : Array(changed.sorted { entries[$0]?.lastUsed ?? 0 > entries[$1]?.lastUsed ?? 0 }.prefix(limit))
+      idsToRevalidate.formUnion(tracked)
+    }
+    if !idsToRevalidate.isEmpty {
+      startRevalidation()
+    }
+  }
+
+  /// The backing data of `kind` changed, without knowing which records.
   public func noteWrite(_ kind: Source.Kind) {
     writeEpochs[kind, default: 0] &+= 1
     for (id, entry) in entries where entry.isFresh && source.kind(of: id) == kind {

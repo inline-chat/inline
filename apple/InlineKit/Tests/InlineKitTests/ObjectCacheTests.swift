@@ -28,6 +28,11 @@ struct ObjectCacheTests {
     var mainThreadCount: Int {
       selects.withLock { $0.count(where: \.onMainThread) }
     }
+
+    /// Reads of cache records, not the tracker's key lookups on the writer.
+    func recordReads(from table: String) -> [String] {
+      selects.withLock { $0.map(\.sql).filter { $0.contains("FROM \"\(table)\"") } }
+    }
   }
 
   private struct Fixture {
@@ -178,14 +183,17 @@ struct ObjectCacheTests {
     let fixture = try await makeFixture(users: 60)
     let ids = (1 ... 60).map { ObjectID.user(Int64($0)) }
     #expect(await loadAndSettle(fixture, ids + [.chat(3), .space(2)]))
-    #expect(fixture.cache.trackerCount == 4)
+    #expect(fixture.cache.trackerCount == 1)
 
     fixture.log.reset()
     try await rename(fixture, user: 7, to: "Seven")
     #expect(await eventually { fixture.cache.cached([.user(7)]).user(7)?.user.firstName == "Seven" })
-    #expect(await eventually { fixture.cache.cached(ids).state(of: .user(60)) == .fresh })
-    // One write refreshes all 60 users with two statements: users, then their photos.
-    #expect(fixture.log.count == 2)
+    #expect(await eventually { fixture.cache.cached(ids).state(of: .user(7)) == .fresh })
+    // The write re-reads user 7 alone: the other 59 were not written and stay fresh.
+    let reads = fixture.log.recordReads(from: "user")
+    #expect(reads.count == 1)
+    #expect(reads.allSatisfy { !$0.contains("60") })
+    #expect(fixture.cache.cached(ids).state(of: .user(60)) == .fresh)
     #expect(fixture.log.mainThreadCount == 0)
   }
 
@@ -233,6 +241,113 @@ struct ObjectCacheTests {
     #expect(await eventually {
       fixture.cache.cached(id).message(chatId: 3, messageId: 10)?.text == "Edited"
     })
+    #expect(fixture.log.mainThreadCount == 0)
+  }
+
+  @Test("presence, profile photos and focus refresh only their user; other files touch no user")
+  func userWritesStayRowLevel() async throws {
+    let fixture = try await makeFixture(users: 20)
+    let ids = (1 ... 20).map { ObjectID.user(Int64($0)) }
+    #expect(await loadAndSettle(fixture, ids))
+    var announced: Set<ObjectID> = []
+    let subscription = fixture.cache.changes.sink { announced.formUnion($0) }
+    defer { subscription.cancel() }
+
+    fixture.log.reset()
+    // A media file, as a download writes it, is no one's profile photo: no user is read again.
+    try await fixture.queue.write { db in
+      try db.execute(sql: "INSERT INTO file (id, fileUniqueId, fileType) VALUES ('media', 'media-u', 'photo')")
+      try db.execute(sql: "UPDATE file SET localPath = '/tmp/media' WHERE id = 'media'")
+    }
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(fixture.log.recordReads(from: "user").isEmpty)
+    let afterMedia = fixture.cache.cached(ids)
+    #expect(ids.allSatisfy { afterMedia.state(of: $0) == .fresh })
+    try await fixture.queue.write { db in
+      try db.execute(sql: "UPDATE user SET online = 1, lastOnline = ? WHERE id = 5", arguments: [Date()])
+    }
+    #expect(await eventually { fixture.cache.cached([.user(5)]).user(5)?.user.online == true })
+    #expect(fixture.log.recordReads(from: "user").count == 1)
+
+    try await fixture.queue.write { db in
+      try db.execute(
+        sql: "INSERT INTO file (id, fileUniqueId, fileType, profileForUserId) VALUES ('avatar', 'avatar-u', 'photo', 6)"
+      )
+    }
+    #expect(await eventually { fixture.cache.cached([.user(6)]).user(6)?.profilePhoto?.count == 1 })
+
+    // A Focus report alone, without a write to the user row.
+    try await fixture.queue.write { db in
+      try UserFocus(userId: 7, focused: true, updatedAt: Date()).save(db)
+    }
+    #expect(await eventually { fixture.cache.cached([.user(7)]).user(7)?.focus?.focused == true })
+
+    #expect(announced == [.user(5), .user(6), .user(7)])
+    #expect(fixture.log.recordReads(from: "user").count == 3)
+    #expect(fixture.log.mainThreadCount == 0)
+  }
+
+  @Test("a profile photo that moves to another user refreshes both users")
+  func movedPhotoRefreshesBothUsers() async throws {
+    let fixture = try await makeFixture()
+    try await fixture.queue.write { db in
+      try db.execute(
+        sql: "INSERT INTO file (id, fileUniqueId, fileType, profileForUserId) VALUES ('avatar', 'avatar-u', 'photo', 1)"
+      )
+    }
+    #expect(await loadAndSettle(fixture, [.user(1), .user(2)]))
+    #expect(fixture.cache.cached([.user(1)]).user(1)?.profilePhoto?.map(\.id) == ["avatar"])
+
+    // As `File.save` does when the server sends the same photo for another user.
+    try await fixture.queue.write { db in
+      try db.execute(sql: "UPDATE file SET profileForUserId = 2 WHERE id = 'avatar'")
+    }
+    #expect(await eventually { fixture.cache.cached([.user(2)]).user(2)?.profilePhoto?.map(\.id) == ["avatar"] })
+    #expect(await eventually { fixture.cache.cached([.user(1)]).user(1)?.profilePhoto?.isEmpty == true })
+  }
+
+  @Test("a message renumbered onto a key already cached as missing follows its row, through a later delete")
+  func renumberOntoCachedKey() async throws {
+    let fixture = try await makeFixture()
+    let old = ObjectID.message(chatId: 3, messageId: 10)
+    let new = ObjectID.message(chatId: 3, messageId: 11)
+    #expect(await loadAndSettle(fixture, [old, new]))
+    #expect(fixture.cache.cached([new]).state(of: new) == .missing)
+
+    try await fixture.queue.write { db in
+      try db.execute(sql: "UPDATE message SET messageId = 11 WHERE chatId = 3 AND messageId = 10")
+    }
+    #expect(await eventually { fixture.cache.cached([new]).message(chatId: 3, messageId: 11)?.text == "First" })
+    #expect(await eventually { fixture.cache.cached([old]).state(of: old) == .missing })
+
+    try await fixture.queue.write { db in
+      try db.execute(sql: "DELETE FROM message WHERE chatId = 3 AND messageId = 11")
+    }
+    #expect(await eventually { fixture.cache.cached([new]).state(of: new) == .missing })
+  }
+
+  @Test("a deleted or renumbered message reaches the key it is cached under")
+  func messageRowChangesReachTheirKey() async throws {
+    let fixture = try await makeFixture()
+    let first = ObjectID.message(chatId: 3, messageId: 10)
+    try await fixture.queue.write { db in
+      try Message(
+        messageId: 20, fromId: 1, date: Date(), text: "Second", peerUserId: nil, peerThreadId: 3, chatId: 3
+      ).insert(db)
+    }
+    let second = ObjectID.message(chatId: 3, messageId: 20)
+    #expect(await loadAndSettle(fixture, [first, second]))
+
+    // A sent message getting its server id: the row keeps its rowid under a new key.
+    try await fixture.queue.write { db in
+      try db.execute(sql: "UPDATE message SET messageId = 11 WHERE chatId = 3 AND messageId = 10")
+    }
+    #expect(await eventually { fixture.cache.cached([first]).state(of: first) == .missing })
+
+    try await fixture.queue.write { db in
+      try db.execute(sql: "DELETE FROM message WHERE chatId = 3 AND messageId = 20")
+    }
+    #expect(await eventually { fixture.cache.cached([second]).state(of: second) == .missing })
     #expect(fixture.log.mainThreadCount == 0)
   }
 
@@ -299,7 +414,7 @@ struct ObjectCacheTests {
 
     // The cache works again after a clear, with trackers re-attached.
     #expect(await loadAndSettle(fixture, [.user(1)]))
-    #expect(fixture.cache.trackerCount == 4)
+    #expect(fixture.cache.trackerCount == 1)
     #expect(fixture.cache.getUser(id: 1)?.user.firstName == "Renamed")
   }
 }
