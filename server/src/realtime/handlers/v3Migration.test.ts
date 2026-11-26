@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { SessionsModel } from "@in/server/db/models/sessions"
@@ -62,6 +63,9 @@ describe("V3 migration RPCs", () => {
     expect(updated.osVersion).toBe("27.0.1")
     expect(result.session?.clientVersion).toBe("5999")
     expect((await SessionsModel.getById(other.session.id)).clientVersion).toBe("5843")
+    // A reported change moves the user even though a newer session exists.
+    const [stored] = await db.select().from(schema.users).where(eq(schema.users.id, user.id))
+    expect(stored?.timeZone).toBe("Asia/Tehran")
   })
 
   test("archives one dialog and returns the ordinary typed update", async () => {

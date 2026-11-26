@@ -11,7 +11,7 @@ import { userSettings, users } from "@in/server/db/schema"
 import { eq, inArray } from "drizzle-orm"
 import type { Transaction } from "@in/server/db/types"
 import { effectiveTimeZoneRule, isPublicRule, mergePrivacyPatch } from "@in/server/modules/privacy/privacyRules"
-import { electedAppleSessionTimeZone } from "@in/server/modules/users/timeZoneSync"
+import { latestLiveDeviceTimeZone } from "@in/server/modules/users/timeZoneSync"
 
 const log = new Log("UserSettingsModel")
 
@@ -136,7 +136,7 @@ async function updateGeneralWithPatchInTransaction(
 
 /**
  * A manual time zone becomes the user's time zone. Going back to automatic
- * restores the one their Apple devices last reported.
+ * restores the zone that most recently took effect on a live Apple device.
  */
 async function applyManualTimeZone(
   tx: Transaction,
@@ -145,7 +145,7 @@ async function applyManualTimeZone(
   next: string | undefined,
 ): Promise<void> {
   if (previous === next) return
-  const timeZone = next ?? (await electedAppleSessionTimeZone(tx, userId))
+  const timeZone = next ?? (await latestLiveDeviceTimeZone(tx, userId))?.timeZone
   if (!timeZone) return
   await tx.update(users).set({ timeZone }).where(eq(users.id, userId))
 }

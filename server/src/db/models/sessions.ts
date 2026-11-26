@@ -27,6 +27,8 @@ export interface SessionPersonalData {
   region?: string | undefined
   city?: string | undefined
   timezone?: string | undefined
+  /** Epoch ms of the last reported change to `timezone`. Absent means it dates from sign-in (`date`). */
+  timezoneSince?: number | undefined
   ip?: string | undefined
   deviceName?: string | undefined
 }
@@ -458,9 +460,10 @@ export class SessionsModel {
     const current = await this.getById(id)
     if (current.userId !== userId || current.revoked) throw new Error("Session not found")
 
+    const timezoneChanged = data.timezone !== undefined && data.timezone !== current.personalData.timezone
     const personalData = {
       ...current.personalData,
-      ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
+      ...(timezoneChanged ? { timezone: data.timezone, timezoneSince: Date.now() } : {}),
       ...(data.deviceName !== undefined ? { deviceName: data.deviceName } : {}),
     }
     const encryptedPersonalData = encrypt(JSON.stringify(personalData))

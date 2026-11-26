@@ -14,7 +14,8 @@ import {
   getPublicHandleAvailability,
   lockPublicHandleNamespace,
 } from "@in/server/modules/spaces/spaceHandle"
-import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
+import { recomputeUserTimeZone } from "@in/server/modules/users/timeZoneSync"
+import { SessionsModel } from "@in/server/db/models/sessions"
 
 export const Input = Type.Object({
   firstName: Type.Optional(Type.String()),
@@ -87,14 +88,13 @@ export const handler = async (input: Input, context: HandlerContext): Promise<St
     }
 
     if (timeZone) {
-      const syncedUser = await syncTimeZoneForElectedAppleSession({
-        userId: context.currentUserId,
-        sessionId: context.currentSessionId,
-        timeZone,
-      })
-      if (syncedUser) {
-        user = syncedUser
-        log.debug("Set timeZone from elected Apple session")
+      // Older builds report their device time zone here instead of through updateSession.
+      // Time zone bookkeeping must not fail the profile save.
+      try {
+        await SessionsModel.updateMetadata(context.currentSessionId, context.currentUserId, { timezone: timeZone })
+        user = (await recomputeUserTimeZone(context.currentUserId, { reportingSessionId: context.currentSessionId })) ?? user
+      } catch (error) {
+        log.warn("Failed to record device time zone", { userId: context.currentUserId, error })
       }
     }
 

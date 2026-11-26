@@ -13,7 +13,7 @@ import { maskPhoneNumber } from "@in/server/utils/privacy"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 import { isSignupComplete } from "@in/server/modules/auth/signupInvites"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
-import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
+import { recomputeUserTimeZone } from "@in/server/modules/users/timeZoneSync"
 import { verifyPhoneAccountProof } from "@in/server/modules/auth/contactProof"
 
 export const Input = Type.Object({
@@ -117,12 +117,7 @@ export const handler = async (
     })
 
     if (timezone) {
-      user =
-        (await syncTimeZoneForElectedAppleSession({
-          userId,
-          sessionId: session.id,
-          timeZone: timezone,
-        })) ?? user
+      user = (await recomputeUserTimeZone(userId, { reportingSessionId: session.id })) ?? user
     }
 
     // New users are reported only after onboarding has saved their final profile.

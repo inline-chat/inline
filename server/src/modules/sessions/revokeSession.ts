@@ -13,6 +13,9 @@ import { internalMessaging } from "@in/server/modules/internalMessaging/service"
 import { outboundPublications } from "@in/server/modules/internalMessaging/outbound"
 import { UserId, SessionId } from "@in/server/core/schema/identifiers"
 import { sessionAuthority } from "@in/server/modules/auth/sessionAuthority"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("revokeSession")
 
 type RevokeActor = "admin" | "user" | "system"
 
@@ -126,5 +129,14 @@ export async function finishSessionRevocation(
   }
   if (outcome.gridState) {
     await finishGridSessionAccess(outcome.gridState, input.targetUserId, input.sessionId)
+  }
+  const clientType = outcome.result.session?.clientType
+  if (outcome.result.revoked && (clientType === "ios" || clientType === "macos")) {
+    // The revoked device may have been the one setting the user's time zone.
+    // Imported lazily: the time zone module depends on the sessions model, which depends on this one.
+    const { recomputeUserTimeZone } = await import("@in/server/modules/users/timeZoneSync")
+    await recomputeUserTimeZone(input.targetUserId).catch((error) => {
+      log.warn("Failed to recompute time zone after revocation", { userId: input.targetUserId, error })
+    })
   }
 }

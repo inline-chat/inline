@@ -206,7 +206,7 @@ describe("updateProfile", () => {
     })
   })
 
-  test("ignores time-zone writes from older Apple sessions", async () => {
+  test("follows a time-zone change from an older Apple session", async () => {
     const user = await testUtils.createUser("old-timezone-profile@example.com")
     const oldSession = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
     await testUtils.createSessionForUser(user.id, { clientType: "macos" })
@@ -215,6 +215,19 @@ describe("updateProfile", () => {
     const result = await handler(
       { timeZone: "America/Toronto" },
       { ...makeContext(user.id), currentSessionId: oldSession.session.id },
+    )
+
+    expect(result.user.timeZone).toBe("America/Toronto")
+  })
+
+  test("ignores time-zone reports from web sessions", async () => {
+    const user = await testUtils.createUser("web-timezone-profile@example.com")
+    const webSession = await testUtils.createSessionForUser(user.id, { clientType: "web" })
+    await db.update(users).set({ timeZone: "Asia/Tehran" }).where(eq(users.id, user.id))
+
+    const result = await handler(
+      { timeZone: "America/Toronto" },
+      { ...makeContext(user.id), currentSessionId: webSession.session.id },
     )
 
     expect(result.user.timeZone).toBe("Asia/Tehran")

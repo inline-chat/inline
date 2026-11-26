@@ -35,7 +35,7 @@ import { handler as createNotionTask } from "@in/server/methods/notion/createNot
 import { handler as createLinearIssue } from "@in/server/methods/createLinearIssue"
 import { handler as logOut } from "@in/server/methods/logout"
 import { handler as updateDialog } from "@in/server/methods/updateDialog"
-import { syncTimeZoneForElectedAppleSession } from "@in/server/modules/users/timeZoneSync"
+import { recomputeUserTimeZone } from "@in/server/modules/users/timeZoneSync"
 import { encodeChatForUser } from "@in/server/realtime/encoders/encodeChat"
 import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 import { encodeMember } from "@in/server/realtime/encoders/encodeMember"
@@ -229,11 +229,7 @@ export async function updateSessionV3(
     osVersion,
   })
   if (timezone) {
-    await syncTimeZoneForElectedAppleSession({
-      userId: context.userId,
-      sessionId: context.sessionId,
-      timeZone: timezone,
-    })
+    await recomputeUserTimeZone(context.userId, { reportingSessionId: context.sessionId })
   }
   return { session: encodeSession(session, context.sessionId) }
 }
