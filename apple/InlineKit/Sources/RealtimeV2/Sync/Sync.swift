@@ -4108,7 +4108,8 @@ actor BucketActor {
   private enum PrefetchOutcome: Sendable {
     /// The limiter refused the slot (cancellation or shutdown); no request was sent.
     case refused
-    case response(InlineProtocol.RpcResult.OneOf_Result?)
+    /// `durationMs` is the request's own time, from send to reply, as a direct request reports it.
+    case response(InlineProtocol.RpcResult.OneOf_Result?, durationMs: Int)
   }
 
   private struct PrefetchedUpdatesPage {
@@ -4136,6 +4137,7 @@ actor BucketActor {
       guard await limiter.acquire() else { return .refused }
       do {
         try Task.checkCancellation()
+        let requestStartedAt = Date()
         let result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
           $0.bucket = bucket
           $0.startSeq = startSeq
@@ -4143,8 +4145,9 @@ actor BucketActor {
           $0.limit = Self.updatesPageLimit
           $0.seqEnd = seqEnd
         }), timeout: Self.getUpdatesTimeout)
+        let durationMs = PerformanceTrace.elapsedMilliseconds(since: requestStartedAt)
         await limiter.release()
-        return .response(result)
+        return .response(result, durationMs: durationMs)
       } catch {
         await limiter.release()
         throw error
@@ -4322,12 +4325,20 @@ actor BucketActor {
               prefetch.task.cancel()
             }
             inFlightPrefetch = nil
-            rpcSpan.end(
-              "bucket=\(key.traceKind) success=true prefetched=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
-            )
+            // duration_ms is the request's own time, comparable with direct requests; wait_ms is how long
+            // this page still waited for it after the previous page applied.
+            let waitMs = PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt)
+            switch outcome {
+              case let .response(_, durationMs):
+                rpcSpan.end(
+                  "bucket=\(key.traceKind) success=true prefetched=true duration_ms=\(durationMs) wait_ms=\(waitMs)"
+                )
+              case .refused:
+                rpcSpan.end("bucket=\(key.traceKind) success=false prefetched=true refused=true wait_ms=\(waitMs)")
+            }
           } catch {
             rpcSpan.end(
-              "bucket=\(key.traceKind) success=false prefetched=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
+              "bucket=\(key.traceKind) success=false prefetched=true wait_ms=\(PerformanceTrace.elapsedMilliseconds(since: rpcStartedAt))"
             )
             inFlightPrefetch = nil
             // The prefetch timed out or lost its connection while the previous page applied: request this
@@ -4340,7 +4351,7 @@ actor BucketActor {
             case .refused:
               resultLabel = "cancelled"
               return true
-            case let .response(response):
+            case let .response(response, _):
               // A nil response takes the same parse-failure path as a direct request.
               result = response
           }
