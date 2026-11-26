@@ -378,6 +378,9 @@ final class PinnedMessageHeaderView: NSView {
           )
           .fetchOne(db)
       }
+      // The message's tables are tracked whole, so most deliveries (a presence update, a message
+      // elsewhere) leave it unchanged. Drop those off the main thread instead of reconfiguring.
+      .removeDuplicates()
       .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
       .receive(on: DispatchQueue.main)
       .sink(
