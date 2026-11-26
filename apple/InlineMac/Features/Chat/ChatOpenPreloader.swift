@@ -467,8 +467,8 @@ actor ChatOpenPreloader {
     return batch.reversed()
   }
 
-  private static func baseQuery(peer: Peer) -> QueryInterfaceRequest<FullMessage> {
-    var query = FullMessage.queryRequest()
+  private static func baseQuery(peer: Peer) -> FullMessageQuery {
+    var query = FullMessageQuery()
     switch peer {
       case let .thread(id):
         query = query.filter(Column("peerThreadId") == id)
@@ -495,7 +495,7 @@ actor ChatOpenPreloader {
       return nil
     }
 
-    return try FullMessage.queryRequest()
+    return try FullMessageQuery()
       .filter(Column("chatId") == parentChatId)
       .filter(Column("messageId") == parentMessageId)
       .fetchOne(db)
@@ -518,7 +518,7 @@ actor ChatOpenPreloader {
       $0.message.chatId == chatId && $0.message.messageId == messageId
     }
     if message == nil {
-      message = try FullMessage.queryRequest()
+      message = try FullMessageQuery()
         .filter(Column("messageId") == messageId && Column("chatId") == chatId)
         .fetchOne(db)
     }
