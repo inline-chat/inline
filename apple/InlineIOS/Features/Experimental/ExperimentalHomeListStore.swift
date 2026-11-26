@@ -152,42 +152,40 @@ final class ExperimentalHomeListStore: ObservableObject {
     database.warnIfInMemoryDatabaseForObservation("ExperimentalHomeListStore")
     #endif
 
-    observation = ValueObservation
-      .tracking { db in
-        let startedAt = Date()
-        let scopeLabel = configuration.spaceID == nil ? "home" : "space"
-        let span = PerformanceTrace.begin(
-          "HomeListQuery",
-          category: .home,
-          "space=\(scopeLabel)"
-        )
-        let snapshots = try ChatListDatabaseQuery.fetchSnapshots(
-          db,
-          spaceID: configuration.spaceID,
-          includeSpaceChatsInHome: configuration.includeSpaceChatsInHome,
-          translationLanguage: UserLocale.getCurrentLanguage()
-        )
-        let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
-        span.end("rows=\(snapshots.count) duration_ms=\(durationMs)")
-        PerformanceTrace.slowBreadcrumb(
-          "iOS Home list query was slow",
-          category: "ios.home.query",
-          durationMs: durationMs,
-          thresholdMs: 50,
-          data: ["rows": snapshots.count, "scope": scopeLabel]
-        )
-        return snapshots
-      }
-      .publisher(in: database.reader, scheduling: .async(onQueue: workerQueue))
-      .subscribe(on: workerQueue)
-      .removeDuplicates()
-      .sink(
-        receiveCompletion: Self.makeCompletionHandler(
-          store: self,
-          generation: observationGeneration
-        ),
-        receiveValue: Self.makeValueHandler(pipeline: pipeline)
+    // A live query refetches only the rows a commit can change (an incoming message, presence write
+    // or draft keystroke elsewhere no longer re-snapshots every row), and every row when the day, time
+    // zone, locale or translation language changes. It retries a failed refresh itself.
+    // `loadLocalState` already read the first frame synchronously; the first value here arrives on
+    // `workerQueue` like the observation it replaces.
+    let scopeLabel = configuration.spaceID == nil ? "home" : "space"
+    let liveQuery = ChatListLiveQuery(
+      writer: database.dbWriter,
+      parameters: ChatListLiveQuery.Parameters(
+        spaceID: configuration.spaceID,
+        includeSpaceChatsInHome: configuration.includeSpaceChatsInHome,
+        translationLanguage: UserLocale.getCurrentLanguage()
+      ),
+      trace: ChatListLiveQuery.Trace(
+        spanName: "HomeListQuery",
+        category: .home,
+        label: "space=\(scopeLabel)",
+        scope: scopeLabel,
+        slowMessage: "iOS Home list query was slow",
+        slowCategory: "ios.home.query"
+      ),
+      translationLanguage: { UserLocale.getCurrentLanguage() }
+    )
+    // The live query retries a failed refresh itself; the first value after a failure clears the error
+    // even when the list is unchanged (the pipeline drops unchanged lists).
+    let failure = ObservationFailureFlag()
+    observation = liveQuery.start(
+      immediate: false,
+      deliveryQueue: workerQueue,
+      onError: Self.makeErrorHandler(store: self, generation: observationGeneration, failure: failure),
+      onChange: Self.makeValueHandler(
+        pipeline: pipeline, store: self, generation: observationGeneration, failure: failure
       )
+    )
   }
 
   /// Home is a local-first surface. Read the persisted snapshot synchronously before
@@ -236,10 +234,18 @@ final class ExperimentalHomeListStore: ObservableObject {
   /// Construct worker callbacks outside the main-actor context. Swift otherwise
   /// inherits a main-executor precondition even though GRDB delivers on `workerQueue`.
   private nonisolated static func makeValueHandler(
-    pipeline: ExperimentalHomeListPipeline
+    pipeline: ExperimentalHomeListPipeline,
+    store: ExperimentalHomeListStore,
+    generation: Int,
+    failure: ObservationFailureFlag
   ) -> @Sendable ([ChatListItemSnapshot]) -> Void {
-    { snapshots in
+    { [weak store] snapshots in
       pipeline.submit(snapshots)
+      if failure.takeRecovery() {
+        Task { @MainActor [weak store] in
+          store?.clearObservationError(generation: generation)
+        }
+      }
     }
   }
 
@@ -251,6 +257,18 @@ final class ExperimentalHomeListStore: ObservableObject {
       Task { @MainActor [weak store] in
         store?.apply(update, generation: generation)
       }
+    }
+  }
+
+  private nonisolated static func makeErrorHandler(
+    store: ExperimentalHomeListStore,
+    generation: Int,
+    failure: ObservationFailureFlag
+  ) -> @Sendable (any Error) -> Void {
+    let completion = makeCompletionHandler(store: store, generation: generation)
+    return { error in
+      failure.markFailed()
+      completion(.failure(error))
     }
   }
 
@@ -321,6 +339,16 @@ final class ExperimentalHomeListStore: ObservableObject {
         "all_chats": update.presentation.allChatCount,
         "structural_changes": update.structuralChangeCount,
       ]
+    )
+  }
+
+  private func clearObservationError(generation observationGeneration: Int) {
+    guard generation == observationGeneration, state.errorDescription != nil else { return }
+    state = ExperimentalHomeListState(
+      presentation: state.presentation,
+      isLoading: false,
+      errorDescription: nil,
+      revision: state.revision + 1
     )
   }
 
@@ -531,5 +559,23 @@ private final class ExperimentalHomeListPipeline: @unchecked Sendable {
       structuralChangeCount: structuralChangeCount,
       shouldAnimate: previous != nil && structuralChangeCount > 0 && structuralChangeCount <= 8
     )
+  }
+}
+
+/// Whether the observation reported an error that a later value should clear.
+private final class ObservationFailureFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var failed = false
+
+  func markFailed() {
+    lock.withLock { failed = true }
+  }
+
+  /// True once after a failure, on the first value that follows it.
+  func takeRecovery() -> Bool {
+    lock.withLock {
+      defer { failed = false }
+      return failed
+    }
   }
 }
