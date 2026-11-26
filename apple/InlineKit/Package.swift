@@ -103,6 +103,13 @@ let package = Package(
     // Targets are the basic building blocks of a package, defining a module or a test suite.
     // Targets can depend on other targets in this package and products from dependencies.
 
+    // sqlite3_config is variadic, so Swift cannot call it; this C shim sets process-wide SQLite options
+    // before the first connection opens.
+    .target(
+      name: "InlineSQLiteTuning",
+      dependencies: [.product(name: "SQLCipher", package: "SQLCipher.swift")]
+    ),
+
     .target(
       name: "InlineAvatarCore",
       swiftSettings: swiftSettings
@@ -139,6 +146,7 @@ let package = Package(
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         "InlineConfig",
         "InlineProtocol",
+        "InlineSQLiteTuning",
         "AnimatedMedia",
         "InlineAudioPlayback",
         "Logger",
