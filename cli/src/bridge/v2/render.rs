@@ -42,6 +42,18 @@ pub(crate) enum Vocabulary {
     Amp,
 }
 
+impl Vocabulary {
+    /// The harness's product name, as its own app says it.
+    pub(crate) fn product(self) -> &'static str {
+        match self {
+            Self::Codex => "Codex",
+            Self::Claude => "Claude Code",
+            Self::OpenCode => "OpenCode",
+            Self::Amp => "Amp",
+        }
+    }
+}
+
 /// A model told to "stay quiet" in a followed thread sometimes answers with
 /// a marker instead of nothing ("(quiet)", "[no reply]"). Posting it would
 /// be the opposite of quiet.
@@ -182,6 +194,9 @@ pub(crate) struct Renderer {
     awaiting_card: bool,
     /// The harness's live status ("Retrying (3/10)"), until the next item.
     live_status: Option<String>,
+    /// How long the session took to start before this turn, shown in its
+    /// progress: "Worked for" counts it too.
+    start_lead_ms: u64,
     /// Error texts already shown as callouts this turn, so the failed turn
     /// doesn't repeat the same error (Codex sends it as an `error`
     /// notification and again on `turn/completed`).
@@ -215,11 +230,43 @@ impl Renderer {
             shown_errors: Vec::new(),
             awaiting_card: false,
             live_status: None,
+            start_lead_ms: 0,
         }
     }
 
     pub(crate) fn mode(&self) -> OutputMode {
         self.mode
+    }
+
+    /// A person's message waits while the session starts: Detailed shows its
+    /// progress at once, headed "Starting Claude Code", and the turn takes
+    /// that message over when it starts. A start can take seconds (Codex
+    /// starts its MCP servers, Claude Code its hooks), and nothing showed.
+    pub(crate) fn starting(&mut self, now: u64) -> Vec<RenderOp> {
+        let mut ops = Vec::new();
+        if self.mode != OutputMode::Detailed || self.turn.is_some() || self.slot.is_some() {
+            return ops;
+        }
+        self.now_ms = now;
+        self.turn_slots = 0;
+        self.live_status = Some(format!("Starting {}", self.vocabulary.product()));
+        self.open_slot(now);
+        self.push_progress(&mut ops);
+        ops
+    }
+
+    /// The session did not start, or no turn came of the message: the
+    /// starting progress goes.
+    pub(crate) fn not_started(&mut self) -> Vec<RenderOp> {
+        if self.turn.is_some() {
+            return Vec::new();
+        }
+        self.live_status = None;
+        self.turn_slots = 0;
+        self.slot
+            .take()
+            .map(|slot| vec![RenderOp::DeleteProgress { slot: slot.id }])
+            .unwrap_or_default()
     }
 
     pub(crate) fn vocabulary(&self) -> Vocabulary {
@@ -307,8 +354,14 @@ impl Renderer {
                     self.awaiting_card = false;
                     self.live_status = None;
                     // Detailed shows "Working" from the start, as v1 did,
-                    // even for a turn that only answers.
+                    // even for a turn that only answers. A starting progress
+                    // becomes the turn's.
+                    self.start_lead_ms = 0;
                     if self.mode == OutputMode::Detailed {
+                        if let Some(slot) = &self.slot {
+                            self.turn_slots = 1;
+                            self.start_lead_ms = now.saturating_sub(slot.started_ms);
+                        }
                         self.open_slot(now);
                         self.push_progress(&mut ops);
                     }
@@ -991,6 +1044,7 @@ impl Renderer {
         // One progress message for the whole turn uses the turn's own time.
         let elapsed = if self.turn_slots <= 1 {
             duration_ms.unwrap_or_else(|| now.saturating_sub(self.turn_started_ms))
+                + std::mem::take(&mut self.start_lead_ms)
         } else {
             self.slot_elapsed(now)
         };
@@ -4662,6 +4716,49 @@ mod tests {
             kinds[card + 1].starts_with("progress 2: Waiting for your answer"),
             "{kinds:?}"
         );
+    }
+
+    #[test]
+    fn starting_progress_becomes_the_turns_or_goes_when_no_turn_comes() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Mo's Claude");
+        let mut ops = renderer.starting(0);
+        // The session takes a while; the progress was there all along.
+        ops.extend(run(
+            &mut renderer,
+            vec![
+                (4_000, turn(TurnPhase::Started { inputs: vec![] })),
+                (4_500, command("c1")),
+                (5_000, finished(None, TurnOutcome::Completed)),
+            ],
+        ));
+        let seen = kinds(&ops);
+        assert!(
+            seen[0].starts_with("progress 1: Starting Claude Code"),
+            "{seen:?}"
+        );
+        assert!(seen[1].starts_with("progress 1: Working"), "{seen:?}");
+        // One message for the start and the turn, and its time counts both.
+        assert_eq!(
+            seen.last().map(String::as_str),
+            Some("end 1: Worked for 4s"),
+            "{seen:?}"
+        );
+        assert!(seen.iter().all(|kind| !kind.contains(" 2:")), "{seen:?}");
+        // A start that fails, or a message that runs no turn, leaves nothing.
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        assert!(kinds(&renderer.starting(0))[0].starts_with("progress 1: Starting Codex"));
+        assert_eq!(kinds(&renderer.not_started()), vec!["delete 1".to_owned()]);
+        assert!(renderer.not_started().is_empty());
+        // Friendly shows no progress, and a running turn keeps its own.
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Claude, "Claude");
+        assert!(renderer.starting(0).is_empty());
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        run(
+            &mut renderer,
+            vec![(0, turn(TurnPhase::Started { inputs: vec![] }))],
+        );
+        assert!(renderer.starting(10).is_empty());
+        assert!(renderer.not_started().is_empty());
     }
 
     #[test]

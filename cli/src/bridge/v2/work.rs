@@ -49,6 +49,8 @@ const TICK: Duration = Duration::from_secs(15);
 /// The apps drop a compose action after 6 s without a repeat.
 const WORKING_HEARTBEAT: Duration = Duration::from_secs(3);
 const WORKING_SEND_TIMEOUT: Duration = Duration::from_secs(2);
+/// A session start this long is logged, by provider.
+const SLOW_OPEN: Duration = Duration::from_secs(2);
 /// Waits before each attempt to post an answer or card; after the last one
 /// it waits for the next tick.
 const PUBLISH_RETRIES: [Duration; 3] = [
@@ -528,6 +530,7 @@ pub(crate) fn spawn(
         resend: HashSet::new(),
         reported: None,
         working_due: None,
+        starting: false,
         phase: phase_tx,
         update_busy: crate::bridge::update_activity::global().key(),
         started_ms: now_ms(),
@@ -691,6 +694,9 @@ struct Actor {
     /// When the "working" compose action is next repeated; `None` while it
     /// is not shown.
     working_due: Option<tokio::time::Instant>,
+    /// A person's message waits while the session starts, and working and
+    /// the starting progress show for it.
+    starting: bool,
     phase: watch::Sender<WorkPhase>,
     update_busy: crate::bridge::update_activity::BusyKey,
     started_ms: u64,
@@ -1578,10 +1584,12 @@ impl Actor {
                 }
                 let retained = std::mem::take(&mut self.retained);
                 self.offer(retained).await;
+                self.clear_starting().await;
                 None
             }
             HoldEffect::OfferPending { inputs } => {
                 self.offer(inputs).await;
+                self.clear_starting().await;
                 None
             }
             HoldEffect::ShowHeldElsewhere { by } => {
@@ -1829,11 +1837,17 @@ impl Actor {
             (None, None) => OpenMode::Start,
         };
         let forking = matches!(mode, OpenMode::Fork { .. });
+        if self.waits_for_turn() {
+            self.show_starting().await;
+        }
         let mut opened = self.open(mode).await;
         // A harness that cannot fork starts the task fresh from its brief.
         if forking && matches!(opened, Err(OpenFailure::Other(_))) {
             log::warn!(target: "inline::bridge::v2", "chat={} fork failed; starting fresh", self.chat_id);
             opened = self.open(OpenMode::Start).await;
+        }
+        if opened.is_err() {
+            self.clear_starting().await;
         }
         match opened {
             Ok(()) => Some(HoldEvent::Acquired),
@@ -1847,6 +1861,47 @@ impl Actor {
                 Some(HoldEvent::Detached)
             }
         }
+    }
+
+    /// A message from a person waits on this acquire to run as a turn
+    /// (passive context and offers start none).
+    fn waits_for_turn(&self) -> bool {
+        let HoldState::Acquiring { pending, .. } = self.hold.state() else {
+            return false;
+        };
+        pending.iter().any(|pending| {
+            self.inputs
+                .get(&pending.id)
+                .is_some_and(|(input, _, _)| !matches!(input.delivery, Delivery::Passive))
+        })
+    }
+
+    /// Shows working and the starting progress before the session opens,
+    /// as the native apps show their spinner at once.
+    async fn show_starting(&mut self) {
+        if self.starting {
+            return;
+        }
+        self.starting = true;
+        let ops = self.renderer.starting(now_ms());
+        self.render(ops).await;
+        self.working_due = Some(tokio::time::Instant::now() + WORKING_HEARTBEAT);
+        let _ = tokio::time::timeout(
+            WORKING_SEND_TIMEOUT,
+            api::send_working(&self.agent.bot, self.chat_id, true),
+        )
+        .await;
+    }
+
+    /// The start is over: a turn took the progress and working over, or
+    /// none came and both go.
+    async fn clear_starting(&mut self) {
+        if !std::mem::take(&mut self.starting) || self.turn.is_some() {
+            return;
+        }
+        let ops = self.renderer.not_started();
+        self.render(ops).await;
+        self.sync_working().await;
     }
 
     async fn probe(&mut self) -> Option<HoldEvent> {
@@ -2046,7 +2101,14 @@ impl Actor {
             // A No project folder someone removed comes back empty.
             let _ = std::fs::create_dir_all(&folder);
         }
-        self.agent
+        let started = std::time::Instant::now();
+        let kind = match &mode {
+            OpenMode::Start => "start",
+            OpenMode::Resume { .. } => "resume",
+            OpenMode::Fork { .. } => "fork",
+        };
+        let opened = self
+            .agent
             .harness
             .open(OpenSpec {
                 mode,
@@ -2065,12 +2127,24 @@ impl Actor {
                 after: None,
                 output_mode: self.renderer.mode(),
             })
-            .await
-            .map_err(|error| match error {
-                OpenError::HeldElsewhere(by) => OpenFailure::HeldElsewhere(by),
-                OpenError::NotFound => OpenFailure::Other(NOT_FOUND.to_owned()),
-                other => OpenFailure::Other(other.to_string()),
-            })
+            .await;
+        // A slow start (Claude Code waiting on its startup, Codex on a
+        // resume) shows in the bridge logs by provider.
+        let elapsed = started.elapsed();
+        if elapsed >= SLOW_OPEN {
+            log::warn!(
+                target: "inline::bridge::v2",
+                "slow step=open provider={} mode={kind} ms={} chat={}",
+                self.renderer.vocabulary().product(),
+                elapsed.as_millis(),
+                self.chat_id
+            );
+        }
+        opened.map_err(|error| match error {
+            OpenError::HeldElsewhere(by) => OpenFailure::HeldElsewhere(by),
+            OpenError::NotFound => OpenFailure::Other(NOT_FOUND.to_owned()),
+            other => OpenFailure::Other(other.to_string()),
+        })
     }
 
     /// Records the native session as this thread's work (owner-authenticated).
@@ -5277,6 +5351,7 @@ pub(crate) mod recovery_tests {
             resend: HashSet::new(),
             reported: None,
             working_due: None,
+            starting: false,
             phase: phase_tx,
             update_busy: crate::bridge::update_activity::global().key(),
             started_ms: now_ms(),

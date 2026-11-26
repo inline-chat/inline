@@ -34,9 +34,10 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use inline_agent_bridge::harness::{
-    Decision, DecisionKind, Delivery, Envelope, Event, ExecutableSource, HarnessDriver, Input,
-    InputContent, InputId, InteractionKind, InteractionResponse, ItemBody, ItemUpdate, ModeId, Op,
-    OpenMode, OpenSpec, Origin, OutputMode, Session, SettingsChange, TurnPhase, UserId,
+    CatalogScope, Decision, DecisionKind, Delivery, Envelope, Event, ExecutableSource,
+    HarnessDriver, Input, InputContent, InputId, InteractionKind, InteractionResponse, ItemBody,
+    ItemUpdate, ModeId, Op, OpenMode, OpenSpec, Origin, OutputMode, Session, SettingsChange,
+    TurnPhase, UserId,
 };
 use inline_protocol::proto;
 
@@ -591,10 +592,39 @@ async fn live_render() {
     ] {
         let mut renderer = Renderer::new(mode, vocabulary, agent);
         renderer.set_folder(folder.clone());
-        let ops: Vec<RenderOp> = envelopes
-            .iter()
-            .flat_map(|envelope| renderer.apply(envelope))
-            .collect();
+        // The bridge shows the start before the session opens, for the first
+        // message.
+        let start = envelopes.first().map_or(0, |first| first.at_ms);
+        let mut ops: Vec<RenderOp> = envelopes
+            .first()
+            .map(|_| renderer.starting(start))
+            .unwrap_or_default();
+        // What each progress message said, and when: a start, a status line.
+        let mut timeline = String::new();
+        let mut note = |at: u64, ops: &[RenderOp]| {
+            for op in ops {
+                let line = match op {
+                    RenderOp::Progress { slot, doc } | RenderOp::EndProgress { slot, doc } => {
+                        format!("progress {slot}: {}", doc.text.lines().next().unwrap_or(""))
+                    }
+                    RenderOp::DeleteProgress { slot } => format!("progress {slot} deleted"),
+                    RenderOp::Final { doc } => {
+                        format!("answer: {}", doc.text.lines().next().unwrap_or(""))
+                    }
+                    _ => continue,
+                };
+                if !timeline.ends_with(&format!("{line}\n")) {
+                    let _ = writeln!(timeline, "{:>7} ms  {line}", at.saturating_sub(start));
+                }
+            }
+        };
+        note(start, &ops);
+        for envelope in &envelopes {
+            let applied = renderer.apply(envelope);
+            note(envelope.at_ms, &applied);
+            ops.extend(applied);
+        }
+        std::fs::write(out.join(format!("{name}.timeline.txt")), timeline).unwrap();
         // The chat while each card waited for its answer.
         let closings = ops
             .iter()
@@ -616,6 +646,20 @@ async fn live_render() {
             std::fs::write(
                 out.join(format!("{name}.waiting{suffix}.messages.json")),
                 serde_json::to_string_pretty(&manifest(agent, &waiting)).unwrap(),
+            )
+            .unwrap();
+        }
+        // The chat while the session started: the last progress still
+        // headed "Starting …".
+        let starting = ops.iter().rposition(
+            |op| matches!(op, RenderOp::Progress { doc, .. } if doc.text.starts_with("Starting")),
+        );
+        if let Some(last) = starting {
+            let snapshot = messages(ops[..=last].to_vec());
+            std::fs::write(out.join(format!("{name}.starting.txt")), dump(&snapshot)).unwrap();
+            std::fs::write(
+                out.join(format!("{name}.starting.messages.json")),
+                serde_json::to_string_pretty(&manifest(agent, &snapshot)).unwrap(),
             )
             .unwrap();
         }
@@ -647,6 +691,7 @@ async fn record(
 ) {
     let folder = scratch_repo(out);
     let (driver, vocabulary, agent) = harness(provider, out);
+    let opening = Instant::now();
     let session = driver
         .open(OpenSpec {
             mode: OpenMode::Start,
@@ -662,6 +707,32 @@ async fn record(
         })
         .await
         .unwrap_or_else(|error| panic!("open failed: {error:?}"));
+    println!("open: {} ms", opening.elapsed().as_millis());
+    // Listings: the open session's folder, then a folder with no session.
+    for (label, scope) in [
+        ("live session's folder", folder.clone()),
+        ("another folder", out.to_path_buf()),
+    ] {
+        let listing = Instant::now();
+        let catalog = driver
+            .catalog(CatalogScope {
+                folder: Some(scope),
+                session: None,
+            })
+            .await;
+        println!(
+            "catalog ({label}): {} ms, {}",
+            listing.elapsed().as_millis(),
+            catalog.map_or_else(
+                |error| format!("failed: {error}"),
+                |catalog| format!(
+                    "{} commands, {} usage windows",
+                    catalog.commands.len(),
+                    catalog.usage.len()
+                )
+            )
+        );
+    }
     let events = Arc::new(Mutex::new(Vec::<Envelope>::new()));
     let sink = events.clone();
     let mut stream = session.events();

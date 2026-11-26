@@ -131,7 +131,16 @@ struct PendingCatalog {
     >,
 }
 
-/// Logs a runtime step that held the event loop, by name and duration only.
+/// A heartbeat or publish's answer, for the loop.
+struct Beat {
+    /// The capabilities Inline took.
+    published: Option<Vec<BotCapability>>,
+    /// For a heartbeat: the health reported, and Inline's answer if it came.
+    report: Option<(RuntimeHealth, Option<proto::ReportAgentRuntimeResult>)>,
+}
+
+/// Logs a slow runtime step (one that held the event loop, or a heartbeat
+/// beside it), by name and duration only.
 fn note_slow(step: &str, started: Instant) {
     let elapsed = started.elapsed();
     if elapsed >= SLOW_STEP {
@@ -392,6 +401,17 @@ pub(crate) struct Runtime {
     catalog_failures: HashMap<CatalogKey, (tokio::time::Instant, Duration)>,
     catalog_tx: mpsc::UnboundedSender<CatalogRefresh>,
     catalog_rx: Option<mpsc::UnboundedReceiver<CatalogRefresh>>,
+    /// Heartbeats and settings publishing run beside the loop, so a slow
+    /// call never holds up a message; their results come back here.
+    beat_tx: mpsc::UnboundedSender<Beat>,
+    beat_rx: Option<mpsc::UnboundedReceiver<Beat>>,
+    /// A heartbeat or publish is in flight.
+    beating: bool,
+    /// Its task, stopped before the last "offline" report so a late
+    /// heartbeat never lands after it.
+    beat_task: Option<tokio::task::JoinHandle<()>>,
+    /// A heartbeat came due while one was in flight: it goes next.
+    beat_again: bool,
     /// A new installation listing the apps haven't been sent yet.
     publish_pending: bool,
     /// The folders registered with the bridge, which threads pick from with
@@ -470,6 +490,7 @@ impl Runtime {
         let (moves_tx, moves) = mpsc::unbounded_channel();
         let (lead_tx, lead) = mpsc::unbounded_channel();
         let (catalog_tx, catalog_rx) = mpsc::unbounded_channel();
+        let (beat_tx, beat_rx) = mpsc::unbounded_channel();
         if let Some(tools) = &tools {
             tools.set_lead(lead_tx.clone(), config.dm_chat_id);
         }
@@ -548,6 +569,11 @@ impl Runtime {
             catalog_failures: HashMap::new(),
             catalog_tx,
             catalog_rx: Some(catalog_rx),
+            beat_tx,
+            beat_rx: Some(beat_rx),
+            beating: false,
+            beat_task: None,
+            beat_again: false,
             publish_pending: false,
             folder_source: None,
             reconnect: Reconnect::default(),
@@ -648,7 +674,9 @@ impl Runtime {
         self.first_catalog().await;
         let _skill_sync = self.skills.clone().map(SkillPublisher::spawn);
         self.startup_activity.take();
-        let mut heartbeat = tokio::time::interval(self.heartbeat().await);
+        let mut beats = self.beat_rx.take().expect("run once");
+        // The first tick beats at once; its answer sets the interval.
+        let mut heartbeat = tokio::time::interval(DEFAULT_HEARTBEAT);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
         let mut moves = self.moves.take().expect("run once");
@@ -656,10 +684,9 @@ impl Runtime {
         let mut connection = tokio::time::interval(CONNECTION_CHECK);
         connection.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let result = loop {
-            if std::mem::take(&mut self.publish_pending) {
-                let started = Instant::now();
-                self.publish_capabilities().await;
-                note_slow("publish_capabilities", started);
+            if self.publish_pending && !self.beating {
+                self.publish_pending = false;
+                self.beat(false);
             }
             tokio::select! {
                 biased;
@@ -667,6 +694,14 @@ impl Runtime {
                 // Before any delivery, so a subthread's first reply finds its work.
                 Some((from, to)) = moves.recv() => self.moved_work(from, to),
                 Some(refresh) = catalogs.recv() => self.apply_catalog(refresh),
+                Some(beat) = beats.recv() => {
+                    if let Some(interval) = self.beat_done(beat).await
+                        && interval != heartbeat.period()
+                    {
+                        heartbeat = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+                        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    }
+                }
                 Some(request) = lead.recv() => {
                     let started = Instant::now();
                     self.lead_request(request).await;
@@ -677,19 +712,11 @@ impl Runtime {
                     self.keep_connected().await;
                     // A harness that needs setup shows in the apps right away.
                     if self.reported_health.as_ref() != Some(&self.agent.harness.describe().health) {
-                        self.heartbeat().await;
+                        self.beat(true);
                     }
                     note_slow("connection", started);
                 }
-                _ = heartbeat.tick() => {
-                    let started = Instant::now();
-                    let interval = self.heartbeat().await;
-                    note_slow("heartbeat", started);
-                    if interval != heartbeat.period() {
-                        heartbeat = tokio::time::interval(interval);
-                        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                    }
-                }
+                _ = heartbeat.tick() => self.beat(true),
                 delivery = events.recv_delivery(), if !crate::bridge::update_activity::global().draining() => {
                     let Some(_delivery_activity) = crate::bridge::update_activity::global().enter() else { continue; };
                     let Some(delivery) = delivery else {
@@ -720,6 +747,9 @@ impl Runtime {
                 }
             }
         };
+        if let Some(task) = self.beat_task.take() {
+            task.abort();
+        }
         self.report_status(proto::AgentRuntimeStatus::Offline, None)
             .await;
         for (_, work) in self.works.drain() {
@@ -841,48 +871,93 @@ impl Runtime {
     ///
     /// Listing never runs here: a stale or missing listing is asked for in
     /// the background, and published when it arrives.
-    async fn publish_capabilities(&mut self) {
+    /// The settings capabilities to publish, when they changed. Later
+    /// heartbeats reuse the last listing; without one yet, a listing is
+    /// asked for and nothing is published.
+    fn capabilities_to_publish(&mut self) -> Option<Vec<BotCapability>> {
         let catalog = match &self.catalog {
             Some((at, catalog)) if at.elapsed() < CAPABILITIES_REFRESH => catalog.clone(),
             Some(_) => self.cached_catalog(),
             None => {
                 self.cached_catalog();
-                return;
+                return None;
             }
         };
         let folders = self
             .folders(&catalog)
             .and_then(|folders| folders.catalog(&self.config.machine_label));
         let capabilities = settings::capabilities(&catalog, folders);
-        if self.published.as_ref() == Some(&capabilities) {
-            return;
-        }
-        match self
-            .agent
-            .bot
-            .set_bot_capabilities(capabilities.clone())
-            .await
-        {
-            Ok(_) => self.published = Some(capabilities),
-            Err(error) => {
-                log::warn!(target: "inline::bridge::v2", "settings capabilities not published: {error}");
-            }
-        }
+        (self.published.as_ref() != Some(&capabilities)).then_some(capabilities)
     }
 
-    async fn heartbeat(&mut self) -> Duration {
-        self.publish_capabilities().await;
-        let health = self.agent.harness.describe().health;
-        if let Some(observer) = &self.health_observer {
-            observer(&health);
+    /// Publishes changed capabilities and, for a heartbeat, reports the
+    /// runtime, in a task beside the loop; `beat_done` takes the answer. A
+    /// beat already in flight is followed by one more, never two at once.
+    fn beat(&mut self, report: bool) {
+        if self.beating {
+            self.beat_again |= report;
+            self.publish_pending |= !report;
+            return;
         }
-        let (status, setup) = runtime_status(&health, &self.config.agent_name);
-        let reported = self.report_status(status, setup).await;
-        if reported.is_some() {
-            self.reported_health = Some(health);
+        let capabilities = self.capabilities_to_publish();
+        let report = report.then(|| {
+            let health = self.agent.harness.describe().health;
+            if let Some(observer) = &self.health_observer {
+                observer(&health);
+            }
+            let (status, setup) = runtime_status(&health, &self.config.agent_name);
+            (health, self.runtime_input(status, setup))
+        });
+        if capabilities.is_none() && report.is_none() {
+            return;
         }
-        match reported {
-            Some(result) => {
+        self.beating = true;
+        let bot = self.agent.bot.clone();
+        let tx = self.beat_tx.clone();
+        self.beat_task = Some(tokio::spawn(async move {
+            let started = Instant::now();
+            let published = match capabilities {
+                Some(capabilities) => match bot.set_bot_capabilities(capabilities.clone()).await {
+                    Ok(_) => Some(capabilities),
+                    Err(error) => {
+                        log::warn!(target: "inline::bridge::v2", "settings capabilities not published: {error}");
+                        None
+                    }
+                },
+                None => None,
+            };
+            let report = match report {
+                Some((health, input)) => Some((
+                    health,
+                    api::report_runtime(&bot, input)
+                        .await
+                        .map_err(|error| log::warn!(target: "inline::bridge::v2", "heartbeat failed: {error}"))
+                        .ok(),
+                )),
+                None => None,
+            };
+            note_slow(
+                if report.is_some() {
+                    "heartbeat"
+                } else {
+                    "publish_capabilities"
+                },
+                started,
+            );
+            let _ = tx.send(Beat { published, report });
+        }));
+    }
+
+    /// Takes a beat's answer: what was published, the reported health, a
+    /// new default output mode, and the next heartbeat interval.
+    async fn beat_done(&mut self, beat: Beat) -> Option<Duration> {
+        self.beating = false;
+        if let Some(capabilities) = beat.published {
+            self.published = Some(capabilities);
+        }
+        let interval = match beat.report {
+            Some((health, Some(result))) => {
+                self.reported_health = Some(health);
                 if let Some(runtime) = &result.runtime {
                     let mode = output_mode(runtime.default_output_mode);
                     if mode != self.default_output_mode {
@@ -893,9 +968,34 @@ impl Runtime {
                         }
                     }
                 }
-                Duration::from_secs(u64::from(result.heartbeat_interval_seconds.max(15)))
+                Some(Duration::from_secs(u64::from(
+                    result.heartbeat_interval_seconds.max(15),
+                )))
             }
-            None => DEFAULT_HEARTBEAT,
+            Some((_, None)) => Some(DEFAULT_HEARTBEAT),
+            None => None,
+        };
+        if std::mem::take(&mut self.beat_again) {
+            self.beat(true);
+        }
+        interval
+    }
+
+    fn runtime_input(
+        &self,
+        status: proto::AgentRuntimeStatus,
+        setup: Option<proto::AgentRuntimeSetup>,
+    ) -> proto::ReportAgentRuntimeInput {
+        let info = self.agent.harness.describe();
+        proto::ReportAgentRuntimeInput {
+            provider: self.config.provider() as i32,
+            status: status as i32,
+            setup,
+            machine_label: Some(self.config.machine_label.clone()),
+            executable_path: self.config.executable_path.clone(),
+            executable_version: info.executable.version.clone(),
+            bridge_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+            ..Default::default()
         }
     }
 
@@ -904,23 +1004,10 @@ impl Runtime {
         status: proto::AgentRuntimeStatus,
         setup: Option<proto::AgentRuntimeSetup>,
     ) -> Option<proto::ReportAgentRuntimeResult> {
-        let info = self.agent.harness.describe();
-        api::report_runtime(
-            &self.agent.bot,
-            proto::ReportAgentRuntimeInput {
-                provider: self.config.provider() as i32,
-                status: status as i32,
-                setup,
-                machine_label: Some(self.config.machine_label.clone()),
-                executable_path: self.config.executable_path.clone(),
-                executable_version: info.executable.version.clone(),
-                bridge_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|error| log::warn!(target: "inline::bridge::v2", "heartbeat failed: {error}"))
-        .ok()
+        api::report_runtime(&self.agent.bot, self.runtime_input(status, setup))
+            .await
+            .map_err(|error| log::warn!(target: "inline::bridge::v2", "heartbeat failed: {error}"))
+            .ok()
     }
 
     async fn handle(&mut self, event: &ClientEvent) -> Result<(), Box<dyn std::error::Error>> {
@@ -1740,10 +1827,8 @@ impl Runtime {
             },
         );
         self.wait_for_catalog(listing, FIRST_CATALOG_WAIT).await;
-        self.publish_pending = false;
-        if self.catalog.is_some() {
-            self.publish_capabilities().await;
-        }
+        // Published beside the loop, with the first heartbeat.
+        self.publish_pending = self.catalog.is_some();
     }
 
     /// The installed skill `/name` means in this thread, if any. Inline's
