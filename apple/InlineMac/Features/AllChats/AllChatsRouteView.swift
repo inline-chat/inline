@@ -705,17 +705,35 @@ final class AllChatsViewModel: ObservableObject {
     db.warnIfInMemoryDatabaseForObservation("AllChatsViewModel.chats")
     #endif
 
-    chatsCancellable = ValueObservation
-      .tracking { db in
-        try ChatListDatabaseQuery.fetchSnapshots(
-          db,
-          spaceID: nil,
-          includeSpaceChatsInHome: true,
-          translationLanguage: UserLocale.getCurrentLanguage(),
-          includePreviewSenderIdentity: true
-        )
-      }
-      .publisher(in: db.dbWriter, scheduling: .immediate)
+    // A live query refetches only the rows a commit can change: a message, presence write or draft
+    // keystroke elsewhere, or opening a chat, no longer re-snapshots every row. All Chats shows
+    // neither openedDate nor the timestamp text. The first value is read synchronously (first frame).
+    let chatsSubject = CurrentValueSubject<[ChatListItemSnapshot]?, any Error>(nil)
+    let liveChats = ChatListLiveQuery(
+      writer: db.dbWriter,
+      parameters: ChatListLiveQuery.Parameters(
+        spaceID: nil,
+        includeSpaceChatsInHome: true,
+        translationLanguage: UserLocale.getCurrentLanguage(),
+        includePreviewSenderIdentity: true,
+        includeOpenedDate: false,
+        includeTimestampText: false
+      ),
+      translationLanguage: { UserLocale.getCurrentLanguage() }
+    )
+    let liveChatsCancellable = liveChats.start(
+      immediate: true,
+      deliveryQueue: .main,
+      onError: { chatsSubject.send(completion: .failure($0)) },
+      onChange: { chatsSubject.send($0) }
+    )
+    chatsCancellable = chatsSubject
+      .compactMap { $0 }
+      // A failed subject completes without a cancel: stop the live query either way.
+      .handleEvents(
+        receiveCompletion: { _ in liveChatsCancellable.cancel() },
+        receiveCancel: { liveChatsCancellable.cancel() }
+      )
       .sink(
         receiveCompletion: { [weak self] completion in
           guard let self else { return }
