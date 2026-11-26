@@ -330,29 +330,48 @@ final class SidebarViewModel {
     db.warnIfInMemoryDatabaseForObservation("SidebarViewModel.chats")
     #endif
 
-    chatsCancellable = ValueObservation
-      // This source always reads the same SQL region. Pool fetches can run
-      // off the writer and coalesce changes while a fetch is in flight.
+    // Chats come from a live query that refetches only the rows a commit can change (an incoming
+    // message, a presence write or a draft keystroke elsewhere no longer re-snapshots every row).
+    // Rows show neither openedDate nor a timestamp. The first value is read synchronously, as with
+    // `.immediate` scheduling, so the first frame has rows.
+    let chatsSubject = CurrentValueSubject<[ChatListItemSnapshot]?, any Error>(nil)
+    let liveChats = ChatListLiveQuery(
+      writer: db.dbWriter,
+      parameters: ChatListLiveQuery.Parameters(
+        spaceID: source.spaceId,
+        includeSpaceChatsInHome: true,
+        translationLanguage: UserLocale.getCurrentLanguage(),
+        includeOpenedDate: false,
+        includeTimestampText: false
+      ),
+      translationLanguage: { UserLocale.getCurrentLanguage() }
+    )
+    let liveChatsCancellable = liveChats.start(
+      immediate: true,
+      deliveryQueue: .main,
+      onError: { chatsSubject.send(completion: .failure($0)) },
+      onChange: { chatsSubject.send($0) }
+    )
+    let foldersPublisher: AnyPublisher<[Folder], any Error> = source.spaceId == nil
+      ? ValueObservation
       .trackingConstantRegion { db in
-        // Rows show neither openedDate nor a timestamp. Leaving openedDate out
-        // of the tracked region keeps opening a chat from re-snapshotting
-        // every row.
-        let chats = try ChatListDatabaseQuery.fetchSnapshots(
-          db,
-          spaceID: source.spaceId,
-          includeSpaceChatsInHome: true,
-          translationLanguage: UserLocale.getCurrentLanguage(),
-          includeOpenedDate: false,
-          includeTimestampText: false
-        )
-        let folders = source.spaceId == nil
-          ? try DialogFolder.order(DialogFolder.Columns.order, DialogFolder.Columns.id)
-            .fetchAll(db)
-            .map(Folder.init)
-          : []
-        return SourceSnapshot(chats: chats, folders: folders)
+        try DialogFolder.order(DialogFolder.Columns.order, DialogFolder.Columns.id)
+          .fetchAll(db)
+          .map(Folder.init)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
+      .eraseToAnyPublisher()
+      : Just([]).setFailureType(to: (any Error).self).eraseToAnyPublisher()
+
+    chatsCancellable = chatsSubject
+      .compactMap { $0 }
+      .combineLatest(foldersPublisher)
+      .map { SourceSnapshot(chats: $0, folders: $1) }
+      // A failed subject completes without a cancel: stop the live query either way.
+      .handleEvents(
+        receiveCompletion: { _ in liveChatsCancellable.cancel() },
+        receiveCancel: { liveChatsCancellable.cancel() }
+      )
       .removeDuplicates()
       .sink(
         receiveCompletion: { [weak self] completion in
