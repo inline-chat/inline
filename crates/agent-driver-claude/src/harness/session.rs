@@ -523,6 +523,25 @@ impl HarnessDriver for ClaudeHarness {
             self.validate(&folder)
                 .await
                 .map_err(|reason| DriverError::Unavailable(format!("{reason:?}")))?;
+            // Checked first, so health and a Claude Code update still show. A
+            // live session in this folder already answered initialize: its
+            // listing is the folder's, and it reads the plan usage without a
+            // new Claude Code process (hooks, MCP servers) starting for it.
+            let live = self
+                .state()
+                .sessions
+                .values()
+                .filter_map(Weak::upgrade)
+                .find(|session| session.cwd == folder && session.initialize.is_some());
+            if let Some(session) = live
+                && let Some(init) = session.initialize.as_ref()
+            {
+                let mut catalog = catalog_from(init, &self.permission_modes());
+                if let Ok(usage) = session.client.get_usage(USAGE_TIMEOUT).await {
+                    catalog.usage = super::mapper::plan_usage(&usage);
+                }
+                return Ok(self.with_saved_projects(catalog));
+            }
             // A short-lived process answers initialize with the folder's catalog.
             let options = self.launch(folder.clone(), SessionStart::Fresh);
             let (client, _events, init) = ClaudeClient::connect(
@@ -534,7 +553,11 @@ impl HarnessDriver for ClaudeHarness {
             .map_err(|error| DriverError::Unavailable(error.to_string()))?;
             // Best effort: API-key accounts and older CLIs have no plan usage.
             let usage = client.get_usage(USAGE_TIMEOUT).await;
-            client.close().await;
+            // The listing doesn't wait for the process to exit (up to 17 s
+            // with its grace periods).
+            tokio::spawn(async move {
+                client.close().await;
+            });
             let mut catalog = catalog_from(&init, &self.permission_modes());
             self.state().catalogs.insert(
                 folder,
