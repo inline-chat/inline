@@ -26,7 +26,7 @@ public final class FullMessageViewModel: ObservableObject, @unchecked Sendable {
     cancellable =
       ValueObservation
         .tracking { db in
-          try FullMessage.queryRequest()
+          try FullMessageQuery()
             .filter(Column("messageId") == messageId && Column("chatId") == chatId)
             .fetchOne(db)
         }

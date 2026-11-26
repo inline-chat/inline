@@ -232,11 +232,15 @@ struct ChatOpenPreparationTests {
 
 /// The plan step reading the opened chat's rows; later `message` aliases are joined replies.
 private func rootStep(_ plan: [String]) -> String? {
-  plan.first { $0.hasPrefix("SEARCH message1 ") || $0.hasPrefix("SCAN message1") }
+  // The bundle loader's base query reads `message` unaliased; the association graph aliased it `message1`.
+  plan.first {
+    $0.hasPrefix("SEARCH message ") || $0.hasPrefix("SCAN message") || $0.hasPrefix("SEARCH message1 ")
+  }
 }
 
-private func queryPlan(_ db: Database, _ request: QueryInterfaceRequest<FullMessage>) throws -> [String] {
-  let statement = try request.makePreparedRequest(db, forSingleResult: false).statement
+private func queryPlan(_ db: Database, _ request: FullMessageQuery) throws -> [String] {
+  // The bundle loader reads the base rows with this request; relations are separate keyed lookups.
+  let statement = try request.messages.makePreparedRequest(db, forSingleResult: false).statement
   return try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN \(statement.sql)", arguments: statement.arguments)
     .map { $0["detail"] as String }
 }
