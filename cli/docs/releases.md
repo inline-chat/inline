@@ -17,12 +17,14 @@ and the private unversioned `cli/package.json` retain their source versions.
 
 Review and commit the intended source changes, then prepare a release in a
 checkout with clean tracked files and index. The command waits for the exact SHA's
-`main` push in CI to pass **Rust workspace all targets** and **Workflow and
-release contracts**. The release gate reads its tools from trusted `main`,
-checks the existing tag and main ancestry, and freezes that SHA before checking
-out or executing candidate code or accessing release environments. Later main
-pushes do not replace the selected commit. CLI releases queue without cancelling
-running or older queued releases.
+`main` push in CI to pass **Rust workspace all targets**, **Workflow and release
+contracts**, **OpenClaw source, tests, and bundle**, and **Hermes source catalog
+and npm bundle parity**. CLI Release validates the OpenClaw and Hermes setup
+too, so a commit red there would fail on every retry. The release gate reads its
+tools from trusted `main`, checks the existing tag and main ancestry, and
+freezes that SHA before checking out or executing candidate code or accessing
+release environments. Later main pushes do not replace the selected commit. CLI
+releases queue without cancelling running or older queued releases.
 
 ```sh
 # Preview the version files without committing or publishing.
@@ -49,13 +51,14 @@ the release retains the selected commit.
 The CLI Alpha workflow cuts alphas on its own, the way macOS Tip and iOS Early
 Testers ship Apple builds. Each CI or CLI Update Qualification completion on
 main, plus a three-hourly sweep, selects the newest main commit that changed CLI
-inputs and passed both the **Rust workspace all targets** / **Workflow and
-release contracts** jobs and the updater qualification jobs. Newer pending CI
-does not delay an already-green candidate. Main CI and updater runs survive
-later pushes, while superseded PR runs are cancelled. It waits while any CLI
-release is running, and cuts at most one alpha every three hours (a manual run
-skips the interval). An unpublished alpha tag is retried with the same version
-and source before another alpha is allocated.
+inputs and passed both those four main CI jobs and the updater qualification
+jobs. A red CLI change is skipped for the next older green one, so when that is
+the last alpha's commit, the next alpha waits for a newer CLI change that
+passes. Newer pending CI does not delay an already-green candidate. Main CI and
+updater runs survive later pushes, while superseded PR runs are cancelled. It
+waits while any CLI release is running, and cuts at most one alpha every three
+hours (a manual run skips the interval). An unpublished alpha tag is retried
+with the same version and source before another alpha is allocated.
 
 It tags that commit with the next alpha above every CLI tag and the committed
 workspace version (`0.7.22-alpha.4` → `0.7.22-alpha.5`; after stable `0.7.22`,
