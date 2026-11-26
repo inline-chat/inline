@@ -523,12 +523,13 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   /// Runs link detection for messages about to be saved, so the save inside the write transaction finds
   /// the answer in `LinkDetectionMemo` instead of running NSDataDetector while holding the writer. Only
-  /// texts `init(from:)` will detect, and no more than the memo holds.
+  /// texts `init(from:)` will detect and the memo keeps, and no more than the memo holds. Longer texts are
+  /// detected inside the write as before; detecting them here would be thrown away.
   static func prepareLinkDetection(
     _ messages: some Sequence<InlineProtocol.Message>,
     memo: LinkDetectionMemo = .shared
   ) {
-    let texts = Array(messages.lazy.compactMap(textNeedingLinkDetection).prefix(memo.capacity))
+    let texts = Array(messages.lazy.compactMap(textNeedingLinkDetection).filter(memo.keeps).prefix(memo.capacity))
     guard !texts.isEmpty else { return }
     memo.reserve(texts.count)
     for text in texts {
@@ -2213,8 +2214,13 @@ final class LinkDetectionMemo: Sendable {
     memo.withLock { $0[text] }
   }
 
+  /// Whether `store` keeps an answer for `text`.
+  func keeps(_ text: String) -> Bool {
+    text.utf16.count <= maxTextLength
+  }
+
   func store(_ text: String, _ hasLink: Bool) {
-    guard text.utf16.count <= maxTextLength else { return }
+    guard keeps(text) else { return }
     memo.withLock { memo in
       if memo.count >= capacity { memo.removeAll(keepingCapacity: true) }
       memo[text] = hasLink
