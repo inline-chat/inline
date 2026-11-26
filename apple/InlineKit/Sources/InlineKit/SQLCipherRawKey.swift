@@ -1,5 +1,6 @@
 import CommonCrypto
 import Foundation
+import InlineSQLiteTuning
 import os
 
 /// Supplies SQLCipher keys as raw key data so connections skip the per-connection KDF.
@@ -47,11 +48,18 @@ enum SQLCipherRawKey {
     return "x'" + hex(key) + "'"
   }
 
+  /// Reads the salt through SQLite's VFS, never with a separate file handle: callers read it while the pool's
+  /// connections hold locks on the file, and closing another descriptor for it would release those locks.
   static func salt(forDatabaseAt path: String) -> Data? {
-    guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-    defer { try? handle.close() }
-    guard let header = try? handle.read(upToCount: saltLength), header.count == saltLength else {
-      // An empty file (created but never written) has no salt yet. Let SQLCipher choose one.
+    // The read initializes SQLite; process options must be set before that.
+    _ = AppDatabase.sqliteProcessConfiguration
+    var header = Data(count: saltLength)
+    let read = header.withUnsafeMutableBytes { bytes in
+      inline_sqlite_read_file_prefix(path, bytes.baseAddress, Int32(saltLength))
+    }
+    guard read == Int32(saltLength) else {
+      // Missing or unreadable, or an empty file (created but never written) with no salt yet. Let SQLCipher
+      // choose one.
       return nil
     }
     // A plaintext SQLite file starts with "SQLite format 3\0"; it has no salt to derive from.
