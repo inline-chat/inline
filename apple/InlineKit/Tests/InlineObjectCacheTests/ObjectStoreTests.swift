@@ -136,6 +136,43 @@ struct ObjectStoreTests {
     #expect(announced == [[1]])
   }
 
+  @Test("noted records are re-read alone, the most recently used first up to the tracked limit")
+  func notedRecordsRefreshAlone() async {
+    let (store, source) = makeStore([1: "a", 2: "b", 3: "c", 100: "x"], tracked: 1)
+    _ = store.get([1, 2, 3, 100])
+    _ = store.cached([2])
+    var announced: [Set<Int>] = []
+    let subscription = store.changes.sink { announced.append($0) }
+    defer { subscription.cancel() }
+
+    source.set(1, "a2")
+    source.set(2, "b2")
+    store.noteWrites([1, 2, 50])
+    #expect(store.cached([3]).state(of: 3) == .fresh)
+    #expect(await eventually { store.peek(2) == "b2" })
+    // Over the limit of one: 2 is the most recently used, so 1 waits until it is used.
+    #expect(store.peek(1) == "a")
+    #expect(source.asyncReads == [[2]])
+    #expect(store.cached([100]).state(of: 100) == .fresh)
+    #expect(announced == [[2]])
+    #expect(await eventually { store.cached([1]).record(1) == "a2" })
+  }
+
+  @Test("a write to a kind with no known record still makes that kind's read in flight come back stale")
+  func kindWriteWithoutIDsStalesInFlightRead() async {
+    let (store, source) = makeStore([1: "old"])
+    source.holdNextRead()
+    let slow = Task { await store.load([1]) }
+    #expect(await eventually { source.isHoldingRead })
+
+    // A deleted row the store can't name: no ID, only the kind.
+    source.set(1, nil)
+    store.noteWrites([], touching: [0])
+    source.releaseRead()
+    _ = await slow.value
+    #expect(await eventually { store.cached([1]).state(of: 1) == .missing })
+  }
+
   @Test("records beyond the tracked limit stay stale until used")
   func untrackedStayStaleUntilUsed() async {
     let (store, source) = makeStore([1: "a", 2: "b", 3: "c"], tracked: 2)
