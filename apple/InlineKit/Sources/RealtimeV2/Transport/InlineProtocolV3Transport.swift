@@ -484,6 +484,18 @@ public actor InlineProtocolV3Transport: Transport {
 
   public func isApplicationAuthenticatedOnConnect() async -> Bool { true }
 
+  /// Opens the transfer connection now, so a coming upload's first RPC finds it ready instead of
+  /// paying its handshake (a fresh temporary key: about seven round trips). Holding it only until it
+  /// is open leaves it idle, so the usual idle timer closes it if no upload follows.
+  public func prewarmTransfer() async {
+    guard let connection, let connectionAuthority, auth.isCurrent(connectionAuthority) else { return }
+    // An open one is left alone: the server times it out from its last request, so restarting our
+    // idle timer here would keep a socket the server is about to close.
+    guard transferConnection == nil || transferMain !== connection else { return }
+    guard let transfer = await acquireTransfer(main: connection) else { return }
+    releaseTransfer(transfer)
+  }
+
   private func completeProbe(
     _ result: Result<Void, any Error>,
     source: InlineProtocolV3Connection,
@@ -1139,6 +1151,11 @@ public actor NegotiatingRealtimeTransport: Transport {
   public func isApplicationAuthenticatedOnConnect() async -> Bool {
     guard let active else { return false }
     return await active.isApplicationAuthenticatedOnConnect()
+  }
+
+  public func prewarmTransfer() async {
+    guard let active, state == .connected else { return }
+    await active.prewarmTransfer()
   }
 
   private func install(_ kind: Kind) {

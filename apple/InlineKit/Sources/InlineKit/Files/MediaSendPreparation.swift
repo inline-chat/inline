@@ -28,11 +28,19 @@ public enum MediaSendPreparation {
   public struct PhotoTarget: Sendable, Equatable {
     public let maxPixelSize: Int
     public let jpegQuality: Double
+    /// Lower JPEG qualities tried in order when the photo at `jpegQuality` is larger than one
+    /// upload part; the first that fits is sent. One that fits none keeps `jpegQuality`: it goes in
+    /// several parts either way.
+    var onePartQualities: [Double] = []
   }
 
   public static func target(for content: PhotoContent) -> PhotoTarget {
     switch content {
-    case .camera: PhotoTarget(maxPixelSize: 1_600, jpegQuality: 0.8)
+    // A photo that fits one part uploads inline with its create in one round trip; a larger one
+    // also pays for create, a part each and finish (server time p50 2.2 s for two or three parts
+    // against ~0.45 s for one). Measured on 1600 px images, 0.72 keeps 76–94% of the bytes at 0.8
+    // and 0.68 keeps 63–83%, so this saves photos up to ~680 KiB at a barely visible cost.
+    case .camera: PhotoTarget(maxPixelSize: 1_600, jpegQuality: 0.8, onePartQualities: [0.72, 0.68])
     case .graphic: PhotoTarget(maxPixelSize: 2_560, jpegQuality: 0.8)
     }
   }
@@ -368,7 +376,34 @@ public enum MediaSendPreparation {
       : [:]
     CGImageDestinationAddImage(destination, image, properties as CFDictionary)
     guard CGImageDestinationFinalize(destination), data.length > 0 else { throw PreparationError.encodeFailed }
-    return PreparedPhoto(data: data as Data, format: format, width: image.width, height: image.height, content: content)
+    var encoded = data as Data
+    if format == .jpeg, encoded.count > onePartByteCount {
+      for quality in target.onePartQualities {
+        let smaller = try encodeJPEG(image, quality: quality)
+        if smaller.count <= onePartByteCount {
+          encoded = smaller
+          break
+        }
+      }
+    }
+    return PreparedPhoto(data: encoded, format: format, width: image.width, height: image.height, content: content)
+  }
+
+  /// The largest body that uploads as one part, inline with its create.
+  static var onePartByteCount: Int { DurableUploadCoordinator.partSize }
+
+  private static func encodeJPEG(_ image: CGImage, quality: Double) throws -> Data {
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(
+      data as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil
+    ) else {
+      throw PreparationError.encodeFailed
+    }
+    CGImageDestinationAddImage(
+      destination, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+    )
+    guard CGImageDestinationFinalize(destination), data.length > 0 else { throw PreparationError.encodeFailed }
+    return data as Data
   }
 
   static func hasVisibleTransparency(_ image: CGImage) -> Bool {

@@ -58,8 +58,14 @@ public protocol Transport: Sendable {
   /// Legacy V2 still performs `connectionInit`; V3 verifies its authorization key before
   /// publishing `.connected` and must not synthesize a second asynchronous open handshake.
   func isApplicationAuthenticatedOnConnect() async -> Bool
+
+  /// Opens the file-transfer path ahead of an upload that is about to start (media attached, or a
+  /// send preparing its file), so the first part doesn't wait for a handshake. Best effort: it
+  /// never throws, does nothing while disconnected, and an unused path closes on its idle timer.
+  func prewarmTransfer() async
 }
 
 public extension Transport {
   func isApplicationAuthenticatedOnConnect() async -> Bool { false }
+  func prewarmTransfer() async {}
 }

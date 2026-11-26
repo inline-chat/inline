@@ -301,6 +301,7 @@ private actor CancelingUploadStaging: NativeUploadStaging {
 
 private actor BlockingPartUploadRPCMock: NativeUploadRPCTransport {
   private var createdUploads = 0
+  private var inlineCreates: [Bool] = []
   private var startedParts: [UInt8] = []
   private var partContinuations: [CheckedContinuation<Void, Never>] = []
   private var finishedUploads = 0
@@ -314,6 +315,7 @@ private actor BlockingPartUploadRPCMock: NativeUploadRPCTransport {
     switch (method, input) {
     case let (.createUpload, .createUpload(create)):
       createdUploads += 1
+      inlineCreates.append(create.hasInlineData)
       var result = CreateUploadResult()
       result.uploadID = create.clientUploadID
       result.partSize = 524_288
@@ -347,6 +349,7 @@ private actor BlockingPartUploadRPCMock: NativeUploadRPCTransport {
   }
 
   func createCount() -> Int { createdUploads }
+  func inlineCreateFlags() -> [Bool] { inlineCreates }
   func startedValues() -> [UInt8] { startedParts }
   func finishCount() -> Int { finishedUploads }
   func cancelCount() -> Int { cancelledUploads }
@@ -1569,15 +1572,16 @@ struct NativeUploadTests {
     }
     #expect(await transport.startedValues().count == window)
 
+    // A one-part file waits for a slot before its create, so it can still go inline.
     let fourthTask = makeTask(window)
     tasks.append(fourthTask)
     for _ in 0 ..< 200 {
-      if await transport.createCount() == window + 1 { break }
+      if await coordinator.waitingPartTransfers == 1 { break }
       try await Task.sleep(for: .milliseconds(5))
     }
-    #expect(await transport.createCount() == window + 1)
+    #expect(await coordinator.waitingPartTransfers == 1)
+    #expect(await transport.createCount() == window)
     #expect(await transport.startedValues().count == window)
-    for _ in 0 ..< 10 { await Task.yield() }
 
     let fourthCompletion = CompletionProbe()
     let fourthResult = Task {
@@ -1602,8 +1606,76 @@ struct NativeUploadTests {
     }
     #expect(error is CancellationError)
     #expect(!(await transport.startedValues()).contains(UInt8(window + 1)))
-    #expect(await transport.cancelCount() == 1)
+    // Canceled before its create: nothing exists on the server to cancel.
+    #expect(await transport.createCount() == window)
+    #expect(await transport.cancelCount() == 0)
     #expect(await transport.finishCount() == window)
+    #expect(await coordinator.waitingPartTransfers == 0)
+  }
+
+  @Test("a one-part file waits for a slot when the window is full, then still goes inline with create")
+  func onePartFileWaitsForSlotAndGoesInline() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-native-upload-inline-wait-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transport = BlockingPartUploadRPCMock()
+    let coordinator = DurableUploadCoordinator(
+      transport: transport,
+      staging: PassthroughUploadStaging(),
+      ownerScope: { "test-owner" }
+    )
+    let window = DurableUploadCoordinator.initialPartWindow
+    let sources = try (1 ... window + 1).map { value in
+      let url = directory.appendingPathComponent("source-\(value)")
+      try Data([UInt8(value)]).write(to: url)
+      return url
+    }
+    let makeTask: @Sendable (Int) -> Task<UploadComplete, Error> = { index in
+      let source = sources[index]
+      return Task {
+        try await coordinator.upload(
+          NativeMediaUploadRequest(
+            logicalID: "photo:inline-wait-\(index)", fileURL: source, fileName: "photo.jpg",
+            mimeType: "image/jpeg", kind: .photo
+          ),
+          progress: { _, _ in }
+        )
+      }
+    }
+    // This server ignores inline bodies, so each of the first uploads ends up holding a slot with
+    // its part. Start them one at a time: slots go first come, first served.
+    var tasks: [Task<UploadComplete, Error>] = []
+    for index in 0 ..< window {
+      tasks.append(makeTask(index))
+      for _ in 0 ..< 200 {
+        if (await transport.startedValues()).contains(UInt8(index + 1)) { break }
+        try await Task.sleep(for: .milliseconds(5))
+      }
+    }
+    #expect(await transport.startedValues().count == window)
+    tasks.append(makeTask(window))
+    for _ in 0 ..< 200 {
+      if await coordinator.waitingPartTransfers == 1 { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(await coordinator.waitingPartTransfers == 1)
+    #expect(await transport.createCount() == window)
+
+    await transport.releaseAllParts()
+    for _ in 0 ..< 400 {
+      if await transport.createCount() == window + 1, await transport.startedValues().count == window + 1 { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    #expect(await transport.createCount() == window + 1)
+    #expect(await transport.inlineCreateFlags() == Array(repeating: true, count: window + 1))
+    await transport.releaseAllParts()
+    for task in tasks {
+      _ = try await task.value
+    }
+    #expect(await transport.finishCount() == window + 1)
+    #expect(await coordinator.waitingPartTransfers == 0)
   }
 
   @Test("starts with the part window, grows it on fast parts, refills out of order, and finishes after every part")

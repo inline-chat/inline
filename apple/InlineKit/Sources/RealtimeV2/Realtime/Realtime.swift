@@ -739,6 +739,13 @@ public actor RealtimeV2 {
     await startTransport()
   }
 
+  /// Opens the file-transfer connection ahead of an upload (see `Transport.prewarmTransfer`).
+  /// Best effort and cheap to repeat; it opens nothing while the main connection is down.
+  public func prewarmTransfer() async {
+    guard !isPreparingForTermination, auth.snapshot().isLoggedIn else { return }
+    await session.prewarmTransfer()
+  }
+
   private func runTransaction(
     _ transactionWrapper: TransactionWrapper,
     owner expectedOwner: TransactionOwner

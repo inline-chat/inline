@@ -499,6 +499,13 @@ public protocol NativeUploadRPCTransport: Sendable {
     input: RpcCall.OneOf_Input?,
     timeout: Duration?
   ) async throws -> RpcResult.OneOf_Result?
+
+  /// Opens whatever connection uploads use, ahead of one that is about to start. Best effort.
+  func prewarmUploadTransport() async
+}
+
+public extension NativeUploadRPCTransport {
+  func prewarmUploadTransport() async {}
 }
 
 public protocol AccountBoundNativeUploadRPCTransport: NativeUploadRPCTransport {
@@ -530,6 +537,10 @@ extension RealtimeV2: AccountBoundNativeUploadRPCTransport {
     timeout: Duration?
   ) async throws -> RpcResult.OneOf_Result? {
     try await callRpcDirect(method: method, input: input, timeout: timeout)
+  }
+
+  public func prewarmUploadTransport() async {
+    await prewarmTransfer()
   }
 
   public func callUploadRPC(
@@ -605,7 +616,8 @@ public actor DurableUploadCoordinator: MediaUploading {
   )
 
   private static let hashReadSize = 1_048_576
-  private static let partSize = 524_288
+  /// Upload part size; a file up to this size goes inline with its create (one round trip).
+  static let partSize = 524_288
   private static let maximumPartCount: UInt32 = 1_000
   /// Parts in flight across every upload adapt to how long a part takes: grow by one when a part
   /// is accepted within 5 s, halve over 15 s or after a failed attempt. A long round trip alone
@@ -645,6 +657,8 @@ public actor DurableUploadCoordinator: MediaUploading {
     let continuation: CheckedContinuation<Bool, Never>
   }
   private var partTransferWaiters: [PartTransferWaiter] = []
+  /// Transfers (parts, and one-part creates) waiting for a slot in the shared window.
+  var waitingPartTransfers: Int { partTransferWaiters.count }
 
   public init(
     transport: any NativeUploadRPCTransport = Api.realtime,
@@ -660,6 +674,16 @@ public actor DurableUploadCoordinator: MediaUploading {
     self.accountFence = accountFence
     self.processingTimeout = processingTimeout
     self.ownerScope = ownerScope
+  }
+
+  /// Opens the upload connection while the caller still prepares the file (attaching, or encoding a
+  /// video), so the first part doesn't also pay its handshake (about seven round trips to the
+  /// origin; ~1.4 s measured from Europe). Returns at once; repeating it is cheap.
+  public nonisolated func prewarmTransport() {
+    let transport = transport
+    Task.detached(priority: .utility) {
+      await transport.prewarmUploadTransport()
+    }
   }
 
   public func upload(
@@ -715,11 +739,15 @@ public actor DurableUploadCoordinator: MediaUploading {
       create.metadata = request.metadata
       // A file that fits in one part rides along with create, which stores and finishes it in the
       // same call: one round trip instead of create, part and finish. Older servers ignore it and
-      // the part uploads as usual. It counts against the part window, and only when a slot is free
-      // right away; otherwise the create goes without it and the part waits like any other.
-      let holdsInlineSlot = byteCount <= Int64(Self.partSize) && tryAcquirePartTransferSlot()
+      // the part uploads as usual. It takes a part slot like any part, waiting its turn when the
+      // window is full (an album): the part would wait for that slot anyway, and going inline
+      // after the wait still saves the part and finish round trips.
+      let holdsInlineSlot = byteCount <= Int64(Self.partSize)
       if holdsInlineSlot {
+        try await acquirePartTransferSlot()
         do {
+          // The wait can be long: recheck what may have changed during it.
+          try validateAccount(accountToken)
           create.inlineData = try await Self.readPart(at: stagedURL, offset: 0, length: Int(byteCount))
         } catch {
           releasePartTransferSlot()
@@ -1275,13 +1303,6 @@ public actor DurableUploadCoordinator: MediaUploading {
     } catch {
       return false
     }
-  }
-
-  /// Takes a part slot only if one is free now; never waits.
-  private func tryAcquirePartTransferSlot() -> Bool {
-    guard activePartTransfers < partWindow, partTransferWaiters.isEmpty else { return false }
-    activePartTransfers += 1
-    return true
   }
 
   private func acquirePartTransferSlot() async throws {

@@ -378,6 +378,10 @@ actor ProtocolSession: ProtocolSessionType {
     await transport.stop()
   }
 
+  func prewarmTransfer() async {
+    await transport.prewarmTransfer()
+  }
+
   func sendPing(nonce: UInt64) async {
     let msg = wrapMessage(body: .ping(.with {
       $0.nonce = nonce

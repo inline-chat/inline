@@ -28,6 +28,54 @@ struct MediaSendPreparationTests {
     #expect(exif?[kCGImagePropertyExifDateTimeOriginal] == nil)
   }
 
+  @Test("a camera photo over one upload part drops to the first lower quality that fits")
+  func cameraPhotoFitsOnePart() throws {
+    // Sensor-like noise makes a 1600 px JPEG at 0.8 larger than one part.
+    let image = try #require(makeNoisyImage(width: 1_600, height: 1_600, amplitude: 12))
+    let plain = try MediaSendPreparation.preparePhoto(
+      .cgImage(image), content: .camera, target: .init(maxPixelSize: 1_600, jpegQuality: 0.8)
+    )
+    #expect(plain.data.count > MediaSendPreparation.onePartByteCount)
+
+    let fitted = try MediaSendPreparation.preparePhoto(
+      .cgImage(image), content: .camera,
+      target: .init(maxPixelSize: 1_600, jpegQuality: 0.8, onePartQualities: [0.78, 0.5])
+    )
+    #expect(fitted.data.count <= MediaSendPreparation.onePartByteCount)
+    #expect(fitted.format == .jpeg)
+    #expect(fitted.width == 1_600)
+    #expect(fitted.height == 1_600)
+  }
+
+  @Test("a photo no lower quality can fit in one part keeps its quality, and one that fits is untouched")
+  func onePartFallbackKeepsQuality() throws {
+    let large = try #require(makeNoisyImage(width: 1_600, height: 1_600, amplitude: 12))
+    let plain = try MediaSendPreparation.preparePhoto(
+      .cgImage(large), content: .camera, target: .init(maxPixelSize: 1_600, jpegQuality: 0.8)
+    )
+    let tried = try MediaSendPreparation.preparePhoto(
+      .cgImage(large), content: .camera,
+      target: .init(maxPixelSize: 1_600, jpegQuality: 0.8, onePartQualities: [0.79])
+    )
+    #expect(tried.data == plain.data)
+
+    let small = try #require(makeImage(width: 1_600, height: 1_200, alpha: false))
+    let smallPlain = try MediaSendPreparation.preparePhoto(
+      .cgImage(small), content: .camera, target: .init(maxPixelSize: 1_600, jpegQuality: 0.8)
+    )
+    let smallCamera = try MediaSendPreparation.preparePhoto(.cgImage(small), content: .camera)
+    #expect(smallCamera.data == smallPlain.data)
+  }
+
+  @Test("only camera photos trade quality for one part; graphics keep theirs")
+  func onePartQualitiesAreCameraOnly() {
+    #expect(!MediaSendPreparation.target(for: .camera).onePartQualities.isEmpty)
+    #expect(MediaSendPreparation.target(for: .camera).onePartQualities.allSatisfy { $0 >= 0.68 && $0 < 0.8 })
+    #expect(MediaSendPreparation.target(for: .graphic).onePartQualities.isEmpty)
+    #expect(MediaSendPreparation.videoThumbnailTarget.onePartQualities.isEmpty)
+    #expect(MediaSendPreparation.fileCopyTarget.onePartQualities.isEmpty)
+  }
+
   @Test("the prepared file needs no further preparation before upload")
   func preparedIsFinal() throws {
     let source = try makeJPEG(width: 3000, height: 2000, orientation: 1, camera: true, gps: true)
@@ -327,6 +375,24 @@ private func makeImage(width: Int, height: Int, alpha: Bool, transparentCorner: 
   context.fill(CGRect(x: width / 4, y: height / 4, width: width / 2, height: height / 2))
   if transparentCorner {
     context.clear(CGRect(x: 0, y: 0, width: max(1, width / 10), height: max(1, height / 10)))
+  }
+  return context.makeImage()
+}
+
+/// Flat color plus deterministic per-channel noise, which JPEG compresses like camera grain.
+private func makeNoisyImage(width: Int, height: Int, amplitude: Int) -> CGImage? {
+  guard let context = CGContext(
+    data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+  ), let pixels = context.data else {
+    return nil
+  }
+  let buffer = pixels.bindMemory(to: UInt8.self, capacity: width * height * 4)
+  var seed: UInt64 = 42
+  for index in 0 ..< width * height * 4 {
+    seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+    let noise = Int((seed >> 33) % UInt64(2 * amplitude + 1)) - amplitude
+    buffer[index] = UInt8(clamping: 128 + (index % 4) * 20 + noise)
   }
   return context.makeImage()
 }

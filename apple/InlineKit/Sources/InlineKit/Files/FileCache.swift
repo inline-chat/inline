@@ -715,6 +715,13 @@ public actor FileCache: Sendable {
 
   // MARK: - Local Saves
 
+  /// Media saved here is about to be sent: open the upload connection while the person finishes
+  /// the message, so the upload doesn't start with a handshake.
+  private static func prewarmUploadConnection() {
+    guard Auth.shared.handle.isLoggedIn() else { return }
+    DurableUploadCoordinator.shared.prewarmTransport()
+  }
+
   /// Prepares a photo the way it is sent (resized for its content, upright, no metadata; see
   /// `MediaSendPreparation`) and stores the result as a local photo. The stored file is the exact
   /// body that is later staged, hashed and uploaded. Does decode and disk work: call off the main thread.
@@ -723,6 +730,7 @@ public actor FileCache: Sendable {
     content: MediaSendPreparation.PhotoContent? = nil,
     target: MediaSendPreparation.PhotoTarget? = nil
   ) throws -> InlineKit.PhotoInfo {
+    prewarmUploadConnection()
     let prepared = try MediaSendPreparation.preparePhoto(source, content: content, target: target)
     let localPath = UUID().uuidString + prepared.format.toExt()
     let fileURL = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
@@ -757,6 +765,7 @@ public actor FileCache: Sendable {
 
   // Note: this does synchronous disk/thumbnail/DB work; avoid calling on MainActor for large assets.
   public static func saveVideo(url: URL, thumbnail: PlatformImage? = nil) async throws -> InlineKit.VideoInfo {
+    prewarmUploadConnection()
     // Handle security scoped URL before any reads
     let hasAccess = url.startAccessingSecurityScopedResource()
     defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
@@ -838,6 +847,7 @@ public actor FileCache: Sendable {
     url: URL,
     options: AnimatedImageVideoConversionOptions = .uploadDefault
   ) async throws -> InlineKit.VideoInfo {
+    prewarmUploadConnection()
     let hasAccess = url.startAccessingSecurityScopedResource()
     defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
 
@@ -1013,6 +1023,7 @@ public actor FileCache: Sendable {
   }
 
   private static func stageDocument(url: URL) throws -> StagedDocument {
+    prewarmUploadConnection()
     let fileName = url.lastPathComponent
 
     let fileManager = FileManager.default

@@ -670,9 +670,28 @@ public actor FileUploader {
     var uploadMimeType = mimeType
     var uploadFileName = fileName
     var resolvedVideoMetadata = videoMetadata
-    var resolvedThumbnailMetadata: ApiClient.ThumbnailUploadMetadata?
     var resolvedVoiceMetadata = voiceMetadata
     var temporaryArtifacts: [URL] = []
+
+    // Open the upload connection while the file is prepared below (a video encodes for seconds),
+    // so the first part doesn't also wait for its handshake.
+    DurableUploadCoordinator.shared.prewarmTransport()
+    // A video's or document's thumbnail is ready before any processing, so it uploads while the
+    // file is prepared rather than after it; the main upload's create names it.
+    let thumbnail: ApiClient.ThumbnailUploadMetadata? = switch media {
+      case .video:
+        videoMetadata?.thumbnail.map {
+          ApiClient.ThumbnailUploadMetadata(
+            data: $0,
+            mimeType: videoMetadata?.thumbnailMimeType ?? MIMEType(text: "image/jpeg")
+          )
+        }
+      case let .document(documentInfo):
+        Self.thumbnailUploadMetadata(from: documentInfo.thumbnail)
+      case .photo, .voice:
+        nil
+    }
+    async let uploadedThumbnailFileUniqueID = Self.uploadThumbnail(thumbnail, uploadId: uploadId)
 
     switch media {
     case .photo:
@@ -731,8 +750,8 @@ public actor FileUploader {
       if prepared.cleanupAfterUpload {
         temporaryArtifacts.append(prepared.url)
       }
-    case let .document(documentInfo):
-      resolvedThumbnailMetadata = Self.thumbnailUploadMetadata(from: documentInfo.thumbnail)
+    case .document:
+      break
     case let .voice(voiceContent):
       resolvedVoiceMetadata = ApiClient.VoiceUploadMetadata(
         duration: Int(voiceContent.duration),
@@ -762,27 +781,7 @@ public actor FileUploader {
       logicalTotalBytes: uploadSizeBytes
     )
 
-    var thumbnailFileUniqueID: String?
-    let thumbnailData = resolvedThumbnailMetadata?.data ?? resolvedVideoMetadata?.thumbnail
-    let thumbnailMimeType = resolvedThumbnailMetadata?.mimeType.text ??
-      resolvedVideoMetadata?.thumbnailMimeType?.text ?? "image/jpeg"
-    if let thumbnailData {
-      let thumbnailURL = FileHelpers.getTrueTemporaryDirectory()
-        .appendingPathComponent("inline-upload-thumbnail-\(UUID().uuidString)")
-      try thumbnailData.write(to: thumbnailURL, options: .atomic)
-      temporaryArtifacts.append(thumbnailURL)
-      let thumbnail = try await DurableUploadCoordinator.shared.upload(
-        NativeMediaUploadRequest(
-          logicalID: "\(uploadId):thumbnail",
-          fileURL: thumbnailURL,
-          fileName: "thumbnail.jpg",
-          mimeType: thumbnailMimeType,
-          kind: .photo
-        ),
-        progress: { _, _ in }
-      )
-      thumbnailFileUniqueID = thumbnail.fileUniqueID
-    }
+    let thumbnailFileUniqueID = try await uploadedThumbnailFileUniqueID
 
     let kind: InlineProtocol.UploadKind
     let nativeMetadata: CreateUploadInput.OneOf_Metadata?
@@ -1129,6 +1128,29 @@ public actor FileUploader {
   }
 
   // MARK: - Helpers
+
+  /// Uploads a send's thumbnail and returns its file ID, or nil when it has none.
+  private nonisolated static func uploadThumbnail(
+    _ thumbnail: ApiClient.ThumbnailUploadMetadata?,
+    uploadId: String
+  ) async throws -> String? {
+    guard let thumbnail else { return nil }
+    let url = FileHelpers.getTrueTemporaryDirectory()
+      .appendingPathComponent("inline-upload-thumbnail-\(UUID().uuidString)")
+    try thumbnail.data.write(to: url, options: .atomic)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let complete = try await DurableUploadCoordinator.shared.upload(
+      NativeMediaUploadRequest(
+        logicalID: "\(uploadId):thumbnail",
+        fileURL: url,
+        fileName: "thumbnail.jpg",
+        mimeType: thumbnail.mimeType.text,
+        kind: .photo
+      ),
+      progress: { _, _ in }
+    )
+    return complete.fileUniqueID
+  }
 
   private static func thumbnailUploadMetadata(from thumbnail: PhotoInfo?) -> ApiClient.ThumbnailUploadMetadata? {
     guard let thumbnail,

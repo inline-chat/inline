@@ -95,6 +95,35 @@ struct NegotiatingRealtimeTransportTests {
 
     observer.cancel()
   }
+
+  @Test("transfer prewarm reaches the connected child and is dropped while disconnected")
+  func prewarmReachesConnectedChildOnly() async {
+    let child = RestartableTestTransport()
+    let transport = NegotiatingRealtimeTransport(
+      hasInlineProtocolCredentials: { true },
+      makeLegacyTransport: { child },
+      makeInlineProtocolTransport: { child }
+    )
+    let observer = Task { for await _ in transport.events {} }
+    defer { observer.cancel() }
+
+    await transport.prewarmTransfer()
+    #expect(await child.prewarmCount == 0)
+
+    await transport.start()
+    #expect(await waitForProbeCondition {
+      await transport.prewarmTransfer()
+      return await child.prewarmCount > 0
+    })
+
+    await child.disconnect()
+    #expect(await waitForProbeCondition {
+      let before = await child.prewarmCount
+      await transport.prewarmTransfer()
+      return await child.prewarmCount == before
+    })
+    await transport.stop()
+  }
 }
 
 private func waitForProbeCondition(
@@ -179,7 +208,10 @@ private actor RestartableTestTransport: Transport {
 
   private(set) var startCount = 0
   private(set) var stopCount = 0
+  private(set) var prewarmCount = 0
   private(set) var stopEventDelivered = false
+
+  func prewarmTransfer() async { prewarmCount += 1 }
 
   func start() async {
     startCount += 1
