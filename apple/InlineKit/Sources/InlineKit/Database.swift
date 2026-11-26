@@ -2,6 +2,7 @@
 import Foundation
 import GRDB
 import InlineConfig
+import InlineSQLiteTuning
 import Logger
 import os
 import Sentry
@@ -243,9 +244,19 @@ public final class AppDatabase: @unchecked Sendable {
   }
 
   convenience init(path: String, passphrase: String) throws {
-    let currentPassphrase = OSAllocatedUnfairLock(initialState: passphrase)
-    let configuration = Self.makeConfiguration { currentPassphrase.withLock { $0 } }
+    // Key every pool connection with the raw key derived once from the passphrase and the file's salt,
+    // so readers created later (lazily, and again after iOS closes them) skip SQLCipher's PBKDF2.
+    let derivedKey = SQLCipherRawKey.literal(passphrase: passphrase, databasePath: path)
+    let currentPassphrase = OSAllocatedUnfairLock(initialState: derivedKey ?? passphrase)
+    var configuration = Self.makeConfiguration { currentPassphrase.withLock { $0 } }
+    // Keep readers open across background and memory warnings: GRDB still releases their page caches,
+    // but reopening a reader costs a key setup and runs inside the pool barrier.
+    configuration.persistentReadOnlyConnections = true
     let pool = try DatabasePool(path: path, configuration: configuration)
+    if derivedKey == nil, let created = SQLCipherRawKey.literal(passphrase: passphrase, databasePath: path) {
+      // A new file has its salt only after the writer created it; readers opened from now on use the raw key.
+      currentPassphrase.withLock { $0 = created }
+    }
     try self.init(storage: Storage(writer: pool, poolPassphrase: currentPassphrase))
   }
 
@@ -1645,9 +1656,20 @@ public extension AppDatabase {
     makeConfiguration(base) { passphrase }
   }
 
+  /// Process-wide SQLite options, applied once before the first connection opens.
+  internal static let sqliteProcessConfiguration: Int32 = {
+    let result = inline_sqlite_disable_memstatus()
+    if result != 0 {
+      // SQLite was initialized before the first AppDatabase connection; statistics stay on.
+      AppDatabase.log.warning("SQLite memory statistics left on (\(result))")
+    }
+    return result
+  }()
+
   private static func makeConfiguration(
     _ base: Configuration = Configuration(), passphrase: @escaping @Sendable () -> String
   ) -> Configuration {
+    _ = sqliteProcessConfiguration
     var config = base
 
     // Let short-lived contention between database connections finish instead
@@ -1657,6 +1679,14 @@ public extension AppDatabase {
     config.prepareDatabase { db in
       db.trace(options: .statement) { log.trace($0.expandedDescription) }
       try db.usePassphrase(passphrase())
+      // SQLCipher decrypts and authenticates every page that misses the cache; the 2 MiB default makes
+      // large writes re-decrypt index pages repeatedly. Pages are only allocated as they load.
+      try db.execute(sql: db.configuration.readonly ? "PRAGMA cache_size = -4096" : "PRAGMA cache_size = -16384")
+      // SQLCipher is built with STAT4: without the planner stability guarantee, a cached statement whose
+      // plan probed a bound value against index statistics (most `message` lookups) is recompiled on the
+      // first step after that binding changes, which costs ~0.1 ms per execution and defeats caching.
+      let qpsg = inline_sqlite_enable_qpsg(db.sqliteConnection)
+      if qpsg != 0 { log.error("Failed to enable the query planner stability guarantee (\(qpsg))") }
     }
 
     return config
@@ -1949,14 +1979,25 @@ public extension AppDatabase {
     }
   }
 
+  /// The key pool connections open with: the raw key literal once the file has a salt. Tests only.
+  internal var poolConnectionKey: String? {
+    writerLock.withLock { storage }.poolPassphrase?.withLock { $0 }
+  }
+
   internal func changePassphrase(_ passphrase: String) throws {
     let current = writerLock.withLock { storage }
     do {
       if let dbPool = current.writer as? DatabasePool {
         try dbPool.barrierWriteWithoutTransaction { db in
-          try db.changePassphrase(passphrase)
+          // Rekey with the raw key derived from the new passphrase and the file's unchanged salt, then
+          // publish the salted raw key so new readers skip the KDF. Fall back to the passphrase when the
+          // file has no readable salt.
+          let salt = SQLCipherRawKey.salt(forDatabaseAt: dbPool.path)
+          let rekey = salt.flatMap { SQLCipherRawKey.rekeyLiteral(passphrase: passphrase, salt: $0) }
+          let connectionKey = salt.flatMap { SQLCipherRawKey.literal(passphrase: passphrase, salt: $0) }
+          try db.changePassphrase(rekey ?? passphrase)
           // Publish the key only after SQLCipher succeeds, while new readers are still excluded.
-          current.poolPassphrase?.withLock { $0 = passphrase }
+          current.poolPassphrase?.withLock { $0 = connectionKey ?? passphrase }
           dbPool.invalidateReadOnlyConnections()
         }
       } else if let dbQueue = current.writer as? DatabaseQueue {
