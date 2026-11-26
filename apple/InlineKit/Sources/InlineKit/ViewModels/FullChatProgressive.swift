@@ -2194,20 +2194,25 @@ public class MessagesProgressiveViewModel {
   ) -> QueryInterfaceRequest<FullMessage> {
     var query = FullMessage.queryRequest(currentUserId: currentUserId)
 
-    switch peer {
-      case let .thread(id):
-        query =
-          query
-            .filter(Column("peerThreadId") == id)
-      case let .user(id):
-        query =
-          query
-            .filter(Column("peerUserId") == id)
-    }
     // Peer columns are indexed by date, so filtering on them alone makes SQLite sort or scan
-    // to order by message id. The chat's (chatId, messageId) index serves both directly.
+    // to order by message id. The chat's (chatId, messageId) index serves both directly. With the chat
+    // known, the peer predicate stays as a check but is kept out of index selection (`+ 0`): with the
+    // planner stability guarantee, an analyzed database otherwise picks the peer/date index and sorts.
     if let chatId = chatId ?? peer.asThreadId() {
       query = query.filter(Column("chatId") == chatId)
+      switch peer {
+        case let .thread(id):
+          query = query.filter(Column("peerThreadId") + 0 == id)
+        case let .user(id):
+          query = query.filter(Column("peerUserId") + 0 == id)
+      }
+    } else {
+      switch peer {
+        case let .thread(id):
+          query = query.filter(Column("peerThreadId") == id)
+        case let .user(id):
+          query = query.filter(Column("peerUserId") == id)
+      }
     }
     return query
   }
