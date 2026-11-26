@@ -1,6 +1,11 @@
 import Auth
 import Foundation
 import Logger
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 @MainActor
 public final class TimeZoneSyncCoordinator {
@@ -13,6 +18,7 @@ public final class TimeZoneSyncCoordinator {
   private var authTask: Task<Void, Never>?
   private var syncTask: Task<Void, Never>?
   private var systemTimeZoneObserver: NSObjectProtocol?
+  private var appStateObservers: [NSObjectProtocol] = []
 
   private init() {}
 
@@ -27,6 +33,26 @@ public final class TimeZoneSyncCoordinator {
     ) { [weak self] _ in
       Task { @MainActor [weak self] in
         self?.syncIfNeeded(reason: "system change")
+      }
+    }
+
+    // A suspended app can miss the system notification above. iOS queues a significant
+    // time change until the app returns, and becoming active covers the rest.
+    #if os(iOS)
+    let appStateNotifications = [
+      UIApplication.didBecomeActiveNotification,
+      UIApplication.significantTimeChangeNotification,
+    ]
+    #elseif os(macOS)
+    let appStateNotifications = [NSApplication.didBecomeActiveNotification]
+    #else
+    let appStateNotifications: [Notification.Name] = []
+    #endif
+    appStateObservers = appStateNotifications.map { name in
+      NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        Task { @MainActor [weak self] in
+          self?.syncIfNeeded(reason: "app active")
+        }
       }
     }
 
@@ -50,6 +76,9 @@ public final class TimeZoneSyncCoordinator {
   private func syncIfNeeded(reason: String) {
     guard Auth.shared.getIsLoggedIn(), !Auth.shared.getHasPendingAccountTransition() else { return }
 
+    // Foundation caches the system zone until its change notification lands, which a
+    // suspended app may never see. Re-read it so a missed change is not hidden.
+    NSTimeZone.resetSystemTimeZone()
     let timeZone = TimeZone.autoupdatingCurrent.identifier
     guard timeZone != lastSyncedTimeZone else { return }
 
