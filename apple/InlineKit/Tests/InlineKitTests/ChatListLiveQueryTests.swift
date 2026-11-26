@@ -133,6 +133,9 @@ struct ChatListLiveQueryTests {
         arguments: [Date()]
       )
     }
+    // Installed first so the write below is routed. Starting without a router installs it on the first
+    // refresh, and a write committed before that is only seen by that refresh's full read.
+    _ = try ChatListChangeRouter.shared(for: database.dbWriter)
     let language = LanguageBox("en")
     let recorder = SnapshotRecorder()
     let cancellable = ChatListLiveQuery(
@@ -225,6 +228,8 @@ struct ChatListLiveQueryTests {
   @Test("commits that arrive while a refresh runs are read in one refresh")
   func burstsCoalesce() async throws {
     let database = try Self.makeDatabase()
+    // Installed first so the write below is routed, as in the language test.
+    _ = try ChatListChangeRouter.shared(for: database.dbWriter)
     let gate = RefreshGate()
     let recorder = SnapshotRecorder()
     let cancellable = ChatListLiveQuery(
@@ -326,6 +331,123 @@ struct ChatListLiveQueryTests {
     cancellable.cancel()
   }
 
+  @Test("a batch that clears one draft and saves another refreshes both rows when the rowid is reused")
+  func draftRowIDReuse() async throws {
+    let database = try Self.makeDatabase()
+    _ = try ChatListChangeRouter.shared(for: database.dbWriter)
+    let recorder = SnapshotRecorder()
+    let cancellable = ChatListLiveQuery(writer: database.dbWriter, parameters: Self.parameters).start(
+      immediate: true,
+      deliveryQueue: recorder.queue,
+      onError: { Issue.record("live query failed: \($0)") },
+      onChange: recorder.record
+    )
+    let first: Int64 = try await database.dbWriter.write { db in
+      try db.execute(sql: "INSERT INTO draft2 (peerKey, text, updatedAt, revision) VALUES ('user_100', 'first', 1, 1)")
+      return db.lastInsertedRowID
+    }
+    let withFirstDraft = try Self.fullFetch(database)
+    #expect(try await Self.settle(recorder, to: withFirstDraft))
+    // As Drafts2's batch writer does: one transaction clears a draft and saves another peer's.
+    let second: Int64 = try await database.dbWriter.write { db in
+      try db.execute(sql: "DELETE FROM draft2 WHERE peerKey = 'user_100'")
+      try db.execute(sql: "INSERT INTO draft2 (peerKey, text, updatedAt, revision) VALUES ('user_101', 'second', 1, 1)")
+      return db.lastInsertedRowID
+    }
+    #expect(second == first, "SQLite reused the cleared draft's rowid")
+    let expected = try Self.fullFetch(database)
+    // Both rows changed: the first lost its draft, the second gained one.
+    for userID in [Int64(100), 101] {
+      let dialogID = Dialog.getDialogId(peerUserId: userID)
+      #expect(withFirstDraft.first { $0.dialogID == dialogID } != expected.first { $0.dialogID == dialogID })
+    }
+    #expect(try await Self.settle(recorder, to: expected))
+    cancellable.cancel()
+  }
+
+  @Test("the index kept at each commit equals a full read, and the list a full fetch, over 300 mixed writes")
+  func indexFollowsEveryWrite() async throws {
+    let database = try Self.makeDatabase()
+    try await database.dbWriter.write { db in try Self.seedThreadsAndSpace(db) }
+    let router = try ChatListChangeRouter.shared(for: database.dbWriter)
+    let recorder = SnapshotRecorder()
+    let cancellable = ChatListLiveQuery(writer: database.dbWriter, parameters: Self.parameters).start(
+      immediate: true,
+      deliveryQueue: recorder.queue,
+      onError: { Issue.record("live query failed: \($0)") },
+      onChange: recorder.record
+    )
+    var random = MixedWriteRandom(seed: 7)
+    for step in 0 ..< 300 {
+      let kind = Int(random.next() % 22)
+      let a = Int(random.next() % 1000)
+      let b = Int(random.next() % 1000)
+      let name = try await database.dbWriter.write { db in
+        try Self.mixedWrite(kind: kind, step: step, a: a, b: b, db)
+      }
+      let kept = try await database.dbWriter.write { db in router.currentIndex(db) }
+      let read = try await database.dbWriter.read { db in try ChatListRowIndex.primed(db) }
+      #expect(kept == read, "step \(step): \(name)")
+      #expect(try await Self.settle(recorder, to: Self.fullFetch(database)), "step \(step): \(name)")
+    }
+    cancellable.cancel()
+  }
+
+  @Test("a message insert, edit or delete refreshes only its chat's row, though the search index writes too")
+  func messageWritesStayIncremental() async throws {
+    let database = try Self.makeDatabase()
+    let router = try ChatListChangeRouter.shared(for: database.dbWriter)
+    let log = ChangeLog()
+    let subscription = router.subscribe { log.append($0) }
+    defer { router.unsubscribe(subscription) }
+    let dialog = Dialog.getDialogId(peerUserId: 100)
+    let date = Date(timeIntervalSince1970: 1_790_300_000)
+
+    try await database.dbWriter.write { db in
+      try InlineKit.Message(
+        messageId: 2, fromId: 100, date: date, text: "searchable words", peerUserId: 100, peerThreadId: nil,
+        chatId: 500, out: false
+      ).insert(db)
+      try db.execute(sql: "UPDATE chat SET lastMsgId = 2 WHERE id = 500")
+    }
+    try await database.dbWriter.write { db in
+      try db.execute(sql: "UPDATE message SET text = 'other words' WHERE chatId = 500 AND messageId = 2")
+    }
+    // As `Message.deleteMessages` does: the chat's last message key moves first.
+    try await database.dbWriter.write { db in
+      try db.execute(sql: "UPDATE chat SET lastMsgId = 1 WHERE id = 500")
+      try db.execute(sql: "DELETE FROM message WHERE chatId = 500 AND messageId = 2")
+    }
+    #expect(log.all == Array(repeating: ChatListChange(dialogIDs: [dialog]), count: 3))
+  }
+
+  @Test("a commit's resolution reads rows by key, never by scanning a table")
+  func resolutionReadsByKey() async throws {
+    let database = try Self.makeDatabase()
+    let draftRowID: Int64 = try await database.dbWriter.write { db in
+      try Self.seedThreadsAndSpace(db)
+      try db.execute(sql: "INSERT INTO draft2 (peerKey, text, updatedAt, revision) VALUES ('user_100', 'draft', 1, 1)")
+      return db.lastInsertedRowID
+    }
+    let router = try ChatListChangeRouter.shared(for: database.dbWriter)
+    try await database.dbWriter.write { db in
+      var statements: [String] = []
+      db.trace(options: .statement) { statements.append($0.expandedDescription) }
+      _ = try router.resolve(db, tables: [
+        "dialog": [100], "chat": [500, Self.replyThreadID], "message": [1, 2], "user": [100, 101],
+        "draft2": [draftRowID], "translation": [1], "document": [1],
+      ], deletes: [])
+      db.trace(options: .statement, nil)
+      // Dialog, message, chat, draft, translation and document keys.
+      #expect(statements.count == 6, "\(statements)")
+      for sql in statements {
+        let details = try Row.fetchAll(db, sql: "EXPLAIN QUERY PLAN " + sql).map { $0["detail"] as String }
+        let scans = details.filter { $0.hasPrefix("SCAN") && !$0.contains("json_each") }
+        #expect(scans.isEmpty, "\(sql): \(details)")
+      }
+    }
+  }
+
   // MARK: Fixture
 
   private static let spaceID: Int64 = 9
@@ -336,6 +458,200 @@ struct ChatListLiveQueryTests {
     let database = AppDatabase.empty()
     try database.dbWriter.write { db in try seed(db) }
     return database
+  }
+
+  /// One write of `kind` over the fixture (12 DMs, a space thread and a reply thread), for the index test.
+  private static func mixedWrite(kind: Int, step: Int, a: Int, b: Int, _ db: Database) throws -> String {
+    let dm = Int64(a % chatCount)
+    let user = 100 + dm
+    let dmChat = 500 + dm
+    let otherUser = Int64(100 + b % chatCount)
+    let date = Date(timeIntervalSince1970: 1_790_200_000 + Double(step))
+    func lastMessageID(_ chat: Int64) throws -> Int64? {
+      try Int64.fetchOne(db, sql: "SELECT lastMsgId FROM chat WHERE id = ?", arguments: [chat])
+    }
+    func addMessage(_ chat: Int64, from: Int64, peerUser: Int64?) throws {
+      let next = (try Int64.fetchOne(db, sql: "SELECT MAX(messageId) FROM message WHERE chatId = ?", arguments: [chat]) ?? 0) + 1
+      try InlineKit.Message(
+        messageId: next, fromId: from, date: date, text: "m\(step)",
+        peerUserId: peerUser, peerThreadId: peerUser == nil ? chat : nil, chatId: chat, out: false
+      ).insert(db)
+      try db.execute(sql: "UPDATE chat SET lastMsgId = ? WHERE id = ?", arguments: [next, chat])
+    }
+    let threads = try Int64.fetchAll(db, sql: "SELECT id FROM chat WHERE parentChatId IS NOT NULL ORDER BY id")
+    switch kind {
+      case 0:
+        try addMessage(dmChat, from: user, peerUser: user)
+        try db.execute(sql: "UPDATE dialog SET unreadCount = COALESCE(unreadCount, 0) + 1 WHERE peerUserId = ?", arguments: [user])
+        return "message in a DM"
+      case 1:
+        let thread = b % 2 == 0 ? spaceThreadID : (threads.last ?? replyThreadID)
+        try addMessage(thread, from: otherUser, peerUser: nil)
+        return "message in a thread from another sender"
+      case 2:
+        try db.execute(
+          sql: "UPDATE message SET text = ? WHERE chatId = ? AND messageId = (SELECT lastMsgId FROM chat WHERE id = ?)",
+          arguments: ["edited \(step)", dmChat, dmChat]
+        )
+        return "last message edit"
+      case 3:
+        try db.execute(
+          sql: "UPDATE message SET fromId = ? WHERE chatId = ? AND messageId = (SELECT lastMsgId FROM chat WHERE id = ?)",
+          arguments: [otherUser, dmChat, dmChat]
+        )
+        return "last message sender change"
+      case 4:
+        try db.execute(sql: "UPDATE user SET firstName = ? WHERE id = ?", arguments: ["User \(step)", otherUser])
+        return "user rename"
+      case 5:
+        try db.execute(sql: "UPDATE user SET online = NOT COALESCE(online, 0) WHERE id = ?", arguments: [otherUser])
+        return "presence"
+      case 6:
+        let documentID = Int64(5000 + step)
+        try db.execute(
+          sql: "INSERT INTO document (documentId, date, fileName, mimeType, size) VALUES (?, ?, ?, 'application/pdf', 10)",
+          arguments: [documentID, date, "doc \(step).pdf"]
+        )
+        try db.execute(
+          sql: "UPDATE message SET documentId = ? WHERE chatId = ? AND messageId = (SELECT lastMsgId FROM chat WHERE id = ?)",
+          arguments: [documentID, dmChat, dmChat]
+        )
+        return "document on a last message"
+      case 7:
+        try db.execute(
+          sql: "UPDATE document SET fileName = ? WHERE documentId = (SELECT MAX(documentId) FROM document)",
+          arguments: ["renamed \(step).pdf"]
+        )
+        return "document rename"
+      case 8:
+        guard let anchor = try lastMessageID(dmChat) else { return "no anchor" }
+        let id = Int64(2000 + step)
+        var chat = Chat(id: id, date: date, type: .thread, title: "Reply \(step)", spaceId: nil)
+        chat.parentChatId = dmChat
+        chat.parentMessageId = anchor
+        try chat.insert(db)
+        try addMessage(id, from: otherUser, peerUser: nil)
+        chat.lastMsgId = try lastMessageID(id)
+        var dialog = Dialog(optimisticForChat: chat)
+        dialog.open = true
+        try dialog.insert(db)
+        return "new reply thread"
+      case 9:
+        guard let thread = threads.isEmpty ? nil : threads[b % threads.count] else { return "no thread" }
+        try db.execute(sql: "UPDATE chat SET parentChatId = ?, parentMessageId = 1 WHERE id = ?", arguments: [dmChat, thread])
+        return "reply thread moves to another DM"
+      case 10:
+        guard let thread = threads.isEmpty ? nil : threads[b % threads.count] else { return "no thread" }
+        try db.execute(
+          sql: """
+          UPDATE message SET text = ? WHERE (chatId, messageId) =
+            (SELECT parentChatId, parentMessageId FROM chat WHERE id = ?)
+          """,
+          arguments: ["anchor \(step)", thread]
+        )
+        return "anchor message edit"
+      case 11:
+        if let cleared = try String.fetchOne(db, sql: "SELECT peerKey FROM draft2 ORDER BY rowid DESC LIMIT 1") {
+          try db.execute(sql: "DELETE FROM draft2 WHERE peerKey = ?", arguments: [cleared])
+        }
+        try db.execute(
+          sql: """
+          INSERT INTO draft2 (peerKey, text, updatedAt, revision) VALUES (?, ?, 1, 1)
+          ON CONFLICT(peerKey) DO UPDATE SET text = excluded.text, revision = revision + 1
+          """,
+          arguments: [b % 3 == 0 ? "thread_\(spaceThreadID)" : "user_\(otherUser)", "draft \(step)"]
+        )
+        return "draft batch: clear one, save another"
+      case 12:
+        let chatID = try Int64?.fetchOne(db, sql: "SELECT chatId FROM dialog WHERE peerUserId = ?", arguments: [user]) ?? nil
+        try db.execute(sql: "UPDATE dialog SET chatId = ? WHERE peerUserId = ?", arguments: [chatID == nil ? dmChat : nil, user])
+        return "dialog chat link toggles"
+      case 13:
+        try db.execute(sql: "UPDATE chat SET peerUserId = ? WHERE id = ?", arguments: [otherUser, dmChat])
+        return "DM chat peer changes"
+      case 15:
+        if try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM dialog WHERE id = ?)", arguments: [user]) == true {
+          try db.execute(sql: "DELETE FROM dialog WHERE id = ?", arguments: [user])
+          return "dialog delete"
+        }
+        try db.execute(sql: "INSERT INTO dialog (id, peerUserId, chatId, open) VALUES (?, ?, ?, 1)", arguments: [user, user, dmChat])
+        return "dialog insert"
+      case 16:
+        guard let thread = threads.isEmpty ? nil : threads[b % threads.count],
+              let anchor = try Row.fetchOne(db, sql: "SELECT parentChatId, parentMessageId FROM chat WHERE id = ?", arguments: [thread]),
+              let parent: Int64 = anchor[0], let message: Int64 = anchor[1]
+        else { return "no anchor" }
+        // A chat's last message key moves off the message first, as `Message.deleteMessages` does.
+        try db.execute(
+          sql: """
+          UPDATE chat SET lastMsgId = (SELECT MAX(messageId) FROM message WHERE chatId = ? AND messageId < ?)
+          WHERE id = ? AND lastMsgId = ?
+          """,
+          arguments: [parent, message, parent, message]
+        )
+        try db.execute(sql: "DELETE FROM message WHERE chatId = ? AND messageId = ?", arguments: [parent, message])
+        return "anchor message delete"
+      case 17:
+        let existing = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM translation WHERE chatId = ?", arguments: [dmChat]) ?? 0
+        if existing > 0 {
+          try db.execute(sql: "UPDATE translation SET translation = ? WHERE chatId = ?", arguments: ["tr \(step)", dmChat])
+          return "translation edit"
+        }
+        try db.execute(
+          sql: """
+          INSERT INTO translation (messageId, chatId, translation, language, date)
+          SELECT lastMsgId, id, ?, 'en', ? FROM chat WHERE id = ? AND lastMsgId IS NOT NULL
+          """,
+          arguments: ["tr \(step)", date, dmChat]
+        )
+        return "translation insert"
+      case 18:
+        try db.inSavepoint {
+          try db.execute(sql: "UPDATE user SET firstName = 'Rolled back' WHERE id = ?", arguments: [otherUser])
+          try db.execute(sql: "UPDATE chat SET parentChatId = NULL WHERE parentChatId IS NOT NULL")
+          return .rollback
+        }
+        try db.execute(sql: "UPDATE dialog SET unreadCount = ? WHERE id = ?", arguments: [step, user])
+        return "rolled-back savepoint and a committed unread count"
+      case 19:
+        try addMessage(dmChat, from: otherUser, peerUser: user)
+        try db.execute(
+          sql: "INSERT INTO draft2 (peerKey, text, updatedAt, revision) VALUES (?, ?, 1, 1) ON CONFLICT(peerKey) DO UPDATE SET text = excluded.text",
+          arguments: ["user_\(user)", "mixed \(step)"]
+        )
+        try db.execute(sql: "UPDATE user SET lastName = ? WHERE id = ?", arguments: ["L\(step)", otherUser])
+        return "message, draft and rename in one transaction"
+      case 20:
+        guard let last = try lastMessageID(dmChat),
+              try Bool.fetchOne(
+                db, sql: "SELECT NOT EXISTS(SELECT 1 FROM translation WHERE chatId = ? AND messageId = ?)", arguments: [dmChat, last]
+              ) == true
+        else { return "no message to renumber" }
+        // A sent message getting its server id; the chat's last message key follows by cascade.
+        try db.execute(
+          sql: "UPDATE message SET messageId = ? WHERE chatId = ? AND messageId = ?",
+          arguments: [10_000 + step, dmChat, last]
+        )
+        return "message id rewrite"
+      case 21:
+        guard let thread = threads.isEmpty ? nil : threads[b % threads.count], thread != replyThreadID else {
+          return "no thread to delete"
+        }
+        try db.execute(sql: "UPDATE chat SET lastMsgId = NULL WHERE id = ?", arguments: [thread])
+        try db.execute(sql: "DELETE FROM message WHERE chatId = ?", arguments: [thread])
+        try db.execute(sql: "DELETE FROM dialog WHERE peerThreadId = ? OR chatId = ?", arguments: [thread, thread])
+        try db.execute(sql: "DELETE FROM chat WHERE id = ?", arguments: [thread])
+        return "reply thread delete"
+      default:
+        guard let last = try lastMessageID(dmChat),
+              let previous = try Int64.fetchOne(
+                db, sql: "SELECT MAX(messageId) FROM message WHERE chatId = ? AND messageId < ?", arguments: [dmChat, last]
+              )
+        else { return "nothing to delete" }
+        try db.execute(sql: "UPDATE chat SET lastMsgId = ? WHERE id = ?", arguments: [previous, dmChat])
+        try db.execute(sql: "DELETE FROM message WHERE chatId = ? AND messageId = ?", arguments: [dmChat, last])
+        return "last message delete"
+    }
   }
 
   /// A thread in a space, and a reply thread under the first DM's first message.
@@ -527,4 +843,24 @@ private final class RefreshGate: @unchecked Sendable {
   }
 
   func release() { released.signal() }
+}
+
+/// Deterministic random numbers for the mixed-write test.
+private struct MixedWriteRandom {
+  private var state: UInt64
+  init(seed: UInt64) { state = seed }
+  mutating func next() -> UInt64 {
+    state &+= 0x9E37_79B9_7F4A_7C15
+    var z = state
+    z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+    z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+    return z ^ (z >> 31)
+  }
+}
+
+private final class ChangeLog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var changes: [ChatListChange] = []
+  var all: [ChatListChange] { lock.withLock { changes } }
+  func append(_ change: ChatListChange) { lock.withLock { changes.append(change) } }
 }

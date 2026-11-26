@@ -26,16 +26,19 @@ public struct ChatListChange: Sendable, Equatable {
 /// `ValueObservation` over the chat list SQL refetches every row (5 ms for 300 chats, more with more
 /// chats) whenever any table the query reads changes: an incoming message in any chat, a presence write,
 /// a draft keystroke. This observer collects the changed row IDs of the tables the chat list reads (at
-/// column granularity, from the compiled SQL's own region), and at commit resolves them to dialog IDs with
-/// a few indexed lookups on the writer connection. Tables without a precise mapping, and deletes whose
-/// rows can no longer be read, request a full refresh, so the result stays exactly what a full refetch
-/// would produce.
+/// column granularity, from the compiled SQL's own region), and at commit resolves them to dialog IDs
+/// through `ChatListRowIndex`, which it keeps current by reading only the changed rows by primary key, so
+/// the writer's cost per commit doesn't grow with the number of chats. Tables without a precise mapping,
+/// and deletes whose rows can no longer be read, request a full refresh, so the result stays exactly what
+/// a full refetch would produce.
 final class ChatListChangeRouter: TransactionObserver, @unchecked Sendable {
   private let region: DatabaseRegion
   // Writer-queue state, touched only from TransactionObserver callbacks.
   private var pending: [String: Set<Int64>] = [:]
   private var deletedTables: Set<String> = []
-  private var draftDialogByRowID: [Int64: Int64] = [:]
+  private var index = ChatListRowIndex()
+  /// Set when keeping the index current failed; the next commit reads it again in full.
+  private var needsPrime = false
   private let subscribers = OSAllocatedUnfairLock<[UUID: @Sendable (ChatListChange) -> Void]>(initialState: [:])
 
   /// Tables the router maps to rows. Any other table the chat list reads requests a full refresh.
@@ -73,13 +76,15 @@ final class ChatListChangeRouter: TransactionObserver, @unchecked Sendable {
       try ChatListChangeRouter(region: ChatListDatabaseQuery.trackedRegion(db))
     }
     try writer.writeWithoutTransaction { db in
-      try router.primeDraftKeys(db)
+      router.index = try ChatListRowIndex.primed(db)
       db.add(transactionObserver: router, extent: .observerLifetime)
     }
     return registry.withLock { registry in
       if let raced = registry[key], raced.writer === (writer as AnyObject) {
         return raced.router
       }
+      // Drop routers whose writer is gone, with their indexes.
+      registry = registry.filter { $0.value.writer != nil }
       registry[key] = Registration(writer: writer as AnyObject, router: router)
       return router
     }
@@ -102,7 +107,12 @@ final class ChatListChangeRouter: TransactionObserver, @unchecked Sendable {
   }
 
   func databaseDidChange(with event: DatabaseEvent) {
-    guard region.isModified(by: event) else { return }
+    // Only tables the list reads. SQLite also reports the search index's own tables, written by the
+    // `message` FTS triggers; GRDB counts such unadvertised events as changes, which would turn every
+    // message write into a full refresh.
+    guard region.isModified(byEventsOfKind: .delete(tableName: event.tableName)), region.isModified(by: event) else {
+      return
+    }
     pending[event.tableName, default: []].insert(event.rowID)
     if event.kind == .delete {
       deletedTables.insert(event.tableName)
@@ -120,10 +130,18 @@ final class ChatListChangeRouter: TransactionObserver, @unchecked Sendable {
     let deletes = deletedTables
     pending.removeAll()
     deletedTables.removeAll()
-    let change: ChatListChange
+    var change: ChatListChange
     do {
-      change = try resolve(db, tables: tables, deletes: deletes)
+      if needsPrime {
+        // The index read again in full is current; a full refresh covers whatever it missed.
+        index = try ChatListRowIndex.primed(db)
+        needsPrime = false
+        change = ChatListChange(requiresFullRefresh: true)
+      } else {
+        change = try resolve(db, tables: tables, deletes: deletes)
+      }
     } catch {
+      needsPrime = true
       change = ChatListChange(requiresFullRefresh: true)
     }
     guard !change.isEmpty else { return }
@@ -134,165 +152,99 @@ final class ChatListChangeRouter: TransactionObserver, @unchecked Sendable {
 
   // MARK: Mapping
 
-  /// Resolves changed rows to the chat list rows they feed. Runs on the writer after commit.
+  /// Resolves changed rows to the chat list rows they feed, keeping the index current. Runs on the writer
+  /// after commit; reads only the changed rows, by primary key.
   func resolve(_ db: Database, tables: [String: Set<Int64>], deletes: Set<String>) throws -> ChatListChange {
     var change = ChatListChange()
     for table in tables.keys where !Self.mappedTables.contains(table) {
       change.requiresFullRefresh = true
     }
-    // Deleted dialogs, messages, translations and documents can't be traced to their rows after the
-    // commit. These deletes are rare (deletions, history clears); a dialog delete also removes the row
-    // from any list. Draft deletes resolve through the keys seen earlier; chat and user deletes
-    // resolve through the dialog columns that still name them.
-    if !deletes.subtracting(["draft2", "chat", "user"]).isEmpty {
+    // Deleted translations and documents can't be traced to their rows after the commit. These deletes
+    // are rare (deletions, history clears). Deleted dialogs, chats, users, drafts and messages resolve
+    // through the keys the index still holds for them.
+    if !deletes.isDisjoint(with: ["translation", "document"]) {
       change.requiresFullRefresh = true
     }
-    // Drafts first: the rowid map must follow every draft write, full refresh or not.
-    if let ids = tables["draft2"] {
-      var unresolved = ids
-      for row in try Row.fetchAll(
-        db.cachedStatement(sql: "SELECT rowid, peerKey FROM draft2 WHERE rowid IN (SELECT value FROM json_each(?))"),
-        arguments: [jsonArray(ids)]
-      ) {
-        let rowID: Int64 = row[0]
-        unresolved.remove(rowID)
-        if let dialogID = try Self.dialogID(db, draftPeerKey: row[1]) {
-          draftDialogByRowID[rowID] = dialogID
-          change.dialogIDs.insert(dialogID)
-        } else {
-          // No dialog shows this draft yet; its dialog's insert refreshes that row. Forget whatever this
-          // rowid named before (rowids restart after the tables are cleared).
-          draftDialogByRowID.removeValue(forKey: rowID)
-        }
+
+    // The index follows every write first, full refresh or not.
+    // Chats whose `parentDialog` (the dialog whose `chatId` is the chat) changed: their reply threads show
+    // that dialog's peer.
+    var parentDialogChats = Set<Int64>()
+    if let ids = tables["dialog"] {
+      let fresh = try ChatListRowIndex.fetchDialogKeys(db, ids: ids)
+      for id in ids {
+        if let old = index.dialogs[id]?.chatID { parentDialogChats.insert(old) }
+        if let new = fresh[id]?.chatID { parentDialogChats.insert(new) }
+        index.setDialog(id, fresh[id])
       }
-      for rowID in unresolved {
-        if let dialogID = draftDialogByRowID.removeValue(forKey: rowID) {
-          change.dialogIDs.insert(dialogID)
-        } else {
+      // A deleted dialog's id refetches nothing, which removes its row.
+      change.dialogIDs.formUnion(ids)
+    }
+    let changedChats = tables["chat"] ?? []
+    // Chats whose last or anchor message was a changed row: that row may now be gone or have another id.
+    var messageLinkedChats = Set<Int64>()
+    for rowID in tables["message"] ?? [] {
+      messageLinkedChats.formUnion(index.chats(linkedToMessageRow: rowID))
+    }
+    let messageKeys = try tables["message"].map {
+      try ChatListRowIndex.fetchMessageKeys(db, table: "message", rowIDs: $0)
+    } ?? []
+    var chatsToRead = changedChats.union(messageLinkedChats)
+    for key in messageKeys {
+      chatsToRead.formUnion(index.chats(readingMessage: key))
+    }
+    if !chatsToRead.isEmpty {
+      let fresh = try ChatListRowIndex.fetchChatKeys(db, ids: chatsToRead)
+      for id in chatsToRead { index.setChat(id, fresh[id]) }
+    }
+    for chatID in parentDialogChats.union(changedChats) {
+      index.updateListPeers(of: chatID)
+    }
+    if let rowIDs = tables["draft2"] {
+      let fresh = try ChatListRowIndex.fetchDraftKeys(db, rowIDs: rowIDs)
+      for rowID in rowIDs {
+        let old = index.draftKeys[rowID]
+        let new = fresh[rowID]
+        // A batch that clears one draft and saves another can hand the cleared draft's rowid to the new
+        // one, so both keys' rows refresh.
+        if let old { change.dialogIDs.formUnion(index.rows(ofDraftKey: old)) }
+        if let new { change.dialogIDs.formUnion(index.rows(ofDraftKey: new)) }
+        if old == nil, new == nil {
+          // A rowid the index never saw, now gone.
           change.requiresFullRefresh = true
         }
+        index.setDraft(rowID: rowID, key: new)
       }
     }
     if change.requiresFullRefresh { return change }
 
-    var chatIDs = Set<Int64>()
-    if let ids = tables["dialog"] {
-      change.dialogIDs.formUnion(ids)
-      // A thread row shows its parent DM's peer through the parent chat's dialog, so the dialog's chat
-      // also refreshes its child thread rows.
-      // A dialog saved before its chat has neither column; it has no child rows to refresh.
-      chatIDs.formUnion(try Int64?.fetchAll(
-        db.cachedStatement(sql: """
-        SELECT COALESCE(chatId, peerThreadId) FROM dialog WHERE id IN (SELECT value FROM json_each(?))
-        """),
-        arguments: [jsonArray(ids)]
-      ).compactMap { $0 })
+    // Rows of changed chats, and of reply threads under them (which show the parent's title and peer).
+    change.dialogIDs.formUnion(index.rows(ofChats: changedChats))
+    change.dialogIDs.formUnion(index.rows(ofThreadsUnder: changedChats.union(parentDialogChats)))
+    change.dialogIDs.formUnion(index.rows(ofChats: messageLinkedChats))
+    for key in messageKeys {
+      change.dialogIDs.formUnion(index.rows(showingMessage: key))
     }
-    if let ids = tables["chat"] {
-      chatIDs.formUnion(ids)
+    if let rowIDs = tables["translation"] {
+      for key in try ChatListRowIndex.fetchMessageKeys(db, table: "translation", rowIDs: rowIDs) {
+        change.dialogIDs.formUnion(index.rows(translating: key))
+      }
     }
-    if let ids = tables["message"] {
-      // A message feeds the list as a chat's last message or as a thread's parent message.
-      change.dialogIDs.formUnion(try Int64.fetchAll(
-        db.cachedStatement(sql: """
-        SELECT d.id FROM message m
-        JOIN chat c ON c.id = m.chatId AND c.lastMsgId = m.messageId
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        WHERE m.globalId IN (SELECT value FROM json_each(?))
-        UNION
-        SELECT d.id FROM message m
-        JOIN chat c ON c.parentChatId = m.chatId AND c.parentMessageId = m.messageId
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        WHERE m.globalId IN (SELECT value FROM json_each(?))
-        """),
-        arguments: [jsonArray(ids), jsonArray(ids)]
-      ))
+    for userID in tables["user"] ?? [] {
+      change.dialogIDs.formUnion(index.rows(showingUser: userID))
     }
-    if let ids = tables["translation"] {
-      change.dialogIDs.formUnion(try Int64.fetchAll(
-        db.cachedStatement(sql: """
-        SELECT d.id FROM translation t
-        JOIN chat c ON c.id = t.chatId AND c.lastMsgId = t.messageId
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        WHERE t.rowid IN (SELECT value FROM json_each(?))
-        """),
-        arguments: [jsonArray(ids)]
-      ))
-    }
-    if let ids = tables["user"] {
-      let users = jsonArray(ids)
-      // Peer user of a DM row, last message sender, and the parent DM's peer of a thread row.
-      change.dialogIDs.formUnion(try Int64.fetchAll(
-        db.cachedStatement(sql: """
-        SELECT id FROM dialog WHERE peerUserId IN (SELECT value FROM json_each(?))
-        UNION
-        SELECT d.id FROM chat c
-        JOIN message m ON m.chatId = c.id AND m.messageId = c.lastMsgId
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        WHERE m.fromId IN (SELECT value FROM json_each(?))
-        UNION
-        SELECT d.id FROM chat parent
-        JOIN chat c ON c.parentChatId = parent.id
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        LEFT JOIN dialog pd ON pd.chatId = parent.id
-        WHERE COALESCE(pd.peerUserId, parent.peerUserId) IN (SELECT value FROM json_each(?))
-        """),
-        arguments: [users, users, users]
-      ))
-    }
-    if let ids = tables["document"] {
-      change.dialogIDs.formUnion(try Int64.fetchAll(
-        db.cachedStatement(sql: """
-        SELECT d.id FROM chat c
-        JOIN message m ON (m.chatId = c.id AND m.messageId = c.lastMsgId)
-          OR (m.chatId = c.parentChatId AND m.messageId = c.parentMessageId)
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        WHERE m.documentId IN (SELECT documentId FROM document WHERE rowid IN (SELECT value FROM json_each(?)))
-        """),
-        arguments: [jsonArray(ids)]
-      ))
-    }
-    if !chatIDs.isEmpty {
-      // Rows of these chats and of their child threads (which show the parent's title and peer).
-      change.dialogIDs.formUnion(try Int64.fetchAll(
-        db.cachedStatement(sql: """
-        SELECT id FROM dialog WHERE COALESCE(chatId, peerThreadId) IN (SELECT value FROM json_each(?))
-        UNION
-        SELECT d.id FROM chat c
-        JOIN dialog d ON COALESCE(d.chatId, d.peerThreadId) = c.id
-        WHERE c.parentChatId IN (SELECT value FROM json_each(?))
-        """),
-        arguments: [jsonArray(chatIDs), jsonArray(chatIDs)]
-      ))
+    if let rowIDs = tables["document"] {
+      for documentID in try ChatListRowIndex.fetchDocumentIDs(db, rowIDs: rowIDs) {
+        change.dialogIDs.formUnion(index.rows(showingDocument: documentID))
+      }
     }
     return change
   }
 
-  private func primeDraftKeys(_ db: Database) throws {
-    for row in try Row.fetchAll(db, sql: "SELECT rowid, peerKey FROM draft2") {
-      if let dialogID = try Self.dialogID(db, draftPeerKey: row[1]) {
-        draftDialogByRowID[row[0]] = dialogID
-      }
-    }
+  /// The index as kept at commits so far, for tests comparing it with a full read.
+  func currentIndex(_: Database) -> ChatListRowIndex {
+    index
   }
-
-  /// `draft2.peerKey` is `user_<id>` or `thread_<id>`, as the chat list joins it.
-  private static func dialogID(_ db: Database, draftPeerKey key: String) throws -> Int64? {
-    if key.hasPrefix("user_"), let id = Int64(key.dropFirst(5)) {
-      return try Int64.fetchOne(db.cachedStatement(sql: "SELECT id FROM dialog WHERE peerUserId = ?"), arguments: [id])
-    }
-    if key.hasPrefix("thread_"), let id = Int64(key.dropFirst(7)) {
-      return try Int64.fetchOne(
-        db.cachedStatement(sql: "SELECT id FROM dialog WHERE peerThreadId = ? AND peerUserId IS NULL"),
-        arguments: [id]
-      )
-    }
-    return nil
-  }
-}
-
-private func jsonArray(_ values: Set<Int64>) -> String {
-  "[" + values.map(String.init).joined(separator: ",") + "]"
 }
 
 /// A chat list kept current by refetching only the rows each commit can change.
@@ -447,7 +399,7 @@ public final class ChatListLiveQuery: @unchecked Sendable {
         break
     }
     if needsRefresh {
-      queue.async { self.enqueue(ChatListChange(requiresFullRefresh: true)) }
+      queue.async { [weak self] in self?.enqueue(ChatListChange(requiresFullRefresh: true)) }
     }
     // The cancellable keeps the query alive until it is cancelled, like a GRDB observation.
     return AnyCancellable { self.cancel() }
@@ -455,16 +407,28 @@ public final class ChatListLiveQuery: @unchecked Sendable {
 
   private func cancel() {
     cancelled.withLock { $0 = true }
-    queue.async {
-      self.isCancelled = true
-      if let id = self.subscription { self.router?.unsubscribe(id) }
-      self.subscription = nil
-      self.onChange = nil
-      self.onError = nil
-      for observer in self.clockObservers {
-        NotificationCenter.default.removeObserver(observer)
-      }
-      self.clockObservers = []
+    // Weak: a query its owner drops right after cancelling is released on the owner's thread, with the
+    // writer it holds, rather than later on this queue (at process exit, that close raced SQLCipher's
+    // shutdown). `deinit` then does the same tear-down.
+    queue.async { [weak self] in self?.tearDown() }
+  }
+
+  private func tearDown() {
+    isCancelled = true
+    if let id = subscription { router?.unsubscribe(id) }
+    subscription = nil
+    onChange = nil
+    onError = nil
+    for observer in clockObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    clockObservers = []
+  }
+
+  deinit {
+    if let id = subscription { router?.unsubscribe(id) }
+    for observer in clockObservers {
+      NotificationCenter.default.removeObserver(observer)
     }
   }
 
@@ -487,9 +451,10 @@ public final class ChatListLiveQuery: @unchecked Sendable {
   private func scheduleRefresh() {
     guard !refreshScheduled else { return }
     refreshScheduled = true
-    queue.async {
-      self.refreshScheduled = false
-      self.refreshIfNeeded()
+    queue.async { [weak self] in
+      guard let self else { return }
+      refreshScheduled = false
+      refreshIfNeeded()
     }
   }
 
