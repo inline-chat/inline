@@ -90,7 +90,11 @@ public actor UpdatesEngine: Sendable {
             // A DM someone else opened can reach us before (or without) its dialog: older servers
             // never sent the recipient a chatOpen. Without a dialog the chat list can't show it.
             let peer = newMessageUpdate.message.peerID.toPeer()
-            if try Dialog.get(peerId: peer).fetchOne(db) == nil {
+            let hasDialog = try Bool.fetchOne(
+              db.cachedStatement(sql: "SELECT EXISTS(SELECT 1 FROM dialog WHERE id = ?)"),
+              arguments: [Dialog.getDialogId(peerId: peer)]
+            ) ?? false
+            if !hasDialog {
               deferredEffects.append(.fetchMissingDialog(peer: peer))
             }
           }
@@ -579,6 +583,15 @@ public actor UpdatesEngine: Sendable {
       )
       var chunkApplied = 0
       var chunkFailed = 0
+
+      // NSDataDetector is the slowest step of saving a message: run it before taking the writer.
+      Message.prepareLinkDetection(chunk.lazy.compactMap { update -> InlineProtocol.Message? in
+        switch update.update {
+          case let .newMessage(newMessage): newMessage.message
+          case let .editMessage(editMessage): editMessage.message
+          default: nil
+        }
+      })
 
       do {
         let chunkResult = try await database.dbWriter.write { db in
@@ -2625,16 +2638,15 @@ extension InlineProtocol.UpdateNewMessage {
     if CancelledSends.shared.isLanded(chatId: message.chatID, messageId: message.id) { return }
 
     // Avoid double-applying side effects when the same message is replayed (eg. sync catch-up,
-    // duplicate delivery, history prefill).
-    let hadMessage = try Message
-      .fetchOne(db, key: ["messageId": message.id, "chatId": message.chatID]) != nil
-
-    let msg = try Message.save(
+    // duplicate delivery, history prefill). The save reads the existing row once; reuse its answer.
+    let saved = try Message.saveWithResult(
       db,
       protocolMessage: message,
       publishChanges: publishChanges,
       materializeMissingReferences: materializeMissingReferences
     )
+    let hadMessage = saved.disposition != .inserted
+    let msg = saved.message
 
     if !msg.isGridTranscript {
       try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
@@ -2646,7 +2658,18 @@ extension InlineProtocol.UpdateNewMessage {
     // totals for delivered messages; applying this local delta too would double
     // count missed messages.
     if msg.out == false {
-      let dialogBefore = try Dialog.get(peerId: msg.peerId).fetchOne(db)
+      // Runs for every incoming message: cached statements over the two counters, no record decode.
+      let dialogID = Dialog.getDialogId(peerId: msg.peerId)
+      let dialogBefore = try Row.fetchOne(
+        db.cachedStatement(sql: "SELECT unreadCount, readInboxMaxId FROM dialog WHERE id = ?"),
+        arguments: [dialogID]
+      ).map { row in
+        // `decode` throws on a value that doesn't convert, as the `Dialog` fetch it replaces did.
+        try (
+          unreadCount: row.decode(Int?.self, forColumn: "unreadCount"),
+          readInboxMaxId: row.decode(Int64?.self, forColumn: "readInboxMaxId")
+        )
+      }
       var didIncrement = false
       var reason = "not_newer_than_read_max"
 
@@ -2656,11 +2679,11 @@ extension InlineProtocol.UpdateNewMessage {
         reason = "increment_disabled"
       } else if hadMessage {
         reason = "duplicate_message"
-      } else if var dialog = dialogBefore {
+      } else if let dialog = dialogBefore {
         let readInboxMaxId = dialog.readInboxMaxId ?? 0
         if msg.messageId > readInboxMaxId {
-          dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
-          try dialog.update(db)
+          try db.cachedStatement(sql: "UPDATE dialog SET unreadCount = ? WHERE id = ?")
+            .execute(arguments: [(dialog.unreadCount ?? 0) + 1, dialogID])
           didIncrement = true
           reason = "incremented"
         }
@@ -2668,11 +2691,18 @@ extension InlineProtocol.UpdateNewMessage {
         reason = "missing_dialog"
       }
 
+      // Catch-up replays and duplicates are the expected bulk case; keep them out of the persistent log.
       let unreadBefore = dialogBefore.flatMap(\.unreadCount).map(String.init) ?? "nil"
       let readMax = dialogBefore.flatMap(\.readInboxMaxId).map(String.init) ?? "nil"
-      Log.shared.info(
-        "[UnreadDiag] incoming_message peer=\(msg.peerId) chatId=\(msg.chatId) msgId=\(msg.messageId) hadExisting=\(hadMessage) increment=\(didIncrement) reason=\(reason) unreadBefore=\(unreadBefore) readMax=\(readMax)"
-      )
+      if reason == "increment_disabled" || reason == "duplicate_message" {
+        Log.shared.debug(
+          "[UnreadDiag] incoming_message peer=\(msg.peerId) chatId=\(msg.chatId) msgId=\(msg.messageId) hadExisting=\(hadMessage) increment=\(didIncrement) reason=\(reason) unreadBefore=\(unreadBefore) readMax=\(readMax)"
+        )
+      } else {
+        Log.shared.info(
+          "[UnreadDiag] incoming_message peer=\(msg.peerId) chatId=\(msg.chatId) msgId=\(msg.messageId) hadExisting=\(hadMessage) increment=\(didIncrement) reason=\(reason) unreadBefore=\(unreadBefore) readMax=\(readMax)"
+        )
+      }
     }
 
     #if os(macOS)

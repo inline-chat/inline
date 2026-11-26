@@ -492,29 +492,26 @@ public extension Chat {
 //        Column("lastMsgId").set(to: lastMsgId),
 //      ])
 
-    let chat = try Chat
-      .filter(Column("id") == chatId)
-      .annotated(
-        withOptional: Chat.lastMessage
-          .select(Column("date").forKey("lastMsgDate"))
-      )
-      .asRequest(of: ChatWithLastMessage.self)
-      .fetchOne(db)
+    // Same join as `Chat.lastMessage` (message.chatId = chat.id AND message.messageId = chat.lastMsgId),
+    // through cached statements: this runs for every applied message.
+    let row = try Row.fetchOne(
+      db.cachedStatement(sql: """
+      SELECT chat.lastMsgId AS lastMsgId, message.date AS lastMsgDate
+      FROM chat
+      LEFT JOIN message ON message.chatId = chat.id AND message.messageId = chat.lastMsgId
+      WHERE chat.id = ?
+      """),
+      arguments: [chatId]
+    )
 
-    if let chat, shouldAdvanceLastMessage(
-      currentLastMsgId: chat.lastMsgId,
-      currentLastMsgDate: chat.lastMsgDate,
+    if let row, try shouldAdvanceLastMessage(
+      currentLastMsgId: row.decode(Int64?.self, forColumn: "lastMsgId"),
+      currentLastMsgDate: row.decode(Date?.self, forColumn: "lastMsgDate"),
       newLastMsgId: lastMsgId,
       newDate: date
     ) {
-      Log.shared.debug(
-        "Updating lastMsgId for chat \(chatId) to \(lastMsgId) with date \(String(describing: chat.lastMsgDate))"
-      )
-      _ = try Chat
-        .filter(Column("id") == chatId)
-        .updateAll(db, [
-          Column("lastMsgId").set(to: lastMsgId),
-      ])
+      try db.cachedStatement(sql: "UPDATE chat SET lastMsgId = ? WHERE id = ?")
+        .execute(arguments: [lastMsgId, chatId])
     }
   }
 
