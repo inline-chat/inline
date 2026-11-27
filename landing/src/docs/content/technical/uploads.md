@@ -85,9 +85,9 @@ This wire-level sequence is for adapter authors. SDK applications can use the pr
 
 
 1. Generate and retain a 16-byte `client_upload_id`. Compute SHA-256 over the source bytes.
-2. Call `CREATE_UPLOAD` with that identity, metadata, byte count, and digest. Keep `upload_id`, `part_size`, `part_count`, `expires_at` (Unix seconds), and `accepted_parts`. A file of at most one part can carry its bytes in `inline_data`: the server stores and finishes it in the same call and returns `complete`. If `complete` is absent, continue with the steps below; part 0 is listed in `accepted_parts` when the server kept it.
+2. Call `CREATE_UPLOAD` with that identity, metadata, byte count, and digest. Keep `upload_id`, `part_size`, `part_count`, `expires_at` (Unix seconds), and `accepted_parts`. A file of at most one part can carry its bytes in `inline_data`: the server stores and finishes it in the same call and returns `complete`. If `complete` is absent, continue with the steps below; part 0 is listed in `accepted_parts` when the server kept it. To skip waiting for the reply before sending parts, propose a 16-byte `upload_id` (derive it from `client_upload_id` so a replay proposes the same one). A server that returns your proposed ID holds parts that arrive just ahead of their create, so later uploads can send parts right behind the create; if it returns a different ID, wait for create replies.
 3. Send every unaccepted zero-based part with `SAVE_UPLOAD_PART`. Every part except the final one must have exactly `part_size` bytes; the final part has the remainder. Parts can arrive out of order, and several can be in flight at once.
-4. Call `FINISH_UPLOAD`. If it reports `missing`, send those parts and finish again. If it reports processing, wait `retry_after_seconds` and query or finish the **same** upload. Continue until `complete` or `failed`.
+4. Call `FINISH_UPLOAD`. A video or document that did not name its thumbnail in `CREATE_UPLOAD` can name it here with `thumbnail_file_unique_id`, so the file can start uploading before its thumbnail is done. If it reports `missing`, send those parts and finish again. If it reports processing, wait `retry_after_seconds` and query or finish the **same** upload. Continue until `complete` or `failed`.
 5. Use returned typed media in a separate send operation. Verify the send result before treating the file as posted to a chat.
 
 The server replies to `SAVE_UPLOAD_PART` once it holds the bytes and stores them after replying, so a reply means received, not stored. A part it loses before storing it, after a failed write or a restart, is reported by `FINISH_UPLOAD` in `missing`; send it again. An identical retry of a part the server already has succeeds with `already_present: true`. Do not reuse an index with different bytes: the whole-file digest check fails the upload.
@@ -128,10 +128,10 @@ The owner is the user and account session; V3 additionally binds the permanent a
 
 | Method | Input | Result and completion boundary |
 | --- | --- | --- |
-| `CREATE_UPLOAD` | `client_upload_id`, metadata, `byte_count`, `sha256`, `kind` | Returns `upload_id`, geometry, expiry, and accepted indices after admission; file bytes are not complete. |
+| `CREATE_UPLOAD` | `client_upload_id`, metadata, `byte_count`, `sha256`, `kind`, optional `upload_id` and `inline_data` | Returns `upload_id`, geometry, expiry, and accepted indices after admission; file bytes are not complete. |
 | `SAVE_UPLOAD_PART` | `upload_id`, `part_index`, exact `data`, optional `offset` for a piece | Returns `already_present` once the server holds the bytes; `FINISH_UPLOAD` reports any it lost. |
 | `GET_UPLOAD_STATE` | `upload_id` | Returns status, accepted indices, and optional completion or failure detail. |
-| `FINISH_UPLOAD` | `upload_id` | Returns `missing`, `processing`, `complete`, or `failed`; processing is not completion. |
+| `FINISH_UPLOAD` | `upload_id`, optional `thumbnail_file_unique_id` | Returns `missing`, `processing`, `complete`, or `failed`; processing is not completion. |
 | `CANCEL_UPLOAD` | `upload_id` | Reports whether cancellation occurred or the upload was already terminal. |
 
 All methods require the upload owner. Invalid input, ownership mismatch, part conflict, or admission capacity can produce RPC errors; inspect the error before retrying. While part storage is unavailable, `SAVE_UPLOAD_PART` returns a retryable service-unavailable error (code 503) with `retry_after_seconds`, currently 5; wait and resend. The current service limits each account session to 20 active uploads and 2 GiB of reserved upload bytes; admission beyond either limit returns a rate-limit error. See [RPC Semantics](/docs/technical/rpc) for commit-unknown requests and [Protocol Schema](/docs/technical/protocol-schema) for exact wire fields.
