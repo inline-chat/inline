@@ -74,13 +74,9 @@ public enum ComposeSendEligibility {
     hasText: Bool,
     hasAttachments: Bool,
     hasForward: Bool,
-    hasPendingVideos: Bool,
-    hasActiveAttachmentUploads: Bool
+    hasPendingVideos: Bool
   ) -> Bool {
-    if hasActiveAttachmentUploads, hasAttachments || hasForward {
-      return false
-    }
-
+    // Uploads started while composing never hold the send: the send takes them over.
     if hasText {
       return true
     }
@@ -144,12 +140,6 @@ public enum ComposeTrailingControlState: Equatable, Sendable {
     }
 
     return .none
-  }
-}
-
-public enum ComposeAttachmentUploadBehavior {
-  public static func shouldStartUploadsInCompose() -> Bool {
-    false
   }
 }
 

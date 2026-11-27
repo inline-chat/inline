@@ -161,17 +161,16 @@ struct ComposeInteractionStateTests {
     #expect(shouldShowImmediately == false)
   }
 
-  @Test("attachment sends are blocked while uploads are already in flight")
-  func sendEligibilityBlocksAttachmentSendDuringUpload() async throws {
+  @Test("attachment sends stay immediate: the send takes over uploads started while composing")
+  func sendEligibilityAllowsAttachmentSendDuringUpload() async throws {
     let canSend = ComposeSendEligibility.canSend(
       hasText: true,
       hasAttachments: true,
       hasForward: false,
-      hasPendingVideos: false,
-      hasActiveAttachmentUploads: true
+      hasPendingVideos: false
     )
 
-    #expect(canSend == false)
+    #expect(canSend == true)
   }
 
   @Test("attachment-only send is allowed while pending video preprocessing is in progress")
@@ -180,31 +179,22 @@ struct ComposeInteractionStateTests {
       hasText: false,
       hasAttachments: false,
       hasForward: false,
-      hasPendingVideos: true,
-      hasActiveAttachmentUploads: false
+      hasPendingVideos: true
     )
 
     #expect(canSend == true)
   }
 
-  @Test("attachment-only send is blocked while uploads are already in flight")
-  func sendEligibilityBlocksAttachmentOnlyDuringUpload() async throws {
+  @Test("attachment-only send stays immediate while its upload runs")
+  func sendEligibilityAllowsAttachmentOnlyDuringUpload() async throws {
     let canSend = ComposeSendEligibility.canSend(
       hasText: false,
       hasAttachments: true,
       hasForward: false,
-      hasPendingVideos: false,
-      hasActiveAttachmentUploads: true
+      hasPendingVideos: false
     )
 
-    #expect(canSend == false)
-  }
-
-  @Test("compose does not prestart attachment uploads")
-  func attachmentUploadsDoNotStartInCompose() async throws {
-    let shouldStartUploads = ComposeAttachmentUploadBehavior.shouldStartUploadsInCompose()
-
-    #expect(shouldStartUploads == false)
+    #expect(canSend == true)
   }
 
   @Test("pending video only can be sent")
@@ -213,8 +203,7 @@ struct ComposeInteractionStateTests {
       hasText: false,
       hasAttachments: false,
       hasForward: false,
-      hasPendingVideos: true,
-      hasActiveAttachmentUploads: false
+      hasPendingVideos: true
     )
 
     #expect(canSend == true)
