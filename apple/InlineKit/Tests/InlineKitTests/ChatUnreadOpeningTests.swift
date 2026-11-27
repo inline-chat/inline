@@ -76,8 +76,10 @@ struct ChatUnreadOpeningTests {
     #expect(ChatUnreadOpening.firstUnreadMessageId(in: window, boundary: 0, reachesHistoryStart: true) == 1)
   }
 
+  /// The window stops at a hole near the boundary instead of failing; a line whose unread side
+  /// is across the hole still needs a fetch.
   @Test @MainActor
-  func holeAcrossTheWindowNeedsAFetch() async throws {
+  func holeNearTheBoundaryCutsTheWindow() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
     try await fixture.database.dbWriter.write { db in
       try MessageHistoryCoverageStore.invalidate(db, chatId: 1)
@@ -88,10 +90,21 @@ struct ChatUnreadOpeningTests {
       // The rows inside the hole are stale cache, not history.
       _ = try Message.filter(Column("messageId") > 1_010 && Column("messageId") < 1_030).deleteAll(db)
     }
-    let window = try await fixture.database.reader.read { db in
-      try ChatUnreadOpening.certifiedWindow(db, peer: .thread(id: 1), boundary: 1_000)
+    let (window, latest) = try await fixture.database.reader.read { db in
+      (
+        try ChatUnreadOpening.certifiedWindow(db, peer: .thread(id: 1), boundary: 1_000),
+        try ChatUnreadOpening.localOpeningWindow(
+          db, peer: .thread(id: 1), boundary: 1_000, latest: []
+        ),
+      )
     }
-    #expect(window == nil)
+    #expect(window?.map(\.message.messageId) == Array(956 ... 1_010))
+    #expect(latest?.map(\.message.messageId) == Array(956 ... 1_010))
+
+    let lineAcrossTheHole = try await fixture.database.reader.read { db in
+      try ChatUnreadOpening.localOpeningWindow(db, peer: .thread(id: 1), boundary: 1_010, latest: [])
+    }
+    #expect(lineAcrossTheHole == nil)
   }
 
   /// An uncached line opens on the latest messages; once its history is fetched the view model

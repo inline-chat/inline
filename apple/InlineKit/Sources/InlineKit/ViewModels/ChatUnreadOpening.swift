@@ -102,24 +102,29 @@ public enum ChatUnreadOpening {
   /// A local window around the boundary that durable history coverage proves continuous, or nil
   /// when the chat's cache cannot show it without fetching. The window is the one the progressive
   /// view model keeps, so no row in it is dropped on the way to the screen.
+  ///
+  /// Rows read across a hole are cut off rather than failing the whole window: a cached row near
+  /// the boundary that no page joins (a reply's quoted message, a pin, a gallery item, the edge of
+  /// an earlier visit) says nothing about the history at the boundary. Paging fills from the edges.
   public nonisolated static func certifiedWindow(
     _ db: Database,
     peer: Peer,
     chatId: Int64? = nil,
     boundary: Int64
   ) throws -> [FullMessage]? {
+    let coordinate = max(1, boundary)
     guard let window = try MessagesProgressiveViewModel.localWindowAroundCoordinate(
       db,
       peer: peer,
       chatId: chatId,
-      messageID: max(1, boundary),
+      messageID: coordinate,
       limit: windowLimit
     ), !window.isEmpty else { return nil }
 
-    // A missing boundary row is already proven by `localWindowAroundCoordinate`. Any
-    // unknown gap between rows would make the view model drop the side across it.
+    // A missing boundary row is already proven by `localWindowAroundCoordinate`. The view model
+    // would drop the side across any unknown gap, so only the run around the boundary is kept.
     let metadata = try MessagesProgressiveViewModel.loadedWindowMetadata(db, peer: peer, messages: window)
-    guard metadata.historyCoverage.contiguousWindow(from: window).count == window.count else { return nil }
-    return window
+    let run = metadata.historyCoverage.contiguousWindow(from: window, around: coordinate)
+    return run.isEmpty ? nil : run
   }
 }

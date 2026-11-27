@@ -47,9 +47,16 @@ public final class ChatOpenPreparation {
   ) async throws -> InitialState {
     let saved = store.place(for: peer)
     let state = try await prepare(peer, saved)
-    // Only the place that was read is cleared; one saved since then is kept.
-    if let saved, state.openAnchor != .saved(saved), store.place(for: peer) == saved {
-      store.clear(for: peer)
+    // Only the place that was read is changed; one saved since then is kept.
+    guard let saved, store.place(for: peer) == saved else { return state }
+    switch state.openAnchor {
+      case .saved(saved):
+        break
+      case let .saved(moved):
+        // Its message was deleted; the place moved to a neighbour.
+        store.save(moved, for: peer)
+      case .unread, .latest:
+        store.clear(for: peer)
     }
     return state
   }

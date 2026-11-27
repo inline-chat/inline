@@ -27,8 +27,8 @@ public enum ChatOpenAnchor: Sendable, Equatable {
 }
 
 /// Reading places per account and chat, kept in the local database so they survive a relaunch
-/// (memory in tests). When a chat opens, its saved place wins over the unread line if the cache
-/// can show its row. The lists save a place when the newest message is off screen and clear it
+/// (memory in tests). When a chat opens with nothing unread, its saved place is where it opens if
+/// the cache can show its row; unread messages win over it. The lists save a place when the newest message is off screen and clear it
 /// at the bottom, on send, on return to latest and on a notification open.
 @MainActor
 public final class ChatReadingPlaceStore {
@@ -172,7 +172,7 @@ final class DatabaseChatReadingPlaceStorage: ChatReadingPlaceStorage {
 }
 
 /// Choosing where a chat opens and the window it opens on, from the local cache only:
-/// the saved reading place, else the unread line, else the latest messages.
+/// the unread line, else the saved reading place, else the latest messages.
 public enum ChatOpening {
   public struct Resolution: Sendable {
     public let anchor: ChatOpenAnchor
@@ -201,54 +201,62 @@ public enum ChatOpening {
   ) throws -> Resolution {
     let boundary = ChatUnreadOpening.boundary(unreadCount: unreadCount, readInboxMaxId: readInboxMaxId)
 
-    if let saved, let window = try savedPlaceWindow(db, peer: peer, chatId: chatId, place: saved, latest: latest) {
+    // Unread messages win over a saved place (Mo, 2026-11-27, both platforms; the place won from 2026-11-25). The
+    // place is kept for an open with nothing unread.
+    if let boundary {
+      if let window = try ChatUnreadOpening.localOpeningWindow(
+        db, peer: peer, chatId: chatId, boundary: boundary, latest: latest
+      ) {
+        return Resolution(
+          anchor: .unread(boundary: boundary), messages: window, unreadBoundary: boundary,
+          uncachedUnreadBoundary: nil, droppedSavedPlace: false
+        )
+      }
       return Resolution(
-        anchor: .saved(saved), messages: window, unreadBoundary: boundary,
+        anchor: .latest, messages: latest, unreadBoundary: boundary,
+        uncachedUnreadBoundary: boundary, droppedSavedPlace: false
+      )
+    }
+
+    if let saved, let opening = try savedPlaceWindow(db, peer: peer, chatId: chatId, place: saved, latest: latest) {
+      return Resolution(
+        anchor: .saved(opening.place), messages: opening.messages, unreadBoundary: nil,
         uncachedUnreadBoundary: nil, droppedSavedPlace: false
       )
     }
-    // A saved place is never fetched: without its row in a continuous cached window it is dropped.
-    let dropped = saved != nil
-
-    guard let boundary else {
-      return Resolution(
-        anchor: .latest, messages: latest, unreadBoundary: nil,
-        uncachedUnreadBoundary: nil, droppedSavedPlace: dropped
-      )
-    }
-    if let window = try ChatUnreadOpening.localOpeningWindow(
-      db, peer: peer, chatId: chatId, boundary: boundary, latest: latest
-    ) {
-      return Resolution(
-        anchor: .unread(boundary: boundary), messages: window, unreadBoundary: boundary,
-        uncachedUnreadBoundary: nil, droppedSavedPlace: dropped
-      )
-    }
+    // A saved place is never fetched: without a continuous cached run at it, it is dropped.
     return Resolution(
-      anchor: .latest, messages: latest, unreadBoundary: boundary,
-      uncachedUnreadBoundary: boundary, droppedSavedPlace: dropped
+      anchor: .latest, messages: latest, unreadBoundary: nil,
+      uncachedUnreadBoundary: nil, droppedSavedPlace: saved != nil
     )
   }
 
-  /// A cached window holding the saved place's row that coverage proves continuous, or nil.
-  /// The latest page comes first, so a place near the bottom stays attached to live messages.
-  /// A deleted row drops the place: there is nothing to put at its offset.
+  /// Where a saved place opens and its window, or nil. The latest page comes first, so a place
+  /// near the bottom stays attached to live messages. Otherwise the window is the cached run
+  /// around the place, cut at the nearest holes on either side, as Telegram cuts its history view:
+  /// a place left after a jump, or at the edge of the history paged in, opens there and pages on.
+  ///
+  /// A row deleted since hands its place to the next message at the same offset, as Telegram's
+  /// restore does; the window read proves nothing else sits between them. A place inside unknown
+  /// history is dropped.
   nonisolated static func savedPlaceWindow(
     _ db: Database,
     peer: Peer,
     chatId: Int64?,
     place: ChatReadingPlace,
     latest: [FullMessage]
-  ) throws -> [FullMessage]? {
+  ) throws -> (place: ChatReadingPlace, messages: [FullMessage])? {
     let id = place.messageId
     guard id > 0 else { return nil }
     if latest.contains(where: { $0.message.messageId == id }), try isContinuous(latest, db: db, peer: peer) {
-      return latest
+      return (place, latest)
     }
-    guard let around = try ChatUnreadOpening.certifiedWindow(db, peer: peer, chatId: chatId, boundary: id),
-          around.contains(where: { $0.message.messageId == id })
+    guard let around = try ChatUnreadOpening.certifiedWindow(db, peer: peer, chatId: chatId, boundary: id)
     else { return nil }
-    return around
+    let ids = around.map(\.message.messageId).filter { $0 > 0 }
+    if ids.contains(id) { return (place, around) }
+    guard let next = ids.filter({ $0 > id }).min() else { return nil }
+    return (ChatReadingPlace(messageId: next, offset: place.offset), around)
   }
 
   /// Whether the view model keeps every row of a window: no unknown history between them.

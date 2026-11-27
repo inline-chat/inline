@@ -55,26 +55,50 @@ struct ChatOpeningTests {
     #expect(state.historyCoverage.isAtCertifiedLiveEnd)
   }
 
+  /// As Telegram's restore: the next message takes the place at the same offset.
   @Test @MainActor
-  func savedPlaceWhoseMessageWasDeletedIsDropped() async throws {
+  func savedPlaceWhoseMessageWasDeletedOpensAtTheNextMessage() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
     try await fixture.database.dbWriter.write { db in
       _ = try Message.filter(Column("chatId") == 1 && Column("messageId") == 1_000).deleteAll(db)
     }
-    let latest = try await fixture.latest(60)
-    let opening = try await fixture.resolve(saved: .init(messageId: 1_000, offset: 4), latest: latest)
+    let opening = try await fixture.resolve(saved: .init(messageId: 1_000, offset: 4))
 
-    #expect(opening.anchor == .latest)
-    #expect(opening.droppedSavedPlace)
-    #expect(opening.messages.map(\.id) == latest.map(\.id))
+    #expect(opening.anchor == .saved(.init(messageId: 1_001, offset: 4)))
+    #expect(!opening.droppedSavedPlace)
+    #expect(opening.messages.contains { $0.message.messageId == 1_001 })
+    #expect(try await fixture.isContinuous(opening.messages))
+  }
+
+  /// A cached row past a hole does not cost the place: the window stops at the hole.
+  @Test @MainActor
+  func savedPlaceNextToAHoleOpensOnItsSideOfIt() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    try await fixture.holeAround1_000()
+    let place = ChatReadingPlace(messageId: 1_000, offset: 0)
+    let opening = try await fixture.resolve(saved: place)
+
+    #expect(opening.anchor == .saved(place))
+    #expect(!opening.droppedSavedPlace)
+    let ids = opening.messages.map(\.message.messageId)
+    #expect(ids == Array(956 ... 1_010))
+    #expect(try await fixture.isContinuous(opening.messages))
+
+    let state = try await fixture.prepare(saved: place)
+    #expect(state.openAnchor == .saved(place))
+    #expect(state.messages.map(\.message.messageId) == ids)
+    #expect(!state.historyCoverage.hasCertifiedNewerEdge)
+    let model = fixture.model(state)
+    defer { model.dispose() }
+    #expect(model.messages.map(\.message.messageId) == ids)
   }
 
   @Test @MainActor
-  func savedPlaceAcrossAHoleIsDroppedForTheLatestMessages() async throws {
+  func savedPlaceInsideAHoleIsDroppedForTheLatestMessages() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
     try await fixture.holeAround1_000()
     let latest = try await fixture.latest(60)
-    let opening = try await fixture.resolve(saved: .init(messageId: 1_000, offset: 0), latest: latest)
+    let opening = try await fixture.resolve(saved: .init(messageId: 1_020, offset: 0), latest: latest)
 
     #expect(opening.anchor == .latest)
     #expect(opening.droppedSavedPlace)
@@ -83,48 +107,80 @@ struct ChatOpeningTests {
   }
 
   @Test @MainActor
-  func savedPlaceAcrossAHoleIsDroppedForTheUnreadLine() async throws {
+  func savedPlaceInsideAHoleIsDroppedForTheUnreadLine() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
     try await fixture.holeAround1_000()
     try await fixture.setUnread(count: 300, readInboxMaxId: 2_100)
-    let opening = try await fixture.resolve(saved: .init(messageId: 1_000, offset: 0))
+    let opening = try await fixture.resolve(saved: .init(messageId: 1_020, offset: 0))
 
+    // Unread wins without looking at the place (kept for an open with nothing unread).
     #expect(opening.anchor == .unread(boundary: 2_100))
-    #expect(opening.droppedSavedPlace)
+    #expect(!opening.droppedSavedPlace)
     #expect(opening.unreadBoundary == 2_100)
     #expect(opening.messages.contains { $0.message.messageId == 2_101 })
 
-    let state = try await fixture.prepare(saved: .init(messageId: 1_000, offset: 0))
+    let state = try await fixture.prepare(saved: .init(messageId: 1_020, offset: 0))
     #expect(state.openAnchor == .unread(boundary: 2_100))
     #expect(state.messages.map(\.id) == opening.messages.map(\.id))
   }
 
+  /// Places left after the ways a reader gets far back, with the cache those leave behind:
+  /// paged up from the newest messages (sparse rows below, like a reply's quoted message), a jump
+  /// to a reply or search result (an around page of 100), and a jump then reading down two pages.
+  /// Before 2026-11-25 every place within 44 rows of a cached row across a hole was dropped.
+  @Test("a place left far back reopens there", arguments: [
+    (rows: [1_000 ... 1_000, 1_790 ... 1_790, 1_801 ... 2_400], certified: [1_801 ... Self.max], places: [1_801, 1_820, 2_200]),
+    (rows: [950 ... 1_049, 2_341 ... 2_400], certified: [950 ... 1_049, 2_341 ... Self.max], places: [950, 1_000, 1_010, 1_049]),
+    (rows: [950 ... 1_169, 2_341 ... 2_400], certified: [950 ... 1_169, 2_341 ... Self.max], places: [1_100, 1_130, 1_169]),
+  ] as [(rows: [ClosedRange<Int64>], certified: [ClosedRange<Int64>], places: [Int64])])
+  @MainActor
+  func placeLeftFarBackReopensThere(
+    cache: (rows: [ClosedRange<Int64>], certified: [ClosedRange<Int64>], places: [Int64])
+  ) async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    try await fixture.cache(rows: cache.rows, certified: cache.certified)
+    let run = try #require(cache.certified.first)
+    for id in cache.places {
+      let place = ChatReadingPlace(messageId: id, offset: 24)
+      let state = try await fixture.prepare(saved: place)
+      #expect(state.openAnchor == .saved(place), "place \(id)")
+      let ids = state.messages.map(\.message.messageId)
+      #expect(ids.contains(id))
+      // Only the run the reader was in; nothing across its holes.
+      #expect(ids.allSatisfy { run.contains($0) }, "place \(id)")
+      let model = fixture.model(state)
+      #expect(model.messages.map(\.message.messageId) == ids)
+      model.dispose()
+    }
+  }
+
   @Test @MainActor
-  func savedPlaceWinsOverUnreadAndKeepsTheBoundary() async throws {
+  func unreadWinsOverASavedPlaceAndKeepsIt() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
     try await fixture.setUnread(count: 400, readInboxMaxId: 2_000)
     let place = ChatReadingPlace(messageId: 1_000, offset: 30)
     let opening = try await fixture.resolve(saved: place)
 
-    #expect(opening.anchor == .saved(place))
+    // Mo, 2026-11-27: the unread position wins over the saved one, on both platforms.
+    #expect(opening.anchor == .unread(boundary: 2_000))
     #expect(opening.unreadBoundary == 2_000)
     #expect(opening.uncachedUnreadBoundary == nil)
     #expect(!opening.droppedSavedPlace)
-    #expect(opening.messages.contains { $0.message.messageId == 1_000 })
+    #expect(opening.messages.contains { $0.message.messageId == 2_001 })
 
     let state = try await fixture.prepare(saved: place)
-    #expect(state.openAnchor == .saved(place))
+    #expect(state.openAnchor == .unread(boundary: 2_000))
     #expect(state.unreadBoundary == 2_000)
   }
 
   @Test @MainActor
-  func savedPlaceNearTheUnreadLineDrawsTheLine() async throws {
+  func unreadNearASavedPlaceOpensAtTheLine() async throws {
     let fixture = try await Fixture(messageCount: 2_400)
     try await fixture.setUnread(count: 1_400, readInboxMaxId: 1_010)
     let place = ChatReadingPlace(messageId: 1_000, offset: 0)
     let opening = try await fixture.resolve(saved: place)
 
-    #expect(opening.anchor == .saved(place))
+    #expect(opening.anchor == .unread(boundary: 1_010))
     let boundary = try #require(opening.unreadBoundary)
     #expect(ChatUnreadOpening.firstUnreadMessageId(
       in: opening.messages, boundary: boundary, reachesHistoryStart: false
@@ -314,6 +370,8 @@ struct ChatOpeningTests {
     #expect(store.place(for: Self.peer) == second)
   }
 
+  private static let max = MessageHistoryHole.positiveMessageIDMax
+
   // MARK: Preparation
 
   @Test @MainActor
@@ -325,10 +383,19 @@ struct ChatOpeningTests {
       try await fixture.prepare($0, saved: $1)
     }
 
-    store.save(ChatReadingPlace(messageId: 1_000, offset: 0), for: Self.peer)
+    store.save(ChatReadingPlace(messageId: 1_020, offset: 0), for: Self.peer)
     let dropped = try await ChatOpenPreparation.readAtReadingPlace(peer: Self.peer, store: store, prepare: prepare)
     #expect(dropped.openAnchor == .latest)
     #expect(store.place(for: Self.peer) == nil)
+
+    // A deleted message's place moves to its neighbour and is kept there.
+    try await fixture.database.dbWriter.write { db in
+      _ = try Message.filter(Column("chatId") == 1 && Column("messageId") == 1_000).deleteAll(db)
+    }
+    store.save(ChatReadingPlace(messageId: 1_000, offset: 6), for: Self.peer)
+    let moved = try await ChatOpenPreparation.readAtReadingPlace(peer: Self.peer, store: store, prepare: prepare)
+    #expect(moved.openAnchor == .saved(ChatReadingPlace(messageId: 1_001, offset: 6)))
+    #expect(store.place(for: Self.peer) == ChatReadingPlace(messageId: 1_001, offset: 6))
 
     let shown = ChatReadingPlace(messageId: 2_200, offset: 8)
     store.save(shown, for: Self.peer)
@@ -370,6 +437,19 @@ private struct Fixture {
         lowerId: 1,
         upperId: MessageHistoryHole.positiveMessageIDMax
       )
+    }
+  }
+
+  /// Keeps only the given rows and certifies only the given ranges, as server pages leave them.
+  func cache(rows: [ClosedRange<Int64>], certified: [ClosedRange<Int64>]) async throws {
+    try await database.dbWriter.write { db in
+      let all = try Message.filter(Column("chatId") == 1).fetchAll(db).map(\.messageId)
+      let kept = all.filter { id in rows.contains { $0.contains(id) } }
+      _ = try Message.filter(Column("chatId") == 1 && !kept.contains(Column("messageId"))).deleteAll(db)
+      try MessageHistoryCoverageStore.invalidate(db, chatId: 1)
+      for range in certified {
+        try MessageHistoryCoverageStore.subtract(db, chatId: 1, lowerId: range.lowerBound, upperId: range.upperBound)
+      }
     }
   }
 
