@@ -6,6 +6,7 @@ import http.client
 from collections import OrderedDict
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from typing import Any, Dict, Iterable, Optional
@@ -788,13 +789,19 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         # IPC stays on loopback even when the host configures an HTTP proxy.
         # The sidecar token must never be forwarded to that proxy.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(request, timeout=15) as response:
+        with opener.open(request, timeout=_sidecar_timeout_seconds()) as response:
             raw = response.read().decode("utf-8")
             status = response.status
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         status = exc.code
     except (OSError, http.client.HTTPException) as exc:
+        if _is_timeout(exc):
+            # The sidecar may still finish the write after this call gives up.
+            raise InlineToolError(
+                "Inline didn't answer in time; the action may still have gone through. Check before retrying.",
+                "transient",
+            ) from exc
         raise InlineToolError(f"Inline sidecar is not reachable: {exc}", "transient") from exc
 
     try:
@@ -807,6 +814,32 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         error_kind = str(data.get("errorKind") or "unknown")
         raise InlineToolError(error, error_kind)
     return data
+
+
+# The sidecar answers a timed-out RPC itself, as an unknown outcome. Waiting longer than its
+# RPC timeout lets that answer through instead of reporting an unreachable sidecar.
+_SIDECAR_DEFAULT_RPC_TIMEOUT_SECONDS = 30
+_SIDECAR_RESPONSE_MARGIN_SECONDS = 15
+
+
+def _sidecar_timeout_seconds() -> float:
+    rpc_seconds = float(_SIDECAR_DEFAULT_RPC_TIMEOUT_SECONDS)
+    raw = _str(inline_env("INLINE_RPC_TIMEOUT_MS"))
+    if raw:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            parsed = 0
+        if parsed > 0:
+            rpc_seconds = parsed / 1000
+    return rpc_seconds + _SIDECAR_RESPONSE_MARGIN_SECONDS
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    # urllib raises socket.timeout on read and wraps it in URLError on connect.
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    return isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, (TimeoutError, socket.timeout))
 
 
 def _sidecar_config() -> tuple[str, str]:
