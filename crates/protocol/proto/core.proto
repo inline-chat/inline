@@ -6598,14 +6598,24 @@ message CreateUploadResult {
   repeated uint32 accepted_parts = 5;
   // Set when inline_data finalized the upload in this call.
   optional UploadComplete complete = 6;
+  // Set by servers that accept a part in pieces (SaveUploadPartInput.offset). A piece starts at a
+  // multiple of this many bytes and is a multiple of it long, except the piece that ends its part.
+  // Clients send whole parts when it is unset.
+  optional uint32 piece_granularity = 7;
 }
 
 message SaveUploadPartInput {
   bytes upload_id = 1;
   uint32 part_index = 2;
   bytes data = 3;
+  // Byte offset of `data` inside the part, when the part is sent in pieces (see
+  // CreateUploadResult.piece_granularity). Unset means `data` is the whole part. The part joins
+  // accepted_parts once all of its bytes have arrived.
+  optional uint32 offset = 4;
 }
 
+// The server replies once it holds the bytes and stores them after replying. A part it loses
+// before storing it is reported by FINISH_UPLOAD in `missing`, and the client sends it again.
 message SaveUploadPartResult { bool already_present = 1; }
 
 message GetUploadStateInput { bytes upload_id = 1; }
