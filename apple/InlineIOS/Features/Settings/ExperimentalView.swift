@@ -12,6 +12,9 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.newThreadComposerKey)
   private var newThreadComposerEnabled = false
 
+  @AppStorage(EarlyUploadSettings.enabledKey)
+  private var earlyUploadsEnabled = true
+
   @AppStorage(MessageContextMenuFeature.preferenceKey)
   private var customContextMenuEnabled = true
 
@@ -30,15 +33,22 @@ struct ExperimentalView: View {
             .labelsHidden()
             .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
         }
+        SettingsItem(icon: "arrow.up.circle", iconColor: .green, title: "Upload While Writing") {
+          Toggle("Upload While Writing", isOn: $earlyUploadsEnabled)
+            .labelsHidden()
+        }
       } header: {
         Text("Files")
       } footer: {
-        if nativeFileDownloadsAvailable {
-          Text("Download documents and videos over the realtime connection. Other media use standard downloads. Turn off to use standard downloads for everything.")
-        } else if nativeFileDownloadsEnabled {
-          Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
-        } else {
-          Text("Sign in to use native file downloads.")
+        VStack(alignment: .leading, spacing: 6) {
+          if nativeFileDownloadsAvailable {
+            Text("Download documents and videos over the realtime connection. Other media use standard downloads. Turn off to use standard downloads for everything.")
+          } else if nativeFileDownloadsEnabled {
+            Text("Sign in to use native file downloads. Turn off to clear the saved preference.")
+          } else {
+            Text("Sign in to use native file downloads.")
+          }
+          Text("Upload While Writing: photos start uploading when you attach them, so they send sooner. Removing one deletes what was uploaded. Off: uploads start when you send.")
         }
       }
 

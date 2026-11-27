@@ -142,7 +142,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var documentInteractionController: UIDocumentInteractionController?
 
   private var hasActiveAttachmentUploads: Bool {
-    guard ComposeAttachmentUploadBehavior.shouldStartUploadsInCompose() else { return false }
+    guard EarlyUploadSettings.isEnabled else { return false }
 
     for attachmentId in attachmentItems.keys {
       if attachmentUploadStartTasks[attachmentId] != nil || attachmentUploadBindingTasks[attachmentId] != nil {
@@ -187,8 +187,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       hasText: hasText,
       hasAttachments: hasAttachments,
       hasForward: hasForward,
-      hasPendingVideos: hasPendingVideos,
-      hasActiveAttachmentUploads: hasActiveAttachmentUploads
+      hasPendingVideos: hasPendingVideos
     )
   }
 
@@ -1247,8 +1246,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       hasText: hasText,
       hasAttachments: hasAttachmentItems,
       hasForward: hasForward,
-      hasPendingVideos: hasPendingVideos,
-      hasActiveAttachmentUploads: hasActiveUploads
+      hasPendingVideos: hasPendingVideos
     ) else { return }
 
     let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
@@ -2205,7 +2203,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func syncAttachmentUploadTracking(cancelRemovedUploads: Bool = true) {
-    guard ComposeAttachmentUploadBehavior.shouldStartUploadsInCompose() else {
+    guard EarlyUploadSettings.isEnabled else {
       clearAttachmentUploadTracking(cancelUploads: cancelRemovedUploads)
       return
     }
@@ -2229,7 +2227,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     for (attachmentId, mediaItem) in attachmentItems {
-      guard attachmentUploadProgress[attachmentId] == nil, attachmentUploadStartTasks[attachmentId] == nil else {
+      guard FileUploader.startsEarly(mediaItem),
+            attachmentUploadProgress[attachmentId] == nil,
+            attachmentUploadStartTasks[attachmentId] == nil
+      else {
         continue
       }
 
@@ -2304,17 +2305,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
+  /// Moves the attachment's bytes now; its finish waits for Send, which takes the upload over,
+  /// and removing the attachment cancels it (the server deletes what it has).
   private func startAttachmentUpload(_ mediaItem: FileMediaItem) async throws {
-    switch mediaItem {
-    case let .photo(photoInfo):
-      _ = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
-    case let .video(videoInfo):
-      _ = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
-    case let .document(documentInfo):
-      _ = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
-    case let .voice(voiceContent):
-      _ = try await FileUploader.shared.uploadVoice(voiceContent: voiceContent)
-    }
+    await FileUploader.shared.startEarlyUpload(media: mediaItem)
   }
 
   private func setAttachmentUploadProgress(_ progress: UploadProgressSnapshot, for attachmentId: String) {
@@ -2345,7 +2339,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
        (progress.stage == .processing || progress.stage == .uploading)
     {
       Task {
-        await FileUploader.shared.cancel(uploadId: attachmentId)
+        await FileUploader.shared.cancelEarlyUpload(uploadId: attachmentId)
       }
     }
 
