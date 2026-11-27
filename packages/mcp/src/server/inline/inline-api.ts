@@ -14,6 +14,7 @@ import {
   GetMessagesInput,
   GetMeInput,
   GetSpaceMembersInput,
+  type GetSpaceMembersResult,
   GetSpaceInput,
   GetUsersInput,
   InputChatParticipant,
@@ -632,12 +633,23 @@ export function createInlineApi(params: {
     return result.getChat
   }
 
+  // conversations.ask resolves up to 10 participants at once; each would list
+  // every allowed space's members. Share those lists for 15s.
+  const spaceMembers = new Map<string, { promise: Promise<GetSpaceMembersResult>; expiresAtMs: number }>()
   const getSpaceMembers = async (spaceId: bigint) => {
-    const result = await invoke(Method.GET_SPACE_MEMBERS, {
+    const key = spaceId.toString()
+    const cached = spaceMembers.get(key)
+    if (cached && cached.expiresAtMs > Date.now()) return await cached.promise
+    const promise = invoke(Method.GET_SPACE_MEMBERS, {
       oneofKind: "getSpaceMembers",
       getSpaceMembers: GetSpaceMembersInput.create({ spaceId }),
+    }).then((result) => result.getSpaceMembers)
+    const entry = { promise, expiresAtMs: Date.now() + 15_000 }
+    spaceMembers.set(key, entry)
+    promise.catch(() => {
+      if (spaceMembers.get(key) === entry) spaceMembers.delete(key)
     })
-    return result.getSpaceMembers
+    return await promise
   }
 
   const getChatParticipants = async (chatId: bigint) => {
@@ -1097,6 +1109,23 @@ export function createInlineApi(params: {
     return (await getFreshAllowedChat(resolved.chatId, deferLastMessage)).chat
   }
 
+  // Writes authorize their target with GET_CHAT, never the full catalog. One
+  // lookup per chat per InlineApi (one HTTP request, or a 15s legacy window)
+  // so a batch to one chat pays once.
+  const writableChats = new Map<string, { promise: Promise<InlineEligibleChat>; expiresAtMs: number }>()
+  const getWritableChat = async (chatId: bigint): Promise<InlineEligibleChat> => {
+    const key = chatId.toString()
+    const cached = writableChats.get(key)
+    if (cached && cached.expiresAtMs > Date.now()) return await cached.promise
+    const promise = getAllowedChat({ chatId }, true, true)
+    const entry = { promise, expiresAtMs: Date.now() + 15_000 }
+    writableChats.set(key, entry)
+    promise.catch(() => {
+      if (writableChats.get(key) === entry) writableChats.delete(key)
+    })
+    return await promise
+  }
+
   const listRecentMessages = async (params: {
     chatId?: bigint
     userId?: bigint
@@ -1124,8 +1153,13 @@ export function createInlineApi(params: {
     let scannedCount = 0
     let nextOffsetId: bigint | null | undefined = params.offsetId
 
+    // Without filters every scanned message is returned, so ask for what is
+    // still missing (plus one, so a chat that ends exactly there still reports
+    // no further page) instead of a 50-message page.
+    const unfiltered = safeDirection === "all" && params.senderUserId == null && safeContent === "all" &&
+      params.since == null && params.until == null && !safeUnreadOnly
     while (messages.length < maxMessages && scannedCount < maxScanned) {
-      const pageLimit = Math.min(50, maxScanned - scannedCount)
+      const pageLimit = Math.min(unfiltered ? maxMessages - messages.length + 1 : 50, maxScanned - scannedCount)
       const historyResult = await invoke(Method.GET_CHAT_HISTORY, {
         oneofKind: "getChatHistory",
         getChatHistory: GetChatHistoryInput.create({
@@ -1765,7 +1799,7 @@ export function createInlineApi(params: {
     },
 
     async createSubthread({ parentChatId, parentMessageId, title, description, emoji, participantUserIds }) {
-      const parent = await getAllowedChat({ chatId: parentChatId })
+      const parent = await getWritableChat(parentChatId)
       // A child of a DM is a home thread. Do not create it and discover only
       // afterward that the grant cannot inspect or send to the result.
       if (parent.spaceId == null && !allowHomeThreads) {
@@ -1804,8 +1838,8 @@ export function createInlineApi(params: {
     },
 
     async forwardMessages({ sourceChatId, destinationChatId, messageIds, shareForwardHeader }) {
-      const sourceChat = await getAllowedChat({ chatId: sourceChatId })
-      const destinationChat = await getAllowedChat({ chatId: destinationChatId })
+      const sourceChat = await getWritableChat(sourceChatId)
+      const destinationChat = await getWritableChat(destinationChatId)
       if (messageIds.length === 0 || messageIds.length > 100 || messageIds.some((id) => id <= 0n)) {
         throw new Error("forwardMessages requires one to one hundred positive message IDs")
       }
@@ -1867,7 +1901,7 @@ export function createInlineApi(params: {
         throw new InlineAccessDeniedError("DM access is not allowed for this grant")
       }
 
-      const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null
+      const chat = target.kind === "chat" ? await getWritableChat(target.chatId) : null
 
       const res = await sendRpcMessage({
         target,
@@ -1886,7 +1920,7 @@ export function createInlineApi(params: {
         throw new InlineAccessDeniedError("DM access is not allowed for this grant")
       }
 
-      const chat = target.kind === "chat" ? await getAllowedChat({ chatId: target.chatId }) : null
+      const chat = target.kind === "chat" ? await getWritableChat(target.chatId) : null
       const caption = text?.trim() ? text : undefined
 
       const res = await sendRpcMessage({

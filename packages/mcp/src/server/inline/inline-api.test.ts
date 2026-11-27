@@ -262,6 +262,45 @@ describe("createInlineApi", () => {
     }
   })
 
+  it("authorizes chat sends with one chat read per chat, never the catalog", async () => {
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Launch", 10n, 3n) } }
+      if (method === Method.GET_SPACE) return { getSpace: { space: { id: 10n, name: "Team" } } }
+      if (method === Method.SEND_MESSAGE) return { sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: 300n, randomId: 1n } } }] } }
+      throw new Error(`unexpected ${method}`)
+    })
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false },
+    })
+    try {
+      const first = await api.sendMessage({ chatId: 7n, text: "one", sendMode: "normal", parseMarkdown: false })
+      await api.sendMessage({ chatId: 7n, text: "two", sendMode: "normal", parseMarkdown: false })
+      expect(first.spaceId).toBe(10n)
+      const methods = realtimeSdk.client.invoke.mock.calls.map(([method]) => method)
+      expect(methods).not.toContain(Method.GET_CHATS)
+      expect(methods.filter((method) => method === Method.GET_CHAT)).toHaveLength(1)
+      expect(sendCalls()).toHaveLength(2)
+    } finally { await api.close() }
+  })
+
+  it("rejects a chat send outside the grant from the chat read alone", async () => {
+    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Other", 99n, 3n) } }
+      throw new Error(`unexpected ${method}`)
+    })
+    const api = createInlineApi({
+      baseUrl: "https://api.inline.test",
+      token: "test-token",
+      allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false },
+    })
+    try {
+      await expect(api.sendMessage({ chatId: 7n, text: "x", sendMode: "normal", parseMarkdown: false })).rejects.toThrow()
+      expect(sendCalls()).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
   it("signs sends with the connection's agent", async () => {
     realtimeSdk.client.invoke.mockResolvedValue({ oneofKind: "sendMessage", sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: 300n, randomId: 1n } } }] } })
     const api = createInlineApi({
@@ -617,6 +656,40 @@ describe("createInlineApi", () => {
       await expect(read[operation]()).rejects.toThrow("no existing approved DM conversation")
       expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHATS])
       expect(sendCalls()).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
+  it("asks history for exactly the requested page when nothing is filtered", async () => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_SPACE) return { getSpace: { space: space(10n, "Team") } }
+      if (method === Method.GET_CHAT_HISTORY) {
+        const limit = input.getChatHistory.limit
+        return { getChatHistory: { messages: Array.from({ length: limit }, (_, index) => message(100n - BigInt(index), 7n, 2n, "m")) } }
+      }
+      return invokeContext(method, input)
+    })
+    const historyLimits = () => realtimeSdk.client.invoke.mock.calls
+      .filter(([method]) => method === Method.GET_CHAT_HISTORY)
+      .map(([, input]) => input.getChatHistory.limit)
+    try {
+      const plain = await api.recentMessages({ chatId: 7n, limit: 20 })
+      expect(plain.messages).toHaveLength(20)
+      expect(plain.nextOffsetId).toBe(81n)
+      expect(historyLimits()).toEqual([21])
+      // A filter can skip messages, so filtered scans keep reading 50 at a time.
+      await api.recentMessages({ chatId: 7n, limit: 20, direction: "sent" })
+      expect(historyLimits()[1]).toBe(50)
+      // A chat that ends exactly at the limit reports no further page.
+      realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+        if (method === Method.GET_SPACE) return { getSpace: { space: space(10n, "Team") } }
+        if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: Array.from({ length: 20 }, (_, index) => message(100n - BigInt(index), 7n, 2n, "m")) } }
+        return invokeContext(method, input)
+      })
+      const exact = await api.recentMessages({ chatId: 7n, limit: 20 })
+      expect(exact.messages).toHaveLength(20)
+      expect(exact.nextOffsetId).toBeNull()
     } finally { await api.close() }
   })
 
