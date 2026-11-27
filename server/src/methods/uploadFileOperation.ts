@@ -211,6 +211,14 @@ function uploadBadRequest(description: string): InlineError {
   return error
 }
 
+function fileExtensionForLog(name: string | undefined): string | undefined {
+  if (!name) return undefined
+  const dot = name.lastIndexOf(".")
+  if (dot <= 0 || dot === name.length - 1) return undefined
+  const extension = name.slice(dot + 1).toLowerCase()
+  return /^[a-z0-9]{1,10}$/.test(extension) ? extension : undefined
+}
+
 function describeUploadRequest(input: UploadFileOperationInput, context: UploadFileOperationContext) {
   return {
     type: input.type,
@@ -218,11 +226,12 @@ function describeUploadRequest(input: UploadFileOperationInput, context: UploadF
     sessionId: context.currentSessionId,
     ip: context.ip,
     filePresent: input.file != null,
-    fileName: input.file?.name,
+    // Names are encrypted at rest; logs keep only the extension.
+    fileExtension: fileExtensionForLog(input.file?.name),
     fileSize: input.file?.size,
     fileMimeType: input.file?.type,
     thumbnailPresent: input.thumbnail != null,
-    thumbnailName: input.thumbnail?.name,
+    thumbnailExtension: fileExtensionForLog(input.thumbnail?.name),
     thumbnailSize: input.thumbnail?.size,
     thumbnailMimeType: input.thumbnail?.type,
     width: input.width,
