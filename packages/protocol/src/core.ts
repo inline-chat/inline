@@ -17478,6 +17478,15 @@ export interface CreateUploadInput {
      * @generated from protobuf field: optional bytes inline_data = 10;
      */
     inlineData?: Uint8Array;
+    /**
+     * A 16-byte upload ID the client picks, so it can send parts right behind this create without
+     * waiting for its reply. The server uses it unless an upload with this client_upload_id already
+     * exists, whose upload_id the result then carries; a server that predates this field ignores it.
+     * Clients send parts early only to servers that returned the proposed ID before.
+     *
+     * @generated from protobuf field: optional bytes upload_id = 11;
+     */
+    uploadId?: Uint8Array;
 }
 /**
  * @generated from protobuf message CreateUploadResult
@@ -17670,6 +17679,13 @@ export interface FinishUploadInput {
      * @generated from protobuf field: bytes upload_id = 1;
      */
     uploadId: Uint8Array;
+    /**
+     * Names the video's or document's thumbnail when the create did not, so the upload can start
+     * before its thumbnail has finished uploading.
+     *
+     * @generated from protobuf field: optional string thumbnail_file_unique_id = 2;
+     */
+    thumbnailFileUniqueId?: string;
 }
 /**
  * @generated from protobuf message UploadMissingParts
@@ -65245,7 +65261,8 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
             { no: 7, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "video", kind: "message", oneof: "metadata", T: () => UploadVideoMetadata },
             { no: 9, name: "voice", kind: "message", oneof: "metadata", T: () => UploadVoiceMetadata },
-            { no: 10, name: "inline_data", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ }
+            { no: 10, name: "inline_data", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ },
+            { no: 11, name: "upload_id", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ }
         ]);
     }
     create(value?: PartialMessage<CreateUploadInput>): CreateUploadInput {
@@ -65302,6 +65319,9 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
                 case /* optional bytes inline_data */ 10:
                     message.inlineData = reader.bytes();
                     break;
+                case /* optional bytes upload_id */ 11:
+                    message.uploadId = reader.bytes();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -65344,6 +65364,9 @@ class CreateUploadInput$Type extends MessageType<CreateUploadInput> {
         /* optional bytes inline_data = 10; */
         if (message.inlineData !== undefined)
             writer.tag(10, WireType.LengthDelimited).bytes(message.inlineData);
+        /* optional bytes upload_id = 11; */
+        if (message.uploadId !== undefined)
+            writer.tag(11, WireType.LengthDelimited).bytes(message.uploadId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -65843,7 +65866,8 @@ export const GetUploadStateResult = new GetUploadStateResult$Type();
 class FinishUploadInput$Type extends MessageType<FinishUploadInput> {
     constructor() {
         super("FinishUploadInput", [
-            { no: 1, name: "upload_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+            { no: 1, name: "upload_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "thumbnail_file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<FinishUploadInput>): FinishUploadInput {
@@ -65861,6 +65885,9 @@ class FinishUploadInput$Type extends MessageType<FinishUploadInput> {
                 case /* bytes upload_id */ 1:
                     message.uploadId = reader.bytes();
                     break;
+                case /* optional string thumbnail_file_unique_id */ 2:
+                    message.thumbnailFileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -65876,6 +65903,9 @@ class FinishUploadInput$Type extends MessageType<FinishUploadInput> {
         /* bytes upload_id = 1; */
         if (message.uploadId.length)
             writer.tag(1, WireType.LengthDelimited).bytes(message.uploadId);
+        /* optional string thumbnail_file_unique_id = 2; */
+        if (message.thumbnailFileUniqueId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.thumbnailFileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

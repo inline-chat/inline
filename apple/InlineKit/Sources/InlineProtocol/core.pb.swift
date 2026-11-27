@@ -29147,6 +29147,19 @@ public nonisolated struct CreateUploadInput: Sendable {
   /// Clears the value of `inlineData`. Subsequent reads from it will return its default value.
   public mutating func clearInlineData() {self._inlineData = nil}
 
+  /// A 16-byte upload ID the client picks, so it can send parts right behind this create without
+  /// waiting for its reply. The server uses it unless an upload with this client_upload_id already
+  /// exists, whose upload_id the result then carries; a server that predates this field ignores it.
+  /// Clients send parts early only to servers that returned the proposed ID before.
+  public var uploadID: Data {
+    get {_uploadID ?? Data()}
+    set {_uploadID = newValue}
+  }
+  /// Returns true if `uploadID` has been explicitly set.
+  public var hasUploadID: Bool {self._uploadID != nil}
+  /// Clears the value of `uploadID`. Subsequent reads from it will return its default value.
+  public mutating func clearUploadID() {self._uploadID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Metadata: Equatable, Sendable {
@@ -29159,6 +29172,7 @@ public nonisolated struct CreateUploadInput: Sendable {
 
   fileprivate var _thumbnailFileUniqueID: String? = nil
   fileprivate var _inlineData: Data? = nil
+  fileprivate var _uploadID: Data? = nil
 }
 
 public nonisolated struct CreateUploadResult: @unchecked Sendable {
@@ -29437,9 +29451,22 @@ public nonisolated struct FinishUploadInput: Sendable {
 
   public var uploadID: Data = Data()
 
+  /// Names the video's or document's thumbnail when the create did not, so the upload can start
+  /// before its thumbnail has finished uploading.
+  public var thumbnailFileUniqueID: String {
+    get {_thumbnailFileUniqueID ?? String()}
+    set {_thumbnailFileUniqueID = newValue}
+  }
+  /// Returns true if `thumbnailFileUniqueID` has been explicitly set.
+  public var hasThumbnailFileUniqueID: Bool {self._thumbnailFileUniqueID != nil}
+  /// Clears the value of `thumbnailFileUniqueID`. Subsequent reads from it will return its default value.
+  public mutating func clearThumbnailFileUniqueID() {self._thumbnailFileUniqueID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _thumbnailFileUniqueID: String? = nil
 }
 
 public nonisolated struct UploadMissingParts: Sendable {
@@ -68577,7 +68604,7 @@ nonisolated extension UploadVoiceMetadata: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateUploadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}client_upload_id\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0\u{3}thumbnail_file_unique_id\0\u{1}video\0\u{1}voice\0\u{3}inline_data\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}client_upload_id\0\u{3}file_name\0\u{3}mime_type\0\u{3}byte_count\0\u{1}sha256\0\u{1}kind\0\u{3}thumbnail_file_unique_id\0\u{1}video\0\u{1}voice\0\u{3}inline_data\0\u{3}upload_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -68619,6 +68646,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
         }
       }()
       case 10: try { try decoder.decodeSingularBytesField(value: &self._inlineData) }()
+      case 11: try { try decoder.decodeSingularBytesField(value: &self._uploadID) }()
       default: break
       }
     }
@@ -68664,6 +68692,9 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     try { if let v = self._inlineData {
       try visitor.visitSingularBytesField(value: v, fieldNumber: 10)
     } }()
+    try { if let v = self._uploadID {
+      try visitor.visitSingularBytesField(value: v, fieldNumber: 11)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -68677,6 +68708,7 @@ nonisolated extension CreateUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
     if lhs._thumbnailFileUniqueID != rhs._thumbnailFileUniqueID {return false}
     if lhs.metadata != rhs.metadata {return false}
     if lhs._inlineData != rhs._inlineData {return false}
+    if lhs._uploadID != rhs._uploadID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -69141,7 +69173,7 @@ nonisolated extension GetUploadStateResult: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension FinishUploadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "FinishUploadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}upload_id\0\u{3}thumbnail_file_unique_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -69150,20 +69182,29 @@ nonisolated extension FinishUploadInput: SwiftProtobuf.Message, SwiftProtobuf._M
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBytesField(value: &self.uploadID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._thumbnailFileUniqueID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.uploadID.isEmpty {
       try visitor.visitSingularBytesField(value: self.uploadID, fieldNumber: 1)
     }
+    try { if let v = self._thumbnailFileUniqueID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: FinishUploadInput, rhs: FinishUploadInput) -> Bool {
     if lhs.uploadID != rhs.uploadID {return false}
+    if lhs._thumbnailFileUniqueID != rhs._thumbnailFileUniqueID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

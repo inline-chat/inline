@@ -6588,6 +6588,11 @@ message CreateUploadInput {
   // that predate this field ignore it; part 0 is then missing from accepted_parts and the client
   // uploads it as usual.
   optional bytes inline_data = 10;
+  // A 16-byte upload ID the client picks, so it can send parts right behind this create without
+  // waiting for its reply. The server uses it unless an upload with this client_upload_id already
+  // exists, whose upload_id the result then carries; a server that predates this field ignores it.
+  // Clients send parts early only to servers that returned the proposed ID before.
+  optional bytes upload_id = 11;
 }
 
 message CreateUploadResult {
@@ -6649,7 +6654,12 @@ message GetUploadStateResult {
   optional UploadFailure failure = 4;
 }
 
-message FinishUploadInput { bytes upload_id = 1; }
+message FinishUploadInput {
+  bytes upload_id = 1;
+  // Names the video's or document's thumbnail when the create did not, so the upload can start
+  // before its thumbnail has finished uploading.
+  optional string thumbnail_file_unique_id = 2;
+}
 
 message UploadMissingParts { repeated uint32 part_indices = 1; }
 
