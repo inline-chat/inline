@@ -593,4 +593,158 @@ describe("native download ranges", () => {
     await operations.getPart(request(BigInt(3 * partSize), partSize), context)
     expect(reads).toBe(3)
   })
+
+  test("sequential ranges prefetch each next window, so only the first range waits on storage", async () => {
+    const size = partSize * 28
+    const reads: number[][] = []
+    const traces: DownloadPartTrace[] = []
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, offset, length) => {
+      reads.push([offset, length])
+      return new Uint8Array(length).fill(offset / partSize)
+    }, 25_000, { loadPartHashes: async () => undefined, trace: (trace) => { traces.push(trace) } })
+    for (let index = 0; index < 28; index += 1) {
+      // The window a boundary range needs was requested before that range arrived.
+      if (index > 0 && index % 8 === 0) expect(reads).toHaveLength(index / 8 + 1)
+      const part = await operations.getPart(request(BigInt(index * partSize), partSize), context)
+      expect(part.data[0]).toBe(Math.floor(index / 8) * 8)
+    }
+    // One read per window, none past the end of the file.
+    expect(reads).toEqual([[0, 8 * partSize], [8 * partSize, 8 * partSize], [16 * partSize, 8 * partSize], [24 * partSize, 4 * partSize]])
+    expect(traces.map((trace) => trace.readAheadHit)).toEqual([false, ...Array<boolean>(27).fill(true)])
+    expect(operations.readAheadBytes).toBe(4 * partSize)
+  })
+
+  test("concurrent ranges at a window boundary share the prefetched read", async () => {
+    const size = partSize * 16
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const reads: number[][] = []
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, offset, length) => {
+      reads.push([offset, length])
+      await gate
+      return new Uint8Array(length).fill(offset / partSize)
+    }, 25_000, { loadPartHashes: async () => undefined })
+    const first = [0, 1].map((index) => operations.getPart(request(BigInt(index * partSize), partSize), context))
+    await Bun.sleep(5)
+    expect(reads).toEqual([[0, 8 * partSize], [8 * partSize, 8 * partSize]])
+    const boundary = [8, 9, 10, 11].map((index) => operations.getPart(request(BigInt(index * partSize), partSize), context))
+    await Bun.sleep(5)
+    release()
+    const parts = await Promise.all([...first, ...boundary])
+    expect(parts.map((part) => part.data[0])).toEqual([0, 0, 8, 8, 8, 8])
+    expect(reads).toHaveLength(2)
+    expect(operations.readAheadBytes).toBe(8 * partSize)
+  })
+
+  test.each(["rejects", "throws"] as const)("a prefetch that %s fails no range and the next window reads normally", async (failure) => {
+    const size = partSize * 16
+    const reads: number[][] = []
+    const traces: DownloadPartTrace[] = []
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on("unhandledRejection", onUnhandled)
+    try {
+      const operations = new NativeDownloadOperations(async () => largeFile(size), (_path, offset, length) => {
+        reads.push([offset, length])
+        if (reads.length === 2) {
+          if (failure === "throws") throw new Error("storage unavailable")
+          return Promise.reject(new Error("storage unavailable"))
+        }
+        return Promise.resolve(new Uint8Array(length).fill(offset / partSize))
+      }, 25_000, { loadPartHashes: async () => undefined, trace: (trace) => { traces.push(trace) } })
+      for (const index of [0, 1, 8, 9]) {
+        const part = await operations.getPart(request(BigInt(index * partSize), partSize), context)
+        expect(part.data[0]).toBe(index < 8 ? 0 : 8)
+      }
+      await Bun.sleep(5)
+      expect(reads).toEqual([[0, 8 * partSize], [8 * partSize, 8 * partSize], [8 * partSize, 8 * partSize]])
+      expect(traces.map((trace) => trace.readAheadHit)).toEqual([false, true, false, true])
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
+  })
+
+  test("prefetches count against the read-ahead budget, are skipped over it and evicted first", async () => {
+    const reads: number[][] = []
+    const operations = new NativeDownloadOperations(async () => largeFile(partSize * 8), async (_path, offset, length) => {
+      reads.push([offset, length])
+      return new Uint8Array(length)
+    }, 25_000, { loadPartHashes: async () => undefined, readAheadBytes: 2 * partSize, readAheadMaxBytes: 4 * partSize })
+    const other = { ...context, sessionId: 3 }
+    const part = (index: number, caller = context) => operations.getPart(request(BigInt(index * partSize), partSize), caller)
+    await part(0)
+    await part(1)
+    expect(reads).toEqual([[0, 2 * partSize], [2 * partSize, 2 * partSize]])
+    expect(operations.readAheadBytes).toBe(4 * partSize)
+    // Another download's window evicts this prefetch, not this download's window.
+    await part(0, other)
+    expect(operations.readAheadBytes).toBe(4 * partSize)
+    await part(1, other)
+    await part(1)
+    expect(reads).toHaveLength(3)
+    expect(operations.readAheadBytes).toBe(4 * partSize)
+    await part(2)
+    expect(reads).toEqual([[0, 2 * partSize], [2 * partSize, 2 * partSize], [0, 2 * partSize], [2 * partSize, 2 * partSize]])
+    expect(operations.readAheadBytes).toBe(4 * partSize)
+  })
+
+  test("one range's cancellation leaves a shared prefetch to the ranges still waiting on it", async () => {
+    const size = partSize * 16
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const signals: [number, AbortSignal][] = []
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, offset, length, signal) => {
+      signals.push([offset, signal!])
+      await gate
+      return new Uint8Array(length).fill(offset / partSize)
+    }, 25_000, { loadPartHashes: async () => undefined })
+    const part = (index: number, signal?: AbortSignal) =>
+      operations.getPart(request(BigInt(index * partSize), partSize), signal ? { ...context, signal } : context)
+    const current = new AbortController()
+    const waiting = [part(0), part(1)]
+    const leavingCurrent = part(2, current.signal)
+    await Bun.sleep(5)
+    current.abort(new DOMException("Client canceled", "AbortError"))
+    await expect(leavingCurrent).rejects.toMatchObject({ name: "AbortError" })
+    const next = new AbortController()
+    const leavingNext = part(8, next.signal)
+    waiting.push(part(9))
+    await Bun.sleep(5)
+    next.abort(new DOMException("Client canceled", "AbortError"))
+    await expect(leavingNext).rejects.toMatchObject({ name: "AbortError" })
+    expect(signals.map(([offset, signal]) => [offset, signal.aborted])).toEqual([[0, false], [8 * partSize, false]])
+    release()
+    expect((await Promise.all(waiting)).map((result) => result.data[0])).toEqual([0, 0, 8])
+    expect(signals).toHaveLength(2)
+  })
+
+  test("a seek or abandonment stops a prefetch nobody awaits", async () => {
+    const size = partSize * 40
+    const timeoutMs = 50
+    const hanging = new Set([8 * partSize, 32 * partSize])
+    const signals: [number, AbortSignal][] = []
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, offset, length, signal) => {
+      signals.push([offset, signal!])
+      if (hanging.has(offset)) return readFileBytes(new ReadableStream<Uint8Array>(), length, signal)
+      return new Uint8Array(length).fill(offset / partSize)
+    }, timeoutMs, { loadPartHashes: async () => undefined })
+    const part = (index: number) => operations.getPart(request(BigInt(index * partSize), partSize), context)
+    await part(0)
+    await part(1)
+    // A forward seek drops the prefetch of the window it skips.
+    expect((await part(24)).data[0]).toBe(24)
+    expect(signals[1]![0]).toBe(8 * partSize)
+    expect(signals[1]![1].reason).toMatchObject({ name: "AbortError" })
+    await part(25)
+    expect(signals[3]![0]).toBe(32 * partSize)
+    expect(signals[3]![1].aborted).toBe(false)
+    // Nobody reaches the next window: the part timeout bounds its read.
+    await Bun.sleep(timeoutMs * 2)
+    expect(signals[3]![1].reason).toMatchObject({ name: "TimeoutError" })
+    expect(operations.readAheadBytes).toBe(8 * partSize)
+    hanging.clear()
+    expect((await part(32)).data[0]).toBe(32)
+    expect(signals.map(([offset]) => offset)).toEqual([0, 8, 24, 32, 32].map((index) => index * partSize))
+  })
 })

@@ -29,6 +29,7 @@ const AUTHORIZATION_CACHE_MAX_ENTRIES = 4_096
 const AUTHORIZATION_CACHE_MAX_ENTRIES_PER_SESSION = 64
 // One storage read serves eight 512 KiB ranges of a sequential download.
 export const DOWNLOAD_READAHEAD_BYTES = 4 * 1024 * 1024
+// Bounds current and prefetched windows together.
 const DOWNLOAD_READAHEAD_MAX_BYTES = 128 * 1024 * 1024
 
 export type DownloadPartTrace = {
@@ -109,6 +110,8 @@ export class NativeDownloadOperations {
   readonly #sessions = new Map<number, number>()
   readonly #authorizations = new Map<string, CachedAuthorization>()
   readonly #windows = new Map<string, ReadAheadWindow>()
+  /** At most one prefetched window per key: the one after its `#windows` window. */
+  readonly #nextWindows = new Map<string, ReadAheadWindow>()
   readonly #progress = new WeakMap<object, DownloadProgress>()
   readonly #now: () => number
   readonly #maxCacheEntries: number
@@ -207,7 +210,9 @@ export class NativeDownloadOperations {
   /**
    * Serves a range from the per-(session, file) read-ahead window, reading the
    * aligned window from storage on a miss. Concurrent ranges in one window share
-   * its single read; any error drops the window.
+   * its single read; any error drops the window. A range served from a window
+   * also prefetches the next one, so sequential reading never waits on storage
+   * at a window boundary.
    */
   async #readThroughWindow(input: {
     key: string
@@ -220,45 +225,91 @@ export class NativeDownloadOperations {
   }): Promise<{ data: Uint8Array; hit: boolean }> {
     const { key, offset, length } = input
     const now = this.#now()
+    const covers = (window: ReadAheadWindow | undefined): window is ReadAheadWindow => window !== undefined &&
+      window.validUntil > now && offset >= window.offset && offset + length <= window.offset + window.length
     let window = this.#windows.get(key)
-    if (window && (window.validUntil <= now || offset < window.offset ||
-        offset + length > window.offset + window.length)) {
+    if (window && !covers(window)) {
       this.#dropWindow(key)
       window = undefined
+    }
+    const next = this.#nextWindows.get(key)
+    if (!window && covers(next)) {
+      // Sequential reading reached the prefetched window.
+      this.#nextWindows.delete(key)
+      window = next
     }
     const hit = window !== undefined
     if (window) {
       this.#windows.delete(key)
       this.#windows.set(key, window)
+      // A second range from one window, or the first from its prefetched
+      // successor, is sequential reading: fetch the window after it now.
+      if (!input.signal.aborted) this.#prefetchAfter(key, window, input.path, input.fileSize, input.validUntil)
     } else {
       const start = offset - (offset % this.#windowBytes)
       const windowLength = Math.min(this.#windowBytes, input.fileSize - start)
+      // A seek keeps the prefetch only if it still follows the window being read.
+      if (next && (next.offset !== start + windowLength || next.validUntil <= now)) {
+        this.#dropWindow(key, this.#nextWindows)
+      }
       if (offset + length > start + windowLength || windowLength > this.#maxReadAheadBytes) {
         // An unaligned range across a window boundary reads exactly what it asked for.
         return { data: await this.readRange(input.path, offset, length, input.signal), hit: false }
       }
-      const created: ReadAheadWindow = {
-        offset: start, length: windowLength, validUntil: input.validUntil, waiters: 0, controller: new AbortController(),
-      }
-      this.#readAheadBytes += windowLength
-      created.inflight = this.readRange(input.path, start, windowLength, created.controller.signal)
-        .then((bytes) => {
-          if (bytes.byteLength !== windowLength) throw RealtimeRpcError.InternalError()
-          if (this.#windows.get(key) === created) {
-            created.bytes = bytes
-            created.inflight = undefined
-          }
-          return bytes
-        }, (error: unknown) => {
-          if (this.#windows.get(key) === created) this.#dropWindow(key)
-          throw error
-        })
-      window = created
-      this.#windows.set(key, created)
+      window = this.#startWindow(key, input.path, start, windowLength, input.validUntil)
+      this.#windows.set(key, window)
       this.#evictWindows(key)
     }
     const bytes = window.bytes ?? await this.#awaitWindow(key, window, input.signal)
     return { data: bytes.subarray(offset - window.offset, offset - window.offset + length), hit }
+  }
+
+  /**
+   * Reads one aligned window from storage under its own controller. The last
+   * range leaving aborts it; with no range waiting, so does being dropped or
+   * the part timeout, which bounds a prefetch nobody reaches like any read.
+   */
+  #startWindow(key: string, path: string, offset: number, length: number, validUntil: number): ReadAheadWindow {
+    const controller = new AbortController()
+    const read = this.readRange(path, offset, length, controller.signal)
+    const window: ReadAheadWindow = { offset, length, validUntil, waiters: 0, controller }
+    const timer = setTimeout(() => {
+      if (window.waiters === 0) controller.abort(new DOMException("File download read-ahead timed out", "TimeoutError"))
+    }, this.partTimeoutMs)
+    timer.unref()
+    this.#readAheadBytes += length
+    window.inflight = read
+      .then((bytes) => {
+        if (bytes.byteLength !== length) throw RealtimeRpcError.InternalError()
+        window.bytes = bytes
+        window.inflight = undefined
+        return bytes
+      })
+      .catch((error: unknown) => {
+        this.#forgetWindow(key, window)
+        throw error
+      })
+      .finally(() => { clearTimeout(timer) })
+    // A prefetch can fail before any range awaits it.
+    window.inflight.catch(() => {})
+    return window
+  }
+
+  /**
+   * Starts reading the window after `window` unless one is already prefetched,
+   * it would pass the end of the file, or it would exceed the read-ahead budget:
+   * a prefetch never evicts another download's window.
+   */
+  #prefetchAfter(key: string, window: ReadAheadWindow, path: string, fileSize: number, validUntil: number): void {
+    const offset = window.offset + window.length
+    if (offset >= fileSize || this.#nextWindows.has(key)) return
+    const length = Math.min(this.#windowBytes, fileSize - offset)
+    if (this.#readAheadBytes + length > this.#maxReadAheadBytes) return
+    try {
+      this.#nextWindows.set(key, this.#startWindow(key, path, offset, length, validUntil))
+    } catch {
+      // The range that reaches this window reads it normally.
+    }
   }
 
   /**
@@ -280,8 +331,8 @@ export class NativeDownloadOperations {
         rejectEarly(signal.reason)
         return
       }
-      if (this.#windows.get(key) === window) this.#dropWindow(key)
       window.controller.abort(signal.reason)
+      if (this.#windows.get(key) === window) this.#dropWindow(key)
     }
     signal.addEventListener("abort", onAbort, { once: true })
     try {
@@ -292,14 +343,28 @@ export class NativeDownloadOperations {
     }
   }
 
-  #dropWindow(key: string): void {
-    const window = this.#windows.get(key)
+  #dropWindow(key: string, windows = this.#windows): void {
+    const window = windows.get(key)
     if (!window) return
-    this.#windows.delete(key)
+    windows.delete(key)
     this.#readAheadBytes -= window.length
+    // A read no range awaits, such as a dropped prefetch, stops.
+    if (window.inflight && window.waiters === 0) {
+      window.controller.abort(new DOMException("File download read-ahead dropped", "AbortError"))
+    }
+  }
+
+  #forgetWindow(key: string, window: ReadAheadWindow): void {
+    if (this.#windows.get(key) === window) this.#dropWindow(key)
+    else if (this.#nextWindows.get(key) === window) this.#dropWindow(key, this.#nextWindows)
   }
 
   #evictWindows(keep: string): void {
+    // Prefetched windows are a guess and go before any window being read.
+    for (const key of this.#nextWindows.keys()) {
+      if (this.#readAheadBytes <= this.#maxReadAheadBytes) return
+      this.#dropWindow(key, this.#nextWindows)
+    }
     for (const key of this.#windows.keys()) {
       if (this.#readAheadBytes <= this.#maxReadAheadBytes) return
       if (key !== keep) this.#dropWindow(key)
