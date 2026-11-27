@@ -35,6 +35,7 @@ let package = Package(
     .package(name: "InlineKit", path: "../InlineKit"),
     .package(name: "InlineMacSidebarModel", path: "../InlineMacSidebarModel"),
     .package(name: "InlineUI", path: "../InlineUI"),
+    .package(name: "InlineContextMenu", path: "../InlineContextMenu"),
     // .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
   ],
 
@@ -59,7 +60,12 @@ let package = Package(
 
     .target(
       name: "InlineMacUI",
-      dependencies: baseDependencies + ["InlineMacHotkeys", "InlineMacTabStrip", "MacTheme"],
+      dependencies: baseDependencies + [
+        "InlineMacHotkeys",
+        "InlineMacTabStrip",
+        "MacTheme",
+        .product(name: "InlineContextMenu", package: "InlineContextMenu"),
+      ],
       swiftSettings: swiftSettings
     ),
 
