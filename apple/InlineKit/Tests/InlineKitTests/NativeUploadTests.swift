@@ -1713,21 +1713,25 @@ struct NativeUploadTests {
       }
     }
 
-    // The window starts at four parts.
+    // The window starts at four parts. Each part is its own task waiting for a slot, so which
+    // four start first isn't fixed; uploading out of order is fine.
     try await waitForStarted(4)
-    #expect(Set(await transport.started()) == Set(0 ..< 4))
+    let first = await transport.started()
+    #expect(first.count == 4)
+    #expect(Set(first).count == 4)
     #expect(await transport.finishCount() == 0)
 
     // A fast part grows the window to five: two parts take its place.
-    await transport.release(1)
+    let fast = first[1]
+    await transport.release(fast)
     try await waitForStarted(6)
     #expect(Set(await transport.started()) == Set(0 ..< 6))
     #expect(await transport.finishCount() == 0)
 
-    for part: UInt32 in [3, 2, 5, 4] {
+    // Out of order, part 0 last unless it was the fast one.
+    for part: UInt32 in [3, 2, 5, 4, 1, 0] where part != fast {
       await transport.release(part)
     }
-    await transport.release(0)
     let complete = try await upload.value
     #expect(complete.fileUniqueID == "INP_pipeline")
     #expect(await transport.finishCount() == 1)

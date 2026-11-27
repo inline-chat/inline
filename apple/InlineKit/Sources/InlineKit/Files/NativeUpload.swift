@@ -1007,7 +1007,8 @@ public actor DurableUploadCoordinator: MediaUploading {
           }
           if let ahead = partAheadPending {
             partAheadPending = nil
-            if await ahead.value {
+            // An unstructured task: cancel it with this one, or a cancel would wait out its part.
+            if await withTaskCancellationHandler(operation: { await ahead.value }, onCancel: { ahead.cancel() }) {
               accepted.insert(0)
               durableAcceptedBytes = Self.acceptedBytes(accepted, partSize: partSize, total: byteCount)
               meter.accepted(durableAcceptedBytes, parts: [0])

@@ -23,6 +23,14 @@ private actor PieceServerMock: NativeUploadRPCTransport {
   private let rejectsPieces: Bool
   private let takesProposedIDs: Bool
   private let createDelay: Duration
+  /// Rejects a part for an upload whose create hasn't returned (a server on another machine).
+  private let rejectsEarlyParts: Bool
+  /// Delays the first save of part 0 after an upload has finished (a slow first part on the
+  /// second upload).
+  private let firstPartDelay: Duration
+  private var createdIDs: Set<Data> = []
+  private var delayedFirstPart = false
+  private var finishedUploads = 0
   private(set) var events: [String] = []
   private var createCount: UInt8 = 0
   private(set) var finishThumbnails: [String?] = []
@@ -38,13 +46,17 @@ private actor PieceServerMock: NativeUploadRPCTransport {
     granularity: UInt32? = 16_384,
     rejectsPieces: Bool = false,
     takesProposedIDs: Bool = false,
-    createDelay: Duration = .zero
+    createDelay: Duration = .zero,
+    rejectsEarlyParts: Bool = false,
+    firstPartDelay: Duration = .zero
   ) {
     self.body = body
     self.granularity = granularity
     self.rejectsPieces = rejectsPieces
     self.takesProposedIDs = takesProposedIDs
     self.createDelay = createDelay
+    self.rejectsEarlyParts = rejectsEarlyParts
+    self.firstPartDelay = firstPartDelay
   }
 
   private var partCount: UInt32 { UInt32((body.count + 524_287) / 524_288) }
@@ -79,10 +91,19 @@ private actor PieceServerMock: NativeUploadRPCTransport {
       result.partSize = 524_288
       result.partCount = partCount
       if let granularity { result.pieceGranularity = granularity }
+      createdIDs.insert(result.uploadID)
       return .createUpload(result)
     case let (.saveUploadPart, .saveUploadPart(save)):
       saves.append(Save(part: save.partIndex, offset: save.hasOffset ? save.offset : nil, length: save.data.count))
       events.append("save \(save.partIndex)")
+      if rejectsEarlyParts, !createdIDs.contains(save.uploadID) {
+        events.append("rejected \(save.partIndex)")
+        throw PieceRejected.oldServer
+      }
+      if firstPartDelay > .zero, save.partIndex == 0, !delayedFirstPart, finishedUploads > 0 {
+        delayedFirstPart = true
+        try await Task.sleep(for: firstPartDelay)
+      }
       if save.hasOffset, rejectsPieces { throw PieceRejected.oldServer }
       let offset = save.hasOffset ? Int(save.offset) : 0
       let start = Int(save.partIndex) * 524_288 + offset
@@ -120,6 +141,7 @@ private actor PieceServerMock: NativeUploadRPCTransport {
       #expect(assembled == body)
       var complete = UploadComplete()
       complete.fileUniqueID = "IND_pieces"
+      finishedUploads += 1
       finish.complete = complete
       return .finishUpload(finish)
     default:
@@ -363,6 +385,119 @@ struct NativeUploadPiecesTests {
     #expect(await server.createThumbnails == [nil])
     #expect(await server.finishThumbnails == ["INP_thumb"])
     #expect(await server.inlineData == nil)
+  }
+
+  /// Uploads `body` once to teach the coordinator that the server takes proposed IDs.
+  private func warmedCoordinator(_ server: PieceServerMock, source: URL) async throws -> DurableUploadCoordinator {
+    let coordinator = DurableUploadCoordinator(transport: server, staging: PieceStaging(), ownerScope: { "owner" })
+    _ = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "document:warm", fileURL: source, fileName: "a.bin", mimeType: "application/octet-stream", kind: .document
+    ), progress: { _, _ in })
+    #expect(coordinator.acceptsThumbnailAtFinish)
+    return coordinator
+  }
+
+  @Test("a part sent ahead that the server rejects is sent again after the create")
+  func rejectedPartAheadIsResent() async throws {
+    let body = pattern(524_288 + 70_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body, takesProposedIDs: true, createDelay: .milliseconds(80), rejectsEarlyParts: true)
+    let coordinator = try await warmedCoordinator(server, source: source)
+    let before = await server.events.count
+    let complete = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "document:resend", fileURL: source, fileName: "a.bin", mimeType: "application/octet-stream", kind: .document
+    ), progress: { _, _ in })
+    #expect(complete.fileUniqueID == "IND_pieces")
+    let events = Array(await server.events.dropFirst(before))
+    #expect(events.contains("rejected 0"))
+    // Accepted on a later save of part 0, after the create returned.
+    let created = events.firstIndex(of: "created")!
+    #expect(events[created...].contains("save 0"))
+  }
+
+  @Test("a single-part file goes ahead of the create and completes")
+  func singlePartGoesAhead() async throws {
+    let body = pattern(200_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body, takesProposedIDs: true, createDelay: .milliseconds(120))
+    let coordinator = try await warmedCoordinator(server, source: source)
+    let before = await server.events.count
+    let gate = NativeUploadFinishGate()
+    gate.open()
+    // A held finish never sends inline, so the part goes as a part.
+    let complete = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "document:single", fileURL: source, fileName: "a.bin", mimeType: "application/octet-stream",
+      kind: .document, finishGate: gate
+    ), progress: { _, _ in })
+    #expect(complete.fileUniqueID == "IND_pieces")
+    let events = Array(await server.events.dropFirst(before))
+    #expect(events.firstIndex(of: "save 0")! < events.firstIndex(of: "created")!)
+  }
+
+  @Test("canceling while the part sent ahead is still moving returns promptly")
+  func cancelDuringPartAhead() async throws {
+    let body = pattern(524_288 + 10_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body, takesProposedIDs: true, firstPartDelay: .seconds(20))
+    let coordinator = try await warmedCoordinator(server, source: source)
+    let upload = Task {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "document:cancel", fileURL: source, fileName: "a.bin", mimeType: "application/octet-stream",
+        kind: .document
+      ), progress: { _, _ in })
+    }
+    try await Task.sleep(for: .milliseconds(300))
+    let clock = ContinuousClock()
+    let canceledAt = clock.now
+    upload.cancel()
+    let result = await upload.result
+    #expect(clock.now - canceledAt < .seconds(3))
+    // It was still waiting on the slow part, so it ended canceled rather than complete.
+    #expect((try? result.get()) == nil)
+    #expect(await server.finishThumbnails.count == 1)
+  }
+
+  @Test("a thumbnail that fails to upload leaves the file without one")
+  func failedThumbnailAtFinish() async throws {
+    let body = pattern(300_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body, takesProposedIDs: true)
+    let coordinator = DurableUploadCoordinator(transport: server, staging: PieceStaging(), ownerScope: { "owner" })
+    struct ThumbnailFailed: Error {}
+    let complete = try await coordinator.upload(NativeMediaUploadRequest(
+      logicalID: "video:nothumb", fileURL: source, fileName: "a.mp4", mimeType: "video/mp4", kind: .document,
+      thumbnailAtFinish: { throw ThumbnailFailed() }
+    ), progress: { _, _ in })
+    #expect(complete.fileUniqueID == "IND_pieces")
+    #expect(await server.finishThumbnails == [nil])
+  }
+
+  @Test("a held upload names its thumbnail only once Send opens the finish")
+  func heldThumbnailWaitsForSend() async throws {
+    let body = pattern(300_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body, takesProposedIDs: true)
+    let coordinator = DurableUploadCoordinator(transport: server, staging: PieceStaging(), ownerScope: { "owner" })
+    let gate = NativeUploadFinishGate()
+    let asked = ProgressLog()
+    let upload = Task {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "video:held", fileURL: source, fileName: "a.mp4", mimeType: "video/mp4", kind: .document,
+        finishGate: gate, thumbnailAtFinish: { asked.append(1); return "INP_held" }
+      ), progress: { _, _ in })
+    }
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(await server.finishThumbnails.isEmpty)
+    #expect(asked.recorded.isEmpty)
+    gate.open()
+    let complete = try await upload.value
+    #expect(complete.fileUniqueID == "IND_pieces")
+    #expect(await server.finishThumbnails == ["INP_held"])
   }
 
   @Test("the proposed upload ID is fixed per client upload ID")
