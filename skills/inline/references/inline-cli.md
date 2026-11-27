@@ -93,7 +93,12 @@ inline capabilities messages send --compact
 `inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]` emit the live public command metadata, conflicts, argument groups, and command examples as JSON without loading authentication, checking for updates, or connecting to Inline. Query the narrowest relevant command instead of loading the entire protobuf schema. Core command groups are `chats`, `messages`, `users`, `spaces`, `notifications`, `bots`, `typing`, `tasks`, and `schema`. Useful read workflows include:
 
 ```bash
-inline chats list --filter "launch" --json --compact
+inline chats list --type thread --filter "launch" --limit 20 --json --compact  # --unread, --pinned, --type, --space-id and --limit are applied by the server
+```
+
+`--unread` covers chats the account has opened (DMs and threads with a dialog). A thread the account never opened has no unread count; the table shows `not opened` for it, and its JSON item has `"dialog": null`.
+
+```bash
 inline messages list --chat-id CHAT_ID --limit 50 --json --compact
 inline messages list --chat-id CHAT_ID --limit 50 --include-threads --json --compact  # adds reply-thread replies (threadReplies[]) for the 20 newest threads; threadsSkipped counts the rest
 inline messages list --chat-id CHAT_ID --thread MESSAGE_ID --json --compact  # one message's reply thread

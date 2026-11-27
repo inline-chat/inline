@@ -74,9 +74,9 @@ Use only columns for access paths the environment actually provides. MCP entries
 | Goal | MCP path | CLI path |
 | --- | --- | --- |
 | Understand access | `account.me` | `inline me --json --compact` |
-| Find a person or DM | `people.search` → `conversations.list` | `inline users list --filter NAME --json --compact`, then `inline chats list --type dm --filter NAME --json --compact` and verify the stable `chatId` |
-| Find a thread or chat | `spaces.list` when useful → `conversations.list` with `spaceId`/`kind` when useful → `conversations.get` | `inline chats list --filter QUERY --json --compact`, then `inline chats get --chat-id CHAT_ID --json --compact` |
-| Triage unread work | `messages.unread` → `messages.context` | `inline chats list --json --compact`, then `inline messages list --chat-id CHAT_ID --limit 50 --include-threads --json --compact` |
+| Find a person or DM | `people.search` → `conversations.list` | `inline users list --filter NAME --json --compact`, then `inline chats list --type dm --filter NAME --limit 5 --json --compact` and verify the stable `chatId` |
+| Find a thread or chat | `spaces.list` when useful → `conversations.list` with `spaceId`/`kind` when useful → `conversations.get` | `inline chats list --type thread --filter QUERY --limit 20 --json --compact` (add `--space-id SPACE_ID` when known), then `inline chats get --chat-id CHAT_ID --json --compact` |
+| Triage unread work | `messages.unread` → `messages.context` | `inline chats list --unread --limit 50 --json --compact`, then `inline messages list --chat-id CHAT_ID --limit 50 --json --compact` |
 | Read or summarize | `messages.list` with a bounded time window | `inline messages list --chat-id CHAT_ID --since TIME --limit 50 --include-threads --json --compact` |
 | Search and inspect context | `messages.search` → `messages.context` | `inline messages search --chat-id CHAT_ID --query QUERY --json --compact`, then `inline messages get --chat-id CHAT_ID --message-id MESSAGE_ID --json --compact` |
 | Create a thread or chat | Resolve the parent and participants → `conversations.create` | Resolve IDs, then `inline chats create --title TITLE --json --compact` with the required space, visibility, and participant flags |
