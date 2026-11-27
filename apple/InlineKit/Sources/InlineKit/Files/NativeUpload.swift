@@ -43,6 +43,9 @@ public struct NativeMediaUploadRequest: Sendable {
   public let kind: UploadKind
   public let thumbnailFileUniqueID: String?
   public let metadata: CreateUploadInput.OneOf_Metadata?
+  /// Holds the finish until it opens (an upload started at attach waits for Send). The bytes still
+  /// move; until finish the server keeps the upload unfinished, so canceling deletes all of it.
+  public let finishGate: NativeUploadFinishGate?
 
   public init(
     logicalID: String,
@@ -51,7 +54,8 @@ public struct NativeMediaUploadRequest: Sendable {
     mimeType: String,
     kind: UploadKind,
     thumbnailFileUniqueID: String? = nil,
-    metadata: CreateUploadInput.OneOf_Metadata? = nil
+    metadata: CreateUploadInput.OneOf_Metadata? = nil,
+    finishGate: NativeUploadFinishGate? = nil
   ) {
     self.logicalID = logicalID
     self.fileURL = fileURL
@@ -61,6 +65,7 @@ public struct NativeMediaUploadRequest: Sendable {
     self.kind = kind
     self.thumbnailFileUniqueID = thumbnailFileUniqueID
     self.metadata = metadata
+    self.finishGate = finishGate
   }
 }
 
@@ -743,7 +748,8 @@ public actor DurableUploadCoordinator: MediaUploading {
       // servers ignore it and the part uploads as usual. A slower one goes in pieces instead, so
       // progress starts after the first 16 KiB rather than at the end. It takes a part slot like
       // any part, waiting its turn when the window is full (an album).
-      let holdsInlineSlot = NativeUploadPieces.sendsInline(
+      // Inline data finishes in create, which a held finish must not do.
+      let holdsInlineSlot = request.finishGate == nil && NativeUploadPieces.sendsInline(
         byteCount: byteCount,
         partSize: Int64(Self.partSize),
         bytesPerSecond: throughput.bytesPerSecond
@@ -923,6 +929,10 @@ public actor DurableUploadCoordinator: MediaUploading {
             }
             finishReconciliationAttempts = 0
           }
+
+          // Every byte is in; an upload started at attach waits here for Send. Canceling the
+          // wait cancels the upload, and the server deletes what it has.
+          if let finishGate = request.finishGate { try await finishGate.wait() }
 
           // Healthy part transfers have no overall deadline. Once all bytes are
           // accepted, bound processing separately so a stalled worker cannot

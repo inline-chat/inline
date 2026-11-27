@@ -392,6 +392,8 @@ public final class Drafts2: @unchecked Sendable {
       draft.attachments.append(attachment)
     }
     persist(snapshot)
+    // Removal cancels by attachment ID, which must then be the upload's.
+    if attachment.id == media.getItemUniqueId() { Self.startEarlyUpload(media) }
     return attachment
   }
 
@@ -484,7 +486,21 @@ public final class Drafts2: @unchecked Sendable {
     }
     guard replacement != nil else { return nil }
     persist(snapshot)
+    // The replaced form's upload is not what gets sent.
+    if id != media.getItemUniqueId() { Self.cancelEarlyUpload(id: id) }
+    Self.startEarlyUpload(media)
     return replacement
+  }
+
+  /// Attachments start uploading while the message is written; the send takes the upload over.
+  private static func startEarlyUpload(_ media: FileMediaItem) {
+    guard FileUploader.startsEarly(media) else { return }
+    Task { await FileUploader.shared.startEarlyUpload(media: media) }
+  }
+
+  /// A removed attachment's upload is deleted on the server, unless a send already took it over.
+  private static func cancelEarlyUpload(id: String) {
+    Task { await FileUploader.shared.cancelEarlyUpload(uploadId: id) }
   }
 
   public func removeAttachment(peer: Peer, id: String) {
@@ -500,6 +516,7 @@ public final class Drafts2: @unchecked Sendable {
       draft.attachments.removeAll { $0.id == id }
     }
     persist(snapshot)
+    Self.cancelEarlyUpload(id: id)
   }
 
   public func hasPendingAttachments(peer: Peer) -> Bool {
@@ -556,6 +573,8 @@ public final class Drafts2: @unchecked Sendable {
     }
   }
 
+  /// Runs after every send as well, so it leaves uploads alone: the send takes those over, and an
+  /// abandoned one expires on the server.
   public func clear(peer: Peer) {
     let peerKey = peer.toString()
     let pendingTasks = stateQueue.sync { () -> [Task<Void, Never>] in
@@ -721,6 +740,7 @@ public final class Drafts2: @unchecked Sendable {
 
     guard let snapshot else { return nil }
     persist(snapshot)
+    Self.startEarlyUpload(media)
     return attachment
   }
 

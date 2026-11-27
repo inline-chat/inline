@@ -197,6 +197,8 @@ public actor FileUploader {
   private var uploadResetTask: Task<Void, Never>?
   private var cancellationTasks: [String: Task<Void, Never>] = [:]
   private var uploadSessionGeneration: UInt64 = 0
+  /// Uploads started at attach, holding their finish until their send arrives.
+  private var earlyFinishGates: [String: NativeUploadFinishGate] = [:]
 
   private init() {}
 
@@ -236,6 +238,7 @@ public actor FileUploader {
       publishProgress(uploadId: uploadId, progress: .completed(id: uploadId, totalBytes: totalBytes))
     }
     uploadTasks.removeValue(forKey: uploadId)
+    earlyFinishGates.removeValue(forKey: uploadId)
     cleanupTasks.removeValue(forKey: uploadId)
     progressHandlers.removeValue(forKey: uploadId)
     activeUploadTokens.removeValue(forKey: uploadId)
@@ -253,6 +256,7 @@ public actor FileUploader {
     Log.shared.warning("[FileUploader] Upload attempt failed for \(uploadId): \(error.localizedDescription)")
     publishProgress(uploadId: uploadId, progress: .failed(id: uploadId, error: error))
     uploadTasks.removeValue(forKey: uploadId)
+    earlyFinishGates.removeValue(forKey: uploadId)
     cleanupTasks.removeValue(forKey: uploadId)
     progressHandlers.removeValue(forKey: uploadId)
     activeUploadTokens.removeValue(forKey: uploadId)
@@ -421,20 +425,7 @@ public actor FileUploader {
     photoInfo: PhotoInfo
   ) async throws -> Int64 {
     guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
-    let photoSize = photoInfo.bestPhotoSize()
-    guard let photoSize,
-          let localPath = photoSize.localPath
-    else {
-      throw FileUploadError.invalidPhoto
-    }
-    let localUrl = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(
-      localPath
-    )
-    let format = photoInfo.photo.format
-    let ext = format.toExt()
-    let fileName = localPath.components(separatedBy: "/").last ?? "" + ext
-    let mimeType = format.toMimeType()
-
+    let source = try Self.photoSource(photoInfo)
     guard let localPhotoId = photoInfo.photo.id else { throw FileUploadError.invalidPhotoId }
     let uploadId = getUploadId(photoId: localPhotoId)
 
@@ -442,14 +433,33 @@ public actor FileUploader {
 
     try await startUpload(
       media: .photo(photoInfo),
-      localUrl: localUrl,
-      mimeType: mimeType,
-      fileName: fileName
+      localUrl: source.url,
+      mimeType: source.mimeType,
+      fileName: source.fileName
     )
 
-    guard let localPhotoId = photoInfo.photo.id else { throw FileUploadError.invalidPhotoId }
-
     return localPhotoId
+  }
+
+  private static func photoSource(_ photoInfo: PhotoInfo) throws -> (url: URL, mimeType: String, fileName: String) {
+    guard let localPath = photoInfo.bestPhotoSize()?.localPath else { throw FileUploadError.invalidPhoto }
+    let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
+    let format = photoInfo.photo.format
+    let fileName = localPath.components(separatedBy: "/").last ?? "" + format.toExt()
+    return (url, format.toMimeType(), fileName)
+  }
+
+  private static func documentSource(_ documentInfo: DocumentInfo) throws -> (url: URL, mimeType: String, fileName: String) {
+    guard let localPath = documentInfo.document.localPath else {
+      Log.shared.error("Document did not have a local path")
+      throw FileUploadError.invalidDocument
+    }
+    let url = FileHelpers.getLocalCacheDirectory(for: .documents).appendingPathComponent(localPath)
+    return (
+      url,
+      documentInfo.document.mimeType ?? "application/octet-stream",
+      documentInfo.document.fileName ?? "document"
+    )
   }
 
   public func uploadVideo(
@@ -511,20 +521,12 @@ public actor FileUploader {
     documentInfo: DocumentInfo
   ) async throws -> Int64 {
     guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
-    guard let localPath = documentInfo.document.localPath else {
-      Log.shared.error("Document did not have a local path")
-      throw FileUploadError.invalidDocument
-    }
-    let localUrl = FileHelpers.getLocalCacheDirectory(for: .documents).appendingPathComponent(
-      localPath
-    )
-    let fileName = documentInfo.document.fileName ?? "document"
-    let mimeType = documentInfo.document.mimeType ?? "application/octet-stream"
+    let source = try Self.documentSource(documentInfo)
     try await startUpload(
       media: .document(documentInfo),
-      localUrl: localUrl,
-      mimeType: mimeType,
-      fileName: fileName
+      localUrl: source.url,
+      mimeType: source.mimeType,
+      fileName: source.fileName
     )
 
     guard let localId = documentInfo.document.id else { throw FileUploadError.invalidDocumentId }
@@ -569,6 +571,48 @@ public actor FileUploader {
     return localVoiceId
   }
 
+  /// Starts uploading an attachment while its message is still being written. Every byte moves,
+  /// but the finish waits for the send (`startUpload` for the same media), so the server keeps the
+  /// upload unfinished: removing the attachment (`cancel(media:accountToken:)`) deletes what it has.
+  /// Photos only for now: a video or document names its thumbnail in its create, and a document's
+  /// thumbnail can arrive after attach. Does nothing with early upload off or already uploading.
+  public func startEarlyUpload(media: FileMediaItem) async {
+    guard EarlyUploadSettings.isEnabled, uploadResetTask == nil, Auth.shared.getCurrentUserId() != nil else {
+      return
+    }
+    do {
+      let source: (url: URL, mimeType: String, fileName: String)
+      switch media {
+      case let .photo(photo): source = try Self.photoSource(photo)
+      case .document, .video, .voice: return
+      }
+      try await startUpload(
+        media: media,
+        localUrl: source.url,
+        mimeType: source.mimeType,
+        fileName: source.fileName,
+        priority: .utility,
+        finishGate: NativeUploadFinishGate()
+      )
+    } catch {
+      Log.shared.debug("[FileUploader] Early upload not started: \(error)")
+    }
+  }
+
+  /// Cancels an upload only while it still waits for its send (started at attach); the server then
+  /// deletes what it has. One a send already took over keeps going.
+  public func cancelEarlyUpload(uploadId: String) {
+    guard earlyFinishGates[uploadId] != nil else { return }
+    cancel(uploadId: uploadId)
+  }
+
+  /// Whether `media` uploads while its message is written (see `startEarlyUpload(media:)`).
+  public nonisolated static func startsEarly(_ media: FileMediaItem) -> Bool {
+    guard EarlyUploadSettings.isEnabled else { return false }
+    if case .photo = media { return true }
+    return false
+  }
+
   public func startUpload(
     media: FileMediaItem,
     localUrl: URL,
@@ -577,6 +621,28 @@ public actor FileUploader {
     priority: TaskPriority = .userInitiated,
     videoMetadata: ApiClient.VideoUploadMetadata? = nil,
     voiceMetadata: ApiClient.VoiceUploadMetadata? = nil
+  ) async throws {
+    try await startUpload(
+      media: media,
+      localUrl: localUrl,
+      mimeType: mimeType,
+      fileName: fileName,
+      priority: priority,
+      videoMetadata: videoMetadata,
+      voiceMetadata: voiceMetadata,
+      finishGate: nil
+    )
+  }
+
+  private func startUpload(
+    media: FileMediaItem,
+    localUrl: URL,
+    mimeType: String,
+    fileName: String,
+    priority: TaskPriority,
+    videoMetadata: ApiClient.VideoUploadMetadata? = nil,
+    voiceMetadata: ApiClient.VoiceUploadMetadata? = nil,
+    finishGate: NativeUploadFinishGate?
   ) async throws {
     guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
 
@@ -616,6 +682,11 @@ public actor FileUploader {
 
     // Check if upload already exists
     if uploadTasks[uploadId] != nil {
+      if finishGate == nil, let early = earlyFinishGates.removeValue(forKey: uploadId) {
+        // The send takes over the upload its attachment started; progress carries on.
+        early.open()
+        return
+      }
       Log.shared.warning("[FileUploader] Upload already in progress for \(uploadId)")
       throw FileUploadError.uploadAlreadyInProgress
     }
@@ -634,6 +705,7 @@ public actor FileUploader {
     let resolvedVoiceMetadata = voiceMetadata
     let token = UUID()
     activeUploadTokens[uploadId] = token
+    if let finishGate { earlyFinishGates[uploadId] = finishGate }
     let task = Task<UploadResult, any Error>(priority: priority) {
       try await FileUploader.shared.performUpload(
         uploadId: uploadId,
@@ -644,7 +716,8 @@ public actor FileUploader {
         fileName: fileName,
         type: type,
         videoMetadata: metadata,
-        voiceMetadata: resolvedVoiceMetadata
+        voiceMetadata: resolvedVoiceMetadata,
+        finishGate: finishGate
       )
     }
 
@@ -661,7 +734,8 @@ public actor FileUploader {
     fileName: String,
     type: MessageFileType,
     videoMetadata: ApiClient.VideoUploadMetadata?,
-    voiceMetadata: ApiClient.VoiceUploadMetadata?
+    voiceMetadata: ApiClient.VoiceUploadMetadata?,
+    finishGate: NativeUploadFinishGate? = nil
   ) async throws -> UploadResult {
     try ensureActiveUpload(uploadId: uploadId, token: token)
     Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
@@ -822,7 +896,8 @@ public actor FileUploader {
           mimeType: uploadMimeType,
           kind: kind,
           thumbnailFileUniqueID: thumbnailFileUniqueID,
-          metadata: nativeMetadata
+          metadata: nativeMetadata,
+          finishGate: finishGate
         ),
         progress: { sent, total in
           progressHandler(
@@ -928,6 +1003,7 @@ public actor FileUploader {
   private func releaseCancelledUploadState(uploadId: String) {
     activeUploadTokens.removeValue(forKey: uploadId)
     uploadTasks.removeValue(forKey: uploadId)
+    earlyFinishGates.removeValue(forKey: uploadId)
     cleanupTasks.removeValue(forKey: uploadId)
     progressHandlers.removeValue(forKey: uploadId)
     finishedUploads.removeValue(forKey: uploadId)
@@ -960,6 +1036,8 @@ public actor FileUploader {
     }
 
     if let taskInfo = uploadTasks[uploadId] {
+      // An upload held for its send is unfinished on the server, so canceling deletes it there.
+      earlyFinishGates.removeValue(forKey: uploadId)
       taskInfo.task.cancel()
       releaseCancelledUploadState(uploadId: uploadId)
       let cancellation = Task {
@@ -1021,6 +1099,7 @@ public actor FileUploader {
 
     Log.shared.debug("[FileUploader] Cancelling all uploads")
 
+    earlyFinishGates.removeAll()
     let tasks = uploadTasks.values.map(\.task)
     let pendingCancellations = Array(cancellationTasks.values)
     let cleanupMonitors = Array(cleanupTasks.values)

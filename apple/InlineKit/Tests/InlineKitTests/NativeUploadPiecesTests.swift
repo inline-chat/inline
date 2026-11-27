@@ -72,6 +72,10 @@ private actor PieceServerMock: NativeUploadRPCTransport {
       received[save.partIndex] = part
       filled[save.partIndex, default: 0] += save.data.count
       return .saveUploadPart(SaveUploadPartResult())
+    case (.cancelUpload, .cancelUpload):
+      var result = CancelUploadResult()
+      result.canceled = true
+      return .cancelUpload(result)
     case (.getUploadState, .getUploadState):
       var state = GetUploadStateResult()
       state.status = .uploading
@@ -222,6 +226,58 @@ struct NativeUploadPiecesTests {
     ), progress: { _, _ in })
     #expect(complete.fileUniqueID == "IND_pieces")
     #expect(await server.saves.last == .init(part: 0, offset: nil, length: 524_288))
+  }
+
+  @Test("a held finish moves every byte, then finishes only once the gate opens")
+  func heldFinishWaitsForGate() async throws {
+    let body = pattern(200_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body)
+    let coordinator = DurableUploadCoordinator(transport: server, staging: PieceStaging(), ownerScope: { "owner" })
+    let gate = NativeUploadFinishGate()
+    let upload = Task {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:early", fileURL: source, fileName: "a.jpg", mimeType: "image/jpeg",
+        kind: .photo, finishGate: gate
+      ), progress: { _, _ in })
+    }
+    let clock = ContinuousClock()
+    let deadline = clock.now + .seconds(5)
+    while await server.saves.reduce(0, { $0 + $1.length }) < body.count, clock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    // Small enough to go inline, but a held finish never goes inline (inline finishes in create).
+    #expect(await server.inlineData == nil)
+    #expect(await server.methods.contains(.finishUpload) == false)
+    gate.open()
+    #expect(try await upload.value.fileUniqueID == "IND_pieces")
+    #expect(await server.methods.last == .finishUpload)
+  }
+
+  @Test("canceling an upload held at its finish cancels it on the server")
+  func canceledHeldUploadIsDiscarded() async throws {
+    let body = pattern(200_000)
+    let source = try sourceFile(body)
+    defer { try? FileManager.default.removeItem(at: source) }
+    let server = PieceServerMock(body: body)
+    let coordinator = DurableUploadCoordinator(transport: server, staging: PieceStaging(), ownerScope: { "owner" })
+    let upload = Task {
+      try await coordinator.upload(NativeMediaUploadRequest(
+        logicalID: "photo:removed", fileURL: source, fileName: "a.jpg", mimeType: "image/jpeg",
+        kind: .photo, finishGate: NativeUploadFinishGate()
+      ), progress: { _, _ in })
+    }
+    let clock = ContinuousClock()
+    let deadline = clock.now + .seconds(5)
+    while await server.saves.reduce(0, { $0 + $1.length }) < body.count, clock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    upload.cancel()
+    await #expect(throws: CancellationError.self) { try await upload.value }
+    #expect(await server.methods.contains(.cancelUpload))
+    #expect(await server.methods.contains(.finishUpload) == false)
   }
 
   @Test("a server without piece support gets whole parts")
