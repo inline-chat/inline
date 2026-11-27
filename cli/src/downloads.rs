@@ -46,7 +46,10 @@ pub(crate) fn resolve_batch_download_path(
     } else {
         format!("{prefix}.{}", descriptor.extension)
     };
-    Ok(available_path(dir.join(file_name)))
+    // The name is unique to this message's media (date, message ID, media ID)
+    // and files land atomically, so an existing file is this media, complete.
+    // Callers reuse it instead of downloading it again.
+    Ok(dir.join(file_name))
 }
 
 pub(crate) async fn download_message_media(
@@ -255,32 +258,6 @@ fn compact_message_date(timestamp: i64) -> String {
         .single()
         .map(|date| date.format("%Y%m%d-%H%M").to_string())
         .unwrap_or_else(|| "00000000-0000".to_string())
-}
-
-fn available_path(path: PathBuf) -> PathBuf {
-    if !path.exists() {
-        return path;
-    }
-
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("download");
-    let extension = path.extension().and_then(|value| value.to_str());
-
-    for suffix in 2.. {
-        let file_name = match extension {
-            Some(extension) if !extension.is_empty() => format!("{stem}-{suffix}.{extension}"),
-            _ => format!("{stem}-{suffix}"),
-        };
-        let candidate = parent.join(file_name);
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-
-    unreachable!("unbounded suffix loop should return a candidate path")
 }
 
 fn media_file_name(media: &proto::MessageMedia) -> Option<String> {
@@ -498,22 +475,5 @@ mod tests {
             resolve_batch_download_path(&message, Path::new("downloads")).unwrap(),
             PathBuf::from("downloads").join("19700101-0000-MSG91-document-9981-report.pdf")
         );
-    }
-
-    #[test]
-    fn available_path_suffixes_existing_files() {
-        let suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "inline-cli-download-path-test-{}-{suffix}",
-            std::process::id(),
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let first = dir.join("file.txt");
-        std::fs::write(&first, b"existing").unwrap();
-
-        assert_eq!(available_path(first), dir.join("file-2.txt"));
     }
 }

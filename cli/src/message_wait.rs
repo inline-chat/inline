@@ -2,9 +2,11 @@
 //!
 //! One bounded call replaces an agent's `messages list` polling loop. The wait
 //! first reads everything after the `--after` cursor (so a reply that landed
-//! between the agent's send and this call is not missed), then keeps reading
-//! newer history on one connection. The cursor only moves forward, so a
-//! reconnect never reports a message twice.
+//! between the agent's send and this call is not missed), then waits on the
+//! same connection for the server to push an update about the chat, reading
+//! newer history once per push. A slow safety read covers pushes that never
+//! arrive. The cursor only moves forward, so a reconnect never reports a
+//! message twice.
 
 use std::error::Error;
 use std::time::Duration;
@@ -26,6 +28,9 @@ pub(crate) const WAIT_MAX_MATCHES: usize = 200;
 
 pub(crate) const MAX_WAIT_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
+/// With pushed updates, a quiet chat is still read this often in case a push
+/// was lost (about 20 reads in 10 quiet minutes, against 200 at a 3 s poll).
+pub(crate) const SAFETY_READ_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SenderFilter {
@@ -79,6 +84,66 @@ pub(crate) trait HistorySource {
     /// Whether a failed read is worth retrying (dropped connection, timeout,
     /// rate limit) rather than ending the wait.
     fn is_transient(&self, error: &(dyn Error + 'static)) -> bool;
+
+    /// Whether the server is pushing updates for this wait right now. While it
+    /// is, an idle wait reads only on a push or every [`SAFETY_READ_INTERVAL`];
+    /// otherwise it reads every poll interval.
+    fn receives_pushes(&self) -> bool {
+        false
+    }
+
+    /// Returns at `until`, or earlier when the server pushes an update that
+    /// may carry a new message in the chat; `true` when a push woke it.
+    async fn wait_for_activity(&mut self, until: Instant) -> bool {
+        sleep_until(until).await;
+        false
+    }
+}
+
+/// The chat a wait is watching, to tell its pushed updates from other chats'.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WaitTarget {
+    pub chat_id: Option<i64>,
+    /// The other side of a DM, when the wait was given `--user-id`.
+    pub peer_user_id: Option<i64>,
+}
+
+impl WaitTarget {
+    /// Whether this pushed update may mean a new message in the target chat.
+    /// It errs toward waking: a wasted read is cheap, a missed one is late.
+    pub(crate) fn woken_by(&self, update: &proto::Update) -> bool {
+        use proto::update::Update as Kind;
+        match &update.update {
+            Some(Kind::NewMessage(new)) => new
+                .message
+                .as_ref()
+                .is_some_and(|message| self.names(Some(message.chat_id), message.peer_id.as_ref())),
+            Some(Kind::NewMessageNotification(notification)) => notification
+                .message
+                .as_ref()
+                .is_some_and(|message| self.names(Some(message.chat_id), message.peer_id.as_ref())),
+            Some(Kind::ChatHasNewUpdates(hint)) => {
+                self.names(Some(hint.chat_id), hint.peer_id.as_ref())
+            }
+            // The account's own bucket moved; a DM's messages can land there.
+            Some(Kind::UserHasNewUpdates(_)) => self.peer_user_id.is_some(),
+            _ => false,
+        }
+    }
+
+    fn names(&self, chat_id: Option<i64>, peer: Option<&proto::Peer>) -> bool {
+        if self.chat_id.is_some() && chat_id.filter(|id| *id != 0) == self.chat_id {
+            return true;
+        }
+        match (
+            self.peer_user_id,
+            peer.and_then(|peer| peer.r#type.as_ref()),
+        ) {
+            (Some(user_id), Some(proto::peer::Type::User(user))) => user.user_id == user_id,
+            (_, Some(proto::peer::Type::Chat(chat))) => Some(chat.chat_id) == self.chat_id,
+            _ => false,
+        }
+    }
 }
 
 pub(crate) async fn wait_for_messages<S: HistorySource>(
@@ -94,6 +159,7 @@ pub(crate) async fn wait_for_messages<S: HistorySource>(
     loop {
         let mut drain_more = false;
         let last_failure: Option<Box<dyn Error>>;
+        log::debug!("messages wait: reading after {cursor}");
         match source.fetch_newer(cursor, WAIT_PAGE_LIMIT).await {
             Ok(mut page) => {
                 last_failure = None;
@@ -150,10 +216,14 @@ pub(crate) async fn wait_for_messages<S: HistorySource>(
             });
         }
 
-        let delay = if last_failure.is_some() {
+        if last_failure.is_some() {
             let delay = retry_backoff;
             retry_backoff = (retry_backoff * 2).min(MAX_RETRY_BACKOFF);
-            delay
+            sleep_until((now + delay).min(deadline)).await;
+            continue;
+        }
+        let delay = if source.receives_pushes() {
+            SAFETY_READ_INTERVAL.max(plan.poll_interval)
         } else {
             plan.poll_interval
         };
@@ -161,7 +231,9 @@ pub(crate) async fn wait_for_messages<S: HistorySource>(
         if let Some(until) = settle_until {
             wake = wake.min(until);
         }
-        sleep_until(wake).await;
+        if source.wait_for_activity(wake).await {
+            log::debug!("messages wait: woken by a pushed update");
+        }
     }
 }
 
@@ -372,6 +444,160 @@ mod tests {
         assert_eq!(started.elapsed(), Duration::from_secs(10));
         // Reads at 0s, 3s, 6s, 9s, and a last look at the 10s deadline.
         assert_eq!(chat.cursors.len(), 5);
+    }
+
+    /// A chat whose server pushes an update at scripted times.
+    struct PushedChat {
+        chat: FakeChat,
+        pushes: VecDeque<Duration>,
+        started: Instant,
+    }
+
+    impl HistorySource for PushedChat {
+        async fn fetch_newer(
+            &mut self,
+            after_id: i64,
+            limit: i32,
+        ) -> Result<Vec<proto::Message>, Box<dyn Error>> {
+            self.chat.fetch_newer(after_id, limit).await
+        }
+
+        fn is_transient(&self, error: &(dyn Error + 'static)) -> bool {
+            self.chat.is_transient(error)
+        }
+
+        fn receives_pushes(&self) -> bool {
+            true
+        }
+
+        async fn wait_for_activity(&mut self, until: Instant) -> bool {
+            match self.pushes.front().map(|at| self.started + *at) {
+                Some(push) if push < until => {
+                    self.pushes.pop_front();
+                    sleep_until(push).await;
+                    true
+                }
+                _ => {
+                    sleep_until(until).await;
+                    false
+                }
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pushed_update_wakes_the_wait_at_once() {
+        let started = Instant::now();
+        let mut chat = PushedChat {
+            chat: FakeChat::new(
+                vec![mine(10)],
+                vec![Step::Arrive(vec![]), Step::Arrive(vec![theirs(11, 2)])],
+            ),
+            pushes: VecDeque::from([Duration::from_millis(1_200)]),
+            started,
+        };
+        let result = wait_for_messages(&mut chat, &plan(10)).await.unwrap();
+        assert_eq!(ids(&result), vec![11]);
+        assert_eq!(started.elapsed(), Duration::from_millis(1_200));
+        assert_eq!(chat.chat.cursors, vec![10, 10]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn with_pushes_a_quiet_chat_is_read_only_by_the_safety_read() {
+        let started = Instant::now();
+        let mut chat = PushedChat {
+            chat: FakeChat::new(vec![], vec![]),
+            pushes: VecDeque::new(),
+            started,
+        };
+        let result = wait_for_messages(&mut chat, &plan(7)).await.unwrap();
+        assert!(result.timed_out);
+        // 0 s, the 30 s safety read, and the 60 s deadline: 3 reads, not 21.
+        assert_eq!(chat.chat.cursors.len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn with_pushes_settle_still_ends_on_time() {
+        let started = Instant::now();
+        let mut chat = PushedChat {
+            chat: FakeChat::new(
+                vec![],
+                vec![
+                    Step::Arrive(vec![theirs(2, 9)]),
+                    Step::Arrive(vec![theirs(3, 9)]),
+                    Step::Arrive(vec![]),
+                ],
+            ),
+            pushes: VecDeque::from([Duration::from_secs(1)]),
+            started,
+        };
+        let mut plan = plan(1);
+        plan.settle = Duration::from_secs(5);
+        let result = wait_for_messages(&mut chat, &plan).await.unwrap();
+        // 2 at 0 s, 3 on the 1 s push, then a last read when settle ends at 6 s.
+        assert_eq!(ids(&result), vec![2, 3]);
+        assert_eq!(started.elapsed(), Duration::from_secs(6));
+        assert_eq!(chat.chat.cursors.len(), 3);
+    }
+
+    fn new_message(chat_id: i64, peer: Option<proto::peer::Type>) -> proto::Update {
+        proto::Update {
+            update: Some(proto::update::Update::NewMessage(proto::UpdateNewMessage {
+                message: Some(proto::Message {
+                    id: 1,
+                    chat_id,
+                    peer_id: peer.map(|r#type| proto::Peer {
+                        r#type: Some(r#type),
+                    }),
+                    ..Default::default()
+                }),
+            })),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_updates_about_the_target_chat_wake_the_wait() {
+        let chat = WaitTarget {
+            chat_id: Some(40),
+            peer_user_id: None,
+        };
+        assert!(chat.woken_by(&new_message(40, None)));
+        assert!(!chat.woken_by(&new_message(41, None)));
+
+        let dm = WaitTarget {
+            chat_id: None,
+            peer_user_id: Some(7),
+        };
+        let from_peer = proto::peer::Type::User(proto::PeerUser { user_id: 7 });
+        let from_other = proto::peer::Type::User(proto::PeerUser { user_id: 8 });
+        assert!(dm.woken_by(&new_message(99, Some(from_peer))));
+        assert!(!dm.woken_by(&new_message(98, Some(from_other))));
+
+        let hint = proto::Update {
+            update: Some(proto::update::Update::ChatHasNewUpdates(
+                proto::UpdateChatHasNewUpdates {
+                    chat_id: 40,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        };
+        assert!(chat.woken_by(&hint));
+        assert!(!dm.woken_by(&hint));
+
+        let status = proto::Update {
+            update: Some(proto::update::Update::UpdateUserStatus(Default::default())),
+            ..Default::default()
+        };
+        assert!(!chat.woken_by(&status));
+
+        let account = proto::Update {
+            update: Some(proto::update::Update::UserHasNewUpdates(Default::default())),
+            ..Default::default()
+        };
+        assert!(dm.woken_by(&account));
+        assert!(!chat.woken_by(&account));
     }
 
     #[tokio::test(start_paused = true)]

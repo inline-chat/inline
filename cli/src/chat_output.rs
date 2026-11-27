@@ -89,6 +89,197 @@ pub(crate) fn apply_chat_list_scope(
     apply_chat_list_limits(payload, None, None)
 }
 
+/// Largest page the server serves.
+const CHAT_PAGE_MAX: usize = 100;
+/// Smallest page after the first, when local filters dropped some rows.
+const MIN_FOLLOW_UP_PAGE: usize = 25;
+
+/// A `chats list` the server can narrow and page instead of answering with the
+/// whole catalog. Built only when it saves work: a server-side filter or a limit.
+#[derive(Debug, PartialEq)]
+pub(crate) struct PagedChatList {
+    scope: proto::ChatListScope,
+    filter: proto::ChatListFilter,
+    /// Without `--include-subthreads` the full catalog shows linked subthreads
+    /// only through a visible dialog; the accessible scope returns them all.
+    hide_subthreads_without_dialog: bool,
+    /// Chats to collect after local filters (offset + limit); `None` walks to the end.
+    want: Option<usize>,
+    /// The scope combination matches nothing (`--type dm --space-id`).
+    empty: bool,
+}
+
+pub(crate) fn paged_chat_list(
+    scope: &ChatListScope,
+    include_subthreads: bool,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Option<PagedChatList> {
+    let narrowed = scope.space_id.is_some()
+        || scope.home
+        || scope.kind.is_some()
+        || scope.unread
+        || scope.pinned;
+    let want = limit.map(|limit| limit.saturating_add(offset.unwrap_or(0)));
+    // A plain full listing costs the same either way; keep the catalog's answer.
+    if !narrowed && want.is_none() {
+        return None;
+    }
+
+    let dms = !matches!(scope.kind, Some(ChatKind::Thread)) && scope.space_id.is_none();
+    let home_threads = !matches!(scope.kind, Some(ChatKind::Dm)) && scope.space_id.is_none();
+    let space_threads = !matches!(scope.kind, Some(ChatKind::Dm)) && !scope.home;
+    let mut kinds = Vec::new();
+    if !(dms && home_threads && space_threads) {
+        if dms {
+            kinds.push(proto::ChatListKind::Dm as i32);
+        }
+        if home_threads {
+            kinds.push(proto::ChatListKind::HomeThread as i32);
+        }
+        if space_threads {
+            kinds.push(proto::ChatListKind::SpaceThread as i32);
+        }
+    }
+    let empty = !(dms || home_threads || space_threads);
+
+    // Unread and pinned live on dialogs. Everything else reads the accessible
+    // scope, which also covers space threads this user never opened (the full
+    // catalog creates their dialogs on the fly).
+    let dialogs_only = (scope.unread || scope.pinned) && !include_subthreads;
+    Some(PagedChatList {
+        scope: if dialogs_only {
+            proto::ChatListScope::Dialogs
+        } else {
+            proto::ChatListScope::Accessible
+        },
+        filter: proto::ChatListFilter {
+            kinds,
+            space_ids: scope.space_id.into_iter().collect(),
+            unread: scope.unread.then_some(true),
+            pinned: scope.pinned.then_some(true),
+            ..Default::default()
+        },
+        hide_subthreads_without_dialog: !include_subthreads && !dialogs_only,
+        want,
+        empty,
+    })
+}
+
+/// One `GetChats` call.
+pub(crate) trait ChatPageSource {
+    async fn get_chats(
+        &mut self,
+        input: proto::GetChatsInput,
+    ) -> Result<proto::GetChatsResult, Box<dyn std::error::Error>>;
+}
+
+/// Walks server pages until `want` chats survive the local filters, or the end.
+pub(crate) async fn fetch_chat_pages(
+    request: &PagedChatList,
+    scope: &ChatListScope,
+    text_filter: Option<&str>,
+    source: &mut impl ChatPageSource,
+) -> Result<proto::GetChatsResult, Box<dyn std::error::Error>> {
+    let mut merged = proto::GetChatsResult::default();
+    if request.empty || request.want == Some(0) {
+        return Ok(merged);
+    }
+    let mut offset = None;
+    loop {
+        // Counting applies the local filters to a copy, so only a limited
+        // listing pays for it; a full walk just follows next_offset.
+        let kept = match request.want {
+            Some(_) => count_listed_chats(&merged, request, scope, text_filter),
+            None => 0,
+        };
+        let page_size = match request.want {
+            Some(want) if kept >= want => break,
+            // The first page asks for exactly what is wanted. Later pages exist
+            // only because local filters (text, hidden subthreads) dropped rows,
+            // so they ask for more rather than shrinking toward one chat each.
+            Some(want) if merged.chats.is_empty() => (want - kept).clamp(1, CHAT_PAGE_MAX),
+            Some(_) if text_filter.is_some_and(|text| !text.trim().is_empty()) => CHAT_PAGE_MAX,
+            Some(want) => (want - kept).clamp(MIN_FOLLOW_UP_PAGE, CHAT_PAGE_MAX),
+            None => CHAT_PAGE_MAX,
+        };
+        let page = source
+            .get_chats(proto::GetChatsInput {
+                limit: Some(page_size as i32),
+                offset,
+                order: proto::ChatListOrder::Recent as i32,
+                filter: Some(request.filter.clone()),
+                scope: request.scope as i32,
+                ..Default::default()
+            })
+            .await?;
+        offset = page.next_offset.clone();
+        merge_chat_page(&mut merged, page);
+        if offset.is_none() {
+            break;
+        }
+    }
+    merged.next_offset = None;
+    if request.hide_subthreads_without_dialog {
+        merged = hide_subthreads_without_dialog(merged);
+    }
+    Ok(merged)
+}
+
+fn count_listed_chats(
+    merged: &proto::GetChatsResult,
+    request: &PagedChatList,
+    scope: &ChatListScope,
+    text_filter: Option<&str>,
+) -> usize {
+    if merged.chats.is_empty() {
+        return 0;
+    }
+    let mut payload = merged.clone();
+    if request.hide_subthreads_without_dialog {
+        payload = hide_subthreads_without_dialog(payload);
+    }
+    apply_chat_list_filter(apply_chat_list_scope(payload, scope), text_filter)
+        .chats
+        .len()
+}
+
+fn merge_chat_page(merged: &mut proto::GetChatsResult, page: proto::GetChatsResult) {
+    let known_users: HashSet<i64> = merged.users.iter().map(|user| user.id).collect();
+    let known_spaces: HashSet<i64> = merged.spaces.iter().map(|space| space.id).collect();
+    merged.chats.extend(page.chats);
+    merged.dialogs.extend(page.dialogs);
+    merged.messages.extend(page.messages);
+    merged.users.extend(
+        page.users
+            .into_iter()
+            .filter(|user| !known_users.contains(&user.id)),
+    );
+    merged.spaces.extend(
+        page.spaces
+            .into_iter()
+            .filter(|space| !known_spaces.contains(&space.id)),
+    );
+    if merged.folders.is_empty() {
+        merged.folders = page.folders;
+    }
+}
+
+/// Matches the full catalog without `--include-subthreads`: a linked subthread
+/// is listed only through a dialog that is not hidden from chat lists.
+fn hide_subthreads_without_dialog(mut payload: proto::GetChatsResult) -> proto::GetChatsResult {
+    let visible: HashSet<i64> = payload
+        .dialogs
+        .iter()
+        .filter(|dialog| dialog.chat_list_hidden != Some(true))
+        .filter_map(|dialog| dialog.chat_id)
+        .collect();
+    payload
+        .chats
+        .retain(|chat| chat.parent_chat_id.is_none() || visible.contains(&chat.id));
+    apply_chat_list_limits(payload, None, None)
+}
+
 pub(crate) fn apply_chat_list_limits(
     mut payload: proto::GetChatsResult,
     limit: Option<usize>,
@@ -462,6 +653,7 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     fn scope_fixture() -> proto::GetChatsResult {
         let dm = proto::Peer {
@@ -939,5 +1131,188 @@ mod tests {
             trimmed.users.iter().map(|user| user.id).collect::<Vec<_>>(),
             vec![42]
         );
+    }
+
+    fn peer_chat(chat_id: i64) -> proto::Peer {
+        proto::Peer {
+            r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id })),
+        }
+    }
+
+    fn page_chat(id: i64, parent_chat_id: Option<i64>) -> proto::Chat {
+        proto::Chat {
+            id,
+            peer_id: Some(peer_chat(id)),
+            space_id: Some(7),
+            parent_chat_id,
+            ..Default::default()
+        }
+    }
+
+    fn page_dialog(chat_id: i64, hidden: bool) -> proto::Dialog {
+        proto::Dialog {
+            peer: Some(peer_chat(chat_id)),
+            chat_id: Some(chat_id),
+            chat_list_hidden: hidden.then_some(true),
+            ..Default::default()
+        }
+    }
+
+    /// Serves fixed pages in order and records every request.
+    struct FakePages {
+        pages: VecDeque<proto::GetChatsResult>,
+        requests: Vec<proto::GetChatsInput>,
+    }
+
+    impl ChatPageSource for FakePages {
+        async fn get_chats(
+            &mut self,
+            input: proto::GetChatsInput,
+        ) -> Result<proto::GetChatsResult, Box<dyn std::error::Error>> {
+            self.requests.push(input);
+            Ok(self.pages.pop_front().unwrap_or_default())
+        }
+    }
+
+    fn next(chat_id: i64) -> Option<proto::ChatListOffset> {
+        Some(proto::ChatListOffset {
+            chat_id,
+            date: Some(1),
+        })
+    }
+
+    #[test]
+    fn plain_full_listing_keeps_the_catalog() {
+        assert_eq!(
+            paged_chat_list(&ChatListScope::default(), false, None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn scope_flags_become_server_filters() {
+        let unread = ChatListScope {
+            unread: true,
+            ..Default::default()
+        };
+        let request = paged_chat_list(&unread, false, None, None).unwrap();
+        assert_eq!(request.scope, proto::ChatListScope::Dialogs);
+        assert_eq!(request.filter.unread, Some(true));
+        assert!(request.filter.kinds.is_empty());
+        assert!(!request.hide_subthreads_without_dialog);
+
+        let home_dms = ChatListScope {
+            home: true,
+            kind: Some(ChatKind::Dm),
+            ..Default::default()
+        };
+        let request = paged_chat_list(&home_dms, false, Some(5), Some(2)).unwrap();
+        assert_eq!(request.scope, proto::ChatListScope::Accessible);
+        assert_eq!(request.filter.kinds, vec![proto::ChatListKind::Dm as i32]);
+        assert_eq!(request.want, Some(7));
+        assert!(request.hide_subthreads_without_dialog);
+
+        let space = ChatListScope {
+            space_id: Some(9),
+            ..Default::default()
+        };
+        let request = paged_chat_list(&space, true, None, None).unwrap();
+        assert_eq!(
+            request.filter.kinds,
+            vec![proto::ChatListKind::SpaceThread as i32]
+        );
+        assert_eq!(request.filter.space_ids, vec![9]);
+        assert!(!request.hide_subthreads_without_dialog);
+
+        let impossible = ChatListScope {
+            space_id: Some(9),
+            kind: Some(ChatKind::Dm),
+            ..Default::default()
+        };
+        assert!(
+            paged_chat_list(&impossible, false, None, None)
+                .unwrap()
+                .empty
+        );
+    }
+
+    #[tokio::test]
+    async fn a_limit_stops_after_enough_chats_without_shrinking_follow_up_pages() {
+        let scope = ChatListScope::default();
+        let request = paged_chat_list(&scope, false, Some(3), None).unwrap();
+        let mut source = FakePages {
+            pages: VecDeque::from([
+                proto::GetChatsResult {
+                    // 2 is a linked subthread without a dialog: the catalog hides it.
+                    chats: vec![
+                        page_chat(1, None),
+                        page_chat(2, Some(1)),
+                        page_chat(3, None),
+                    ],
+                    dialogs: vec![page_dialog(1, false), page_dialog(3, false)],
+                    next_offset: next(3),
+                    ..Default::default()
+                },
+                proto::GetChatsResult {
+                    chats: vec![page_chat(4, Some(1))],
+                    dialogs: vec![page_dialog(4, false)],
+                    next_offset: next(4),
+                    ..Default::default()
+                },
+                proto::GetChatsResult {
+                    chats: vec![page_chat(5, None)],
+                    ..Default::default()
+                },
+            ]),
+            requests: Vec::new(),
+        };
+        let merged = fetch_chat_pages(&request, &scope, None, &mut source)
+            .await
+            .unwrap();
+
+        let ids: Vec<i64> = merged.chats.iter().map(|chat| chat.id).collect();
+        assert_eq!(ids, vec![1, 3, 4]);
+        assert_eq!(merged.next_offset, None);
+        let sizes: Vec<_> = source.requests.iter().map(|input| input.limit).collect();
+        assert_eq!(sizes, vec![Some(3), Some(25)]);
+        assert_eq!(source.requests[1].offset, next(3));
+        assert!(
+            source
+                .requests
+                .iter()
+                .all(|input| input.include_subthreads.is_none())
+        );
+    }
+
+    #[tokio::test]
+    async fn walks_every_page_without_a_limit_and_drops_hidden_subthreads() {
+        let scope = ChatListScope {
+            space_id: Some(7),
+            ..Default::default()
+        };
+        let request = paged_chat_list(&scope, false, None, None).unwrap();
+        let mut source = FakePages {
+            pages: VecDeque::from([
+                proto::GetChatsResult {
+                    chats: vec![page_chat(1, None), page_chat(2, Some(1))],
+                    dialogs: vec![page_dialog(2, true)],
+                    next_offset: next(2),
+                    ..Default::default()
+                },
+                proto::GetChatsResult {
+                    chats: vec![page_chat(3, None)],
+                    ..Default::default()
+                },
+            ]),
+            requests: Vec::new(),
+        };
+        let merged = fetch_chat_pages(&request, &scope, None, &mut source)
+            .await
+            .unwrap();
+        let ids: Vec<i64> = merged.chats.iter().map(|chat| chat.id).collect();
+        assert_eq!(ids, vec![1, 3]);
+        assert!(merged.dialogs.is_empty());
+        assert_eq!(source.requests.len(), 2);
+        assert!(source.requests.iter().all(|input| input.limit == Some(100)));
     }
 }

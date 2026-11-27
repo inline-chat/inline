@@ -346,12 +346,17 @@ pub fn print_chat_list(
     }
 
     let id_width = id_column_width(output.items.iter().map(|item| item.chat.id));
-    let unread_width = id_column_width(
+    let mut unread_width = id_column_width(
         output
             .items
             .iter()
             .map(|item| i64::from(item.unread_count.unwrap_or(0))),
     );
+    // A thread the account never opened has no dialog, so no unread count to
+    // show: say that instead of a misleading 0.
+    if output.items.iter().any(|item| item.dialog.is_none()) {
+        unread_width = unread_width.max(display_width(NOT_OPENED_LABEL));
+    }
 
     let mut name_width = display_width("name");
     let mut space_width = display_width("space");
@@ -411,7 +416,7 @@ pub fn print_chat_list(
             pad_left(&item.chat.id.to_string(), id_width),
             pad_right(name, name_width),
             pad_right(&truncate_display(space, space_width), space_width),
-            pad_left(&item.unread_count.unwrap_or(0).to_string(), unread_width),
+            chat_unread_cell(item, unread_width),
             pad_right(&truncate_display(preview, last_width), last_width),
         );
         for continuation in name_lines.iter().skip(1) {
@@ -426,6 +431,15 @@ pub fn print_chat_list(
         }
     }
     Ok(())
+}
+
+const NOT_OPENED_LABEL: &str = "not opened";
+
+fn chat_unread_cell(item: &ChatListItem, width: usize) -> String {
+    if item.dialog.is_none() {
+        return style_dim(&pad_left(NOT_OPENED_LABEL, width));
+    }
+    pad_left(&item.unread_count.unwrap_or(0).to_string(), width)
 }
 
 pub(crate) fn print_chat_details(chat: &proto::Chat, dialog: Option<&proto::Dialog>) {
@@ -1628,6 +1642,35 @@ mod tests {
         assert_eq!(format_relative_date(now - 5_184_000, now), "2mo ago");
         assert_eq!(format_relative_date(now - 63_072_000, now), "2y ago");
         assert_eq!(format_relative_date(now + 120, now), "in 2m");
+    }
+
+    #[test]
+    fn a_chat_without_a_dialog_says_not_opened_instead_of_zero_unread() {
+        let item = |dialog: Option<proto::Dialog>| ChatListItem {
+            chat: proto::Chat {
+                id: 5,
+                ..Default::default()
+            },
+            unread_count: dialog.as_ref().and_then(|dialog| dialog.unread_count),
+            dialog,
+            peer: PeerSummary {
+                peer_type: "chat".to_string(),
+                id: 5,
+            },
+            display_name: "Launch".to_string(),
+            space: None,
+            space_name: None,
+            last_message: None,
+            last_message_line: None,
+            last_message_relative_date: None,
+        };
+        let opened = item(Some(proto::Dialog {
+            unread_count: Some(4),
+            ..Default::default()
+        }));
+        assert_eq!(chat_unread_cell(&opened, 10).trim(), "4");
+        let never_opened = item(None);
+        assert!(chat_unread_cell(&never_opened, 10).contains(NOT_OPENED_LABEL));
     }
 
     #[test]

@@ -19,8 +19,8 @@ use chrono::{TimeZone, Utc};
 use clap::{Args, ValueEnum};
 use inline_client::{
     ClientEvent, ClientIdentity, ClientStatus, ClientStore, ConnectRequest, ConversationKind,
-    DialogRecord, DialogsOrder, DialogsRequest, InMemoryStore, InlineClient, InlineId, MediaKind,
-    MessageContent, MessageRecord, SdkBackend, SqliteStore, UserRecord,
+    DialogRecord, InMemoryStore, InlineClient, InlineId, MediaKind, MessageContent, MessageRecord,
+    SdkBackend, SqliteStore, UserRecord, UsersRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -759,65 +759,91 @@ impl NamedListener {
 // ---------------------------------------------------------------------------
 // Chat and user lookups
 
-const DIALOG_REFRESH_COOLDOWN: Duration = Duration::from_secs(10);
+/// How long a failed chat or user lookup is left alone before the next event
+/// asks again, so a burst of events from one chat makes one failing request,
+/// not one per event.
+const FAILED_LOOKUP_RETRY: Duration = Duration::from_secs(30);
 
 struct Directory {
     client: InlineClient,
     store: Arc<dyn ClientStore>,
+    /// `None` remembers a chat the source could not show, so it is asked once.
     chats: HashMap<i64, Option<ChatFacts>>,
-    users: HashMap<i64, UserRecord>,
-    last_refresh: Option<tokio::time::Instant>,
+    users: HashMap<i64, Option<UserRecord>>,
+    /// When a lookup last failed, for [`FAILED_LOOKUP_RETRY`].
+    failed_chats: HashMap<i64, tokio::time::Instant>,
+    failed_users: HashMap<i64, tokio::time::Instant>,
+}
+
+fn recently_failed(failures: &HashMap<i64, tokio::time::Instant>, id: i64) -> bool {
+    failures
+        .get(&id)
+        .is_some_and(|at| at.elapsed() < FAILED_LOOKUP_RETRY)
 }
 
 impl Directory {
+    fn new(client: InlineClient, store: Arc<dyn ClientStore>) -> Self {
+        Self {
+            client,
+            store,
+            chats: HashMap::new(),
+            users: HashMap::new(),
+            failed_chats: HashMap::new(),
+            failed_users: HashMap::new(),
+        }
+    }
+
+    /// Local store first, then one GetChat for that chat only. A listener
+    /// starts with an empty store, so this runs once per chat it hears from.
     async fn chat(&mut self, chat_id: i64) -> Option<ChatFacts> {
-        if let Some(Some(known)) = self.chats.get(&chat_id) {
-            return Some(known.clone());
+        if let Some(known) = self.chats.get(&chat_id) {
+            return known.clone();
         }
-        if let Ok(Some(dialog)) = self.store.dialog(InlineId::new(chat_id)).await {
-            let facts = ChatFacts::from(&dialog);
-            self.chats.insert(chat_id, Some(facts.clone()));
-            return Some(facts);
-        }
-        // A chat with a new message sorts first, so the newest page has it.
-        let due = self
-            .last_refresh
-            .is_none_or(|at| at.elapsed() >= DIALOG_REFRESH_COOLDOWN);
-        if due {
-            self.last_refresh = Some(tokio::time::Instant::now());
-            if let Ok(page) = self
-                .client
-                .dialogs(DialogsRequest {
-                    limit: Some(50),
-                    cursor: None,
-                    order: DialogsOrder::RecentActivity,
-                })
-                .await
-            {
-                for dialog in &page.dialogs {
-                    self.chats
-                        .insert(dialog.chat_id.get(), Some(ChatFacts::from(dialog)));
+        let dialog = match self.store.dialog(InlineId::new(chat_id)).await {
+            Ok(Some(dialog)) => Some(dialog),
+            _ if recently_failed(&self.failed_chats, chat_id) => return None,
+            _ => match self.client.fetch_dialog(InlineId::new(chat_id)).await {
+                Ok(dialog) => dialog,
+                Err(_) => {
+                    self.failed_chats
+                        .insert(chat_id, tokio::time::Instant::now());
+                    return None;
                 }
-                for user in page.users {
-                    self.users.insert(user.user_id.get(), user);
-                }
-            }
-        }
-        self.chats.entry(chat_id).or_insert(None).clone()
+            },
+        };
+        self.failed_chats.remove(&chat_id);
+        let facts = dialog.as_ref().map(ChatFacts::from);
+        self.chats.insert(chat_id, facts.clone());
+        facts
     }
 
     async fn user(&mut self, user_id: i64) -> Option<UserRecord> {
-        if let Some(user) = self.users.get(&user_id) {
-            return Some(user.clone());
+        if let Some(known) = self.users.get(&user_id) {
+            return known.clone();
         }
-        let user = self
-            .store
-            .user(InlineId::new(user_id))
-            .await
-            .ok()
-            .flatten()?;
+        let stored = self.store.user(InlineId::new(user_id)).await.ok().flatten();
+        let user = match stored {
+            Some(user) => Some(user),
+            None if user_id <= 0 => None,
+            None if recently_failed(&self.failed_users, user_id) => return None,
+            None => match self
+                .client
+                .users(UsersRequest {
+                    user_ids: vec![InlineId::new(user_id)],
+                })
+                .await
+            {
+                Ok(result) => result.users.into_iter().next(),
+                Err(_) => {
+                    self.failed_users
+                        .insert(user_id, tokio::time::Instant::now());
+                    return None;
+                }
+            },
+        };
+        self.failed_users.remove(&user_id);
         self.users.insert(user_id, user.clone());
-        Some(user)
+        user
     }
 }
 
@@ -1098,7 +1124,9 @@ pub(crate) async fn run(
     let mut request =
         ConnectRequest::new(credential).with_account_namespace(format!("cli-listen-{account}"));
     if !resumed {
-        request = request.start_after_current();
+        // A listener only wants what happens next: take the server's current
+        // position instead of reading (and discarding) the account's history.
+        request = request.start_at_current_position();
     }
     if let Err(error) = client.connect(request).await {
         let _ = tokio::time::timeout(Duration::from_secs(3), client.shutdown()).await;
@@ -1154,13 +1182,7 @@ pub(crate) async fn run(
         );
     }
 
-    let mut directory = Directory {
-        client: client.clone(),
-        store,
-        chats: HashMap::new(),
-        users: HashMap::new(),
-        last_refresh: None,
-    };
+    let mut directory = Directory::new(client.clone(), store);
     let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
     let mut matched: u64 = 0;
     let mut dirty = false;

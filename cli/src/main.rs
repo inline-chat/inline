@@ -27,6 +27,7 @@ mod message_output;
 mod message_page;
 mod message_selectors;
 mod message_wait;
+mod name_cache;
 mod native_download;
 mod notifications;
 mod output;
@@ -50,7 +51,7 @@ use dialoguer::Confirm;
 use futures_util::stream::{self, StreamExt};
 use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
@@ -65,8 +66,8 @@ use crate::auth_flow::{
     build_auth_logout_output, handle_login, print_auth_logout, print_auth_user,
 };
 use crate::chat_output::{
-    ChatListScope, apply_chat_list_filter, apply_chat_list_limits, apply_chat_list_scope,
-    build_chat_list, chat_display_name,
+    ChatListScope, ChatPageSource, apply_chat_list_filter, apply_chat_list_limits,
+    apply_chat_list_scope, build_chat_list, chat_display_name, fetch_chat_pages, paged_chat_list,
 };
 use crate::config::Config;
 use crate::doctor::{build_doctor_output, print_doctor};
@@ -99,7 +100,7 @@ use crate::output::{
     build_space_members_output, build_user_list, print_chat_details, print_message_detail,
     user_display_name, user_summary,
 };
-use crate::peer::input_peer_from_args;
+use crate::peer::{PeerKey, input_peer_from_args, peer_key_from_peer};
 use crate::state::LocalDb;
 use crate::validation::{
     normalize_search_queries, normalize_translation_language, parse_time_filters,
@@ -114,6 +115,33 @@ use inline_sdk::{
     InlineProtocolV3Connection, NativeUploadError, NativeUploadInput, RealtimeClient, RpcRequest,
     upload_file_v2, upload_file_v3_parallel,
 };
+
+/// Something that can run one typed RPC, so readable-output helpers work on
+/// a plain connection and on a `messages wait` session alike.
+trait RealtimeRpc {
+    async fn rpc<R: RpcRequest>(
+        &mut self,
+        request: R,
+    ) -> Result<R::Response, Box<dyn std::error::Error>>;
+}
+
+impl RealtimeRpc for AuthenticatedRealtime {
+    async fn rpc<R: RpcRequest>(
+        &mut self,
+        request: R,
+    ) -> Result<R::Response, Box<dyn std::error::Error>> {
+        self.call(request).await
+    }
+}
+
+impl ChatPageSource for AuthenticatedRealtime {
+    async fn get_chats(
+        &mut self,
+        input: proto::GetChatsInput,
+    ) -> Result<proto::GetChatsResult, Box<dyn std::error::Error>> {
+        self.call(input).await
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 enum AuthenticatedRealtime {
@@ -131,6 +159,24 @@ enum AuthenticatedRealtime {
 }
 
 impl AuthenticatedRealtime {
+    /// Promotes the connection into a multiplexed session that also receives
+    /// the server's pushed updates, with the store whose authority a revoked
+    /// session clears.
+    fn into_session(self) -> (inline_sdk::RealtimeSession, Option<AuthStore>) {
+        match self {
+            Self::V2 {
+                connection,
+                authority_owner,
+                ..
+            } => (connection.into_session(), authority_owner),
+            Self::V3 {
+                connection,
+                auth_store,
+                ..
+            } => (connection.into_session(), Some(auth_store)),
+        }
+    }
+
     async fn call<R>(&mut self, request: R) -> Result<R::Response, Box<dyn std::error::Error>>
     where
         R: RpcRequest,
@@ -3988,12 +4034,31 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     validate_table_only_list_flags(cli.json, args.ids, args.id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let payload = realtime
-                        .call(proto::GetChatsInput {
-                            include_subthreads: Some(args.include_subthreads),
-                            ..Default::default()
-                        })
-                        .await?;
+                    let paged = paged_chat_list(
+                        &args.scope,
+                        args.include_subthreads,
+                        args.limit,
+                        args.offset,
+                    );
+                    let payload = match paged {
+                        Some(paged) => {
+                            fetch_chat_pages(
+                                &paged,
+                                &args.scope,
+                                args.filter.as_deref(),
+                                &mut realtime,
+                            )
+                            .await?
+                        }
+                        None => {
+                            realtime
+                                .call(proto::GetChatsInput {
+                                    include_subthreads: Some(args.include_subthreads),
+                                    ..Default::default()
+                                })
+                                .await?
+                        }
+                    };
                     let payload = apply_chat_list_scope(payload, &args.scope);
 
                     if cli.json {
@@ -4583,17 +4648,18 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             } else {
                                 HashMap::new()
                             };
-                        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
-                        let users_by_id = chats_payload
-                            .users
-                            .into_iter()
-                            .map(|user| (user.id, user))
-                            .collect();
-                        let chats_by_id = chats_payload
-                            .chats
-                            .into_iter()
-                            .map(|chat| (chat.id, chat))
-                            .collect();
+                        let (users_by_id, chats_by_id) =
+                            fetch_message_names(
+                                &mut realtime,
+                                &config,
+                                &peer,
+                                payload
+                                    .messages
+                                    .iter()
+                                    .chain(thread_replies.iter().flat_map(|thread| &thread.messages))
+                                    .map(|message| message.from_id),
+                            )
+                            .await;
                         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
                         let mut output = build_message_list(
                             payload,
@@ -4675,12 +4741,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                 } else {
                                     HashMap::new()
                                 };
-                            let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
-                            let users_by_id = chats_payload
-                                .users
-                                .into_iter()
-                                .map(|user| (user.id, user))
-                                .collect();
+                            let (users_by_id, _) =
+                                fetch_message_names(&mut realtime, &config, &peer, [message.from_id])
+                                    .await;
                             let current_user_id = local_db.load()?.current_user.map(|user| user.id);
                             let summary = message_summary(
                                 &message,
@@ -4725,17 +4788,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             } else {
                                 HashMap::new()
                             };
-                        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
-                        let users_by_id = chats_payload
-                            .users
-                            .into_iter()
-                            .map(|user| (user.id, user))
-                            .collect();
-                        let chats_by_id = chats_payload
-                            .chats
-                            .into_iter()
-                            .map(|chat| (chat.id, chat))
-                            .collect();
+                        let (users_by_id, chats_by_id) =
+                            fetch_message_names(
+                                &mut realtime,
+                                &config,
+                                &peer,
+                                messages.iter().map(|message| message.from_id),
+                            )
+                            .await;
                         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
                         let output = build_message_list_from_messages(
                             &messages,
@@ -5180,7 +5240,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 SpacesCommand::List => {
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
-                    let mut payload = realtime.call(proto::GetChatsInput::default()).await?;
+                    let mut payload = proto::GetChatsResult {
+                        spaces: realtime.call(proto::GetSpacesInput {}).await?.spaces,
+                        ..Default::default()
+                    };
 
                     if cli.json {
                         let spaces = std::mem::take(&mut payload.spaces);
@@ -5468,13 +5531,70 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
     result
 }
 
-/// Reads newer history over one authenticated connection, reconnecting after
-/// transport failures.
+/// One `messages wait` connection: RPCs plus the server's pushed updates,
+/// subscribed before the first read so a reply cannot slip between the two.
+struct WaitSession {
+    session: inline_sdk::RealtimeSession,
+    events: inline_sdk::RealtimeEventReceiver,
+    authority_owner: Option<AuthStore>,
+}
+
+impl WaitSession {
+    fn new(realtime: AuthenticatedRealtime) -> Self {
+        let (session, authority_owner) = realtime.into_session();
+        let events = session.subscribe();
+        Self {
+            session,
+            events,
+            authority_owner,
+        }
+    }
+
+    async fn connect(
+        config: &Config,
+        auth_store: &AuthStore,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self::new(
+            connect_authenticated_realtime(config, auth_store).await?,
+        ))
+    }
+}
+
+impl RealtimeRpc for WaitSession {
+    async fn rpc<R: RpcRequest>(
+        &mut self,
+        request: R,
+    ) -> Result<R::Response, Box<dyn std::error::Error>> {
+        match self.session.call(request).await {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                clear_owned_authority_if_invalidated(
+                    self.authority_owner.as_ref(),
+                    matches!(&error, inline_sdk::RealtimeError::AuthenticationInvalidated),
+                )?;
+                Err(error.into())
+            }
+        }
+    }
+}
+
+/// Reads newer history over one session, woken by pushed updates about the
+/// chat, reconnecting after transport failures.
 struct RealtimeHistorySource<'a> {
     config: &'a Config,
     auth_store: &'a AuthStore,
-    realtime: Option<AuthenticatedRealtime>,
+    session: Option<WaitSession>,
     peer: proto::InputPeer,
+    target: message_wait::WaitTarget,
+}
+
+impl RealtimeHistorySource<'_> {
+    async fn session(&mut self) -> Result<&mut WaitSession, Box<dyn std::error::Error>> {
+        if self.session.is_none() {
+            self.session = Some(WaitSession::connect(self.config, self.auth_store).await?);
+        }
+        Ok(self.session.as_mut().expect("session was just connected"))
+    }
 }
 
 impl message_wait::HistorySource for RealtimeHistorySource<'_> {
@@ -5483,12 +5603,6 @@ impl message_wait::HistorySource for RealtimeHistorySource<'_> {
         after_id: i64,
         limit: i32,
     ) -> Result<Vec<proto::Message>, Box<dyn std::error::Error>> {
-        let realtime = match self.realtime.as_mut() {
-            Some(realtime) => realtime,
-            None => self
-                .realtime
-                .insert(connect_authenticated_realtime(self.config, self.auth_store).await?),
-        };
         let input = proto::GetChatHistoryInput {
             peer_id: Some(self.peer.clone()),
             mode: Some(proto::GetChatHistoryMode::HistoryModeNewer as i32),
@@ -5496,11 +5610,21 @@ impl message_wait::HistorySource for RealtimeHistorySource<'_> {
             limit: Some(limit),
             ..Default::default()
         };
-        match realtime.call(input).await {
-            Ok(payload) => Ok(payload.messages),
+        match self.session().await?.rpc(input).await {
+            Ok(payload) => {
+                // A DM wait learns its chat ID from the first message it sees.
+                if self.target.chat_id.is_none() {
+                    self.target.chat_id = payload
+                        .messages
+                        .iter()
+                        .map(|message| message.chat_id)
+                        .find(|chat_id| *chat_id != 0);
+                }
+                Ok(payload.messages)
+            }
             Err(error) => {
                 if native_download::retryable_transport_failure(error.as_ref()) {
-                    self.realtime = None;
+                    self.session = None;
                 }
                 Err(error)
             }
@@ -5510,6 +5634,48 @@ impl message_wait::HistorySource for RealtimeHistorySource<'_> {
     fn is_transient(&self, error: &(dyn std::error::Error + 'static)) -> bool {
         native_download::retryable_transport_failure(error)
             || native_download::server_range_retryable(error)
+    }
+
+    fn receives_pushes(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| !session.session.is_closed())
+    }
+
+    async fn wait_for_activity(&mut self, until: tokio::time::Instant) -> bool {
+        let Some(session) = self.session.as_mut() else {
+            tokio::time::sleep_until(until).await;
+            return false;
+        };
+        loop {
+            let event = tokio::select! {
+                event = session.events.recv() => event,
+                () = tokio::time::sleep_until(until) => return false,
+            };
+            match event {
+                Ok(inline_sdk::RealtimeEvent::Updates(updates)) => {
+                    if updates.iter().any(|update| self.target.woken_by(update)) {
+                        return true;
+                    }
+                }
+                Ok(inline_sdk::RealtimeEvent::AuthenticationInvalidated) => {
+                    let _ = clear_owned_authority_if_invalidated(
+                        session.authority_owner.as_ref(),
+                        true,
+                    );
+                    // The next read reports the failure.
+                    return false;
+                }
+                Ok(_) => {}
+                // Missed events may include this chat's: read now.
+                Err(inline_sdk::RealtimeError::EventLagged { .. }) => return true,
+                // The socket is gone; the next read reconnects.
+                Err(_) => {
+                    self.session = None;
+                    return false;
+                }
+            }
+        }
     }
 }
 
@@ -5551,10 +5717,23 @@ async fn handle_messages_wait(
         ),
         None => parent_peer,
     };
+    let target = message_wait::WaitTarget {
+        chat_id: match &peer.r#type {
+            Some(proto::input_peer::Type::Chat(chat)) => Some(chat.chat_id),
+            _ => None,
+        },
+        peer_user_id: match &peer.r#type {
+            Some(proto::input_peer::Type::User(user)) => Some(user.user_id),
+            _ => None,
+        },
+    };
+    // Subscribe before the first read, so a reply landing in between still
+    // wakes the wait.
+    let mut session = WaitSession::new(realtime);
     let after_id = match after {
         Some(after_id) => after_id,
-        None => realtime
-            .call(proto::GetChatHistoryInput {
+        None => session
+            .rpc(proto::GetChatHistoryInput {
                 peer_id: Some(peer.clone()),
                 mode: Some(proto::GetChatHistoryMode::HistoryModeLatest as i32),
                 limit: Some(1),
@@ -5578,8 +5757,9 @@ async fn handle_messages_wait(
     let mut source = RealtimeHistorySource {
         config,
         auth_store,
-        realtime: Some(realtime),
+        session: Some(session),
         peer: peer.clone(),
+        target,
     };
     let result = message_wait::wait_for_messages(&mut source, &plan).await?;
     let timed_out = result.timed_out;
@@ -5595,23 +5775,14 @@ async fn handle_messages_wait(
             ))
         );
     } else {
-        let realtime = match source.realtime.as_mut() {
-            Some(realtime) => realtime,
-            None => source
-                .realtime
-                .insert(connect_authenticated_realtime(config, auth_store).await?),
-        };
-        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
-        let users_by_id = chats_payload
-            .users
-            .into_iter()
-            .map(|user| (user.id, user))
-            .collect();
-        let chats_by_id = chats_payload
-            .chats
-            .into_iter()
-            .map(|chat| (chat.id, chat))
-            .collect();
+        let session = source.session().await?;
+        let (users_by_id, chats_by_id) = fetch_message_names(
+            session,
+            config,
+            &peer,
+            result.messages.iter().map(|message| message.from_id),
+        )
+        .await;
         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
         let output = build_message_list_from_messages(
             &result.messages,
@@ -5693,17 +5864,13 @@ async fn handle_messages_search(
         } else {
             HashMap::new()
         };
-        let chats_payload = realtime.call(proto::GetChatsInput::default()).await?;
-        let users_by_id = chats_payload
-            .users
-            .into_iter()
-            .map(|user| (user.id, user))
-            .collect();
-        let chats_by_id = chats_payload
-            .chats
-            .into_iter()
-            .map(|chat| (chat.id, chat))
-            .collect();
+        let (users_by_id, chats_by_id) = fetch_message_names(
+            &mut realtime,
+            config,
+            &peer,
+            payload.messages.iter().map(|message| message.from_id),
+        )
+        .await;
         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
         let output = build_message_list_from_messages(
             &payload.messages,
@@ -7013,6 +7180,15 @@ async fn download_messages_media(
                         });
                     }
                 };
+                if let Ok(existing) = tokio::fs::metadata(&output_path).await
+                    && existing.is_file()
+                {
+                    return Ok(DownloadedFileOutput {
+                        message_id,
+                        path: output_path.display().to_string(),
+                        bytes: existing.len(),
+                    });
+                }
                 match download_message_media(&message, &output_path).await {
                     Ok(bytes) => Ok(DownloadedFileOutput {
                         message_id,
@@ -7458,6 +7634,81 @@ fn peer_summary_from_input(peer: &proto::InputPeer) -> Option<PeerSummary> {
         }),
         None => None,
     }
+}
+
+/// Names for readable message output without the whole chat catalog: a
+/// chat target's title through GetChat, and senders (plus a DM peer) from the
+/// on-disk name cache, asking GetUsers (50 per call) only for names not seen
+/// in the last day. The messages were already read, so a failed lookup falls
+/// back to a stale cached name, then to "user N", instead of failing.
+async fn fetch_message_names(
+    realtime: &mut impl RealtimeRpc,
+    config: &Config,
+    peer: &proto::InputPeer,
+    sender_ids: impl IntoIterator<Item = i64>,
+) -> (HashMap<i64, proto::User>, HashMap<i64, proto::Chat>) {
+    let mut user_ids: BTreeSet<i64> = sender_ids.into_iter().filter(|id| *id > 0).collect();
+    let mut chats_by_id = HashMap::new();
+    match &peer.r#type {
+        Some(proto::input_peer::Type::User(user)) => {
+            user_ids.insert(user.user_id);
+        }
+        Some(proto::input_peer::Type::Chat(_)) => {
+            let chat = realtime
+                .rpc(proto::GetChatInput {
+                    peer_id: Some(peer.clone()),
+                    include_recent_messages: false,
+                })
+                .await
+                .ok()
+                .and_then(|result| result.chat);
+            if let Some(chat) = chat {
+                if let Some(PeerKey::User(user_id)) =
+                    chat.peer_id.as_ref().and_then(peer_key_from_peer)
+                {
+                    user_ids.insert(user_id);
+                }
+                chats_by_id.insert(chat.id, chat);
+            }
+        }
+        _ => {}
+    }
+
+    let now = current_epoch_seconds() as i64;
+    let mut cache = name_cache::NameCache::load(&config.data_dir, &config.api_base_url);
+    let mut users_by_id = HashMap::new();
+    let mut missing = Vec::new();
+    for user_id in user_ids {
+        match cache.fresh(user_id, now) {
+            Some(user) => {
+                users_by_id.insert(user_id, user);
+            }
+            None => missing.push(user_id),
+        }
+    }
+    for chunk in missing.chunks(50) {
+        let Ok(result) = realtime
+            .rpc(proto::GetUsersInput {
+                user_ids: chunk.to_vec(),
+            })
+            .await
+        else {
+            break;
+        };
+        for user in result.users {
+            cache.remember(&user, now);
+            users_by_id.insert(user.id, user);
+        }
+    }
+    for user_id in missing {
+        if let std::collections::hash_map::Entry::Vacant(slot) = users_by_id.entry(user_id)
+            && let Some(user) = cache.any(user_id)
+        {
+            slot.insert(user);
+        }
+    }
+    cache.save();
+    (users_by_id, chats_by_id)
 }
 
 fn peer_name_from_input(
