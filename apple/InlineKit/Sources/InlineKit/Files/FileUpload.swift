@@ -465,6 +465,24 @@ public actor FileUploader {
   public func uploadVideo(
     videoInfo: VideoInfo
   ) async throws -> Int64 {
+    let video = try await videoUpload(videoInfo)
+    try await startUpload(
+      media: video.media,
+      localUrl: video.source.url,
+      mimeType: video.source.mimeType,
+      fileName: video.source.fileName,
+      videoMetadata: video.metadata
+    )
+    return video.localId
+  }
+
+  /// What `uploadVideo` uploads: the persisted video, its file, and checked metadata.
+  private func videoUpload(_ videoInfo: VideoInfo) async throws -> (
+    media: FileMediaItem,
+    source: (url: URL, mimeType: String, fileName: String),
+    metadata: ApiClient.VideoUploadMetadata,
+    localId: Int64
+  ) {
     guard uploadResetTask == nil else { throw FileUploadError.uploadCancelled }
     let startingSessionGeneration = uploadSessionGeneration
 
@@ -505,16 +523,7 @@ public actor FileUploader {
       isAnimated: resolvedVideoInfo.video.isAnimated,
       hasAudio: resolvedVideoInfo.video.hasAudio
     )
-
-    try await startUpload(
-      media: .video(resolvedVideoInfo),
-      localUrl: localUrl,
-      mimeType: mimeType.text,
-      fileName: fileName,
-      videoMetadata: videoMetadata
-    )
-
-    return localVideoId
+    return (.video(resolvedVideoInfo), (localUrl, mimeType.text, fileName), videoMetadata, localVideoId)
   }
 
   public func uploadDocument(
@@ -574,24 +583,33 @@ public actor FileUploader {
   /// Starts uploading an attachment while its message is still being written. Every byte moves,
   /// but the finish waits for the send (`startUpload` for the same media), so the server keeps the
   /// upload unfinished: removing the attachment (`cancel(media:accountToken:)`) deletes what it has.
-  /// Photos only for now: a video or document names its thumbnail in its create, and a document's
-  /// thumbnail can arrive after attach. Does nothing with early upload off or already uploading.
+  /// Videos and documents too where the server takes their thumbnail at finish (see `startsEarly`),
+  /// a video encoding now rather than at Send. Does nothing with early upload off or already
+  /// uploading.
   public func startEarlyUpload(media: FileMediaItem) async {
     guard EarlyUploadSettings.isEnabled, uploadResetTask == nil, Auth.shared.getCurrentUserId() != nil else {
       return
     }
     do {
       let source: (url: URL, mimeType: String, fileName: String)
+      var videoMetadata: ApiClient.VideoUploadMetadata?
+      var uploadMedia = media
       switch media {
       case let .photo(photo): source = try Self.photoSource(photo)
+      case let .document(document) where Self.startsEarly(media):
+        source = try Self.documentSource(document)
+      case let .video(video) where Self.startsEarly(media):
+        let prepared = try await videoUpload(video)
+        (uploadMedia, source, videoMetadata) = (prepared.media, prepared.source, prepared.metadata)
       case .document, .video, .voice: return
       }
       try await startUpload(
-        media: media,
+        media: uploadMedia,
         localUrl: source.url,
         mimeType: source.mimeType,
         fileName: source.fileName,
         priority: .utility,
+        videoMetadata: videoMetadata,
         finishGate: NativeUploadFinishGate()
       )
     } catch {
@@ -606,11 +624,20 @@ public actor FileUploader {
     cancel(uploadId: uploadId)
   }
 
-  /// Whether `media` uploads while its message is written (see `startEarlyUpload(media:)`).
+  /// Whether `media` uploads while its message is written (see `startEarlyUpload(media:)`). A video
+  /// or document names its thumbnail at finish, which only servers seen to take it get.
   public nonisolated static func startsEarly(_ media: FileMediaItem) -> Bool {
     guard EarlyUploadSettings.isEnabled else { return false }
-    if case .photo = media { return true }
-    return false
+    switch media {
+    case .photo: return true
+    case .video: return DurableUploadCoordinator.shared.acceptsThumbnailAtFinish
+    case let .document(document):
+      if document.thumbnail != nil { return DurableUploadCoordinator.shared.acceptsThumbnailAtFinish }
+      // One that may still get a thumbnail waits for Send, where it has it.
+      guard let url = try? documentSource(document).url else { return false }
+      return !DocumentThumbnailIntegration.canAttemptGeneration(at: url)
+    case .voice: return false
+    }
   }
 
   public func startUpload(
@@ -765,7 +792,16 @@ public actor FileUploader {
       case .photo, .voice:
         nil
     }
-    async let uploadedThumbnailFileUniqueID = Self.uploadThumbnail(thumbnail, uploadId: uploadId)
+    // An upload started at attach names its thumbnail at finish, where the server takes that, so the
+    // file doesn't wait for the thumbnail; both wait for Send, so removing the attachment deletes both.
+    let thumbnailAtFinish: Task<String?, any Error>? =
+      finishGate != nil && thumbnail != nil && DurableUploadCoordinator.shared.acceptsThumbnailAtFinish
+        ? Task { try await Self.uploadThumbnail(thumbnail, uploadId: uploadId, finishGate: finishGate) }
+        : nil
+    async let uploadedThumbnailFileUniqueID = Self.uploadThumbnail(
+      thumbnailAtFinish == nil ? thumbnail : nil,
+      uploadId: uploadId
+    )
 
     switch media {
     case .photo:
@@ -887,6 +923,11 @@ public actor FileUploader {
       nativeMetadata = .voice(voice)
     }
 
+    var finishThumbnail: (@Sendable () async throws -> String?)?
+    if let thumbnailAtFinish {
+      finishThumbnail = { @Sendable () async throws -> String? in try await thumbnailAtFinish.value }
+    }
+    let resolvedFinishThumbnail = finishThumbnail
     let transferTask = Task.detached(priority: .userInitiated) {
       try await DurableUploadCoordinator.shared.upload(
         NativeMediaUploadRequest(
@@ -897,7 +938,8 @@ public actor FileUploader {
           kind: kind,
           thumbnailFileUniqueID: thumbnailFileUniqueID,
           metadata: nativeMetadata,
-          finishGate: finishGate
+          finishGate: finishGate,
+          thumbnailAtFinish: resolvedFinishThumbnail
         ),
         progress: { sent, total in
           progressHandler(
@@ -910,10 +952,18 @@ public actor FileUploader {
         }
       )
     }
-    let complete = try await withTaskCancellationHandler {
-      try await transferTask.value
-    } onCancel: {
-      transferTask.cancel()
+    let complete: UploadComplete
+    do {
+      complete = try await withTaskCancellationHandler {
+        try await transferTask.value
+      } onCancel: {
+        transferTask.cancel()
+        thumbnailAtFinish?.cancel()
+      }
+    } catch {
+      // A held thumbnail left behind would stay on the server until it expires.
+      thumbnailAtFinish?.cancel()
+      throw error
     }
     try Task.checkCancellation()
     try ensureActiveUpload(uploadId: uploadId, token: token)
@@ -1211,7 +1261,8 @@ public actor FileUploader {
   /// Uploads a send's thumbnail and returns its file ID, or nil when it has none.
   private nonisolated static func uploadThumbnail(
     _ thumbnail: ApiClient.ThumbnailUploadMetadata?,
-    uploadId: String
+    uploadId: String,
+    finishGate: NativeUploadFinishGate? = nil
   ) async throws -> String? {
     guard let thumbnail else { return nil }
     let url = FileHelpers.getTrueTemporaryDirectory()
@@ -1224,7 +1275,8 @@ public actor FileUploader {
         fileURL: url,
         fileName: "thumbnail.jpg",
         mimeType: thumbnail.mimeType.text,
-        kind: .photo
+        kind: .photo,
+        finishGate: finishGate
       ),
       progress: { _, _ in }
     )

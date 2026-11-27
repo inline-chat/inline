@@ -5,6 +5,7 @@ import Auth
 import InlineConfig
 import InlineProtocol
 import Logger
+import os
 import RealtimeV2
 
 public enum MediaUploadLimits {
@@ -46,6 +47,10 @@ public struct NativeMediaUploadRequest: Sendable {
   /// Holds the finish until it opens (an upload started at attach waits for Send). The bytes still
   /// move; until finish the server keeps the upload unfinished, so canceling deletes all of it.
   public let finishGate: NativeUploadFinishGate?
+  /// Names the thumbnail at finish instead of create (`thumbnailFileUniqueID` stays nil), so the
+  /// upload can start before its thumbnail is done. Only for servers that take it; see
+  /// `DurableUploadCoordinator.acceptsThumbnailAtFinish`.
+  public let thumbnailAtFinish: (@Sendable () async throws -> String?)?
 
   public init(
     logicalID: String,
@@ -55,7 +60,8 @@ public struct NativeMediaUploadRequest: Sendable {
     kind: UploadKind,
     thumbnailFileUniqueID: String? = nil,
     metadata: CreateUploadInput.OneOf_Metadata? = nil,
-    finishGate: NativeUploadFinishGate? = nil
+    finishGate: NativeUploadFinishGate? = nil,
+    thumbnailAtFinish: (@Sendable () async throws -> String?)? = nil
   ) {
     self.logicalID = logicalID
     self.fileURL = fileURL
@@ -66,6 +72,7 @@ public struct NativeMediaUploadRequest: Sendable {
     self.thumbnailFileUniqueID = thumbnailFileUniqueID
     self.metadata = metadata
     self.finishGate = finishGate
+    self.thumbnailAtFinish = thumbnailAtFinish
   }
 }
 
@@ -617,7 +624,8 @@ public enum NativeMediaUploadError: Error, LocalizedError, Sendable, PrivacySafe
 
 public actor DurableUploadCoordinator: MediaUploading {
   public static let shared = DurableUploadCoordinator(
-    accountFence: AuthNativeUploadAccountFence(auth: Auth.shared.handle)
+    accountFence: AuthNativeUploadAccountFence(auth: Auth.shared.handle),
+    remembersServerTraits: true
   )
 
   private static let hashReadSize = 1_048_576
@@ -657,6 +665,22 @@ public actor DurableUploadCoordinator: MediaUploading {
   private var activePartTransfers = 0
   private(set) var partWindow = DurableUploadCoordinator.initialPartWindow
   private(set) var throughput = NativeUploadThroughput()
+  private struct ServerTraits {
+    /// The last create used the upload ID this client proposed (servers with pieces, parts sent
+    /// ahead of the create reply, and thumbnails at finish).
+    var takesClientUploadIDs = false
+    var pieceGranularity: Int?
+  }
+
+  private nonisolated let serverTraits: OSAllocatedUnfairLock<ServerTraits>
+  /// The shared coordinator remembers traits across launches, so the first upload after one
+  /// already benefits; any create corrects them.
+  private let remembersServerTraits: Bool
+  private static let takesClientUploadIDsKey = "nativeUpload.server.takesClientUploadIDs"
+  private static let pieceGranularityKey = "nativeUpload.server.pieceGranularity"
+
+  /// Whether this server names thumbnails at finish, learned from earlier creates.
+  public nonisolated var acceptsThumbnailAtFinish: Bool { serverTraits.withLock { $0.takesClientUploadIDs } }
   private var retryingPendingCancellations = false
   private struct PartTransferWaiter {
     let id: UUID
@@ -673,13 +697,20 @@ public actor DurableUploadCoordinator: MediaUploading {
     processingTimeout: Duration = .seconds(600),
     ownerScope: @escaping @Sendable () -> String? = {
       Auth.shared.getCurrentUserId().map(String.init)
-    }
+    },
+    remembersServerTraits: Bool = false
   ) {
     self.transport = transport
     self.staging = staging
     self.accountFence = accountFence
     self.processingTimeout = processingTimeout
     self.ownerScope = ownerScope
+    self.remembersServerTraits = remembersServerTraits
+    let defaults = UserDefaults.standard
+    serverTraits = OSAllocatedUnfairLock(initialState: remembersServerTraits ? ServerTraits(
+      takesClientUploadIDs: defaults.bool(forKey: Self.takesClientUploadIDsKey),
+      pieceGranularity: defaults.object(forKey: Self.pieceGranularityKey) as? Int
+    ) : ServerTraits())
   }
 
   /// Opens the upload connection while the caller still prepares the file (attaching, or encoding a
@@ -743,13 +774,17 @@ public actor DurableUploadCoordinator: MediaUploading {
         create.thumbnailFileUniqueID = thumbnailFileUniqueID
       }
       create.metadata = request.metadata
+      // Picked here, so the first part can go right behind the create (see sendsAhead below).
+      let proposedUploadID = Self.proposedUploadID(clientUploadID: create.clientUploadID)
+      create.uploadID = proposedUploadID
       // A file that fits in one part and uploads quickly rides along with create, which stores and
       // finishes it in the same call: one round trip instead of create, part and finish. Older
       // servers ignore it and the part uploads as usual. A slower one goes in pieces instead, so
       // progress starts after the first 16 KiB rather than at the end. It takes a part slot like
       // any part, waiting its turn when the window is full (an album).
       // Inline data finishes in create, which a held finish must not do.
-      let holdsInlineSlot = request.finishGate == nil && NativeUploadPieces.sendsInline(
+      let holdsInlineSlot = request.finishGate == nil && request.thumbnailAtFinish == nil &&
+        NativeUploadPieces.sendsInline(
         byteCount: byteCount,
         partSize: Int64(Self.partSize),
         bytesPerSecond: throughput.bytesPerSecond
@@ -765,6 +800,31 @@ public actor DurableUploadCoordinator: MediaUploading {
           throw error
         }
       }
+
+      let meter = NativeUploadProgressMeter(total: byteCount, report: progress)
+      // A server that took this client's upload IDs before gets the first part without waiting
+      // for the create reply: it holds a part for an upload being created until the create lands.
+      let traits = serverTraits.withLock { $0 }
+      let sendsAhead = traits.takesClientUploadIDs && !holdsInlineSlot
+      let partAhead: Task<Bool, Never>? = sendsAhead ? Task { [self] in
+        do {
+          _ = try await transferPart(
+            0,
+            uploadID: proposedUploadID,
+            stagedURL: stagedURL,
+            partSize: Int64(Self.partSize),
+            byteCount: byteCount,
+            pieceGranularity: traits.pieceGranularity,
+            rampUp: true,
+            meter: meter,
+            accountToken: accountToken
+          )
+          return true
+        } catch {
+          return false
+        }
+      } : nil
+      defer { partAhead?.cancel() }
 
       let createdResult: RpcResult.OneOf_Result?
       hasAttemptedCreate = true
@@ -794,6 +854,17 @@ public actor DurableUploadCoordinator: MediaUploading {
       guard case let .createUpload(created)? = createdResult else {
         throw NativeMediaUploadError.unexpectedResponse
       }
+      let tookProposedID = created.uploadID == proposedUploadID
+      let granularity = created.hasPieceGranularity ? Int(created.pieceGranularity) : nil
+      serverTraits.withLock { traits in
+        traits.takesClientUploadIDs = tookProposedID
+        traits.pieceGranularity = granularity
+      }
+      if remembersServerTraits {
+        UserDefaults.standard.set(tookProposedID, forKey: Self.takesClientUploadIDsKey)
+        UserDefaults.standard.set(granularity, forKey: Self.pieceGranularityKey)
+      }
+      if !tookProposedID { partAhead?.cancel() }
       let partSize = Int64(created.partSize)
       guard created.uploadID.count == 16,
             partSize == Self.partSize,
@@ -833,6 +904,8 @@ public actor DurableUploadCoordinator: MediaUploading {
       }
 
       var accepted = Set(created.acceptedParts)
+      // Part 0 is already on its way; the loop below sends the rest alongside it.
+      var partAheadPending = tookProposedID ? partAhead : nil
       guard accepted.allSatisfy({ $0 < created.partCount }) else {
         await cancelAndDiscard(
           uploadID: created.uploadID,
@@ -846,7 +919,6 @@ public actor DurableUploadCoordinator: MediaUploading {
         partSize: partSize,
         total: byteCount
       )
-      let meter = NativeUploadProgressMeter(total: byteCount, report: progress)
       let pieceGranularity = created.hasPieceGranularity ? Int(created.pieceGranularity) : nil
       try validateAccount(accountToken)
       meter.accepted(durableAcceptedBytes)
@@ -856,12 +928,16 @@ public actor DurableUploadCoordinator: MediaUploading {
 
       var finishReconciliationAttempts = 0
       var missingPartRounds = 0
+      var finishThumbnail: String?
+      var finishThumbnailResolved = false
       let processingClock = ContinuousClock()
       var processingDeadline: ContinuousClock.Instant?
       do {
         while true {
           try Task.checkCancellation()
-          let missingParts = (0 ..< created.partCount).filter { !accepted.contains($0) }
+          let missingParts = (0 ..< created.partCount).filter {
+            !accepted.contains($0) && !(partAheadPending != nil && $0 == 0)
+          }
           if !missingParts.isEmpty {
             processingDeadline = nil
             if transferStartedAt == nil { transferStartedAt = transferClock.now }
@@ -872,7 +948,7 @@ public actor DurableUploadCoordinator: MediaUploading {
               for _ in 0 ..< min(Self.partWindowLimits.upperBound, missingParts.count) {
                 let partIndex = missingParts[nextPart]
                 // The first part sent ramps up from 16 KiB pieces for an early first progress.
-                let rampUp = nextPart == 0 && accepted.isEmpty
+                let rampUp = nextPart == 0 && accepted.isEmpty && partAheadPending == nil
                 nextPart += 1
                 group.addTask { [self] in
                   try await transferPart(
@@ -929,6 +1005,16 @@ public actor DurableUploadCoordinator: MediaUploading {
             }
             finishReconciliationAttempts = 0
           }
+          if let ahead = partAheadPending {
+            partAheadPending = nil
+            if await ahead.value {
+              accepted.insert(0)
+              durableAcceptedBytes = Self.acceptedBytes(accepted, partSize: partSize, total: byteCount)
+              meter.accepted(durableAcceptedBytes, parts: [0])
+            }
+            // Sent again below if it failed.
+            continue
+          }
 
           // Every byte is in; an upload started at attach waits here for Send. Canceling the
           // wait cancels the upload, and the server deletes what it has.
@@ -943,8 +1029,14 @@ public actor DurableUploadCoordinator: MediaUploading {
             throw NativeMediaUploadError.processingTimedOut
           }
 
+          if let thumbnailAtFinish = request.thumbnailAtFinish, !finishThumbnailResolved {
+            // A thumbnail that failed to upload leaves the file without one rather than failing it.
+            finishThumbnail = (try? await thumbnailAtFinish()) ?? nil
+            finishThumbnailResolved = true
+          }
           var finish = FinishUploadInput()
           finish.uploadID = created.uploadID
+          if let finishThumbnail { finish.thumbnailFileUniqueID = finishThumbnail }
           let finished: FinishUploadResult
           do {
             let result = try await callUploadRPC(
@@ -1484,6 +1576,15 @@ public actor DurableUploadCoordinator: MediaUploading {
     try Task.checkCancellation()
     guard data.count == length else { throw NativeMediaUploadError.sourceChanged }
     return data
+  }
+
+  /// The upload ID proposed with create: fixed per client upload ID, so a replayed create proposes
+  /// the same one.
+  static func proposedUploadID(clientUploadID: Data) -> Data {
+    var hash = SHA256()
+    hash.update(data: Data("inline-native-upload-id-v1:".utf8))
+    hash.update(data: clientUploadID)
+    return Data(hash.finalize().prefix(16))
   }
 
   private static func clientUploadID(logicalID: String, sourceDigest: Data, identitySalt: Data) -> Data {
