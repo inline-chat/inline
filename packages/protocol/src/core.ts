@@ -17509,6 +17509,14 @@ export interface CreateUploadResult {
      * @generated from protobuf field: optional UploadComplete complete = 6;
      */
     complete?: UploadComplete;
+    /**
+     * Set by servers that accept a part in pieces (SaveUploadPartInput.offset). A piece starts at a
+     * multiple of this many bytes and is a multiple of it long, except the piece that ends its part.
+     * Clients send whole parts when it is unset.
+     *
+     * @generated from protobuf field: optional uint32 piece_granularity = 7;
+     */
+    pieceGranularity?: number;
 }
 /**
  * @generated from protobuf message SaveUploadPartInput
@@ -17526,8 +17534,19 @@ export interface SaveUploadPartInput {
      * @generated from protobuf field: bytes data = 3;
      */
     data: Uint8Array;
+    /**
+     * Byte offset of `data` inside the part, when the part is sent in pieces (see
+     * CreateUploadResult.piece_granularity). Unset means `data` is the whole part. The part joins
+     * accepted_parts once all of its bytes have arrived.
+     *
+     * @generated from protobuf field: optional uint32 offset = 4;
+     */
+    offset?: number;
 }
 /**
+ * The server replies once it holds the bytes and stores them after replying. A part it loses
+ * before storing it is reported by FINISH_UPLOAD in `missing`, and the client sends it again.
+ *
  * @generated from protobuf message SaveUploadPartResult
  */
 export interface SaveUploadPartResult {
@@ -65344,7 +65363,8 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
             { no: 3, name: "part_count", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
             { no: 4, name: "expires_at", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "accepted_parts", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 13 /*ScalarType.UINT32*/ },
-            { no: 6, name: "complete", kind: "message", T: () => UploadComplete }
+            { no: 6, name: "complete", kind: "message", T: () => UploadComplete },
+            { no: 7, name: "piece_granularity", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<CreateUploadResult>): CreateUploadResult {
@@ -65385,6 +65405,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
                 case /* optional UploadComplete complete */ 6:
                     message.complete = UploadComplete.internalBinaryRead(reader, reader.uint32(), options, message.complete);
                     break;
+                case /* optional uint32 piece_granularity */ 7:
+                    message.pieceGranularity = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -65419,6 +65442,9 @@ class CreateUploadResult$Type extends MessageType<CreateUploadResult> {
         /* optional UploadComplete complete = 6; */
         if (message.complete)
             UploadComplete.internalBinaryWrite(message.complete, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional uint32 piece_granularity = 7; */
+        if (message.pieceGranularity !== undefined)
+            writer.tag(7, WireType.Varint).uint32(message.pieceGranularity);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -65435,7 +65461,8 @@ class SaveUploadPartInput$Type extends MessageType<SaveUploadPartInput> {
         super("SaveUploadPartInput", [
             { no: 1, name: "upload_id", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
             { no: 2, name: "part_index", kind: "scalar", T: 13 /*ScalarType.UINT32*/ },
-            { no: 3, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+            { no: 3, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 4, name: "offset", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<SaveUploadPartInput>): SaveUploadPartInput {
@@ -65461,6 +65488,9 @@ class SaveUploadPartInput$Type extends MessageType<SaveUploadPartInput> {
                 case /* bytes data */ 3:
                     message.data = reader.bytes();
                     break;
+                case /* optional uint32 offset */ 4:
+                    message.offset = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -65482,6 +65512,9 @@ class SaveUploadPartInput$Type extends MessageType<SaveUploadPartInput> {
         /* bytes data = 3; */
         if (message.data.length)
             writer.tag(3, WireType.LengthDelimited).bytes(message.data);
+        /* optional uint32 offset = 4; */
+        if (message.offset !== undefined)
+            writer.tag(4, WireType.Varint).uint32(message.offset);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
