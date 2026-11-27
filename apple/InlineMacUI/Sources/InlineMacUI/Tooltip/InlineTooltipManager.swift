@@ -366,6 +366,11 @@ private final class InlineTooltipPanel: NSPanel {
   override var canBecomeKey: Bool { false }
   override var canBecomeMain: Bool { false }
 
+  /// AppKit's menu windows (`NSPopupMenuWindow`, `_NSGlassEffectWindow`) answer yes here though they are
+  /// never key. Glass reads it: without it a panel that cannot become key gets the inactive glass,
+  /// which drops the vibrant fill and looks dark and flat. Private selector; unused if AppKit drops it.
+  @objc func _hasActiveAppearanceIgnoringKeyFocus() -> Bool { true }
+
   init(contentView: NSView) {
     super.init(
       contentRect: CGRect(origin: .zero, size: contentView.intrinsicContentSize),
@@ -401,6 +406,11 @@ final class InlineTooltipBubbleView: NSView {
   }
 
   private let contentView = InlineTooltipContentView()
+  /// The shadow only outside the body: glass is translucent and samples what is under it, so a shadow
+  /// drawn beneath the body gives the whole tooltip a grey cast. An even-odd mask cuts the body out.
+  private let shadowClip = CALayer()
+  private let shadowClipMask = CAShapeLayer()
+  private let shadowLayer = CALayer()
   private let surfaceContentView = NSView()
   private let surfaceView: NSView
   private var presentation: InlineTooltipResolvedContent?
@@ -425,10 +435,14 @@ final class InlineTooltipBubbleView: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     layer?.masksToBounds = false
-    layer?.shadowColor = NSColor.black.cgColor
-    layer?.shadowOpacity = Layout.shadowOpacity
-    layer?.shadowRadius = Layout.shadowRadius
-    layer?.shadowOffset = Layout.shadowOffset
+    shadowLayer.shadowColor = NSColor.black.cgColor
+    shadowLayer.shadowOpacity = Layout.shadowOpacity
+    shadowLayer.shadowRadius = Layout.shadowRadius
+    shadowLayer.shadowOffset = Layout.shadowOffset
+    shadowClipMask.fillRule = .evenOdd
+    shadowClip.mask = shadowClipMask
+    shadowClip.addSublayer(shadowLayer)
+    layer?.addSublayer(shadowClip)
     surfaceView.frame = bounds
     addSubview(surfaceView)
 
@@ -460,19 +474,40 @@ final class InlineTooltipBubbleView: NSView {
 
   override func layout() {
     super.layout()
-    surfaceView.frame = bounds.insetBy(dx: Layout.renderingInset, dy: Layout.renderingInset)
-    layer?.shadowPath = CGPath(
-      roundedRect: surfaceView.frame,
-      cornerWidth: Layout.cornerRadius,
-      cornerHeight: Layout.cornerRadius,
-      transform: nil
-    )
+    let body = bounds.insetBy(dx: Layout.renderingInset, dy: Layout.renderingInset)
+    surfaceView.frame = body
+    layoutShadow(body: body)
     surfaceContentView.frame = surfaceView.bounds
     contentView.frame = surfaceContentView.bounds.insetBy(
       dx: Layout.horizontalPadding,
       dy: Layout.verticalPadding
     )
     contentView.layoutSubtreeIfNeeded()
+  }
+
+  private func layoutShadow(body: CGRect) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    let clip = CGMutablePath()
+    clip.addRect(bounds)
+    clip.addPath(CGPath(
+      roundedRect: body,
+      cornerWidth: Layout.cornerRadius,
+      cornerHeight: Layout.cornerRadius,
+      transform: nil
+    ))
+    shadowClip.frame = bounds
+    shadowClipMask.frame = bounds
+    shadowClipMask.path = clip
+    shadowLayer.frame = body
+    shadowLayer.cornerRadius = Layout.cornerRadius
+    shadowLayer.shadowPath = CGPath(
+      roundedRect: CGRect(origin: .zero, size: body.size),
+      cornerWidth: Layout.cornerRadius,
+      cornerHeight: Layout.cornerRadius,
+      transform: nil
+    )
+    CATransaction.commit()
   }
 
   @discardableResult
